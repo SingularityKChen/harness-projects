@@ -5,26 +5,31 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # PR 上取消旧运行是对的，但合并到 main 的验证记录不可被后续合并取消。
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
-  fast-gate:
-    # 名称即分支保护引用的检查名（AGENTS.md §9.2）：改名必须同步修改保护配置。
-    name: PR Fast Gate
+  # 跑 PR 代码的 lane。新增 lane 时只加在这里，不必改分支保护。
+  verify:
+    name: Verify（typecheck + 契约测试）
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
 
       # 版本来自 package.json 的 packageManager 字段，避免两处漂移。
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -34,3 +39,23 @@ jobs:
       - run: pnpm typecheck
 
       - run: pnpm test
+
+  # 分支保护只 require 这一个名字（AGENTS.md §9.2）。
+  # 它不 checkout PR 代码、不读 secrets，只汇总上面 lane 的结果：
+  # 这样增删 lane 不会改变保护配置，也不会让"发布必需状态"的 job 执行不可信代码。
+  fast-gate:
+    name: PR Fast Gate
+    needs: [verify]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 任一 lane 未成功则失败
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          echo "::error::Needed job results: ${{ join(needs.*.result, ', ') }}"
+          exit 1
+
+      - name: 汇总
+        run: |
+          echo "All needed jobs succeeded: ${{ join(needs.*.result, ', ') }}"
