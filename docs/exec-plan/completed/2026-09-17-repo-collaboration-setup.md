@@ -188,10 +188,24 @@ Engram 的项目由 MCP 进程 cwd 决定，所以要在两处声明：
 
 - Observation：Engram 的仓库级配置字段名可从二进制字符串中确认（`Fix .engram/config.json so project_name is a non-empty project name.`），因此无需猜测 schema。
   Evidence：`strings /opt/homebrew/bin/engram | grep '.engram/config'`。
+- Observation：Engram 的 `.engram/config.json` **只被 MCP 会话读取，不被 CLI 的一次性命令读取**。同样 cwd 下，`engram save` 不带 `--project` 会把记忆写成**空项目**（数据库里 `project` 为空串），而 `engram mcp` 返回 `project="harness-projects"`、`project_source="config"`。
+  Evidence：`sqlite3 ~/.engram/engram.db "select id, '['||project||']' ..."` → `10||…`；MCP 探针输出 `{"project":"harness-projects","project_source":"config"}`。判定方法：把配置换成非法 JSON，CLI 仍照常保存成功，说明该路径没有读它。
+- Observation：上游的 `review-ownership` 目录**不是** CODEOWNERS——该仓库根、`.github/`、`docs/` 三处都没有 CODEOWNERS，也没有路径→owner 匹配；它是一套"加权批准积分"策略（`approval-policy.json` + 计算 commit status），"谁审什么"实际靠 area 标签与人工 review request。
+  Evidence：子代理逐行读取 `.github/review-ownership/{README.md,approval-policy.json,check-approval.mjs,check-approval.test.mjs}`；三处 CODEOWNERS 均 404。
+- Observation：上游仓库侧**没有**基于 LLM 的 PR 自动评审 CI；其 `auto-review` 记录描述的是"模型在每次工具调用前审查该动作"的产品功能。真正相关的是自托管 webhook overlay，需要公网端点，且明确不写入 PR。
+  Evidence：子代理对 20 个 workflow 与关键字（coderabbit/copilot/mergify/reviewdog/danger/pr-agent）的检索；`docs/user/guide/github-review.md` 的规则说明。
+- Observation：上游把"必需检查"做成**单一聚合 job**，理由写在 workflow 注释里：分支保护只 require 一个稳定检查名，而不是枚举会随矩阵漂移的 lane。本仓库据此把 `PR Fast Gate` 改为聚合 job。
+  Evidence：`.github/workflows/ci.yml` 的 `all-checks-passed` job。
+- Observation：GitHub Projects 的自定义字段**不能叫 `Type`**（保留给原生 issue types），改名 `Kind` 后正常；项目视图**可以**由 GraphQL `createProjectV2View` 创建，但 `visibleFieldIds` 之外的分组排序仍只能在网页端设置；`gh project link` 不接受 `--owner @me` 与具体仓库组合。
+  Evidence：`Name cannot have a reserved value`；`__type(name:"CreateProjectV2ViewInput")` 的输入字段；`gh project link 10 --owner @me` 报 `has different owner from '@me'`。
+- Observation：本仓库的 CI 只在 **base 为 main** 的 PR 上运行（`pull_request.branches: [main]`），因此把一批叠在另一批的分支上时，那些 PR 显示 `no checks reported`；而仓库只允许 rebase 合并，父 PR 合并后子分支还需重新 rebase。最终改为**四个各自基于 main 的独立 PR**。
+  Evidence：`gh pr checks 11/12/13` → `no checks reported`；`gh pr view 11 --json mergeStateStatus` → `CLEAN`（非 main 的 base 不受保护）。
+- Observation：**改 workflow 的 PR 无法用该 workflow 验证自己**。分支上的 `ci.yml` 语法无效时，GitHub 不报"检查失败"，而是根本不创建检查——PR 显示 `no checks reported`，看起来像"这一批不需要检查"。
+  Evidence：`gh run list --branch chore/pr-review-setup` → 连续 4 次 0 秒 failure，提示 "This run likely failed because of a workflow file issue"；该提交的 `check-runs` 接口返回空。
+- Observation：上一条的根因是一处 YAML 细节——`run: echo "… succeeded: …"` 里的冒号加空格让纯标量被解析成映射，必须写成块标量（`run: |`）。更值得记住的是过程错误：工作区文件改好、也只对工作区做了 YAML 解析，随后 `git commit --amend` 漏了 `git add`，推出去的是未修复版本。判定对象应当是**远端内容**（`gh api …/contents/….yml?ref=<branch>`），而不是工作区文件。
+  Evidence：amend 之后 `git status --short` 仍显示 ` M .github/workflows/ci.yml`；远端第 54 行仍是坏的那一行；补上 `git add` 后 lane 与聚合门禁两个检查同时出现并通过。
 - Observation：本会话的 shell 沙箱不允许写 `~/.engram`，因此 `engram` CLI 报 `migration: attempt to write a readonly database (8)`；这是沙箱限制而非 Engram 故障，MCP 侧（宿主进程）不受影响。
   Evidence：`touch ~/.engram/.sandbox-probe` → `Operation not permitted`；同一命令经 MCP 工具保存记忆成功。
-
----
 
 ## Decision Log
 
@@ -199,19 +213,21 @@ Engram 的项目由 MCP 进程 cwd 决定，所以要在两处声明：
   Rationale：把"受启发"与"依赖/集成"混在一张表里会让读者误以为存在隶属或赞助关系，而这正是发布面治理要避免的暗示。
   Date/Author：2026-09-17 / agent
 
-- Decision：GitHub Projects 的字段与 `AGENTS.md` 的工作单元一一对应，而不是另造一套流程。
-  Rationale：两套流程必然漂移；字段直接复用 ExecPlan / 批次 / 类型 / 领域这四个已有概念，文档与看板互为镜像。
+- Decision：GitHub Projects 的字段与 `AGENTS.md` 的工作单元一一对应，而不是另造一套流程；不引入标签体系，也不做自动生命周期投影。
+  Rationale：两套流程必然漂移；字段直接复用 ExecPlan / 批次 / 类型 / 领域这四个已有概念，文档与看板互为镜像。自动投影需要常驻服务与额外凭据，收益不足以抵掉一个新的失效点。
   Date/Author：2026-09-17 / agent
 
-- Decision：评审体系只移植"不依赖常驻公网端点"的部分，自动评审优先本地命令 + CI 只读检查。
-  Rationale：本机没有公网入口，webhook 方案需要 tunnel 与长期在线端点，属于可选增强；把它设为默认会让仓库依赖一个随时可能失效的链路。
-  Date/Author：2026-09-17 / agent（待 Batch 3 调研结论确认后细化）
+- Decision：评审体系只移植"不依赖常驻公网端点"的部分；必需检查改为"单一聚合 job"；不做 CODEOWNERS，也不做加权批准积分制。
+  Rationale：上游的积分制是为"全员 write 权限的团队"设计的，单人仓库用原生 1 个批准即可；CODEOWNERS 会让维护者无法批准自己的 PR。聚合 job 则在任何规模下都成立——它把"保护配置"与"lane 数量"解耦，并让发布必需状态的 job 不执行 PR 代码。
+  Date/Author：2026-09-17 / agent（依据 Batch 3 调研结论）
+
+- Decision：四个批次各自成为基于 `main` 的独立 PR，而不是层叠分支；计划文件只由 B1 携带。
+  Rationale：层叠会让非 main base 的 PR 拿不到检查（等于绕过门禁），而 rebase 合并会打断链式关系。代价是 AGENTS.md 的索引行分散在三个 PR 的相邻位置，先合并的那个会让后合并的需要一次两行级 rebase。
+  Date/Author：2026-09-17 / agent
 
 - Decision：Engram 采用"仓库级 config + 会话级 preset"两层，而不改 host-plane 行。
   Rationale：host-plane 行只允许一个 cwd，改它会把其他仓库的记忆一起挪走；作用域内覆盖是工具本身支持的机制。
   Date/Author：2026-09-17 / agent
-
----
 
 ## Idempotence and Recovery
 
@@ -232,9 +248,43 @@ Engram 的项目由 MCP 进程 cwd 决定，所以要在两处声明：
 
 ## Outcomes & Retrospective
 
-（完成后回填。）
+四个批次完成，各自成为基于 `main` 的独立 PR（可任意顺序合并）：
 
----
+| 批次 | PR | 内容 | 验证证据 |
+|---|---|---|---|
+| B1 | #3 | README 参考与致谢 + 本计划 | 四条来源链接匿名 200；每条写明"参考了什么" |
+| B2 | #11 | GitHub Projects 看板与维护约定 | 字段/条目/视图/关联四项回读；文档命令可复制 |
+| B3 | #12 | PR 模板 + 聚合必需检查 + 评审标准 | lane 与聚合门禁两个检查同时通过；`pnpm verify` 5/5 |
+| B4 | #13 | Engram 作用域（仓库级 config + preset） | MCP 探针 `project_source=config`；preset `mounted OK`；探针已清理 |
+
+验收对照（Plan of Work 的 11 项）：
+
+1. README 参考清单可验证 —— ✅ 四条来源全部匿名可访问，逐条写明参考内容。
+2. 不暗示隶属 —— ✅ 商标免责与"独立项目"声明保留，新增内容无"官方/授权"字样。
+3. 项目字段齐全 —— ✅ `Status, Kind, Area, ExecPlan, Batch, Gate`。
+4. 条目与字段有值 —— ✅ 7 个种子条目（issue #4–#10）字段非空，Gate E1 条目标了 `E1`。
+5. 维护方式可复制 —— ✅ `docs/project-management/README.md` 的命令含字段/选项 ID。
+6. PR 模板生效 —— ✅ `.github/pull_request_template.md` 含四个必需小节与 Proof 折叠块。
+7. 评审归属可验证 —— ✅ 以"按领域"的归属表实现，未引入 CODEOWNERS（理由见 Decision Log）。
+8. 评审入口可执行 —— ✅ 行级评论命令与"按改动面选证据"表可复制执行。
+9. Engram 作用域正确 —— ✅ 仓库级与 preset 两条路径均有实测输出。
+10. 工程门禁未回归 —— ✅ 四个分支各自 `pnpm verify` 通过。
+11. 每项可独立回滚 —— ✅ 三个内容 PR 的文件集合互不重叠（AGENTS.md 仅各加自己一行）。
+
+**与计划的偏差**
+
+1. 计划假定四个批次可以层叠成一个 PR 链；实测层叠会让非 main base 的 PR 拿不到检查（等于绕过门禁），且 rebase 合并会打断链条。因此改为四个独立 PR，计划文件只由 B1 携带。
+2. AGENTS.md 的索引行分散在各自的 PR 里：B2/B3/B4 各加自己那一行。三个 PR 都在同一张表的相邻位置插入，先合并的那个会让后合并的需要一次 rebase 解冲突（两行级）。这是"每个 PR 自包含"与"零冲突"之间的取舍，选择了前者。
+3. B3 的范围比原计划多了一项：把 `ci.yml` 改成 lane + 聚合 job（原计划只写 PR 模板与评审文档）。理由是它是"必需检查稳定"这一目标的直接实现，且上游原始注释明确给出了理由。
+4. B3 还多花了两个修复循环：workflow 语法错误让该 PR 完全没有检查，而"没有检查"在页面上看起来像"不需要检查"；修复过程中又暴露出"验证工作区文件、提交暂存区内容"的落差。两条都记进了 Surprises。
+5. 执行中还发现：在层叠分支上对计划文件所做的更新，会在拍平时被丢弃（因为该路径不属于那些批次）。因此本文件最终内容是在 B1 分支上一次性重写的。
+
+**遗留问题**
+
+- 本机 preset `harness-projects` 已挂载校验通过，但**尚未在真实会话中启动过**；建议用它开一个会话确认工具列表与记忆落点。
+- 可选增强（DSH 在 PR ready 时开只读评审会话）需要公网端点，未启用。
+- issue #4–#10 是种子工作项，尚未分配 ExecPlan；开始其一时按约定新建计划并把路径写回条目。
+- `.engram/config.json` 对 CLI 无效这一事实已记录在 `docs/development/README.md`；若上游后续版本改变该行为，需要同步更新该文档与 `AGENTS.md`。
 
 ## Bottom Change Note
 
