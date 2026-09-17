@@ -41,7 +41,16 @@ pnpm verify        # typecheck + 契约测试
 | [`PLANS.md`](PLANS.md) | ExecPlan 的格式与生命周期 |
 | [`docs/README.md`](docs/README.md) | 文档地图与计划索引 |
 | [`CLAUDE.md`](CLAUDE.md) | 指向 `AGENTS.md` 的相对软链接 |
+| [`LICENSE`](LICENSE) | Apache-2.0 许可证全文 |
 
 ## 当前阶段
 
-产品与工程设计已冻结，进入实现前的身份与同步验证（Gate E1）。在此之前优先交付不依赖真实 GitHub 也能验收的纵向切片；上游依据见 `deepseek-harness-project-delivery-engineering-pack-v0.1/`（冻结输入，只读）。
+产品与工程设计已在本地冻结，进入实现前的身份与同步验证（Gate E1）。在此之前优先交付不依赖真实 GitHub 也能验收的纵向切片。
+
+## 许可证
+
+本项目以 [Apache License 2.0](LICENSE) 发布，Copyright 2026 SingularityKChen。
+
+- 许可证第 6 条**不授予商标权**：`DeepSeek`、`DeepSeek Harness`、`GitHub`、`Jira` 等名称与标识归各自所有者，本项目仅在描述互操作对象时提及。
+- 本项目是**独立项目**，与 DeepSeek 官方无隶属、赞助或背书关系。
+- 本项目在设计与实现阶段参考了一份不随仓库分发的上游设计输入；仓库内的文档是唯一可分发表述，背景见 [`docs/exec-plan/completed/2026-09-17-disclosure-audit-and-license.md`](docs/exec-plan/completed/2026-09-17-disclosure-audit-and-license.md)。
