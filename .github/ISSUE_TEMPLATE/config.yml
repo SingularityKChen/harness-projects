@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Design first, then open an issue
+    url: https://github.com/SingularityKChen/harness-projects/blob/main/AGENTS.md
+    about: Anything spanning design, implementation and verification starts with an ExecPlan in docs/exec-plan/active/ (AGENTS.md §4). Issues track work that has a plan.
+  - name: Issue and label conventions
+    url: https://github.com/SingularityKChen/harness-projects/blob/main/AGENTS.md
+    about: AGENTS.md §8.7 defines the title format, kind/area/gate label vocabulary, body structure, and how pull requests link issues.

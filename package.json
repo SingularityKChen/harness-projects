@@ -14,6 +14,7 @@
     "test": "node --test tests/contract tests/integration tests/e2e",
     "test:contract": "node --test tests/contract",
     "boundaries": "node --test tests/contract/package-boundaries.test.js",
+    "check:policy": "node scripts/policy-check.mjs",
     "verify": "pnpm run typecheck && pnpm run test"
   },
   "devDependencies": {

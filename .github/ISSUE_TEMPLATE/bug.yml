@@ -1,0 +1,68 @@
+name: Bug
+description: Something behaves differently from what this repository documents.
+title: ""
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Title — required format:** `fix(<area>): <imperative English summary>`
+
+        `area` is one of the areas listed in [`AGENTS.md §8.7`](https://github.com/SingularityKChen/harness-projects/blob/main/AGENTS.md).
+
+        Example: `fix(storage): keep the planning binding unique after a failed migration`
+
+        **Labels — required:** exactly one `kind:*` (use `kind:fix`), at least one `area:*`.
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: What happens
+      description: The actual behaviour, with the command or action that produces it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen
+      description: The documented or intended behaviour, and where it is documented.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce
+      description: Numbered steps, starting from a clean checkout. Note whether it is deterministic.
+      value: |
+        1.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Command output, failing test names, logs. Only what you actually ran.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: The document, test or invariant this contradicts.
+      value: |
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Suspected cause, scope of impact, workaround, and what is explicitly not part of the fix.
+      placeholder: Anything a reader needs that does not belong above.
+    validations:
+      required: true
