@@ -92,7 +92,9 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 ## 7. 可选增强：DSH 在 PR ready 时自动开只读评审会话
 
-上游平台提供了一个可选 overlay：GitHub 的 `pull_request` → `ready_for_review` 事件会创建一个**只读**评审会话（不修改文件、分支、PR 或 GitHub 状态）。它**默认不启用**，启用前需要知道：
+上游平台提供了一个可选 overlay：GitHub 的 `pull_request` → `ready_for_review` 事件会创建一个**只读**评审会话（不修改文件、分支、PR 或 GitHub 状态）。
+
+**本仓库已选定自托管 runner 路径**（只出站、零入站暴露），落地细节见 `docs/review/github-runner.md`（由同期的 runner PR 引入）。如果你要用上游文档里的公网 webhook 路线，下面是它的前置条件：
 
 - 需要公网 HTTPS 入口（TLS 反代或 tunnel）才能让 GitHub 投递；适配器自身不提供 TLS。
 - 需要凭据 `DSH_GITHUB_WEBHOOK_SECRET`（写入 DSH 凭据引用后按请求解析，轮换立即生效）。
