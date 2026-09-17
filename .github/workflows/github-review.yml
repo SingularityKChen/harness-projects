@@ -1,0 +1,67 @@
+name: GitHub review session
+
+# Trigger path: pull-based, like a self-hosted CI runner.
+#
+# GitHub needs no inbound route to this machine. A self-hosted runner holds the
+# outbound long-poll to GitHub, receives this event, and POSTs the event payload
+# to the DSH GitHub webhook endpoint on loopback. The public-webhook route
+# (tunnel + repo webhook) is therefore not used at all.
+#
+# `pull_request_target` is deliberate: the workflow definition is always taken
+# from the default branch, so a pull request cannot change what runs on the
+# runner. The pull request's code is never checked out and never executed — the
+# job only forwards the event payload.
+
+on:
+  pull_request_target:
+    types: [ready_for_review]
+
+concurrency:
+  group: github-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  create-review-session:
+    name: Create review session
+    # Only pull requests from this repository: an outside contribution must not
+    # be able to make this machine start agent sessions.
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: [self-hosted, macos]
+    timeout-minutes: 5
+    steps:
+      - name: Forward the event to the local DSH endpoint
+        env:
+          DSH_GITHUB_WEBHOOK_SECRET: ${{ secrets.DSH_GITHUB_WEBHOOK_SECRET }}
+          ENDPOINT: http://127.0.0.1:3081/github
+          EVENT_PATH: ${{ github.event_path }}
+          DELIVERY_ID: actions-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DSH_GITHUB_WEBHOOK_SECRET:-}" ]; then
+            echo "::error::secret DSH_GITHUB_WEBHOOK_SECRET is not configured"
+            exit 1
+          fi
+
+          # The endpoint verifies the signature over the exact request body, so
+          # sign the file and post it byte-for-byte. Node keeps the secret out of
+          # the process argv on the shared self-hosted runner.
+          signature="sha256=$(node -e 'const c=require("node:crypto"),fs=require("node:fs");process.stdout.write(c.createHmac("sha256",process.env.DSH_GITHUB_WEBHOOK_SECRET).update(fs.readFileSync(process.env.EVENT_PATH)).digest("hex"))')"
+
+          code=$(curl -sS -o "$RUNNER_TEMP/dsh-review-response.txt" -w '%{http_code}' \
+            --max-time 30 \
+            -X POST "$ENDPOINT" \
+            -H 'content-type: application/json' \
+            -H "x-hub-signature-256: $signature" \
+            -H 'x-github-event: pull_request' \
+            -H "x-github-delivery: $DELIVERY_ID" \
+            --data-binary "@$EVENT_PATH" || echo 000)
+
+          echo "endpoint responded: $code"
+          echo "202 means the signature and JSON were accepted and the rule call was scheduled;"
+          echo "it does not mean the rule matched or that a session was created."
+          if [ "$code" != "202" ]; then
+            echo "::error::local DSH endpoint answered $code — is 'dsh web --patch .../github-review.overlay.yml' running?"
+            exit 1
+          fi
