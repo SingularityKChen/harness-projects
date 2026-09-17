@@ -29,6 +29,7 @@
 | [2026-09-17-repo-bootstrap](exec-plan/completed/2026-09-17-repo-bootstrap.md) | 仓库引导完成：文档治理约定、pnpm 工作区骨架、包边界契约测试、`PR Fast Gate` 与 `main` 分支保护（只允许 rebase 合并） |
 | [2026-09-17-disclosure-audit-and-license](exec-plan/completed/2026-09-17-disclosure-audit-and-license.md) | 发布面审计完成：上游设计输入从仓库历史移除并保留本地只读副本；采用 Apache-2.0；残余暴露面（PR ref）已记录待决 |
 | [2026-09-17-issue-convention](exec-plan/completed/2026-09-17-issue-convention.md) | Issue 标题、标签、正文与 PR 关联约定已归档，检查 workflow 保持 advisory |
+| [2026-09-17-repo-collaboration-setup](exec-plan/completed/2026-09-17-repo-collaboration-setup.md) | 协作建设完成：README 参考致谢、GitHub Projects 工作项看板、PR 评审体系（含聚合必需检查）、Engram 记忆作用域；四项各自成独立 PR |
 
 ## 3. 上游设计输入
 
