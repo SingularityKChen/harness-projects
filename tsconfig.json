@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@harness-projects/domain": ["./packages/domain/src/index.ts"],
+      "@harness-projects/capabilities": ["./packages/capabilities/src/index.ts"],
+      "@harness-projects/core": ["./packages/core/src/index.ts"],
+      "@harness-projects/controller": ["./packages/controller/src/index.ts"],
+      "@harness-projects/client": ["./packages/client/src/index.ts"],
+      "@harness-projects/ui-model": ["./packages/ui-model/src/index.ts"],
+      "@harness-projects/ui": ["./packages/ui/src/index.ts"],
+      "@harness-projects/provider-planning-local": ["./packages/providers/planning-local/src/index.ts"],
+      "@harness-projects/provider-planning-github-projects": ["./packages/providers/planning-github-projects/src/index.ts"],
+      "@harness-projects/provider-development-local-git": ["./packages/providers/development-local-git/src/index.ts"],
+      "@harness-projects/provider-development-github": ["./packages/providers/development-github/src/index.ts"],
+      "@harness-projects/provider-delivery-github-actions": ["./packages/providers/delivery-github-actions/src/index.ts"],
+      "@harness-projects/provider-execution-harness": ["./packages/providers/execution-harness/src/index.ts"],
+      "@harness-projects/provider-execution-human": ["./packages/providers/execution-human/src/index.ts"],
+      "@harness-projects/storage-sqlite": ["./packages/storage/sqlite/src/index.ts"],
+      "@harness-projects/app-harness-plugin": ["./apps/harness-plugin/src/index.ts"],
+      "@harness-projects/app-web": ["./apps/web/src/index.ts"]
+    }
+  },
+  "include": ["packages/**/src/**/*.ts", "packages/**/src/**/*.tsx", "apps/**/src/**/*.ts", "apps/**/src/**/*.tsx"],
+  "exclude": ["**/node_modules", "**/dist"]
+}
