@@ -60,15 +60,18 @@
 - **实现前必须通过 Gate E1**（跨 Provider 对象身份与同步幂等性验证），结论会决定 Schema v1 是否冻结。
 - 在此之前，优先交付"不依赖真实 GitHub 也能验收"的纵向切片。
 
-### 1.5 上游输入（只读）
+### 1.5 上游设计输入（本地只读参考，不随仓库分发）
 
-`deepseek-harness-project-delivery-engineering-pack-v0.1/` 是**冻结的上游输入**，包含 PRD、UI Spec、Engineering Design、SQLite Schema、API/Provider Contract、Identity Spike 计划、Test & Release Plan 与 ADR 初稿。
+本项目在开工前有一份**外部设计输入**（产品与工程设计文档：范围、界面规范、工程设计、数据模型、接口契约、身份验证计划、实施计划、测试与发布门禁、决策记录初稿）。
+
+它**不在本仓库内分发**：出于发布资格与品牌承诺的考虑，已从仓库历史中移除，仅作为所有者本地的只读参考保留在 `deepseek-harness-project-delivery-engineering-pack-v0.1/`，该路径由 `.gitignore` 忽略。背景与证据见 `docs/exec-plan/completed/2026-09-17-disclosure-audit-and-license.md`。
 
 规则：
 
-- 不修改、不重命名、不搬迁其中任何文件；它是带 `MANIFEST.md` 哈希与 `VERIFICATION.md` 结论的输入物。
-- 其中的概念需要长期维护时，在本仓库 `docs/` 下**重新表述**，而不是就地编辑上游文件。
-- 上游文档与仓库内文档冲突时，以仓库内文档为准，并在 ExecPlan 的 Decision Log 中记录原因。
+- **仓库内文档是唯一可分发表述**：任何对外可读的结论都必须能在本仓库 `docs/` 下独立成立，不能依赖外部包里的内容才说得通。
+- 需要长期维护的概念，在本仓库 `docs/` 下**重新表述**，而不是引用外部文件。
+- 引用该输入时只使用"上游设计输入"这类中性描述，不复述其内部版本号、文档编号与目录结构。
+- 外部输入与仓库内文档冲突时，以仓库内文档为准，并在 ExecPlan 的 Decision Log 中记录原因。
 
 ---
 
@@ -398,9 +401,9 @@ pnpm run boundaries          # 只跑包边界契约测试
 
 ### 9.3 验收对标
 
-- 实现级验收对标上游 Test & Release Plan 的 10 条不变量（身份、幂等、恢复、能力边界）。
-- 阶段门禁：**Gate E1**（身份与同步 spike）通过前不冻结 Schema v1；**Gate R1** 是 MVP 发布门禁。
-- 门禁清单存放在上游工程包与 `docs/architecture/`，本仓库不重复维护两份。
+- 实现级验收对标十类不变量：身份分离、幂等、恢复、能力边界（清单见 `tests/README.md`）。
+- 阶段门禁：**Gate E1**（身份与同步验证）通过前不冻结数据模型 v1；**Gate R1** 是 MVP 发布门禁。
+- 门禁清单的**可分发表述**在本仓库内维护（`AGENTS.md` §9 与 `docs/architecture/`），不指向任何仓库外文件。
 
 ### 9.4 完成前自查
 
@@ -431,6 +434,5 @@ pnpm run boundaries          # 只跑包边界契约测试
 | `PLANS.md` | ExecPlan 格式与生命周期 |
 | `docs/README.md` | 文档地图 |
 | `docs/exec-plan/completed/2026-09-17-repo-bootstrap.md` | ExecPlan 样例（仓库引导，已完成） |
-| `deepseek-harness-project-delivery-engineering-pack-v0.1/README.md` | 上游工程包入口与 Engineering Gate |
-| `deepseek-harness-project-delivery-engineering-pack-v0.1/engineering-design-v0.1.md` | 工程设计与依赖方向 |
-| `deepseek-harness-project-delivery-engineering-pack-v0.1/test-release-plan-v0.1.md` | 测试分层与发布门禁 |
+| `docs/exec-plan/completed/2026-09-17-disclosure-audit-and-license.md` | 发布面审计、上游输入下架与许可证决策 |
+| `LICENSE` | Apache-2.0 许可证全文 |

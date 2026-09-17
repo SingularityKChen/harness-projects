@@ -13,10 +13,10 @@
 
 ## 当前依据
 
-在本目录下的主题文档补齐之前：
+本目录下的主题文档尚未补齐。在补齐之前：
 
-- `deepseek-harness-project-delivery-engineering-pack-v0.1/deepseek-harness-project-delivery-prd-v0.5.md` —— 当前 PRD（v0.4 已被其取代）；
-- `deepseek-harness-project-delivery-engineering-pack-v0.1/deepseek-harness-project-delivery-ui-spec-v0.1.md` —— 界面与交互规范。
+- 产品范围与目标形态的**可分发**表述以本仓库 `README.md` 与 `AGENTS.md` §1 为准；
+- 界面与交互规范需要落地时，在本目录内新建主题文档，自包含地写明结论，不指向外部文件（上游设计输入不随仓库分发，见 `AGENTS.md` §1.5）。
 
 ## 约束
 

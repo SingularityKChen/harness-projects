@@ -27,17 +27,18 @@
 | 计划 | 结论 |
 |---|---|
 | [2026-09-17-repo-bootstrap](exec-plan/completed/2026-09-17-repo-bootstrap.md) | 仓库引导完成：文档治理约定、pnpm 工作区骨架、包边界契约测试、`PR Fast Gate` 与 `main` 分支保护（只允许 rebase 合并） |
+| [2026-09-17-disclosure-audit-and-license](exec-plan/completed/2026-09-17-disclosure-audit-and-license.md) | 发布面审计完成：上游设计输入从仓库历史移除并保留本地只读副本；采用 Apache-2.0；残余暴露面（PR ref）已记录待决 |
 
-## 3. 上游输入
+## 3. 上游设计输入
 
-`deepseek-harness-project-delivery-engineering-pack-v0.1/`（仓库根目录）是冻结的上游输入，包含 PRD、UI Spec、Engineering Design、SQLite Schema、API/Provider Contract、Identity Spike 计划、Test & Release Plan 与 ADR 初稿。
+本项目的上游设计输入（产品范围、界面规范、工程设计、数据模型、接口契约、身份验证计划、实施计划、测试与发布门禁、决策记录初稿）**不随本仓库分发**：出于发布资格与品牌承诺的考虑，它已从仓库历史中移除，仅作为所有者本地的只读参考存在。审计结论与决策依据见 [2026-09-17-disclosure-audit-and-license](exec-plan/completed/2026-09-17-disclosure-audit-and-license.md)。
 
-它**不**属于 `docs/`：本目录下的文档是对其中概念的仓库内权威表述，两者冲突时以本目录为准，并在 ExecPlan 的 Decision Log 中记录原因（`AGENTS.md` §1.5）。
+因此本目录下的文档是**唯一可分发表述**：对外可读的结论必须能在这里独立成立，不能依赖那份外部输入才说得通（`AGENTS.md` §1.5）。
 
 后续可能出现的独立批次：
 
-- 把上游 ADR 逐条重述为 `docs/adr/ADR-XXXX-<slug>.md`；
-- 把上游 Engineering Design 中仍然有效的部分重述为 `docs/architecture/` 下的主题文档；
-- 把 PRD 中仍然有效的产品结论重述为 `docs/product/` 下的范围与术语文档。
+- 把上游决策记录中仍然有效的部分逐条重述为 `docs/adr/ADR-XXXX-<slug>.md`；
+- 把工程设计中仍然有效的部分重述为 `docs/architecture/` 下的主题文档；
+- 把产品结论中仍然有效的部分重述为 `docs/product/` 下的范围与术语文档。
 
-在这些批次完成之前，上游文件是这些主题的当前依据。
+在这些批次完成之前，本目录下凡涉及长期架构或产品结论的地方，都必须自包含地写明结论本身，而不是指向外部文件。

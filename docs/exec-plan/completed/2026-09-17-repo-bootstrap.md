@@ -3,7 +3,7 @@
 > 状态：Active  
 > 创建：2026-09-17  
 > 范围：本仓库（`harness-projects`）的初始化，不包含任何产品功能实现  
-> 上游输入：`deepseek-harness-project-delivery-engineering-pack-v0.1/`（冻结参考）
+> 上游输入：本地上游设计输入（只读参考，不随仓库分发，见 `AGENTS.md` §1.5）
 > 执行方式：本仓库自定义 exec-plan 流程（见 `AGENTS.md` §6、`PLANS.md`）
 
 ---
@@ -86,7 +86,7 @@ spec 阶段与 plan 阶段**流程保留**（先澄清与方案取舍，再落�
 
 - 只使用本仓库内可复现的工具链：Node ≥ 22、pnpm 10、`node --test`（不引入测试框架直到出现真实需要）。
 - 文档语言为中文，代码标识符、路径、命令为英文。
-- 不修改 `deepseek-harness-project-delivery-engineering-pack-v0.1/` 下的任何文件：它是冻结的上游输入。
+- 不修改本地上游设计输入目录（`deepseek-harness-project-delivery-engineering-pack-v0.1/`，只读参考、不随仓库分发）下的任何文件。
 - 不提交 secret、token、SQLite 数据库文件与任何运行态目录（`.superpowers/`、`.worktrees/`）。
 - 单个 PR 的代码改动 ≤ 1000 行、文档改动 ≤ 1500 行；PR 提交后**不得自行合并**。
 
@@ -324,7 +324,7 @@ docs(upstream): 纳入冻结的工程包作为只读输入
 
 - 上游工程包是否要归档进 `docs/product`、`docs/architecture`、`docs/adr`（逐条重述 ADR 等）——需要单独一份 ExecPlan。
 - 测试框架仍是 `node --test`；当出现需要 TS 类型化测试或浏览器环境的用例时再评估引入，属于未来的独立批次。
-- 公开仓库尚未选择 LICENSE；这是所有权决策，留给人类伙伴。
+- 公开仓库尚未选择 LICENSE；这是所有权决策，留给人类伙伴。（2026-09-17 已由 Apache-2.0 关闭，见 `2026-09-17-disclosure-audit-and-license.md`）
 - 尚未建立 issue 模板与首批跟踪 issue（PR 规则要求 PR 关联 issue）。
 
 ---
@@ -333,3 +333,4 @@ docs(upstream): 纳入冻结的工程包作为只读输入
 
 - 2026-09-17：首次创建。原因：仓库引导阶段需要一份自带上下文、可被无上下文实现者执行的计划，并把"批次 = 可独立验收的最小闭环"固化为后续工作的默认方式。
 - 2026-09-17：执行完毕后回填。原因：Batch 1/Batch 3 的验证命令按实测结果校准（`git check-ignore` 需要尾斜杠）；Batch 6 补入"空目录不被 git 跟踪"这一实测发现；补齐 Outcomes 与验收证据后归档到 `completed/`。
+- 2026-09-17：上游输入改为"本地只读参考、不随仓库分发"（见 `2026-09-17-disclosure-audit-and-license.md`）。原因：该输入已从仓库历史中移除，本文中引用它的路径不再指向仓库内容，需要就地标注以免给出失效指引；"公开仓库尚未选择 LICENSE"这一条遗留问题由 Apache-2.0 关闭。
