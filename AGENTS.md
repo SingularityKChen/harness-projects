@@ -17,6 +17,7 @@
 | 记录一个不可回退的技术决策 | `docs/adr/` |
 | 写产品范围、术语、目标形态 | `docs/product/` |
 | 提交 PR 或做评审 | `.github/pull_request_template.md`（模板）+ `docs/review/README.md`（评审标准与证据选择） |
+| 登记与推进工作项 | `docs/project-management/README.md`（GitHub Projects 字段与维护命令） |
 | 需要隔离工作区 | `.worktrees/<task-slug>/`（§7） |
 | 开 issue、写标题与标签 | `.github/ISSUE_TEMPLATE/` 表单 + §8.7 的格式（英文标题、`kind`/`area`/`gate` 标签） |
 | 提交代码 | 分支 + PR，禁止直接推 `main`，禁止自行合并（§8）；提交与开 PR 前先做敏感信息自查（§8.6）；PR 必须 link issue（§8.3） |
@@ -553,4 +554,5 @@ node scripts/workflow-check.mjs
 | `docs/exec-plan/completed/2026-09-17-disclosure-audit-and-license.md` | 发布面审计、上游输入下架与许可证决策 |
 | `docs/review/README.md` | 评审标准：事实核实、证据选择、必查项、意见落点、归属与安全姿态 |
 | `.github/ISSUE_TEMPLATE/` | issue 表单：Task 与 Bug 的正文结构（§8.7） |
+| `docs/project-management/README.md` | 工作项看板：GitHub Projects 字段、状态语义与维护命令 |
 | `LICENSE` | Apache-2.0 许可证全文 |
