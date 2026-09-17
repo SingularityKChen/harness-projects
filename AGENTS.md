@@ -197,7 +197,7 @@ storage/*   ─┘
 
 ### 4.3 强制章节
 
-格式权威是 `PLANS.md`，`docs/exec-plan/active/2026-09-17-repo-bootstrap.md` 是一个完整样例。最低要求：
+格式权威是 `PLANS.md`，`docs/exec-plan/completed/2026-09-17-repo-bootstrap.md` 是一个完整样例。最低要求：
 
 `Purpose / Big Picture`、`Context and Orientation`、`Design / Spec`、`Global Constraints`、`Plan of Work`、`Validation and Acceptance`、`Progress`、`Surprises & Discoveries`、`Decision Log`、`Idempotence and Recovery`、`Interfaces and Dependencies`、`Outcomes & Retrospective`、`Bottom Change Note`。
 
@@ -430,7 +430,7 @@ pnpm run boundaries          # 只跑包边界契约测试
 |---|---|
 | `PLANS.md` | ExecPlan 格式与生命周期 |
 | `docs/README.md` | 文档地图 |
-| `docs/exec-plan/active/2026-09-17-repo-bootstrap.md` | ExecPlan 样例（本次仓库引导） |
+| `docs/exec-plan/completed/2026-09-17-repo-bootstrap.md` | ExecPlan 样例（仓库引导，已完成） |
 | `deepseek-harness-project-delivery-engineering-pack-v0.1/README.md` | 上游工程包入口与 Engineering Gate |
 | `deepseek-harness-project-delivery-engineering-pack-v0.1/engineering-design-v0.1.md` | 工程设计与依赖方向 |
 | `deepseek-harness-project-delivery-engineering-pack-v0.1/test-release-plan-v0.1.md` | 测试分层与发布门禁 |

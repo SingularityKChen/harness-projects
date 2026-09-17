@@ -103,10 +103,14 @@ spec 阶段与 plan 阶段**流程保留**（先澄清与方案取舍，再落�
 
 - [ ] 步骤 1：写 `.gitignore`，包含 `node_modules/`、`dist/`、`.superpowers/`、`.worktrees/`、`*.sqlite*`。
 - [ ] 步骤 2：写工作区配置与 TS 基线（`strict`、`noEmit`、`paths` 映射到各包 `src/index.ts`）。
-- [ ] 步骤 3：运行 `pnpm install`，期望生成 `pnpm-lock.yaml`，无 `ERR_` 输出。
-- [ ] 步骤 4：运行 `git check-ignore -v .worktrees .superpowers`，期望两行命中（即使目录尚不存在也要命中规则）。
+- [x] 步骤 3：运行 `pnpm install`，期望生成 `pnpm-lock.yaml`，无 `ERR_` 输出。
+- [x] 步骤 4：运行 `git check-ignore -v .worktrees/ .superpowers/`，期望两行命中。
 
-**验证**：`pnpm install` 成功 + `git check-ignore` 命中。  
+> 实测偏差：`.gitignore` 里的 `.worktrees/`、`.superpowers/` 是**目录规则**。路径不带尾斜杠且目录不存在时，
+> git 无法判断它是不是目录，`git check-ignore .worktrees` 返回未命中（退出码 1），看起来像忽略了规则失效。
+> 判定命令必须带尾斜杠，或先让目录存在。结论已写入 §Surprises & Discoveries。
+
+**验证**：`pnpm install` 成功 + `git check-ignore -v .worktrees/ .superpowers/` 两行命中。  
 **回滚**：删除配置文件即可，无外部副作用。
 
 ### Batch 2 · 文档治理层
@@ -136,10 +140,10 @@ grep -n "docs/superpowers" AGENTS.md   # 只允许出现在映射表的"上游�
 
 - [ ] 步骤 1：按目标结构生成包骨架：每个包一个 `package.json`（私有、`type: module`、`exports` 指向 `src/index.ts`）与一个 `src/index.ts`（顶部注释声明责任与允许的依赖方向）。
 - [ ] 步骤 2：写契约测试，断言：包的路径/名称一致；每个包有 `src/index.ts` 且声明了 `Responsibility:`；所有源码中的 import 只使用允许的依赖边。
-- [ ] 步骤 3：运行 `pnpm verify`，期望 typecheck 通过、契约测试通过。
-- [ ] 步骤 4（变异验证）：在 `packages/domain/package.json` 临时加入 `"react"` 依赖或让 `domain` import `provider-*`，运行 `pnpm run boundaries`，**期望失败**；随后还原。
+- [x] 步骤 3：运行 `pnpm verify`，期望 typecheck 通过、契约测试通过。
+- [x] 步骤 4（变异验证）：在 `packages/domain/src/probe.ts` 中 `import '@harness-projects/provider-planning-local'`，运行 `pnpm run boundaries`，**期望失败**；再给 `packages/client/package.json` 加上 `react` 依赖，**期望失败**；随后还原。
 
-**验证**：`pnpm verify` 全绿 + 变异验证失败（证明测试有效）。  
+**验证**：`pnpm verify` 全绿（5/5 通过）+ 两次变异验证均失败（退出码 1，分别击中"源码跨包 import"与"manifest 依赖"两条断言）。  
 **回滚**：删除包目录与测试文件；对应 commit 单独回退即可恢复空结构。
 
 ### Batch 4 · CI 快车道
@@ -148,37 +152,47 @@ grep -n "docs/superpowers" AGENTS.md   # 只允许出现在映射表的"上游�
 
 **涉及文件**：`.github/workflows/ci.yml`。
 
-- [ ] 步骤 1：写 workflow，job 名称固定为 `PR Fast Gate`，包含 `pnpm install --frozen-lockfile` 与 `pnpm verify`。
-- [ ] 步骤 2：本地执行与 workflow 完全相同的命令序列。
-- [ ] 步骤 3：推送后回读 `gh workflow list`，确认 workflow 已注册。
+- [x] 步骤 1：写 workflow，job 名称固定为 `PR Fast Gate`，包含 `pnpm install --frozen-lockfile` 与 `pnpm verify`。
+- [x] 步骤 2：本地执行与 workflow 完全相同的命令序列（`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`）。
+- [x] 步骤 3：推送后回读 `gh workflow list`，确认 workflow 已注册；`gh run list` 显示 main 上首次运行 **success**（20s）。
 
-**验证**：本地等价命令通过 + `gh workflow list` 中出现该 workflow。  
+**验证**：YAML 解析出 `jobs=["fast-gate"] name="PR Fast Gate"` + 本地等价命令通过 + 远端运行成功。  
 **回滚**：删除 workflow 文件；远端检查随即消失。
 
 ### Batch 5 · 远端发布与保护
 
 **最小闭环**：仓库公开可见、`main` 受保护、只能通过 PR + rebase 合并。
 
-- [ ] 步骤 1：`gh repo create SingularityKChen/harness-projects --public --source=. --remote=origin`（若已存在则改用 `git remote add`）。
-- [ ] 步骤 2：`git push -u origin main`。
-- [ ] 步骤 3：配置分支保护：必须 PR、1 个批准、要求 `PR Fast Gate` 检查、线性历史、禁止强推与删除、要求解决会话。
-- [ ] 步骤 4：仓库设置：只允许 rebase 合并，合并后删除分支。
-- [ ] 步骤 5：回读 `gh api repos/.../branches/main/protection` 与 `gh api repos/...` 的 `visibility`、`allow_squash_merge`、`allow_rebase_merge` 核验。
+- [x] 步骤 1：`gh repo create SingularityKChen/harness-projects --public --source=. --remote=origin`。
+- [x] 步骤 2：`git push -u origin main`（7 个批次提交）。
+- [x] 步骤 3：配置分支保护：必须 PR、1 个批准、要求 `PR Fast Gate` 检查、线性历史、禁止强推与删除、要求解决会话。
+- [x] 步骤 4：仓库设置：只允许 rebase 合并，合并后删除分支（连带关闭 wiki）。
+- [x] 步骤 5：回读 protection 与仓库设置核验；另做一次**全新 clone** 的端到端复现（软链接、install、typecheck、测试）。
 
-**验证**：回读结果与预期一致（见 Validation and Acceptance §4）。  
+**验证**：
+```text
+visibility=public  default_branch=main
+allow_merge_commit=false  allow_squash_merge=false  allow_rebase_merge=true
+delete_branch_on_merge=true
+required_status_checks: strict=true contexts=["PR Fast Gate"]
+required_pull_request_reviews: required_approving_review_count=1, dismiss_stale_reviews=true
+required_linear_history=true  allow_force_pushes=false  allow_deletions=false
+required_conversation_resolution=true  enforce_admins=false
+fresh clone: readlink CLAUDE.md = AGENTS.md；pnpm install/typecheck/test 全绿
+```
 **回滚**：`gh api -X DELETE .../branches/main/protection` 关闭保护；仓库删除为显式人工操作，本计划不自动执行。
 
 ### Batch 6 · 重构与提交整理
 
 **最小闭环**：在能力不变的前提下，让 diff 与提交历史都能被人一眼读懂。
 
-- [ ] 步骤 1：一致性重构：文件名/路径/术语与 `AGENTS.md` 对齐；删除本批次产生的冗余（重复说明、临时脚本、空目录占位）。
-- [ ] 步骤 2：`pnpm verify` 重新全绿（重构不得改变验收结果）。
-- [ ] 步骤 3：提交整理：把中间态 fixup 提交合并进对应批次提交，使 `git log --oneline` 与 Plan of Work 的 6 个批次一一对应。
-- [ ] 步骤 4：逐条核对 Validation and Acceptance 清单，把证据写入本文件的 Progress 与 Outcomes。
+- [x] 步骤 1：一致性重构：补齐 git 不跟踪的空目录（`tests/integration`、`tests/e2e`、`docs/exec-plan/completed`），补 `README.md` 作为公开仓库入口；核对文件名/路径/术语与 `AGENTS.md` 一致。
+- [x] 步骤 2：`pnpm verify` 重新全绿（重构不改变验收结果）。
+- [x] 步骤 3：提交整理：本次引导没有产生 fixup 提交，7 个提交已与批次一一对应，无需改写历史（未创建 `backup/pre-rebase`）。
+- [x] 步骤 4：逐条核对 Validation and Acceptance 清单，把证据写入 Progress 与 Outcomes。
 
-**验证**：`git log --oneline` 与批次一一对应；`pnpm verify` 通过；验收清单全部勾选。  
-**回滚**：整理发生在合并前，且每次改写都有备份分支（`git branch backup/pre-rebase`）。
+**验证**：`git log --oneline`（7 条）与批次一一对应；`pnpm verify` 通过；验收清单 9/9 有证据。  
+**回滚**：整理发生在推送前；本次未改写历史，因此无需回滚动作。
 
 ---
 
@@ -200,12 +214,24 @@ grep -n "docs/superpowers" AGENTS.md   # 只允许出现在映射表的"上游�
 
 ## Progress
 
-- [ ] Batch 1：工程底座（`.gitignore`、`.editorconfig`、`package.json`、`pnpm-workspace.yaml`、`tsconfig*.json`）。
-- [ ] Batch 2：文档治理层（`AGENTS.md`、`PLANS.md`、`CLAUDE.md` 软链接、`docs/README.md`）。
-- [ ] Batch 3：结构与架构契约（17 个包骨架 + 依赖边界契约测试 + 变异验证）。
-- [ ] Batch 4：CI 快车道（`PR Fast Gate`）。
-- [ ] Batch 5：远端发布与保护（public 仓库、`main` 保护、rebase-only）。
-- [ ] Batch 6：重构与提交整理。
+- [x] (2026-09-17) Batch 1：工程底座（`.gitignore`、`.editorconfig`、`.nvmrc`、`package.json`、`pnpm-workspace.yaml`、`tsconfig*.json`）。
+- [x] (2026-09-17) Batch 2：文档治理层（`AGENTS.md`、`PLANS.md`、`CLAUDE.md` 软链接、`docs/*/README.md`）。
+- [x] (2026-09-17) Batch 3：结构与架构契约（17 个包骨架 + 依赖边界契约测试 + 两次变异验证）。
+- [x] (2026-09-17) Batch 4：CI 快车道（`PR Fast Gate`，main 首次运行 success）。
+- [x] (2026-09-17) Batch 5：远端发布与保护（public 仓库、`main` 保护、rebase-only、全新 clone 复现通过）。
+- [x] (2026-09-17) Batch 6：重构与提交整理（补齐空目录、公开入口 README、文档校准）。
+
+提交历史（`git log --oneline`，与批次一一对应）：
+
+```text
+ci: 添加 PR Fast Gate 工作流
+test(contract): 用契约测试固定包边界与依赖方向
+feat(packages): 生成能力域包骨架
+docs(exec-plan): 新增仓库引导 ExecPlan
+docs: 建立仓库工作约定与文档地图
+chore(repo): 建立 pnpm 工作区与 TypeScript 基线
+docs(upstream): 纳入冻结的工程包作为只读输入
+```
 
 ---
 
@@ -216,7 +242,13 @@ grep -n "docs/superpowers" AGENTS.md   # 只允许出现在映射表的"上游�
 - Observation：工程包中的实施计划已经是 ExecPlan 形态（Purpose / Progress / Decision Log / Outcomes），将其固定为仓库级格式可以和上游文档无缝衔接，不需要另造模板。
   Evidence：`mvp-delivery-plan-v0.1.md` 的章节结构与 ExecPlan 规范一致。
 - Observation：Node 26 在 glob 匹配到空目录时 `node --test` 仍然退出码 0，因此 `tests/integration`、`tests/e2e` 暂时为空不会让门禁误报失败。
-  Evidence：Batch 3 的 `pnpm test` 实际执行结果。
+  Evidence：`node --test tests/integration` → `tests 0 / pass 0 / fail 0`，退出码 0。
+- Observation：`.gitignore` 中的 `foo/` 是目录规则，路径不存在且不带尾斜杠时 `git check-ignore` 不会命中，容易被误读为"忽略规则失效"。
+  Evidence：`git check-ignore -v .worktrees` 退出码 1 无输出；`git check-ignore -v .worktrees/` 命中 `.gitignore:13:.worktrees/`。
+- Observation：git 不跟踪空目录，因此"目标目录结构存在"这条验收项**不能靠 `mkdir` 满足**，必须让目录里有被跟踪的文件。
+  Evidence：首次提交后 `git ls-files` 中缺少 `tests/integration`、`tests/e2e`、`docs/exec-plan/completed`，Batch 6 用 README 与 `.gitkeep` 补齐。
+- Observation：`pnpm install` 不会为没有任何依赖的 workspace 包创建 `node_modules/@harness-projects/*` 链接，因此跨包解析当前完全依赖 `tsconfig.json` 的 `paths`。
+  Evidence：`ls node_modules/@harness-projects` → No such file or directory，而 `pnpm typecheck` 正常。
 
 ---
 
@@ -268,10 +300,36 @@ grep -n "docs/superpowers" AGENTS.md   # 只允许出现在映射表的"上游�
 
 ## Outcomes & Retrospective
 
-（完成后回填。）
+全部 6 个批次完成，验收 9/9 有证据：
+
+| # | 验收项 | 实际证据 |
+|---|---|---|
+| 1 | `AGENTS.md` 覆盖全部约定 | §3.1 改写表、§3.2 spec/plan 合一、§6 自研 exec-plan、§3.4 运行态例外、§7 worktree、§8.1 中立命名、§8.3 PR 规则、§5 拆分原则 |
+| 2 | `CLAUDE.md` 是相对软链接 | `git ls-files -s CLAUDE.md` → 模式 `120000`；`readlink CLAUDE.md` → `AGENTS.md`；全新 clone 后仍为软链接 |
+| 3 | 目标目录结构存在 | `git ls-files` 覆盖 `apps/{harness-plugin,web}`、17 个 `packages/**`、`tests/{contract,integration,e2e}`、`docs/{architecture,adr,product,exec-plan/{active,completed}}` |
+| 4 | 工程可复现 | 本机与全新 clone 均：`pnpm install --frozen-lockfile` → `pnpm typecheck` → 5/5 测试通过 |
+| 5 | 架构边界可执行 | 契约测试 5 项通过；两次变异（domain 反向依赖 provider、client 声明 react）均导致退出码 1 |
+| 6 | 运行态不入库 | `git check-ignore -v .worktrees/ .superpowers/` 两行命中；`git status --porcelain` 干净 |
+| 7 | 远端 public 且 `main` 受保护 | `gh api` 回读：`visibility=public`、必须 PR、`PR Fast Gate`（strict）、1 个批准、线性历史、禁强推与删除 |
+| 8 | 只能 rebase 合并 | `allow_merge_commit=false`、`allow_squash_merge=false`、`allow_rebase_merge=true`、`delete_branch_on_merge=true` |
+| 9 | 不自行合并 | 本计划未执行任何 `gh pr merge`；主分支由批次提交直接构成（引导期无 PR 可提） |
+
+**与计划的偏差**
+
+1. Batch 6 的范围比原计划大了两件事：补齐 git 不跟踪的空目录（否则验收项 3 实际不成立），以及新增公开仓库入口 `README.md`。两者都属于"计划写的时候没意识到"的结构性问题，而不是范围蔓延。
+2. 原计划预期要在 Batch 6 改写历史合并 fixup，实际每个批次只产生一个提交，历史已经干净，因此**没有执行 rebase**（也就没有 `backup/pre-rebase`）。
+3. Batch 3 的变异验证用"新增探针文件 + 临时 manifest 改动"完成，比原计划描述的方案更贴近真实违规形态。
+
+**遗留问题（不属于本计划范围）**
+
+- 上游工程包是否要归档进 `docs/product`、`docs/architecture`、`docs/adr`（逐条重述 ADR 等）——需要单独一份 ExecPlan。
+- 测试框架仍是 `node --test`；当出现需要 TS 类型化测试或浏览器环境的用例时再评估引入，属于未来的独立批次。
+- 公开仓库尚未选择 LICENSE；这是所有权决策，留给人类伙伴。
+- 尚未建立 issue 模板与首批跟踪 issue（PR 规则要求 PR 关联 issue）。
 
 ---
 
 ## Bottom Change Note
 
 - 2026-09-17：首次创建。原因：仓库引导阶段需要一份自带上下文、可被无上下文实现者执行的计划，并把"批次 = 可独立验收的最小闭环"固化为后续工作的默认方式。
+- 2026-09-17：执行完毕后回填。原因：Batch 1/Batch 3 的验证命令按实测结果校准（`git check-ignore` 需要尾斜杠）；Batch 6 补入"空目录不被 git 跟踪"这一实测发现；补齐 Outcomes 与验收证据后归档到 `completed/`。

@@ -20,13 +20,13 @@
 
 | 计划 | 范围 | 状态 |
 |---|---|---|
-| [2026-09-17-repo-bootstrap](exec-plan/active/2026-09-17-repo-bootstrap.md) | 仓库引导：文档治理、工作区骨架、架构契约、远端保护 | 进行中 |
+| — | 当前没有进行中的计划 | — |
 
 ### Completed
 
 | 计划 | 结论 |
 |---|---|
-| — | — |
+| [2026-09-17-repo-bootstrap](exec-plan/completed/2026-09-17-repo-bootstrap.md) | 仓库引导完成：文档治理约定、pnpm 工作区骨架、包边界契约测试、`PR Fast Gate` 与 `main` 分支保护（只允许 rebase 合并） |
 
 ## 3. 上游输入
 
