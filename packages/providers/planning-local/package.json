@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/provider-planning-local",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "本地项目规划 Provider",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/app-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "独立 Web 外壳",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

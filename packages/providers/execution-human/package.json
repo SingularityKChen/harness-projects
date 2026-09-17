@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/provider-execution-human",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "人工执行 Provider",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

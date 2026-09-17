@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/capabilities",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "能力定义与注册契约",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "应用核心：工作空间、策略、关系图与投影",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

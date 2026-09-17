@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/provider-planning-github-projects",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "GitHub Projects 项目规划 Provider",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/app-harness-plugin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Harness 外壳适配",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
