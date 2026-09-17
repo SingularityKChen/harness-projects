@@ -4,7 +4,7 @@
 
 ## 第一批将落地的用例
 
-以下用例对应上游 Test & Release Plan 的集成层要求，按优先级排列：
+以下用例是本层的第一批，按优先级排列：
 
 1. `migration from empty` —— 空目录建立 Schema，约束与唯一索引生效；
 2. `restart restore` —— 进程重启后身份、关系与执行上下文不丢失；

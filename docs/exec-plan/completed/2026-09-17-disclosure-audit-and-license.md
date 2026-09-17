@@ -25,7 +25,7 @@
 
 - 仓库 `SingularityKChen/harness-projects` 为 public，`main` 受保护（必须 PR + 1 批准 + `PR Fast Gate` + 线性历史 + 禁强推/删除）。
 - 该工程包在 `8b39b4a`（根提交）被纳入，此后再未改动；它出现在**所有**提交的树中，因此任何"移除"都必然是历史重写，而不是一次删除提交。
-- 该包是产品与工程设计的上游输入：PRD、UI Spec、Engineering Design、SQLite Schema、API/Provider Contract、Identity Spike、MVP 计划、Test & Release Plan、ADR 初稿。
+- 该包是一份产品与工程设计的上游输入（约 13 份文档、5,100 行），按 `AGENTS.md` §1.5 的规则，本计划只以中性描述引用它，不复述其内部版本号与文档编号。
 - 术语：**发布面（publication surface）** = 任何可以匿名获取的内容，包括分支、标签、PR ref、缓存视图。
 
 ---
