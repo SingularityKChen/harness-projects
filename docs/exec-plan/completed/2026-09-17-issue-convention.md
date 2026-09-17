@@ -124,9 +124,9 @@ node scripts/policy-check.mjs pr <n>      # 是否 link 同仓 issue，且被 li
 
 ### Batch 5 · 文档与约定入库
 
-- [x] 步骤 1：`AGENTS.md` 新增 §8.6（标题/标签/正文/PR 绑定/执行），§8.3 增加"每个 PR 必须 link 同仓 issue"，§3.3 增加英文例外，§0 与 §9.1 增加入口。
+- [x] 步骤 1：`AGENTS.md` 新增 §8.7（标题/标签/正文/PR 绑定/执行），§8.3 增加"每个 PR 必须 link 同仓 issue"，§3.3 增加英文例外，§0 与 §9.1 增加入口。
 - [x] 步骤 2：`package.json` 增加 `check:policy`。
-- [x] 步骤 3：修正 PR #11 分支上"不引入标签体系"的表述，避免与 §8.6 冲突。
+- [x] 步骤 3：修正 PR #11 分支上"不引入标签体系"的表述，避免与 §8.7 冲突。
 - [x] 步骤 4：本计划归档到 `docs/exec-plan/completed/`。
 
 **验证**：`pnpm verify` 全绿；`grep` 确认仓库内不再有"不引入标签体系"的说法。  
@@ -144,7 +144,7 @@ node scripts/policy-check.mjs pr <n>      # 是否 link 同仓 issue，且被 li
 | 4 | 存量 issue 合规 | `gh issue list` 全部匹配 `<kind>(<area>): ...` 且各含一个 `kind:*`、至少一个 `area:*` |
 | 5 | PR 关联完整 | 四个在审 PR 均有 `Closes #N`，且 `policy-check pr` 通过 |
 | 6 | 检查为 advisory | 分支保护仍只要求 `PR Fast Gate` |
-| 7 | 约定可读 | `AGENTS.md` §8.6 含标题格式、标签表、正文结构与执行命令 |
+| 7 | 约定可读 | `AGENTS.md` §8.7 含标题格式、标签表、正文结构与执行命令 |
 | 8 | 不依赖在审 PR | 本分支 `git diff --name-only main` 不含其他 PR 引入的文件 |
 
 ---
@@ -165,6 +165,12 @@ node scripts/policy-check.mjs pr <n>      # 是否 link 同仓 issue，且被 li
   Evidence：单测 `title must match` vs `unknown kind` 的第一次失败输出。
 - Observation：检查脚本不应依赖 API 才能知道"当前仓库是谁"——`gh repo view` 走 GraphQL，会因瞬时故障让本地检查直接崩掉；`GITHUB_REPOSITORY` 与 `git remote` 都能离线回答。
   Evidence：`Post "https://api.github.com/graphql": EOF` 导致 `policy-check issue 4` 失败；改为先解析远端后通过。
+
+- Observation：**改动单选字段的选项列表会让已有条目的该字段值失效**。`updateProjectV2Field` 会重建选项，旧选项 ID 不再被引用，条目上显示为空——没有任何报错，只有回读才能发现。本次在 `Area`（13 → 21 个取值）与 `Kind`（`feature` → `feat`）上各触发一次。
+  Evidence：改 Area 后 `gh project item-list` 里 `#4`–`#10` 的 `area` 变成 `null`；改 Kind 后 `#4` 的 `kind` 为空。两次都通过"对全部 12 个条目重新赋值 + 回读"修复。
+- Observation：项目 `Kind` 字段原有取值是全称 `feature`，而标签与 issue 标题用 `feat`——"字段与标签同源"如果不实际对齐，就只是一句声明。本次把字段选项改名并对齐到 6 个提交类型。
+  Evidence：`opt Kind feat` 返回空字符串，`field-list` 显示选项为 `feature`；改名后 `feat=ba8276f5`。
+- Observation：`gh project item-list --format json` 暴露的是 camelCase 键（`kind` / `area` / `gate` / `status`），用它做回读比逐个 `item-edit` 查证更快，也更容易发现 null。
 
 ---
 
@@ -205,16 +211,41 @@ node scripts/policy-check.mjs pr <n>      # 是否 link 同仓 issue，且被 li
 
 - 工具：`gh`（`issues: read`、`pull-requests: read` 即可运行检查）、`node ≥ 22`、GitHub Issue Forms。
 - 契约：分支保护仍只要求 `PR Fast Gate`；`Issue policy` 是独立检查名。
-- 词汇表：`scripts/policy-check.mjs` 的 `KINDS` / `AREAS` 是唯一实现，`AGENTS.md` §8.6 是唯一说明；两者不一致时以脚本为准并同步文档。
+- 词汇表：`scripts/policy-check.mjs` 的 `KINDS` / `AREAS` 是唯一实现，`AGENTS.md` §8.7 是唯一说明；两者不一致时以脚本为准并同步文档。
 
 ---
 
 ## Outcomes & Retrospective
 
-（归档时回填。）
+全部 5 个批次完成，验收 8/8 有证据：
+
+| # | 验收项 | 实际证据 |
+|---|---|---|
+| 1 | 表单存在且关闭自由格式 | 三个表单文件 YAML 解析通过（`task.yml` 字段 `context/scope/acceptance/references/notes`）；`config.yml` 的 `blank_issues_enabled: false` |
+| 2 | 检查逻辑可执行 | `policy-check issue 4` → 退出码 0；把标题临时改成中文 → 退出码 1 并输出 `::error::title must match ...`；恢复后回到 0 |
+| 3 | 检查有单测 | `pnpm test` 12 个通过（5 边界 + 7 策略） |
+| 4 | 存量 issue 合规 | 全部 12 个 issue 逐个跑 `policy-check issue` 均通过 |
+| 5 | PR 关联完整 | `policy-check pr 3/11/12/13` 通过；新 PR #19 由 `Issue policy` 检查验证 `Closes #18` |
+| 6 | 检查为 advisory | `gh pr checks 19` 同时出现 `Issue policy` 与 `PR Fast Gate`；分支保护仍只要求 `PR Fast Gate` |
+| 7 | 约定可读 | `AGENTS.md` §8.7 含标题格式、21 个 area、标签表、正文结构与执行命令；§3.3 含英文例外 |
+| 8 | 不依赖在审 PR | 本分支改动只有 9 个文件，均不在其他 PR 的改动集合里 |
+
+**与计划的偏差**
+
+1. 计划只写"存量 issue 一次性对齐"，实际还包含**看板对齐**：标签词汇表（21 个 area）比项目 `Area` 字段原有的 13 个取值更宽，字段必须扩展，否则"同源"不成立。这一步连带触发了选项 ID 重建，需要重新赋值全部条目。
+2. 计划未预料到 `Kind` 字段与标签词汇本身不一致（`feature` vs `feat`），修复它又触发一次选项重建。
+3. PR #11 的文档因此被更新两次：一次是"标签与字段同源"的表述（原写的是"不引入标签体系"），一次是字段名、选项取值与选项 ID 表的整体重写。
+
+**遗留问题**
+
+- `Issue policy` 保持 advisory；等它稳定、误报为零后再评估加入分支保护。
+- 标签与项目字段仍由作者与维护者手工保持一致；检查覆盖 issue 一侧，项目字段一侧只靠文档约定（本次已把"改选项必须重新赋值并回读"写进 `docs/project-management/README.md`）。
+- 若日后新增包或 `docs/` 子目录，需要同时更新三处：`scripts/policy-check.mjs` 的 `AREAS`、`AGENTS.md` §8.7 的列表、项目 `Area` 字段的选项——目前没有自动检查这三者一致，是一个已知的漂移点。
 
 ---
 
 ## Bottom Change Note
 
 - 2026-09-17：首次创建。原因：issue 需要固定格式、英文标题与标签，并且 PR 必须与 issue 关联；这类"约定 + 检查 + 存量对齐"的改动横跨仓库文件与 GitHub 状态，需要一份可复核的计划。
+- 2026-09-17：执行完毕后回填。原因：对齐看板字段时发现单选选项重建会让旧值失效、且 `Kind` 取值与标签不一致，计划的范围因此从"issue 对齐"扩到"issue + 看板字段对齐"，记入偏差与遗留问题后归档。
+- (2026-09-18) 因与并行分支的章节号冲突，issue 约定由 §8.6 改为 §8.7，本文引用同步改号。
