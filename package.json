@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "项目交付工作台：以可替换 Provider 组合 Planning / Development / Delivery / Execution 能力域",
+  "license": "Apache-2.0",
   "packageManager": "pnpm@10.28.2",
   "engines": {
     "node": ">=22.0.0"
