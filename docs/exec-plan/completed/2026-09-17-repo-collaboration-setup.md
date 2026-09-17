@@ -147,9 +147,9 @@ Engram 的项目由 MCP 进程 cwd 决定，所以要在两处声明：
 
 ### Batch 5 · 验证与归档
 
-- [ ] 步骤 1：逐条核对 Validation and Acceptance，把证据写入 `Outcomes & Retrospective`。
-- [ ] 步骤 2：`pnpm verify` 全绿（本批不涉及代码，但门禁不得回归）。
-- [ ] 步骤 3：把本计划移入 `docs/exec-plan/completed/`，更新 `docs/README.md` 索引。
+- [x] 步骤 1：逐条核对 Validation and Acceptance，把证据写入 `Outcomes & Retrospective`。
+- [x] 步骤 2：`pnpm verify` 全绿（本批不涉及代码，但门禁不得回归）。
+- [x] 步骤 3：把本计划移入 `docs/exec-plan/completed/`，更新 `docs/README.md` 索引。
 
 **验证**：见下表。  
 **回滚**：不适用。
@@ -180,7 +180,7 @@ Engram 的项目由 MCP 进程 cwd 决定，所以要在两处声明：
 - [ ] Batch 2：GitHub Projects。
 - [ ] Batch 3：PR 评审体系。
 - [ ] Batch 4：Engram 项目作用域。
-- [ ] Batch 5：验证与归档。
+- [x] (2026-09-17) Batch 5：验证与归档（四项工作各自成 PR，验收证据见 Outcomes）。
 
 ---
 
