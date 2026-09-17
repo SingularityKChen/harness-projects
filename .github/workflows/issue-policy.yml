@@ -1,0 +1,43 @@
+name: Issue policy
+
+# Advisory by design: this check is deliberately NOT part of branch protection.
+# It reports formatting and linkage problems so they are visible, without making
+# a merge depend on the wording of an issue. Promote it to a required check in
+# branch protection only after it has been stable for a while.
+
+on:
+  issues:
+    types: [opened, edited, labeled, unlabeled, reopened]
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+concurrency:
+  group: issue-policy-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  issue-policy:
+    name: Issue policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Check the issue title and labels
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/policy-check.mjs issue "${{ github.event.issue.number }}"
+
+      - name: Check that the pull request links an issue
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/policy-check.mjs pr "${{ github.event.pull_request.number }}"

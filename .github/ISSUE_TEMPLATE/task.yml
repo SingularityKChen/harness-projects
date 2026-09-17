@@ -1,0 +1,71 @@
+name: Task
+description: A unit of work with a fixed title prefix and verifiable acceptance criteria.
+title: ""
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Title — required format:** `<kind>(<area>): <imperative English summary>`
+
+        - `kind` is one of `feat`, `fix`, `docs`, `chore`, `refactor`, `test`.
+        - `area` is one of the areas listed in [`AGENTS.md §8.7`](https://github.com/SingularityKChen/harness-projects/blob/main/AGENTS.md).
+        - Titles are English, lowercase prefix, no trailing period.
+
+        Example: `feat(storage): add the SQLite schema and migration skeleton`
+
+        **Labels — required:** exactly one `kind:*`, at least one `area:*`, at most one `gate:*`.
+        The title prefixes and the labels must agree; the advisory `Issue policy` check reports mismatches.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why this exists. What is true today, and what is missing.
+      placeholder: Two to four sentences. Link the repository document that already states the requirement.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What this issue covers, and what it deliberately does not.
+      value: |
+        **In scope**
+
+        -
+
+        **Out of scope**
+
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: One checkbox per independently verifiable outcome. Name the command, artifact or observation that proves it.
+      value: |
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Repository documents this issue depends on or restates.
+      value: |
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Dependencies, open questions, and what must be true before starting.
+      placeholder: Anything a reader needs that does not belong in Context.
+    validations:
+      required: true

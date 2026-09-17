@@ -18,7 +18,8 @@
 | 写产品范围、术语、目标形态 | `docs/product/` |
 | 提交 PR 或做评审 | `.github/pull_request_template.md`（模板）+ `docs/review/README.md`（评审标准与证据选择） |
 | 需要隔离工作区 | `.worktrees/<task-slug>/`（§7） |
-| 提交代码 | 分支 + PR，禁止直接推 `main`，禁止自行合并；提交与开 PR 前先做敏感信息自查（§8.6） |
+| 开 issue、写标题与标签 | `.github/ISSUE_TEMPLATE/` 表单 + §8.7 的格式（英文标题、`kind`/`area`/`gate` 标签） |
+| 提交代码 | 分支 + PR，禁止直接推 `main`，禁止自行合并（§8）；提交与开 PR 前先做敏感信息自查（§8.6）；PR 必须 link issue（§8.3） |
 
 ---
 
@@ -168,6 +169,7 @@ storage/*   ─┘
 ### 3.3 语言、命名与格式
 
 - 文档正文用中文；代码标识符、路径、命令、类型名用英文。
+- **例外**：issue 的标题与正文用英文（§8.7）——它是公开可检索的索引面。提交信息与 PR 描述仍按本仓库既有习惯写中文摘要。
 - 章节标题保持与 `PLANS.md` 的章节名一致（英文名），便于检索与脚本处理。
 - 分支与文档命名保持中立（§8.1）；不要在路径、分支名、标题里写工具品牌。
 - 文档中的命令必须是**可复制执行**的，并写明期望输出。
@@ -343,7 +345,8 @@ git worktree add .worktrees/<task-slug> -b <type>/<task-slug>
 4. **合并方式**：被要求合并时使用 **rebase merge**。仓库设置已禁用 merge commit 与 squash，因此"只允许 rebase"是环境保证而非口头约定。
 5. **评审方式**：被要求评审时，使用 **GitHub inline review comment**（针对具体行的评论），而不是只在 PR 顶层留一条总结评论。
 6. 每个 PR 必须关联 ExecPlan：PR 描述里给出 ExecPlan 路径与批次名。
-7. `main` 受分支保护：必须通过 PR、必须通过 `PR Fast Gate`、必须有批准、线性历史、禁止强推与删除。
+7. **每个 PR 必须 link 同仓 issue**：完成写 `Closes #N`，未完成写 `Refs #N`；`Issue policy` 检查会核对（§8.7）。
+8. `main` 受分支保护：必须通过 PR、必须通过 `PR Fast Gate`、必须有批准、线性历史、禁止强推与删除。
 
 ### 8.4 PR 描述模板
 
@@ -418,6 +421,42 @@ git diff origin/main...HEAD -U0 -- . ':(exclude)AGENTS.md' | grep -E '^\+' | gre
 ```
 
 命中即**阻塞项**：改成占位符后重新提交。**未推送**的分支用 `git commit --amend` 或交互式 rebase 重写；**已推送**的分支只靠"再提交一次删除"不够——历史与 PR ref 仍在发布面上，旧提交对象在 GitHub 上仍可按 SHA 取到，须由人类伙伴决定是否重写历史并清理关联记录（例如删除已失效的 workflow run）。该正则只覆盖可机械判定的一类，**人工按上表逐条过一遍才是通过条件**；结论勾选进 PR 描述的"验证证据"（§8.4）。
+### 8.7 Issue 与标签约定
+
+**标题格式（强制）**：`<kind>(<area>): <英文祈使句摘要>`
+
+- `kind` ∈ `feat` / `fix` / `docs` / `chore` / `refactor` / `test`，与提交类型同一套词汇。
+- `area` 取仓库里真实存在的位置：`packages/*` 的顶层目录名、`apps`、`tests`、`docs` 本身与 `docs/*` 的子目录名；另加不对应目录的过程域 `ci`、`repo`。
+- 查看当前 area 取值：`node scripts/policy-check.mjs areas`（期望输出 21 行）。
+- `area:*` 标签与 Project 的 `Area` 字段是同一套词汇的两份**投影**，权威源是脚本，同步时以该命令的输出为准。
+- 标题用**英文**（§3.3 的例外，理由：issue 是公开可检索的索引面）；前缀小写；摘要不以句号结尾、不超过 80 字符。
+- 例：`feat(storage): add the SQLite schema and migration skeleton`
+
+**标签（强制）**
+
+| 命名空间 | 数量 | 取值 |
+|---|---|---|
+| `kind:*` | 恰好 1 个 | 与标题前缀一致 |
+| `area:*` | 至少 1 个 | 包含标题括号内的区域（可再加相关区域） |
+| `gate:*` | 至多 1 个 | `E1`（阻塞数据模型冻结）、`R1`（MVP 发布门禁） |
+
+标签是**权威分类**（可搜索、可筛选、可被检查）；GitHub Projects 的 `Kind` / `Area` / `Gate` 字段是它的看板投影，取值来自同一套词汇。不引入优先级或严重度标签：本仓库没有事故语义，`gate:*` 已经表达"阻塞下一里程碑"。
+
+**正文结构**：由 `.github/ISSUE_TEMPLATE/` 的表单保证，不允许自由格式。
+
+- Task：`Context` → `Scope`（in / out）→ `Acceptance criteria`（每条可独立验证，写明确切命令或产物）→ `References` → `Notes`
+- Bug：`What happens` → `What should happen` → `How to reproduce` → `Evidence` → `References` → `Notes`
+
+**PR 与 issue 的绑定（强制）**：每个 PR 在描述里 link 至少一个同仓 issue——完成写 `Closes #N`，未完成写 `Refs #N`。一个 PR 仍须构成一个可独立验收、合并、回滚的闭环（§8.3）。
+
+**执行**
+
+```bash
+node scripts/policy-check.mjs issue <n>   # 标题 + 标签
+node scripts/policy-check.mjs pr <n>      # 是否 link issue，且被 link 的 issue 合规
+```
+
+`.github/workflows/issue-policy.yml` 在 issue 与 PR 事件上运行同一个检查，检查名为 `Issue policy`。它**刻意不进分支保护**：格式问题应当可见，但不应让合并取决于某个 issue 的措辞；稳定一段时间后再考虑提升为必需检查。
 
 ---
 
@@ -426,6 +465,8 @@ git diff origin/main...HEAD -U0 -- . ':(exclude)AGENTS.md' | grep -E '^\+' | gre
 ### 9.1 本地命令
 
 ```bash
+node scripts/policy-check.mjs issue <n>   # 核对某个 issue 的标题与标签（§8.7）
+node scripts/policy-check.mjs pr <n>      # 核对某个 PR 是否 link 了合规的 issue
 pnpm install                 # 建立工作区
 pnpm verify                  # typecheck + 全部测试（提交前必须全绿）
 pnpm typecheck               # tsc --noEmit
@@ -510,4 +551,5 @@ node scripts/workflow-check.mjs
 | `docs/exec-plan/completed/2026-09-17-repo-bootstrap.md` | ExecPlan 样例（仓库引导，已完成） |
 | `docs/exec-plan/completed/2026-09-17-disclosure-audit-and-license.md` | 发布面审计、上游输入下架与许可证决策 |
 | `docs/review/README.md` | 评审标准：事实核实、证据选择、必查项、意见落点、归属与安全姿态 |
+| `.github/ISSUE_TEMPLATE/` | issue 表单：Task 与 Bug 的正文结构（§8.7） |
 | `LICENSE` | Apache-2.0 许可证全文 |
