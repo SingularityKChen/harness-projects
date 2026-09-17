@@ -47,6 +47,19 @@ pnpm verify        # typecheck + 契约测试
 
 产品与工程设计已在本地冻结，进入实现前的身份与同步验证（Gate E1）。在此之前优先交付不依赖真实 GitHub 也能验收的纵向切片。
 
+## 参考与致谢
+
+本项目站在若干公开工作之上。下表逐条说明**参考了哪个来源、参考了什么**；各来源的著作权与商标归其各自所有者，本项目与它们之间不存在隶属、赞助或背书关系。
+
+| 来源 | 参考了什么 |
+|---|---|
+| [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | 宿主平台，以及架构方向：Host 拥有权威状态、客户端模型不依赖 React、界面按 Slot 组合、能力定义与提供方实现分离 |
+| [superpowers](https://github.com/obra/superpowers)（MIT，Jesse Vincent） | 工作流骨架：先设计后计划、隔离工作区、按批次执行、任务后评审。本项目用中性命名改写它，并把设计与计划收敛到同一份 `docs/exec-plan/` 文档 |
+| [OpenAI Codex 的 PLANS.md / ExecPlan 约定](https://community.openai.com/t/plans-md-file-mentioned-in-the-shipping-with-codex-talk-at-dev-day/1361628) | ExecPlan 的章节结构：Purpose / Big Picture、Progress、Surprises & Discoveries、Decision Log、Outcomes & Retrospective |
+| [Conventional Commits](https://www.conventionalcommits.org/) | 提交信息的类型前缀与语义 |
+
+**工具链**：Node.js（内置 `node --test`）、pnpm workspace、TypeScript、GitHub Actions。它们是依赖，不是上述意义上的启发来源。
+
 ## 许可证
 
 本项目以 [Apache License 2.0](LICENSE) 发布，Copyright 2026 SingularityKChen。
