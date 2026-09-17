@@ -12,6 +12,10 @@ build/
 .superpowers/
 .worktrees/
 
+# 本地上游设计输入（只读参考，不随仓库分发）
+# 参见 AGENTS.md §1.5 与 docs/exec-plan/completed/2026-09-17-disclosure-audit-and-license.md
+deepseek-harness-project-delivery-engineering-pack-v0.1/
+
 # 本地数据与密钥
 .env
 .env.*

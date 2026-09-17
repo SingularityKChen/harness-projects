@@ -15,12 +15,14 @@
 
 ## 当前依据
 
-在本目录下的主题文档补齐之前，以下上游文档是这些主题的当前依据（冻结输入，只读）：
+本目录下的主题文档尚未补齐。在补齐之前，涉及以下主题的结论必须**在本目录内自包含地写明**，不能指向外部文件：
 
-- `deepseek-harness-project-delivery-engineering-pack-v0.1/engineering-design-v0.1.md` —— 总体技术设计与依赖方向；
-- `deepseek-harness-project-delivery-engineering-pack-v0.1/api-provider-contract-v0.1.md` —— Query / Command / 错误模型 / Provider 契约 / 订阅模型；
-- `deepseek-harness-project-delivery-engineering-pack-v0.1/schema-v0.1.sql` —— SQLite v1 数据模型（可执行）；
-- `deepseek-harness-project-delivery-engineering-pack-v0.1/test-release-plan-v0.1.md` —— 测试分层、故障矩阵与发布门禁。
+- 总体技术设计与依赖方向（与 `AGENTS.md` §2 一并构成当前依据）；
+- Query / Command 分层、错误模型、Provider 契约与订阅模型；
+- SQLite v1 数据模型（可执行 schema 以本仓库 `packages/storage/sqlite/` 的实现与迁移为准）；
+- 测试分层、故障矩阵与发布门禁（见 `tests/README.md` 与 `AGENTS.md` §9）。
+
+上游设计输入本身不随仓库分发（`AGENTS.md` §1.5）；它可以在本地被参考，但不能作为对外可读结论的唯一依据。
 
 ## 写作要求
 
