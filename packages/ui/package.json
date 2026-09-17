@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "共享 React 页面与组件",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

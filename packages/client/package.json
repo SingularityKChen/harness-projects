@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "React-free 客户端模型",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/storage-sqlite",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SQLite 存储实现",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

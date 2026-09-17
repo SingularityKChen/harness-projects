@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/domain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "领域实体、枚举、稳定标识与关系语义",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

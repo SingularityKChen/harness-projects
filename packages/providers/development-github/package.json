@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/provider-development-github",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "GitHub 研发 Provider",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

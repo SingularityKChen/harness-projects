@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/provider-delivery-github-actions",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "GitHub Actions 交付 Provider",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/provider-development-local-git",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "本地 Git 研发 Provider",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

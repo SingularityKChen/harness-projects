@@ -1,0 +1,10 @@
+{
+  "name": "@harness-projects/ui-model",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "领域对象到展示结构的转换",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
