@@ -1,0 +1,11 @@
+packages:
+  - apps/*
+  - packages/domain
+  - packages/core
+  - packages/controller
+  - packages/client
+  - packages/ui-model
+  - packages/ui
+  - packages/capabilities
+  - packages/providers/*
+  - packages/storage/*
