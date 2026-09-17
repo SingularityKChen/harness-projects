@@ -16,6 +16,7 @@
 | 写长期架构说明 | `docs/architecture/` |
 | 记录一个不可回退的技术决策 | `docs/adr/` |
 | 写产品范围、术语、目标形态 | `docs/product/` |
+| 提交 PR 或做评审 | `.github/pull_request_template.md`（模板）+ `docs/review/README.md`（评审标准与证据选择） |
 | 需要隔离工作区 | `.worktrees/<task-slug>/`（§7） |
 | 提交代码 | 分支 + PR，禁止直接推 `main`，禁止自行合并（§8） |
 
@@ -366,7 +367,13 @@ git worktree add .worktrees/<task-slug> -b <type>/<task-slug>
 
 ### 8.5 评审规范（inline）
 
-行级评论用 GitHub review comment API，例如：
+完整标准见 `docs/review/README.md`（评审前核实事实、按改动面选证据、阻塞与建议的判定、意见落在哪里）。摘要：
+
+- **意见落在行上**：可定位到具体行的缺陷用 GitHub inline review comment，跨文件或整体结论用 PR 级评论。
+- **阻塞与建议分开**：标 `[blocking]` / `[suggestion]`；一条有证据的阻塞问题胜过一堆风格提醒。
+- **不提已被绿色门禁覆盖的问题**；只报告实际执行过的命令与观察到的输出。
+
+行级评论命令：
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/{number}/comments \
@@ -395,7 +402,8 @@ pnpm run boundaries          # 只跑包边界契约测试
 
 ### 9.2 CI 门禁
 
-- **PR Fast Gate**（`.github/workflows/ci.yml`，job 名称即检查名）：`pnpm install --frozen-lockfile` + `pnpm verify`。该检查名被分支保护引用，改名必须同步修改保护配置与本文档。
+- **PR Fast Gate** 是唯一被分支保护引用的检查名。它由**聚合 job** 发布：聚合 job 不 checkout PR 代码、不读 secrets，只汇总各 lane 的结果。因此新增 lane（例如将来的集成测试或端到端测试）不需要修改保护配置，也不会让"发布必需状态"的 job 执行不可信代码。
+- 改名 `PR Fast Gate` 必须同步修改保护配置与本文档——两者是同一个契约。
 - **Merge Gate**（后续按需扩展）：契约测试全量、集成测试、端到端、迁移测试、包边界测试。
 - **Scheduled Regression**（后续）：大数据量 fixture、重复/乱序事件压测、重连循环、性能趋势。
 
@@ -435,4 +443,5 @@ pnpm run boundaries          # 只跑包边界契约测试
 | `docs/README.md` | 文档地图 |
 | `docs/exec-plan/completed/2026-09-17-repo-bootstrap.md` | ExecPlan 样例（仓库引导，已完成） |
 | `docs/exec-plan/completed/2026-09-17-disclosure-audit-and-license.md` | 发布面审计、上游输入下架与许可证决策 |
+| `docs/review/README.md` | 评审标准：事实核实、证据选择、必查项、意见落点、归属与安全姿态 |
 | `LICENSE` | Apache-2.0 许可证全文 |
