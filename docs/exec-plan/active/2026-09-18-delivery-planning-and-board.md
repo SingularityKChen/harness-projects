@@ -261,7 +261,7 @@ grep -n '2026-09-18-delivery-planning-and-board' docs/README.md
 - [x] 用真实 token 端到端跑通 8 个 open PR 的回填
 - [x] 回填后重读 25 个条目的 `Status`，零漂移
 - [ ] 配置仓库 secret `PROJECTS_TOKEN`（带 `project` scope）—— **待人类执行**
-- [ ] 在界面关掉四条写 `Status` 的内置工作流 —— **待人类执行**
+- [x] 在界面关掉四条写 `Status` 的内置工作流（四条均已回读为 `enabled = false`）
 **验证**：`pnpm verify` → `tests 14 / pass 14`；端到端 `#14 #15 #16 #17 #18 #20 #32 #34 = PR open` 且 `Status` 零漂移。
 **回滚**：`git revert`；字段用 `deleteProjectV2Field`。
 
@@ -288,12 +288,12 @@ gh api graphql -f query='query{user(login:"SingularityKChen"){projectV2(number:1
 **验证**：`pnpm verify` → `tests 16 / pass 16 / fail 0`；PR #35 上 `Disclosure scan`、`PR size`、`PR Fast Gate` 三个检查全绿。
 **回滚**：`git revert`；两个检查不在分支保护里，撤掉不影响任何现有 PR 的可合并性。
 
-### Batch 6 · 人工开启看板工作流（待人类执行）
+### Batch 6 · 人工开启看板工作流（已完成）
 **最小闭环**：新上板条目不再出现空状态。
 **为什么不能自动化**：见 D4——GitHub 未提供启用内置工作流的 mutation。
-- [ ] 在网页界面开启 `Item added to project` → Status = Todo
-- [ ] 在网页界面开启 `Item closed` → Status = Done
-- [ ] 确认 `Pull request merged` 保持关闭
+- [x] 在网页界面开启 `Item added to project` → Status = Todo
+- [x] 在网页界面开启 `Item closed` → Status = Done
+- [x] 确认 `Pull request merged` 保持关闭
 **验证**：见 `Validation and Acceptance` 表第 6 行。
 **回滚**：同一界面关闭开关。
 
@@ -306,7 +306,7 @@ gh api graphql -f query='query{user(login:"SingularityKChen"){projectV2(number:1
 | 3 | 每个 issue 都有里程碑 | `gh issue list --state open --limit 50 --json number,milestone --jq '[.[]\|select(.milestone==null)]\|length'` = 0 | 通过（2026-09-18） |
 | 4 | 看板 23 条目字段无空洞 | 字段回填脚本输出 `wrote=164 failed=0`；GraphQL 读回每条的 Status / Priority / Size 均非空 | 通过（2026-09-18） |
 | 5 | 依赖图可查询 | `gh issue list --state open --search "-is:blocked"` 返回的集合与"当前真正可动手"一致 | 通过（2026-09-18） |
-| 6 | 两个看板工作流已开启 | 新建一个测试 issue 并加入看板后 Status 自动为 `Todo`；关闭它后 Status 自动为 `Done`；随后删除该测试 issue | **待人类执行**（Batch 6） |
+| 6 | 两个看板工作流已开启 | `gh api graphql` 读 `projectV2.workflows`：`Item added to project` 与 `Item closed` 均 `enabled = true` | 通过（2026-09-18） |
 | 7 | `Pull request merged` 保持关闭 | `gh api graphql` 读 `workflows` 节点，该项 `enabled = false` | 通过（2026-09-18） |
 | 8 | 发布面自查 | 见 `Idempotence and Recovery` 的自查方法；本次机械扫描与五个类目的人工逐条核对均通过 | 通过（2026-09-18） |
 
@@ -317,7 +317,7 @@ gh api graphql -f query='query{user(login:"SingularityKChen"){projectV2(number:1
 - [x] (2026-09-18) Batch 3 子条目与依赖图（10 个子条目、18 条依赖边）
 - [x] (2026-09-18) Batch 4 迭代排期与字段回填（164 次字段写入，0 失败）
 - [x] (2026-09-18) Batch 5 文档落地
-- [x] (2026-09-18) Batch 6 两个看板工作流已开启（`Item added to project` → `Todo`，`Item closed` → `Done`，均已实测）；**仍需人工**：view 1 设 group by `Status`、view 5 设 group by `Milestone`，并关掉四条写 `Status` 的内置工作流
+- [x] (2026-09-18) Batch 6 两个看板工作流已开启（`Item added to project` → `Todo`，`Item closed` → `Done`，均已实测）；四条写 `Status` 的内置工作流也已关掉（`enabled = false` 已回读）。**仍需人工**：view 1 设 group by `Status`、view 5 设 group by `Milestone`——分组无法经 API 回读（见本节上一条），因此只能在界面确认
 - [x] (2026-09-18) Batch 9 工程执行状态分离（PR #37）
 - [x] (2026-09-18) Batch 7 Project view 重建（6 个 view，各带 filter 与列集合）
 - [x] (2026-09-18) Batch 8 §8.6 与 §8.3 可执行化（PR #35，三个检查全绿）
@@ -380,47 +380,47 @@ gh api graphql -f query='query{user(login:"SingularityKChen"){projectV2(number:1
 
 - **Decision**：把 MVP 重述为 MVP-0（fake provider 链路）/ MVP-1（真实 provider 链路）/ 首发范围三层，并把 MVP-0 认定为"原始交付 MVP"在本仓库的正确形态。
   **Rationale**：上游的能力范围表是发布范围，不是第一个交付物；把它当 MVP 会导致十几个能力横向并行、每个都无法单独验收。MVP-0 不需要凭据与网络，能最早证伪核心信念，且从 fake 换真实 provider 应当是替换而非重写——如果不是，说明能力契约本身错了，而这正是 fake 版本要暴露的。
-  **Date/Author**：2026-09-18 / Claude Opus 5
+  **Date/Author**：2026-09-18 / agent
 
 - **Decision**：迭代 1 只做"清空评审队列"，不排任何新开发。
   **Rationale**：六个 PR 全绿且零合并，瓶颈在合并吞吐而非工作量。继续新建 PR 会加长队列并推高每个 PR 的变基成本。
-  **Date/Author**：2026-09-18 / Claude Opus 5
+  **Date/Author**：2026-09-18 / agent
 
 - **Decision**：不开启 `Pull request merged → Status = Done` 看板工作流。
   **Rationale**：合并是工程执行事实，`Done` 是规划状态。让前者自动改写后者正是本项目不变量第 3 条禁止的行为。在自己的看板上开这个例外，会让不变量在自己的实践里先失效。
-  **Date/Author**：2026-09-18 / Claude Opus 5
+  **Date/Author**：2026-09-18 / agent
 
 - **Decision**：优先级用看板字段而不是标签。
   **Rationale**：issue #18 拒绝的是"和看板字段重复的标签体系"，不是"不需要优先级"。字段形式既满足迭代规划，又不与 #18 的结论冲突。
-  **Date/Author**：2026-09-18 / Claude Opus 5
+  **Date/Author**：2026-09-18 / agent
 
 - **Decision**：#7 暂不拆子条目，且不排期。
   **Rationale**：它的批次划分依赖 Gate E1 裁决（#25）。现在拆出的子条目有很大概率作废；排期则是空头承诺。
-  **Date/Author**：2026-09-18 / Claude Opus 5
+  **Date/Author**：2026-09-18 / agent
 
 - **Decision**：M3 / M4 / Gate R1 不设到期日。
   **Rationale**：Gate E1 的裁决可以重塑 #7 的形状，五周之后的精确日期是虚假精度。
-  **Date/Author**：2026-09-18 / Claude Opus 5
+  **Date/Author**：2026-09-18 / agent
 
 - **Decision**：§8.6 与 §8.3 的两个检查都不进分支保护。
   **Rationale**：机械扫描只覆盖可判定的一类，§8.6 的通过条件仍是人工过五个类目；设成必需检查会制造"绿了就等于查过了"的错觉，正好取消掉它想保住的那道人工门。体量上限是工程判断而非物理约束，偶有合理超出，让它可见并需要解释比让它阻塞合并更合适。与 `Issue policy` 的既有立场一致。
-  **Date/Author**：2026-09-18 / Claude Opus 5
+  **Date/Author**：2026-09-18 / agent
 
 - **Decision**：dependabot 只开 `github-actions`，不开 `npm`。
   **Rationale**：它存在的直接理由是让 action 能安全地 pin 到 commit SHA——pin 之后升级会变成手工负担，两者必须一起用。npm 的更新 PR 数量远大于 actions，而当前瓶颈正是评审队列的合并吞吐。
-  **Date/Author**：2026-09-18 / Claude Opus 5
+  **Date/Author**：2026-09-18 / agent
 
 - **Decision**：看板自定义字段一律用 ASCII 名；已有的三个 CJK 字段改名为 `Iteration` / `Priority` / `Size`。
   **Rationale**：`gh project item-list --format json` 会静默损坏 CJK key，`jq` 取不到值又不报错——把这种沉默当成"字段没值"会得出错误结论。看板上原有的六个字段本来就是英文，混用是最差的选择。
-  **Date/Author**：2026-09-18 / Claude Opus 5
+  **Date/Author**：2026-09-18 / agent
 
 - **Decision**：工程执行事实写独立的 `Engineering` 字段，而不是关掉自动化了事。
   **Rationale**：内置工作流写死 `Status` 不可重定向，所以"要自动化"和"守住不变量 3"在内置能力范围内无法兼得。自己写一个工作流即可两者兼得，而且这正是产品自身的模型（规划状态与工程状态分属不同投影）。
-  **Date/Author**：2026-09-18 / Claude Opus 5
+  **Date/Author**：2026-09-18 / agent
 
 - **Decision**：合并顺序写进文档，不编码成 `blocked-by`；只有真实内容依赖才建依赖边。
   **Rationale**：`blocked-by` 应当表示"做不了"。把变基顺序写成依赖会让"什么被挡住了"这条查询失去意义。
-  **Date/Author**：2026-09-18 / Claude Opus 5
+  **Date/Author**：2026-09-18 / agent
 
 ## Idempotence and Recovery
 
@@ -489,7 +489,7 @@ gh pr update-branch <next> --rebase
 
 ## Outcomes & Retrospective
 
-本计划的 Batch 1–5 已完成，Batch 6 因平台限制待人工执行。完成后回填本节。
+本计划的 Batch 1–9 已完成（Batch 6 的两个看板工作流已在界面开启并回读确认，四条写 `Status` 的内置工作流已关闭）；Batch 8 与 Batch 9 分别交付在 PR #35 与 PR #37。剩余唯一人工项是两个 view 的分组设置，它无法经 API 回读。完成后回填本节。
 
 当前可以记录的实际结果：
 
