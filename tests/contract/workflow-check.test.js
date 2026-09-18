@@ -462,6 +462,14 @@ test('W7：workflow 缺少 jobs 时必须报告', () => {
   assertOnlyRule(baseline.replace(/jobs:\n  build:[\s\S]*$/, ''), 'W7');
 });
 
+// jobs: {} 能通过 isObject 检查（空映射也是映射），但创建零个检查——和
+// "目录存在但一个 *.yml 都没匹配到"是同一类假绿：输入合法，工作量为零。
+// RULES 里 W7 的 title 一直写着"非空映射"，实现之前只拒绝 undefined 与
+// 非对象，从未真正检查过"非空"，这条用例把承诺和实现钉在一起。
+test('W7：jobs 是空映射 {} 时必须报告（RULES 标题承诺的"非空"此前未实现）', () => {
+  assertOnlyRule(baseline.replace(/jobs:\n  build:[\s\S]*$/, 'jobs: {}\n'), 'W7');
+});
+
 // 解析不了的 workflow 必须让检查失败，不能静默放行：
 // "语法错的 workflow 只是完全不创建检查"是已经发生过的事故。
 test('解析失败时抛出，而不是返回空结果', () => {
