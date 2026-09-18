@@ -32,6 +32,7 @@ import {
   hasPullRequestMetadata,
   linkRuleExemption,
   linkedIssues,
+  stripIneffectiveContexts,
   titleParts,
 } from '../../scripts/policy-check.mjs'
 
@@ -355,4 +356,113 @@ test('策略：exit code 分类完整——0 成功、1 规则违规、2 用法�
   // 不受影响，可以放心断言 exit 2。
   const usage = runWithStubGh('exit 0', ['bogus'])
   assert.equal(usage.status, 2, `未知子命令应 exit 2；实际 ${usage.status}\n${usage.stderr}`)
+})
+
+// ── Batch F：不生效上下文的剥离（issue #62） ────────────────────────────────
+//
+// 三种形态共享同一个根因：正则在整段正文上匹配，不理解 Markdown 与 HTML 的
+// 上下文。Batch D 修掉了围栏代码块那一种，剩下两种在这里收敛。
+//
+// 注意与上一条回归用例的区别：那条用的是**非数字占位符** `#N`，它匹配不上
+// `#(\d+)` 所以本来就被拒绝——与「注释被识别并跳过」是两件事。下面的用例一律
+// 用真实号码，否则测不到真正的缺口。
+
+test('策略：linkedIssues 忽略 HTML 注释里的 Closes #12，真实号码也不例外', () => {
+  // 缺口的现实形态：评审者把关联先注释掉当便签，或从 §8.4 模板里复制一行、
+  // 把 N 换成真实号码却忘了从注释里搬出来。渲染后读者看不见这一行，
+  // GitHub 也不会真的建立关联——但修复前这个 PR 会被判为合规。
+  assert.deepEqual(linkedIssues('<!-- Closes #12 -->'), { closes: [], refs: [] })
+  assert.match(checkPullRequestBody('<!-- Closes #12 -->')[0], /must link the issue/)
+
+  // 多行注释、注释里混着别的内容，判定相同
+  const note = ['<!--', 'Closes #12, 还在确认这个号码对不对', '-->'].join('\n')
+  assert.deepEqual(linkedIssues(note), { closes: [], refs: [] })
+
+  // 注释之外还有真链接时，只有注释里那条被丢掉
+  assert.deepEqual(linkedIssues('<!-- Closes #12 -->\n\nRefs #34'), { closes: [], refs: [34] })
+})
+
+test('策略：linkedIssues 忽略行内代码里的 Closes #12', () => {
+  // 与围栏同一条理由：代码跨度渲染成字面文本，是在「展示」这个字符串而不是
+  // 「声明」一条关联。§8.4 的模板本身就含 `Closes #N`，讲解它时最自然的写法
+  // 就是行内代码。
+  assert.deepEqual(linkedIssues('模板里写的是 `Closes #12` 这种形态'), { closes: [], refs: [] })
+  assert.match(checkPullRequestBody('模板里写的是 `Closes #12`')[0], /must link the issue/)
+
+  // 双反引号跨度同样被剥离
+  assert.deepEqual(linkedIssues('``Closes #12``'), { closes: [], refs: [] })
+
+  // 代码跨度限定在同一行内：分散在不同行的两个反引号不构成同一个跨度，
+  // 不得把中间的真实链接一起吞掉。往不误伤的方向倒——过度剥离会让一个
+  // 合规的 PR 变红，正是 §8.3 第 7 条说的那种没有意义的红。
+  const strayTicks = ['`草稿开头', 'Closes #12', '`草稿结尾'].join('\n')
+  assert.deepEqual(linkedIssues(strayTicks), { closes: [12], refs: [] })
+})
+
+test('策略：引用块里的 Closes #12 仍然算链接——这是被显式决定的，不是遗漏', () => {
+  // #62 要求对引用块「无论选拦还是不拦」都给出显式判定。选不拦：引用块渲染成
+  // 可见正文，GitHub 的关闭关键字在其中照常生效，剥离它会让一个 GitHub 真的
+  // 会去关闭 issue 的 PR 被判为未关联——那正是 §8.3 第 7 条警告的
+  // 「红得没有意义、把人训练成忽略这条检查」的形态。
+  assert.deepEqual(linkedIssues('> Closes #12'), { closes: [12], refs: [] })
+  assert.deepEqual(checkPullRequestBody('> Closes #12'), [])
+})
+
+test('策略：剥离顺序是围栏先于注释——顺序本身有牙', () => {
+  // 围栏是 CommonMark 的叶子块：围栏里的 `<!--` 是字面文本，不是注释开头。
+  // 先剥注释会让这个未闭合的开头一路吃到正文后面真正的 `-->`，把中间那条
+  // 真实链接一起吞掉。断言 #12 仍被识别，就是给「围栏先剥」这个顺序上牙。
+  const body = [
+    '```',
+    '<!-- 围栏里这个注释开头没有闭合',
+    '```',
+    '',
+    'Closes #12',
+    '',
+    '<!-- 这才是一条真正的注释 -->',
+  ].join('\n')
+  assert.deepEqual(linkedIssues(body), { closes: [12], refs: [] })
+})
+
+test('策略：stripIneffectiveContexts 是导出的纯函数，可逐形态验证', () => {
+  // #62 要求剥离逻辑可被单独测试，而不是只能透过 linkedIssues 间接观察。
+  assert.equal(stripIneffectiveContexts('<!-- x -->').trim(), '')
+  assert.equal(stripIneffectiveContexts('`x`').trim(), '')
+  assert.equal(stripIneffectiveContexts('```\nx\n```').trim(), '')
+  assert.equal(stripIneffectiveContexts('> x'), '> x')
+  assert.equal(stripIneffectiveContexts('普通正文'), '普通正文')
+  // 纯函数：不改输入，缺省输入不抛
+  assert.equal(stripIneffectiveContexts(undefined), '')
+})
+
+test('策略：Batch F 的剥离不回归 Batch D 已经正确的判定', () => {
+  assert.deepEqual(linkedIssues('Closes #12 and Refs #5'), { closes: [12], refs: [5] })
+  assert.deepEqual(linkedIssues('<!-- Closes #N -->'), { closes: [], refs: [] })
+  assert.deepEqual(linkedIssues('Closes #0'), { closes: [], refs: [] })
+  const repo = 'SingularityKChen/harness-projects'
+  assert.deepEqual(linkedIssues(`Closes https://github.com/${repo}/issues/12`, repo), { closes: [12], refs: [] })
+})
+
+// ── PR #63 评审修复：未闭合的 <!-- 是假绿 ──────────────────────────────────
+//
+// RC2 的又一个实例：stripHtmlComments 的决策域只覆盖了"闭合的注释"这一种
+// 作者想到的形态。GitHub 渲染未闭合的 `<!--` 时会把其后**全部正文**一并吞掉
+// （页面上完全不可见），而"改到一半先把一行注释掉、没来得及补上闭合"正是
+// 本 PR 针对的那类意外里最常见的一种——号码是真实数字，之前完全没被剥离。
+
+test('策略：linkedIssues 把未闭合的 <!-- 当成吞到文末，不再算关联', () => {
+  // 复现：没有任何 --> 时，旧实现完全不匹配，真实号码原样留在正文里。
+  assert.deepEqual(linkedIssues('<!-- note\nCloses #12'), { closes: [], refs: [] })
+  assert.match(checkPullRequestBody('<!-- note\nCloses #12')[0], /must link the issue/)
+  // 未闭合注释之前的真实链接必须保留——不是把整份正文都吞掉
+  assert.deepEqual(linkedIssues('Refs #34\n\n<!-- Closes #12, 还没想好要不要关'), { closes: [], refs: [34] })
+})
+
+test('策略：HTML 注释不嵌套——两条已经正确的判定加回归钉子', () => {
+  // 第一个 --> 关闭第一个 <!--，其余文本（含内层看起来像开始的 <!--）都在
+  // 注释范围内，一起被剥掉：不算关联。
+  assert.deepEqual(linkedIssues('<!-- <!-- Closes #12 --> -->'), { closes: [], refs: [] })
+  // 同理，第一个 --> 提前关闭了外层注释；之后的 Closes #12 已经在注释之外，
+  // 是可见正文：算关联。
+  assert.deepEqual(linkedIssues('<!-- <!-- --> Closes #12 -->'), { closes: [12], refs: [] })
 })
