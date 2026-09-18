@@ -270,8 +270,24 @@ export function hasPullRequestMetadata(meta) {
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Run `gh`, exiting with the internal-error code (3) instead of letting a
+ * thrown `execFileSync` reach `main()` as a bare Node stack trace under the
+ * same exit code (1) as a rule violation. A non-zero `gh` exit — expired
+ * auth, rate limiting, a network failure, or a pull request that links an
+ * issue which was deleted or transferred — is an infrastructure failure the
+ * checker hit, not something the contributor did wrong. Mirrors
+ * `parseFetchedJson`'s sibling case (output received but unparseable). Real
+ * repro: `node scripts/policy-check.mjs issue 999999` → `gh` exits non-zero
+ * with `gh: Not Found (HTTP 404)`.
+ */
 function gh(args) {
-  return execFileSync('gh', args, { encoding: 'utf8' })
+  try {
+    return execFileSync('gh', args, { encoding: 'utf8' })
+  } catch (error) {
+    console.error(`could not run gh ${args.join(' ')}: ${error.message}`)
+    process.exit(3)
+  }
 }
 
 function repository() {

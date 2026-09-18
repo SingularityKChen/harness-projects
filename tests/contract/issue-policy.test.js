@@ -254,3 +254,79 @@ test('策略：linkedIssues 维持两个已有的正确判定——HTML 注释�
   assert.deepEqual(linkedIssues('<!-- Closes #N -->'), { closes: [], refs: [] })
   assert.deepEqual(linkedIssues('Closes owner/repo#12'), { closes: [], refs: [] })
 })
+
+// ── PR #59 评审修复（P1）：gh 进程失败统一取 exit 3 ─────────────────────────
+//
+// RC2：决策域只覆盖了作者想到的形态。parseFetchedJson() 只覆盖"拿到输出但解
+// 析不了"，没覆盖"execFileSync 直接抛"（gh 鉴权过期、限流、网络故障、或
+// link 了一个已删除/已转移的 issue）。下面是分类测试：把每一种失败形态映射
+// 到它的 exit code，让 exit 3（内部错误）与 exit 1（规则违规）、exit 2（用法
+// 错误）、exit 0（成功）四者互不相撞——而不是只测"修好的那一种"。
+
+/** 裸 Node 栈的特征：uncaught 异常以版本行收尾、并含调用帧。用它断言"这条
+ *  路径修好之后不再是裸栈"，而不仅仅是 exit code 对了。 */
+const BARE_NODE_STACK = /Node\.js v\d|at execFileSync|at genericNodeError/
+
+/**
+ * 把一个 `#!/bin/sh` 桩程序放到 PATH 最前面充当 `gh`，从而在不碰网络的前提
+ * 下精确控制"gh 到底做了什么"。GITHUB_REPOSITORY 固定为 owner/repo，让
+ * repository() 直接短路，不再自己触发一次 gh/git 调用干扰断言。
+ */
+function runWithStubGh(shBody, argv) {
+  const holder = fs.mkdtempSync(path.join(os.tmpdir(), 'policy-check-gh-stub-'))
+  try {
+    const stub = path.join(holder, 'gh')
+    fs.writeFileSync(stub, `#!/bin/sh\n${shBody}\n`)
+    fs.chmodSync(stub, 0o755)
+    const script = fileURLToPath(new URL('../../scripts/policy-check.mjs', import.meta.url))
+    return spawnSync(process.execPath, [script, ...argv], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${holder}:${process.env.PATH}`, GITHUB_REPOSITORY: 'owner/repo' },
+    })
+  } finally {
+    fs.rmSync(holder, { recursive: true, force: true })
+  }
+}
+
+test('策略：gh 输出拿到了但解析不了的既有三种形态仍是 exit 3（回归钉子）', () => {
+  const emptyStdout = runWithStubGh('exit 0', ['pr', '5'])
+  assert.equal(emptyStdout.status, 3, `空 stdout 应 exit 3；实际 ${emptyStdout.status}\n${emptyStdout.stderr}`)
+
+  const noAuthor = runWithStubGh(`printf '%s' '{"body":"x"}'`, ['pr', '5'])
+  assert.equal(noAuthor.status, 3, `JSON 缺 author 应 exit 3；实际 ${noAuthor.status}\n${noAuthor.stderr}`)
+
+  const garbage = runWithStubGh(`printf '%s' '<html>502 Bad Gateway</html>'`, ['issue', '5'])
+  assert.equal(garbage.status, 3, `垃圾输出应 exit 3；实际 ${garbage.status}\n${garbage.stderr}`)
+})
+
+test('策略：gh 进程本身失败（非零退出）同样取 exit 3，不与规则违规的 exit 1 相撞', () => {
+  // 复现评审报告第四种形态：鉴权过期。
+  const authError = runWithStubGh(`echo 'gh: could not authenticate' >&2; exit 1`, ['issue', '5'])
+  assert.equal(authError.status, 3, `gh 鉴权失败应 exit 3；实际 ${authError.status}\n${authError.stderr}`)
+  assert.doesNotMatch(authError.stderr, BARE_NODE_STACK, `不应泄漏裸 Node 栈：\n${authError.stderr}`)
+
+  // 复现真实数据：node scripts/policy-check.mjs issue 999999 → gh 404。
+  const notFound = runWithStubGh(`echo 'gh: Not Found (HTTP 404)' >&2; exit 1`, ['issue', '999999'])
+  assert.equal(notFound.status, 3, `gh 404 应 exit 3；实际 ${notFound.status}\n${notFound.stderr}`)
+  assert.doesNotMatch(notFound.stderr, BARE_NODE_STACK, `不应泄漏裸 Node 栈：\n${notFound.stderr}`)
+})
+
+test('策略：exit code 分类完整——0 成功、1 规则违规、2 用法错误、3 内部错误，四者互不相撞', () => {
+  const ok = runWithStubGh(
+    `printf '%s' '{"number":5,"title":"feat(repo): keep the exit code taxonomy honest","labels":["kind:feat","area:repo"]}'`,
+    ['issue', '5'],
+  )
+  assert.equal(ok.status, 0, `合规 issue 应 exit 0；实际 ${ok.status}\n${ok.stderr}`)
+
+  const violation = runWithStubGh(`printf '%s' '{"number":5,"title":"not a conforming title","labels":[]}'`, [
+    'issue',
+    '5',
+  ])
+  assert.equal(violation.status, 1, `不合规 issue 应 exit 1；实际 ${violation.status}\n${violation.stderr}`)
+
+  // 用法错误路径在 mode 分派之前就会经过 repository()（与本次三条评审修复
+  // 无关的另一处既有行为，未在本批改动范围内），GITHUB_REPOSITORY 短路后
+  // 不受影响，可以放心断言 exit 2。
+  const usage = runWithStubGh('exit 0', ['bogus'])
+  assert.equal(usage.status, 2, `未知子命令应 exit 2；实际 ${usage.status}\n${usage.stderr}`)
+})
