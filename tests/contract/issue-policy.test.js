@@ -24,6 +24,7 @@ import {
   checkLabels,
   checkPullRequestBody,
   checkTitle,
+  linkRuleExemption,
   linkedIssues,
   titleParts,
 } from '../../scripts/policy-check.mjs'
@@ -82,4 +83,26 @@ test('策略：PR 正文必须 link 同仓 issue，Closes 与 Refs 都能识别'
   assert.deepEqual(checkPullRequestBody('Refs #42'), [])
   assert.match(checkPullRequestBody('just prose')[0], /must link the issue/)
   assert.match(checkPullRequestBody(undefined)[0], /must link the issue/)
+})
+
+test('策略：link issue 规则对机器开的 PR 豁免，对人开的 PR 不豁免', () => {
+  // 豁免的理由是「没有可追溯的规划工作项」，不是「这个作者特殊」。
+  // 因此判据取 GitHub 的 user.type，而不是一份需要人工维护的 bot 名单。
+  const bot = linkRuleExemption({ authorType: 'Bot', authorLogin: 'dependabot[bot]' })
+  assert.equal(bot.exempt, true)
+  assert.match(bot.reason, /bot/)
+
+  // 换一个 bot 也豁免——名单没有被写死
+  assert.equal(linkRuleExemption({ authorType: 'Bot', authorLogin: 'renovate[bot]' }).exempt, true)
+
+  // 人开的 PR 一律不豁免，哪怕登录名长得像 bot
+  assert.equal(linkRuleExemption({ authorType: 'User', authorLogin: 'someone' }).exempt, false)
+  assert.equal(linkRuleExemption({ authorType: 'User', authorLogin: 'not-a-dependabot' }).exempt, false)
+
+  // 缺字段时不豁免：未知情形往收紧的方向倒（与 §9.5 对解析失败的立场一致）
+  assert.equal(linkRuleExemption({}).exempt, false)
+  assert.equal(linkRuleExemption({ authorType: undefined, authorLogin: 'x' }).exempt, false)
+
+  // 豁免只影响 link 规则本身，不改变正文判定
+  assert.match(checkPullRequestBody('just prose')[0], /must link the issue/)
 })
