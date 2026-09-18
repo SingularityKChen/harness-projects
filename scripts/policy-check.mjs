@@ -157,6 +157,31 @@ export function linkedIssues(body) {
 }
 
 /**
+ * Whether the link-an-issue rule (§8.3.7) applies to a pull request's author.
+ *
+ * The rule exists so that a change traces back to a *planned* work item. A
+ * machine-opened pull request has no planned work item — the upstream release
+ * is the trigger, and the pull request is the work item. Requiring an issue
+ * would mean a human files one afterwards to justify a bot's change, restating
+ * the pull request body. That is ceremony with no information gain, and worse:
+ * the check would be permanently red on a recurring class of pull request,
+ * which trains people to ignore it. An advisory check whose red is meaningless
+ * is the mirror image of the "green means checked" illusion §9.2 warns about.
+ *
+ * Keyed on GitHub's `user.type`, not on a list of bot names: a name list is one
+ * more vocabulary that has to be kept in sync by hand, which is the class of
+ * problem §8.7 removed for areas.
+ *
+ * @returns {{exempt: boolean, reason?: string}}
+ */
+export function linkRuleExemption({ authorType, authorLogin }) {
+  if (authorType === 'Bot') {
+    return { exempt: true, reason: `author ${authorLogin ?? '<unknown>'} is a bot (§8.3.7 exemption)` }
+  }
+  return { exempt: false }
+}
+
+/**
  * Check a pull request body: it must name at least one same-repository issue.
  * @returns {string[]} one message per violation; empty means conforming.
  */
@@ -221,7 +246,24 @@ function main(argv) {
   }
 
   if (mode === 'pr' && number) {
-    const body = gh(['api', `repos/${repo}/pulls/${number}`, '--jq', '.body'])
+    const raw = gh(['api', `repos/${repo}/pulls/${number}`, '--jq', '{body: .body, authorType: .user.type, authorLogin: .user.login}'])
+    let meta
+    try {
+      meta = JSON.parse(raw)
+    } catch (error) {
+      // An unparseable response means the pull request was never read. Fail
+      // loudly rather than reporting it as the contributor's policy violation.
+      console.error(`could not read pull request #${number}: ${error.message}`)
+      process.exit(3)
+    }
+
+    const exemption = linkRuleExemption(meta)
+    if (exemption.exempt) {
+      console.log(`#${number} skipped: ${exemption.reason}`)
+      return
+    }
+
+    const body = meta.body
     const problems = checkPullRequestBody(body)
     if (problems.length > 0) fail(problems)
 

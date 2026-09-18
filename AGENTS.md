@@ -348,6 +348,7 @@ git worktree add .worktrees/<task-slug> -b <type>/<task-slug>
 5. **评审方式**：被要求评审时，使用 **GitHub inline review comment**（针对具体行的评论），而不是只在 PR 顶层留一条总结评论。
 6. 每个 PR 必须关联 ExecPlan：PR 描述里给出 ExecPlan 路径与批次名。
 7. **每个 PR 必须 link 同仓 issue**：完成写 `Closes #N`，未完成写 `Refs #N`；`Issue policy` 检查会核对（§8.7）。
+   **唯一例外：机器开的 PR 不受此约束**（判定按 GitHub 的 `user.type == 'Bot'`，不是按 bot 名单）。理由是这条规则要保证的是「改动可以追溯到一个**被规划过**的工作项」，而机器开的 PR 没有——触发它的是上游发布，PR 本身就是工作项。强行要求会变成「人事后补一个 issue 去给 bot 的改动找理由」，issue 正文只能重述 PR 正文，没有信息增量；更糟的是这个 advisory 检查会在一整类 PR 上**长期变红**，把人训练成忽略它——那是 §9.2 警告的「绿了就等于查过了」的镜像形态。
 8. `main` 受分支保护：必须通过 PR、必须通过 `PR Fast Gate`、必须有批准、线性历史、禁止强推与删除。
 
 ### 8.4 PR 描述模板
@@ -450,6 +451,8 @@ git diff origin/main...HEAD -U0 -- . ':(exclude)AGENTS.md' | grep -E '^\+' | gre
 - Bug：`What happens` → `What should happen` → `How to reproduce` → `Evidence` → `References` → `Notes`
 
 **PR 与 issue 的绑定（强制）**：每个 PR 在描述里 link 至少一个同仓 issue——完成写 `Closes #N`，未完成写 `Refs #N`。一个 PR 仍须构成一个可独立验收、合并、回滚的闭环（§8.3）。
+
+**例外：机器开的 PR**（`user.type == 'Bot'`，例如 Dependabot 的依赖升级）跳过这条绑定判定，理由见 §8.3 第 7 条。判定写在 `scripts/policy-check.mjs` 的 `linkRuleExemption()` 里、由契约测试守住，不是 workflow 里的一行 `if` —— 豁免本身也是一条规则，应当可被证伪。其余判定（标题、标签）不受豁免影响。
 
 **执行**
 
