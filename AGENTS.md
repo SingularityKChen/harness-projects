@@ -437,8 +437,9 @@ git diff origin/main...HEAD -U0 -- . ':(exclude)AGENTS.md' | grep -E '^\+' | gre
 
 - `kind` ∈ `feat` / `fix` / `docs` / `chore` / `refactor` / `test`，与提交类型同一套词汇。
 - `area` 取仓库里真实存在的位置：`packages/*` 的顶层目录名、`apps`、`tests`、`docs` 本身与 `docs/*` 的子目录名；另加不对应目录的过程域 `ci`、`repo`。
-- 查看当前 area 取值：`node scripts/policy-check.mjs areas`（期望输出 21 行）。
+- 查看当前 area 取值：`node scripts/policy-check.mjs areas`（当前输出 21 行；这个数字由 `AREAS` 决定，权威源是命令本身的输出而不是这句话——`AREAS` 变了不用回来改这句话）。
 - `area:*` 标签与 Project 的 `Area` 字段是同一套词汇的两份**投影**，权威源是脚本，同步时以该命令的输出为准。
+- `AREAS` 是否覆盖了仓库里每个真实目录，由契约测试核对（`requiredAreas()` 读 `packages/*` 与 `docs/*` 的目录名）；该核对只统计匹配 `/^[a-z0-9-]+$/` 的目录名。点目录（如 `.vitepress`）、下划线目录（如 `ui_kit`）这类名字永远无法出现在上面的标题格式里，因此也不计入"`AREAS` 必须覆盖"的范围——不加这道过滤，两条断言会互相矛盾：把这类目录加进 `AREAS` 会让标题格式的测试变红，不加又会让覆盖率测试变红，谁都补不平。
 - 标题用**英文**（§3.3 的例外，理由：issue 是公开可检索的索引面）；前缀小写；摘要不以句号结尾、不超过 80 字符。
 - 例：`feat(storage): add the SQLite schema and migration skeleton`
 
