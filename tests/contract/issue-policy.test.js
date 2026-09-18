@@ -255,7 +255,33 @@ test('策略：linkedIssues 维持两个已有的正确判定——HTML 注释�
   assert.deepEqual(linkedIssues('Closes owner/repo#12'), { closes: [], refs: [] })
 })
 
-// ── PR #59 评审修复（P1）：gh 进程失败统一取 exit 3 ─────────────────────────
+// ── PR #59 评审修复第 1 条：linkedIssues 接受 GitHub 文档支持的冒号写法 ────
+// GitHub《Linking a pull request to an issue》原文："The keywords can be
+// followed by colons or in uppercase." 用例直接取自该文档给出的形态，不靠猜测。
+
+test('策略：linkedIssues 接受关键字后的可选冒号（Closes: #12 / CLOSES: #12 / Fixes: #12）', () => {
+  assert.deepEqual(linkedIssues('Closes: #12'), { closes: [12], refs: [] })
+  assert.deepEqual(linkedIssues('CLOSES: #12'), { closes: [12], refs: [] })
+  assert.deepEqual(linkedIssues('Fixes: #12'), { closes: [12], refs: [] })
+  assert.deepEqual(linkedIssues('Refs: #12'), { closes: [], refs: [12] })
+  // 不带冒号的写法必须继续通过——这不是"改成只认冒号"
+  assert.deepEqual(linkedIssues('Closes #12'), { closes: [12], refs: [] })
+})
+
+// ── PR #59 评审修复第 2 条：owner/repo#N 长形式与完整 URL 形式口径对齐 ─────
+// 评审指出的内部不一致：同一个仓库，完整 URL 算关联、owner/repo#N 长形式不算。
+// 两者都由同一个 repo 参数判定"是不是本仓"，理应同判。
+
+test('策略：linkedIssues 接受同仓 owner/repo#N 长形式，与完整 URL 形式的口径一致', () => {
+  const repo = 'SingularityKChen/harness-projects'
+  assert.deepEqual(linkedIssues(`Closes ${repo}#12`, repo), { closes: [12], refs: [] })
+  // 跨仓长形式依旧拒绝——和跨仓 URL 已有的判定对齐，不是"关掉过滤"
+  assert.deepEqual(linkedIssues(`Closes someone-else/other-repo#12`, repo), { closes: [], refs: [] })
+  // 不传 repo 时无法判定"是不是本仓"，长形式和 URL 形式一样一律不生效
+  assert.deepEqual(linkedIssues(`Closes ${repo}#12`), { closes: [], refs: [] })
+})
+
+// ── PR #59 评审修复第 3 条（P1）：gh 进程失败统一取 exit 3 ─────────────────
 //
 // RC2：决策域只覆盖了作者想到的形态。parseFetchedJson() 只覆盖"拿到输出但解
 // 析不了"，没覆盖"execFileSync 直接抛"（gh 鉴权过期、限流、网络故障、或

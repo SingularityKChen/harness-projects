@@ -451,7 +451,7 @@ git diff origin/main...HEAD -U0 -- . ':(exclude)AGENTS.md' | grep -E '^\+' | gre
 - Task：`Context` → `Scope`（in / out）→ `Acceptance criteria`（每条可独立验证，写明确切命令或产物）→ `References` → `Notes`
 - Bug：`What happens` → `What should happen` → `How to reproduce` → `Evidence` → `References` → `Notes`
 
-**PR 与 issue 的绑定（强制）**：每个 PR 在描述里 link 至少一个同仓 issue——完成写 `Closes #N`，未完成写 `Refs #N`。一个 PR 仍须构成一个可独立验收、合并、回滚的闭环（§8.3）。
+**PR 与 issue 的绑定（强制）**：每个 PR 在描述里 link 至少一个同仓 issue——完成写 `Closes #N`，未完成写 `Refs #N`。一个 PR 仍须构成一个可独立验收、合并、回滚的闭环（§8.3）。关键字后可选一个冒号、大小写不限（`Closes: #12`、`CLOSES #12`，与 GitHub 官方文档给出的形态一致）；号码可以写成 `#N`、同仓完整 URL，或同仓 `owner/repo#N` 长形式——三种写法同判，跨仓写法（长形式或 URL）一律不算。判定实现在 `linkedIssues()`，由契约测试逐形态守住。
 
 **例外：机器开的 PR**（`user.type == 'Bot'`，例如 Dependabot 的依赖升级）跳过这条绑定判定，理由见 §8.3 第 7 条。判定写在 `scripts/policy-check.mjs` 的 `linkRuleExemption()` 里、由契约测试守住，不是 workflow 里的一行 `if` —— 豁免本身也是一条规则，应当可被证伪。其余判定（标题、标签）不受豁免影响。
 

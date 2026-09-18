@@ -181,13 +181,20 @@ function escapeRegExp(text) {
  * Same-repository issue references found in a pull request body.
  *
  * Matches `#<n>` and, when `repo` (the current `<owner>/<repo>`) is given,
- * GitHub's full-URL closing syntax pointed at that same repository. A
- * cross-repo `owner/repo#12`, or a full URL to a *different* repository, is
+ * two more forms GitHub recognizes for that *same* repository: the full
+ * closing URL and the `owner/repo#<n>` long form. A cross-repo
+ * `owner/repo#12`, or a full URL to a *different* repository, is
  * deliberately not a match — a closing keyword only closes issues in the
  * repository the pull request lives in, and `#0` is never a real issue.
  *
+ * The keyword may also be followed by a colon: GitHub's "Linking a pull
+ * request to an issue" documents "The keywords can be followed by colons or
+ * in uppercase" with `Closes: #10`, `CLOSES #10`, and `CLOSES: #10` as its
+ * own examples.
+ *
  * @param {string} body
- * @param {string} [repo] current `<owner>/<repo>`; enables the URL form
+ * @param {string} [repo] current `<owner>/<repo>`; enables the URL and
+ *   `owner/repo#<n>` forms
  */
 export function linkedIssues(body, repo) {
   const closes = []
@@ -196,11 +203,12 @@ export function linkedIssues(body, repo) {
   const keyword = String.raw`(close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)`
   const hashRef = String.raw`#(?<hashNumber>\d+)`
   const urlRef = repo ? String.raw`https://github\.com/${escapeRegExp(repo)}/issues/(?<urlNumber>\d+)` : null
-  const alternation = urlRef ? `(?:${hashRef}|${urlRef})` : hashRef
-  const pattern = new RegExp(String.raw`\b${keyword}\s+${alternation}`, 'gi')
+  const longRef = repo ? String.raw`${escapeRegExp(repo)}#(?<longNumber>\d+)` : null
+  const alternation = repo ? `(?:${hashRef}|${urlRef}|${longRef})` : hashRef
+  const pattern = new RegExp(String.raw`\b${keyword}:?\s+${alternation}`, 'gi')
 
   for (const match of text.matchAll(pattern)) {
-    const number = Number(match.groups.hashNumber ?? match.groups.urlNumber)
+    const number = Number(match.groups.hashNumber ?? match.groups.urlNumber ?? match.groups.longNumber)
     if (!Number.isInteger(number) || number <= 0) continue // #0 is not a real issue
     const key = match[1].toLowerCase()
     const target = key.startsWith('ref') ? refs : closes
