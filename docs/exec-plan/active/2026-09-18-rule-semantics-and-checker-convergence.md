@@ -2,8 +2,8 @@
 
 > 状态：Active
 > 创建：2026-09-18
-> 范围：把 2026-09-18 MVP 交付评审留下的 9 个 issue（#38 #39 #40 #41 #45 #46 #47 #48 #55）收敛掉。分成 5 个各自可独立验收、合并、回滚的 PR。不写 `packages/` 下任何实现代码。
-> 控制文档：本文件是这 5 个 PR 的唯一 ExecPlan。合并顺序见 `Interfaces and Dependencies`。
+> 范围：把 2026-09-18 MVP 交付评审留下的 9 个 issue（#38 #39 #40 #41 #45 #46 #47 #48 #55）收敛掉。前五个 PR 收敛规则语义与离线检查器，第六个 PR（#61）补齐 #45 的运行时观察闭环；六者都可独立验收、合并、回滚。不写 `packages/` 下任何实现代码。
+> 控制文档：本文件是这 6 个 PR 的唯一 ExecPlan。合并顺序见 `Interfaces and Dependencies`。
 
 ## Purpose / Big Picture
 
@@ -112,14 +112,14 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 
 因此在 D3 的表述里去掉「PR 体量约束从评审时前移到规划时」这个闭环声明，改成：`Size` 是规划时的**人工信号**（帮助判断该不该先拆），`rule-checks size` 是评审时的**机械度量**，两者不连通，且这是有意的。
 
-### D4. #45 只做可离线判定的一半
+### D4. #45 先做可离线判定的一半
 
 `projectV2.workflows` 是 user-level project 的数据，`GITHUB_TOKEN` 读不了，必须 `PROJECTS_TOKEN`——实测该 secret 不存在。因此把 #45 切成两半：
 
 - **本轮交付**：纯函数 `boardWorkflowFindings(workflows, mustBeDisabled)` + 契约测试。输入是工作流清单与必须关闭的清单，输出是违规项。清单内容由 D2 推导得出（六条）。离线、进 `pnpm verify`、现在就能验收。
 - **留给 #37**：调用它的 workflow（需要 PAT）。#37 本来就是引入 `PROJECTS_TOKEN` 的那个 PR。
 
-#45 保持 open，把范围收窄写进 issue。这不是「摊薄一个风险」——可判定的那一半与需要凭据的那一半是**两个不同的风险**（判定逻辑对不对 / 凭据与权限配得对不对）。
+#45 保持 open，把范围收窄写进 issue。这不是「摊薄一个风险」——可判定的那一半与需要凭据的那一半是**两个不同的风险**（判定逻辑对不对 / 凭据与权限配得对不对）。运行时半边后来具备前置条件，并由 D7 / Batch G 接续。
 
 ### D5. 检查器三个 PR 按文件切，不按 issue 切
 
@@ -137,12 +137,20 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 
 「修复前红 → 修复后绿 → 变异后再红」这三步的输出都要记进 `Progress`。只写「已修复」不算验收。
 
+### D7. #45 的运行时观察只做边界适配，不复制判定
+
+`scripts/board-workflow-check.mjs` 与 `tests/contract/board-workflow.test.js` 是看板工作流语义的唯一判定权威。运行时观察新增独立 adapter `scripts/check-board-workflows-live.mjs`，职责严格限定为：读取 `PROJECTS_TOKEN` / `PROJECT_OWNER` / `PROJECT_NUMBER`、发出 GitHub GraphQL 请求、验证响应完整性、把完整 `nodes` 交给 `boardWorkflowFindings()`、输出 findings 并设置退出码。它不保存第二份 `EXPECTED`，也不引入通用 Provider 或完整分页框架。
+
+运行时边界一律 fail-closed：网络错误、非 2xx、非 JSON、GraphQL `errors`、`data` / `user` / `projectV2` 缺失，以及 `nodes.length !== totalCount` 都以 exit 1 结束；任一规则 finding 同样 exit 1；只有九条工作流完整返回且全部符合权威判定时 exit 0。`first: 100` 不是分页实现，`totalCount` 是「本次快照完整」的证明；超过单页容量时主动失败比静默检查前 100 条正确。
+
+带 PAT 的 workflow 只保留 `schedule`。它不接受 `pull_request`、`workflow_dispatch` 或任何可选 ref，因此 `actions/checkout` 始终取默认分支的受信任代码；`PROJECT_OWNER` 与 `PROJECT_NUMBER` 是显式 job env，token 只进入执行 adapter 的步骤 env。这样 PR 作者不能通过改脚本或选择 ref，让长效 PAT 执行非默认分支代码。
+
 ## Global Constraints
 
 - 不改 `packages/` 与 `apps/` 下任何文件；本轮不碰产品代码。
 - 每个 PR 独立满足 §8.3 第 2 条：代码 ≤ 1000 行、文档 ≤ 1500 行。
 - 进入 `pnpm verify` 的检查必须离线、无凭据（§1.4、§9.3）。需要网络或 token 的判定只能做 advisory（§9.2）。
-- 检查器的错误路径一律 fail-closed；内部错误与规则违规必须用不同 exit code 区分（内部错误取 3）。
+- 离线检查器的错误路径一律 fail-closed；内部错误与规则违规必须用不同 exit code 区分（内部错误取 3）。Batch G 的 advisory live adapter 只有「本轮观察可信」与「不可信/违规」两态，所有非成功状态统一 exit 1，避免 workflow 把运行时边界故障误判为可忽略的第三态。
 - 不引入新的运行时依赖；`yaml` 是唯一已有的 devDependency。
 - 每个 PR 的描述里给出本文件路径与批次名（§8.3 第 6 条），并 link 它交付的 issue（§8.3 第 7 条）。
 
@@ -270,6 +278,21 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 
 **验证**：每条意见的复现命令在修复前后各跑一次；四个检查器对仓库现有文件仍全绿；五路合并顺序重测。
 
+### Batch G · 看板工作流运行时观察（PR #61，`chore/board-invariants`）
+
+**最小闭环**：默认分支上的定时任务用仓库 secret 读取完整的九条内置工作流，把快照交给 Batch A 的唯一判定函数；任何传输、结构、完整性或规则异常都明确变红。
+
+**涉及文件**：`.github/workflows/board-invariants.yml`（收窄）、`scripts/check-board-workflows-live.mjs`（新建）、`tests/contract/check-board-workflows-live.test.js`（新建）、`tests/contract/board-workflow-check.test.js`（删除）、本 ExecPlan（回填）
+
+- [ ] 先写 adapter / CLI / workflow 契约测试并在旧实现上观察失败
+- [ ] adapter 校验三个必需环境变量；只负责 GraphQL transport、响应结构与完整性，再调用 `boardWorkflowFindings()`
+- [ ] 网络错误、HTTP 错误、非 JSON、GraphQL `errors`、`data` / `user` / `projectV2` 缺失、`nodes` 与 `totalCount` 不一致全部 exit 1
+- [ ] 九条合规 exit 0；任何 finding exit 1
+- [ ] workflow 只保留 `schedule`，checkout / setup-node 使用当前 `main` 的固定 SHA，owner / project number 显式配置，token 仅进入 adapter 步骤
+- [ ] 删除重复判定测试 `board-workflow-check.test.js`，保留 `board-workflow.test.js` 为唯一规则契约测试
+
+**验证**：`node --test tests/contract/board-workflow.test.js tests/contract/check-board-workflows-live.test.js`；`node scripts/workflow-check.mjs`；`pnpm verify`。
+
 ## Validation and Acceptance
 
 | # | 验收项 | 判定证据 | 结果 |
@@ -282,6 +305,7 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 | 6 | 现有四个 workflow 在加固后的检查器下仍合规 | `node scripts/workflow-check.mjs` → `no findings`，exit 0 | 待执行 |
 | 7 | 五个 PR 各自满足 §8.3 体量上限 | `node scripts/rule-checks.mjs size` 逐 PR 输出 | 待执行 |
 | 8 | `main` 在五个 PR 全部合并后仍然绿 | 合并后 `pnpm verify` + `workflow-check` + `rule-checks` 实跑 | 待执行 |
+| 9 | #45 的运行时观察不复制判定、不会让 PAT 执行非默认分支代码，并对不完整响应 fail-closed | adapter 契约测试覆盖成功、finding 与全部边界故障；workflow 只有 `schedule`；`node scripts/workflow-check.mjs` 与 `pnpm verify` 均 exit 0 | 通过（2026-09-19）：窄测 36/36；`workflow-check` 检查 5 个文件、exit 0；`pnpm verify` 168/168、exit 0 |
 
 ## Progress
 
@@ -294,6 +318,7 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 - [x] (2026-09-18 14:40 CST) Batch D policy-check 加固：六项全部完成，另在同文件范围内补 `parseFetchedJson()`（原 `fetchIssue()` 无 JSON 解析错误处理）。`pnpm verify` 43 → **55**
 - [x] (2026-09-18 15:40 CST) Batch E rule-checks 加固：十二项全部完成（凭据模式、逐提交扫描、提交信息与 PR 描述、hunk 解析、exit code 契约、去掉自我豁免、收窄误报、掩码输出、CJK 路径解引号、生成物 glob 排除、重命名与大小写、exit 3 分类）。`pnpm verify` 43 → **69**
 - [x] (2026-09-18 16:05 CST) 验收与重构（Opus）：逐批独立复核（不采信报告）、把 PR #61 的双向模型吸收进 Batch A、回填本文件、实测合并顺序
+- [x] (2026-09-19) Batch G 看板工作流运行时观察：先新增 adapter / CLI / workflow 契约测试，在旧实现上得到 `tests 36 / pass 15 / fail 21`、exit 1（缺 adapter 且 workflow 仍有 `pull_request` / `workflow_dispatch`）；实现后窄测 `36/36`、`node scripts/workflow-check.mjs` exit 0（检查 5 个文件）、`pnpm verify` `168/168` exit 0。删除重复的 `board-workflow-check.test.js`，规则权威仍只有 `board-workflow-check.mjs` + `board-workflow.test.js`。
 
 ## 执行期间的偏差
 
@@ -330,6 +355,14 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
   **Evidence**：PR #61（另一会话）与 Batch A 都创建了 `scripts/board-workflow-check.mjs`，API 不同，实测 rebase 冲突；PR #63（另一会话）叠在仍是 draft 的 #59 之上。两者都是 ready 状态，而本计划的五个都是 draft。
   **Decision impact**：`Interfaces and Dependencies` 只声明了自己这五个 PR 的顺序，对「另一个会话正在改同一个文件」无感。已记入 `merge-queue.md`；#61 的模型按 Decision Log 吸收进 A。
 
+- **Observation**（2026-09-19）：PR #61 rebase 到当前 `main` 后，workflow 仍执行 `node scripts/board-workflow-check.mjs`，但该文件已经按 Batch A 收敛为无 CLI 入口的纯函数模块；直接执行会无输出、exit 0。
+  **Evidence**：`node scripts/board-workflow-check.mjs` → 无输出，exit 0；同时 PR #61 原有的重复测试调用已经不存在的 `checkBoardWorkflows()`。这不是网络错误，而是两个并行实现对同一文件所有权的冲突在 rebase 后留下了假绿接线。
+  **Decision impact**：不能再给纯函数模块附加网络/CLI 职责，也不能保留第二套判定测试；Batch G 新建独立 adapter，并让 workflow 显式调用它。
+
+- **Observation**（2026-09-19）：此前「`PROJECTS_TOKEN` 不存在」只是 2026-09-18 14:02 的时点事实，当前仓库已经具备该 secret。
+  **Evidence**：只读查询仓库 Actions secret 元数据时可见 `PROJECTS_TOKEN`；未读取、输出或保存 secret 值。
+  **Decision impact**：D4 的运行时前提已满足，#45 不再需要继续把运行时观察留给未定的后续；但 token 仍只允许进入定时 workflow 的单一步骤。
+
 ## Decision Log
 
 - **Decision**：`Status` 定为规划轴、人拥有。
@@ -364,6 +397,10 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
   **Rationale**：本轮只交付了 #48 三项诉求里的一项。另两项（Milestone ↔ 迭代 轴泄漏、M2/M3 分层是否对调）各自还有两个选项，且都是规划决定而不是实现决定——替人类伙伴选了再声称关闭，等于把一次未做的判断伪装成已完成的工作。选项与代价已写进 #48 的评论。
   **Date/Author**：2026-09-18 15:30 CST / agent
 
+- **Decision**：#45 的运行时观察采用「纯判定模块 → 薄 live adapter → schedule-only workflow」三层，并拒绝通用 Provider、完整分页器与可选 ref。
+  **Rationale**：判定语义已有唯一权威，复制会再次制造 #56/#61 的漂移；当前对象只有九条，用 `first: 100` + `nodes.length === totalCount` 可直接证明快照完整，完整分页框架没有新增可判定能力。PAT 只需观察配置漂移，PR/手动 ref 不提供额外覆盖，却会扩大不可信代码执行面。
+  **Date/Author**：2026-09-19 / agent
+
 ## Idempotence and Recovery
 
 - 五个分支各自独立；任一 PR 可单独 `git revert`，不牵连其他四个。
@@ -390,21 +427,21 @@ B/C/D/E 都改 `AGENTS.md` 的不同小节（§0+§10 / §9.5 / §8.7 / §8.3+§
 
 **跨会话的协同约束**（本计划开工时没有预料到）：
 
-- **PR #61**（另一会话）交付 #45 的运行时半边。它原本与 PR-A 在 `scripts/board-workflow-check.mjs` 上硬冲突；按 `Decision Log` 的裁决，模型已吸收进 PR-A，#61 需要 rebase 到 PR-A 之后并缩成只剩取数与接线。
+- **PR #61** 交付 #45 的运行时半边。它原本与 PR-A 在 `scripts/board-workflow-check.mjs` 上硬冲突；按 `Decision Log` 的裁决，模型已吸收进 PR-A，#61 已 rebase 到 PR-A 之后并缩成只剩取数、完整性验证与接线。
 - **PR #63**（另一会话）交付 #62，叠在 PR-D 之上，必须排在 PR-D 之后。
 
-**交还给人类伙伴的人工项**：建 `PROJECTS_TOKEN`（带 `project` scope）—— PR #61 与 PR #37 都卡在这一个前提上。`Item reopened` 已由人类伙伴关掉，该项不再待办。
+`Item reopened` 已由人类伙伴关掉；`PROJECTS_TOKEN` 也已存在。两项历史阻塞均已解除，secret 值仍不进入文档、日志与提交。
 
 C / D / E 三者之间**无依赖**，可任意顺序；但都改 `AGENTS.md`，预期在 §8.3/§8.7/§9.5 各自的小节内有「两边都保留」级别的 rebase 冲突。
 
 **交还给人类伙伴的人工项**：
 
 1. 在 Project → Workflows 界面关掉 `Item reopened`（按 D1/D2 必须关；无 API 可用）。
-2. 建 `PROJECTS_TOKEN`（带 `project` scope）才能接线 #45 的运行时半边与 #37。
+2. 定期复核 `PROJECTS_TOKEN` 的最小权限与轮换状态；secret 已存在，不再是接线阻塞。
 
 ## Outcomes & Retrospective
 
-五个批次全部执行完毕，五个 PR 均为 draft，等待人类伙伴评审——**本计划不合并任何 PR**。
+前五个规则收敛批次与 Batch G 运行时观察均已执行完毕，等待人类伙伴评审——**本计划不合并任何 PR**。
 
 **交付结果**
 
@@ -415,6 +452,7 @@ C / D / E 三者之间**无依赖**，可任意顺序；但都改 `AGENTS.md`，
 | C | #58 | 43 → 71 | 六类假绿全部关闭；新增 W7；§9.5 规则文本同步 |
 | D | #59 | 43 → 55 | 六项加固；`parseFetchedJson()`；§8.7 同步 |
 | E | #60 | 43 → 69 | 十二项；`PR_BODY` 经 `env` 传入；§8.3/§8.6 同步 |
+| G | #61 | 当前 main 147 → 168 | 独立 live adapter；schedule-only PAT 边界；删除重复判定测试；响应完整性 fail-closed |
 
 合并后的合计测试数由实测确定，不靠相加推断（见 `Validation and Acceptance` 第 8 项）。
 
@@ -436,3 +474,4 @@ C / D / E 三者之间**无依赖**，可任意顺序；但都改 `AGENTS.md`，
 
 - 2026-09-18 14:03 CST：新建本文件。范围是 2026-09-18 MVP 交付评审留下的 9 个 issue，分五个 PR 收敛。三个设计决定（`Status` 的读法、PR 切分、#45 的切半）在开工前由人类伙伴裁决，记在 `Decision Log`。
 - 2026-09-18 16:05 CST：五个批次执行完毕后回填。改动原因：(1) `Progress` 勾选五个批次并补「执行期间的偏差」一节（Batch E 被用量上限打断、两次独立撞到 `cp` 静默失败）；(2) `Validation and Acceptance` 第 1 项的判定范围排除本文件自身，理由是自指——与 `AGENTS.md` 被 `SCAN_EXCLUDES` 排除同一类；(3) `Decision Log` 增三条（吸收 #61 的模型、合并顺序改 E 第一、`Closes #48` 收回成 `Refs`）；(4) `Surprises` 增两条（本文件被自己的扫描器命中；三会话并行产出冲突产物）；(5) `Outcomes & Retrospective` 回填，含对 D6 写得过于笼统的自我批评。
+- 2026-09-19：加入并完成 Batch G。原因是 #61 rebase 后暴露了真正根因：纯判定模块已经成为唯一权威，但旧 workflow 仍把它当 CLI，且 PR/手动触发让 PAT 执行面超出观察所需。新增 D7、运行时验收项、红→绿 Progress、两条 Surprise 与三层边界 Decision；实现收敛为独立 live adapter + schedule-only workflow，不引入 Provider 或分页框架。
