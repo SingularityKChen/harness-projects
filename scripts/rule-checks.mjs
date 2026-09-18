@@ -159,7 +159,7 @@ function size(base) {
     console.log('')
     console.log('超出即拆分（AGENTS.md §8.3 第 2 条）。拆分的依据是 §5.1 的四个判据，')
     console.log('不是「把同一个风险摊成更多文件提交」——每个子 PR 都要能单独验收。')
-    console.log('看板上的 `规模` 字段用于在动手之前声明预计量级，避免在评审时才发现。')
+    console.log('看板上的 `Size` 字段用于在动手之前声明预计量级，避免在评审时才发现。')
     return 1
   }
   return 0
