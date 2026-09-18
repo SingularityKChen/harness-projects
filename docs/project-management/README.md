@@ -91,3 +91,9 @@ gh project item-edit --id "$item" --project-id PVT_kwHOAY1ahM4BjzAQ \
 - **标签与项目字段同源**：issue 的分类以 `kind:*`、`area:*`、`gate:*` 标签为准（见 `AGENTS.md` §8.7），本表的字段是它在看板上的投影；两套取值来自同一个词汇表，因此不构成"两份事实"。不引入优先级或严重度标签：本仓库没有事故语义，`gate:*` 已经表达"阻塞下一里程碑"。
 - 不用项目状态机替代 PR 生命周期：`Status` 是**投影**，权威状态仍在 PR 与 ExecPlan。
 - 不做自动生命周期投影（webhook 事件驱动改状态）：它需要常驻服务与额外凭据，收益不足以抵掉一个新的失效点。
+
+## 6. 相关文档
+
+| 文档 | 内容 |
+|---|---|
+| `docs/project-management/merge-queue.md` | 评审队列里一批待合并 PR 的顺序、依赖、如何验证"无冲突"声明，以及已知冲突点与解法 |
