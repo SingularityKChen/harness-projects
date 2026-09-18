@@ -18,7 +18,7 @@
 | 写产品范围、术语、目标形态 | `docs/product/` |
 | 提交 PR 或做评审 | `.github/pull_request_template.md`（模板）+ `docs/review/README.md`（评审标准与证据选择） |
 | 需要隔离工作区 | `.worktrees/<task-slug>/`（§7） |
-| 提交代码 | 分支 + PR，禁止直接推 `main`，禁止自行合并（§8） |
+| 提交代码 | 分支 + PR，禁止直接推 `main`，禁止自行合并；提交与开 PR 前先做敏感信息自查（§8.6） |
 
 ---
 
@@ -359,6 +359,7 @@ git worktree add .worktrees/<task-slug> -b <type>/<task-slug>
 ## 验证证据
 - [ ] `pnpm install --frozen-lockfile`
 - [ ] `pnpm verify`
+- [ ] 敏感信息自查（§8.6）：本 PR 的 diff、commit message 与描述均不含本机路径、用户名/主机名、凭据或内部系统信息
 - [ ] <本批特有的验证命令与结果>
 
 ## 风险与回滚
@@ -385,6 +386,38 @@ gh api repos/{owner}/{repo}/pulls/{number}/comments \
 ```
 
 评审输出要可执行：指出具体行、对应哪条约定、建议怎么改。不要输出"整体看起来不错"这类无法行动的结论。
+
+### 8.6 提交与 PR 前的敏感信息自查（公开仓库）
+
+**本仓库是 public 仓库，发布面（publication surface）包括分支、标签与 PR ref**——草稿分支一旦推送到远端、PR 描述一旦提交，就等同于公开发布；事后删除**无法**从缓存视图、PR ref 与第三方镜像中回收；自托管 runner 的 Actions 日志（含 `Runner name`、`Machine name` 与工作目录）同样是公开面。"发布面"的完整定义与判定标准见 `docs/exec-plan/completed/2026-09-17-disclosure-audit-and-license.md`。
+
+因此**每次提交前、每次开 PR 前**都必须做一次敏感信息自查，范围包含 commit message、PR 描述与 CI 日志。不得以"这是内部仓库""以后再清理"为前提。评审侧的对应必查项是 `docs/review/README.md` 的"评审者：必查项 → 安全边界"：**作者自查与评审复核是两道独立的门，不能用其中一道替代另一道。**
+
+不得进入发布面的内容（沿用该计划的机械扫描类目）：
+
+| 类目 | 说明 |
+|---|---|
+| 凭据 | token、key、secret、Bearer、私钥、口令；真实 secret 的**值**，以及 `.credentials` 类文件的内容 |
+| 本机路径与身份 | `/Users/<name>/…`、`/home/<name>/…`、本机用户名、主机名、runner 注册名、`*.local`、`*.internal` |
+| 账号与个人信息 | 邮箱、手机号、个人标识、组织与署名信息 |
+| 内部系统 | 内网地址与端口、内部服务/跳板/runner 名、未公开的配置与拓扑 |
+| 保密字样 | 内部 / 保密 / NDA / confidential / 禁止外传，及其所描述的实体 |
+
+**写法**：一律用占位符代替真实值——`~/.dsh/…`、`$DSH_HOME/…`、`<runner-name>`、`<host>`、`<workspace>`。要说明"某台机器上存在某个文件"时，只写相对结构与文件名，不写绝对路径、用户名与本机名。**不要在工作流里 `echo $(hostname)` / `echo $(pwd)`**——自托管 runner 的日志是公开的（这一条来自一次真实事故：一次性冒烟工作流的日志把机器名与用户路径一起公开了）。
+
+**检查命令**（只判定本次改动，不扫全树；因为本节的规则文本本身含有这些模式，必须排除 `AGENTS.md`；**期望输出为空**）：
+
+```bash
+# 提交前：暂存区的新增行
+git diff --cached -U0 -- . ':(exclude)AGENTS.md' | grep -E '^\+' | grep -vE '^\+\+\+' \
+  | grep -nE '/Users/[^/ ]+|/home/[^/ ]+|[A-Za-z0-9._-]+\.(local|internal|lan|corp)\b'
+
+# 开 PR 前：相对 main 的全部新增行
+git diff origin/main...HEAD -U0 -- . ':(exclude)AGENTS.md' | grep -E '^\+' | grep -vE '^\+\+\+' \
+  | grep -nE '/Users/[^/ ]+|/home/[^/ ]+|[A-Za-z0-9._-]+\.(local|internal|lan|corp)\b'
+```
+
+命中即**阻塞项**：改成占位符后重新提交。**未推送**的分支用 `git commit --amend` 或交互式 rebase 重写；**已推送**的分支只靠"再提交一次删除"不够——历史与 PR ref 仍在发布面上，旧提交对象在 GitHub 上仍可按 SHA 取到，须由人类伙伴决定是否重写历史并清理关联记录（例如删除已失效的 workflow run）。该正则只覆盖可机械判定的一类，**人工按上表逐条过一遍才是通过条件**；结论勾选进 PR 描述的"验证证据"（§8.4）。
 
 ---
 
@@ -422,12 +455,13 @@ pnpm run boundaries          # 只跑包边界契约测试
 3. 是否引入了新的路径/分支/文档命名，且它不含工具品牌？
 4. 是否更新了 ExecPlan 的 `Progress`、`Decision Log`、`Surprises & Discoveries`？
 5. 若把本批改动整体回退，仓库是否仍处于可工作状态？
+6. 本次改动（含 commit message、PR 描述与自托管 runner 日志）是否已按 §8.6 做过敏感信息自查，且发布面上没有本机路径、本机用户名/主机名、凭据或内部系统信息？
 
 ---
 
 ## 10. 安全与信任边界
 
-- 密钥、token、私钥永不入库；Project 数据库只保存指向 secret 服务的句柄（`secret_ref`）。
+- 密钥、token、私钥永不入库；Project 数据库只保存指向 secret 服务的句柄（`secret_ref`）。本仓库是 **public** 仓库：提交与 PR 前必须做敏感信息自查（§8.6）——本机绝对路径与本机用户名、主机名 / runner 名、内网地址与端口、未公开的配置与拓扑，同样属于不得进入发布面的内容。
 - 本地 Git 操作使用 argv / library API，不拼接 shell 字符串；worktree 路径必须规范化并位于允许的根目录内。
 - 外部写操作必须可追踪：记录 actor、目标 ProviderBinding、本地幂等键与结果状态。
 - LLM（包括本 agent）不参与规划状态、关系语义或发布门禁的控制路径；只做确定性规则明确允许的辅助。
