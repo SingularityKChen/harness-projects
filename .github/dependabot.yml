@@ -1,0 +1,26 @@
+version: 2
+
+# 只开 github-actions 这一个 ecosystem。
+#
+# npm 暂不开：本仓库当前的瓶颈是评审队列的合并吞吐（见
+# docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md 的
+# Surprises & Discoveries），而 npm 的更新 PR 数量远大于 actions。
+# 等 M0 队列清空、且 packages/ 下真的有运行时依赖之后再开。
+#
+# 这条配置的直接用途是：让 workflow 里的 action 可以安全地 pin 到 commit SHA。
+# pin 到 SHA 之后升级会变成手工负担，而 Dependabot 会把它变回自动的——
+# 两者要一起用才成立，单独 pin 会腐化。
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    # 一次只开一个，避免把队列撑大。
+    open-pull-requests-limit: 1
+    commit-message:
+      # 与 AGENTS.md §8.2 的 Conventional Commits 一致。
+      prefix: chore(ci)
+    labels:
+      - kind:chore
+      - area:ci
