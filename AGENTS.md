@@ -22,6 +22,7 @@
 | 需要隔离工作区 | `.worktrees/<task-slug>/`（§7） |
 | 开 issue、写标题与标签 | `.github/ISSUE_TEMPLATE/` 表单 + §8.7 的格式（英文标题、`kind`/`area`/`gate` 标签） |
 | 提交代码 | 分支 + PR，禁止直接推 `main`，禁止自行合并（§8）；提交与开 PR 前先做敏感信息自查（§8.6）；PR 必须 link issue（§8.3） |
+| 合并评审队列里排队的一批 PR | `docs/project-management/merge-queue.md`（合并顺序、如何验证"无冲突"声明、GitHub 的 rebase merge 拒绝时怎么本地处理） |
 
 ---
 
@@ -549,6 +550,10 @@ node scripts/workflow-check.mjs
 - 本地 Git 操作使用 argv / library API，不拼接 shell 字符串；worktree 路径必须规范化并位于允许的根目录内。
 - 外部写操作必须可追踪：记录 actor、目标 ProviderBinding、本地幂等键与结果状态。
 - LLM（包括本 agent）不参与规划状态、关系语义或发布门禁的控制路径；只做确定性规则明确允许的辅助。
+- 上一条的**适用范围**是产品的运行时控制路径——`packages/core` 与各 Provider 跑起来之后如何判定、传播、覆盖规划状态与关系语义；不包括本仓库自身作为该产品第一个用户时，agent 在 GitHub Projects 上替人操作看板这件事本身。后者受下面三条约束，不能援引"这只是自举练习"而豁免。
+- 在本仓库自身的项目管理上，agent 可以作为人类伙伴的操作代理执行**确定性写入**——取值能从别处机械推导、agent 不引入任何新判断的那一类：字段回填（例如把 `area:*`/`kind:*`/`gate:*` 标签同步到 Project 的 `Area`/`Kind`/`Gate` 字段）、批量赋值（例如对一批已核实的条目统一写入 `ExecPlan`/`Batch` 文本字段）、索引与文档维护（例如更新 `docs/project-management/README.md` 的字段 ID 表、`docs/README.md` 的 ExecPlan 索引）。
+- 以下两类写入必须先经人类伙伴**批准**，agent 不得单方面执行，即使技术上可以调用同一组 API：`Status` 的取值变更（它断言"规划所有者接受该工作项完成"，规划所有者是人）；`blocked-by` / `blocking` 关系边的新增或删除（它直接决定另一个条目能不能开始）。这两类分别对应上面"规划状态"与"关系语义"两个词，不是新增约束，是把已有约束具体到字段。
+- 批准必须留痕，且痕迹不能只存在于一次会话里：批准记录进该写入所属 ExecPlan 的 `Decision Log`，写明日期与决定者（人类伙伴姓名，或标注"人类伙伴裁决"）。判定规则可机械执行：一条 `Status` 变更或一条 `blocked-by` 边，在对应 `Decision Log` 里找不到批准记录，就视为**无效**——发现即回滚或补批准，不因为它已经显示在看板上就默认有效。
 - 破坏性操作（删除分支、清理工作区、删除远端仓库）默认不做；必须由人类显式要求。
 - **自托管 runner 不是一次性环境**：job 与登录用户的其它进程共享同一台机器。因此（a）凭据只经环境变量或文件描述符传递，**绝不进 argv**——同机进程可读进程表，Actions 的 secret 掩码不覆盖进程表；（b）临时文件只用 `$RUNNER_TEMP`，不写 `/tmp` 这类可预测的共享路径；（c）不调用任何 GitHub API 的 job 声明 `permissions: {}`。在托管 runner 上可以忽略的写法，在这里不是。
 
