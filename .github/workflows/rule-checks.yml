@@ -19,6 +19,9 @@ name: Rule checks
 on:
   pull_request:
     branches: [main]
+    # 省略 types 时默认不含 edited：PR 描述编辑后不重跑，绿色横幅描述的是
+    # 编辑前的旧内容（issue #40 评审项 2）。与 issue-policy.yml 用同一套。
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: rule-checks-${{ github.event.pull_request.number }}
