@@ -65,7 +65,14 @@
 
 2026-09-18 对真实看板的核对（`gh api graphql` 读 `projectV2.workflows`）显示：上表标「关闭」的全部 7 条当前均为 `enabled: false`，标「开启」的 2 条均为 `enabled: true`，与本表的推导结果完全一致。
 
-`scripts/board-workflow-check.mjs` 导出的 `MUST_BE_DISABLED` 常量就是这张表「关闭」列的 7 个名字；它与本文档必须保持一致，改动其中一边必须同时改另一边（`tests/contract/board-workflow.test.js` 有一条测试把两者钉在一起，防止漂移）。
+`scripts/board-workflow-check.mjs` 导出的 `EXPECTED` 常量就是这张表的可执行形式——九条各自的名字、期望状态与理由；`MUST_BE_DISABLED` 由它**推导**（`filter(r => !r.enabled)`）而不是另行维护，因为手写第二份清单就是再造一处会漂移的副本。两者与本文档必须保持一致，改动其中一边必须同时改另一边（`tests/contract/board-workflow.test.js` 有一条测试把条数、名字与期望状态三样都钉死，防止漂移）。
+
+判定是**双向**的，而且有第四类输出，这两点值得说明，因为它们不是从「必须关闭」这个说法里自然得出的：
+
+- **双向**：只查「该关的有没有开」会漏掉另一个方向。`Item added to project` 被误关之后，新上板的条目会停在空状态，而没有任何东西报出来。因此 `EXPECTED` 声明的是九条各自的**期望状态**，不是一份「必须关闭」的名单。
+- **`unknown`：裁决表里没有的工作流一律变红。** GitHub 新增内置工作流时不会通知任何人，而新增的工作流默认没有被裁决过。本仓库实测过 GitHub 在两次读取之间新增三条内置工作流，当时没有任何东西发现。一份只查已知七条的清单会对第十条视而不见——所以未裁决的工作流必须逼一次显式判断（套 §4 的四步规则），而不是默认放行。
+
+四类偏离按严重度排序输出，破坏不变量 3 的 `should-be-disabled` 排最前：`should-be-disabled`（该关的开着）、`unknown`（未被裁决）、`should-be-enabled`（该开的关着）、`missing`（裁决表里有、看板上已不存在，可能是 GitHub 改了名字）。
 
 ## 6. 对「`Closes #N` 是人写的，所以关闭也算规划动作」的回应
 
@@ -92,7 +99,7 @@
 - `rule-checks size` 现在是**离线、无凭据**的检查，进 `pnpm verify`，随 `PR Fast Gate` 成为**必需**检查。`AGENTS.md` §9.2 的判定准则是：机械可判定、没有需要人解释的误报类别 → 进必需检查；判定里含人的解释，或者需要凭据 → 只能做 advisory。
 - 一旦 `rule-checks size` 需要读看板，它就需要凭据；按同一条判定准则，它必须从「必需」降级为「advisory」。为了多做一个「实际 vs 申报」的比较，把一条**已经生效**的必需检查降级成**需要凭据才能跑**的建议性检查，不划算——这是拿一个更强的保证换一个更弱的观察。
 
-结论：`Size` 是规划时的人工信号，`rule-checks size` 是评审时的机械度量，两者故意不连通。如果将来要连通，前提是先有 `PROJECTS_TOKEN`（见 issue #45 / #37 的运行时接线），且需要重新评估 `rule-checks size` 是否还应该留在必需门禁里——不能只加对比逻辑而不重新过一遍 §9.2 的判定。
+结论：`Size` 是规划时的人工信号，`rule-checks size` 是评审时的机械度量，两者故意不连通。如果将来要连通，前提是先有 `PROJECTS_TOKEN`（见 issue #45 / PR #61 的运行时接线），且需要重新评估 `rule-checks size` 是否还应该留在必需门禁里——不能只加对比逻辑而不重新过一遍 §9.2 的判定。
 
 ## 8. Non-goals：本文档不回答什么
 
@@ -100,7 +107,7 @@
 
 - **Agent 可以写哪些规划状态、一条 `blocked-by` 边算不算有效**——属于 issue #47，交付载体是 `AGENTS.md` §10 的增补，不是本文档。
 - **合并队列的顺序与解冲突记录**——属于 issue #46，交付载体是 `docs/project-management/merge-queue.md`，不是本文档。
-- **四条 / 现在是七条工作流的运行时可观测性检查**（读真实看板、需要 `PROJECTS_TOKEN`，发现即报警）——属于 issue #45 的运行时半边，交付载体是 PR #37 引入的 advisory workflow。本文档与 `scripts/board-workflow-check.mjs` 只提供离线判定的纯函数（§5），不发起任何网络请求，也不接线。
+- **运行时可观测性检查**（读真实看板、需要 `PROJECTS_TOKEN`，发现偏离即报警）——属于 issue #45 的运行时半边，交付载体是 PR #61 的 advisory workflow：它负责取数与接线，判定逻辑复用本文档 §5 的可执行形式。本文档与 `scripts/board-workflow-check.mjs` 只提供离线判定的纯函数，不发起任何网络请求、不提供 CLI，因此可以留在 `pnpm verify` 这条离线必需检查里。
 - **`Milestone` 与 `Iteration` 两条轴是否正交、`M2`/`M3` 两个里程碑的排序是否需要对调**——这是 issue #48 提出的另外两项连带诉求，与「`Status` 是什么」不是同一条根因链，本文档不处理，留待该 issue 自己的批次。
 - **`Kind` / `Area` / `Gate` / `Priority` / `Iteration` 等其余看板字段的完整清单与字段 / 选项 ID**——权威表述在 `docs/project-management/README.md`。该文件尚未同步 `delivery-planning-and-board.md` Batch 2 / Batch 9 新增的字段，这是一个已知缺口，不在本文档的修复范围内。
 - **实际去网页界面切换任何工作流开关**——GitHub GraphQL 没有启停内置工作流的 mutation（只有 `deleteProjectV2Workflow`），只能人工操作。本文档不代替那个操作，只定义「开关应该处在什么状态」，供 `scripts/board-workflow-check.mjs` 核对实际状态是否漂移。
