@@ -87,17 +87,25 @@ git push --force-with-lease origin <自己的分支>
 
 ## 4. 当前队列
 
-以下五个 PR 都属于同一份 ExecPlan——`docs/exec-plan/active/2026-09-18-rule-semantics-and-checker-convergence.md`，是它的五个批次。位置 1 必须最先合并：位置 2–5 的 ExecPlan 链接在位置 1 合并之前，指向的都是一份还不存在于 `main` 的文件，这与第 1 节描述的"悬空链接"是同一类问题，区别只是这一次顺序在开工前就声明好了，不是事后拼凑。位置 2–5 互相没有依赖，可任意顺序合并。
+五个 PR 属于同一份 ExecPlan（`docs/exec-plan/active/2026-09-18-rule-semantics-and-checker-convergence.md`）的五个批次，另有两个来自**其它会话**的 PR 与它们交织。
+
+顺序在 2026-09-18 的验收阶段按实测修订过一次，修订理由见位置 1 那一行——它是本文件第 6 节那条新增教训的来源。
 
 | 位置 | PR | 分支 | 交付 | 依赖 | 已知冲突点与解法 |
 |---|---|---|---|---|---|
-| 1 | #56（Batch A） | `docs/board-planning-semantics` | Closes #55、#48——看板 `Status` 的规划轴/工程轴定义，九条内置工作流的裁决规则 | 无 | 不改 `AGENTS.md`；暂无已知冲突 |
-| 2–5（互不依赖，任意顺序） | #57（Batch B，本 PR） | `docs/process-records` | Closes #46、#47——本文件，以及 `AGENTS.md` §10 的 agent 写入边界增补 | 1（ExecPlan 链接） | 改 `AGENTS.md` §10。§9.5 结尾与 §10 开头相邻，若本 PR 与 PR-C（改 §9.5）互相晚于对方合并，预期在该边界出现"两边都保留"级冲突 |
-| 2–5（互不依赖，任意顺序） | #58（Batch C） | `fix/workflow-check-false-greens` | Closes #38——`workflow-check.mjs` 六类假绿收敛，含 §9.5 规则文本同步 | 1（ExecPlan 链接） | 改 `AGENTS.md` §9.5。与 PR-B 改的 §10 相邻，冲突预期同上 |
-| 2–5（互不依赖，任意顺序） | #59（Batch D） | `fix/policy-check-hardening` | Closes #39——`policy-check.mjs` 入口守卫与取值加固 | 1（ExecPlan 链接） | 若改动落到 `AGENTS.md` §8.7（该批次计划标注"如需"），与 PR-E 若落到的 §8.6 相邻，预期"两边都保留" |
-| 2–5（互不依赖，任意顺序） | #60（Batch E） | `fix/rule-checks-hardening` | Closes #40、#41——发布面扫描与体量分桶加固 | 1（ExecPlan 链接） | 若改动落到 `AGENTS.md` §8.3/§8.6（该批次计划标注"如需"），§8.6 与 PR-D 若落到的 §8.7 相邻，预期同上 |
+| 1 | #60（Batch E） | `fix/rule-checks-hardening` | Closes #40 #41——发布面扫描补凭据与逐提交扫描，体量分桶修正 | 无 | 改 `AGENTS.md` §8.3/§8.6 |
+| 2 | #56（Batch A） | `docs/board-planning-semantics` | Closes #55——`Status` 的规划轴/工程轴定义与九条内置工作流的推导规则 | 无硬依赖 | 不改 `AGENTS.md`；与 **#61 在 `scripts/board-workflow-check.mjs` 上曾硬冲突**，已按裁决把 #61 的模型吸收进本 PR |
+| 3 | #57（Batch B，本 PR） | `docs/process-records` | Closes #46 #47——本文件与 `AGENTS.md` §10 的 agent 写入边界 | 无硬依赖 | 改 `AGENTS.md` §10，与 PR-C 的 §9.5 相邻，预期「两边都保留」 |
+| 4 | #58（Batch C） | `fix/workflow-check-false-greens` | Closes #38——六类假绿收敛，新增 W7 | 无硬依赖 | 改 `AGENTS.md` §9.5，同上 |
+| 5 | #59（Batch D） | `fix/policy-check-hardening` | Closes #39——入口守卫与取值加固 | 无硬依赖 | 改 `AGENTS.md` §8.7，与 §8.6 相邻 |
+| 6 | #63（另一会话） | `fix/link-context-stripping` | Closes #62——剥离不生效上下文 | **5**（分支直接叠在 #59 之上） | 叠加分支，#59 之前不可合并 |
+| 待定 | #61（另一会话） | `chore/board-invariants` | #45 的运行时半边 | **2**（判定逻辑已并入 #56） | 需 rebase 到 #56 之后并缩成只剩取数与接线；另需 `PROJECTS_TOKEN` 才能变绿 |
 
-这张表由每个批次自己维护：谁在自己的 PR 里最终改了 `AGENTS.md` 的哪个小节、是否触发了计划里标注的"如需"条款，只有该批次的执行者知道确切结果；合并前请按 2.2 的步骤把"预期"验证成"实测"，并按 2.3 的模板记录实际解法与合并后的 commit SHA。
+**为什么位置 1 是 E 而不是 A。** 原计划把 E 排最后。实测发现：五个分支都带着那份 ExecPlan，而未加固的扫描器把计划里**列举误报字面量的那一行**判成真实泄漏——于是在 E 合并之前，另外四个完全合规的 PR 都挂着一个红的 `Disclosure scan`。E 与其余四个没有内容依赖，提前零成本。
+
+本计划文件随五个分支各带一份**逐字节相同**的副本，因此每个 PR 单独看时 ExecPlan 链接都不悬空——这与第 1 节描述的「悬空链接」问题不同。实测按顺序 rebase 时 git 按 patch-id 把重复的 seed 提交识别为已应用并跳过。
+
+这张表由每个批次自己维护：谁最终改了 `AGENTS.md` 的哪个小节，只有该批次的执行者知道确切结果；合并前请按 2.2 的步骤把「预期」验证成「实测」，并按 2.3 的模板记录实际解法与合并后的 commit SHA。
 
 ## 5. 历史：2026-09-18 那一轮的实测结果
 
@@ -128,6 +136,25 @@ git push --force-with-lease origin <自己的分支>
 > 一个 PR 的"无冲突"声明，必须对**它声明的合并位置之前的所有 PR**做预演，不能只对着其中任意一个看起来相关的对象。
 
 第 2.2 节的预演步骤——从位置 1 依次变基到自己前一位，而不是挑一个分支单独比较——就是这条规则的操作化。
+
+### 6.1 修误报的 PR 应当提前
+
+2026-09-18 的第二轮又得到一条，来源不同：五个 PR 都带着同一份 ExecPlan，而当时未加固的发布面扫描器把那份计划里**列举误报字面量的那一行**判成真实泄漏——于是四个完全合规的 PR 都挂着红的 `Disclosure scan`，而修这个误报的正是队列里的第五个 PR。
+
+> 一个 PR 若修的是**影响队列中其它 PR 检查结果**的误报，应当提前到它们之前。判据不是「谁更重要」，而是「谁的红叉是别人造成的」。
+
+这与第 6 节那条规则的共同点值得点出：两者都是「排队顺序本身携带信息」——顺序不只是变基顺序，它决定了每个 PR 在评审时**看起来**合不合规。一个长期挂红的 advisory 检查会把人训练成忽略它，而那正是 `AGENTS.md` §9.2 警告的「绿了就等于查过了」的镜像形态。
+
+### 6.2 并行会话会产出互相冲突的产物，而排队表看不见
+
+同一轮里三个会话并行工作，产出了两处排队表无法预先发现的交织：
+
+- **同名文件、不同 API**：#61 与 #56 都创建了 `scripts/board-workflow-check.mjs`，实测 rebase 硬冲突。两者是同一个 issue（#45）的两种切法。
+- **叠在 draft 之上的分支**：#63 直接基于 #59 的分支开出，因此 #59 之前不可合并——而 #59 当时还是 draft。
+
+排队表只记录「已知的 PR 之间怎么排」，它不会告诉你「另一个会话此刻正在改同一个文件」。目前没有机制能自动发现这件事；可行的最小对策是**开工前先看一眼 `gh pr list --state open` 与 `git ls-remote --heads origin`**，把「这个文件有没有别人在动」变成排队前的一次显式检查，而不是合并时才发现。
+
+
 
 ## 7. 一个悬而未决的问题：批准门禁
 
