@@ -524,24 +524,27 @@ pnpm run boundaries          # 只跑包边界契约测试
 
 | id | 不变量 | 判定 |
 |---|---|---|
-| **W1** | 每个 job 声明 `timeout-minutes`，整数且 `1 ≤ n ≤ 15` | 缺失或越界即违规 |
-| **W2** | 每个 `actions/checkout` step 声明 `with.persist-credentials: false` | 缺失即违规 |
-| **W3** | 每个 step 的 `uses` 若不是本地引用（不以 `./` 开头），必须写成 `<owner>/<repo>[/<path>]@<40 位十六进制>` | 不是 40 位 hex 即违规 |
-| **W4** | 每个 workflow 顶层声明 `permissions`；**顶层与任一 job 显式声明的** `permissions` 里任何键的取值都不得是 `write`（值不以 `write` 开头）。此外，若任一 job 的 `runs-on` 含 `self-hosted`，顶层 `permissions` 必须是空映射 `{}`，且该 job 不得用 job 级 `permissions` 覆盖出非空权限 | 缺失、含 write、自托管顶层非 `{}`、或自托管 job 覆盖出非空权限即违规。job 级 `permissions` 会覆盖顶层，只查顶层等于给最小权限留一个后门 |
-| **W5** | 若 workflow 的 `on.push` 会覆盖默认分支，则 `concurrency.cancel-in-progress` 不得是字面量 `true`。「覆盖默认分支」＝ `on` 写成 `push` 字符串、或写成含 `push` 的数组、或 `push` 存在且（`branches` 未限定或含 `main`，且未用 `branches-ignore` 排除 `main`） | 是字面量 `true` 即违规。`on: push` 与 `on: [push, …]` 是合法写法且覆盖全部分支，必须一并拦下；`branches-ignore` 排除 `main` 时取消是安全的，不得误报 |
-| **W6** | 若声明了 `concurrency`，必须显式声明 `cancel-in-progress` | 缺失即违规 |
+| **W1** | 每个**非 `uses:` 形态**的 job 声明 `timeout-minutes`，整数且 `1 ≤ n ≤ 15` | 缺失或越界即违规。`jobs.<id>.uses`（可复用 workflow 调用）豁免——GitHub 不允许在这类 job 上声明这个键，强行要求就是制造一个无法满足的红门禁 |
+| **W2** | 每个 checkout step —— `uses` 的 `<owner>/<repo>` 部分（去掉 `@ref` 与子路径后）按 GitHub 语义**大小写不敏感**等于 `actions/checkout` —— 声明 `with.persist-credentials: false` | `with` 不存在、`persist-credentials` 键不存在、或取值不是 `false` 即违规。按 action 精确匹配，不是字符串前缀匹配（`actions/checkout-sarif` 不算命中，`Actions/Checkout` 算） |
+| **W3** | 每个 step 的 `uses`、以及每个 job 的 `uses`（`jobs.<id>.uses`，可复用 workflow 调用）若不是本地引用（不以 `./` 开头），必须写成 `<owner>/<repo>[/<path>]@<40 位十六进制>` | 不是 40 位 hex 即违规。job 级与 step 级 `uses` 受同一条规则约束——可复用 workflow 调用带着仓库 token 运行，movable ref 与 step 级同样危险 |
+| **W4** | 每个 workflow 顶层声明 `permissions`；**顶层与任一 job（含 `uses:` 形态）显式声明的** `permissions` 里任何键的取值都不得是 `write`（值不以 `write` 开头）。此外，若任一**非 `uses:` 形态**的 job 判定为 self-hosted，顶层 `permissions` 必须是空映射 `{}`，且该 job 不得用 job 级 `permissions` 覆盖出非空权限。`runs-on` 按字符串 / 数组 / `{labels}` 映射三种写法摊平成标签列表后判定 self-hosted：标签等于字面量 `self-hosted`，或不在托管标签白名单内（含未展开的 `${{ }}` 表达式，以及摊平不出任何标签的未知形状），都按 self-hosted 处理（fail-closed on unknown） | 缺失、含 write、自托管顶层非 `{}`、或自托管 job 覆盖出非空权限即违规。job 级 `permissions` 会覆盖顶层，只查顶层等于给最小权限留一个后门；只认字面量 `self-hosted` 或只支持字符串/数组两种形状，会被 GitHub 文档化的 `{group, labels}` 对象形式、未展开的矩阵表达式、或不含该字面量但仍匹配到自托管机器标签集的写法绕过——本仓库自己的 runner 就注册在 `[self-hosted, macOS, ARM64, dsh]` 这样的标签集下。`jobs.<id>.uses` 没有 `runs-on`，不参与 self-hosted 判定，但仍然受"不得 write"约束 |
+| **W5** | 若 workflow 的 `on.push` 会覆盖默认分支，则顶层与**每个 job**（`jobs.<id>.concurrency` 与顶层同一条判据）的 `concurrency.cancel-in-progress` 都不得等价于真值字面量——**布尔值 `true`，以及带引号的字符串标量 `'true'`（大小写、首尾空白不敏感）都算**。「覆盖默认分支」＝ `on` 写成 `push` 字符串、或写成含 `push` 的数组、或 `push` 存在且（`branches` 未限定或按 GitHub 的 glob 语义（`*`/`**`）匹配到 `main`，且未用 `branches-ignore` 以同样的 glob 语义排除 `main`） | 等价于真值字面量即违规，顶层与 job 级都查。`on: push` 与 `on: [push, …]` 是合法写法且覆盖全部分支，必须一并拦下；`branches`/`branches-ignore` 按通配符匹配，不是字面量数组包含（`branches: ['**']` 必须命中）；`branches-ignore` 排除 `main` 时取消是安全的，不得误报；`${{ github.event_name == 'pull_request' }}` 这类表达式字符串不算真值字面量，必须继续放行——`ci.yml` 依赖这个写法 |
+| **W6** | 若顶层或**任一 job** 声明了 `concurrency`，必须显式声明 `cancel-in-progress` | 缺失即违规，顶层与 job 级都查 |
+| **W7** | workflow 顶层必须声明 `jobs`，且取值必须是映射 | 缺失、或不是映射（例如写成 YAML 列表）即违规——语法能解析但结构不对的输入必须被拦下，不能因为不是 W1–W6 能处理的形状就放过 |
 
-检查器用法（在仓库根运行；无 finding 且 exit 0 表示合规，合规时打印一行汇总）：
+检查器用法（在仓库根运行；无 finding 且 exit 0 表示合规，合规时打印一行汇总，包含已检查的文件数）：
 
 ```bash
 node scripts/workflow-check.mjs
 ```
 
-该检查随 `pnpm verify` 进入 `PR Fast Gate`，是**必需**检查（判定准则见 §9.2）。**解析不了的 workflow 会让检查直接失败**（fail closed），不会静默放行——"语法错的 workflow 只是完全不创建检查"是已经发生过的事故，检查器不能重复它。
+该检查随 `pnpm verify` 进入 `PR Fast Gate`，是**必需**检查（判定准则见 §9.2）。以下情形一律 **fail closed**、以 exit code 3 结束（与 W1–W7 规则违规的 exit code 1 区分开，方便调用方分辨"检查器没跑起来"和"跑起来了但不合规"）：`.github/workflows` 目录不存在；目录存在但一个 `*.yml`/`*.yaml` 都没匹配到（两者都曾经被当成"没有 workflow＝合规"而返回空结果，这正是本节要堵住的假绿）；workflow 文件读取失败（权限、损坏的文件描述符等，措辞为"无法读取"）；workflow 解析失败（措辞为"无法解析"，两者分开措辞方便定位是权限问题还是内容问题）。**符号链接指向的 workflow 文件同样会被检查**（用 `statSync` 而不是目录项自带的文件类型跟随符号链接）。"语法错的 workflow 只是完全不创建检查"是已经发生过的事故，检查器不能重复它，也不能在其它 fail-closed 场景下重复它的变体。
 
 **W1 的上界取 15 的理由**：本仓库当前最长的 lane 实测 18 秒（#12 的 PR 描述），15 分钟是 50 倍余量，同时把"卡住的 job 占满 runner 默认 360 分钟"这类浪费挡在门外。将来出现合法需要更长时间的真实 lane 时，改这个上界是一次有意识的决策（改检查 + 改本节），而不是在单个 workflow 里悄悄放宽。
 
-**W3 不设官方/第三方豁免的理由**：`actions/*` 的 tag 同样可移动。用"厂商身份"做豁免等于在检查器里引入一份需要人工维护的分类表——那正是 RM3 本身。pin 之后的升级由 `.github/dependabot.yml`（`github-actions` ecosystem，由 #35 引入）承担。
+**W3 不设官方/第三方豁免的理由**：`actions/*` 的 tag 同样可移动，`jobs.<id>.uses` 的可复用 workflow 引用也一样。用"厂商身份"做豁免等于在检查器里引入一份需要人工维护的分类表——那正是 RM3 本身。pin 之后的升级由 `.github/dependabot.yml`（`github-actions` ecosystem，由 #35 引入）承担。
+
+**W4 的托管 runner 标签白名单只收窄、不为个别 workflow 放宽的理由**：判定 self-hosted 时"不在白名单内即 self-hosted"是刻意保守的 fail-closed 默认值，与 W1 的 15 分钟上界同一种姿态——出现合法的新托管标签（例如新的 GitHub 托管镜像版本）时，扩表是一次有意识的决策（改 `GITHUB_HOSTED_RUNNERS` + 改本节），不是在单个 workflow 里悄悄放宽判定。
 
 ---
 
