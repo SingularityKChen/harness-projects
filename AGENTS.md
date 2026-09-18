@@ -440,6 +440,13 @@ pnpm run boundaries          # 只跑包边界契约测试
 - **Merge Gate**（后续按需扩展）：契约测试全量、集成测试、端到端、迁移测试、包边界测试。
 - **Scheduled Regression**（后续）：大数据量 fixture、重复/乱序事件压测、重连循环、性能趋势。
 
+**门禁级别的判定准则**
+
+> 一条规则做成必需检查还是 advisory，判据不是"重要性"，而是**可判定性与误报代价**：
+> 机械可判定、且没有需要人来判断的误报类别 → 进 `pnpm verify`（随 `PR Fast Gate` 成为必需）；
+> 判定里含人的解释（措辞、体量、披露类目）→ 做成可见但不阻塞的 advisory 检查，并写明提升为必需检查的前置条件。
+> 已有三例：`package-boundaries`（必需）、`Issue policy`（advisory）、`Rule checks`（advisory）。
+
 ### 9.3 验收对标
 
 - 实现级验收对标十类不变量：身份分离、幂等、恢复、能力边界（清单见 `tests/README.md`）。
@@ -456,6 +463,31 @@ pnpm run boundaries          # 只跑包边界契约测试
 4. 是否更新了 ExecPlan 的 `Progress`、`Decision Log`、`Surprises & Discoveries`？
 5. 若把本批改动整体回退，仓库是否仍处于可工作状态？
 6. 本次改动（含 commit message、PR 描述与自托管 runner 日志）是否已按 §8.6 做过敏感信息自查，且发布面上没有本机路径、本机用户名/主机名、凭据或内部系统信息？
+
+### 9.5 workflow 不变量
+
+`.github/workflows/*` 必须共同满足下表的不变量；判定由 `scripts/workflow-check.mjs` 机械执行。
+
+| id | 不变量 | 判定 |
+|---|---|---|
+| **W1** | 每个 job 声明 `timeout-minutes`，整数且 `1 ≤ n ≤ 15` | 缺失或越界即违规 |
+| **W2** | 每个 `actions/checkout` step 声明 `with.persist-credentials: false` | 缺失即违规 |
+| **W3** | 每个 step 的 `uses` 若不是本地引用（不以 `./` 开头），必须写成 `<owner>/<repo>[/<path>]@<40 位十六进制>` | 不是 40 位 hex 即违规 |
+| **W4** | 每个 workflow 顶层声明 `permissions`；**顶层与任一 job 显式声明的** `permissions` 里任何键的取值都不得是 `write`（值不以 `write` 开头）。此外，若任一 job 的 `runs-on` 含 `self-hosted`，顶层 `permissions` 必须是空映射 `{}`，且该 job 不得用 job 级 `permissions` 覆盖出非空权限 | 缺失、含 write、自托管顶层非 `{}`、或自托管 job 覆盖出非空权限即违规。job 级 `permissions` 会覆盖顶层，只查顶层等于给最小权限留一个后门 |
+| **W5** | 若 workflow 的 `on.push` 会覆盖默认分支，则 `concurrency.cancel-in-progress` 不得是字面量 `true`。「覆盖默认分支」＝ `on` 写成 `push` 字符串、或写成含 `push` 的数组、或 `push` 存在且（`branches` 未限定或含 `main`，且未用 `branches-ignore` 排除 `main`） | 是字面量 `true` 即违规。`on: push` 与 `on: [push, …]` 是合法写法且覆盖全部分支，必须一并拦下；`branches-ignore` 排除 `main` 时取消是安全的，不得误报 |
+| **W6** | 若声明了 `concurrency`，必须显式声明 `cancel-in-progress` | 缺失即违规 |
+
+检查器用法（在仓库根运行；无 finding 且 exit 0 表示合规，合规时打印一行汇总）：
+
+```bash
+node scripts/workflow-check.mjs
+```
+
+该检查随 `pnpm verify` 进入 `PR Fast Gate`，是**必需**检查（判定准则见 §9.2）。**解析不了的 workflow 会让检查直接失败**（fail closed），不会静默放行——"语法错的 workflow 只是完全不创建检查"是已经发生过的事故，检查器不能重复它。
+
+**W1 的上界取 15 的理由**：本仓库当前最长的 lane 实测 18 秒（#12 的 PR 描述），15 分钟是 50 倍余量，同时把"卡住的 job 占满 runner 默认 360 分钟"这类浪费挡在门外。将来出现合法需要更长时间的真实 lane 时，改这个上界是一次有意识的决策（改检查 + 改本节），而不是在单个 workflow 里悄悄放宽。
+
+**W3 不设官方/第三方豁免的理由**：`actions/*` 的 tag 同样可移动。用"厂商身份"做豁免等于在检查器里引入一份需要人工维护的分类表——那正是 RM3 本身。pin 之后的升级由 `.github/dependabot.yml`（`github-actions` ecosystem，由 #35 引入）承担。
 
 ---
 
