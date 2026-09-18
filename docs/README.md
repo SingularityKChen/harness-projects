@@ -20,7 +20,7 @@
 
 | 计划 | 范围 | 状态 |
 |---|---|---|
-| — | 当前没有进行中的计划 | — |
+| [2026-09-18-review-feedback-convergence](exec-plan/active/2026-09-18-review-feedback-convergence.md) | 评审反馈根因收敛：#12/#19/#21/#35 的 workflow 不变量、自托管威胁模型与 area 词表单源化 | Active |
 
 ### Completed
 
