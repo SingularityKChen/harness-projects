@@ -43,11 +43,14 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      - name: 扫描本次改动的新增行
-        # base_ref 经 env 传入而不是直接插值进 run：它是事件负载里的值，
-        # 即使这里被 `branches: [main]` 约束成只可能是 main，也不在 shell 里展开。
+      - name: 扫描本次改动的新增行、每个提交与 PR 描述
+        # base_ref 与 PR 描述都经 env 传入而不是直接插值进 run：两者都是事件
+        # 负载里的值，即使 base_ref 被 `branches: [main]` 约束成只可能是
+        # main，也不在 shell 里展开——PR 描述是自由文本，插值进 run 会是
+        # 任意 shell 注入。disclosure() 内部用 process.env.PR_BODY 读取。
         env:
           BASE_REF: ${{ github.base_ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: node scripts/rule-checks.mjs disclosure "origin/$BASE_REF"
 
   size:

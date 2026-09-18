@@ -342,7 +342,7 @@ git worktree add .worktrees/<task-slug> -b <type>/<task-slug>
 ### 8.3 PR 规则
 
 1. **一个 PR 可以关闭多个 issue**，但必须共同构成一个**可独立验收、合并、回滚的能力闭环**；不会单纯为了减少 issue 数量而聚合。
-2. **改动规模**：代码 ≤ 1000 行，文档 ≤ 1500 行（`git diff --shortstat` 的增删之和；排除 `pnpm-lock.yaml` 与生成物）。超出即拆分。
+2. **改动规模**：代码 ≤ 1000 行，文档 ≤ 1500 行（`git diff --shortstat` 的增删之和；排除锁文件与生成目录）。权威实现是 `node scripts/rule-checks.mjs size <base-ref>` 的 `SIZE_EXCLUDE_RULES`：按路径前缀/目录段判定，覆盖 `pnpm-lock.yaml`/`package-lock.json`/`yarn.lock`（含任意嵌套深度）与 `dist/`、`generated/` 目录，不是只匹配仓库根的精确文件名。超出即拆分。
 3. **禁止自行合并**：提交 PR 后不得 merge，即使 CI 全绿、即使无人 review。是否合并由人类伙伴决定。
 4. **合并方式**：被要求合并时使用 **rebase merge**。仓库设置已禁用 merge commit 与 squash，因此"只允许 rebase"是环境保证而非口头约定。
 5. **评审方式**：被要求评审时，使用 **GitHub inline review comment**（针对具体行的评论），而不是只在 PR 顶层留一条总结评论。
@@ -404,23 +404,29 @@ gh api repos/{owner}/{repo}/pulls/{number}/comments \
 | 类目 | 说明 |
 |---|---|
 | 凭据 | token、key、secret、Bearer、私钥、口令；真实 secret 的**值**，以及 `.credentials` 类文件的内容 |
-| 本机路径与身份 | `/Users/<name>/…`、`/home/<name>/…`、本机用户名、主机名、runner 注册名、`*.local`、`*.internal` |
+| 本机路径与身份 | `/Users/<name>/…`、`/home/<name>/…`、本机用户名、主机名、runner 注册名、`*.local`、`*.internal`、`*.home`、`*.intranet` |
 | 账号与个人信息 | 邮箱、手机号、个人标识、组织与署名信息 |
-| 内部系统 | 内网地址与端口、内部服务/跳板/runner 名、未公开的配置与拓扑 |
+| 内部系统 | 内网地址与端口（含 RFC1918 私网字面量）、内部服务/跳板/runner 名、未公开的配置与拓扑 |
 | 保密字样 | 内部 / 保密 / NDA / confidential / 禁止外传，及其所描述的实体 |
 
 **写法**：一律用占位符代替真实值——`~/.dsh/…`、`$DSH_HOME/…`、`<runner-name>`、`<host>`、`<workspace>`。要说明"某台机器上存在某个文件"时，只写相对结构与文件名，不写绝对路径、用户名与本机名。**不要在工作流里 `echo $(hostname)` / `echo $(pwd)`**——自托管 runner 的日志是公开的（这一条来自一次真实事故：一次性冒烟工作流的日志把机器名与用户路径一起公开了）。
 
-**检查命令**（只判定本次改动，不扫全树；因为本节的规则文本本身含有这些模式，必须排除 `AGENTS.md`；**期望输出为空**）：
+**权威机械实现**：`node scripts/rule-checks.mjs disclosure <base-ref>`（随 `pnpm verify` 之外的 advisory `Rule checks` job 跑在每个 PR 上，见 §9.2）。它比下面这条本地 grep 覆盖得更完整，是五个类目里**可机械判定的子集**的权威判定，而不是下面 grep 命令的简化替代：
+
+- 覆盖四个来源：对 base 的新增行、范围内每个提交各自引入的新增行（能捕捉"先加后删"——树对树的差异看不见净变化为零的历史）、每个提交信息、以及经 `PR_BODY` 环境变量传入的 PR 描述（在 workflow 里必须经 `env` 传入，不得插值进 `run:`）。
+- 除本机路径与内网主机名外，还机械识别常见凭据**形状**（GitHub 令牌 `gh[pousr]_…`/`github_pat_…`、AWS Access Key `AKIA…`、私钥 PEM 头）与 RFC1918 私网地址字面量——这是 §10 唯一写成硬约束的类目（"密钥、token、私钥永不入库"），也是最容易机械判定的一类。它**不能**识别任意口令或业务侧的私密值，人工五类目自查仍是通过条件。
+- 命中时只打印文件、模式名与打码后的摘要，不把原始敏感内容回显进 Actions 日志（日志本身也是发布面）；先加后删的命中会带上提交 SHA，提示需要的是改写历史而不是再提交一次删除；命中或先加后删的情形都要求额外删除本次 workflow run。
+
+**检查命令**（本地快速自查的子集，只覆盖本机路径与部分内网主机名，不含凭据形状、RFC1918、先加后删、提交信息与 PR 描述——完整判定用上面的 `disclosure` 命令；只判定本次改动，不扫全树；因为本节的规则文本本身含有这些模式，必须排除 `AGENTS.md`；**期望输出为空**）：
 
 ```bash
 # 提交前：暂存区的新增行
 git diff --cached -U0 -- . ':(exclude)AGENTS.md' | grep -E '^\+' | grep -vE '^\+\+\+' \
-  | grep -nE '/Users/[^/ ]+|/home/[^/ ]+|[A-Za-z0-9._-]+\.(local|internal|lan|corp)\b'
+  | grep -nE '/Users/[^/ ]+|/home/[^/ ]+|[A-Za-z0-9._-]+\.(local|internal|lan|corp|home|intranet)\b'
 
 # 开 PR 前：相对 main 的全部新增行
 git diff origin/main...HEAD -U0 -- . ':(exclude)AGENTS.md' | grep -E '^\+' | grep -vE '^\+\+\+' \
-  | grep -nE '/Users/[^/ ]+|/home/[^/ ]+|[A-Za-z0-9._-]+\.(local|internal|lan|corp)\b'
+  | grep -nE '/Users/[^/ ]+|/home/[^/ ]+|[A-Za-z0-9._-]+\.(local|internal|lan|corp|home|intranet)\b'
 ```
 
 命中即**阻塞项**：改成占位符后重新提交。**未推送**的分支用 `git commit --amend` 或交互式 rebase 重写；**已推送**的分支只靠"再提交一次删除"不够——历史与 PR ref 仍在发布面上，旧提交对象在 GitHub 上仍可按 SHA 取到，须由人类伙伴决定是否重写历史并清理关联记录（例如删除已失效的 workflow run）。该正则只覆盖可机械判定的一类，**人工按上表逐条过一遍才是通过条件**；结论勾选进 PR 描述的"验证证据"（§8.4）。
