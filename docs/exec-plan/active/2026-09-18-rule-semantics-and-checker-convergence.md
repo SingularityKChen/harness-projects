@@ -210,6 +210,19 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 - [ ] 更正 §8.3 的「1、2、3」表述为实测数字
 **验证**：每一项的变异测试；`rule-checks disclosure` / `size` 对本 PR 自身仍通过
 
+### Batch F · 不生效上下文的剥离（PR-F，`fix/link-context-stripping`）
+**最小闭环**：`linkedIssues` 在关键字匹配前剥离所有不生效上下文，三种形态各有一条有牙的用例。
+**涉及文件**：`scripts/policy-check.mjs`、`tests/contract/issue-policy.test.js`
+**基线**：`fix/policy-check-hardening`（Batch D 的分支），不是 `main` —— 理由见 D7
+**交付**：Closes #62
+- [x] `stripHtmlComments`：HTML 注释里的**真实号码**不再算关联（占位符 `#N` 本来就被拒，是两件事）
+- [x] `stripInlineCode`：行内代码跨度里的引用不再算关联；限定同一行内，不成对的反引号不得吞掉真链接
+- [x] 引用块的判定被**显式决定为不剥离**，并有一条用例守住这个决定
+- [x] 三步剥离合成导出的纯函数 `stripIneffectiveContexts`，可逐形态断言（#62 的要求）
+- [x] 剥离顺序（围栏 → 注释 → 行内代码）本身有一条用例
+**验证**：每一项「修复前红 → 修复后绿 → 变异后再红」；`pnpm verify` 全绿（61 tests / 0 fail）
+**回滚**：`git revert`。剥离是纯函数，撤销后判定回到 Batch D 的状态，不牵连 Batch D 的三处修正
+
 ## Validation and Acceptance
 
 | # | 验收项 | 判定证据 | 结果 |
@@ -222,6 +235,7 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 | 6 | 现有四个 workflow 在加固后的检查器下仍合规 | `node scripts/workflow-check.mjs` → `no findings`，exit 0 | 待执行 |
 | 7 | 五个 PR 各自满足 §8.3 体量上限 | `node scripts/rule-checks.mjs size` 逐 PR 输出 | 待执行 |
 | 8 | `main` 在五个 PR 全部合并后仍然绿 | 合并后 `pnpm verify` + `workflow-check` + `rule-checks` 实跑 | 待执行 |
+| 9 | `linkedIssues` 对三种不生效上下文都不再误判 | Batch F 的五条用例「红 → 绿 → 变异红」输出；`pnpm verify` 61 tests / 0 fail | 已通过（2026-09-18） |
 
 ## Progress
 
@@ -233,9 +247,17 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 - [ ] Batch C workflow-check 假绿收敛
 - [ ] Batch D policy-check 加固
 - [ ] Batch E rule-checks 加固
+- [x] (2026-09-18 CST) Batch F 不生效上下文的剥离 —— 三态证据：
+  - **红**：把 `stripIneffectiveContexts` 打成恒等桩后，恰好 3 条新用例红（HTML 注释、行内代码、纯函数导出），既有 21 条与「引用块不剥离」「剥离顺序」两条全绿 —— 说明红的是行为缺口本身，不是模块装配
+  - **绿**：实现后 `node --test tests/contract/issue-policy.test.js` → 27 pass / 0 fail；`pnpm verify` → 61 pass / 0 fail
+  - **变异红**：M1 去掉注释剥离 → 注释用例红；M2 去掉行内代码剥离 → 行内代码用例红；M3 顺序改成注释先于围栏 → 顺序用例红；M4 顺带剥掉引用块 → 引用块用例红；M5 行内代码改成跨行贪婪 → 行内代码用例红
 - [ ] 验收与重构（Opus），回填本文件
 
 ## Surprises & Discoveries
+
+- **Observation**（2026-09-18 CST）：`<!-- Closes #N -->` 被正确拒绝这条既有陈述，**不能**推出「HTML 注释被理解」。它成立只因为字面量 `N` 不是数字，匹配不上 `#(\d+)`；把 `N` 换成真实号码（`<!-- Closes #12 -->`）修复前返回 `{closes:[12]}`。证据：`node -e "import('./scripts/policy-check.mjs').then(m=>console.log(m.linkedIssues('<!-- Closes #12 -->')))"`。教训：**一条用例只证明它实际断言的那件事**；用占位符写的回归用例不能当作对该类形态的覆盖。
+
+- **Observation**（2026-09-18 CST）：第一版变异脚本对 M5（行内代码改成跨行贪婪）报「fail 0」，看起来是「这条用例没有牙」。实际是脚本里嵌套引号的转义把替换吞了，变异**根本没被应用**。手工施加同一处变异后该用例确实变红（fail 1）。教训：**变异测试自身也需要先证明它改到了东西**——「变异后仍绿」与「变异没发生」在输出上长得一模一样。已在该轮中把断言换成真正有判别力的形态（两个分散在不同行的反引号夹住一条真链接）。
 
 - **Observation**（2026-09-18 14:00 CST）：「必须保持关闭」的内置工作流是**六条**，不是评审里估的四条或五条。
   **Evidence**：看板实测九条内置工作流；按 D2 的推导规则求值——写 `Status` 且由工程事件触发的有 `Item closed`、`Item reopened`、`Pull request linked to issue`、`Code review approved`、`Code changes requested`、`Pull request merged`；`Auto-close issue` 与 `Item closed` 构成回环，同样关闭（第七条，但它写的是 issue 状态而不是 `Status`，单列）。
@@ -250,6 +272,20 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
   **Decision impact**：见 D4——切成离线判定与运行时接线两半，后者留给 #37。
 
 ## Decision Log
+
+- **Decision**：Batch F 的基线取 `fix/policy-check-hardening`（Batch D 的分支），不取 `main`。
+  **Rationale**：#62 的 Scope 明写「围栏代码块（PR #59 已做，本 issue 复用其实现）」。两者改的是同一个函数的同一段，取 `main` 作基线等于要么重写一遍围栏剥离、要么在合并时解一次必然的冲突。代价是 PR-F 必须排在 PR-D 之后合并。
+  **Date/Author**：2026-09-18 CST / agent
+
+- **Decision**：引用块（`> Closes #12`）**不**剥离。
+  **Rationale**：#62 要求对这一形态「无论选拦还是不拦」都给出显式判定。引用块渲染成可见正文，GitHub 的关闭关键字在其中照常生效——剥离它会让一个 GitHub 真的会去关闭 issue 的 PR 被判为未关联。§8.3 第 7 条已经论证过：一条在合规输入上长期变红的 advisory 检查，会把人训练成忽略它。两个方向都有代价时，往「不误伤」的方向倒。
+  **不确定性**：GitHub 服务端对引用块的确切处理未在本轮实测（需要真开 issue 与 PR 验证）。该检查是 advisory，判错的代价有界；且所选方向是安全的那一侧——错了只会漏掉一个本就不该算的关联，不会拦下一个合规的 PR。
+  **Date/Author**：2026-09-18 CST / agent
+
+- **Decision**：剥离顺序固定为围栏 → HTML 注释 → 行内代码，并为顺序本身写一条用例。
+  **Rationale**：围栏是 CommonMark 的叶子块，围栏里的 `<!--` 是字面文本而不是注释开头；先剥注释会让围栏里一个未闭合的 `<!--` 一路吃到正文后面真正的 `-->`，把中间的真实链接一起吞掉。行内代码的定界符是围栏定界符的前缀，必须排在围栏之后，否则会吃掉围栏标记。三者都不是可交换的，所以顺序写进注释还不够，要有用例（M3 证明它有牙）。
+  **已知局限**：注释与围栏互相嵌套的病态输入无法用固定顺序的正则完全正确处理（正确做法是从左到右单次扫描、每次取最先出现的构造）。本轮不做，理由是 §5.1 的最小闭环与 §6.1「不顺手重构批次外的代码」——那会改写 Batch D 的 `stripFencedCodeBlocks`。现实形态（注释便签、模板样板、行内代码讲解）已被覆盖。
+  **Date/Author**：2026-09-18 CST / agent
 
 - **Decision**：`Status` 定为规划轴、人拥有。
   **Rationale**：`Status` 是 Planning provider 的原生字段，不变量 3 要求规划轴在看板上有落脚点；且人类伙伴关掉 `Item closed` 这一动作在「`Status` = 工程事实」的读法下是错的，因此该动作本身证伪了读法 A。
@@ -305,3 +341,5 @@ C / D / E 三者之间**无依赖**，可任意顺序；但都改 `AGENTS.md`，
 ## Bottom Change Note
 
 - 2026-09-18 14:03 CST：新建本文件。范围是 2026-09-18 MVP 交付评审留下的 9 个 issue，分五个 PR 收敛。三个设计决定（`Status` 的读法、PR 切分、#45 的切半）在开工前由人类伙伴裁决，记在 `Decision Log`。
+
+- 2026-09-18 CST：追加 Batch F（不生效上下文的剥离，Closes #62）。它是 Batch D 执行中发现、超出 #39 枚举范围的第四处缺口，按 §5.1 第 4 条单开一个 PR 而不是扩大 PR-D；基线取 Batch D 的分支，理由记在 Decision Log。同时补 Validation 第 9 行、Progress 的三态证据与两条 Surprises。

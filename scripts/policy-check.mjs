@@ -173,6 +173,57 @@ function stripFencedCodeBlocks(text) {
   return text.replace(/```[\s\S]*?```/g, '')
 }
 
+/**
+ * Strip HTML comments. A comment renders to nothing, so a reference inside one
+ * is invisible to every reader of the pull request and creates no link — yet
+ * before this it satisfied the check. The realistic form is a reviewer
+ * commenting a line out as a note to self, or §8.4's own template copied with
+ * `N` replaced by a real number but the line left inside the comment.
+ *
+ * Note this is a different statement from "`<!-- Closes #N -->` is rejected":
+ * that holds only because the literal `N` is not a digit, which says nothing
+ * about comments being understood. A real number needed this step.
+ */
+function stripHtmlComments(text) {
+  return text.replace(/<!--[\s\S]*?-->/g, '')
+}
+
+/**
+ * Strip inline code spans, for the same reason as fences: a code span renders
+ * as literal text, so it *shows* the string rather than *declaring* a link.
+ *
+ * Bounded to a single line and to balanced backtick runs, so an odd stray
+ * backtick cannot swallow the rest of the body. That direction is deliberate:
+ * over-stripping would drop a real link and turn the check red on a conforming
+ * pull request, which is the failure mode §8.3.7 warns trains people to ignore
+ * an advisory check.
+ */
+function stripInlineCode(text) {
+  return text.replace(/(`+)[^\n]*?\1/g, '')
+}
+
+/**
+ * Remove the contexts in which an issue reference does not take effect, before
+ * the keyword match runs. Exported so each form can be asserted on its own.
+ *
+ * Order is load-bearing and is asserted by a test:
+ *
+ *  1. fenced code blocks — a fence is a CommonMark leaf block, so a `<!--` or a
+ *     backtick inside one is literal text, not the start of a construct.
+ *     Stripping comments first would let an unterminated `<!--` inside a fence
+ *     run on to the next real `-->` and swallow a genuine link in between.
+ *  2. HTML comments.
+ *  3. inline code — its delimiter is a prefix of the fence delimiter, so it has
+ *     to run after fences or it would eat the fence markers themselves.
+ *
+ * Block quotes are deliberately *not* stripped: they render as visible prose
+ * and GitHub's closing keywords take effect inside them, so removing them would
+ * fail a pull request whose issue GitHub really does close.
+ */
+export function stripIneffectiveContexts(text) {
+  return stripInlineCode(stripHtmlComments(stripFencedCodeBlocks(text ?? '')))
+}
+
 function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -199,7 +250,7 @@ function escapeRegExp(text) {
 export function linkedIssues(body, repo) {
   const closes = []
   const refs = []
-  const text = stripFencedCodeBlocks(body ?? '')
+  const text = stripIneffectiveContexts(body)
   const keyword = String.raw`(close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)`
   const hashRef = String.raw`#(?<hashNumber>\d+)`
   const urlRef = repo ? String.raw`https://github\.com/${escapeRegExp(repo)}/issues/(?<urlNumber>\d+)` : null
