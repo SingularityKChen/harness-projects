@@ -12,8 +12,9 @@
 // exercise the rules without calling GitHub.
 
 import { execFileSync } from 'node:child_process'
-import { readdirSync } from 'node:fs'
+import { readdirSync, realpathSync } from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /** Title kinds; each maps to exactly one `kind:*` label. */
 export const KINDS = ['feat', 'fix', 'docs', 'chore', 'refactor', 'test']
@@ -48,6 +49,18 @@ export const AREAS = [
 
 export const PROCESS_AREAS = ['ci', 'repo']
 
+/** Gate label values; §8.7 restricts `gate:*` to these two milestone markers. */
+export const GATES = ['E1', 'R1']
+
+// The TITLE regex's area group only ever accepts this shape. A directory
+// whose name doesn't match it (a dotdir like `.vitepress`, an underscore
+// name like `ui_kit`) can never appear in a conforming title, so it must not
+// be counted as something AREAS is required to cover either — otherwise
+// `missingAreas` and the "every AREAS entry parses" title test contradict
+// each other: adding the dirty name to AREAS turns the title test red,
+// leaving it out turns the coverage test red, and neither fixes the other.
+const AREA_NAME = /^[a-z0-9-]+$/
+
 export function requiredAreas(rootDir) {
   const packageAreas = readdirSync(path.join(rootDir, 'packages'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
@@ -55,7 +68,9 @@ export function requiredAreas(rootDir) {
   const docsAreas = readdirSync(path.join(rootDir, 'docs'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
-  return [...new Set([...packageAreas, 'apps', 'tests', 'docs', ...docsAreas, ...PROCESS_AREAS])]
+  return [...new Set([...packageAreas, 'apps', 'tests', 'docs', ...docsAreas, ...PROCESS_AREAS])].filter((area) =>
+    AREA_NAME.test(area),
+  )
 }
 
 export function missingAreas(rootDir) {
@@ -123,6 +138,11 @@ export function checkLabels(labels, title) {
 
   const gates = of('gate')
   if (gates.length > 1) problems.push(`expected at most one \`gate:*\` label, found ${gates.length} (${gates.join(', ')})`)
+  for (const gate of gates) {
+    if (!GATES.includes(gate.slice('gate:'.length))) {
+      problems.push(`unknown label \`${gate}\`; expected one of ${GATES.map((g) => `gate:${g}`).join(', ')}`)
+    }
+  }
 
   for (const label of list) {
     const namespace = label.split(':')[0]
@@ -144,14 +164,47 @@ export function checkLabels(labels, title) {
   return problems
 }
 
-/** Same-repository issue references found in a pull request body. */
-export function linkedIssues(body) {
+/**
+ * Strip ```-fenced code blocks so literal boilerplate inside them — a pasted
+ * draft, a quoted example, §8.4's own PR template — never counts as a real
+ * link. Non-greedy so multiple separate fences are each removed on their own.
+ */
+function stripFencedCodeBlocks(text) {
+  return text.replace(/```[\s\S]*?```/g, '')
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Same-repository issue references found in a pull request body.
+ *
+ * Matches `#<n>` and, when `repo` (the current `<owner>/<repo>`) is given,
+ * GitHub's full-URL closing syntax pointed at that same repository. A
+ * cross-repo `owner/repo#12`, or a full URL to a *different* repository, is
+ * deliberately not a match — a closing keyword only closes issues in the
+ * repository the pull request lives in, and `#0` is never a real issue.
+ *
+ * @param {string} body
+ * @param {string} [repo] current `<owner>/<repo>`; enables the URL form
+ */
+export function linkedIssues(body, repo) {
   const closes = []
   const refs = []
-  for (const [, keyword, number] of body.matchAll(/\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s+#(\d+)/gi)) {
-    const key = keyword.toLowerCase()
+  const text = stripFencedCodeBlocks(body ?? '')
+  const keyword = String.raw`(close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)`
+  const hashRef = String.raw`#(?<hashNumber>\d+)`
+  const urlRef = repo ? String.raw`https://github\.com/${escapeRegExp(repo)}/issues/(?<urlNumber>\d+)` : null
+  const alternation = urlRef ? `(?:${hashRef}|${urlRef})` : hashRef
+  const pattern = new RegExp(String.raw`\b${keyword}\s+${alternation}`, 'gi')
+
+  for (const match of text.matchAll(pattern)) {
+    const number = Number(match.groups.hashNumber ?? match.groups.urlNumber)
+    if (!Number.isInteger(number) || number <= 0) continue // #0 is not a real issue
+    const key = match[1].toLowerCase()
     const target = key.startsWith('ref') ? refs : closes
-    if (!target.includes(Number(number))) target.push(Number(number))
+    if (!target.includes(number)) target.push(number)
   }
   return { closes, refs }
 }
@@ -183,16 +236,36 @@ export function linkRuleExemption({ authorType, authorLogin }) {
 
 /**
  * Check a pull request body: it must name at least one same-repository issue.
+ * @param {string} body
+ * @param {string} [repo] current `<owner>/<repo>`; forwarded to `linkedIssues`
+ *   so its full-URL closing syntax can be recognized.
  * @returns {string[]} one message per violation; empty means conforming.
  */
-export function checkPullRequestBody(body) {
-  const { closes, refs } = linkedIssues(body ?? '')
+export function checkPullRequestBody(body, repo) {
+  const { closes, refs } = linkedIssues(body ?? '', repo)
   if (closes.length + refs.length === 0) {
     return [
       'pull request body must link the issue it delivers — add `Closes #<n>` (or `Refs #<n>` when it does not complete the issue)',
     ]
   }
   return []
+}
+
+/**
+ * Whether fetched pull-request metadata actually names an author.
+ *
+ * Every real pull request has one. A value that lacks it means the response
+ * was never actually fetched — empty stdout, a response stripped by a
+ * missing scope, a `--jq` filter that matched nothing — not that the author
+ * genuinely left those fields blank (GitHub does not allow an authorless
+ * pull request). Collapsing that into "did not write `Closes #N`" would
+ * blame the contributor for a fetch failure the checker itself hit, so
+ * `main()`'s `pr` branch gives it a distinct exit code instead.
+ *
+ * @returns {boolean}
+ */
+export function hasPullRequestMetadata(meta) {
+  return typeof meta?.authorType === 'string' && typeof meta?.authorLogin === 'string'
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
@@ -215,10 +288,27 @@ function repository() {
   return gh(['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner']).trim()
 }
 
+/**
+ * Parse a `gh` response, exiting with the internal-error code (3) instead of
+ * throwing a raw stack trace when it can't be parsed — empty stdout (a
+ * missing scope, a `--jq` miss) and garbage output both land here rather
+ * than being reported as a rule violation, so CI can tell "could not check"
+ * apart from "non-conforming" (see `hasPullRequestMetadata` for the other
+ * half: a response that parses fine but is missing the fields it should
+ * always have).
+ */
+function parseFetchedJson(raw, description) {
+  try {
+    return JSON.parse(raw)
+  } catch (error) {
+    console.error(`could not read ${description}: ${error.message}`)
+    process.exit(3)
+  }
+}
+
 function fetchIssue(repo, number) {
-  return JSON.parse(
-    gh(['api', `repos/${repo}/issues/${number}`, '--jq', '{number, title, labels: [.labels[].name]}']),
-  )
+  const raw = gh(['api', `repos/${repo}/issues/${number}`, '--jq', '{number, title, labels: [.labels[].name]}'])
+  return parseFetchedJson(raw, `issue #${number}`)
 }
 
 function fail(messages) {
@@ -247,13 +337,13 @@ function main(argv) {
 
   if (mode === 'pr' && number) {
     const raw = gh(['api', `repos/${repo}/pulls/${number}`, '--jq', '{body: .body, authorType: .user.type, authorLogin: .user.login}'])
-    let meta
-    try {
-      meta = JSON.parse(raw)
-    } catch (error) {
-      // An unparseable response means the pull request was never read. Fail
-      // loudly rather than reporting it as the contributor's policy violation.
-      console.error(`could not read pull request #${number}: ${error.message}`)
+    const meta = parseFetchedJson(raw, `pull request #${number}`)
+
+    if (!hasPullRequestMetadata(meta)) {
+      // Parsed fine but has no author — every real pull request has one, so
+      // this is a response that was never actually fetched (empty stdout, a
+      // missing scope, a `--jq` miss), not a contributor who wrote nothing.
+      console.error(`could not read pull request #${number}: response is missing author metadata`)
       process.exit(3)
     }
 
@@ -264,10 +354,10 @@ function main(argv) {
     }
 
     const body = meta.body
-    const problems = checkPullRequestBody(body)
+    const problems = checkPullRequestBody(body, repo)
     if (problems.length > 0) fail(problems)
 
-    const { closes, refs } = linkedIssues(body)
+    const { closes, refs } = linkedIssues(body, repo)
     const nested = []
     for (const linked of closes) {
       const issue = fetchIssue(repo, linked)
@@ -285,4 +375,25 @@ function main(argv) {
   process.exit(2)
 }
 
-if (process.argv[1]?.endsWith('policy-check.mjs')) main(process.argv.slice(2))
+/**
+ * Whether this file is being executed directly as a CLI, not merely imported.
+ *
+ * `process.argv[1]?.endsWith('policy-check.mjs')` fails open on any rename:
+ * copy the script to an extensionless name and both `areas` and a no-argument
+ * invocation silently exit 0 instead of running or printing usage, because
+ * the guard never calls `main()`. Compare realpaths instead, mirroring
+ * scripts/workflow-check.mjs's `invokedDirectly()`.
+ */
+function invokedDirectly() {
+  const entry = process.argv[1]
+  if (entry === undefined) return false
+
+  const self = fileURLToPath(import.meta.url)
+  try {
+    return realpathSync(entry) === realpathSync(self)
+  } catch {
+    return path.basename(entry) === path.basename(self)
+  }
+}
+
+if (invokedDirectly()) main(process.argv.slice(2))
