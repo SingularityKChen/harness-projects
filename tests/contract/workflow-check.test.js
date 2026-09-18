@@ -202,6 +202,16 @@ test('W4：顶层 permissions 含 write', () => {
   assertOnlyRule(baseline.replace('  contents: read', '  contents: write'), 'W4');
 });
 
+// `permissions: write-all` 是 GitHub 认的合法顶层简写（一次性授予全部写
+// 权限），不是映射。inspectPermissions 的 `!isObject(permissions)` 分支是
+// 唯一挡住它的判据——这是一条从未被任何 fixture 触发过的 fail-closed
+// 默认值（同一函数也用在 job 级 permissions 上，这里只需在顶层钉一次），
+// 挡的又是单条声明里最危险的写法。不测 `read-all`：现有实现同样会拦它，
+// 但那是 §9.5 文本没写清楚的另一个问题，留给后续 issue，这里不改判据。
+test('W4：顶层 permissions 写成 write-all（非映射简写）时仍要拦', () => {
+  assertOnlyRule(baseline.replace('permissions:\n  contents: read\n', 'permissions: write-all\n'), 'W4');
+});
+
 // job 级 permissions 会覆盖顶层。只查顶层等于给最小权限留了一个后门。
 test('W4：job 级 permissions 含 write 同样违规', () => {
   assertOnlyRule(
@@ -267,6 +277,28 @@ test('W4：数组里的自定义标签不等于字面量 self-hosted 时仍要 f
 });
 
 // -----------------------------------------------------------------------
+// W4：摊平不出任何标签的未知形状——§9.5 明写的 fail-closed 默认值
+// （isSelfHosted 里 `labels.length === 0` 分支），此前从未被任何 fixture
+// 触发过：变异测试把 `return true` 改成 `return false` 后，全量测试仍然
+// 46 pass / 0 fail。下面两条各自对应一种"摊平不出标签"的具体形状。
+// -----------------------------------------------------------------------
+
+// {group} 是 GitHub 文档化的合法写法（按 runner group 调度），但不带
+// labels 时摊平逻辑拿不到任何标签，必须落到这条兜底上，而不是放行。
+test('W4：runs-on 只写 {group} 不带 labels 时摊平不出标签，必须 fail-closed 当 self-hosted', () => {
+  assertOnlyRule(
+    baseline.replace('runs-on: ubuntu-latest', 'runs-on:\n      group: my-runner-group'),
+    'W4',
+  );
+});
+
+// runs-on 整个键缺失是另一种"摊平不出任何标签"的具体形状——job 根本没
+// 声明在哪里跑。同一条兜底必须覆盖它，不能只覆盖 {group} 这一种写法。
+test('W4：job 缺少 runs-on 时同样摊平不出标签，必须 fail-closed 当 self-hosted', () => {
+  assertOnlyRule(baseline.replace('    runs-on: ubuntu-latest\n', ''), 'W4');
+});
+
+// -----------------------------------------------------------------------
 // W5/W6：job 级 concurrency、分支 glob、真值字面量（issue #38 表格第 3 行）
 // -----------------------------------------------------------------------
 
@@ -296,6 +328,17 @@ test('W5：push.branches 含 main 时要拦', () => {
 test('W5：push.branches-ignore 排除 main 时不算覆盖，不得误报', () => {
   assertNoFinding(
     baseline.replace('  pull_request:\n    branches: [main]\n', '  pull_request:\n    branches: [main]\n  push:\n    branches-ignore: [main]\n'),
+  );
+});
+
+// push 存在但既没有 branches 也没有 branches-ignore（例如只订阅 tag）时，
+// pushCoversMainBranch 落到"branches 未限定→覆盖默认分支"这条兜底——
+// §9.5 W5 行原文就是这样写的，但此前从未被任何 fixture 触发过：把这条
+// 兜底的 `return true` 改成 `return false` 后，全量测试仍然全绿。
+test('W5：push 只声明 tags（无 branches/branches-ignore）时仍按覆盖默认分支处理', () => {
+  assertOnlyRule(
+    baseline.replace('  pull_request:\n    branches: [main]\n', "  pull_request:\n    branches: [main]\n  push:\n    tags: ['v1.0']\n"),
+    'W5',
   );
 });
 
@@ -460,6 +503,14 @@ test('W7：jobs 写成 YAML 列表时必须报告', () => {
 
 test('W7：workflow 缺少 jobs 时必须报告', () => {
   assertOnlyRule(baseline.replace(/jobs:\n  build:[\s\S]*$/, ''), 'W7');
+});
+
+// jobs: {} 能通过 isObject 检查（空映射也是映射），但创建零个检查——和
+// "目录存在但一个 *.yml 都没匹配到"是同一类假绿：输入合法，工作量为零。
+// RULES 里 W7 的 title 一直写着"非空映射"，实现之前只拒绝 undefined 与
+// 非对象，从未真正检查过"非空"，这条用例把承诺和实现钉在一起。
+test('W7：jobs 是空映射 {} 时必须报告（RULES 标题承诺的"非空"此前未实现）', () => {
+  assertOnlyRule(baseline.replace(/jobs:\n  build:[\s\S]*$/, 'jobs: {}\n'), 'W7');
 });
 
 // 解析不了的 workflow 必须让检查失败，不能静默放行：

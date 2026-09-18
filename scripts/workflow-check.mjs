@@ -278,6 +278,11 @@ function inspectWorkflow(document, file) {
     findings.push(finding('W7', file, null, 'workflow 缺少 jobs'));
   } else if (!isObject(jobsValue)) {
     findings.push(finding('W7', file, null, 'workflow 的 jobs 必须是映射'));
+  } else if (Object.keys(jobsValue).length === 0) {
+    // 空映射能通过 isObject 检查，但 `jobs: {}` 创建零个检查，和"目录存在但
+    // 零匹配"是同一类假绿——RULES 里 W7 的 title 一直写着"非空映射"，这里
+    // 补上实现，让标题、AGENTS.md §9.5 与代码三处口径一致（不是新增判据）。
+    findings.push(finding('W7', file, null, 'workflow 的 jobs 不得是空映射'));
   } else {
     jobs = jobsValue;
   }
