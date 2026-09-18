@@ -3,15 +3,17 @@
 //
 //   node scripts/policy-check.mjs issue <number>
 //   node scripts/policy-check.mjs pr <number>
+//   node scripts/policy-check.mjs areas
 //
-// The rules are documented in docs/project-management/README.md and in
-// AGENTS.md §8.3. They are advisory: the workflow publishes a check named
+// The rules are documented in AGENTS.md §8.7. They are advisory: the workflow publishes a check named
 // "Issue policy" that is deliberately not part of branch protection.
 //
 // The pure functions are exported so tests/contract/issue-policy.test.js can
 // exercise the rules without calling GitHub.
 
 import { execFileSync } from 'node:child_process'
+import { readdirSync } from 'node:fs'
+import path from 'node:path'
 
 /** Title kinds; each maps to exactly one `kind:*` label. */
 export const KINDS = ['feat', 'fix', 'docs', 'chore', 'refactor', 'test']
@@ -44,6 +46,22 @@ export const AREAS = [
   'repo',
 ]
 
+export const PROCESS_AREAS = ['ci', 'repo']
+
+export function requiredAreas(rootDir) {
+  const packageAreas = readdirSync(path.join(rootDir, 'packages'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+  const docsAreas = readdirSync(path.join(rootDir, 'docs'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+  return [...new Set([...packageAreas, 'apps', 'tests', 'docs', ...docsAreas, ...PROCESS_AREAS])]
+}
+
+export function missingAreas(rootDir) {
+  return requiredAreas(rootDir).filter((area) => !AREAS.includes(area))
+}
+
 // Deliberately wider than KINDS: an unknown kind should be reported as such
 // rather than as a malformed title.
 const TITLE = /^([a-z][a-z0-9-]*)\(([a-z0-9-]+)\): (\S.*)$/
@@ -66,7 +84,7 @@ export function checkTitle(title) {
 
   const [, kind, area, summary] = match
   if (!KINDS.includes(kind)) problems.push(`unknown kind \`${kind}\`; expected one of ${KINDS.join(', ')}`)
-  if (!AREAS.includes(area)) problems.push(`unknown area \`${area}\`; see the area list in docs/project-management/README.md`)
+  if (!AREAS.includes(area)) problems.push(`unknown area \`${area}\`; see AGENTS.md §8.7 or run node scripts/policy-check.mjs areas`)
   if (CJK.test(title)) problems.push('title must be written in English (CJK characters found)')
   if (summary.endsWith('.')) problems.push('summary must not end with a period')
   if (summary.length > 80) problems.push(`summary is ${summary.length} characters; keep it under 80`)
@@ -180,12 +198,18 @@ function fetchIssue(repo, number) {
 
 function fail(messages) {
   for (const message of messages) console.error(`::error::${message}`)
-  console.error(`\n${messages.length} problem(s) found. See docs/project-management/README.md.`)
+  console.error(`\n${messages.length} problem(s) found. See AGENTS.md §8.7 or run node scripts/policy-check.mjs areas.`)
   process.exit(1)
 }
 
 function main(argv) {
   const [mode, number] = argv
+
+  if (mode === 'areas' && number === undefined) {
+    for (const area of [...AREAS].sort()) console.log(area)
+    return
+  }
+
   const repo = repository()
 
   if (mode === 'issue' && number) {
@@ -215,7 +239,7 @@ function main(argv) {
     return
   }
 
-  console.error('usage: node scripts/policy-check.mjs issue <number> | pr <number>')
+  console.error('usage: node scripts/policy-check.mjs areas | issue <number> | pr <number>')
   process.exit(2)
 }
 

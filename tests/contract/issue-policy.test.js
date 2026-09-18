@@ -1,7 +1,7 @@
 /**
  * Issue and pull request policy
  *
- * Protects the rules documented in docs/project-management/README.md:
+ * Protects the rules documented in AGENTS.md §8.7:
  * an issue title reads `<kind>(<area>): <imperative English summary>`, its
  * labels carry exactly one `kind:*`, at least one `area:*` and at most one
  * `gate:*`, the two representations agree, and a pull request names the issue
@@ -13,11 +13,14 @@
  */
 
 import assert from 'node:assert/strict'
+import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
+import path from 'node:path'
 
 import {
   AREAS,
   KINDS,
+  missingAreas,
   checkLabels,
   checkPullRequestBody,
   checkTitle,
@@ -64,6 +67,11 @@ test('策略：词汇表里的每个区域都能在标题里出现', () => {
   for (const kind of KINDS) {
     assert.deepEqual(checkTitle(`${kind}(repo): keep the kind vocabulary honest`), [], kind)
   }
+})
+
+test('策略：area 词表必须覆盖仓库里每一个真实位置', () => {
+  const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+  assert.deepEqual(missingAreas(rootDir), [])
 })
 
 test('策略：PR 正文必须 link 同仓 issue，Closes 与 Refs 都能识别', () => {
