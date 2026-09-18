@@ -56,8 +56,10 @@ gh api repos/SingularityKChen/harness-projects/actions/runners \
 # 000 or "connection refused" means the overlay is not loaded.
 curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:3081/github
 
-# Start DSH with the overlay (the endpoint only exists while this is running)
-dsh web --patch ~/.dsh/profiles/web/github-review.overlay.yml
+# Start DSH with the overlay. `--patch` is a LAUNCHER flag: it must precede the
+# app arguments, and `dsh web --patch ...` is rejected by this CLI version with
+# "unknown option '--patch'". The canonical form is --profile web:
+dsh --profile web --patch ~/.dsh/profiles/web/github-review.overlay.yml
 
 # Runner service, if it stops
 cd ~/actions-runner-dsh && ./svc.sh status   # or: ./svc.sh start | stop
@@ -65,6 +67,12 @@ cd ~/actions-runner-dsh && ./svc.sh status   # or: ./svc.sh start | stop
 
 **Failure modes worth knowing**
 
+- **Every model request fails with `REQUEST_EXTENSION: DeepSeek request extension preparation failed`, while the host boots and the UI works.** This is the trap of this setup, and it is not caused by the webhook rows themselves. The DeepSeek package-inventory request extension (`,dsh_plugin_packages`, contributed by `dsh-plugin-package-inventory-deepseek`) resolves each active loader entry to its owning package. A patch row that names a **file module** (`./github-ready-review-rule.mjs`) has no package name, so the resolver walks up from the module's directory and finds the **profile's own `package.json`** — and `identityFromManifest` throws when that manifest declares a name but no `version`. The throw rejects `prepare()`, which the LLM adapter reports as `REQUEST_EXTENSION` on *every* request. The stock profile manifest ships without a `version`, so the documented "rule file beside the profile patch" layout breaks all model traffic until it is fixed:
+  ```jsonc
+  // ~/.dsh/profiles/web/package.json
+  { "name": "dsh-profile-web", "version": "0.0.0", ... }
+  ```
+  Verified both ways on this machine with a headless profile and a trivial file-module row: without `version` the run ends in `REQUEST_EXTENSION`, with it the same run answers normally.
 - Endpoint down (DSH not running with the overlay): the workflow fails with a clear message naming the endpoint. Nothing else is affected — the runner is not a gate, and no PR check depends on it.
 - Runner offline: the event is queued by GitHub while the runner is disconnected, then delivered on reconnect.
 - Signature mismatch (local credential and repository secret out of step): the endpoint answers `401` and the workflow fails.
