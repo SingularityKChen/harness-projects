@@ -17,6 +17,8 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
+import { parse as parseYaml } from 'yaml'
+
 import {
   BUDGETS,
   DISCLOSURE_PATTERNS,
@@ -148,11 +150,26 @@ test('披露：RFC1918 内网地址会被命中，公网地址不会', () => {
   assert.deepEqual(scanDiff(mkDiff('x.txt', [`公网 DNS 是 ${rfc1918(8, 8, 8, 8)}`])), [])
 })
 
-test('披露：新增的内网 TLD（home/intranet）会被命中', () => {
-  for (const host of [internalTld('nas', 'home'), internalTld('build01', 'intranet')]) {
+test('披露：新增的内网 TLD（home/intranet）会被命中——标签含数字或连字符，形状像真实主机名', () => {
+  for (const host of [internalTld('build-01', 'home'), internalTld('nas1', 'intranet')]) {
     const hits = scanDiff(mkDiff('x.txt', [`端点是 ${host}`]))
     assert.equal(hits.length, 1, `应命中：${host}`)
     assert.equal(hits[0].pattern, '内网主机名')
+  }
+})
+
+// 协调者实测到的六个假阳性（issue #40 评审项 4 / RC2），packages/ui 落地后是惯用写法。
+test('误报收窄：home/intranet 不再把普通 JS/TS 属性访问误判成内网主机名', () => {
+  const propertyAccess = [
+    'el.className = styles.home',
+    'const label = messages.home',
+    'if (route === routes.home)',
+    '<Link to={paths.home}>',
+    "t('nav.home')",
+    'cfg.intranet = false',
+  ]
+  for (const line of propertyAccess) {
+    assert.deepEqual(scanDiff(mkDiff('x.ts', [line])), [], `不应命中：${line}`)
   }
 })
 
@@ -239,6 +256,33 @@ test('hunk 解析：命中摘要打码匹配片段，不原样回显敏感值（
   assert.match(hits[0].excerpt, /key:/)
 })
 
+// 整行遮蔽（issue #40 评审项 1）：一行命中 N 个模式，旧实现打印 N 条摘要，每条只遮自己那一段。
+test('披露：一行命中三个模式时，每条命中的摘要都遮住全部三处敏感值，且没有字段携带未打码原文（不再保留 line 暗桩）', () => {
+  const host = internalHost('build01')
+  const token = fakeGhToken()
+  const line = `runner at ${homePath('alice', 'actions-runner')} on ${host} key ${token}`
+
+  const hits = scanDiff(mkDiff('x.txt', [line]))
+
+  assert.equal(hits.length, 3, '家目录路径/内网主机名/GitHub 令牌各自成一条命中')
+  for (const hit of hits) {
+    assert.ok(!Object.hasOwn(hit, 'line'), '不应再存在未打码的 line 字段')
+    const fields = Object.values(hit).filter((v) => typeof v === 'string')
+    assert.ok(fields.every((v) => !v.includes(token) && !v.includes('alice/actions-runner') && !v.includes(host)))
+  }
+})
+
+test('披露：同一行上同一模式出现两次时，两次都被遮蔽、都被报告（不是只取 regex.exec 的第一个匹配）', () => {
+  const first = fakeGhToken()
+  const second = ['gh', 'p_', 'b'.repeat(36)].join('') // 同类第二个 token，值不同于 first
+  const hits = scanDiff(mkDiff('x.txt', [`first ${first} second ${second}`]))
+
+  assert.equal(hits.length, 2, '同一行两个 GitHub 令牌应各自成一条命中')
+  for (const hit of hits) {
+    assert.ok(!hit.excerpt.includes(first) && !hit.excerpt.includes(second), `摘要不应原样回显任一令牌：${hit.excerpt}`)
+  }
+})
+
 test('命中时的补救文案提到删除本次 workflow run（AGENTS.md §8.6 的恢复流程要求两者都做）', () => {
   const dirty = mkDiff('x.txt', [`见 ${homePath('alice', 'x')}`])
 
@@ -291,6 +335,48 @@ test('自我豁免已移除：真实 git pathspec 下，脚本自身文件里的
     process.chdir(originalCwd)
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+// pathspec 锚定到仓库顶层（issue #40 评审项 3）：裸 `.` 是 cwd 相对的，子目录里运行会静默收窄范围。
+test('pathspec：从子目录运行时仍能扫到仓库顶层的泄露，不会静默收窄范围（真实 git 仓库，不注入 readDiff）', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'rule-checks-pathspec-'))
+  const originalCwd = process.cwd()
+  try {
+    const run = (args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    run(['init', '-q', '-b', 'main'])
+    run(['config', 'user.email', 'test@example.com'])
+    run(['config', 'user.name', 'Test'])
+    writeFileSync(path.join(dir, 'README.md'), '# fixture\n')
+    run(['add', '-A'])
+    run(['commit', '-q', '-m', 'base'])
+    run(['checkout', '-q', '-b', 'feature'])
+    mkdirSync(path.join(dir, 'docs'))
+    mkdirSync(path.join(dir, 'packages', 'core'), { recursive: true })
+    // 泄露落在仓库顶层的 docs/a.md——协调者复现材料原样，不是本文件自己的泄露。
+    writeFileSync(path.join(dir, 'docs', 'a.md'), `leak: ${homePath('alice', 'secret-db')}\n`)
+    run(['add', '-A'])
+    run(['commit', '-q', '-m', 'add leak'])
+
+    process.chdir(dir)
+    assert.equal(disclosure('main'), 1, '从仓库根运行（对照组，这一直是对的）')
+
+    process.chdir(path.join(dir, 'packages', 'core'))
+    assert.equal(disclosure('main'), 1, '从子目录运行同样应当命中——旧实现因裸 `.` 是 cwd 相对的而静默放行')
+  } finally {
+    process.chdir(originalCwd)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// CI 接线（issue #40 评审项 2）：省略 types 时默认不含 edited，PR 描述编辑后 workflow 不重跑。
+test('CI 接线：Rule checks 的 on.pull_request 声明 edited 触发类型', () => {
+  const workflowPath = fileURLToPath(new URL('../../.github/workflows/rule-checks.yml', import.meta.url))
+  const workflow = parseYaml(readFileSync(workflowPath, 'utf8'))
+  const types = workflow.on?.pull_request?.types
+
+  assert.ok(Array.isArray(types), 'on.pull_request 必须显式声明 types，否则默认值不含 edited')
+  const required = ['opened', 'synchronize', 'reopened', 'edited']
+  assert.ok(required.every((t) => types.includes(t)), `应包含 ${required}（与 issue-policy.yml 的既定写法一致）`)
 })
 
 // ---------------------------------------------------------------------------

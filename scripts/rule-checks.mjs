@@ -9,6 +9,9 @@
 // 只看「相对 base 的本次改动」，不扫全树：规则约束的是本次要推上发布面的
 // 东西，不是仓库里历史遗留的内容。
 //
+// PR 标题与分支名同样属于 §8.6 定义的发布面，尚未接入扫描：留作后续小 PR，
+// 详见 .github/workflows/rule-checks.yml 里 types 那条注释（issue #40 评审项 2）。
+//
 // 纯函数导出给 tests/contract/rule-checks.test.js，使其无需 git 也能被验证；
 // disclosure()/size() 本身也导出，接受注入的 git 数据源，让 exit code 契约
 // （命中→1、干净→0）同样可以离线测试。
@@ -59,8 +62,14 @@ function buildHomePathPattern() {
 // (?!\.[A-Za-z0-9])  ……后面不能紧跟「点 + 字母数字」：挡掉
 //            `settings.local.json` 这类把 TLD 当中间段、后面还有真扩展名
 //            的文件名；真正的主机名以这个词结尾，不会再接一段。
+//
+// 标签形状约束（issue #40 评审项 4 / RC2）：要求 TLD 前的标签含数字或连字符
+// ——收窄决策域本身，不是加一份会过时的豁免名单。真实主机名习惯带编号/连
+// 字符（build-01、nas1），JS/TS 属性访问的标签（styles、nav、cfg）几乎总是
+// 纯字母；没选"要求 //、@、:port 等上下文"，因为常见披露就是纯文本提及。
 function buildInternalHostPattern() {
-  return new RegExp(`\\b(?<!\\.)[A-Za-z0-9._-]+\\.(?:${INTERNAL_TLDS.join('|')})\\b(?!\\.[A-Za-z0-9])`)
+  const label = '[A-Za-z0-9._-]*[0-9-][A-Za-z0-9._-]*'
+  return new RegExp(`\\b(?<!\\.)${label}\\.(?:${INTERNAL_TLDS.join('|')})\\b(?!\\.[A-Za-z0-9])`)
 }
 
 // RFC1918 私网地址：10/8、172.16/12、192.168/16。八位组按合法范围校验，
@@ -173,31 +182,60 @@ function parseHunkStart(header) {
   return m ? Number(m[1]) : 1
 }
 
-/** 把命中行里实际匹配到的敏感片段替换成方块，只保留能定位问题的上下文。 */
-function maskExcerpt(line, match) {
-  const start = match.index
-  const end = start + match[0].length
-  const mask = '█'.repeat(Math.min(Math.max(match[0].length, 3), 12))
-  const masked = line.slice(0, start) + mask + line.slice(end)
-  const MAX = 160
-  if (masked.length <= MAX) return masked.trim()
-  const windowStart = Math.max(0, start - 40)
-  return `${windowStart > 0 ? '…' : ''}${masked.slice(windowStart, windowStart + MAX).trim()}…`
+/** 一行里全部模式、全部匹配的位置——不止每个模式的第一个（旧实现用 `regex.exec` 只取一个，issue #40 评审项 1）。 */
+function findMatches(text) {
+  const matches = []
+  for (const { name, regex, hint } of DISCLOSURE_PATTERNS) {
+    const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`
+    const global = new RegExp(regex.source, flags)
+    let m
+    while ((m = global.exec(text))) {
+      matches.push({ start: m.index, end: m.index + m[0].length, name, hint })
+      if (m[0].length === 0) global.lastIndex += 1 // 防御：这组模式不会真的产生零宽匹配
+    }
+  }
+  return matches.sort((a, b) => a.start - b.start)
 }
 
+/** 已经打码的整行太长时，围绕锚点截取一个窗口，只保留能定位问题的上下文。 */
+function windowAround(maskedLine, anchor) {
+  const MAX = 160
+  if (maskedLine.length <= MAX) return maskedLine.trim()
+  const windowStart = Math.max(0, anchor - 40)
+  return `${windowStart > 0 ? '…' : ''}${maskedLine.slice(windowStart, windowStart + MAX).trim()}…`
+}
+
+/**
+ * 一行文本里全部模式的全部命中：单趟从左到右扫描遮蔽全部匹配区间，不只是
+ * 某条命中自己那一段（P1-1：旧实现一行命中 N 个模式就打印 N 条摘要，各遮
+ * 一段、露其余）。不保留 `line` 字段——旧实现里它是没人打印却装原文的暗桩。
+ */
 function matchPatterns(text) {
-  const hits = []
-  for (const { name, regex, hint } of DISCLOSURE_PATTERNS) {
-    const match = regex.exec(text)
-    if (match) hits.push({ pattern: name, hint, line: text.trim(), excerpt: maskExcerpt(text, match) })
-  }
-  return hits
+  const matches = findMatches(text)
+  let maskedLine = ''
+  let cursor = 0
+  const anchors = matches.map(({ start, end }) => {
+    const from = Math.max(cursor, start)
+    maskedLine += text.slice(cursor, from)
+    const anchor = maskedLine.length
+    const to = Math.max(from, end)
+    maskedLine += '█'.repeat(Math.min(Math.max(to - from, 3), 12))
+    cursor = to
+    return anchor
+  })
+  maskedLine += text.slice(cursor)
+
+  return matches.map(({ name, hint }, i) => ({
+    pattern: name,
+    hint,
+    excerpt: windowAround(maskedLine, anchors[i]),
+  }))
 }
 
 /**
  * 扫描 `git diff` 输出里的新增行（按 hunk 解析，见 {@link parseAddedLines}）。
  * @param {string} diff 统一 diff 文本
- * @returns {{file: string, lineNo: number, line: string, pattern: string, hint: string, excerpt: string}[]}
+ * @returns {{file: string, lineNo: number, pattern: string, hint: string, excerpt: string}[]}
  */
 export function scanDiff(diff) {
   const hits = []
@@ -222,7 +260,10 @@ export function scanText(text, fileLabel) {
 // scripts/rule-checks.mjs 不在这张表里：上面的拼装写法已经让它对自己干净
 // （由「自扫命中数为 0」的契约测试守住），豁免反而会让这个文件变成全仓库
 // 唯一不被扫描的地方——而它正是最可能长出临时本机路径的文件。
-const SCAN_EXCLUDES = [':(exclude)AGENTS.md']
+//
+// `:(top,exclude)` 而不是 `:(exclude)`（issue #40 评审项 3）：裸的写法和
+// 下面 disclosure() 里裸的 `.` 一样是 cwd 相对，子目录里排除不掉仓库根的 AGENTS.md。
+const SCAN_EXCLUDES = [':(top,exclude)AGENTS.md']
 
 // ---------------------------------------------------------------------------
 // §8.3 PR 体量上限
@@ -355,9 +396,10 @@ const annotate = (level, message) => console.log(`::${level}::${message}`)
  */
 export function disclosure(base, deps = {}) {
   const {
-    readDiff = (range) => git(['diff', '-U0', range, '--', '.', ...SCAN_EXCLUDES]),
+    // `:(top)` 而不是裸 `.`：后者是 cwd 相对的，子目录里运行会静默收窄范围。
+    readDiff = (range) => git(['diff', '-U0', range, '--', ':(top)', ...SCAN_EXCLUDES]),
     listCommits = (range) => git(['log', '--format=%H', range]).split('\n').filter(Boolean),
-    readCommitDiff = (sha) => git(['diff', '-U0', `${sha}^!`, '--', '.', ...SCAN_EXCLUDES]),
+    readCommitDiff = (sha) => git(['diff', '-U0', `${sha}^!`, '--', ':(top)', ...SCAN_EXCLUDES]),
     readCommitMessage = (sha) => git(['log', '-1', '--format=%B', sha]),
     prBody = process.env.PR_BODY ?? '',
   } = deps
