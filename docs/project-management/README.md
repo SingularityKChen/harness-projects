@@ -14,8 +14,8 @@
 | 字段 | 类型 | 取值 | 语义 |
 |---|---|---|---|
 | Status | 单选（内置） | `Todo` / `In Progress` / `In Review` / `Done` | 与 PR 生命周期对齐：`In Review` = PR 已提交待评审；`Done` = 已合并或已验收 |
-| Kind | 单选 | `feat` / `fix` / `docs` / `chore` / `refactor` / `test` | 与提交类型和 issue 标题前缀一致（`AGENTS.md` §8.2、§8.6） |
-| Area | 单选 | 21 个取值：11 个包 + 8 个 `docs/` 子目录 + `ci` / `repo` | 与 `area:*` 标签同一套词汇（`AGENTS.md` §8.6），覆盖包所有权与文档目录 |
+| Kind | 单选 | `feat` / `fix` / `docs` / `chore` / `refactor` / `test` | 与提交类型和 issue 标题前缀一致（`AGENTS.md` §8.2、§8.7） |
+| Area | 单选 | 21 个取值：11 个包 + 8 个 `docs/` 子目录 + `ci` / `repo` | 与 `area:*` 标签同一套词汇（`AGENTS.md` §8.7），覆盖包所有权与文档目录 |
 | ExecPlan | 文本 | 计划路径，如 `docs/exec-plan/active/2026-09-17-xxx.md` | 条目所属计划；无计划留空 |
 | Batch | 文本 | 批次名，与 ExecPlan 的 `Plan of Work` 一致 | 用于把一个计划拆成可独立验收的条目 |
 | Gate | 单选 | `E1` / `R1` | 阶段门禁；只有真正阻塞发布的条目才填 |
@@ -75,7 +75,7 @@ gh project item-edit --id "$item" --project-id PVT_kwHOAY1ahM4BjzAQ \
 
 选项 ID 在字段被重建时会变化；变化后重新执行 `gh project field-list 10 --owner SingularityKChen --format json` 并更新本表。
 
-**改动单选字段的选项列表会让已有条目的该字段值失效**（`updateProjectV2Field` 会重建选项，旧选项 ID 不再被引用，条目上显示为空）。因此：改选项之后必须对全部条目重新赋值一次，再回读确认——本表的 ID 与 `AGENTS.md` §8.6 的词汇表由此保持一致。
+**改动单选字段的选项列表会让已有条目的该字段值失效**（`updateProjectV2Field` 会重建选项，旧选项 ID 不再被引用，条目上显示为空）。因此：改选项之后必须对全部条目重新赋值一次，再回读确认——本表的 ID 与 `AGENTS.md` §8.7 的词汇表由此保持一致。
 
 ## 4. 视图
 
@@ -88,6 +88,6 @@ gh project item-edit --id "$item" --project-id PVT_kwHOAY1ahM4BjzAQ \
 
 ## 5. 不做什么
 
-- **标签与项目字段同源**：issue 的分类以 `kind/*`、`area/*`、`gate/*` 标签为准（见 `AGENTS.md` §8.6），本表的字段是它在看板上的投影；两套取值来自同一个词汇表，因此不构成"两份事实"。不引入优先级或严重度标签：本仓库没有事故语义，`gate:*` 已经表达"阻塞下一里程碑"。
+- **标签与项目字段同源**：issue 的分类以 `kind:*`、`area:*`、`gate:*` 标签为准（见 `AGENTS.md` §8.7），本表的字段是它在看板上的投影；两套取值来自同一个词汇表，因此不构成"两份事实"。不引入优先级或严重度标签：本仓库没有事故语义，`gate:*` 已经表达"阻塞下一里程碑"。
 - 不用项目状态机替代 PR 生命周期：`Status` 是**投影**，权威状态仍在 PR 与 ExecPlan。
 - 不做自动生命周期投影（webhook 事件驱动改状态）：它需要常驻服务与额外凭据，收益不足以抵掉一个新的失效点。
