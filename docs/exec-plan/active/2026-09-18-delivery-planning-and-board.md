@@ -174,7 +174,15 @@ gh api graphql -f query='query { __schema { mutationType { fields { name } } } }
 
 **已知缺口**：不是 sub-issue 的新 issue 不会自动上板——issue #20 就是这样漏掉的，本次手工补入。补这个缺口需要一个带 `project` scope 的 token 存成仓库 secret，再加一个 Actions 工作流。本次**不做**：评审队列还没清空时再往里加一个 PR，只会加重当前真正的瓶颈。已记入 `Interfaces and Dependencies` 待办。
 
-### D5. 被放弃的方案
+### D5. Engineering 是当前事实的投影，不是事件历史
+
+PR / review webhook 只回答“现在值得重算一次”，不能回答“当前状态是什么”。单条 `approved` 可能已经被新提交作废，单条 `commented` 也不能证明批准消失；因此工作流不再把 event payload 映射成字段值，而是每次读取当前 PR 的 `state / merged / isDraft / reviewDecision / closingIssuesReferences` snapshot，再由唯一受控构造器生成 `Engineering` 决策。合并优先于评审结论，关闭未合并与草稿清空字段，`CHANGES_REQUESTED` / `APPROVED` 分别投影对应值，其余已知的 open 状态投影为 `PR open`；未知枚举一律失败，不猜测。
+
+写入边界同样 fail closed：`ENGINEERING_FIELD_ID` 必须由仓库变量 `PROJECTS_ENGINEERING_FIELD_ID` 显式注入，并按稳定 ID 查询后核对所属 Project、字段名、`SINGLE_SELECT` 类型及完整选项集合。GraphQL 逐层验证网络、HTTP、JSON、`errors`、`data`、`repository` 与 `pullRequest`；`closingIssuesReferences` 和每个 issue 的 `projectItems` 都以 `totalCount` 核对 snapshot 完整性，超过单次 100 个节点的上限就失败而非在截断数据上写入；mutation 携带 `clientMutationId`，只有回执的 mutation id 与目标 item id 同时匹配才打印 `confirmed`。
+
+secret 边界采用两段式触发：`pull_request_review` 只运行无权限、无 secret、无 checkout 的 signal workflow，并把 PR 编号作为 inert artifact 传给消费者；默认分支上的特权 workflow 通过 `workflow_run` 消费、校验这个编号。PR 生命周期使用 `pull_request_target`。特权 job 显式 checkout 默认分支，绝不执行 PR head；review actor 关联关系只限制是否产生信号，`Approved` 真值始终来自 snapshot 的 `reviewDecision`。所有 reconcile 全局串行且不相互取消：PR 编号在 job 运行后才可信可用，提前按 payload 分组既不可靠，取消已经开始的正确 reconcile 又可能丢失唯一一次写入。
+
+### D6. 被放弃的方案
 
 | 放弃的方案 | 为什么 |
 |---|---|
@@ -186,7 +194,7 @@ gh api graphql -f query='query { __schema { mutationType { fields { name } } } }
 
 ## Global Constraints
 
-- 本计划**不修改** `packages/` 下任何文件，不新增依赖，不改 CI 工作流。
+- 本计划**不修改** `packages/` 下任何文件、不新增依赖、不改 `PR Fast Gate`；Batch 9 只新增独立的 Engineering reconcile workflow。
 - 所有对 GitHub 的改动通过 `gh` 完成，命令必须可复制重放（见 `Idempotence and Recovery`）。
 - 本仓库是 public：分支一经推送、PR 描述一经提交即等同公开发布。因此进入发布面的内容（issue 正文、里程碑描述、PR 描述、本文件）不得含本机绝对路径、本机用户名 / 主机名、凭据或内部系统信息。
 - 不修改 `main` 分支保护配置，不改 `PR Fast Gate` 检查名。
@@ -255,14 +263,18 @@ grep -n '2026-09-18-delivery-planning-and-board' docs/README.md
 
 ### Batch 9 · 工程执行状态与规划状态分离
 **最小闭环**：工程事件有地方可写，且写的不是 `Status`。
-**涉及文件**：`scripts/sync-engineering-state.mjs`、`.github/workflows/engineering-state.yml`、`tests/contract/engineering-state.test.js`（交付在 PR #37 / issue #36）
+**涉及文件**：`scripts/sync-engineering-state.mjs`、`.github/workflows/engineering-state.yml`、`.github/workflows/engineering-state-signal.yml`、`tests/contract/engineering-state.test.js`（交付在 PR #37 / issue #36）
 - [x] 新建 `Engineering` 字段：`PR open / Changes requested / Approved / Merged`
-- [x] 事件映射写成纯函数，含一条断言"映射结果不可能是任何规划状态字面量"的契约测试
+- [x] 把事件降级为 reconcile signal；由当前 PR snapshot 与唯一受控构造器决定投影
+- [x] 字段 ID 从 `vars.PROJECTS_ENGINEERING_FIELD_ID` 注入，并核对 Project / name / type / options
+- [x] GraphQL transport、空 repository / PR、mutation ack 全部 fail closed；确认目标 item 后才记录成功
+- [x] review signal 与默认分支特权 reconcile 分离；checkout 固定默认分支，actions 固定到当前 `main` 的 commit SHA
+- [x] concurrency 不取消进行中的 reconcile；外部 actor 只限制触发面，不提供批准真值
 - [x] 用真实 token 端到端跑通 8 个 open PR 的回填
 - [x] 回填后重读 25 个条目的 `Status`，零漂移
-- [ ] 配置仓库 secret `PROJECTS_TOKEN`（带 `project` scope）—— **待人类执行**
+- [ ] 配置仓库变量 `PROJECTS_ENGINEERING_FIELD_ID`；缺失时工作流明确失败，不按字段名猜测—— **待人类执行**
 - [x] 在界面关掉四条写 `Status` 的内置工作流（四条均已回读为 `enabled = false`）
-**验证**：`pnpm verify` → `tests 14 / pass 14`；端到端 `#14 #15 #16 #17 #18 #20 #32 #34 = PR open` 且 `Status` 零漂移。
+**验证**：新增脚本契约先失败（10 fail，exit 1），workflow 信任边界契约再失败（2 fail，exit 1）；实现后 `node --test tests/contract/engineering-state.test.js` 为 14 / 14、workflow checker 为 51 / 51，最终 `pnpm verify` 为 161 / 161（均 exit 0）。线上启用前必须配置真实字段 ID，本批不把未知 ID 写死进仓库。
 **回滚**：`git revert`；字段用 `deleteProjectV2Field`。
 
 ### Batch 7 · Project view 重建
@@ -319,6 +331,7 @@ gh api graphql -f query='query{user(login:"SingularityKChen"){projectV2(number:1
 - [x] (2026-09-18) Batch 5 文档落地
 - [x] (2026-09-18) Batch 6 两个看板工作流已开启（`Item added to project` → `Todo`，`Item closed` → `Done`，均已实测）；四条写 `Status` 的内置工作流也已关掉（`enabled = false` 已回读）。**仍需人工**：view 1 设 group by `Status`、view 5 设 group by `Milestone`——分组无法经 API 回读（见本节上一条），因此只能在界面确认
 - [x] (2026-09-18) Batch 9 工程执行状态分离（PR #37）
+- [x] (2026-09-19) Batch 9 评审根因修复：snapshot 权威、可信默认分支执行、稳定字段 ID、GraphQL/ack fail closed；字段 ID 仓库变量仍待人类配置
 - [x] (2026-09-18) Batch 7 Project view 重建（6 个 view，各带 filter 与列集合）
 - [x] (2026-09-18) Batch 8 §8.6 与 §8.3 可执行化（PR #35，三个检查全绿）
 
@@ -367,6 +380,18 @@ gh api graphql -f query='query{user(login:"SingularityKChen"){projectV2(number:1
 - **Observation**：内置看板工作流会**异步覆盖**已经显式写入的 Status，延迟 4–8 秒且不留 actor 痕迹。
   **Evidence**：issue #34 的 Status 从显式设定的 `In Review` 变成 `In Progress`（03:17:31 创建 PR #35 → 03:17:57 条目被改写）；受控实验（新建 draft 条目再删）测得 `Item added to project` 写 `Todo` 的延迟为 4–8 秒；`ProjectV2Workflow` 只暴露 `name` / `enabled`，读不到是谁写的、写了什么。
   **Decision impact**：这是不变量 3 在自己看板上的实例。Batch 9 给出解法——工程事实写独立的 `Engineering` 字段，`Status` 保持人工拥有。
+
+- **Observation**：PR #37 初版把单条 review event 当成聚合评审真值，并在能读取 `PROJECTS_TOKEN` 的 job 中 checkout PR head；`commented` 还可能通过 `cancel-in-progress: true` 取消已经开始的正确写入。
+  **Evidence**：新增契约在旧实现上以 10 条缺失边界失败（`node --test tests/contract/engineering-state.test.js`，exit 1）；workflow 契约又分别因缺少 `pull_request_target` 与 signal workflow 失败（exit 1）。旧 workflow 的 checkout 未指定默认分支，review job 直接读取 secret。
+  **Decision impact**：事件只保留唤醒语义；review signal 无权限无 secret，特权消费者来自并 checkout 默认分支；并发不取消，最终值每次从当前 snapshot 重算。
+
+- **Observation**：`workflow_run.pull_requests[0]` 不是 GitHub 对跨工作流传递 PR 编号给出的可靠契约；官方示例显式上传 PR 编号 artifact，而且现有 GraphQL 查询的 `first:20` 也会在关联较多时静默截断。
+  **Evidence**：GitHub Actions 的 `workflow_run` 文档用 producer artifact → default-branch consumer 传递 PR 编号；新增契约验证 artifact actions 固定到完整 SHA，并让 `totalCount` 大于已取节点数的两层 snapshot 都失败。
+  **Decision impact**：signal 只上传经 admission filter 接受的 PR 编号，消费者验证正整数后才向持有 PAT 的步骤传递；所有 reconcile 用一个固定 concurrency group 串行。查询上限提高到 100，并以 `totalCount` 拒绝不完整 snapshot。
+
+- **Observation**：当前 token 无法可靠发现用户 Project 的真实字段 ID，按名字运行则会把配置漂移伪装成成功。
+  **Evidence**：本地身份缺少读取用户 Project 所需的 scope，无法给出可复核的 live ID。
+  **Decision impact**：不猜、不硬编码未知值；由 `vars.PROJECTS_ENGINEERING_FIELD_ID` 显式配置，脚本用稳定 ID 查询并核对所属 Project、名称、类型与完整选项，缺失或不匹配即失败。
 
 - **Observation**：在 ExecPlan 里复制 §8.6 的扫描正则，会让该文件在下一次自查时命中自己——因为正则里含有家目录前缀的字面量。
   **Evidence**：首次提交前自查命中本文件第 384 行，而该行正是被引用的正则。
@@ -417,6 +442,14 @@ gh api graphql -f query='query{user(login:"SingularityKChen"){projectV2(number:1
 - **Decision**：工程执行事实写独立的 `Engineering` 字段，而不是关掉自动化了事。
   **Rationale**：内置工作流写死 `Status` 不可重定向，所以"要自动化"和"守住不变量 3"在内置能力范围内无法兼得。自己写一个工作流即可两者兼得，而且这正是产品自身的模型（规划状态与工程状态分属不同投影）。
   **Date/Author**：2026-09-18 / agent
+
+- **Decision**：Engineering 同步采用“无权 signal → 默认分支可信 reconcile → ack 后确认”的三段边界。
+  **Rationale**：事件顺序、单个 reviewer 状态与当前聚合结论不是同一事实；让 PR head 代码接触用户级 Project PAT 又越过了最小权限边界。重新查询完整 snapshot 能处理乱序和过期事件，PR 编号经 inert artifact 显式跨越权限边界，固定 concurrency group 保证 query/write 不交错，ack 校验则守住“attempted 不等于 confirmed”的不变量。
+  **Date/Author**：2026-09-19 / agent
+
+- **Decision**：字段身份以仓库变量提供的稳定 GraphQL ID 为入口，字段名只作运行时契约核对。
+  **Rationale**：按名字搜索无法区分同名或错误归属字段，改名还会改变身份；但当前又没有可复核的 live ID。显式配置并 fail closed 是在不伪造事实的前提下可上线的最小系统。
+  **Date/Author**：2026-09-19 / agent
 
 - **Decision**：合并顺序写进文档，不编码成 `blocked-by`；只有真实内容依赖才建依赖边。
   **Rationale**：`blocked-by` 应当表示"做不了"。把变基顺序写成依赖会让"什么被挡住了"这条查询失去意义。
@@ -502,3 +535,5 @@ gh pr update-branch <next> --rebase
 - 2026-09-18：首次创建。原因：13 个 issue、6 个 open PR 与一个只有 12 条目的看板之间已经无法用人脑对齐；同时"MVP 是什么"在上游输入里有三种互相冲突的表述，需要在开始实现前收敛成一个可判定的定义。
 - 2026-09-18：追加 Batch 7（Project view 重建）与 Batch 8（§8.6 / §8.3 可执行化，交付在 PR #35）。原因：view 侧原本是三份相同的默认配置，看板建好了却没法用；而 §8.6 / §8.3 两条规则写得很确切却零自动化，正好补上 D3「规划时声明体量」的评审侧一半。同时**订正**了一条错误的 Surprise：`AGENTS.md` 的敏感信息自查一节并未丢失，它在 PR #12 里。
 - 2026-09-18：追加 Batch 9（工程执行状态分离，交付在 PR #37），并把三个看板字段改名为 `Iteration` / `Priority` / `Size`。原因：实测发现 `gh project item-list --format json` 会静默损坏 CJK 字段名，这推翻了本计划最初"不必改名"的判断；同时在看板上抓到一次内置工作流异步覆盖显式 Status 的实例，需要给工程事实一个不与规划状态争抢的落点。
+- 2026-09-19：按 PR #37 评审重写 Batch 9 的事实与权限边界。原因：原方案把 event 当状态、按字段名解析、执行 PR head 且未核对 mutation ack，无法证明“当前真值、可信代码、确认写入”三个关键条件；现改为 snapshot reconcile、稳定 ID 配置、两段 workflow 与全链路 fail closed，不纳入 #61 的看板监控范围。
+- 2026-09-19：完成前复核把 `workflow_run.pull_requests[0]` 改为官方文档采用的 inert artifact 传递，并给关联 issue/items snapshot 增加完整性证明。原因：默认分支消费者安全不等于上下文必然存在，截断查询也不等于当前完整事实；两处都必须 fail closed。

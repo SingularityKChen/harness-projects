@@ -1,0 +1,84 @@
+name: Engineering state
+
+# 事件只是 reconcile signal。这个特权 workflow 始终来自默认分支，checkout 也显式
+# 指向默认分支；脚本重新查询 PR 当前 snapshot/reviewDecision 后才投影 Engineering。
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, converted_to_draft, synchronize, closed]
+  workflow_run:
+    workflows: [Engineering state signal]
+    types: [completed]
+
+concurrency:
+  # PR 编号在 workflow_run job 内经 artifact 验证后才可用；全局串行避免不同来源的
+  # signal 在 query/write 之间交错，从而让较早 snapshot 覆盖较新结果。
+  group: engineering-state-reconcile
+  # 旧 signal 也查询当前 snapshot；取消已开始的 run 可能丢掉唯一一次正确写入。
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Reconcile engineering state
+    if: >-
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'pull_request_review' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download inert reconcile data
+        if: github.event_name == 'workflow_run'
+        id: download-signal
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: engineering-state-signal
+          path: ${{ runner.temp }}/engineering-state-signal
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Resolve validated PR number
+        id: pr
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_PR_NUMBER: ${{ github.event.pull_request.number }}
+          SIGNAL_PATH: ${{ runner.temp }}/engineering-state-signal/pr_number
+        run: |
+          if [ "$EVENT_NAME" = "pull_request_target" ]; then
+            value="$TARGET_PR_NUMBER"
+          elif [ -f "$SIGNAL_PATH" ]; then
+            value="$(tr -d '[:space:]' < "$SIGNAL_PATH")"
+          else
+            exit 0
+          fi
+          case "$value" in
+            ''|*[!0-9]*|0) exit 1 ;;
+          esac
+          printf 'number=%s\n' "$value" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.pr.outputs.number != ''
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.pr.outputs.number != ''
+        with:
+          node-version-file: .nvmrc
+
+      - name: Reconcile Engineering from current PR snapshot
+        if: steps.pr.outputs.number != ''
+        env:
+          PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          ENGINEERING_FIELD_ID: ${{ vars.PROJECTS_ENGINEERING_FIELD_ID }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RECONCILE_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: node scripts/sync-engineering-state.mjs "$PR_NUMBER"
