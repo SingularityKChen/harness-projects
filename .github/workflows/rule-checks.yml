@@ -1,0 +1,72 @@
+name: Rule checks
+
+# 把 AGENTS.md 里两条已经成文、但今天只靠作者自觉的规则变成可见的检查：
+#
+#   §8.6  发布面敏感信息自查（本仓库是 public）
+#   §8.3  PR 体量上限（代码 ≤ 1000 行 / 文档 ≤ 1500 行）
+#
+# Advisory by design：与 `Issue policy` 一样，这两个检查**故意不进分支保护**。
+#
+#   §8.6 的机械扫描只覆盖可机械判定的一类，通过条件仍然是人工把五个类目逐条
+#   过一遍——把它设成必需检查会制造「绿了就等于查过了」的错觉，正好取消掉它
+#   想保住的那道人工门。
+#
+#   §8.3 的上限是工程判断而不是物理约束，偶尔存在合理超出（例如一次性引入的
+#   大体量生成物）。让它可见、需要解释，比让它阻塞合并更合适。
+#
+# 稳定运行一段时间、并且确认没有误报之后，再考虑提升为必需检查。
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: rule-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  disclosure:
+    name: Disclosure scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 需要完整历史才能算出 base...HEAD 的三点差异。
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: 扫描本次改动的新增行
+        # base_ref 经 env 传入而不是直接插值进 run：它是事件负载里的值，
+        # 即使这里被 `branches: [main]` 约束成只可能是 main，也不在 shell 里展开。
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node scripts/rule-checks.mjs disclosure "origin/$BASE_REF"
+
+  size:
+    name: PR size
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: 核对 PR 体量上限
+        # base_ref 经 env 传入而不是直接插值进 run：它是事件负载里的值，
+        # 即使这里被 `branches: [main]` 约束成只可能是 main，也不在 shell 里展开。
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node scripts/rule-checks.mjs size "origin/$BASE_REF"
