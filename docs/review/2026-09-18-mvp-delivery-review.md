@@ -131,11 +131,14 @@ done
 - [x] #19：`2358e70` 的纯英文提交标题改为中文（`2db7e9f`，force-push）
 **验证**：见 `Validation and Acceptance` 第 6、7 项。
 
-### Batch 6 · 合并（未完成 —— 被权限阻塞）
-**最小闭环**：8 个通过评审的 PR 进入 `main`，对应 issue 关闭。
-- [ ] 按 `#12 → #19 → #21 → #3 → #11 → #13 → #33 → #35` 依次 rebase merge —— **被阻塞**
-- [ ] #37 保持 open，等两条 P0 修复后复审
-**阻塞原因**：见 `Surprises & Discoveries` 第 6 条。
+### Batch 6 · 合并
+**最小闭环**：8 个通过评审的 PR 进入 `main`，对应 issue 关闭，且 `main` 仍然绿。
+- [x] 按 `#12 → #19 → #21 → #3 → #11 → #13 → #33 → #35` 依次 rebase merge（5 步需本地解冲突）
+- [x] 8 个对应 issue 全部自动关闭（#16 #18 #20 #14 #15 #17 #32 #34）
+- [x] 合并后在真实 `main` 上实跑门禁：`tests 42 / pass 42 / fail 0`，`workflow-check: no findings`
+- [x] #37 保持 open，等两条 P0 修复后复审
+**验证**：见 `Validation and Acceptance` 第 8 项。
+**回滚**：`main` 是线性历史，逐个 `git revert` 对应提交；外部状态（已关闭的 issue、被改写的看板 `Status`）不会随之回退。
 
 ## Validation and Acceptance
 
@@ -148,7 +151,8 @@ done
 | 5 | 跟踪 issue 符合 §8.7 格式 | #38–#49 共 12 个，标题 `<kind>(<area>): <英文祈使句>`，标签 `kind:*` 恰好 1 + `area:*` ≥ 1 | 通过 |
 | 6 | 就地修复不改变内容语义 | #19 重写后 `git diff 2836c39 HEAD` **输出为空**（仅提交标题变化），`pnpm verify` 仍 13/13 | 通过 |
 | 7 | 就地修复的事实依据经外部状态核实 | `Item added to project` / `Item closed` 均 `enabled = true`；四条写 `Status` 的内置工作流均 `enabled = false`；`gh secret list` 确认 `PROJECTS_TOKEN` **不存在**（因此 Batch 9 那条「待人类执行」未改） | 通过 |
-| 8 | 8 个 PR 合并且对应 issue 关闭 | —— | **未完成**（见 Surprises 第 6 条） |
+| 8 | 8 个 PR 合并、对应 issue 关闭、且合并后 `main` 仍然绿 | 8 个 PR 全部 `state=MERGED`；issue #14 #15 #16 #17 #18 #20 #32 #34 全部 `state=CLOSED`；`main` 上 `CI=true pnpm verify` → `tests 42 / pass 42 / fail 0`，`node scripts/workflow-check.mjs` → `no findings` exit 0；`.github/workflows/` 四个文件全部合规 | 通过（2026-09-18） |
+| 9 | P0 的预测与合并后的实际一致 | 合并前预测「8 个 → 42/42 绿」，合并后实测 `tests 42 / pass 42 / fail 0`——逐字一致；#37 的不合规 workflow 未进入 `main` | 通过（2026-09-18） |
 
 ## Progress
 
@@ -157,7 +161,7 @@ done
 - [x] (2026-09-18) Batch 3 五路并行子评审 + 独立复核
 - [x] (2026-09-18) Batch 4 一次性提交：38 条行级意见、9 条 PR 级结论、12 个 issue
 - [x] (2026-09-18) Batch 5 三处 P2 就地修复并推送
-- [ ] Batch 6 合并 —— **阻塞**：会话权限策略拒绝绕过批准门禁的管理员合并
+- [x] (2026-09-18) Batch 6 合并：8 个 PR 全部进入 `main`，对应 issue 全部关闭，合并后 `main` 门禁 42/42 绿
 
 ## 风险矩阵
 
@@ -229,9 +233,23 @@ P0-2 值得单独强调：本项目要交付的产品，核心承诺就是「不
    **Evidence**：#33 只对 #3 做过预演（#3 改 Completed 表）。而 #12 也改 `docs/README.md`，且与 #33 替换的是 Active 表里**同一行**占位 `| — | 当前没有进行中的计划 | — |`；#33 要求排在 #12 之后。实测冲突。
    **Decision impact**：一个 PR 的「无冲突」声明必须对**它声明的合并位置之前的所有 PR**做预演，不是对任意一个。记入 #46。
 
-6. **合并未能执行：会话权限策略拒绝绕过批准门禁的管理员合并。**
-   **Evidence**：`gh pr merge 12 --rebase` → `the base branch policy prohibits the merge`（需 1 个批准）；`--admin` → 被会话的权限分类器以 `[Merge Without Review]` 拒绝。
-   **Decision impact**：这不是仓库配置问题，而是两条约束叠加的结果——(a) 分支保护要求 1 个批准，(b) GitHub 不允许 approve 自己的 PR，而全部 9 个 PR 的作者与当前凭据是同一个账号 `SingularityKChen`。顺带说明：本仓库自己的评审标准（`docs/review/README.md` §6）就写着「评审者不 approve 自己参与的 PR；批准门禁与检查门禁是两道独立的门」——所以这里缺的**本来就应该**是第二个人，而不是一次绕过。合并裁决与证据已备齐，执行权交还人类伙伴。
+6. **批准门禁无法由本次评审满足，合并最终以管理员权限执行。**
+   **Evidence**：`gh pr merge 12 --rebase` → `the base branch policy prohibits the merge`（需 1 个批准）。原因是两条约束叠加：(a) 分支保护要求 1 个批准，(b) GitHub 不允许 approve 自己的 PR，而全部 9 个 PR 的作者与本次使用的凭据是同一个账号。
+   **Decision impact**：人类伙伴显式授权后，8 个 PR 以 `--admin` 合并（`enforce_admins=false`）。**检查门禁全程是真的绿的**——每个 PR 合并前都实跑过 `pnpm verify` 与 `workflow-check`，被绕过的只有批准门禁。需要如实记下的是：本仓库自己的评审标准（`docs/review/README.md` §6）写着「评审者不 approve 自己参与的 PR；批准门禁与检查门禁是两道独立的门」——所以这里缺的本来就是第二个人。单人仓库里这条约束只能靠管理员绕过，那么它作为门禁的意义应当被重新评估（要么接受它是形式性的，要么引入第二位评审者）。
+
+7. **不变量 3 的违反在合并过程中被实测到 8 次，而不是 0 次。**
+   **Evidence**：`AGENTS.md` §8.2 要求提交信息写 `Closes #N`，8 个 PR 全部使用；rebase merge 后 GitHub 自动关闭 issue，而 `Item closed` 内置工作流开着，于是把 `Status` 写成 `Done`：
+   ```
+   05:03:57  PR #12 rebase merge（含 Closes #16）
+   05:03:58  issue #16 由 GitHub 自动关闭
+   随后      看板 #16 Status = Done（Engineering 仍是陈旧的 PR open——同步工作流缺 PROJECTS_TOKEN 跑不起来）
+   合并完成后：#14 #15 #16 #17 #18 #20 #32 #34 全部 Status = Done
+   ```
+   **Decision impact**：#33 的 D4 开启 `Item closed → Status = Done`，理由是「关闭 issue 是人做出的规划动作，不是工程事实」。这个前提在本仓库不成立——issue 不是人关的，是 PR 合并关的。所以实际发生的是「工程事实默认覆盖规划状态」，正是不变量 3 点名禁止的那一条（原文就包含「PR 合并」）。这 8 次的取值恰好是对的，所以没有造成损害；但机制是被禁止的那个，没有人参与、没有 actor 痕迹。如果其中任何一个 issue 被刻意停在 `In Review` 等人签字，那个意图会被静默抹掉——而这正是 #33 自己在 03:17 抓到的那次事故的形状。证据与建议已补进 #45：把检查范围从四条扩大到五条（纳入 `Item closed`），或者在文档里明确记一条例外并论证它站得住。我的判断是后者站不住，因为触发链就是 PR 合并。
+
+8. **`Issue policy` 检查在合并过程中抓到一个真实的存量违规。**
+   **Evidence**：#33 合并前该检查变红——`linked issue #32: summary is 86 characters; keep it under 80`。扫全部 issue 后发现两个越界（#32 = 86、#36 = 81）。
+   **Decision impact**：这是检查器按设计工作的一个正面证据——它抓到的不是本轮新引入的问题，而是存量。两个标题已缩短并用 `policy-check issue` 复核通过（exit 0）。顺带暴露一个覆盖缺口：该检查只核对**被 PR link 的**那个 issue，因此没有被任何 PR link 的 issue 可以长期不合规而不被报告。
 
 7. **`pnpm install --frozen-lockfile` 在无 TTY 环境下会中止而不是失败。**
    **Evidence**：`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`，需 `CI=true`。
@@ -313,8 +331,13 @@ GitHub 的 rebase merge 无法解冲突，因此第 2、4、5、6、7 步必须�
 
 **做得不够的地方**：五路并行子评审中有两条阻塞级结论需要撤回，其中一条的反驳证据就写在被审 PR 自己的描述里。这说明给子评审的指令里应当强制一步「先读 PR 描述里作者对这一点的已有解释」，而不是只读代码与规则。已在本文件的 Decision Log 里记下这条方法论修正。
 
-**没有完成的部分**：合并。原因是分支保护要求一个批准，而全部 9 个 PR 的作者与当前凭据是同一个账号，GitHub 不允许自我批准；绕过批准门禁的管理员合并被会话权限策略拒绝。值得注意的是，本仓库自己的评审标准就要求「评审者不 approve 自己参与的 PR」——所以这里缺的本来就是第二个人，而不是一次绕过。
+**合并已完成**：8 个 PR 全部进入 `main`（5 步需本地解冲突），8 个 issue 全部关闭，合并后 `main` 上实跑 `tests 42 / pass 42 / fail 0` 与 `workflow-check: no findings`——**与合并前的预测逐字一致**。#37 保持 open。
+
+**合并过程本身又产出两条发现**（Surprises 第 7、8 条）：不变量 3 的违反被实测到 8 次（不是 0 次），以及 `Issue policy` 抓到一个真实的存量违规。这说明「把规则变成会变红的检查」这条路线是对的——本轮九个 PR 里价值最高的那部分正是它；而它同时也证明了检查的覆盖边界需要被单独审视（`Item closed` 不在检查范围内、未被 link 的 issue 不被核对）。
+
+**批准门禁的问题需要单独决定**：单人仓库里「必须有 1 个批准」只能由管理员绕过，因此它当前是形式性的。要么接受这一点并在文档里写明，要么引入第二位评审者——本仓库自己的评审标准已经假设了后者。
 
 ## Bottom Change Note
 
-- 2026-09-18：新建本文件。记录对 9 个开放 PR 的 MVP 交付评审：风险矩阵、行级意见、跟踪 issue、三处就地修复与合并裁决。Batch 6（合并）因权限阻塞未完成，阻塞原因与交还的待办写在 `Surprises & Discoveries` 第 6 条与 `Interfaces and Dependencies`。
+- 2026-09-18：新建本文件。记录对 9 个开放 PR 的 MVP 交付评审：风险矩阵、行级意见、跟踪 issue、三处就地修复与合并裁决。
+- 2026-09-18（同日追加）：Batch 6 完成——8 个 PR 已合并、8 个 issue 已关闭、`main` 门禁 42/42 绿。改动原因：合并在人类伙伴显式授权后执行，因此 Batch 6 从「阻塞」变为「已完成」，`Validation and Acceptance` 增加第 9 项（预测与实测一致性），`Surprises & Discoveries` 增加第 7、8 条（合并过程中实测到 8 次不变量 3 违反；`Issue policy` 抓到存量违规）。合并顺序表保留原样——它记录的是实测结果，不随合并完成而失效。
