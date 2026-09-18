@@ -539,6 +539,7 @@ node scripts/workflow-check.mjs
 - 外部写操作必须可追踪：记录 actor、目标 ProviderBinding、本地幂等键与结果状态。
 - LLM（包括本 agent）不参与规划状态、关系语义或发布门禁的控制路径；只做确定性规则明确允许的辅助。
 - 破坏性操作（删除分支、清理工作区、删除远端仓库）默认不做；必须由人类显式要求。
+- **自托管 runner 不是一次性环境**：job 与登录用户的其它进程共享同一台机器。因此（a）凭据只经环境变量或文件描述符传递，**绝不进 argv**——同机进程可读进程表，Actions 的 secret 掩码不覆盖进程表；（b）临时文件只用 `$RUNNER_TEMP`，不写 `/tmp` 这类可预测的共享路径；（c）不调用任何 GitHub API 的 job 声明 `permissions: {}`。在托管 runner 上可以忽略的写法，在这里不是。
 
 ---
 
