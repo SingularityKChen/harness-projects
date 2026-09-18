@@ -1,0 +1,51 @@
+name: Board invariants
+
+# 观察看板内置工作流的启停状态。
+#
+# 看板上那几条"由 PR 事件推进条目状态"的内置工作流写的都是 `Status` 且不可
+# 重定向，是 AGENTS.md §1.3 不变量 3 的反例。它们**无法用 API 启停**——GraphQL
+# 只有 `deleteProjectV2Workflow`，没有 enable/disable mutation——所以"关着"
+# 这件事只能靠人记得。
+#
+# 启用不可自动化，但**观察**可以：`ProjectV2Workflow` 暴露 `enabled`。
+#
+# Advisory by design：与 `Issue policy`、`Rule checks` 一样**不进分支保护**。
+# 它依赖网络与 token，把它设成必需检查会让 token 过期直接堵死合并通道，
+# 而它要防的是配置漂移，不是代码缺陷。
+#
+# 只从默认分支按日调度：这个 job 使用长效 PAT，不能让 PR 代码或手选 ref 进入执行面。
+# 看板可以在没有任何 PR 的情况下漂移，定时观察也正好覆盖这种变化。
+
+on:
+  schedule:
+    # 每天 02:00 UTC。看板漂移不是紧急故障，一天一次足够。
+    - cron: '0 2 * * *'
+
+concurrency:
+  group: board-invariants-scheduled
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  board-workflows:
+    name: Board workflow invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PROJECT_OWNER: SingularityKChen
+      PROJECT_NUMBER: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: 核对看板工作流与裁决表
+        env:
+          PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+        run: node scripts/check-board-workflows-live.mjs
