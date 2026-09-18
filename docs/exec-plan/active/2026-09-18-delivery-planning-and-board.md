@@ -253,6 +253,29 @@ grep -n '2026-09-18-delivery-planning-and-board' docs/README.md
 ```
 **回滚**：`git revert` 本批提交。
 
+### Batch 7 · Project view 重建
+**最小闭环**：每个 view 回答一个确切问题，而不是三份相同的默认配置。
+- [x] 盘点：三个 view 全部无 filter、无分组、同样五列；"View 1" 与"计划"完全一样
+- [x] 改造已有三个并新建三个，共六个：本迭代（Board）、可动手、路线图（Roadmap）、Gate E1、待排期、全部
+- [x] 每个 view 设 filter 与列集合
+**验证**：
+```bash
+gh api graphql -f query='query{user(login:"SingularityKChen"){projectV2(number:10){views(first:10){nodes{number name layout filter}}}}}' \
+  --jq '.data.user.projectV2.views.nodes[] | "\(.number) \(.name) \(.layout) \(.filter)"'
+# 期望：6 行，除"全部"外每行都有非空 filter
+```
+**回滚**：`deleteProjectV2View`；被改造的三个需按本节记录的原值还原（原值均为"无 filter、默认五列"）。
+
+### Batch 8 · 把 §8.6 与 §8.3 变成可执行的检查
+**最小闭环**：两条只靠作者自觉的规则变成 PR 上可见的检查。
+**涉及文件**：`scripts/rule-checks.mjs`、`.github/workflows/rule-checks.yml`、`.github/dependabot.yml`、`tests/contract/rule-checks.test.js`（交付在 PR #35 / issue #34）
+- [x] 扫描与体量核算写成纯函数 + CLI，可在无网络无凭据下测试
+- [x] 契约测试 11 条，并用注入缺陷证明它有牙
+- [x] 两个检查都不进分支保护，理由写在 workflow 文件头
+- [x] dependabot 只开 github-actions
+**验证**：`pnpm verify` → `tests 16 / pass 16 / fail 0`；PR #35 上 `Disclosure scan`、`PR size`、`PR Fast Gate` 三个检查全绿。
+**回滚**：`git revert`；两个检查不在分支保护里，撤掉不影响任何现有 PR 的可合并性。
+
 ### Batch 6 · 人工开启看板工作流（待人类执行）
 **最小闭环**：新上板条目不再出现空状态。
 **为什么不能自动化**：见 D4——GitHub 未提供启用内置工作流的 mutation。
@@ -283,6 +306,8 @@ grep -n '2026-09-18-delivery-planning-and-board' docs/README.md
 - [x] (2026-09-18) Batch 4 迭代排期与字段回填（164 次字段写入，0 失败）
 - [x] (2026-09-18) Batch 5 文档落地
 - [ ] Batch 6 人工开启两个看板工作流 —— **阻塞：GitHub 未提供对应 mutation，只能在网页界面操作**
+- [x] (2026-09-18) Batch 7 Project view 重建（6 个 view，各带 filter 与列集合）
+- [x] (2026-09-18) Batch 8 §8.6 与 §8.3 可执行化（PR #35，三个检查全绿）
 
 ## Surprises & Discoveries
 
@@ -310,13 +335,25 @@ grep -n '2026-09-18-delivery-planning-and-board' docs/README.md
   **Evidence**：回填前 `gh project item-list` 的条目号集合缺 20；建完子条目后 22–31 全部出现。
   **Decision impact**：`Auto-add sub-issues to project` 确实生效；缺口只在"非子条目的新 issue"。记为待办而非现在就修（见 D4）。
 
-- **Observation**：会话开始时 `AGENTS.md` 处于 modified 状态，其工作区内容包含一节"提交与 PR 前的敏感信息自查"（发布面定义、五类不得进入发布面的内容、两条扫描命令）以及 §9.4 的第 6 条自查项；本次工作过程中该修改从工作区消失，`AGENTS.md` 回到与 HEAD 一致的状态，而 HEAD 的 §8 只到 8.5、§9.4 只有 5 条。
-  **Evidence**：会话起始 `git status` 显示 `M AGENTS.md`；随后 `git status --short AGENTS.md` 无输出；`grep -nE '^#{2,3} 8' AGENTS.md` 最后一项是 `### 8.5`；`git stash list` 为空；遍历所有远端分支的 `AGENTS.md` 均无该节。
-  **Decision impact**：本计划与新建 issue 中原本指向该节的引用已全部改写为**就地陈述规则本身**，避免在仓库里留下指向不存在章节的悬空引用。规则本身仍然执行——本次提交前的机械扫描与五类人工核对都已完成。该节是否恢复、以及如何与四个同样改动 `AGENTS.md` 的在审 PR 协调，需要人类决定。
+- **Observation**：规划期间一度判定 `AGENTS.md` 的"提交与 PR 前的敏感信息自查"一节丢失。**该判定是错的**：那部分改动被并入了 PR #12，`main` 上看不到是因为它还没合并。
+  **Evidence**：`gh pr diff 12 | grep -n '敏感信息自查'` 命中第 121 行 `### 8.6 提交与 PR 前的敏感信息自查（公开仓库）`；PR #12 的规模也从 +170 增长到 +206。
+  **Decision impact**：没有任何内容需要恢复。但由此产生的两处改写**保留**——本计划与 issue #22 / #30 里原本指向 §8.6 的引用已改成就地陈述规则，这在 §8.6 随 PR #12 合并进 `main` 之前仍然是正确的写法（指向一个 `main` 上不存在的章节会是悬空引用）。教训：判断"某条约定是否存在"时，只查 `main` 不够，必须同时查在审分支。
 
 - **Observation**：`addBlockedBy` 的入参字段名是 `blockingIssueId`，不是 `blockedByIssueId`。
   **Evidence**：`gh api graphql -f query='query { __type(name:"AddBlockedByInput") { inputFields { name } } }'`。
   **Decision impact**：仅为脚本记录，避免下次重复试错。
+
+- **Observation**：Project view 的可编程面比预期窄。`createProjectV2View` / `updateProjectV2View` 存在，`filter` 可以设，但 `ProjectV2ViewConfigurationInput` **只有 `visibleFieldIds` 一个字段**——分组、排序、看板列顺序都没有 mutation；Roadmap 布局连 `visibleFieldIds` 都不接受；传入的列顺序会被 GitHub 重排；view 之间的先后顺序也不可设。
+  **Evidence**：`gh api graphql` 内省 `ProjectV2ViewConfigurationInput` 只返回 `visibleFieldIds`；给 Roadmap view 传 configuration 返回 `Roadmap views do not support visible fields.`；回读六个 view 的列顺序与传入顺序不一致。
+  **Decision impact**：分组必须人工设（本迭代 → group by Status，待排期 → group by Milestone），记入 Batch 6 的人工清单；把最常用的"本迭代"改造进原来的 1 号位而不是新建，以绕开 view 顺序不可设。
+
+- **Observation**：GitHub Project 的 filter 接受 CJK 字段名——`迭代:@current`、`优先级:P0`、`规模:拆分`、`no:迭代` 全部被接受。
+  **Evidence**：逐条 `updateProjectV2View` 测试，均返回成功。
+  **Decision impact**：不必为了 filter 把三个新字段改成英文名。但要注意**API 不校验 filter 语义**：mutation 成功只证明字符串被存下了，不证明它在界面上真的筛出东西。
+
+- **Observation**：在 ExecPlan 里复制 §8.6 的扫描正则，会让该文件在下一次自查时命中自己——因为正则里含有家目录前缀的字面量。
+  **Evidence**：首次提交前自查命中本文件第 384 行，而该行正是被引用的正则。
+  **Decision impact**：本计划改为陈述规则不复制命令；Batch 8 的扫描器进一步用片段拼装前缀（`['Users','home','root']`），使完整字面量从不出现，因此不需要再加自我豁免。
 
 - **Observation**：`gh api graphql -F v='{"text":"..."}'` 无法传递嵌套 JSON 对象给 `ProjectV2FieldValue!` 变量，会报 `was provided invalid value`。
   **Evidence**：首轮 164 次写入全部失败，改为把值字面量内联进 mutation 字符串后 164 次全部成功。
@@ -346,6 +383,14 @@ grep -n '2026-09-18-delivery-planning-and-board' docs/README.md
 
 - **Decision**：M3 / M4 / Gate R1 不设到期日。
   **Rationale**：Gate E1 的裁决可以重塑 #7 的形状，五周之后的精确日期是虚假精度。
+  **Date/Author**：2026-09-18 / Claude Opus 5
+
+- **Decision**：§8.6 与 §8.3 的两个检查都不进分支保护。
+  **Rationale**：机械扫描只覆盖可判定的一类，§8.6 的通过条件仍是人工过五个类目；设成必需检查会制造"绿了就等于查过了"的错觉，正好取消掉它想保住的那道人工门。体量上限是工程判断而非物理约束，偶有合理超出，让它可见并需要解释比让它阻塞合并更合适。与 `Issue policy` 的既有立场一致。
+  **Date/Author**：2026-09-18 / Claude Opus 5
+
+- **Decision**：dependabot 只开 `github-actions`，不开 `npm`。
+  **Rationale**：它存在的直接理由是让 action 能安全地 pin 到 commit SHA——pin 之后升级会变成手工负担，两者必须一起用。npm 的更新 PR 数量远大于 actions，而当前瓶颈正是评审队列的合并吞吐。
   **Date/Author**：2026-09-18 / Claude Opus 5
 
 - **Decision**：合并顺序写进文档，不编码成 `blocked-by`；只有真实内容依赖才建依赖边。
@@ -430,3 +475,4 @@ gh pr update-branch <next> --rebase
 ## Bottom Change Note
 
 - 2026-09-18：首次创建。原因：13 个 issue、6 个 open PR 与一个只有 12 条目的看板之间已经无法用人脑对齐；同时"MVP 是什么"在上游输入里有三种互相冲突的表述，需要在开始实现前收敛成一个可判定的定义。
+- 2026-09-18：追加 Batch 7（Project view 重建）与 Batch 8（§8.6 / §8.3 可执行化，交付在 PR #35）。原因：view 侧原本是三份相同的默认配置，看板建好了却没法用；而 §8.6 / §8.3 两条规则写得很确切却零自动化，正好补上 D3「规划时声明体量」的评审侧一半。同时**订正**了一条错误的 Surprise：`AGENTS.md` 的敏感信息自查一节并未丢失，它在 PR #12 里。
