@@ -214,8 +214,8 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 
 | # | 验收项 | 判定证据 | 结果 |
 |---|---|---|---|
-| 1 | `Status` 的定义在仓库里唯一 | `grep -rn '开发做完没' docs/` 输出为空；`docs/product/board-semantics.md` 存在且给出唯一答案 | 待执行 |
-| 2 | 九条内置工作流的裁决可从一条规则推导 | `board-semantics.md` 的推导规则 + 九行表；契约测试断言「必须关闭」清单为六条 | 待执行 |
+| 1 | `Status` 的定义在仓库里唯一 | `grep -rn '开发做完没' docs/` 输出为空；`docs/product/board-semantics.md` 存在且给出唯一答案 | 通过，有一处已知例外（2026-09-18）：`docs/product/board-semantics.md` 与 `delivery-planning-and-board.md` 已不含该表述，检查通过；但本文件（`2026-09-18-rule-semantics-and-checker-convergence.md`）自身的 D1 表与「最小成功证据」为展示改前改后而引用了这个字面量，因此对 `docs/` 全树跑该 grep 不会得到空输出——命中全部落在本文件、且都是「现在/改成」对照，不是当前生效的定义 |
+| 2 | 九条内置工作流的裁决可从一条规则推导 | `board-semantics.md` 的推导规则 + 九行表；契约测试断言「必须关闭」清单为六条 | 通过，但数字有更正（2026-09-18）：逐行数 D2 表「关闭」得到 **7** 条而不是六条（`Auto-close issue` 是遗漏的第七条，见 Surprises & Discoveries）；`docs/product/board-semantics.md` §5 与 `tests/contract/board-workflow.test.js` 均按 7 条实现并断言 |
 | 3 | 合并队列有长期载体 | `docs/project-management/merge-queue.md` 存在；一个无上下文的人只读它能合完队列 | 待执行 |
 | 4 | agent 写入边界可判定 | 读 `AGENTS.md` §10 增补能对「agent 写的这条 `blocked-by` 边算不算有效」给出确定答案 | 待执行 |
 | 5 | 四个检查器的每一种绕过形态都有注入用例 | 逐项「修复前红 → 修复后绿 → 变异后再红」的命令输出 | 待执行 |
@@ -228,7 +228,7 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 - [x] (2026-09-18 14:03 CST) 路由与取证：读完 9 个 issue、量化四个脚本与测试体量、核实看板工作流实际状态与 `PROJECTS_TOKEN` 缺失
 - [x] (2026-09-18 14:03 CST) 三个设计决定由人类伙伴裁决（D1 的读法、5 个 PR 的切分、#45 只做离线一半）
 - [x] (2026-09-18 14:03 CST) 建立 5 个隔离工作区与分支
-- [ ] Batch A 看板语义定义
+- [x] (2026-09-18) Batch A 看板语义定义：新建 `docs/product/board-semantics.md`；修正 `delivery-planning-and-board.md` 术语表 / D2 表 / D4 表三处与 D3 的闭环声明；新建 `scripts/board-workflow-check.mjs` + `tests/contract/board-workflow.test.js`（13 条用例，含变异测试验证有牙）；`docs/README.md` 加主题文档索引。`pnpm verify` 43 → 56（PR-A 提交，见下方 Surprises 关于「六条」应为「七条」的更正）
 - [ ] Batch B 过程记录
 - [ ] Batch C workflow-check 假绿收敛
 - [ ] Batch D policy-check 加固
@@ -248,6 +248,14 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 - **Observation**（2026-09-18 14:02 CST）：`PROJECTS_TOKEN` 仍不存在，因此 #45 的运行时半边与 #37 卡在同一个前提上。
   **Evidence**：`gh secret list` → 只有 `DSH_GITHUB_WEBHOOK_SECRET`。
   **Decision impact**：见 D4——切成离线判定与运行时接线两半，后者留给 #37。
+
+- **Observation**（Batch A 执行时，2026-09-18）：本文件第 240 行那条 Surprise 的总结句说「必须保持关闭」是**六条**，但把 D2 表（Design / Spec）「裁决」列里标「关闭」的行逐行数出来是 **7** 条：`Item closed`、`Item reopened`、`Pull request linked to issue`、`Code review approved`、`Code changes requested`、`Pull request merged`、`Auto-close issue`。
+  **Evidence**：D2 表本身没有错——第 240 行那条 Surprise 的 `Evidence` 段紧接着已经承认 `Auto-close issue`「同样关闭（第七条……单列）」，只是总结句只统计了直接落在 D2 规则字面表述里的六个（写 `Status`、触发事件属于工程轴），没把这处已经承认的第七条计入总数。`docs/product/board-semantics.md` §5 按 7 条实现，`scripts/board-workflow-check.mjs` 的 `MUST_BE_DISABLED` 与 `tests/contract/board-workflow.test.js` 的断言均为 7；`Validation and Acceptance` 表第 2 行原定「契约测试断言……为六条」同样需要按此更正。2026-09-18 对真实看板的核对（`gh api graphql` 读 `projectV2.workflows`）显示这 7 条当前全部是 `enabled: false`，另外两条（`Item added to project`、`Auto-add sub-issues to project`）全部是 `enabled: true`，与 7 这个数字及 D2 的推导结果一致。
+  **Decision impact**：D2 的推导规则本身不需要改——问题只在总结句漏计，不影响规则正确性。后续批次（尤其 Batch B 若引用「必须保持关闭的工作流数量」）应以 `docs/product/board-semantics.md` §5 与本条记录的 7 为准，不要沿用第 240 行的「六条」。本条记录不修改第 240 行原文，按 ExecPlan 的追加式更正惯例处理。
+
+- **Observation**（Batch A 执行时，2026-09-18）：第 244 行记录的人工缺口（`Item reopened` 当时是 `enabled: true`）已经不再成立。
+  **Evidence**：2026-09-18（Batch A 执行时）重新查询 `gh api graphql … projectV2.workflows`，`Item reopened` 现在是 `enabled: false`；当前实测的九条状态与 `docs/product/board-semantics.md` §5 的推导结果（7 条关闭、2 条开启）完全一致。
+  **Decision impact**：人类伙伴已经在第 244 行记录之后、Batch A 开工之前手动处理了这个人工步骤，本计划不需要为此再提任何请求。这不改变 D1/D2 的设计结论，只是记录该项人工待办已经完成。
 
 ## Decision Log
 
