@@ -56,12 +56,14 @@
 | `Code review approved` | `Status` | 规划轴 | 工程轴 | 不一致 | **关闭** |
 | `Code changes requested` | `Status` | 规划轴 | 工程轴 | 不一致 | **关闭** |
 | `Pull request merged` | `Status` | 规划轴 | 工程轴 | 不一致 | **关闭** |
-| `Auto-close issue`（`Status = Done` 时关闭 issue） | issue 的 open/closed 状态（不是 `Status`） | 工程轴（见 §4 第 2 步） | 工程轴触发，但写入方向是**规划 → 工程**：把人写的 `Status = Done` 反过来推成一个工程事实，并与 `Item closed` 首尾相接构成回环 | 跨轴写入，方向相反但同样违规 | **关闭** |
+| `Auto-close issue`（`Status = Done` 时关闭 issue） | issue 的 open/closed 状态（不是 `Status`，见 §4 第 2 步） | 工程轴 | 规划轴（触发条件是 `Status` 被改成 `Done`，而按本表其余八行，`Status` 的唯一合法写入点是人） | 不一致 | **关闭** |
 | `Auto-add sub-issues to project` | 不写 `Status`（只挂载父子关系） | —— | —— | 规则不适用（§4 第 1 步） | **开启** |
 
 **从表里数「关闭」得到 7 条，不是 6 条。**
 
-控制本文档所属批次的 ExecPlan（`docs/exec-plan/active/2026-09-18-rule-semantics-and-checker-convergence.md`，`Surprises & Discoveries`）在总结句里写的是「六条」——那个数字只统计了直接落在 §4 规则字面表述里的六个工作流（写 `Status`、触发事件属于工程轴），没有把 `Auto-close issue` 计入，尽管同一条记录紧接着承认它「同样关闭（第七条）」。`Auto-close issue` 没有直接落在规则的字面表述里，原因是它写的不是 `Status`，而是 issue 本身的 open/closed 状态，用与 `Item closed` 相反的方向在两轴之间搭桥；但它必须保持关闭的理由与其余六条同源——跨轴写入不允许，不分方向。因此本文档把它计入「必须保持关闭」的清单，作为该清单的唯一权威来源。
+控制本文档所属批次的 ExecPlan（`docs/exec-plan/active/2026-09-18-rule-semantics-and-checker-convergence.md`，`Surprises & Discoveries`）在总结句里写的是「六条」——那个数字只统计了写 `Status` 的六个，没有把 `Auto-close issue` 计入，尽管同一条记录紧接着承认它「同样关闭（第七条）」。本文档的九行表是该清单的唯一权威来源，计数为 7。
+
+**九行全部只用 §4 的四步规则求值，没有例外行。** 最容易看成例外的是 `Auto-close issue`：它写的不是 `Status`，而是 issue 自己的 open/closed 状态。但 §4 第 2 步已经把该状态归入工程轴，第 3 步把「人在看板上手动改字段」归入规划轴——而这条工作流的触发条件恰恰是 `Status` 被改成 `Done`，按本表其余八行，`Status` 的唯一合法写入点是人。于是它和其余六条一样，是一次两轴不一致的跨轴写入，只是方向相反（规划 → 工程，并与 `Item closed` 首尾相接构成回环）。方向不影响判定：§4 问的是两轴是否一致，不是谁写谁。
 
 2026-09-18 对真实看板的核对（`gh api graphql` 读 `projectV2.workflows`）显示：上表标「关闭」的全部 7 条当前均为 `enabled: false`，标「开启」的 2 条均为 `enabled: true`，与本表的推导结果完全一致。
 
@@ -95,11 +97,13 @@
 
 这两者被**有意不连通**——`rule-checks size` 从不读看板的 `Size` 字段，也不产出「实际 vs 申报」的偏差报告。这不是遗漏（issue #48 明确指出过这一点，并给出两个选项：要么让 `rule-checks size` 去读看板做「实际 vs 申报」对比，要么如实承认 `Size` 只是信号），而是权衡之后的结论：
 
-- 读看板的 `Size` 字段需要 `PROJECTS_TOKEN`——看板是 user-level project，Actions 默认提供的 `GITHUB_TOKEN` 没有权限读它，这枚 secret 至今不存在（`gh secret list` 只有 `DSH_GITHUB_WEBHOOK_SECRET`）。
+- 读看板的 `Size` 字段**需要凭据**：看板是 user-level project，Actions 默认提供的 `GITHUB_TOKEN` 读不了，必须一枚带 `project` scope 的 PAT。这一条与「那枚 secret 此刻存不存在」无关——存在与否只影响该检查能否跑起来，不影响它必须**依赖凭据**这个性质，而下面两条的论证只用到后者。
 - `rule-checks size` 现在是**离线、无凭据**的检查，进 `pnpm verify`，随 `PR Fast Gate` 成为**必需**检查。`AGENTS.md` §9.2 的判定准则是：机械可判定、没有需要人解释的误报类别 → 进必需检查；判定里含人的解释，或者需要凭据 → 只能做 advisory。
 - 一旦 `rule-checks size` 需要读看板，它就需要凭据；按同一条判定准则，它必须从「必需」降级为「advisory」。为了多做一个「实际 vs 申报」的比较，把一条**已经生效**的必需检查降级成**需要凭据才能跑**的建议性检查，不划算——这是拿一个更强的保证换一个更弱的观察。
 
-结论：`Size` 是规划时的人工信号，`rule-checks size` 是评审时的机械度量，两者故意不连通。如果将来要连通，前提是先有 `PROJECTS_TOKEN`（见 issue #45 / PR #61 的运行时接线），且需要重新评估 `rule-checks size` 是否还应该留在必需门禁里——不能只加对比逻辑而不重新过一遍 §9.2 的判定。
+结论：`Size` 是规划时的人工信号，`rule-checks size` 是评审时的机械度量，两者故意不连通。将来要连通的前提**不是**「有了凭据」，而是**重新过一遍 §9.2 的判定准则**并接受由此产生的门禁降级——凭据只是实现前提，判定准则才是决策依据。不能只加对比逻辑而跳过这一步。
+
+> 本节此前把「该 secret 尚不存在」写成了论证的第一条。那是一个**时点事实**：它在写下时为真，随后即变。删掉它之后本节结论不受影响——这正说明它当初就不是承重的论据。凭据的当前状态请用 `gh secret list -R SingularityKChen/harness-projects` 现查，不要依赖本文档的转述。
 
 ## 8. Non-goals：本文档不回答什么
 
