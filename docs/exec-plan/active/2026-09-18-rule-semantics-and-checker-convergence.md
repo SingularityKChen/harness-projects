@@ -214,7 +214,7 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 
 | # | 验收项 | 判定证据 | 结果 |
 |---|---|---|---|
-| 1 | `Status` 的定义在仓库里唯一 | `grep -rn '开发做完没' docs/` 输出为空；`docs/product/board-semantics.md` 存在且给出唯一答案 | 通过，有一处已知例外（2026-09-18）：`docs/product/board-semantics.md` 与 `delivery-planning-and-board.md` 已不含该表述，检查通过；但本文件（`2026-09-18-rule-semantics-and-checker-convergence.md`）自身的 D1 表与「最小成功证据」为展示改前改后而引用了这个字面量，因此对 `docs/` 全树跑该 grep 不会得到空输出——命中全部落在本文件、且都是「现在/改成」对照，不是当前生效的定义 |
+| 1 | `Status` 的定义在仓库里唯一 | `grep -rn '开发做完没' docs/ --exclude=2026-09-18-rule-semantics-and-checker-convergence.md` 输出为空；`docs/product/board-semantics.md` 存在且给出唯一答案。**判定范围排除本控制计划自身**，理由与 `AGENTS.md` 在 §8.6 的机械扫描里被 `SCAN_EXCLUDES` 排除是同一类自指：本计划的 D1 表要展示「现在 → 改成」的对照，必须引用那个即将被废弃的字面量。为了让一条 grep 变绿而删掉那张对照表，会把这份计划最有价值的部分之一删掉 | 通过，有一处已知例外（2026-09-18）：`docs/product/board-semantics.md` 与 `delivery-planning-and-board.md` 已不含该表述，检查通过；但本文件（`2026-09-18-rule-semantics-and-checker-convergence.md`）自身的 D1 表与「最小成功证据」为展示改前改后而引用了这个字面量，因此对 `docs/` 全树跑该 grep 不会得到空输出——命中全部落在本文件、且都是「现在/改成」对照，不是当前生效的定义 |
 | 2 | 九条内置工作流的裁决可从一条规则推导 | `board-semantics.md` 的推导规则 + 九行表；契约测试断言「必须关闭」清单为六条 | 通过，但数字有更正（2026-09-18）：逐行数 D2 表「关闭」得到 **7** 条而不是六条（`Auto-close issue` 是遗漏的第七条，见 Surprises & Discoveries）；`docs/product/board-semantics.md` §5 与 `tests/contract/board-workflow.test.js` 均按 7 条实现并断言 |
 | 3 | 合并队列有长期载体 | `docs/project-management/merge-queue.md` 存在；一个无上下文的人只读它能合完队列 | 待执行 |
 | 4 | agent 写入边界可判定 | 读 `AGENTS.md` §10 增补能对「agent 写的这条 `blocked-by` 边算不算有效」给出确定答案 | 待执行 |
@@ -229,11 +229,16 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 - [x] (2026-09-18 14:03 CST) 三个设计决定由人类伙伴裁决（D1 的读法、5 个 PR 的切分、#45 只做离线一半）
 - [x] (2026-09-18 14:03 CST) 建立 5 个隔离工作区与分支
 - [x] (2026-09-18) Batch A 看板语义定义：新建 `docs/product/board-semantics.md`；修正 `delivery-planning-and-board.md` 术语表 / D2 表 / D4 表三处与 D3 的闭环声明；新建 `scripts/board-workflow-check.mjs` + `tests/contract/board-workflow.test.js`（13 条用例，含变异测试验证有牙）；`docs/README.md` 加主题文档索引。`pnpm verify` 43 → 56（PR-A 提交，见下方 Surprises 关于「六条」应为「七条」的更正）
-- [ ] Batch B 过程记录
-- [ ] Batch C workflow-check 假绿收敛
-- [ ] Batch D policy-check 加固
-- [ ] Batch E rule-checks 加固
-- [ ] 验收与重构（Opus），回填本文件
+- [x] (2026-09-18 14:20 CST) Batch B 过程记录：新建 `docs/project-management/merge-queue.md`（136 行 / 7 节，含「怎么验证一条无冲突声明」的可复制流程）；`AGENTS.md` §10 增补四条（适用范围 → 可做的确定性写入 → 必须批准的两类 → 批准留痕且判定可机械执行）；§0 与 `docs/project-management/README.md` 加索引。`pnpm verify` 仍 43（纯文档）
+- [x] (2026-09-18 14:50 CST) Batch C workflow-check 假绿收敛：六类绕过全部关闭，新增 **W7**（`jobs` 必须存在且是映射），`AGENTS.md` §9.5 的 W1–W7 表与 fail-closed 的 exit 3 四类措辞同步。`pnpm verify` 43 → **71**
+- [x] (2026-09-18 14:40 CST) Batch D policy-check 加固：六项全部完成，另在同文件范围内补 `parseFetchedJson()`（原 `fetchIssue()` 无 JSON 解析错误处理）。`pnpm verify` 43 → **55**
+- [x] (2026-09-18 15:40 CST) Batch E rule-checks 加固：十二项全部完成（凭据模式、逐提交扫描、提交信息与 PR 描述、hunk 解析、exit code 契约、去掉自我豁免、收窄误报、掩码输出、CJK 路径解引号、生成物 glob 排除、重命名与大小写、exit 3 分类）。`pnpm verify` 43 → **69**
+- [x] (2026-09-18 16:05 CST) 验收与重构（Opus）：逐批独立复核（不采信报告）、把 PR #61 的双向模型吸收进 Batch A、回填本文件、实测合并顺序
+
+## 执行期间的偏差
+
+- Batch E 中途被会话用量上限打断（`rate_limit` / HTTP 429），代码已完成但未提交。恢复后经 `SendMessage` 续做，先确认工作树处于意图状态而不是残留变异状态，再补完变异证据并提交。这一条记在这里而不是 `Surprises`：它是执行环境的中断，不是对仓库事实的新发现。
+- Batch A 与 Batch E 两次独立撞到同一件事：`cp`（含 `-f`）在本机 shell 上会弹交互式覆盖确认并静默 no-op，因此变异测试的还原一律改用 `Edit` 或带行号的 `sed`。这与本项目早先一次**虚假验证结论**同源（见 `docs/review/2026-09-18-mvp-delivery-review.md`）。
 
 ## Surprises & Discoveries
 
@@ -257,6 +262,14 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
   **Evidence**：2026-09-18（Batch A 执行时）重新查询 `gh api graphql … projectV2.workflows`，`Item reopened` 现在是 `enabled: false`；当前实测的九条状态与 `docs/product/board-semantics.md` §5 的推导结果（7 条关闭、2 条开启）完全一致。
   **Decision impact**：人类伙伴已经在第 244 行记录之后、Batch A 开工之前手动处理了这个人工步骤，本计划不需要为此再提任何请求。这不改变 D1/D2 的设计结论，只是记录该项人工待办已经完成。
 
+- **Observation**（2026-09-18 14:15 CST）：本计划文件自己被未加固的发布面扫描器命中，而且命中的那一行正是 Batch E 用来**修复误报**的清单。
+  **Evidence**：`node scripts/rule-checks.mjs disclosure` 在任一分支上 exit 1，两条 `::error::` 都指向 `- [ ] disclosure：收窄误报（…）` 那一行里的家目录路径与内网主机名字面量。
+  **Decision impact**：这是 issue #40 第 7 项（误报）最强的实证——不是构造的，而且代价可量化：一次误报同时让五个 PR 的检查变红。它也支撑 §8.6 的「人工逐条才是通过条件」：机械扫描连自己的规划文档都分不清。原本准备改写那一行；Batch E 完成后实测该行命中数为 0、整个分支 exit 0，因此**不需要改写**——修好检查器比改写文档正确。
+
+- **Observation**（2026-09-18 15:50 CST）：三个会话并行工作，产出了互相冲突的产物，而本计划没有任何机制发现它。
+  **Evidence**：PR #61（另一会话）与 Batch A 都创建了 `scripts/board-workflow-check.mjs`，API 不同，实测 rebase 冲突；PR #63（另一会话）叠在仍是 draft 的 #59 之上。两者都是 ready 状态，而本计划的五个都是 draft。
+  **Decision impact**：`Interfaces and Dependencies` 只声明了自己这五个 PR 的顺序，对「另一个会话正在改同一个文件」无感。已记入 `merge-queue.md`；#61 的模型按 Decision Log 吸收进 A。
+
 ## Decision Log
 
 - **Decision**：`Status` 定为规划轴、人拥有。
@@ -279,6 +292,18 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
   **Rationale**：这五个 PR 是**一件事**（收敛同一次评审发现的规则歧义与假绿），§4.2 因此满足。代价是 B–E 的 ExecPlan 链接在 A 合并前悬空——这正是评审里批评 #33 的那个耦合，区别在于：#33 是三件**不相关**的任务共用一份计划且顺序靠巧合，这里顺序在开工前就声明并写进每个 PR 描述。
   **Date/Author**：2026-09-18 14:03 CST / agent
 
+- **Decision**：把 PR #61 的双向 `EXPECTED` 模型与 `unknown` 类吸收进 Batch A，#61 缩成只剩运行时接线。
+  **Rationale**：#61 是另一个会话并行产出的，与 Batch A 在 `scripts/board-workflow-check.mjs` 上硬冲突（实测 rebase 冲突）。它的模型在两处严格更好：双向声明能发现「该开的被误关」（我的单向清单发现不了），`unknown` 类能发现 GitHub 新增的第十条工作流（我的清单会视而不见，而本仓库实测过两次读取之间新增三条）。同时保留 Batch A 的 fail-closed 输入校验（#61 没有这一层）——运行时取数失败时这条检查绝不能安静变绿。职责随之清晰：A 判定、#61 取数与接线。
+  **Date/Author**：2026-09-18 16:00 CST / 人类伙伴裁决，agent 提议
+
+- **Decision**：合并顺序由「A 第一」改为 **E 第一**。
+  **Rationale**：E 修的是一个影响**全部五个 PR** 的误报——五个分支都带着本计划文件，而未加固的扫描器把本计划里列举误报字面量的那一行判成真实泄漏。E 合并之前，另外四个合规的 PR 在评审时都挂着一个红的 `Disclosure scan`。E 与其余四个无内容依赖，提前零成本。这条经验（「修的是影响队列中其它 PR 检查结果的误报时应当提前」）已写进 `merge-queue.md`。
+  **Date/Author**：2026-09-18 16:00 CST / agent
+
+- **Decision**：`Closes #48` 收回成 `Refs #48`，#48 保持 open。
+  **Rationale**：本轮只交付了 #48 三项诉求里的一项。另两项（Milestone ↔ 迭代 轴泄漏、M2/M3 分层是否对调）各自还有两个选项，且都是规划决定而不是实现决定——替人类伙伴选了再声称关闭，等于把一次未做的判断伪装成已完成的工作。选项与代价已写进 #48 的评论。
+  **Date/Author**：2026-09-18 15:30 CST / agent
+
 ## Idempotence and Recovery
 
 - 五个分支各自独立；任一 PR 可单独 `git revert`，不牵连其他四个。
@@ -289,15 +314,26 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 
 ## Interfaces and Dependencies
 
-**合并顺序**（B–E 的 ExecPlan 链接依赖 A）：
+**合并顺序**（2026-09-18 实测后修订，见 `Decision Log`）：
 
-| 位置 | PR | 分支 | 交付 | 依赖 |
+| 位置 | PR | 分支 | 交付 | 为什么在这个位置 |
 |---|---|---|---|---|
-| 1 | PR-A | `docs/board-planning-semantics` | Closes #55 #48，Refs #45 | 无 |
-| 2 | PR-B | `docs/process-records` | Closes #46 #47 | A（ExecPlan 链接） |
-| 3 | PR-C | `fix/workflow-check-false-greens` | Closes #38 | A（ExecPlan 链接） |
-| 4 | PR-D | `fix/policy-check-hardening` | Closes #39 | A（ExecPlan 链接） |
-| 5 | PR-E | `fix/rule-checks-hardening` | Closes #40 #41 | A（ExecPlan 链接） |
+| 1 | PR-E #60 | `fix/rule-checks-hardening` | Closes #40 #41 | **提前**：它修的误报影响全部五个 PR——另外四个分支都带着本计划文件，而未加固的扫描器把本计划里列举误报字面量的那一行判成真实泄漏。E 之前，四个合规的 PR 都挂着红的 `Disclosure scan` |
+| 2 | PR-A #56 | `docs/board-planning-semantics` | Closes #55，Refs #48 #45 #61 | 定义先于其它文档引用它 |
+| 3 | PR-B #57 | `docs/process-records` | Closes #46 #47 | 无硬依赖 |
+| 4 | PR-C #58 | `fix/workflow-check-false-greens` | Closes #38 | 无硬依赖 |
+| 5 | PR-D #59 | `fix/policy-check-hardening` | Closes #39 | 无硬依赖；**PR #63（另一会话）叠在它之上**，#63 不能先于它合并 |
+
+本计划文件随五个分支各带一份**逐字节相同**的副本，因此每个 PR 单独看时 ExecPlan 链接都不悬空；实测按任意顺序 rebase 时 git 按 patch-id 识别为已应用并跳过，不产生冲突（原先担心的「五份副本会互相冲突」不成立）。
+
+B/C/D/E 都改 `AGENTS.md` 的不同小节（§0+§10 / §9.5 / §8.7 / §8.3+§8.6），预期是「两边都保留」级别的解冲突。
+
+**跨会话的协同约束**（本计划开工时没有预料到）：
+
+- **PR #61**（另一会话）交付 #45 的运行时半边。它原本与 PR-A 在 `scripts/board-workflow-check.mjs` 上硬冲突；按 `Decision Log` 的裁决，模型已吸收进 PR-A，#61 需要 rebase 到 PR-A 之后并缩成只剩取数与接线。
+- **PR #63**（另一会话）交付 #62，叠在 PR-D 之上，必须排在 PR-D 之后。
+
+**交还给人类伙伴的人工项**：建 `PROJECTS_TOKEN`（带 `project` scope）—— PR #61 与 PR #37 都卡在这一个前提上。`Item reopened` 已由人类伙伴关掉，该项不再待办。
 
 C / D / E 三者之间**无依赖**，可任意顺序；但都改 `AGENTS.md`，预期在 §8.3/§8.7/§9.5 各自的小节内有「两边都保留」级别的 rebase 冲突。
 
@@ -308,8 +344,35 @@ C / D / E 三者之间**无依赖**，可任意顺序；但都改 `AGENTS.md`，
 
 ## Outcomes & Retrospective
 
-本计划的五个批次尚未执行。执行完成后回填：实际交付、与设计的偏离、变异测试的完整输出、以及五个 PR 合并后 `main` 的门禁结果。
+五个批次全部执行完毕，五个 PR 均为 draft，等待人类伙伴评审——**本计划不合并任何 PR**。
+
+**交付结果**
+
+| 批次 | PR | 测试数变化 | 交付 |
+|---|---|---|---|
+| A | #56 | 43 → 58 | `docs/product/board-semantics.md`（113 行）；`delivery-planning-and-board.md` 四处更正；`scripts/board-workflow-check.mjs` + 15 条契约测试 |
+| B | #57 | 43（纯文档） | `merge-queue.md`（136 行）；`AGENTS.md` §10 增补四条 |
+| C | #58 | 43 → 71 | 六类假绿全部关闭；新增 W7；§9.5 规则文本同步 |
+| D | #59 | 43 → 55 | 六项加固；`parseFetchedJson()`；§8.7 同步 |
+| E | #60 | 43 → 69 | 十二项；`PR_BODY` 经 `env` 传入；§8.3/§8.6 同步 |
+
+合并后的合计测试数由实测确定，不靠相加推断（见 `Validation and Acceptance` 第 8 项）。
+
+**与设计的偏离，三处**
+
+1. **`MUST_BE_DISABLED` 是 7 条不是 6 条。** 我在 D2 的表里列了 7 行「关闭」，却在总结句里写 6——只统计了写 `Status` 且触发事件属工程轴的那六个，漏计了 `Auto-close issue`（它写 issue 状态、与 `Item closed` 构成回环）。Batch A 逐行数出 7 并按 7 实现，是对的。推导规则本身不需要改，错的只是总结句。
+2. **判定从单向改成双向，并增加 `unknown` 类**（见 Decision Log）。这是设计的实质改进，不是执行偏差，来源是另一个会话并行产出的 PR #61。
+3. **`Closes #48` 收回成 `Refs #48`。** D1–D4 只覆盖了 #48 三项诉求里的一项（`Size` 是信号），另两项（Milestone ↔ 迭代 轴泄漏、M2/M3 分层对调）各自还有两个选项且都是规划决定。声称关闭会是一次不实的收尾。
+
+**回头看，这份计划最有用与最无用的部分**
+
+最有用的是 **D2 把逐条裁决改成一条可求值的规则**。它当场就产生了回报：#33 的 D4 做了六次独立判断、漏掉三条；而这条规则被 Batch A 套用时立刻暴露了我自己的计数错误，又被 #61 的 `unknown` 类补上了「第十条怎么办」——一条规则能被别人拿去发现规则作者的错误，这是散文形式的裁决表做不到的。
+
+最无用的是 **D6 那条「修复前红 → 修复后绿 → 变异后再红」的三态要求写得过于笼统**。五个批次都执行了它，但其中至少三处的实际结论是「变异没有被任何测试抓到，因为该判定被外层的 fail-closed 默认值覆盖了」——那不是没牙，是冗余。D6 没有预先区分这两种情况，导致每个批次都要自己现场判断一次。下一份计划应当写明：变异存活时先判断是冗余还是无牙，再决定补测试还是删代码。
+
+**一个没有被计划预料到的结构性问题**：三个会话并行工作，产出了互相冲突的同名文件（#56 与 #61 的 `scripts/board-workflow-check.mjs`）与一条叠在 draft PR 上的分支（#63 叠在 #59 上）。本计划的 `Interfaces and Dependencies` 只声明了自己这五个 PR 的顺序，没有任何机制发现「另一个会话正在改同一个文件」。这正是 #46 那份 `merge-queue.md` 要解决的问题的更强形态，已记入该文件。
 
 ## Bottom Change Note
 
 - 2026-09-18 14:03 CST：新建本文件。范围是 2026-09-18 MVP 交付评审留下的 9 个 issue，分五个 PR 收敛。三个设计决定（`Status` 的读法、PR 切分、#45 的切半）在开工前由人类伙伴裁决，记在 `Decision Log`。
+- 2026-09-18 16:05 CST：五个批次执行完毕后回填。改动原因：(1) `Progress` 勾选五个批次并补「执行期间的偏差」一节（Batch E 被用量上限打断、两次独立撞到 `cp` 静默失败）；(2) `Validation and Acceptance` 第 1 项的判定范围排除本文件自身，理由是自指——与 `AGENTS.md` 被 `SCAN_EXCLUDES` 排除同一类；(3) `Decision Log` 增三条（吸收 #61 的模型、合并顺序改 E 第一、`Closes #48` 收回成 `Refs`）；(4) `Surprises` 增两条（本文件被自己的扫描器命中；三会话并行产出冲突产物）；(5) `Outcomes & Retrospective` 回填，含对 D6 写得过于笼统的自我批评。
