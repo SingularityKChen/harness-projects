@@ -9,16 +9,16 @@
 
 完成后，一个对本项目一无所知的人打开 GitHub Project 10，不读任何文档就能回答三个问题：
 
-1. **现在该做什么** —— 当前迭代里 `优先级 = P0` 的条目；
+1. **现在该做什么** —— 当前迭代里 `Priority = P0` 的条目；
 2. **什么被挡住了** —— `blocked-by` 边上还有未关闭的 issue 的条目；
-3. **这一批会有多大** —— `规模` 字段，在动手之前就声明预计 diff 量级。
+3. **这一批会有多大** —— `Size` 字段，在动手之前就声明预计 diff 量级。
 
 同时，"MVP 是什么"从一张二十行的范围表，回到**一条可被证伪的链路**。
 
 最小成功证据：
 
 ```bash
-# 每个看板条目的 Status / 优先级 / 规模 都非空
+# 每个看板条目的 Status / Priority / Size 都非空
 gh project item-list 10 --owner SingularityKChen --format json --limit 80 \
   | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for i in d['items'] if i.get('status')), '/', len(d['items']))"
 # 期望：23 / 23
@@ -116,7 +116,7 @@ M3 之后**故意不填到期日**：Gate E1 的裁决可以重塑 #7 的拆分�
 
 `AGENTS.md` §8.3 规定代码 PR ≤ 1000 行、文档 ≤ 1500 行。问题在于这个约束现在只在**评审时**才被发现——那时拆分成本最高。两个机制把它前移到**规划时**：
 
-**机制一：`规模` 字段**（看板单选字段），在动手之前声明预计 diff 量级：
+**机制一：`Size` 字段**（看板单选字段），在动手之前声明预计 diff 量级：
 
 | 取值 | 含义 |
 |---|---|
@@ -128,7 +128,7 @@ M3 之后**故意不填到期日**：Gate E1 的裁决可以重塑 #7 的拆分�
 
 **机制二：sub-issue**。一个 sub-issue = 一个批次 = 一个 PR。父条目只做协调，不占 PR。
 
-**规则**：标 `拆分` 的条目只有在**至少一个子条目进入迭代**时才跟着进入迭代，并在最后一个子条目关闭时关闭。因此 #7 标 `拆分` 且未排期——它还没有被拆，现在排期就是空头承诺。
+**规则**：标 `拆分` 的条目只有在**至少一个子条目进入迭代**时才跟着进入迭代，并在最后一个子条目关闭时关闭。因此 #7 标 `拆分`（`Size` 字段取值）且未排期——它还没有被拆，现在排期就是空头承诺。
 
 本次按这条规则新建了十个子条目：
 
@@ -206,13 +206,13 @@ gh api graphql -f query='query { __schema { mutationType { fields { name } } } }
 ### Batch 2 · 看板字段与里程碑
 **最小闭环**：迭代排期与 PR 粒度有了承载字段；能力闭环有了范围盒。
 - [x] 新建 `迭代` 字段（ITERATION，四个具名迭代）
-- [x] 新建 `优先级` 字段（P0 / P1 / P2）
-- [x] 新建 `规模` 字段（XS / S / M / L / 拆分）
+- [x] 新建 `Priority` 字段（P0 / P1 / P2）
+- [x] 新建 `Size` 字段（XS / S / M / L / 拆分）
 - [x] 新建六个里程碑并写入验收口径
 **验证**：
 ```bash
 gh project field-list 10 --owner SingularityKChen --format json --limit 30 \
-  --jq '[.fields[].name] | map(select(. == "迭代" or . == "优先级" or . == "规模")) | length'
+  --jq '[.fields[].name] | map(select(. == "Iteration" or . == "Priority" or . == "Size")) | length'
 # 期望：3
 gh api repos/SingularityKChen/harness-projects/milestones --jq 'length'
 # 期望：6
@@ -234,7 +234,7 @@ gh issue view 4 --json title --jq .title   # 父条目存在
 
 ### Batch 4 · 迭代排期与字段回填
 **最小闭环**：看板上没有空字段，"现在做什么"可以直接看出来。
-- [x] 为 23 个条目写入 Status / Kind / Area / Gate / 优先级 / 规模 / 迭代 / ExecPlan / Batch
+- [x] 为 23 个条目写入 Status / Kind / Area / Gate / Priority / Size / Iteration / ExecPlan / Batch
 - [x] 把漏掉的 #20 补进看板
 **验证**：见 `Validation and Acceptance` 表第 4 行。
 **回滚**：字段值可逐条清空；不影响 issue 本身。
@@ -252,6 +252,18 @@ grep -n '2026-09-18-delivery-planning-and-board' docs/README.md
 # 期望：至少一行
 ```
 **回滚**：`git revert` 本批提交。
+
+### Batch 9 · 工程执行状态与规划状态分离
+**最小闭环**：工程事件有地方可写，且写的不是 `Status`。
+**涉及文件**：`scripts/sync-engineering-state.mjs`、`.github/workflows/engineering-state.yml`、`tests/contract/engineering-state.test.js`（交付在 PR #37 / issue #36）
+- [x] 新建 `Engineering` 字段：`PR open / Changes requested / Approved / Merged`
+- [x] 事件映射写成纯函数，含一条断言"映射结果不可能是任何规划状态字面量"的契约测试
+- [x] 用真实 token 端到端跑通 8 个 open PR 的回填
+- [x] 回填后重读 25 个条目的 `Status`，零漂移
+- [ ] 配置仓库 secret `PROJECTS_TOKEN`（带 `project` scope）—— **待人类执行**
+- [ ] 在界面关掉四条写 `Status` 的内置工作流 —— **待人类执行**
+**验证**：`pnpm verify` → `tests 14 / pass 14`；端到端 `#14 #15 #16 #17 #18 #20 #32 #34 = PR open` 且 `Status` 零漂移。
+**回滚**：`git revert`；字段用 `deleteProjectV2Field`。
 
 ### Batch 7 · Project view 重建
 **最小闭环**：每个 view 回答一个确切问题，而不是三份相同的默认配置。
@@ -289,10 +301,10 @@ gh api graphql -f query='query{user(login:"SingularityKChen"){projectV2(number:1
 
 | # | 验收项 | 判定证据 | 结果 |
 |---|---|---|---|
-| 1 | 三个新字段存在 | `gh project field-list 10 --owner SingularityKChen` 含 `迭代 / 优先级 / 规模` | 通过（2026-09-18） |
+| 1 | 三个新字段存在 | `gh project field-list 10 --owner SingularityKChen` 含 `Iteration / Priority / Size` | 通过（2026-09-18） |
 | 2 | 六个里程碑存在且各带验收口径 | `gh api repos/SingularityKChen/harness-projects/milestones --jq 'length'` = 6 | 通过（2026-09-18） |
 | 3 | 每个 issue 都有里程碑 | `gh issue list --state open --limit 50 --json number,milestone --jq '[.[]\|select(.milestone==null)]\|length'` = 0 | 通过（2026-09-18） |
-| 4 | 看板 23 条目字段无空洞 | 字段回填脚本输出 `wrote=164 failed=0`；GraphQL 读回每条的 Status / 优先级 / 规模 均非空 | 通过（2026-09-18） |
+| 4 | 看板 23 条目字段无空洞 | 字段回填脚本输出 `wrote=164 failed=0`；GraphQL 读回每条的 Status / Priority / Size 均非空 | 通过（2026-09-18） |
 | 5 | 依赖图可查询 | `gh issue list --state open --search "-is:blocked"` 返回的集合与"当前真正可动手"一致 | 通过（2026-09-18） |
 | 6 | 两个看板工作流已开启 | 新建一个测试 issue 并加入看板后 Status 自动为 `Todo`；关闭它后 Status 自动为 `Done`；随后删除该测试 issue | **待人类执行**（Batch 6） |
 | 7 | `Pull request merged` 保持关闭 | `gh api graphql` 读 `workflows` 节点，该项 `enabled = false` | 通过（2026-09-18） |
@@ -305,7 +317,8 @@ gh api graphql -f query='query{user(login:"SingularityKChen"){projectV2(number:1
 - [x] (2026-09-18) Batch 3 子条目与依赖图（10 个子条目、18 条依赖边）
 - [x] (2026-09-18) Batch 4 迭代排期与字段回填（164 次字段写入，0 失败）
 - [x] (2026-09-18) Batch 5 文档落地
-- [ ] Batch 6 人工开启两个看板工作流 —— **阻塞：GitHub 未提供对应 mutation，只能在网页界面操作**
+- [x] (2026-09-18) Batch 6 两个看板工作流已开启（`Item added to project` → `Todo`，`Item closed` → `Done`，均已实测）；**仍需人工**：view 1 设 group by `Status`、view 5 设 group by `Milestone`，并关掉四条写 `Status` 的内置工作流
+- [x] (2026-09-18) Batch 9 工程执行状态分离（PR #37）
 - [x] (2026-09-18) Batch 7 Project view 重建（6 个 view，各带 filter 与列集合）
 - [x] (2026-09-18) Batch 8 §8.6 与 §8.3 可执行化（PR #35，三个检查全绿）
 
@@ -347,9 +360,13 @@ gh api graphql -f query='query{user(login:"SingularityKChen"){projectV2(number:1
   **Evidence**：`gh api graphql` 内省 `ProjectV2ViewConfigurationInput` 只返回 `visibleFieldIds`；给 Roadmap view 传 configuration 返回 `Roadmap views do not support visible fields.`；回读六个 view 的列顺序与传入顺序不一致。
   **Decision impact**：分组必须人工设（本迭代 → group by Status，待排期 → group by Milestone），记入 Batch 6 的人工清单；把最常用的"本迭代"改造进原来的 1 号位而不是新建，以绕开 view 顺序不可设。
 
-- **Observation**：GitHub Project 的 filter 接受 CJK 字段名——`迭代:@current`、`优先级:P0`、`规模:拆分`、`no:迭代` 全部被接受。
-  **Evidence**：逐条 `updateProjectV2View` 测试，均返回成功。
-  **Decision impact**：不必为了 filter 把三个新字段改成英文名。但要注意**API 不校验 filter 语义**：mutation 成功只证明字符串被存下了，不证明它在界面上真的筛出东西。
+- **Observation**：GitHub Project 的 filter 接受 CJK 字段名（`迭代:@current`、`优先级:P0` 等全部被接受），但 **`gh project item-list --format json` 会损坏 CJK 字段名的字节**：key 的前导字节被替换成 U+FFFD，`jq '.["迭代"]'` 静默返回 null 而不报错。
+  **Evidence**：`gh project item-list ... | jq -r '.items[0]|keys[]' | xxd` 输出 `efbfbd efbfbd efbfbd e4bba3`——三个替换字符后才是「代」。改名为 ASCII 后同一命令正常输出 `iteration` / `priority` / `size`。
+  **Decision impact**：**推翻了本计划最初"不必改名"的判断**。三个字段已改名为 `Iteration` / `Priority` / `Size`，两个引用旧名的 view filter 同步更新。另注意 **API 不校验 filter 语义**：mutation 成功只证明字符串被存下了，不证明它在界面上真的筛出东西。
+
+- **Observation**：内置看板工作流会**异步覆盖**已经显式写入的 Status，延迟 4–8 秒且不留 actor 痕迹。
+  **Evidence**：issue #34 的 Status 从显式设定的 `In Review` 变成 `In Progress`（03:17:31 创建 PR #35 → 03:17:57 条目被改写）；受控实验（新建 draft 条目再删）测得 `Item added to project` 写 `Todo` 的延迟为 4–8 秒；`ProjectV2Workflow` 只暴露 `name` / `enabled`，读不到是谁写的、写了什么。
+  **Decision impact**：这是不变量 3 在自己看板上的实例。Batch 9 给出解法——工程事实写独立的 `Engineering` 字段，`Status` 保持人工拥有。
 
 - **Observation**：在 ExecPlan 里复制 §8.6 的扫描正则，会让该文件在下一次自查时命中自己——因为正则里含有家目录前缀的字面量。
   **Evidence**：首次提交前自查命中本文件第 384 行，而该行正是被引用的正则。
@@ -391,6 +408,14 @@ gh api graphql -f query='query{user(login:"SingularityKChen"){projectV2(number:1
 
 - **Decision**：dependabot 只开 `github-actions`，不开 `npm`。
   **Rationale**：它存在的直接理由是让 action 能安全地 pin 到 commit SHA——pin 之后升级会变成手工负担，两者必须一起用。npm 的更新 PR 数量远大于 actions，而当前瓶颈正是评审队列的合并吞吐。
+  **Date/Author**：2026-09-18 / Claude Opus 5
+
+- **Decision**：看板自定义字段一律用 ASCII 名；已有的三个 CJK 字段改名为 `Iteration` / `Priority` / `Size`。
+  **Rationale**：`gh project item-list --format json` 会静默损坏 CJK key，`jq` 取不到值又不报错——把这种沉默当成"字段没值"会得出错误结论。看板上原有的六个字段本来就是英文，混用是最差的选择。
+  **Date/Author**：2026-09-18 / Claude Opus 5
+
+- **Decision**：工程执行事实写独立的 `Engineering` 字段，而不是关掉自动化了事。
+  **Rationale**：内置工作流写死 `Status` 不可重定向，所以"要自动化"和"守住不变量 3"在内置能力范围内无法兼得。自己写一个工作流即可两者兼得，而且这正是产品自身的模型（规划状态与工程状态分属不同投影）。
   **Date/Author**：2026-09-18 / Claude Opus 5
 
 - **Decision**：合并顺序写进文档，不编码成 `blocked-by`；只有真实内容依赖才建依赖边。
@@ -460,7 +485,7 @@ gh pr update-branch <next> --rebase
 **已知缺口（未纳入本计划，需另开工作项）**
 
 1. 非 sub-issue 的新 issue 不会自动上板。补法需要一个带 `project` scope 的 token 存成仓库 secret，加一个 Actions 工作流。评审队列清空后再做。
-2. 本次确立的 `迭代 / 优先级 / 规模` 语义应当并入 `docs/project-management/README.md`——该文件目前只存在于 PR #11，合并后再补。
+2. 本次确立的 `Iteration / Priority / Size` 语义应当并入 `docs/project-management/README.md`——该文件目前只存在于 PR #11，合并后再补。
 
 ## Outcomes & Retrospective
 
@@ -476,3 +501,4 @@ gh pr update-branch <next> --rebase
 
 - 2026-09-18：首次创建。原因：13 个 issue、6 个 open PR 与一个只有 12 条目的看板之间已经无法用人脑对齐；同时"MVP 是什么"在上游输入里有三种互相冲突的表述，需要在开始实现前收敛成一个可判定的定义。
 - 2026-09-18：追加 Batch 7（Project view 重建）与 Batch 8（§8.6 / §8.3 可执行化，交付在 PR #35）。原因：view 侧原本是三份相同的默认配置，看板建好了却没法用；而 §8.6 / §8.3 两条规则写得很确切却零自动化，正好补上 D3「规划时声明体量」的评审侧一半。同时**订正**了一条错误的 Surprise：`AGENTS.md` 的敏感信息自查一节并未丢失，它在 PR #12 里。
+- 2026-09-18：追加 Batch 9（工程执行状态分离，交付在 PR #37），并把三个看板字段改名为 `Iteration` / `Priority` / `Size`。原因：实测发现 `gh project item-list --format json` 会静默损坏 CJK 字段名，这推翻了本计划最初"不必改名"的判断；同时在看板上抓到一次内置工作流异步覆盖显式 Status 的实例，需要给工程事实一个不与规划状态争抢的落点。
