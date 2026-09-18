@@ -183,9 +183,17 @@ function stripFencedCodeBlocks(text) {
  * Note this is a different statement from "`<!-- Closes #N -->` is rejected":
  * that holds only because the literal `N` is not a digit, which says nothing
  * about comments being understood. A real number needed this step.
+ *
+ * An unclosed `<!--` runs to the end of the input rather than not matching at
+ * all, matching CommonMark/GitHub rendering: on GitHub an unterminated
+ * comment swallows the rest of the body (nothing after it renders), and
+ * "commenting a line out mid-edit and not finishing the close" is a common
+ * real instance of exactly this. `(?:-->|$)` lets the lazy scan stop at a real
+ * close when one exists — unchanged from before — and fall through to
+ * end-of-string when one never comes.
  */
 function stripHtmlComments(text) {
-  return text.replace(/<!--[\s\S]*?-->/g, '')
+  return text.replace(/<!--[\s\S]*?(?:-->|$)/g, '')
 }
 
 /**
@@ -196,7 +204,10 @@ function stripHtmlComments(text) {
  * backtick cannot swallow the rest of the body. That direction is deliberate:
  * over-stripping would drop a real link and turn the check red on a conforming
  * pull request, which is the failure mode §8.3.7 warns trains people to ignore
- * an advisory check.
+ * an advisory check. The cost this buys: CommonMark allows a code span to
+ * span a newline, so one that does (`` `Closes\n#12` ``) is a false green here
+ * — the reference inside still counts as linked — which is accepted rather
+ * than fixed because the check is advisory and the miss is narrow.
  */
 function stripInlineCode(text) {
   return text.replace(/(`+)[^\n]*?\1/g, '')

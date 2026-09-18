@@ -442,3 +442,27 @@ test('策略：Batch F 的剥离不回归 Batch D 已经正确的判定', () => 
   const repo = 'SingularityKChen/harness-projects'
   assert.deepEqual(linkedIssues(`Closes https://github.com/${repo}/issues/12`, repo), { closes: [12], refs: [] })
 })
+
+// ── PR #63 评审修复：未闭合的 <!-- 是假绿 ──────────────────────────────────
+//
+// RC2 的又一个实例：stripHtmlComments 的决策域只覆盖了"闭合的注释"这一种
+// 作者想到的形态。GitHub 渲染未闭合的 `<!--` 时会把其后**全部正文**一并吞掉
+// （页面上完全不可见），而"改到一半先把一行注释掉、没来得及补上闭合"正是
+// 本 PR 针对的那类意外里最常见的一种——号码是真实数字，之前完全没被剥离。
+
+test('策略：linkedIssues 把未闭合的 <!-- 当成吞到文末，不再算关联', () => {
+  // 复现：没有任何 --> 时，旧实现完全不匹配，真实号码原样留在正文里。
+  assert.deepEqual(linkedIssues('<!-- note\nCloses #12'), { closes: [], refs: [] })
+  assert.match(checkPullRequestBody('<!-- note\nCloses #12')[0], /must link the issue/)
+  // 未闭合注释之前的真实链接必须保留——不是把整份正文都吞掉
+  assert.deepEqual(linkedIssues('Refs #34\n\n<!-- Closes #12, 还没想好要不要关'), { closes: [], refs: [34] })
+})
+
+test('策略：HTML 注释不嵌套——两条已经正确的判定加回归钉子', () => {
+  // 第一个 --> 关闭第一个 <!--，其余文本（含内层看起来像开始的 <!--）都在
+  // 注释范围内，一起被剥掉：不算关联。
+  assert.deepEqual(linkedIssues('<!-- <!-- Closes #12 --> -->'), { closes: [], refs: [] })
+  // 同理，第一个 --> 提前关闭了外层注释；之后的 Closes #12 已经在注释之外，
+  // 是可见正文：算关联。
+  assert.deepEqual(linkedIssues('<!-- <!-- --> Closes #12 -->'), { closes: [12], refs: [] })
+})
