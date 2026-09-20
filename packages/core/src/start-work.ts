@@ -4,7 +4,8 @@
  */
 import { CapabilityKey, ProjectErrorCode, projectError } from '@harness-projects/capabilities'
 import {
-  ExecutionContextStatus, ExecutionRunStatus, type ExecutionContextId, type ProjectError,
+  EntityKind, ExecutionContextStatus, ExecutionRunStatus, RelationType, asBrandedId,
+  type EntityId, type ExecutionContextId, type ProjectError,
 } from '@harness-projects/domain'
 import { resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
@@ -14,6 +15,7 @@ import {
   type StartWorkRequest, type StartWorkResult,
 } from './execution-context.ts'
 import { namesFor, outcomeOf, provisionGit, type GitOutcome } from './git-provisioning.ts'
+import { EdgeProvenance, asEntityId, chainEntityId, recordEdges, type DiscoveredEdge } from './relations.ts'
 import { createWriteLedger, type WriteLedger, type WriteReport } from './write-machine.ts'
 
 function actorKind(request: StartWorkRequest): string | undefined {
@@ -80,6 +82,7 @@ async function provision(
 ): Promise<StartWorkResult> {
   const git = await provisionGit(context, request, namesFor(request), contextId)
   await saveContext(context, contextId, request, git.status, git.branchExternalId, git.worktreeExternalId)
+  await recordStartFacts(context, request, contextId, git)
   if (git.bindingId !== undefined) {
     await ledger.record({
       workspaceId: context.workspaceId, bindingId: git.bindingId, commandName: 'startWork',
@@ -88,6 +91,30 @@ async function provision(
   }
   if (!git.ok) return toResult(git.report, outcomeOf(git), git.report.error)
   return startExecution(context, request, contextId, git)
+}
+
+/** 链路推进写入的系统事实边：工作项 → 执行上下文 → 工作树（携带分支）。 */
+async function recordStartFacts(
+  context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, git: GitOutcome,
+): Promise<void> {
+  const workItemId = asBrandedId<EntityId>(request.workItemId)
+  const contextEntityId = asEntityId(contextId)
+  const edges: DiscoveredEdge[] = [{
+    from: workItemId, to: contextEntityId, type: RelationType.Tracks, provenance: EdgeProvenance.Command,
+    artifact: { id: contextEntityId, kind: EntityKind.ExecutionContext, externalId: contextId, label: undefined, observed: true, detail: undefined },
+  }]
+  const slot = git.worktreeExternalId ?? git.branchExternalId
+  if (slot !== undefined) {
+    const worktreeId = chainEntityId(context.workspaceId, EntityKind.Worktree, `${git.bindingId}|${slot}`)
+    edges.push({
+      from: contextEntityId, to: worktreeId, type: RelationType.HasWorktree, provenance: EdgeProvenance.Command,
+      artifact: {
+        id: worktreeId, kind: EntityKind.Worktree, externalId: slot,
+        label: git.branchExternalId ?? slot, observed: true, detail: undefined,
+      },
+    })
+  }
+  await recordEdges(context, edges)
 }
 
 async function startExecution(

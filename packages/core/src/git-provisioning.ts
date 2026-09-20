@@ -34,12 +34,20 @@ function slug(raw: string): string {
   return cleaned === '' ? 'work-item' : cleaned
 }
 
+/** 分支与工作树的默认命名：只由工作项 id 派生，不含任何本机路径；谱系投影复用同一权威。 */
+export function branchNameFor(workItemId: string): string {
+  return `work/${slug(workItemId)}`
+}
+export function worktreePathFor(workItemId: string): string {
+  return `.worktrees/${slug(workItemId)}`
+}
+
 /** 分支名与工作树路径都可由调用方覆盖；默认值只由工作项 id 派生，不含任何本机路径。 */
 export function namesFor(request: StartWorkRequest): Names {
   const path = request.worktreePath
   return {
-    branch: request.branchName ?? `work/${slug(request.workItemId)}`,
-    path: path === undefined || path.trim() === '' ? `.worktrees/${slug(request.workItemId)}` : path,
+    branch: request.branchName ?? branchNameFor(request.workItemId),
+    path: path === undefined || path.trim() === '' ? worktreePathFor(request.workItemId) : path,
   }
 }
 
