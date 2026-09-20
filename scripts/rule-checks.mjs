@@ -397,9 +397,18 @@ export function tally(numstat) {
  */
 export const DEFAULT_BASE = 'origin/main'
 
-/** `origin/main`、`refs/heads/main` 与 `main` 指向同一条基线；比较前归一化。 */
+/**
+ * `origin/main`、`refs/remotes/origin/main`、`refs/heads/main` 与 `main` 指向同一
+ * 条基线；比较前归一化。归一化只影响"要不要多打印一行栈累计"，不影响判定。
+ * `origin/main~1` 这类**不是**同一个提交的写法故意不归一：它确实不是 main 的
+ * tip，按非 main 处理才是对的。
+ */
 export function normalizeBaseRef(ref) {
-  return ref.replace(/^refs\/heads\//, '').replace(/^origin\//, '')
+  return String(ref)
+    .trim()
+    .replace(/^refs\/heads\//, '')
+    .replace(/^refs\/remotes\/[^/]+\//, '')
+    .replace(/^origin\//, '')
 }
 
 /**
