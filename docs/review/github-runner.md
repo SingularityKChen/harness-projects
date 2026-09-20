@@ -90,7 +90,7 @@ cd ~/<runner-name> && ./svc.sh status   # 或：./svc.sh start | stop
 
 ## 6. 自托管 runner 的威胁模型
 
-§5 的前几条描述的是**网络**边界：无入站监听、workflow 不可被 PR 替换、事件只走 loopback。这一节描述的是另一条边界，它由"这台 runner 不是一次性环境"直接推出（`AGENTS.md` §10 同一约束的成文）。
+§5 的前几条描述的是**网络**边界：无入站监听、workflow 不可被 PR 替换、事件只走 loopback。这一节描述的是另一条边界，它由"这台 runner 不是一次性环境"直接推出（`AGENTS.md` §7 与 `docs/development/repository-rules.md` §3 同一约束的成文）。
 
 **为什么托管 runner 上的直觉在这里不成立。** 托管 runner 为每个 job 开一台用完即弃的虚拟机：job 结束，整台机器连同进程表、临时目录和磁盘上的一切一起销毁。因此"job 期间留痕没关系"的写法在那里成立——留痕的生命周期不超过 job。自托管 runner 相反：job 与登录用户的其它进程共享同一台机器。job 结束后，进程表里的残留、临时目录里的文件、以及任何写盘的东西都继续存在，并且与你不希望它们看见这些内容的本地进程共存。**在托管 runner 上可以忽略的写法，在这里不是。**
 

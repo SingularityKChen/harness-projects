@@ -2,6 +2,15 @@
 
 本地开发环境与工具配置。这里写的是"在这台机器上工作需要的设置"，不是产品设计。
 
+## 入口
+
+| 文档 | 用途 |
+|---|---|
+| repository-rules.md | 发布面、workflow W1–W7、项目写入和安全边界 |
+| workflow.md | GPT-6 适配的开发、ExecPlan、draft PR、并行、验收与请求评审流程 |
+| ci.md | 当前 workflow、PR Fast Gate、merge_group / weekly 的演进边界 |
+| publication.md | disclosure / size 命令与人工五类目检查 |
+
 ## 1. 工具链
 
 | 工具 | 版本来源 | 检查 |

@@ -74,6 +74,24 @@ git push --force-with-lease origin <自己的分支>
 
 合并完成后：把第 4 节对应行标记为已合并（注明日期与最终落在 `main` 上的 commit SHA），并对**下一个**还未合并的 PR 重新核实一次「无冲突」声明——它现在要对的是真实的 `origin/main`，不是预演时的假设状态。
 
+### 2.4 PR 前与最终 push 前的提交整理
+
+开 PR 前、以及最终 push 前，执行一次提交整理：删除临时调试和 fixup，把同一批次收敛成可独立审阅的提交序列；整理后重新运行本批验证、敏感信息检查和体量检查。分支已推送时先创建恢复锚点：
+
+    git fetch origin
+    git ls-remote origin refs/heads/<自己的分支>
+    git branch backup/<自己的分支>-before-reorg <当前本地 head>
+    git range-diff origin/main...<旧 head> origin/main...<整理后 head>
+    git push --force-with-lease=refs/heads/<自己的分支>:<旧远端 head> origin <整理后 head>:refs/heads/<自己的分支>
+
+push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。draft PR 只有在最终 head 的 checks 通过后才执行：
+
+    gh pr ready <n>
+    gh pr view <n> --json isDraft,baseRefName,headRefOid,mergeable,mergeStateStatus
+    gh pr checks <n>
+
+如果 PR 已经是 ready，仍然要回读；不要把旧 head 的 ready 状态当作新 head 的验收证据。
+
 ## 3. 队列表的列
 
 | 列 | 含义 |
@@ -106,6 +124,21 @@ git push --force-with-lease origin <自己的分支>
 本计划文件的**种子提交**在相关分支上逐字节相同——用 `git rev-parse <分支>:docs/exec-plan/active/2026-09-18-rule-semantics-and-checker-convergence.md` 逐分支比对可重新核实这一点（期望：共享种子提交的分支返回同一个 blob hash），下文只是某一时刻的快照，结论应以重新执行该命令为准，不要假设它长期成立。种子相同是每个 PR 单独看时 ExecPlan 链接都不悬空的原因——这与第 1 节描述的「悬空链接」问题不同；rebase 时 git 按 patch-id 把这个共同的种子提交识别为已应用并跳过。但**不是所有分支都停在种子提交上**：#56（位置 2）相对种子有 87 行新增、16 行删除（净增 71 行，307→378 行，非纯追加）；#63（位置 6）相对它所叠的 #59（同为 307 行的种子）有 41 行纯新增、零删除（307→348 行）——`git diff --stat <分支A> <分支B> -- <上面那条路径>` 可重验这组数字，同样应以重新执行为准。这部分改动都落在这份 ExecPlan 本身，不参与 patch-id 去重。实测结果是 #56 在自己的位置干净变基，真正的冲突出现在更晚的 #63——它的纯追加落进了 #56 已经动过的同一片区域（`Progress`/`Bottom Change Note`），具体冲突点与解法见位置 6 那一行。
 
 这张表由每个批次自己维护：谁最终改了 `AGENTS.md` 的哪个小节，只有该批次的执行者知道确切结果；合并前请按 2.2 的步骤把「预期」验证成「实测」，并按 2.3 的模板记录实际解法与合并后的 commit SHA。
+
+### 4.1 当前远端队列快照（2026-09-20）
+
+上面的历史队列记录了 2026-09-18 的规则语义栈；当前远端开放 PR 只有 #69 和 #37，不能把历史位置直接套用：
+
+| 位置 | PR | head | base | 状态 | 依赖与动作 |
+|---|---|---|---|---|---|
+| 1 | #69 | docs/repository-guidance @（以刷新命令返回的当前 head 为准） | main | ready，mergeable=true；最新 Rule checks / Issue policy / PR Fast Gate 均成功 | 本 PR 只改根指令和 docs，关联 #68；最终 push 后按 §2.4 回读，等待人类评审，不自行合并 |
+| 本轮不合并 | #37 | chore/engineering-state @ b46c095 | main | 远端快照显示 BEHIND，需先 rebase 到当前 main 并重新验证 | 工程状态写入是独立高风险变更；#69 不改它，待其 owner 按当前 head 重新整理和验收 |
+
+刷新此表必须执行：
+
+    git fetch origin
+    gh api 'repos/SingularityKChen/harness-projects/pulls?state=open&per_page=100' --jq '.[] | {number,title,draft,base:.base.ref,head:.head.ref,sha:.head.sha}'
+    git ls-remote origin refs/heads/main refs/heads/docs/repository-guidance refs/heads/chore/engineering-state
 
 ## 5. 历史：2026-09-18 那一轮的实测结果
 

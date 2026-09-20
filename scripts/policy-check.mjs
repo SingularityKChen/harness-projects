@@ -5,7 +5,7 @@
 //   node scripts/policy-check.mjs pr <number>
 //   node scripts/policy-check.mjs areas
 //
-// The rules are documented in AGENTS.md §8.7. They are advisory: the workflow publishes a check named
+// The rules are documented in docs/development/repository-rules.md §4. They are advisory: the workflow publishes a check named
 // "Issue policy" that is deliberately not part of branch protection.
 //
 // The pure functions are exported so tests/contract/issue-policy.test.js can
@@ -99,7 +99,7 @@ export function checkTitle(title) {
 
   const [, kind, area, summary] = match
   if (!KINDS.includes(kind)) problems.push(`unknown kind \`${kind}\`; expected one of ${KINDS.join(', ')}`)
-  if (!AREAS.includes(area)) problems.push(`unknown area \`${area}\`; see AGENTS.md §8.7 or run node scripts/policy-check.mjs areas`)
+  if (!AREAS.includes(area)) problems.push(`unknown area \`${area}\`; see docs/development/repository-rules.md §4 or run node scripts/policy-check.mjs areas`)
   if (CJK.test(title)) problems.push('title must be written in English (CJK characters found)')
   if (summary.endsWith('.')) problems.push('summary must not end with a period')
   if (summary.length > 80) problems.push(`summary is ${summary.length} characters; keep it under 80`)
@@ -399,7 +399,7 @@ function fetchIssue(repo, number) {
 
 function fail(messages) {
   for (const message of messages) console.error(`::error::${message}`)
-  console.error(`\n${messages.length} problem(s) found. See AGENTS.md §8.7 or run node scripts/policy-check.mjs areas.`)
+  console.error(`\n${messages.length} problem(s) found. See docs/development/repository-rules.md §4 or run node scripts/policy-check.mjs areas.`)
   process.exit(1)
 }
 

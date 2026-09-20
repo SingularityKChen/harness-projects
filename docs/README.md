@@ -14,6 +14,10 @@
 
 约定来源见 `AGENTS.md` §3；计划格式见 `PLANS.md`。
 
+## 1.1 Agent 工作流入口
+
+开发、CI 和发布面细则在 [docs/development/workflow.md](development/workflow.md)、[docs/development/ci.md](development/ci.md)、[docs/development/repository-rules.md](development/repository-rules.md) 和 [docs/development/publication.md](development/publication.md)。MVP 交付评审与回复评审分别见 [docs/review/mvp-review.md](review/mvp-review.md) 和 [docs/review/responding.md](review/responding.md)；评审标准总览仍在 [docs/review/README.md](review/README.md)。
+
 ## 2. ExecPlan 索引
 
 ### Active

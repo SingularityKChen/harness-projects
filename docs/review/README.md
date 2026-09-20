@@ -2,6 +2,8 @@
 
 评审怎么进行：谁看什么、按什么标准判定、意见落在哪里。分支保护与 PR 规则在 `AGENTS.md` §8，这里只讲**评审本身**。
 
+完整 MVP 风险矩阵流程见 [mvp-review.md](mvp-review.md)，评审意见回复、根因修复和 thread resolve 见 [responding.md](responding.md)。本文件保留证据选择、严重度和意见落点标准。
+
 ## 1. 评审前先核实事实
 
 评审的第一步不是读描述，而是把可核对的事实拿到手：
@@ -63,7 +65,7 @@ gh pr checks <n>          # 哪些检查真的跑过、结果是什么
 
 ```bash
 gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
-  -f body='[blocking] 这里让 ui 依赖 provider 实现，会破坏能力可替换性（AGENTS.md §2.2）。' \
+  -f body='[blocking] 这里让 ui 依赖 provider 实现，会破坏能力可替换性（AGENTS.md §2）。' \
   -f path='packages/ui/src/index.ts' -F line=12 -f side=RIGHT \
   -f commit_id="$(gh api repos/SingularityKChen/harness-projects/pulls/<n> --jq .head.sha)"
 ```
@@ -87,6 +89,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 - **必需检查只引用一个名字**（`PR Fast Gate`）。它由聚合 job 发布，该 job **不执行 PR 代码、不读 secrets**，只汇总其他 lane 的结果；增删 lane 不需要改分支保护。
 - 运行 PR 代码的 lane 使用 `pull_request` 事件（fork 场景下 token 只读），不使用 `pull_request_target`。
+- `github-review.yml` 是明确的特例：它响应 `pull_request_target`，只使用默认分支定义、过滤同仓 PR、转发事件 payload，不 checkout 或执行 PR 代码；它运行在 self-hosted runner 上，权限为空。不要把这个只读信号入口推广成普通 PR 执行入口。
 - **改门禁或依赖边矩阵的 PR 单独提交**：`.github/workflows/`、`tests/contract/package-boundaries.test.js` 的改动不与其他改动混在一个 PR 里，便于把它当作一次"规则变更"单独评审。
 - 评审者不 approve 自己参与的 PR；批准门禁与检查门禁是两道独立的门。
 
