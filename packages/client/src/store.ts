@@ -27,42 +27,39 @@ export interface EntityStore {
   isCurrent(entityId: string): boolean
 }
 
-function freshEntry(entity: WireEntity, revision: number): StoredEntity {
-  return { entityId: entity.entityId, entity, revision, stale: entity.source.freshness === WireFreshness.Degraded }
+function upsertInto(entries: Map<string, StoredEntity>, entity: WireEntity, at: number): void {
+  const stale = entity.source.freshness === WireFreshness.Degraded
+  const existing = entries.get(entity.entityId)
+  if (existing === undefined) {
+    entries.set(entity.entityId, { entityId: entity.entityId, entity, revision: at, stale })
+    return
+  }
+  existing.entity = entity
+  existing.revision = at
+  existing.stale = stale
+}
+
+function sortedList(entries: Map<string, StoredEntity>): readonly StoredEntity[] {
+  return [...entries.values()].sort((left, right) => (left.entityId < right.entityId ? -1 : 1))
 }
 
 export function createEntityStore(): EntityStore {
   const entries = new Map<string, StoredEntity>()
   let revision = 0
-
-  const upsert = (entity: WireEntity, at: number): void => {
-    const existing = entries.get(entity.entityId)
-    if (existing === undefined) {
-      entries.set(entity.entityId, freshEntry(entity, at))
-      return
-    }
-    existing.entity = entity
-    existing.revision = at
-    existing.stale = entity.source.freshness === WireFreshness.Degraded
-  }
-
   return {
     get revision(): number {
       return revision
     },
     applyBaseline(snapshot: WireSnapshot): void {
-      const seen = new Set<string>()
-      for (const entity of snapshot.entities) {
-        seen.add(entity.entityId)
-        upsert(entity, snapshot.revision)
-      }
+      const seen = new Set<string>(snapshot.entities.map((entity) => entity.entityId))
+      for (const entity of snapshot.entities) upsertInto(entries, entity, snapshot.revision)
       for (const entityId of [...entries.keys()]) {
         if (!seen.has(entityId)) entries.delete(entityId)
       }
       revision = snapshot.revision
     },
     applyDelta(delta: WireDelta): void {
-      for (const entity of delta.upserts) upsert(entity, delta.revision)
+      for (const entity of delta.upserts) upsertInto(entries, entity, delta.revision)
       for (const entityId of delta.removed) entries.delete(entityId)
       revision = delta.revision
     },
@@ -70,7 +67,7 @@ export function createEntityStore(): EntityStore {
       for (const entry of entries.values()) entry.stale = true
     },
     get: (entityId) => entries.get(entityId),
-    list: () => [...entries.values()].sort((left, right) => (left.entityId < right.entityId ? -1 : 1)),
+    list: () => sortedList(entries),
     isCurrent: (entityId) => entries.get(entityId)?.stale === false,
   }
 }

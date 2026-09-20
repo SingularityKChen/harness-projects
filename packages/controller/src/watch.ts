@@ -28,45 +28,53 @@ export interface WorkspaceWatch {
   close(): void
 }
 
-export function watchWorkspace(source: WatchSource, options: WatchOptions): WorkspaceWatch {
-  const retain = options.retain ?? 1
-  let cursor = options.afterRevision
-  let previous = options.seed !== undefined && options.seed.revision === cursor ? options.seed : undefined
-  let closed = false
+interface WatchState {
+  cursor: number
+  previous: WireSnapshot | undefined
+  closed: boolean
+  retain: number
+}
 
-  const gapOf = (current: number, reason: string): WireEvent => ({
-    kind: 'gap',
-    gap: { requestedAfter: cursor, currentRevision: current, reason },
-  })
+function gapEvent(state: WatchState, current: number, reason: string): WireEvent {
+  return { kind: 'gap', gap: { requestedAfter: state.cursor, currentRevision: current, reason } }
+}
 
-  const classify = (next: WireSnapshot): WireEvent | undefined => {
-    if (next.revision === cursor) {
-      previous = next
-      return undefined
-    }
-    if (next.revision < cursor) return gapOf(next.revision, `订阅者修订 ${cursor} 领先于工作区修订 ${next.revision}`)
-    if (next.revision - cursor > retain) {
-      return gapOf(next.revision, `落后 ${next.revision - cursor} 个修订，超出保留窗口 ${retain}`)
-    }
-    if (previous === undefined || previous.revision !== cursor) {
-      return gapOf(next.revision, `没有修订 ${cursor} 处的快照，无法重建连续增量`)
-    }
-    const delta = diffSnapshots(previous, next)
-    previous = next
-    cursor = next.revision
-    return { kind: 'delta', delta }
+async function pollSource(source: WatchSource, state: WatchState): Promise<WireEvent | undefined> {
+  if (state.closed) return undefined
+  const next = await source.baseline()
+  if (next.revision === state.cursor) {
+    state.previous = next
+    return undefined
   }
+  if (next.revision < state.cursor) {
+    return gapEvent(state, next.revision, `订阅者修订 ${state.cursor} 领先于工作区修订 ${next.revision}`)
+  }
+  if (next.revision - state.cursor > state.retain) {
+    return gapEvent(state, next.revision, `落后 ${next.revision - state.cursor} 个修订，超出保留窗口 ${state.retain}`)
+  }
+  if (state.previous === undefined || state.previous.revision !== state.cursor) {
+    return gapEvent(state, next.revision, `没有修订 ${state.cursor} 处的快照，无法重建连续增量`)
+  }
+  const delta = diffSnapshots(state.previous, next)
+  state.previous = next
+  state.cursor = next.revision
+  return { kind: 'delta', delta }
+}
 
+export function watchWorkspace(source: WatchSource, options: WatchOptions): WorkspaceWatch {
+  const state: WatchState = {
+    cursor: options.afterRevision,
+    previous: options.seed?.revision === options.afterRevision ? options.seed : undefined,
+    closed: false,
+    retain: options.retain ?? 1,
+  }
   return {
     get afterRevision(): number {
-      return cursor
+      return state.cursor
     },
-    async poll(): Promise<WireEvent | undefined> {
-      if (closed) return undefined
-      return classify(await source.baseline())
-    },
+    poll: () => pollSource(source, state),
     close(): void {
-      closed = true
+      state.closed = true
     },
   }
 }
