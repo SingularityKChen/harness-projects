@@ -123,6 +123,9 @@ PR 描述必须包含闭环、ExecPlan + Batch、`Closes` / `Refs`、真实验�
 | 旧引用 | 当前规范 |
 |---|---|
 | §1.3 | 本文件 §1.1 不变量 |
+| §1.4 | 本文件 §1.2 当前门禁与 `docs/architecture/release-gates.md` |
+| §1.5 | 本文件 §3 文档与事实源 |
+| §9.3 | `docs/architecture/release-gates.md`（发布门禁 R1 的仓库内逐条表述） |
 | §2.2 | 本文件 §2 依赖方向 |
 | §3.3 | 本文件 §3 文档与事实源 |
 | §5.1 | 本文件 §4 ExecPlan 批次与 docs/development/workflow.md |

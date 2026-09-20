@@ -140,6 +140,85 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
     gh api 'repos/SingularityKChen/harness-projects/pulls?state=open&per_page=100' --jq '.[] | {number,title,draft,base:.base.ref,head:.head.ref,sha:.head.sha}'
     git ls-remote origin refs/heads/main refs/heads/docs/repository-guidance refs/heads/chore/engineering-state
 
+### 4.2 MVP-0 并行堆叠 PR 队列（2026-09-20 起）
+
+这一轮不是"一串待合并的 PR"，而是**三条栈**（详见 `docs/exec-plan/active/2026-09-20-mvp0-parallel-stacks.md`）。栈内必须自下而上合并；栈之间除了共享栈底 `chore/workspace-dependency-graph` 之外互不依赖。
+
+| 栈 | 顺序 | PR | 分支 | base | Closes | 备注 |
+|---|---|---|---|---|---|---|
+| 底座 | 0 | #80 | `chore/workspace-dependency-graph` | main | #74 | 所有栈的栈底；必须先合并，否则其它 PR 的 base 不存在 |
+| A 契约 | 1 | #81 | `feat/domain-identity-model` | `chore/workspace-dependency-graph` | #75 | 领域模型 |
+| A 契约 | 2 | #84 | `feat/capability-contracts` | `feat/domain-identity-model` | #29 | 五域 port 与错误模型 |
+| A 契约 | 3 | #85 | `feat/planning-contract-suite` | `feat/capability-contracts` | #30 | Planning/Storage 套件与替身；**新增包 `packages/providers/fake` 与本条一起落地** |
+| A 契约 | 4 | #88 | `feat/development-contract-suite` | `feat/planning-contract-suite` | Refs #31 | development 域（由 1098 行超限拆出） |
+| A 契约 | 5 | #86 | `feat/domain-contract-suites` | `feat/development-contract-suite` | #31 | delivery 与 execution 域 + 五域组合根 |
+| B 持久化 | 1 | #82 | `feat/storage-migration-runner` | `chore/workspace-dependency-graph` | #26 | 与 A 栈并行 |
+| D 文档 | 1 | #83 | `docs/vertical-path-and-gates` | `chore/workspace-dependency-graph` | #44 | 与 A/B 栈并行；本文件所在的 PR |
+| C 切片 | 1 | #87 | `test/mvp0-chain-assertion` | `feat/domain-contract-suites` | #42 | 进度轨道；创建时故意是**红的**（7 条断言点名未实现节点），到 C 栈最后一批变绿才提升进 `pnpm verify` |
+| C 切片 | 2 | #92 | `feat/core-bootstrap` | `test/mvp0-chain-assertion` | #76 | core 引导与投影；失败断言 7 → 4 |
+| C 切片 | 3 | #93 | `feat/core-start-work` | `feat/core-bootstrap` | #77 | 写路径状态机与 Start Work 补偿序列；失败断言 4 → 2 |
+| C 切片 | 4 | #94 | `feat/core-delivery-lineage` | `feat/core-start-work` | #78 | 交付谱系与状态策略；失败断言 2 → 0 |
+| C 切片 | 5 | #95 | `feat/controller-client-slice` | `feat/core-delivery-lineage` | #79 #7 | controller 与 React-free client；把 `test:mvp0` 提升进 `verify` |
+
+**已知冲突点与解法**（按 §2.2 的预演规则维护）
+
+| 冲突点 | 涉及 | 解法 |
+|---|---|---|
+| `docs/exec-plan/active/2026-09-20-mvp0-parallel-stacks.md` 的 Progress 与决策小节 | A 栈各批次、C 栈 | 两边都保留；批次事实以 A 栈内追加的"订正"为准（控制计划里对 A3/A4 划分的初版描述已被契约栈计划订正两次） |
+| `docs/README.md` §2 与 §4 | #80（§2 登记五份计划）与 #83（§4 登记产品主题文档） | 两处不同表格，两边都保留 |
+| `pnpm-lock.yaml` | 只有 #85（新增 `packages/providers/fake`）动过 | 其余分支不得改锁文件；#85 之后的所有分支都已包含该条目 |
+| `tests/contract/package-boundaries.test.js` | 只有 #80（新增两条检查）与 #85（登记新包）动过 | 两边都保留；`EXPECTED` 只允许 #85 追加一行 |
+
+**堆叠 PR 与 CI 的实测行为**：`.github/workflows/ci.yml` 的触发条件是 `pull_request: branches: [main]`，因此**只有 base 指向 `main` 的 PR 会跑 `PR Fast Gate`**。本轮实测：#80 跑了 Disclosure scan / Issue policy / PR Fast Gate 且全绿，其余八个 PR 只跑了 advisory 的 `Issue policy`。也就是说栈内 PR 的"检查全绿"**不是 CI 证据**，而是本地等价命令的证据。接手的人要按下面的表逐分支复跑，或者先把 CI 的触发分支扩展（那是另一个批次，需要同步 `docs/development/ci.md` 与 `scripts/workflow-check.mjs`）。
+
+栈内每个 head 上的本地等价门禁（`tsc --noEmit` + `node --test tests/contract tests/integration tests/e2e`，2026-09-20 实测）：
+
+| 分支 | tsc | 测试 |
+|---|---|---|
+| `chore/workspace-dependency-graph` | OK | 183 pass / 0 fail |
+| `feat/domain-identity-model` | OK | 198 pass / 0 fail |
+| `feat/capability-contracts` | OK | 213 pass / 0 fail |
+| `feat/planning-contract-suite` | OK | 233 pass / 0 fail |
+| `feat/development-contract-suite` | OK | 246 pass / 0 fail |
+| `feat/domain-contract-suites` | OK | 263 pass / 0 fail |
+| `feat/storage-migration-runner` | OK | 188 pass / 0 fail |
+| `docs/vertical-path-and-gates` | OK | 183 pass / 0 fail |
+| `test/mvp0-chain-assertion` | OK | 263 pass / 0 fail（另有 `node --test tests/mvp0` 的 7 条**故意失败**） |
+| `feat/core-bootstrap` | OK | 270 pass / 0 fail（mvp0：4 条失败） |
+| `feat/core-start-work` | OK | 278 pass / 0 fail（mvp0：2 条失败） |
+| `feat/core-delivery-lineage` | OK | 285 pass / 0 fail（mvp0 全绿） |
+| `feat/controller-client-slice` | OK | 294 pass / 0 fail（mvp0 全绿，并已提进 `verify`） |
+
+上表在 2026-09-21 的级联变基之后重测：栈底先 rebase 到当时的 `main`（该轮 main 前进 10 个提交，含 #97 与 #98），其余 12 条分支按 `--onto <新父> <旧父>` 逐层重放。**预演过的冲突如实发生**：`docs/README.md` 的 Active 计划索引表两边各插了行，按"两边都保留"解决；C 栈各批次的 `docs/exec-plan/active/2026-09-20-mvp0-slice.md` 也逐层冲突（Progress 取较新一侧、Surprises 两边都保留）。级联中曾因用错 `--onto` 基准丢掉过 C2/C4 的测试文件，已按祖先关系逐层复核修复——**这说明"变基成功"不等于"内容正确"，每层都要核对累积文件集**。
+
+**堆叠 PR 与 `closingIssuesReferences` 的实测行为与配方**：本轮 9 个 PR 的描述里都写了 `Closes #N`，但首次回读时只有 base 是 `main` 的 PR 出现在 `closingIssuesReferences` 里。原因是 GitHub 只在 PR 指向默认分支时登记 closing 关联；而**一旦 PR 被 GitHub 归入某个 stack，base 就改不动了**（`gh pr edit <n> --base main` 返回 `Cannot change the base branch because the pull request is part of a stack.`）。
+
+实测可行、并且已经对全部 PR 执行过的配方是——**先让 closing 关联登记，再把 base 放回栈内**：
+
+```bash
+# 1. 该 PR 所在栈如果不止它一个，先解散分组（只解除分组，PR 与分支不动）
+gh stack unstack <stack-number>            # 例：gh stack unstack 90
+
+# 2. 把 PR 的 base 临时指向默认分支：closing 关联在这一步登记
+gh pr edit <pr> --base main
+gh issue view <issue> --json closedByPullRequestsReferences   # 期望：[<pr>]
+
+# 3. 重新链接栈：gh stack link 会把 base 改回上一层分支，而 closing 关联**保留**
+gh stack link <pr-1> <pr-2> ... <pr-n>     # 自下而上，例：80 81 84 85 88 86 87
+gh pr view <pr> --json baseRefName,closingIssuesReferences
+# 期望：base 回到上一层分支，且 closing 仍是 [<issue>]
+```
+
+对本轮 9 个 PR 执行后的回读结果：`#74←80`、`#75←81`、`#29←84`、`#30←85`、`#31←86`、`#42←87`、`#26←82`、`#44←83`；栈重新建立为 stack #91（7 个 PR，base 链与执行前一致）。**不在任何栈里的 PR（#82、#83）更简单**：直接 `--base main` 登记，再改回原 base，关联同样保留。
+
+新增批次按同一配方处理：先 `gh pr create --draft --base main`（登记关联），再 `gh stack link <stack-number> <new-pr>` 把它追加到栈顶——追加会设置 base 且不丢关联。**不要**在创建时直接用 `--base <栈内分支>`，那样 issue 侧永远看不到这个 PR。
+
+**这一轮不合并**：#36 / #37（工程状态字段）、#49 / #65 / #66 / #67（M0.1 交付控制后续）——它们是交付控制面的工作，与 MVP-0 链路不是同一个闭环，混在一起会让"MVP-0 是否跑通"这个信号失真。
+
+**合并前**：C 栈已补齐（#87 → #92 → #93 → #94 → #95），`node --test tests/mvp0` 从 7 条失败单调降到 0，并在 #95 中提升进 `pnpm verify`。**合并顺序仍然必须自下而上**：单独合并 #87 会让 `main` 上出现一条红色的进度轨道（那是它的初始状态，不是缺陷），只有整条 C 栈合并完才变绿。
+
+**C 栈的一次假绿与修复（必须知道）**：C 栈顶端交付前，独立验证者证明 `tests/mvp0` 的节点 6/7 在**没有任何真实观察**时也能通过——`getDeliveryLineage` 会返回 `observed:false / chain_skeleton / candidate` 的骨架跳，而断言只查关系类型。同一批注入还显示节点 3（身份幂等）与节点 5（Start Work 幂等）同样没被钉住。修复落在 #95 的最后三个提交：`getDeliveryLineage` 只返回 `observed=true` 的跳，断言改为走真实链路并断言观察事实；五条注入（去重守卫、复用守卫、change_request 建工作项、CI 写规划状态、交付读数为空）在修复后都能让对应断言变红。**评审 #95 时应优先复核这五条注入**，因为把一条假绿的断言提进必需门禁，比没有门禁更危险。
+
 ## 5. 历史：2026-09-18 那一轮的实测结果
 
 以下是 2026-09-18 完成的上一轮评审（9 个开放 PR：#12 #19 #21 #3 #11 #13 #33 #35 #37）的**实测记录**，不是当前队列的一部分，也不是可以直接套用的模板——它作为一个已经发生过的具体案例，说明第 2 节的流程为什么长这个样子。来源：`docs/review/2026-09-18-mvp-delivery-review.md`。

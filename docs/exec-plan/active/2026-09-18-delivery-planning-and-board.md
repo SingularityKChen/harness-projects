@@ -61,7 +61,7 @@ gh issue list --state open --search "-is:blocked" --json number,title --jq 'leng
 
 ### D1. 原始交付 MVP 到底是什么
 
-上游输入用三样东西描述 MVP：一张约二十行的能力范围表、一条十三步的纵向链路、一个十二条的发布门禁。**这三样不是同一个东西，混用它们是当前最大的规划风险。**
+上游输入用三样东西描述 MVP：一张能力范围表、一条逐步枚举的纵向链路、一份逐条列出的发布门禁。**这三样不是同一个东西，混用它们是当前最大的规划风险。**（仓库内的枚举：纵向链路见 `docs/product/vertical-path.md`，发布门禁见 `docs/architecture/release-gates.md`。）
 
 范围表回答的是"首发版本里包含哪些能力"。把它当成 MVP，就会同时铺开工作项列表、Backlog/Sprint、看板、Kanban WIP、Roadmap、Milestone、关系管理、同步诊断、Activity/Provenance、能力降级——十几个能力横向并行，**每一个单独都无法验收**，风险全部堆到最后一次集成。这正是 `AGENTS.md` §5.2 明令禁止的横向切分。
 
@@ -77,9 +77,9 @@ gh issue list --state open --search "-is:blocked" --json number,title --jq 'leng
 
 | 名称 | 是什么 | 判定方式 | 对应 |
 |---|---|---|---|
-| **MVP-0** | 上面那条链路，全部用 fake provider | `pnpm test` 内一条端到端用例通过，无凭据、无网络 | issue #7 / 里程碑 M3 |
-| **MVP-1** | 同一条链路，provider 换成真实 GitHub Projects / Git / GitHub / Actions，链路语义不变 | 在一个 sandbox Project 上人工走通前 12 步 | 里程碑 M4 |
-| **首发范围** | 上游那张能力表 | Gate R1 的十二条 | 里程碑 Gate R1 |
+| **MVP-0** | 上面那条链路，全部用离线 provider | `node --test tests/mvp0` 全绿，无凭据、无网络（见 `docs/product/vertical-path.md`） | issue #7 / 里程碑 M3 |
+| **MVP-1** | 同一条链路，provider 换成真实 GitHub Projects / Git / GitHub / Actions，链路语义不变 | 在一个 sandbox 项目上人工走通纵向链路的步骤枚举（见 `docs/product/vertical-path.md`） | 里程碑 M4 |
+| **首发范围** | R1 门禁覆盖的发布资格范围 | R1 门禁逐条满足（见 `docs/architecture/release-gates.md`） | 里程碑 Gate R1 |
 
 **MVP-0 才是"原始交付 MVP"在本仓库的正确形态。** 理由有三条：
 
