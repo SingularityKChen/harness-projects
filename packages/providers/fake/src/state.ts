@@ -1,9 +1,11 @@
 /** 内存对象表：每个对象的 source version 与待投递观察队列。只保存外部事实的镜像；内部实体 id 不在替身里——provider 只认外部 id（AGENTS.md §1.1 不变量 1）。 */
+import type { ProviderBindingId } from '@harness-projects/domain'
 import {
   makeObservation,
   type ExternalObjectRef,
   type ProviderIteration,
   type ProviderObservation,
+  type ProviderPage,
   type ProviderPlanningContent,
   type ProviderPlanningFieldDefinition,
   type ProviderPlanningFields,
@@ -22,6 +24,26 @@ export type FakePlanningState = {
 
 /** 对象键：binding 内 `(objectKind, externalId)` 唯一；数组序列化避免分隔符碰撞。 */
 export function itemKey(ref: ExternalObjectRef): string { return JSON.stringify([ref.bindingId, ref.objectKind, ref.externalId]) }
+
+/** 外部对象定位子构造器。url 一律 undefined：替身不伪造平台跳转链接（公开仓库的字符串都在发布面内）。 */
+export function refOf(bindingId: ProviderBindingId, objectKind: string, externalId: string): ExternalObjectRef {
+  return { bindingId, objectKind, externalId, url: undefined }
+}
+
+/** 分页输入的公共形状：工程域列表方法只依赖 cursor 与 limit，不关心其余过滤条件。 */
+export interface FakePageInput { readonly cursor: string | undefined; readonly limit: number }
+
+/** 游标分页与 Planning 替身同一规则：cursor 是十进制偏移，nextCursor 未定义即遍历结束。 */
+export function paginate<T>(rows: readonly T[], input: FakePageInput): ProviderPage<T> {
+  const offset = input.cursor === undefined ? 0 : Number.parseInt(input.cursor, 10)
+  const next = offset + input.limit
+  return { items: rows.slice(offset, next), nextCursor: next < rows.length ? String(next) : undefined }
+}
+
+/** 分页前的稳定排序：列表顺序必须与游标推进一致，否则一次遍历会重复或漏掉对象。 */
+export function byExternalId<T extends { readonly ref: ExternalObjectRef }>(a: T, b: T): number {
+  return a.ref.externalId < b.ref.externalId ? -1 : 1
+}
 
 export function findItem(state: FakePlanningState, ref: ExternalObjectRef): FakePlanningItemRecord | undefined {
   const key = itemKey(ref)
