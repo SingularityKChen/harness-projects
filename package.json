@@ -18,6 +18,23 @@
     "verify": "pnpm run typecheck && pnpm run test"
   },
   "devDependencies": {
+    "@harness-projects/app-harness-plugin": "workspace:*",
+    "@harness-projects/app-web": "workspace:*",
+    "@harness-projects/capabilities": "workspace:*",
+    "@harness-projects/client": "workspace:*",
+    "@harness-projects/controller": "workspace:*",
+    "@harness-projects/core": "workspace:*",
+    "@harness-projects/domain": "workspace:*",
+    "@harness-projects/provider-delivery-github-actions": "workspace:*",
+    "@harness-projects/provider-development-github": "workspace:*",
+    "@harness-projects/provider-development-local-git": "workspace:*",
+    "@harness-projects/provider-execution-harness": "workspace:*",
+    "@harness-projects/provider-execution-human": "workspace:*",
+    "@harness-projects/provider-planning-github-projects": "workspace:*",
+    "@harness-projects/provider-planning-local": "workspace:*",
+    "@harness-projects/storage-sqlite": "workspace:*",
+    "@harness-projects/ui": "workspace:*",
+    "@harness-projects/ui-model": "workspace:*",
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3",
     "yaml": "^2.9.1"

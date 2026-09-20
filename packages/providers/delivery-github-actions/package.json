@@ -6,5 +6,9 @@
   "description": "GitHub Actions 交付 Provider",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@harness-projects/domain": "workspace:*",
+    "@harness-projects/capabilities": "workspace:*"
   }
 }

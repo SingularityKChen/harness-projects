@@ -6,5 +6,9 @@
   "description": "React-free 客户端模型",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@harness-projects/domain": "workspace:*",
+    "@harness-projects/controller": "workspace:*"
   }
 }
