@@ -1,9 +1,6 @@
-/**
- * 内存 Storage 实现：A2 冻结的 Storage port（事务 / 工作区与绑定 / 身份 / 规划 / 工程 / 执行 /
+/** 内存 Storage 实现：A2 冻结的 Storage port（事务 / 工作区与绑定 / 身份 / 规划 / 工程 / 执行 /
  * 关系 / 同步 / 写尝试 / 投影修订号）。只读写本地控制事实，不做外部调用，也不持久化。
- *
- * 导出/导入内部状态让"换一个实例读同一份内容"能模拟重启，见 `tests/contract/suites/storage.js`。
- */
+ * 导出/导入内部状态让"换一个实例读同一份内容"能模拟重启，见 `tests/contract/suites/storage.js`。 */
 import * as cap from '@harness-projects/capabilities'
 import * as domain from '@harness-projects/domain'
 
@@ -22,14 +19,12 @@ export interface FakeStorageData {
   attempts: cap.MutationAttemptRecord[]
   revisions: { workspaceId: domain.WorkspaceId; revision: number }[]
 }
-
 export function emptyStorageData(): FakeStorageData {
   return {
     workspaces: [], bindings: [], entities: [], identities: [], projections: [], repositories: [],
     contexts: [], runs: [], relations: [], observations: [], cursors: [], attempts: [], revisions: [],
   }
 }
-
 function upsert<T>(list: T[], record: T, match: (item: T) => boolean): void {
   const index = list.findIndex(match)
   if (index === -1) list.push(record)
@@ -38,23 +33,31 @@ function upsert<T>(list: T[], record: T, match: (item: T) => boolean): void {
 
 const isActiveContext = (status: domain.ExecutionContextStatus): boolean =>
   status !== domain.ExecutionContextStatus.Closed && status !== domain.ExecutionContextStatus.Failed
-
 export class MemoryStorage implements cap.Storage {
   /** 内部状态；只应由本文件的导出/导入函数与测试读取，写入一律走 port 方法。 */
   data: FakeStorageData
 
+  /** 事务队列：重叠事务按调用顺序串行，每个事务在前一个 settle 后才克隆状态。 */
+  #queue: Promise<unknown> = Promise.resolve()
+
   constructor(data: FakeStorageData = emptyStorageData()) {
     this.data = data
   }
-
-  /** 事务内抛错即整体回滚：草稿只在 work 成功返回后替换正式状态。 */
-  async transaction<T>(work: (tx: cap.StorageTransaction) => Promise<T>): Promise<T> {
-    const draft = structuredClone(this.data)
-    const result = await work(new MemoryStorage(draft))
-    this.data = draft
-    return result
+  /**
+   * 事务内抛错即整体回滚：草稿只在 work 成功返回后替换正式状态。
+   * 克隆与执行都排在队列里，因此后到的事务看到的是前一个事务提交后的状态，不会用旧快照覆盖已提交写入。
+   */
+  transaction<T>(work: (tx: cap.StorageTransaction) => Promise<T>): Promise<T> {
+    const run = this.#queue.then(async () => {
+      const draft = structuredClone(this.data)
+      const result = await work(new MemoryStorage(draft))
+      this.data = draft
+      return result
+    })
+    // 队列吸收失败：一次事务抛错不得阻断后续事务；调用方仍从 run 收到该失败。
+    this.#queue = run.then(() => undefined, () => undefined)
+    return run
   }
-
   async putWorkspace(record: cap.WorkspaceRecord): Promise<void> { upsert(this.data.workspaces, record, (w) => w.id === record.id) }
   async getWorkspace(id: domain.WorkspaceId): Promise<cap.WorkspaceRecord | undefined> { return this.data.workspaces.find((w) => w.id === id) }
 
@@ -77,7 +80,6 @@ export class MemoryStorage implements cap.Storage {
     if (existing === undefined) this.data.identities.push(record)
     else this.data.identities[index] = { ...record, id: existing.id, entityId: existing.entityId }
   }
-
   async findExternalIdentity(
     bindingId: domain.ProviderBindingId, externalKind: domain.ExternalIdentityKind, externalId: string,
   ): Promise<domain.ExternalIdentity | undefined> {
@@ -123,7 +125,6 @@ export class MemoryStorage implements cap.Storage {
   }
 
   async listRelations(workspaceId: domain.WorkspaceId): Promise<readonly domain.Relation[]> { return this.data.relations.filter((r) => r.workspaceId === workspaceId).map((r) => r.relation) }
-
   /** dedupe 由 (binding, dedupeKey) 唯一实现：重复观察返回 false，且不覆盖已存记录。 */
   async recordObservation(record: cap.ObservationRecord): Promise<boolean> {
     const key = `${record.observation.bindingId}|${record.observation.dedupeKey}`
@@ -155,7 +156,6 @@ export class MemoryStorage implements cap.Storage {
     else this.data.revisions[index] = { workspaceId, revision }
     return revision  }
 }
-
 export function createFakeStorage(data: FakeStorageData = emptyStorageData()): MemoryStorage {
   return new MemoryStorage(structuredClone(data))
 }
