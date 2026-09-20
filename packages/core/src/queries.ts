@@ -10,6 +10,9 @@ import { IdentityRole, type EntityId, type ExternalIdentity } from '@harness-pro
 import { gateCommand } from './capabilities.ts'
 import { PLANNING_SYNC_SCOPE } from './bootstrap.ts'
 import type { CoreContext } from './context.ts'
+import {
+  getDeliveryProjection, type DeliveryLineageHop, type DeliveryProjection, type DeliveryScope,
+} from './delivery.ts'
 import { readExecutionContext, type ExecutionContextQuery, type ExecutionContextView } from './execution-context.ts'
 import {
   toPlanningItemView,
@@ -23,6 +26,10 @@ export interface CoreQueries {
   listPlanningItems(): Promise<readonly PlanningItemView[]>
   getItemDetail(entityId: EntityId): Promise<PlanningItemDetail | undefined>
   getExecutionContext(query: ExecutionContextQuery): Promise<ExecutionContextView | undefined>
+  /** 交付投影：链路事实 + 能力状态 + 新鲜度；只读，不触发任何外部写入。 */
+  getDeliveryProjection(scope: DeliveryScope): Promise<DeliveryProjection>
+  /** 工作项 → 执行上下文 → 分支 → 提交 → 变更请求 → CI 的可查询谱系。 */
+  getDeliveryLineage(scope: DeliveryScope): Promise<readonly DeliveryLineageHop[]>
 }
 
 export function createQueries(context: CoreContext): CoreQueries {
@@ -51,6 +58,11 @@ export function createQueries(context: CoreContext): CoreQueries {
     },
 
     getExecutionContext: (query) => readExecutionContext(context, query),
+    getDeliveryProjection: (scope) => getDeliveryProjection(context, scope),
+
+    async getDeliveryLineage(scope: DeliveryScope): Promise<readonly DeliveryLineageHop[]> {
+      return (await getDeliveryProjection(context, scope)).hops
+    },
   }
 }
 
