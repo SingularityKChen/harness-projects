@@ -189,6 +189,7 @@ node scripts/rule-checks.mjs size origin/main
 | 7 | 门禁与配置变更的完整回归 | `tsc --noEmit` exit 0；`node --test tests/contract tests/integration tests/e2e` → pass 175 / fail 0 | 通过（`verify` 的两个组成命令逐条执行，见遗留 6） |
 | 8 | 体量与发布面合规 | `size origin/main` 两个桶都在预算内；`disclosure origin/main` 机械扫描 exit 0；五类目人工核对无命中 | 通过 |
 | 9 | 触发器语义在真实事件上得到证实 | 合并后栈内某个 PR 收到一次 push，`gh run list` 出现 base 为该 PR 声明 base 的新 run | **本次无法验证**（需要合并后的真实事件，见遗留 2） |
+| 10 | 独立对抗验收（无实现上下文）未能证伪四条主张，且它提出的 P2 已补判别性测试 | 验收报告：verdict `not_falsified`；四条主张 A–D 全部 holds；六个必跑命令复现；五个指定注入全部有牙（2/2/1/1/3 条测试变红）；它额外构造的"三点差异→两点差异"注入当时 175 条全绿，现已由新增的真实 git 用例接住 | 通过 |
 
 ## Progress
 
@@ -198,6 +199,8 @@ node scripts/rule-checks.mjs size origin/main
 - [x] (2026-09-20) Batch 1 · 触发器与基线的解耦
 - [x] (2026-09-20) Batch 2 · 契约测试固化不变量（新增 7 条，42 → 49）
 - [x] (2026-09-20) Batch 3 · 文档与规则表述同步
+- [x] (2026-09-20) 独立对抗验收（无实现上下文，见验收项 10）：四条主张未被证伪；它提出的 P2 已补两条判别性测试（49 → 51），三条 P3 中两条写进文档、一条作为显示层取舍记录
+- [ ] 合并后回读验收项 9，然后把本计划移入 `completed/` 并更新 `docs/README.md`
 
 ## Surprises & Discoveries
 
@@ -215,6 +218,12 @@ node scripts/rule-checks.mjs size origin/main
 
 7. **`.worktrees/` 下的工作区没有 `node_modules`，会让一条既有测试假红。** `tests/contract/workflow-check.test.js` 的「CLI：脚本路径含空格时仍然真的执行检查」用 `path.resolve('node_modules')` 造符号链接；工作区里没有这个目录时链接目标不存在，被测脚本 import `yaml` 失败 → exit 1 但 stdout 为空，正则断言失败。同一命令在主检出里通过（`✔`），说明是环境差异而非回归。另外 `node_modules/` 这条 ignore 规则**不匹配符号链接**，所以把 `node_modules` 直接做成符号链接会以未跟踪文件的形式出现在 `git status` 里（差点被 `git add -A` 带进提交）；改用真实目录 + 指向主检出各包的符号链接，它才被正确忽略。
 
+8. **承重性质（三点差异）此前零测试覆盖——由无实现上下文的对抗验收发现。** 验收 agent 在五个指定注入之外自己加了一个：只把真实 git 调用的 `...` 换成 `..`，打印字符串与桩路由用的字面量全部保留。当时 175 条测试**全绿**。而在它构造的仓库里（base 分支在子分支分出后前进 1200 行，即本计划称作常规的 `gh stack rebase` / base 前进场景），一个真实只有 5 行的子 PR 被判成 1205 行、exit 0 翻成 exit 1，首行标签却仍写着「判定范围 parent...HEAD」。根因是原有测试的桩全部忽略传入的 `range`（`readDiff`/`listCommits` 桩多为无参），因此"三点差异"只被打印字符串约束、没有被行为约束。已补两条：一条钉住每个数据源收到的范围字符串（判定侧 `...`、披露的逐提交扫描 `..`），一条是真实 git 用例复现"base 前进"并断言只算 5 行。补完后重放同一注入，前者仍绿（它测的是 `size()` 传给桩的字符串）、后者变红——真正接住该注入的是后者，这个分层是有意的：桩层防"调用方改了 range"，真实 git 层防"默认读取器的语义坏了"。
+
+9. **`runs` API 的 `base.ref` / `head.sha` 是实时快照，会用相反印象误导复核者。** 验收 agent 按"73 次运行里没有 #83/#88 的 head"去复核时，先看到的是"14 个 base 非 main 的运行"，像是过滤器从没挡住任何东西。它用两个字段的时间戳证明了这些字段是实时值：run `35497827896` 的 `head_sha` 是 `9f893755`（提交时间早于运行 18 秒），而同一响应里 `pull_requests[0].head.sha` 是 `9ff118bb`（提交时间晚于该次运行）。运行时基线只能从 `.head_sha` 加 job 日志回显的 `BASE_REF:` 读。这条已写进 `docs/development/ci.md`，因为下一个复核者一定会再踩一次。
+
+10. **计划锚定的 head 已经前进。** `9f89375` 不再是 PR #95 的 head（现为 `9ff118b`）：同一 base 下是 981/1000（仍 ≤1000、仍 exit 0），`origin/main` 下是 7876/1000（仍超限）。定性结论对当前 head 依然成立，只有数字是快照。这提醒"用今天的命令复核历史证据"会看到不同数字；验收表第 1–3 项的锚点是提交而不是分支名，这一点是对的。
+
 ## Decision Log
 
 | 决策 | Rationale | 日期 / 来源 |
@@ -226,6 +235,8 @@ node scripts/rule-checks.mjs size origin/main
 | 不把 `github.base_ref` 改写成 `github.event.pull_request.base.ref` | 两者在 `pull_request` 下取值相同，不改变行为；防复发由契约测试承担，不做纯外观改动 | 2026-09-20 / 本计划 |
 | 分支基于 `origin/main`，不基于 PR #80 | 修复必须能先于栈合并（`merge-queue.md` §6.1）；基于 #80 会把本修复的落地耦合成"#80 先合并"，而 #80 之上还有 11 个 PR 在等 | 2026-09-20 / 本计划 |
 | 只引用 `origin/main` 上已存在的文件 | `AGENTS.md` §3 要求 `docs/` 自包含；引用未合并的计划文件就是悬空链接 | 2026-09-20 / 本计划 |
+| 交付前跑一次**无实现上下文**的独立对抗验收，而不是自证 | 实现者自己写的验收表与实现同源，最容易被"桩忽略参数"这类盲区骗过；本次验收 agent 确实找到了三点差异零覆盖这个盲区（Surprises 8） | 2026-09-20 / 用户要求 + 本计划 |
+| 对抗验收提出的 P2 在标 ready 之前补掉，三条 P3 按影响面分别处理 | P2 直指本 PR 的承重性质且修复成本是两条测试；P3 里两条是"复核者会踩"的文档问题（写进 `ci.md`），一条是显示层取舍（`normalizeBaseRef` 已顺手覆盖 `refs/remotes/<remote>/` 与首尾空白，`origin/main~1` 故意不归一） | 2026-09-20 / 本计划 |
 
 ## Idempotence and Recovery
 
@@ -246,7 +257,9 @@ node scripts/rule-checks.mjs size origin/main
 
 ## Outcomes & Retrospective
 
-三个批次全部完成，验收项 1–8 通过，第 9 项需要合并后的真实事件。改动落在 4 个提交上：计划、Batch 1（workflow + 脚本）、Batch 2（契约测试新增 7 条）、Batch 3（文档与计划回填）。
+三个批次全部完成，验收项 1–8 与 10 通过，第 9 项需要合并后的真实事件。改动落在 6 个提交上：计划、Batch 1（workflow + 脚本）、Batch 2（契约测试新增 7 条）、Batch 3（文档与计划回填）、登记 PR 与 CI 证据、以及对抗验收后的 P2 补测（契约测试再增 2 条）。
+
+交付前跑了一次无实现上下文的独立对抗验收（验收项 10）。它的结论是四条主张都未能证伪：六个必跑命令全部复现，五个指定注入全部有牙（分别让 2 / 2 / 1 / 1 / 3 条测试变红），主张 B 被九种累计输入（超大值、NaN、二进制 `-`、null、空串、数字、重命名形状、真实 git 抛错）逐一攻击后仍不参与判定。它自己加的一个注入抓到了真缺口——三点差异零覆盖（Surprises 8），已补两条判别性测试并在补完后重放该注入确认变红。
 
 核心证据是同一条 head（`9f89375`）上的对照：修复前 `size origin/main` 给 `代码：7837 / 1000 行`、exit 1，而那正是 job `106044050398` 的结论；修复后 `size origin/feat/core-delivery-lineage` 给 `代码：900 / 1000 行`、exit 0，首行写明 `基线：origin/feat/core-delivery-lineage @ 592b6208721a`，栈累计 7837 行单列一行并标注不计入判定。
 
@@ -269,3 +282,4 @@ node scripts/rule-checks.mjs size origin/main
 - 2026-09-20：修正引用来源。发现栈的控制计划由 PR #80 引入、尚未在 `main` 上，故改为只引用 `main` 已存在的 `AGENTS.md` §8 与 `merge-queue.md` §6.1；Batch 3 去掉对那份计划的修改，改列遗留项；补记"分支基于 `origin/main`"的决策与 `docs/README.md` 的冲突处理方式。
 - 2026-09-20：三个批次完成，回填 Progress、验收结果（1–8 通过、9 待合并后真实事件）、Surprises 6–7（`describeBaseline()` 换行缺陷、工作区缺 `node_modules` 造成的假红）与 Outcomes，新增遗留 6（`pnpm verify` 的沙箱限制与等价证据）。
 - 2026-09-20：登记交付载体 PR #98 与真实 CI 事件的报告证据（run `35499369649` 的 `size` / `disclosure` 两个 job 日志都打印了基线），并写明它不替代验收项 9。
+- 2026-09-20：加入验收项 10 与对抗验收的结果处理——新增两条测试钉住三点差异（其中一条是真实 git 的"base 前进"用例）、`normalizeBaseRef` 覆盖 `refs/remotes/<remote>/` 与首尾空白、`ci.md` 补上"`runs` API 的 base.ref/head.sha 是实时快照"这条复核陷阱；Surprises 8–10、Decision Log 两条与 Progress 同步更新。
