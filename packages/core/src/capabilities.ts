@@ -1,16 +1,13 @@
 /**
  * 核心能力门：有效访问级别与命令入口的拒绝检查（issue #76 / ExecPlan D1）。
  *
- * 有效访问级别 = capability ∩ permission ∩ policy。这个交集在 `registerBindings` 里由
- * capabilities 层的 `effectiveCapabilities` 算出并挂在 binding 上；本文件只消费结论：
- * read 命令在 read_only 下仍可执行，write 命令必须被拒绝，缺能力一律是结构化不可用。
+ * 有效访问级别 = capability ∩ permission ∩ policy，由 `registerBindings` 用 capabilities 层的
+ * `effectiveCapabilities` 算出；本文件只消费结论：read 命令在 read_only 下仍可执行，write 命令必须
+ * 被拒绝，缺能力一律是结构化不可用。
  */
 import { AccessLevel, type CapabilityKey, type ProviderRegistry } from '@harness-projects/capabilities'
 import {
-  ProjectErrorCode,
-  projectError,
-  type ProjectError,
-  type ProviderBindingId,
+  ProjectErrorCode, projectError, type ProjectError, type ProviderBindingId,
 } from '@harness-projects/domain'
 import { resolveCapability } from './registry.ts'
 
@@ -41,18 +38,13 @@ export function gateCommand(registry: ProviderRegistry, key: CapabilityKey, mode
     return denied(resolution.access, bindingId, error)
   }
   return {
-    allowed: true,
-    access: resolution.access,
-    degraded: resolution.access === AccessLevel.Degraded,
-    bindingId,
-    error: undefined,
+    allowed: true, access: resolution.access, degraded: resolution.access === AccessLevel.Degraded,
+    bindingId, error: undefined,
   }
 }
 
 function denied(
-  access: AccessLevel,
-  bindingId: ProviderBindingId | undefined,
-  error: ProjectError,
+  access: AccessLevel, bindingId: ProviderBindingId | undefined, error: ProjectError,
 ): CommandGate {
   return { allowed: false, access, degraded: false, bindingId, error }
 }
