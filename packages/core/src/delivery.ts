@@ -103,7 +103,8 @@ export async function getDeliveryProjection(context: CoreContext, scope: Deliver
     }
   }
   const facts = await readChainFacts(context, normalized)
-  const edges = chainEdges(facts)
+  // 骨架跳（observed=false）只是"缺哪一跳"的位置标记，不是链路存在：它既不落成关系，也不进谱系。
+  const edges = chainEdges(facts).filter((edge) => edge.artifact.observed)
   const recorded = await recordEdges(context, edges)
   const hops: DeliveryLineageHop[] = []
   for (let index = 0; index < edges.length; index += 1) {
