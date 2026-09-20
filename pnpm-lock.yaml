@@ -8,6 +8,57 @@ importers:
 
   .:
     devDependencies:
+      '@harness-projects/app-harness-plugin':
+        specifier: workspace:*
+        version: link:apps/harness-plugin
+      '@harness-projects/app-web':
+        specifier: workspace:*
+        version: link:apps/web
+      '@harness-projects/capabilities':
+        specifier: workspace:*
+        version: link:packages/capabilities
+      '@harness-projects/client':
+        specifier: workspace:*
+        version: link:packages/client
+      '@harness-projects/controller':
+        specifier: workspace:*
+        version: link:packages/controller
+      '@harness-projects/core':
+        specifier: workspace:*
+        version: link:packages/core
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:packages/domain
+      '@harness-projects/provider-delivery-github-actions':
+        specifier: workspace:*
+        version: link:packages/providers/delivery-github-actions
+      '@harness-projects/provider-development-github':
+        specifier: workspace:*
+        version: link:packages/providers/development-github
+      '@harness-projects/provider-development-local-git':
+        specifier: workspace:*
+        version: link:packages/providers/development-local-git
+      '@harness-projects/provider-execution-harness':
+        specifier: workspace:*
+        version: link:packages/providers/execution-harness
+      '@harness-projects/provider-execution-human':
+        specifier: workspace:*
+        version: link:packages/providers/execution-human
+      '@harness-projects/provider-planning-github-projects':
+        specifier: workspace:*
+        version: link:packages/providers/planning-github-projects
+      '@harness-projects/provider-planning-local':
+        specifier: workspace:*
+        version: link:packages/providers/planning-local
+      '@harness-projects/storage-sqlite':
+        specifier: workspace:*
+        version: link:packages/storage/sqlite
+      '@harness-projects/ui':
+        specifier: workspace:*
+        version: link:packages/ui
+      '@harness-projects/ui-model':
+        specifier: workspace:*
+        version: link:packages/ui-model
       '@types/node':
         specifier: ^24.10.1
         version: 24.13.5
@@ -18,39 +69,166 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1
 
-  apps/harness-plugin: {}
+  apps/harness-plugin:
+    dependencies:
+      '@harness-projects/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@harness-projects/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      '@harness-projects/ui-model':
+        specifier: workspace:*
+        version: link:../../packages/ui-model
 
-  apps/web: {}
+  apps/web:
+    dependencies:
+      '@harness-projects/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@harness-projects/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      '@harness-projects/ui-model':
+        specifier: workspace:*
+        version: link:../../packages/ui-model
 
-  packages/capabilities: {}
+  packages/capabilities:
+    dependencies:
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../domain
 
-  packages/client: {}
+  packages/client:
+    dependencies:
+      '@harness-projects/controller':
+        specifier: workspace:*
+        version: link:../controller
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../domain
 
-  packages/controller: {}
+  packages/controller:
+    dependencies:
+      '@harness-projects/capabilities':
+        specifier: workspace:*
+        version: link:../capabilities
+      '@harness-projects/core':
+        specifier: workspace:*
+        version: link:../core
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../domain
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      '@harness-projects/capabilities':
+        specifier: workspace:*
+        version: link:../capabilities
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/domain: {}
 
-  packages/providers/delivery-github-actions: {}
+  packages/providers/delivery-github-actions:
+    dependencies:
+      '@harness-projects/capabilities':
+        specifier: workspace:*
+        version: link:../../capabilities
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../../domain
 
-  packages/providers/development-github: {}
+  packages/providers/development-github:
+    dependencies:
+      '@harness-projects/capabilities':
+        specifier: workspace:*
+        version: link:../../capabilities
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../../domain
 
-  packages/providers/development-local-git: {}
+  packages/providers/development-local-git:
+    dependencies:
+      '@harness-projects/capabilities':
+        specifier: workspace:*
+        version: link:../../capabilities
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../../domain
 
-  packages/providers/execution-harness: {}
+  packages/providers/execution-harness:
+    dependencies:
+      '@harness-projects/capabilities':
+        specifier: workspace:*
+        version: link:../../capabilities
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../../domain
 
-  packages/providers/execution-human: {}
+  packages/providers/execution-human:
+    dependencies:
+      '@harness-projects/capabilities':
+        specifier: workspace:*
+        version: link:../../capabilities
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../../domain
 
-  packages/providers/planning-github-projects: {}
+  packages/providers/planning-github-projects:
+    dependencies:
+      '@harness-projects/capabilities':
+        specifier: workspace:*
+        version: link:../../capabilities
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../../domain
 
-  packages/providers/planning-local: {}
+  packages/providers/planning-local:
+    dependencies:
+      '@harness-projects/capabilities':
+        specifier: workspace:*
+        version: link:../../capabilities
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../../domain
 
-  packages/storage/sqlite: {}
+  packages/storage/sqlite:
+    dependencies:
+      '@harness-projects/capabilities':
+        specifier: workspace:*
+        version: link:../../capabilities
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../../domain
 
-  packages/ui: {}
+  packages/ui:
+    dependencies:
+      '@harness-projects/client':
+        specifier: workspace:*
+        version: link:../client
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@harness-projects/ui-model':
+        specifier: workspace:*
+        version: link:../ui-model
 
-  packages/ui-model: {}
+  packages/ui-model:
+    dependencies:
+      '@harness-projects/client':
+        specifier: workspace:*
+        version: link:../client
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../domain
 
 packages:
 

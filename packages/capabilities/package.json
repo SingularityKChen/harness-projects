@@ -6,5 +6,8 @@
   "description": "能力定义与注册契约",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@harness-projects/domain": "workspace:*"
   }
 }

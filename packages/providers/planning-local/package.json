@@ -6,5 +6,9 @@
   "description": "本地项目规划 Provider",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@harness-projects/domain": "workspace:*",
+    "@harness-projects/capabilities": "workspace:*"
   }
 }

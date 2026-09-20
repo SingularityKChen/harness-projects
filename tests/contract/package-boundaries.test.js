@@ -238,6 +238,41 @@ test('依赖：源码中的跨包 import 必须落在允许的边上', async () 
   }
 })
 
+test('依赖：源码 import 的兄弟包必须在本包 manifest 中声明', async () => {
+  for (const dir of Object.keys(EXPECTED)) {
+    const manifest = await readJson(path.join(repoRoot, dir, 'package.json'))
+    const declared = new Set([
+      ...Object.keys(manifest.dependencies ?? {}),
+      ...Object.keys(manifest.peerDependencies ?? {}),
+    ])
+    for (const file of await sourceFiles(path.join(repoRoot, dir, 'src'))) {
+      const source = await readFile(file, 'utf8')
+      const relative = path.relative(repoRoot, file)
+      for (const specifier of importSpecifiers(source)) {
+        const target = resolveInternal(specifier)
+        if (target === undefined) continue
+        const packageName = specifier.split('/').slice(0, 2).join('/')
+        assert.ok(
+          declared.has(packageName),
+          `${relative} import 了 ${packageName}，但 ${dir}/package.json 没有声明它：运行时解析会失败`,
+        )
+      }
+    }
+  }
+})
+
+test('依赖：根 manifest 声明全部工作区包，测试层才能按包名 import', async () => {
+  const root = await readJson(path.join(repoRoot, 'package.json'))
+  const declared = root.devDependencies ?? {}
+  for (const [dir, { name }] of Object.entries(EXPECTED)) {
+    assert.ok(
+      name in declared,
+      `package.json 的 devDependencies 缺少 ${name}（${dir}）：tests/ 无法按包名 import 它`,
+    )
+    assert.equal(declared[name], 'workspace:*', `${name} 必须用 workspace:* 协议声明`)
+  }
+})
+
 test('依赖：manifest 中声明的内部与外部依赖同样受约束', async () => {
   for (const [dir, { allow }] of Object.entries(EXPECTED)) {
     const manifest = await readJson(path.join(repoRoot, dir, 'package.json'))

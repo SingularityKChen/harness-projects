@@ -6,5 +6,11 @@
   "description": "独立 Web 外壳",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@harness-projects/domain": "workspace:*",
+    "@harness-projects/client": "workspace:*",
+    "@harness-projects/ui-model": "workspace:*",
+    "@harness-projects/ui": "workspace:*"
   }
 }
