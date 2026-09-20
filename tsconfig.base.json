@@ -17,6 +17,8 @@
     "noUnusedParameters": true,
 
     "verbatimModuleSyntax": true,
+    // 运行时就是 Node 的类型剥离：包内相对导入必须写 .ts 后缀，且没有构建步骤（noEmit）。
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
