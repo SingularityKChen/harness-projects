@@ -252,6 +252,8 @@ node scripts/rule-checks.mjs size origin/main
 
 与计划的偏差：Batch 3 原计划还要修改 `docs/exec-plan/active/2026-09-20-mvp0-parallel-stacks.md` 的 D5 表格，因该文件不在 `main` 上而改为遗留项（遗留 3）；`pnpm verify` 没能以包装命令的形式执行（遗留 6）。计划没有预见到 `describeBaseline()` 的换行缺陷（Surprises 6），它在实现过程中被发现并当场修掉，并补了防复发断言。
 
+交付载体是 PR #98（`fix/rule-checks-stacked-base`，base `main`）。除验收表里的本地证据外，修复后的报告已在真实 CI 事件上跑过：run `35499369649` 的 `size` job 日志里出现 `基线：origin/main @ f09730b678c9（判定范围 origin/main...HEAD）` 与 `代码：214 / 1000 行`（无 `栈累计` 行，因为该 PR 的 base 就是 main），同一 run 的 `disclosure` job 日志里出现 `基线：origin/main @ f09730b678c9（扫描范围 origin/main...HEAD）` 后接 `机械扫描通过`。这确认了报告层在真实环境的行为；它**不**替代验收项 9——那条要验的是 base 不是 `main` 时的触发行为。
+
 已知需要如实记录的遗留：
 
 1. `ci.yml` 仍以 `branches: [main]` 约束 `pull_request`，栈内 PR 拿不到 `Verify` / `PR Fast Gate`；栈的验收要求"每个 PR 的 `PR Fast Gate` 在自己的 head 上为绿"在放开该触发器之前不可满足。
@@ -266,3 +268,4 @@ node scripts/rule-checks.mjs size origin/main
 - 2026-09-20：创建。记录 issue #96 的取证结果、方案 A/B/C/D 的取舍、三项用户决定（栈累计不设预算、1 个 PR、暂不放开 `ci.yml` 触发器）与三个批次。
 - 2026-09-20：修正引用来源。发现栈的控制计划由 PR #80 引入、尚未在 `main` 上，故改为只引用 `main` 已存在的 `AGENTS.md` §8 与 `merge-queue.md` §6.1；Batch 3 去掉对那份计划的修改，改列遗留项；补记"分支基于 `origin/main`"的决策与 `docs/README.md` 的冲突处理方式。
 - 2026-09-20：三个批次完成，回填 Progress、验收结果（1–8 通过、9 待合并后真实事件）、Surprises 6–7（`describeBaseline()` 换行缺陷、工作区缺 `node_modules` 造成的假红）与 Outcomes，新增遗留 6（`pnpm verify` 的沙箱限制与等价证据）。
+- 2026-09-20：登记交付载体 PR #98 与真实 CI 事件的报告证据（run `35499369649` 的 `size` / `disclosure` 两个 job 日志都打印了基线），并写明它不替代验收项 9。
