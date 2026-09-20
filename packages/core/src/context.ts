@@ -6,8 +6,8 @@ import {
   type AccessLevel, type CapabilityKey, type ExternalObjectRef, type ProviderRegistry, type Storage,
 } from '@harness-projects/capabilities'
 import {
-  StatusPolicy, WriteState, newEntityId, newExternalIdentityId, newRelationId, newWorkspaceId,
-  type EntityId, type ExternalIdentityId, type RelationId, type WorkspaceId,
+  NormalizedStatus, StatusPolicy, WriteState, newEntityId, newExternalIdentityId, newRelationId,
+  newWorkspaceId, type EntityId, type ExternalIdentityId, type RelationId, type WorkspaceId,
 } from '@harness-projects/domain'
 import { bootstrapWorkspace, type BootstrapResult } from './bootstrap.ts'
 import { rerunPipeline, type DeliveryWriteAttempt } from './delivery.ts'
@@ -16,6 +16,9 @@ import { createQueries, type CoreQueries } from './queries.ts'
 import { registerBindings, type CoreProviderTable } from './registry.ts'
 import { confirmRelation, type RecordedEdge, type RelationRef } from './relations.ts'
 import { startWork } from './start-work.ts'
+import {
+  StatusPolicyMode, writePlanningStatus, type PlanningStatusCommand, type StatusDecision,
+} from './status-policy.ts'
 
 export interface IdFactory {
   readonly entityId: () => EntityId
@@ -63,6 +66,8 @@ export interface CoreCommands {
   confirmRelation(ref: RelationRef): Promise<RecordedEdge | undefined>
   /** 对只读交付方的写尝试：只回结构化 not supported，不改任何状态。 */
   rerunPipeline(ref: ExternalObjectRef): Promise<DeliveryWriteAttempt>
+  /** 规划状态的唯一显式写入命令；工程事实无权调用它（不变量 3）。 */
+  applyPlanningStatus(command: PlanningStatusCommand): Promise<StatusDecision>
 }
 
 /**
@@ -114,6 +119,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
       startWork: (request: StartWorkRequest) => startWork(context, request),
       confirmRelation: (ref: RelationRef) => confirmRelation(context, ref),
       rerunPipeline: (ref: ExternalObjectRef) => rerunPipeline(context, ref),
+      applyPlanningStatus: (command: PlanningStatusCommand) => writePlanningStatus(context, command),
     }),
   }
 }
@@ -138,8 +144,10 @@ function unavailableCore(reason: string): CoreApi {
     }),
     startWork: async () => startWorkUnavailable(error),
     confirmRelation: async () => undefined,
-    rerunPipeline: async () => ({
-      supported: false, writeState: WriteState.Failed, saving: false, confirmed: false, error,
+    rerunPipeline: async () => ({ supported: false, writeState: WriteState.Failed, saving: false, confirmed: false, error }),
+    applyPlanningStatus: async (command: PlanningStatusCommand) => ({
+      entityId: command.entityId, status: NormalizedStatus.Unknown, derived: [], wrote: false,
+      policy: StatusPolicy.ProviderAuthoritative, mode: StatusPolicyMode.SourceManaged, reason: reason, error,
     }),
   }
   return { queries: namespace(queries), commands: namespace(commands) }

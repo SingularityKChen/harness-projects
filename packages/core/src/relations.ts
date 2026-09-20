@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto'
 import type { Storage, StorageTransaction } from '@harness-projects/capabilities'
 import {
   EntityKind, RelationSource, RelationState, asBrandedId, makeRelation,
-  type EntityId, type Relation, type RelationType, type WorkspaceId,
+  type EngineeringFactKind, type EntityId, type Relation, type RelationType, type WorkspaceId,
 } from '@harness-projects/domain'
 import type { CoreContext } from './context.ts'
 
@@ -40,6 +40,8 @@ export interface ChainNode {
   readonly label: string | undefined
   readonly observed: boolean
   readonly detail: string | undefined
+  /** 这次观察隐含的工程事实种类（CI 成功/失败）；只作为派生标记的输入，永不改写规划状态。 */
+  readonly fact: EngineeringFactKind | undefined
 }
 
 /** 一条待记录/已记录的跳：`artifact` 是这一跳引入的产物节点（tracks/has_worktree 是 to，其余是 from）。 */

@@ -8,6 +8,7 @@ import {
   type EntityId, type ExecutionContextId, type ProjectError,
 } from '@harness-projects/domain'
 import { resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
+import { chainNode } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
 import {
   StartWorkFallback, contextIdFor, contextRecord, reportForExisting, runIdFor, runStatusFor,
@@ -94,24 +95,19 @@ async function provision(
 }
 
 /** 链路推进写入的系统事实边：工作项 → 执行上下文 → 工作树（携带分支）。 */
-async function recordStartFacts(
-  context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, git: GitOutcome,
-): Promise<void> {
+async function recordStartFacts(context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, git: GitOutcome): Promise<void> {
   const workItemId = asBrandedId<EntityId>(request.workItemId)
   const contextEntityId = asEntityId(contextId)
   const edges: DiscoveredEdge[] = [{
     from: workItemId, to: contextEntityId, type: RelationType.Tracks, provenance: EdgeProvenance.Command,
-    artifact: { id: contextEntityId, kind: EntityKind.ExecutionContext, externalId: contextId, label: undefined, observed: true, detail: undefined },
+    artifact: chainNode(contextEntityId, EntityKind.ExecutionContext, contextId, undefined, true),
   }]
   const slot = git.worktreeExternalId ?? git.branchExternalId
   if (slot !== undefined) {
     const worktreeId = chainEntityId(context.workspaceId, EntityKind.Worktree, `${git.bindingId}|${slot}`)
     edges.push({
       from: contextEntityId, to: worktreeId, type: RelationType.HasWorktree, provenance: EdgeProvenance.Command,
-      artifact: {
-        id: worktreeId, kind: EntityKind.Worktree, externalId: slot,
-        label: git.branchExternalId ?? slot, observed: true, detail: undefined,
-      },
+      artifact: chainNode(worktreeId, EntityKind.Worktree, slot, git.branchExternalId ?? slot, true),
     })
   }
   await recordEdges(context, edges)

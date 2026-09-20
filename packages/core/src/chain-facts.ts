@@ -7,7 +7,7 @@
  * 且不会因为重新读取而换 id（不变量 6）。本文件不写任何外部状态，也不触碰规划投影。
  */
 import { CapabilityKey, type ExternalObjectRef, type ProviderResult, type ResolvedBinding } from '@harness-projects/capabilities'
-import { EntityKind } from '@harness-projects/domain'
+import { EngineeringFactKind, EntityKind } from '@harness-projects/domain'
 import { gateCommand } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
 import { contextIdFor, readExecutionContext } from './execution-context.ts'
@@ -33,10 +33,16 @@ interface ChangeRequestFact { readonly ref: ExternalObjectRef; readonly label: s
 
 const PAGE_LIMIT = 50
 
-export function chainNode(
-  id: ChainNode['id'], kind: EntityKind, externalId: string | undefined,
-  label: string | undefined, observed: boolean, detail?: string,
-): ChainNode { return { id, kind, externalId, label, observed, detail } }
+export function chainNode(id: ChainNode['id'], kind: EntityKind, externalId: string | undefined,
+  label: string | undefined, observed: boolean, detail?: string, fact?: EngineeringFactKind): ChainNode {
+  return { id, kind, externalId, label, observed, detail, fact }
+}
+
+/** CI 观察 → 工程事实种类：只有明确的结论才算事实，其余（进行中 / 排队）不猜。 */
+function factFor(conclusion: string | undefined): EngineeringFactKind | undefined {
+  if (conclusion === 'failure') return EngineeringFactKind.CiFailed
+  return conclusion === 'success' ? EngineeringFactKind.CiPassed : undefined
+}
 
 /** 读能力门：未声明/只读以外一律折成 gap；provider 缺失也走同一条路，调用方永远拿到结构化结论。 */
 async function gated<T>(
@@ -54,9 +60,7 @@ async function gated<T>(
   return { value: result.value, gap: undefined }
 }
 
-function collect(gaps: CapabilityGap[], gap: CapabilityGap | undefined): void {
-  if (gap !== undefined) gaps.push(gap)
-}
+function collect(gaps: CapabilityGap[], gap: CapabilityGap | undefined): void { if (gap !== undefined) gaps.push(gap) }
 
 async function resolveRepository(
   context: CoreContext, repositoryId: string, gaps: CapabilityGap[],
@@ -99,6 +103,7 @@ async function readPipelines(
   return (read.value?.items ?? []).map((run) => chainNode(
     chainEntityId(context.workspaceId, EntityKind.PipelineRun, `${run.ref.bindingId}|${run.ref.externalId}`),
     EntityKind.PipelineRun, run.ref.externalId, `${run.status}: ${run.conclusion ?? '未完成'}`, true,
+    undefined, factFor(run.conclusion),
   ))
 }
 
@@ -111,6 +116,7 @@ async function readChecks(
   return (read.value?.items ?? []).map((check) => chainNode(
     chainEntityId(context.workspaceId, EntityKind.CheckRun, `${check.ref.bindingId}|${check.ref.externalId}`),
     EntityKind.CheckRun, check.ref.externalId, `${check.name}: ${check.conclusion ?? check.status}`, true,
+    undefined, factFor(check.conclusion),
   ))
 }
 
@@ -155,11 +161,8 @@ function commitNode(context: CoreContext, scope: DeliveryScopeInput, repository:
 
 function changeRequestNode(context: CoreContext, repository: ExternalObjectRef | undefined, branch: string, fact: ChangeRequestFact | undefined): ChainNode {
   const slot = `${fact?.ref.bindingId ?? repository?.bindingId ?? 'unbound'}|${fact?.ref.externalId ?? branch}`
-  return chainNode(
-    chainEntityId(context.workspaceId, EntityKind.ChangeRequest, slot), EntityKind.ChangeRequest,
-    fact?.ref.externalId, fact?.label ?? branch, fact !== undefined,
-    fact === undefined ? '变更请求尚未观察到' : undefined,
-  )
+  return chainNode(chainEntityId(context.workspaceId, EntityKind.ChangeRequest, slot), EntityKind.ChangeRequest,
+    fact?.ref.externalId, fact?.label ?? branch, fact !== undefined, fact === undefined ? '变更请求尚未观察到' : undefined)
 }
 
 function skeleton(context: CoreContext, kind: EntityKind, slot: string, label: string, detail: string): ChainNode {

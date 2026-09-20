@@ -13,7 +13,8 @@ import {
   type ExternalObjectRef, type ProjectError,
 } from '@harness-projects/capabilities'
 import {
-  EntityKind, RelationSource, RelationState, RelationType, WriteState, type EntityId, type Relation,
+  EntityKind, RelationSource, RelationState, RelationType, WriteState,
+  type EngineeringFactKind, type EntityId, type Relation,
 } from '@harness-projects/domain'
 import { gateCommand, resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
 import {
@@ -39,6 +40,8 @@ export interface DeliveryLineageHop {
   readonly observed: boolean
   readonly unavailable: boolean
   readonly detail: string | undefined
+  /** 这一跳隐含的工程事实（CI 成功/失败）：调用方只能把它折成派生标记。 */
+  readonly fact: EngineeringFactKind | undefined
 }
 
 export interface DeliveryCapabilityState {
@@ -102,7 +105,7 @@ function toHop(edge: DiscoveredEdge, relation: Relation, gaps: readonly Capabili
     relationType: relation.type, source: RelationSource.Lineage, relationSource: relation.source,
     relationState: relation.state, provenance: edge.provenance, from: relation.from, to: relation.to,
     entityKind: edge.artifact.kind, externalId: edge.artifact.externalId, label: edge.artifact.label,
-    observed: edge.artifact.observed, detail: edge.artifact.detail,
+    observed: edge.artifact.observed, detail: edge.artifact.detail, fact: edge.artifact.fact,
     unavailable: gaps.some((gap) => keys.includes(gap.key)),
   }
 }

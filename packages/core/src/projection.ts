@@ -8,6 +8,7 @@ import {
   type ExternalIdentityKind, type NormalizedStatus, type PlanningContent, type ProviderBindingId,
   type WorkspaceProjection,
 } from '@harness-projects/domain'
+import type { DeliveryLineageHop } from './delivery.ts'
 import { entityKindFor } from './identity.ts'
 
 /** 外部对象引用：详情与内容引用据此回指 provider 侧对象，不暴露 provider 原生形状。 */
@@ -91,4 +92,16 @@ export function withEngineeringFacts(
   view: PlanningItemView, facts: readonly EngineeringFact[],
 ): PlanningItemView {
   return { ...view, engineering: engineeringBlock(facts) }
+}
+
+/** 交付跳动 → 工程事实：subject 恒为工作项，CI 结论只作为事实输入，不参与规划状态判定。 */
+export function toDeliveryFacts(hops: readonly DeliveryLineageHop[], subjectId: EntityId): readonly EngineeringFact[] {
+  const facts: EngineeringFact[] = []
+  for (const hop of hops) if (hop.fact !== undefined) facts.push({ kind: hop.fact, subjectId })
+  return facts
+}
+
+/** 把交付谱系折进投影的 engineering 块（D5 派生投影）；planningStatus 与内容字段逐字保留。 */
+export function withDeliveryLineage(view: PlanningItemView, hops: readonly DeliveryLineageHop[], subjectId: EntityId): PlanningItemView {
+  return withEngineeringFacts(view, toDeliveryFacts(hops, subjectId))
 }
