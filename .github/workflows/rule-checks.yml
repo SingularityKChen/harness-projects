@@ -18,9 +18,17 @@ name: Rule checks
 
 on:
   pull_request:
-    branches: [main]
+    # 刻意不声明 branches。这个过滤器不只是「哪些 PR 进入本 workflow」的准入
+    # 谓词——它同时决定 github.base_ref 的取值，而 base_ref 正是下面两个 job
+    # 度量体量与发布面范围用的基线。一旦限定成 [main]，能跑的时候基线就必然
+    # 是 main，`${base}...HEAD` 于是退化成「这个 head 分支里还没进 main 的全部
+    # 内容」：栈上 PR 被报成整个栈的累计（PR #95 的真实改动 900 行被报成
+    # 7837 行），而 base 不是 main 的 PR 一次都不触发。两种后果都记录在
+    # issue #96——判定基线只能由 PR 自己声明的 base 决定，触发器不替它选择。
+    #
     # 省略 types 时默认不含 edited：PR 描述编辑后不重跑，绿色横幅描述的是
     # 编辑前的旧内容（issue #40 评审项 2）。与 issue-policy.yml 用同一套。
+    # edited 同时覆盖「改 base」：栈向上 retarget 时会重算一次，判定自愈。
     types: [opened, synchronize, reopened, edited]
 
 concurrency:
@@ -48,9 +56,11 @@ jobs:
 
       - name: 扫描本次改动的新增行、每个提交与 PR 描述
         # base_ref 与 PR 描述都经 env 传入而不是直接插值进 run：两者都是事件
-        # 负载里的值，即使 base_ref 被 `branches: [main]` 约束成只可能是
-        # main，也不在 shell 里展开——PR 描述是自由文本，插值进 run 会是
+        # 负载里的值，不在 shell 里展开——PR 描述是自由文本，插值进 run 会是
         # 任意 shell 注入。disclosure() 内部用 process.env.PR_BODY 读取。
+        #
+        # base_ref 是 PR 自己声明的 base（本 workflow 刻意不声明 branches
+        # 过滤器，理由见文件头）：栈上 PR 扫的是它相对栈内上一层的改动。
         env:
           BASE_REF: ${{ github.base_ref }}
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -71,8 +81,9 @@ jobs:
           node-version-file: .nvmrc
 
       - name: 核对 PR 体量上限
-        # base_ref 经 env 传入而不是直接插值进 run：它是事件负载里的值，
-        # 即使这里被 `branches: [main]` 约束成只可能是 main，也不在 shell 里展开。
+        # base_ref 经 env 传入而不是直接插值进 run：它是事件负载里的值，不在
+        # shell 里展开。基线就是 PR 自己声明的 base；脚本会把实际用的基线
+        # 打印出来，避免读者把它读成整栈的累计。
         env:
           BASE_REF: ${{ github.base_ref }}
         run: node scripts/rule-checks.mjs size "origin/$BASE_REF"
