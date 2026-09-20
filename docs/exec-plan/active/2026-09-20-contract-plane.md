@@ -120,41 +120,45 @@ node_modules/.bin/tsc --noEmit
 
 **回滚**：`git revert` 本批提交；`packages/capabilities` 尚未引用这些符号。
 
-### Batch A2 · 能力契约与 Planning 套件（Closes #29 #30）
+### Batch A2 · 能力契约与结构化错误模型（Closes #29）
 
-**最小闭环**：五个域的 port、capability key、四态访问级别、错误模型被冻结；Planning 契约套件连同通过它的离线 provider 一起存在；新建 `packages/providers/fake` 并在 manifest、`tsconfig.json`、边界矩阵三处登记。
+**最小闭环**：五个域的 port、capability key、四态访问级别、结构化错误模型与观察形状被冻结，并被 `tests/contract/capabilities-*.test.js` 固定；本批次只定义，不含任何实现，也不 import 任何具体 provider。
 
-**涉及文件**：`packages/capabilities/src/**`、`packages/providers/fake/{package.json,src/**}`、`tests/contract/suites/planning.js`、`tests/contract/planning-contract.test.js`、`tests/contract/capabilities.test.js`、`package.json`（根，新增该包的 devDependency）、`pnpm-lock.yaml`、`tsconfig.json`、`tests/contract/package-boundaries.test.js`
+**涉及文件**：`packages/capabilities/src/**`、`tests/contract/capabilities-*.test.js`
 
-- [ ] `result.ts`、`capability-keys.ts`、`observation.ts`
-- [ ] `planning-provider.ts`：读能力全套 + 可选写能力，内容三态联合
-- [ ] `development-provider.ts`、`delivery-provider.ts`、`execution-provider.ts`、`storage.ts`：签名冻结（含 `Storage` 的方法分组）
-- [ ] `registry.ts`：绑定引用与已解析 provider 的组合视图
-- [ ] 离线 Planning provider：分页、内容三态、字段写、draft→issue 转换、故障开关
-- [ ] Planning 契约套件：列出与分页、内容三态、缺能力、权限被拒、离线、重复观察得到同一稳定键
+- [x] `result.ts`、`capability-keys.ts`、`observation.ts`
+- [x] `planning-provider.ts`：读能力全套 + 可选写能力，内容三态联合
+- [x] `development-provider.ts`、`delivery-provider.ts`、`execution-provider.ts`、`storage.ts`：签名冻结（含 `Storage` 的方法分组）
+- [x] `registry.ts`：绑定引用与已解析 provider 的组合视图
+- [x] 契约测试：8 个错误码闭集与 retryable/recovery 语义、capability key 不含平台名、`intersectAccess` 语义、11 个调用方码映射完整、去重键规则
 
 **验证**：
 
 ```bash
 node --test tests/contract
-pnpm run boundaries
+node_modules/.bin/tsc --noEmit
+node scripts/rule-checks.mjs size feat/domain-identity-model
 ```
 
-期望：全部通过；从离线 provider 移除一个可选能力后，"该能力不可用"用例失败。
+期望：全部通过；代码变更不超过 1000 行上限。
 
-**回滚**：`git revert` 本批提交；A1 与 F1 不受影响（该包是新增目录，回滚即删除）。
+**回滚**：`git revert` 本批提交；A1 与 F1 不受影响（回滚后该包回到只导出 `packageId` 的骨架状态）。
 
-### Batch A3 · 其余三域套件与替身（Closes #31）
+**批次划分订正（2026-09-20）**：原方案把 #29 与 #30 合成一个 PR。实测五个域的接口定义连同离线 provider 与 Planning 契约套件会超过 `AGENTS.md` §8 的 1000 行代码上限，因此拆成两个 PR：#29 只交付契约层（本批次）；#30 与 #31 合并为下一个 PR（见 Batch A3），由它一并交付离线替身与四域套件。被取代的控制计划决定见 `2026-09-20-mvp0-parallel-stacks.md` 的 Decision Log。
 
-**最小闭环**：development / delivery / execution 三域也有套件与离线替身，Storage 的内存替身满足其契约；MVP-0 链路需要的全部构件都能在无凭据条件下构造。
+### Batch A3 · 离线替身与四个域的套件（Closes #30 #31）
 
-**涉及文件**：`packages/providers/fake/src/**`、`tests/contract/suites/{development,delivery,execution,storage}.js`、`tests/contract/{development,delivery,execution,storage}-contract.test.js`
+**最小闭环**：Planning 契约套件连同通过它的离线 provider 一起存在；development / delivery / execution 三域也有套件与离线替身，Storage 的内存替身满足其契约；MVP-0 链路需要的全部构件都能在无凭据条件下构造。本批次合并了原方案的 #30 与 #31（见 Batch A2 的划分订正）。
 
+**涉及文件**：`packages/providers/fake/{package.json,src/**}`、`tests/contract/suites/{planning,development,delivery,execution,storage}.js`、`tests/contract/{planning,development,delivery,execution,storage}-contract.test.js`、`package.json`（根，新增该包的 devDependency）、`pnpm-lock.yaml`、`tsconfig.json`、`tests/contract/package-boundaries.test.js`
+
+- [ ] 离线 Planning provider：分页、内容三态、字段写、draft→issue 转换、故障开关
+- [ ] Planning 契约套件：列出与分页、内容三态、缺能力、权限被拒、离线、重复观察得到同一稳定键
 - [ ] development 替身：仓库身份、分支创建、工作树创建/移除、变更请求读写、原生谱系
 - [ ] delivery 替身：按提交查流水线与检查、可选部署能力、写操作返回 not supported 且不改状态
 - [ ] execution 替身：启动、查询、可选取消、失败映射到带阶段的错误
 - [ ] Storage 内存替身：事务、身份与实体、执行上下文、关系、写尝试、修订号，并支持"换一个实例读同一份内容"以模拟重启
-- [ ] 四个套件各至少一条判别性用例
+- [ ] 五个套件各至少一条判别性用例
 
 **验证**：
 
@@ -163,9 +167,9 @@ node --test tests/contract
 pnpm run boundaries
 ```
 
-期望：全部通过；把 delivery 替身的写操作改成静默成功，`not supported` 用例失败。
+期望：全部通过；从离线 provider 移除一个可选能力后，对应的 "not supported" 用例失败；把 delivery 替身的写操作改成静默成功，`not supported` 用例失败。
 
-**回滚**：`git revert` 本批提交；A2 的 Planning 套件仍自洽。
+**回滚**：`git revert` 本批提交；A2 的 Planning 套件仍自洽（A2 只含契约层，回滚 A3 不会碰它）。
 
 ## Validation and Acceptance
 
@@ -175,15 +179,15 @@ pnpm run boundaries
 | 2 | Draft→Issue 保持内部 id | `node --test tests/contract` 的身份用例 | 待验证 |
 | 3 | 工程事实不改写规划状态 | 状态策略三态各一条用例 | 待验证 |
 | 4 | 五个域 port 签名冻结 | `packages/capabilities/src/**` 每个 port 有类型级测试或契约套件覆盖 | 待验证 |
-| 5 | 错误模型覆盖 8 个 provider 码与 11 个调用方码，且映射有测试 | `tests/contract/capabilities.test.js` | 待验证 |
+| 5 | 错误模型覆盖 8 个 provider 码与 11 个调用方码，且映射有测试 | `node --test tests/contract/capabilities-errors.test.js` | 待验证 |
 | 6 | 套件有牙 | 每个域一条"删掉能力即失败"的注入缺陷实验记录 | 待验证 |
 | 7 | 离线 | 全部用例在断网、无凭据下通过 | 待验证 |
 
 ## Progress
 
 - [ ] Batch A1 · 领域模型（#75）
-- [ ] Batch A2 · 能力契约与 Planning 套件（#29 #30）
-- [ ] Batch A3 · 其余三域套件与替身（#31）
+- [x] (2026-09-20) Batch A2 · 能力契约与结构化错误模型（#29）
+- [ ] Batch A3 · 离线替身与四个域的套件（#30 #31）
 
 ## Surprises & Discoveries
 
@@ -191,12 +195,17 @@ pnpm run boundaries
 
 ## Decision Log
 
-- **Decision**：`Storage` port 的签名由本栈冻结。
-  **Rationale**：上游只给了名字，而 core 与持久化栈都需要一个确定的接口才能并行；不冻结就只能靠实现者各自想象，集成时必然返工。
+- **Decision**：`Storage` port 的签名、分组与命名由本批次冻结；这些**不是上游给定的**，上游只给了 `Storage` 这个名字。
+  **Rationale**：core 与持久化栈都需要一个确定的接口才能并行；不冻结就只能靠实现者各自想象，集成时必然返工。分组固定为：事务 / 工作区与绑定 / 身份 / 规划 / 工程 / 执行 / 关系 / 同步 / 写尝试 / 投影修订号，写进 `packages/capabilities/src/storage.ts` 的文件头注释与类型分组。
   **Date/Author**：2026-09-20 / agent
 
 - **Decision**：契约套件放测试层，离线替身集中在一个包。
   **Rationale**：见 D3、D4。两者共同的效果是：产品包不依赖测试运行器，而真实 provider 落地时能复用同一套件。
+  **Date/Author**：2026-09-20 / agent
+
+- **Decision**：`ExecutionProvider` 契约里没有 `reconcile`，MVP 由 core 轮询 `getRun` 兜底。
+  **Rationale**：上游设计要求“没有 webhook 也必须最终正确”，而执行域在 MVP 阶段没有可用的事件源；显式不提供观察流，比给一个永远返回空的 `reconcile` 更诚实——后者会让调用方误以为执行域有推送。该决定写进 `packages/capabilities/src/execution-provider.ts` 的契约注释，不允许被当成遗漏。
+  **Unresolved**：等执行平台出现可用事件源时，再单独决定是否补 `reconcile`（届时它是可选能力，仍不得改变本批次的签名）。
   **Date/Author**：2026-09-20 / agent
 
 ## Idempotence and Recovery
@@ -234,3 +243,4 @@ ProviderObservation / dedupe key 规则
 ## Bottom Change Note
 
 - 2026-09-20：首次创建。原因：控制计划把 MVP-0 切出四条栈，契约栈需要自己的设计取舍与批次验收记录。
+- 2026-09-20：订正批次划分：#29 独立成一个 PR（Batch A2），#30 与 #31 合并为下一个 PR（Batch A3）。原因：原方案单个 PR 含五域接口、离线替身与 Planning 契约套件，代码变更超过 `AGENTS.md` §8 的 1000 行上限；拆分后每批仍可独立验收。
