@@ -16,7 +16,7 @@
     "test:mvp0": "node --test tests/mvp0",
     "boundaries": "node --test tests/contract/package-boundaries.test.js",
     "check:policy": "node scripts/policy-check.mjs",
-    "verify": "pnpm run typecheck && pnpm run test"
+    "verify": "pnpm run typecheck && pnpm run test && pnpm run test:mvp0"
   },
   "devDependencies": {
     "@harness-projects/app-harness-plugin": "workspace:*",
