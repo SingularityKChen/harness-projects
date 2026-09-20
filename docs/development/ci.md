@@ -10,9 +10,16 @@
 | Issue policy | issue / PR 事件；检查标题、标签和 issue 关联 | advisory |
 | Rule checks | PR 事件；发布面和 PR 体量 | advisory |
 | Board invariants | 每日 schedule；读取 Project 工作流启停并与裁决表比较 | advisory；需要 PROJECTS_TOKEN |
-| GitHub review session | ready_for_review 的 pull_request_target；只转发 payload，不 checkout PR 代码 | 不属于合并门禁 |
+| GitHub review session | ready_for_review 的 pull_request_target；只转发 payload，不 checkout PR 代码；按 head 提交去重 | 不属于合并门禁 |
 
 Board invariants 只从默认分支按日运行，使用 Project token 读取九条内置 workflow，发现 unknown / missing / 状态偏离就失败；它不 checkout PR ref，也不进入分支保护。Review session 是特例：它运行在 self-hosted runner 上，默认分支 workflow 固定定义，权限为空，secret 只经 env 进入签名过程，响应体写 $RUNNER_TEMP。普通 PR 代码 lane 使用 pull_request；不得把 pull_request_target 用作执行不可信 PR 代码的入口。
+
+Review session 的两条结构性质由 `tests/contract/github-review-workflow.test.js` 固定，改 workflow 必须同时改它：
+
+- **事件负载只从运行器导出的 `GITHUB_EVENT_PATH` 读**。workflow 表达式里的运行器事件路径在这台自托管运行器上会求值为空字符串，于是 `readFileSync("")` 抛 ENOENT，job 在第一步崩掉且报错里只有一个空路径（issue #65，2026-09-20 实测三次运行全部如此）。空路径与空文件都必须先被显式拒绝并打印 `::error::`，而不是留一个 Node 栈。内联签名脚本读的必须是 `process.env.GITHUB_EVENT_PATH`：脚本里那个 shell 变量不会继承到子进程。
+- **并发按 head 提交去重**：`group` 是 head SHA，`cancel-in-progress: true`。`ready_for_review` 对每次 draft → ready 都发一个新事件，按 PR 号分组不限制队列深度，单台运行器会被排满（issue #49）。同一份代码只值一次评审会话，head 未变时后来的运行取消在先的运行。
+
+`pull_request_target` 的代价必须记住：**workflow 定义永远取自默认分支，所以这类修复在合并进 `default branch` 之前无法用真实事件验证**。合并前的证据是本地排练——把 workflow 里的转发脚本原样抽出、用真实事件负载与本机凭据对 `127.0.0.1:3081/github` 执行，期望 `endpoint responded: 202`；合并后必须再回读一次真实运行，把"本地排练通过"当成"线上已修好"是不允许的。
 
 CI workflow 的 action 必须 pin 到 40 位 commit；checkout 必须关闭 persist-credentials；权限最小；main push 运行不能因后续 push 被取消。新增 workflow 必须同时更新 workflow-check、契约测试和本文件。
 
