@@ -44,6 +44,9 @@ importers:
       '@harness-projects/provider-execution-human':
         specifier: workspace:*
         version: link:packages/providers/execution-human
+      '@harness-projects/provider-fake':
+        specifier: workspace:*
+        version: link:packages/providers/fake
       '@harness-projects/provider-planning-github-projects':
         specifier: workspace:*
         version: link:packages/providers/planning-github-projects
@@ -174,6 +177,15 @@ importers:
         version: link:../../domain
 
   packages/providers/execution-human:
+    dependencies:
+      '@harness-projects/capabilities':
+        specifier: workspace:*
+        version: link:../../capabilities
+      '@harness-projects/domain':
+        specifier: workspace:*
+        version: link:../../domain
+
+  packages/providers/fake:
     dependencies:
       '@harness-projects/capabilities':
         specifier: workspace:*

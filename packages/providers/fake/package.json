@@ -1,0 +1,14 @@
+{
+  "name": "@harness-projects/provider-fake",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "离线替身：能力域的内存实现与故障注入计划，供契约套件在无凭据条件下使用",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@harness-projects/domain": "workspace:*",
+    "@harness-projects/capabilities": "workspace:*"
+  }
+}
