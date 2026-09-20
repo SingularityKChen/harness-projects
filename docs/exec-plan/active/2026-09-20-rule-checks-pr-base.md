@@ -180,24 +180,24 @@ node scripts/rule-checks.mjs size origin/main
 
 | # | 验收项 | 判定证据 | 结果 |
 |---|---|---|---|
-| 1 | 栈上 PR 的体量判定按自己的 base | 在 `9f89375` 上 `size origin/feat/core-delivery-lineage` → `代码：900 / 1000 行`、exit 0 | 待验证 |
-| 2 | 报告写明基线，读者不需要反推 | 上述命令首行为 `基线：origin/feat/core-delivery-lineage @ 592b6208721a` | 待验证 |
-| 3 | 栈累计可见但不参与判定 | 同一命令出现 `栈累计（…仅记录，不计入判定）` 行且 exit 0；把它注入成远超预算的值时 exit 仍为 0 | 待验证 |
-| 4 | 触发器不再约束 base（I1/I2） | `node --test tests/contract/rule-checks.test.js` 中"不得声明分支过滤器"一条通过；反向注入过滤器后该条失败 | 待验证 |
-| 5 | `main` 基线的日常输出不被污染 | `size origin/main` 不出现 `栈累计` 行 | 待验证 |
-| 6 | W1–W7 与 workflow 契约未破坏 | `node scripts/workflow-check.mjs` no findings；`node --test tests/contract/workflow-check.test.js` 全绿 | 待验证 |
-| 7 | 门禁与配置变更的完整回归 | `pnpm verify` 全绿 | 待验证 |
-| 8 | 体量与发布面合规 | `size origin/main` 两个桶都在预算内；`disclosure` 机械扫描 exit 0；五类目人工核对无命中 | 待验证 |
-| 9 | 触发器语义在真实事件上得到证实 | 合并后栈内某个 PR 收到一次 push，`gh run list` 出现 base 为该 PR 声明 base 的新 run | **本次无法验证**（需要合并后的真实事件，见 `Outcomes & Retrospective`） |
+| 1 | 栈上 PR 的体量判定按自己的 base | 在 `9f89375` 上 `size origin/feat/core-delivery-lineage` → `代码：900 / 1000 行`、exit 0 | 通过 |
+| 2 | 报告写明基线，读者不需要反推 | 首行为 `基线：origin/feat/core-delivery-lineage @ 592b6208721a（判定范围 origin/feat/core-delivery-lineage...HEAD）` | 通过 |
+| 3 | 栈累计可见但不参与判定 | 同一命令出现 `栈累计（相对 origin/main，仅记录，不计入判定）：代码 7837 行、文档 1359 行` 且 exit 0；契约测试把累计注入 8000 行时 exit 仍为 0 | 通过 |
+| 4 | 触发器不再约束 base（I1/I2） | `node --test tests/contract/rule-checks.test.js` → pass 49 / fail 0；把 `branches: [main]` 反向注入后该条失败并给出 issue #96 的理由 | 通过 |
+| 5 | `main` 基线的日常输出不被污染 | `size origin/main` 输出中 `栈累计` 出现 0 次 | 通过 |
+| 6 | W1–W7 与 workflow 契约未破坏 | `node scripts/workflow-check.mjs` → `no findings（已检查 5 个文件）`、exit 0 | 通过 |
+| 7 | 门禁与配置变更的完整回归 | `tsc --noEmit` exit 0；`node --test tests/contract tests/integration tests/e2e` → pass 175 / fail 0 | 通过（`verify` 的两个组成命令逐条执行，见遗留 6） |
+| 8 | 体量与发布面合规 | `size origin/main` 两个桶都在预算内；`disclosure origin/main` 机械扫描 exit 0；五类目人工核对无命中 | 通过 |
+| 9 | 触发器语义在真实事件上得到证实 | 合并后栈内某个 PR 收到一次 push，`gh run list` 出现 base 为该 PR 声明 base 的新 run | **本次无法验证**（需要合并后的真实事件，见遗留 2） |
 
 ## Progress
 
 - [x] (2026-09-20) 取证：复现 PR #95 的 `7837` 与真实值 `900`，逐一比对 10 个栈内 PR，确认报告值等于相对 `origin/main` 的三点差异（7/7），并发现 #83/#88 的 head 从未触发
 - [x] (2026-09-20) 开 issue #96，`node scripts/policy-check.mjs issue 96` 通过
 - [x] (2026-09-20) 建隔离工作区 `.worktrees/rule-checks-stacked-base/`，分支 `fix/rule-checks-stacked-base`（base `origin/main` @ `f09730b`）
-- [ ] Batch 1 · 触发器与基线的解耦
-- [ ] Batch 2 · 契约测试固化不变量
-- [ ] Batch 3 · 文档与规则表述同步
+- [x] (2026-09-20) Batch 1 · 触发器与基线的解耦
+- [x] (2026-09-20) Batch 2 · 契约测试固化不变量（新增 7 条，42 → 49）
+- [x] (2026-09-20) Batch 3 · 文档与规则表述同步
 
 ## Surprises & Discoveries
 
@@ -210,6 +210,10 @@ node scripts/rule-checks.mjs size origin/main
 4. **退化的触发路径有两条，结果相同。** PR #95 的 run 创建于 `created_at + 3s`，而它的 `base_ref_changed` 发生在 run 之后 37 秒——触发瞬间 base 还是 `main`，随后 retarget 到栈内上一层，红叉被永久冻结（过滤器不再允许重跑）。PR #81 的两次 `base_ref_changed`（07:05:39 / 07:05:58）之间夹着 07:05:41 的 run——形态是"为了让门禁跑一次而临时把 base 指回 `main`"。两条路径都源自同一个过滤器。
 
 5. **栈的控制计划还不在 `main` 上。** `docs/exec-plan/active/2026-09-20-mvp0-parallel-stacks.md` 由 PR #80 引入、尚未合并（`git cat-file -e origin/main:…` → 不存在）。因此本计划改为只引用 `main` 上已有的规范来源（`AGENTS.md` §8 的"每个 PR … ≤1000 行"与 `merge-queue.md` §6.1），并把对那份计划 D5 的措辞修正列为遗留项——否则本 PR 会亲手制造 `merge-queue.md` §1 记录过的"链接指向还没合并的文件"。
+
+6. **`git rev-parse` 的结尾换行会把基线行拆成两行。** `describeBaseline()` 的第一版把 `execFileSync` 的返回值直接拼进模板串，于是 `基线：… @ f09730b678c9` 与后面的括号各占一行（`wc -l` 比预期多 1，`sed -n 1p` 只有 36 字节）。改为 `String(resolveRef(base)).trim()`，并补了一条注入 `'abc123\n'` 的契约测试防复发。这是本 PR 自己引入又自己修掉的一个缺陷，留在计划里因为它是"报告层也要有判别性测试"的具体理由。
+
+7. **`.worktrees/` 下的工作区没有 `node_modules`，会让一条既有测试假红。** `tests/contract/workflow-check.test.js` 的「CLI：脚本路径含空格时仍然真的执行检查」用 `path.resolve('node_modules')` 造符号链接；工作区里没有这个目录时链接目标不存在，被测脚本 import `yaml` 失败 → exit 1 但 stdout 为空，正则断言失败。同一命令在主检出里通过（`✔`），说明是环境差异而非回归。另外 `node_modules/` 这条 ignore 规则**不匹配符号链接**，所以把 `node_modules` 直接做成符号链接会以未跟踪文件的形式出现在 `git status` 里（差点被 `git add -A` 带进提交）；改用真实目录 + 指向主检出各包的符号链接，它才被正确忽略。
 
 ## Decision Log
 
@@ -242,15 +246,23 @@ node scripts/rule-checks.mjs size origin/main
 
 ## Outcomes & Retrospective
 
-待完成后填写。已知需要如实记录的遗留：
+三个批次全部完成，验收项 1–8 通过，第 9 项需要合并后的真实事件。改动落在 4 个提交上：计划、Batch 1（workflow + 脚本）、Batch 2（契约测试新增 7 条）、Batch 3（文档与计划回填）。
+
+核心证据是同一条 head（`9f89375`）上的对照：修复前 `size origin/main` 给 `代码：7837 / 1000 行`、exit 1，而那正是 job `106044050398` 的结论；修复后 `size origin/feat/core-delivery-lineage` 给 `代码：900 / 1000 行`、exit 0，首行写明 `基线：origin/feat/core-delivery-lineage @ 592b6208721a`，栈累计 7837 行单列一行并标注不计入判定。
+
+与计划的偏差：Batch 3 原计划还要修改 `docs/exec-plan/active/2026-09-20-mvp0-parallel-stacks.md` 的 D5 表格，因该文件不在 `main` 上而改为遗留项（遗留 3）；`pnpm verify` 没能以包装命令的形式执行（遗留 6）。计划没有预见到 `describeBaseline()` 的换行缺陷（Surprises 6），它在实现过程中被发现并当场修掉，并补了防复发断言。
+
+已知需要如实记录的遗留：
 
 1. `ci.yml` 仍以 `branches: [main]` 约束 `pull_request`，栈内 PR 拿不到 `Verify` / `PR Fast Gate`；栈的验收要求"每个 PR 的 `PR Fast Gate` 在自己的 head 上为绿"在放开该触发器之前不可满足。
 2. 验收项 9（真实事件确认触发器语义）在本次无法完成：它需要合并之后栈内 PR 的一次 push。命令与期望输出已写在 `Validation and Acceptance` 里。
 3. `docs/exec-plan/active/2026-09-20-mvp0-parallel-stacks.md` 的 D5 表格（"单 PR 代码变更 ≤ 1000 行"的强制方式）应补上"栈上必须传 `origin/<该 PR 的 baseRefName>`，不是 `origin/main`"。该文件由 PR #80 引入，本分支无法修改；#80 合并后追加一句即可。
 4. `pull_request` 的 workflow 不会因为 base 分支自身前进而重跑；栈内 PR 的体量结论因此可能相对一个已经前进的 base 变旧。本次通过打印基线提交让这种陈旧可见，但不引入自动重算。
 5. `disclosure` 的判定范围同样被修正，但它对"栈内 PR 的发布面"是否应逐 PR 独立扫描（而不是只在合并前的整体扫描）未做进一步论证。
+6. `pnpm verify` 在本会话的沙箱内无法运行：pnpm 读到 `package.json` 的 `packageManager` 字段后要自举对应版本，需要写工作区外的临时目录（`Operation not permitted`）。改为逐条执行它的两个组成命令——`tsc --noEmit`（exit 0）与 `node --test tests/contract tests/integration tests/e2e`（pass 175 / fail 0）。CI 侧仍以 `pnpm install --frozen-lockfile` / `pnpm typecheck` / `pnpm test` 的真实执行作为该路径的证据。
 
 ## Bottom Change Note
 
 - 2026-09-20：创建。记录 issue #96 的取证结果、方案 A/B/C/D 的取舍、三项用户决定（栈累计不设预算、1 个 PR、暂不放开 `ci.yml` 触发器）与三个批次。
 - 2026-09-20：修正引用来源。发现栈的控制计划由 PR #80 引入、尚未在 `main` 上，故改为只引用 `main` 已存在的 `AGENTS.md` §8 与 `merge-queue.md` §6.1；Batch 3 去掉对那份计划的修改，改列遗留项；补记"分支基于 `origin/main`"的决策与 `docs/README.md` 的冲突处理方式。
+- 2026-09-20：三个批次完成，回填 Progress、验收结果（1–8 通过、9 待合并后真实事件）、Surprises 6–7（`describeBaseline()` 换行缺陷、工作区缺 `node_modules` 造成的假红）与 Outcomes，新增遗留 6（`pnpm verify` 的沙箱限制与等价证据）。

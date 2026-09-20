@@ -23,6 +23,12 @@ Review session 的两条结构性质由 `tests/contract/github-review-workflow.t
 
 CI workflow 的 action 必须 pin 到 40 位 commit；checkout 必须关闭 persist-credentials；权限最小；main push 运行不能因后续 push 被取消。新增 workflow 必须同时更新 workflow-check、契约测试和本文件。
 
+### Rule checks 的判定基线不由触发器决定
+
+`Rule checks` 的 `size` 与 `disclosure` 两个 job 都把 `github.base_ref` 当作判定基线（体量分桶的范围、发布面扫描的范围）。因此 `.github/workflows/rule-checks.yml` 的 `on.pull_request` **刻意不声明 `branches` / `branches-ignore`**：那个过滤器不只是“哪些 PR 进入本 workflow”的准入谓词，它同时决定 `base_ref` 的取值。声明成 `[main]` 之后，能跑的时候基线必然是 `main`，`${base}...HEAD` 退化成“这个 head 分支里还没进 `main` 的全部内容”，于是栈上 PR 被量成整个栈相对 `main` 的累计（PR #95 的真实改动 900 行被报成 7837 行），而 base 不是 `main` 的 PR 完全不触发，连一次结论都没有（#83 / #88 的 head 在 73 次运行里没有出现）。两种后果的实测记录见 issue #96，防复发断言是 `tests/contract/rule-checks.test.js` 里的两条「CI 接线」测试。
+
+`CI` workflow 目前仍保留 `pull_request: branches: [main]`，栈内 PR 因此拿不到 `Verify` / `PR Fast Gate`。放开它同时改变运行次数与门禁覆盖面，属于独立决策，尚未执行；在那之前栈内 PR 的门禁缺口按遗留项记录，不要读成“检查是绿的”。
+
 ## W1–W7
 
 详细判定和 fail-closed 退出码见 repository-rules.md。CI 必须使 workflow-check 通过后才宣称门禁完整。解析失败、未知 jobs 结构、无 workflow 文件和空 jobs 都是检查失败，不可当作“没有需要检查的内容”。

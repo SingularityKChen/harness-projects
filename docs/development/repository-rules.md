@@ -40,6 +40,6 @@
 
 执行任何 Git 操作前，先用 realpath 规范化 worktree 和目标路径，确认目标位于允许的 workspace 根目录内；拒绝 `..` 穿越、符号链接逃逸和未枚举的清理路径。涉及路径边界的实现必须有契约测试或可复制的人工检查，不能只依赖调用者自觉。
 
-提交使用 `<type>(<scope>): <中文摘要>`，type 为 feat / fix / docs / refactor / test / chore / ci / perf；正文说明原因，末尾关联 issue。PR 描述使用 `.github/pull_request_template.md`，包含闭环、ExecPlan + Batch、Closes / Refs、真实验证证据、风险和回滚。代码 ≤1000 行、文档 ≤1500 行；用 `node scripts/rule-checks.mjs size <base-ref>` 判定。
+提交使用 `<type>(<scope>): <中文摘要>`，type 为 feat / fix / docs / refactor / test / chore / ci / perf；正文说明原因，末尾关联 issue。PR 描述使用 `.github/pull_request_template.md`，包含闭环、ExecPlan + Batch、Closes / Refs、真实验证证据、风险和回滚。代码 ≤1000 行、文档 ≤1500 行；用 `node scripts/rule-checks.mjs size <base-ref>` 判定——`<base-ref>` 是该 PR **自己声明的 base**：栈上 PR 的 base 是栈内上一层，传 `main` 会把这个栈的累计读成这一个 PR 的体量（issue #96）。
 
 Issue 标题格式是 `<kind>(<area>): <英文祈使句摘要>`，kind 必须是 feat / fix / docs / chore / refactor / test；area 由 `node scripts/policy-check.mjs areas` 提供。标签必须恰好一个 kind、至少一个 area、至多一个 gate；Task / Bug 表单的 Context、Scope、Acceptance criteria、References、Notes 字段必须完整。`node scripts/policy-check.mjs issue <n>` 检查 issue，`node scripts/policy-check.mjs pr <n>` 检查关联和被关联 issue；机器 PR 仅豁免关联检查。
