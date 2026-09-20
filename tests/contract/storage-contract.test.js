@@ -1,14 +1,13 @@
-/**
- * 内存 Storage 替身的契约套件装配，外加一条判别性用例。
- *
+/** 内存 Storage 替身的契约套件装配，外加判别性用例。
  * `restart` 用导出/导入内部状态模拟重启——删掉导出实现后，套件里"换一个实例读同一份内容"必然失败。
- * 额外用例保护事务隔离：未提交的写入在事务外读不到，否则回滚就只是假象。
- */
+ * 额外用例保护事务隔离：未提交的写入在事务外读不到，否则回滚就只是假象；重叠事务必须串行，
+ * 否则后提交者会用旧快照覆盖先提交者已确认的写入。 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-
 import { createFakeStorage, exportFakeStorageState } from '@harness-projects/provider-fake'
 import { storageContractSuite } from './suites/storage.js'
+
+const workspace = (id, name) => ({ id, name, statusPolicy: 'provider_authoritative' })
 
 storageContractSuite({
   label: '内存 Storage 替身',
@@ -25,6 +24,40 @@ test('内存 Storage 替身：事务未提交前外部读不到写入，提交�
   })
   assert.equal(seenInside, undefined, '未提交的写入不得被事务外读到')
   assert.equal((await storage.getWorkspace('ws-1'))?.name, '工作区')
+})
+
+// 确定性重叠：T1 在事务内挂起（此时尚未提交），T2 随即开始，然后才放行 T1。
+// 修复前两者各自克隆同一份空快照，后提交者整体替换，先提交者的写入必然消失。
+test('内存 Storage 替身：重叠事务串行提交，已确认的写入不被后来者覆盖', { timeout: 5000 }, async () => {
+  const storage = createFakeStorage()
+  let markSuspended
+  const suspended = new Promise((resolve) => { markSuspended = resolve })
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+
+  const first = storage.transaction(async (tx) => {
+    await tx.putWorkspace(workspace('ws-t1', 'T1'))
+    markSuspended()
+    await gate
+  })
+  await suspended
+  const second = storage.transaction((tx) => tx.putWorkspace(workspace('ws-t2', 'T2')))
+  release()
+  await Promise.all([first, second])
+
+  assert.equal((await storage.getWorkspace('ws-t1'))?.name, 'T1')
+  assert.equal((await storage.getWorkspace('ws-t2'))?.name, 'T2', 'T2 已确认的写入不得被 T1 的提交覆盖')
+})
+
+test('内存 Storage 替身：一次事务失败后，下一个事务仍能提交', { timeout: 5000 }, async () => {
+  const storage = createFakeStorage()
+  await assert.rejects(storage.transaction(async (tx) => {
+    await tx.putWorkspace(workspace('ws-failed', '不该存在'))
+    throw new Error('事务内失败')
+  }), /事务内失败/)
+  await storage.transaction((tx) => tx.putWorkspace(workspace('ws-after', '提交成功')))
+  assert.equal(await storage.getWorkspace('ws-failed'), undefined, '失败事务的写入必须整体回滚')
+  assert.equal((await storage.getWorkspace('ws-after'))?.name, '提交成功')
 })
 
 const DUPLICATE_OBSERVATION = { state: 'pending', observation: { bindingId: 'binding-1', dedupeKey: 'dedupe-1', type: 'issue.updated', eventTime: undefined, receivedTime: '2026-09-20T00:00:01Z', subject: { bindingId: 'binding-1', objectKind: 'issue', externalId: 'issue-1', url: undefined }, sourceVersion: 'v1', payloadHash: 'payload-hash', payload: {} } } // 与 suites/storage.js 同形状；同一 (binding, dedupeKey) 的第二次投递必须整笔 no-op
