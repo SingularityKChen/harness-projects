@@ -5,6 +5,7 @@
 ```bash
 pnpm test              # 全部三层（node --test）
 pnpm test:contract     # 只跑契约层
+pnpm test:mvp0         # 只跑 MVP-0 进度轨道（故意失败，不入门禁）
 pnpm run boundaries    # 只跑包边界契约测试
 ```
 
