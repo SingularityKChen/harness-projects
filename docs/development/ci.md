@@ -25,7 +25,11 @@ CI workflow 的 action 必须 pin 到 40 位 commit；checkout 必须关闭 pers
 
 ### Rule checks 的判定基线不由触发器决定
 
-`Rule checks` 的 `size` 与 `disclosure` 两个 job 都把 `github.base_ref` 当作判定基线（体量分桶的范围、发布面扫描的范围）。因此 `.github/workflows/rule-checks.yml` 的 `on.pull_request` **刻意不声明 `branches` / `branches-ignore`**：那个过滤器不只是“哪些 PR 进入本 workflow”的准入谓词，它同时决定 `base_ref` 的取值。声明成 `[main]` 之后，能跑的时候基线必然是 `main`，`${base}...HEAD` 退化成“这个 head 分支里还没进 `main` 的全部内容”，于是栈上 PR 被量成整个栈相对 `main` 的累计（PR #95 的真实改动 900 行被报成 7837 行），而 base 不是 `main` 的 PR 完全不触发，连一次结论都没有（#83 / #88 的 head 在 73 次运行里没有出现）。两种后果的实测记录见 issue #96，防复发断言是 `tests/contract/rule-checks.test.js` 里的两条「CI 接线」测试。
+`Rule checks` 的 `size` 与 `disclosure` 两个 job 都把 `github.base_ref` 当作判定基线（体量分桶的范围、发布面扫描的范围）。因此 `.github/workflows/rule-checks.yml` 的 `on.pull_request` **刻意不声明 `branches` / `branches-ignore`**：那个过滤器不只是“哪些 PR 进入本 workflow”的准入谓词，它同时决定 `base_ref` 的取值。声明成 `[main]` 之后，能跑的时候基线必然是 `main`，`${base}...HEAD` 退化成“这个 head 分支里还没进 `main` 的全部内容”，于是栈上 PR 被量成整个栈相对 `main` 的累计（PR #95 的真实改动 900 行被报成 7837 行），而 base 不是 `main` 的 PR 完全不触发，连一次结论都没有（#83 的 head `c55080ed5b` 与 #88 的 head `39285d938c` 在截至 2026-09-20 的 73 次运行里没有出现；该计数随运行增长）。两种后果的实测记录见 issue #96，防复发断言是 `tests/contract/rule-checks.test.js` 里的两条「CI 接线」测试。
+
+复核这段历史时有一个陷阱：`runs` API 的 `pull_requests[].base.ref` 与 `.head.sha` 是**实时快照**，不是运行时的值——今天直接列出来会得到“‘base 非 main’的运行有 14 个”，看上去像过滤器从没挡住任何东西。运行时的基线只能从 `.head_sha` 加上 job 日志 `##[group]Run` 段里回显的 `BASE_REF:` 读；不看日志时的判据是“报出的桶值等于相对 `origin/main` 的三点差异、而不等于相对该 PR 声明 base 的三点差异”（当时 14/14 与 `origin/main` 吻合、0/14 与声明 base 吻合）。
+
+判定侧的三点差异（`${base}...HEAD`）本身也是被测试钉住的性质，不只是实现细节：base 分支前进、子分支尚未 rebase、base 被 force-push 改写这三种情形下，它只算子分支自己的提交；`tests/contract/rule-checks.test.js` 里有一条真实 git 用例专门复现“base 前进”这一种。
 
 `CI` workflow 目前仍保留 `pull_request: branches: [main]`，栈内 PR 因此拿不到 `Verify` / `PR Fast Gate`。放开它同时改变运行次数与门禁覆盖面，属于独立决策，尚未执行；在那之前栈内 PR 的门禁缺口按遗留项记录，不要读成“检查是绿的”。
 
