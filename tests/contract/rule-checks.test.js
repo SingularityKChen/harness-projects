@@ -21,11 +21,14 @@ import { parse as parseYaml } from 'yaml'
 
 import {
   BUDGETS,
+  DEFAULT_BASE,
   DISCLOSURE_PATTERNS,
   SIZE_EXCLUDE_RULES,
   bucketOf,
+  describeBaseline,
   disclosure,
   isSizeExcluded,
+  normalizeBaseRef,
   normalizePath,
   scanDiff,
   size,
@@ -76,6 +79,7 @@ const noGit = {
   listCommits: () => [],
   readCommitDiff: () => '',
   readCommitMessage: () => '',
+  resolveRef: () => 'deadbeef1234',
   prBody: '',
 }
 
@@ -379,6 +383,27 @@ test('CI 接线：Rule checks 的 on.pull_request 声明 edited 触发类型', (
   assert.ok(required.every((t) => types.includes(t)), `应包含 ${required}（与 issue-policy.yml 的既定写法一致）`)
 })
 
+// issue #96：`on.pull_request.branches` 不只是「哪些 PR 进入本 workflow」的准入
+// 谓词——它同时把 `github.base_ref` 钉成被过滤的那一条，而 base_ref 正是
+// size / disclosure 两个 job 的判定基线。声明成 [main] 之后，能跑的时候基线
+// 必然是 main，栈上 PR 被量成整个栈相对 main 的累计（PR #95：真实 900 行被报成
+// 7837 行），base 不是 main 的 PR 则一次都不触发（#83 / #88 的 head）。
+// 这条断言把「准入不能改写基线」钉在配置层：加回过滤器就会红。
+test('CI 接线：Rule checks 的 on.pull_request 不得声明分支过滤器（它会同时钉住判定基线）', () => {
+  const workflowPath = fileURLToPath(new URL('../../.github/workflows/rule-checks.yml', import.meta.url))
+  const workflow = parseYaml(readFileSync(workflowPath, 'utf8'))
+  const trigger = workflow.on?.pull_request
+
+  assert.ok(trigger !== null && typeof trigger === 'object', 'on.pull_request 必须存在且是映射')
+  for (const key of ['branches', 'branches-ignore']) {
+    assert.equal(
+      trigger[key],
+      undefined,
+      `on.pull_request.${key} 会把 github.base_ref 钉成被过滤的那一条，size/disclosure 的判定基线随之被改写（issue #96）`,
+    )
+  }
+})
+
 // ---------------------------------------------------------------------------
 // exit code 契约、先加后删、提交信息、PR 描述（issue #40 项 2/3/5）
 // ---------------------------------------------------------------------------
@@ -434,12 +459,91 @@ test('通过时的横幅如实列出四个来源，不能读成「§8.6 已经�
   assert.match(output, /人工/)
 })
 
+// 判定自描述（issue #96）：扫描范围由 base 决定，读者必须能一眼看出这次用的是
+// 哪一条基线，而不是从「7837 行」这个结果反推。
+test('披露：输出写明判定用的基线与提交，读者不需要反推', () => {
+  const { output } = captureLogs(() => disclosure('origin/feat/stack-parent', noGit))
+
+  assert.match(output, /^基线：origin\/feat\/stack-parent @ deadbeef1234（扫描范围 origin\/feat\/stack-parent\.\.\.HEAD）$/m)
+})
+
 test('exit code 契约：size 超预算返回 1，未超返回 0', () => {
   const over = `${BUDGETS.code + 1}\t0\tpackages/core/src/a.ts`
   const under = '10\t0\tpackages/core/src/a.ts'
+  const stub = { resolveRef: () => 'deadbeef1234' }
 
-  assert.equal(size('base', { readNumstat: () => over }), 1)
-  assert.equal(size('base', { readNumstat: () => under }), 0)
+  assert.equal(size('base', { ...stub, readNumstat: () => over }), 1)
+  assert.equal(size('base', { ...stub, readNumstat: () => under }), 0)
+})
+
+// ---------------------------------------------------------------------------
+// 判定基线（issue #96）
+// ---------------------------------------------------------------------------
+
+test('基线：origin/main、refs/heads/main 与 main 是同一条基线的三种写法', () => {
+  for (const ref of ['main', 'origin/main', 'refs/heads/main']) {
+    assert.equal(normalizeBaseRef(ref), 'main')
+  }
+  assert.equal(normalizeBaseRef('origin/feat/stack-parent'), 'feat/stack-parent')
+  assert.equal(DEFAULT_BASE, 'origin/main')
+})
+
+test('基线：git 输出的结尾换行不会把基线行拆成两行，解析失败也不抛错', () => {
+  // 真实 git 的 stdout 带结尾换行；不 trim 会让「基线：…」与后面的括号各占一行。
+  assert.equal(describeBaseline('origin/main', { resolveRef: () => 'abc123def456\n' }), 'origin/main @ abc123def456')
+  assert.equal(
+    describeBaseline('origin/gone', {
+      resolveRef: () => {
+        throw new Error('bad revision')
+      },
+    }),
+    'origin/gone（无法解析成提交）',
+  )
+})
+
+test('体量：base 不是 main 时打印基线、本 PR 行数与栈累计，判定只按本 PR（issue #96）', () => {
+  const prLocal = '10\t0\tpackages/client/src/sync.ts'
+  const stackCumulative = `${BUDGETS.code * 8}\t0\tpackages/core/src/chain-facts.ts`
+
+  const { result: code, output } = captureLogs(() =>
+    size('origin/feat/stack-parent', {
+      // 同一个数据源服务两个范围：判定范围给本 PR 的，栈累计范围给整栈的。
+      readNumstat: (range) => (range.startsWith(`${DEFAULT_BASE}...`) ? stackCumulative : prLocal),
+      resolveRef: () => 'abc123def456',
+    }),
+  )
+
+  assert.equal(code, 0, '栈累计再大也不参与判定：§8 的预算是单个 PR 的闭环规模')
+  assert.match(output, /^基线：origin\/feat\/stack-parent @ abc123def456（判定范围 origin\/feat\/stack-parent\.\.\.HEAD）$/m)
+  assert.match(output, /代码：10 \/ 1000 行/)
+  assert.match(output, /^栈累计（相对 origin\/main，仅记录，不计入判定）：代码 8000 行、文档 0 行$/m)
+})
+
+test('体量：base 不是 main 时栈累计算不出来也只降级，不影响判定', () => {
+  const { result: code, output } = captureLogs(() =>
+    size('origin/feat/stack-parent', {
+      readNumstat: (range) => {
+        if (range.startsWith(`${DEFAULT_BASE}...`)) throw new Error('unknown revision')
+        return '10\t0\tpackages/client/src/sync.ts'
+      },
+      resolveRef: () => 'abc123def456',
+    }),
+  )
+
+  assert.equal(code, 0)
+  assert.match(output, /栈累计：相对 origin\/main 计算失败/)
+  assert.match(output, /判定不受影响/)
+})
+
+test('体量：base 就是 main 时不打印栈累计行，日常路径的输出不被污染', () => {
+  for (const base of ['origin/main', 'main']) {
+    const { result: code, output } = captureLogs(() =>
+      size(base, { readNumstat: () => '10\t0\tpackages/client/src/sync.ts', resolveRef: () => 'abc123def456' }),
+    )
+
+    assert.equal(code, 0)
+    assert.doesNotMatch(output, /栈累计/)
+  }
 })
 
 // ---------------------------------------------------------------------------
