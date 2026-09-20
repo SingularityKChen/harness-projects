@@ -481,11 +481,98 @@ test('exit code 契约：size 超预算返回 1，未超返回 0', () => {
 // ---------------------------------------------------------------------------
 
 test('基线：origin/main、refs/heads/main 与 main 是同一条基线的三种写法', () => {
-  for (const ref of ['main', 'origin/main', 'refs/heads/main']) {
-    assert.equal(normalizeBaseRef(ref), 'main')
+  for (const ref of ['main', 'origin/main', 'refs/heads/main', 'refs/remotes/origin/main', ' origin/main ']) {
+    assert.equal(normalizeBaseRef(ref), 'main', `${JSON.stringify(ref)} 应归一到 main`)
   }
   assert.equal(normalizeBaseRef('origin/feat/stack-parent'), 'feat/stack-parent')
   assert.equal(DEFAULT_BASE, 'origin/main')
+  // `origin/main~1` 不是 main 的 tip：故意不归一，否则会把"量的是另一个提交"
+  // 说成"量的是 main"。
+  assert.equal(normalizeBaseRef('origin/main~1'), 'main~1')
+})
+
+// 三点差异是 size / disclosure 与「拒绝方案 D」的共同承重点：它保证 base 分支
+// 前进、子分支尚未 rebase、base 被 force-push 改写这三种情形下，量到的仍然只是
+// 子分支自己的提交。此前没有任何断言检查过传给 git 的 range——把 `...` 换成
+// `..`（打印字符串与桩路由用的字面量全部保留）能让全部测试保持绿色，而在 base
+// 前进的仓库里会把 5 行的 PR 判成 1200 行以上（下一条真实 git 用例复现了它）。
+// 这条契约直接钉住每个数据源收到的范围字符串。
+test('体量与披露：判定侧的范围必须是三点差异，披露的逐提交扫描才是两点差异', () => {
+  const sizeRanges = []
+  captureLogs(() =>
+    size('origin/feat/stack-parent', {
+      readNumstat: (range) => {
+        sizeRanges.push(range)
+        return '10\t0\ta.ts'
+      },
+      resolveRef: () => 'abc123def456',
+    }),
+  )
+  assert.deepEqual(sizeRanges, ['origin/feat/stack-parent...HEAD', 'origin/main...HEAD'])
+
+  const diffRanges = []
+  const logRanges = []
+  captureLogs(() =>
+    disclosure('origin/feat/stack-parent', {
+      ...noGit,
+      readDiff: (range) => {
+        diffRanges.push(range)
+        return ''
+      },
+      listCommits: (range) => {
+        logRanges.push(range)
+        return []
+      },
+    }),
+  )
+  assert.deepEqual(diffRanges, ['origin/feat/stack-parent...HEAD'], '新增行按三点差异取，不能把 base 自己的提交算进来')
+  assert.deepEqual(logRanges, ['origin/feat/stack-parent..HEAD'], '逐提交扫描本来就该用两点差异（只要 HEAD 一侧的提交）')
+})
+
+// 真实 git 下的判别性用例：base 分支在子分支分出之后继续前进（计划把这种情形
+// 当常规——`gh stack rebase` 与 base 前进都会产生它）。共同祖先仍是 base 的旧
+// tip，三点差异因此只算子分支自己的 5 行；换成两点差异会把 base 的 1200 行算
+// 进来，exit 0 翻成 exit 1——正是本 PR 要消灭的那类假红。
+test('体量：base 分支前进时只算子分支自己的改动，不把 base 的新提交算进来（真实 git 仓库）', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'rule-checks-range-'))
+  const originalCwd = process.cwd()
+  try {
+    const run = (args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    const lines = (prefix, count) =>
+      Array.from({ length: count }, (_, i) => `${prefix}${i}`).join('\n')
+
+    run(['init', '-q', '-b', 'main'])
+    run(['config', 'user.email', 'test@example.com'])
+    run(['config', 'user.name', 'Test'])
+    writeFileSync(path.join(dir, 'seed.txt'), 'seed\n')
+    run(['add', '-A'])
+    run(['commit', '-q', '-m', 'seed'])
+
+    run(['checkout', '-q', '-b', 'stack-parent'])
+    writeFileSync(path.join(dir, 'parent.js'), lines('p', 50))
+    run(['add', '-A'])
+    run(['commit', '-q', '-m', 'parent'])
+
+    run(['checkout', '-q', '-b', 'child'])
+    writeFileSync(path.join(dir, 'child.js'), lines('c', 5))
+    run(['add', '-A'])
+    run(['commit', '-q', '-m', 'child'])
+
+    run(['checkout', '-q', 'stack-parent'])
+    writeFileSync(path.join(dir, 'parent.js'), lines('m', 1200))
+    run(['add', '-A'])
+    run(['commit', '-q', '-m', 'parent advances'])
+    run(['checkout', '-q', 'child'])
+
+    process.chdir(dir)
+    const { result: code, output } = captureLogs(() => size('stack-parent'))
+
+    assert.equal(code, 0, '子分支只有 5 行：base 的 1200 行不得改变判定')
+    assert.match(output, /代码：5 \/ 1000 行/)
+  } finally {
+    process.chdir(originalCwd)
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('基线：git 输出的结尾换行不会把基线行拆成两行，解析失败也不抛错', () => {
