@@ -27,7 +27,7 @@ import { pathToFileURL } from 'node:url'
 // 再豁免扫描（见下方 SCAN_EXCLUDES 的说明），拼装是这条性质唯一的守卫，由
 // 「自扫命中数为 0」的契约测试验证——新增的凭据/内网模式同样遵守这条纪律。
 //
-// 不含 'root'。这是把实现改回与 AGENTS.md §8.6 canonical 正则一致——该正则
+// 不含 'root'。这是把实现改回与 docs/development/publication.md canonical 正则一致——该正则
 // 只认 Users 与 home 两个家目录段，从未包含 root；不是遗漏，是修正：root 是
 // 这个脚本自己加的一段，代价是它在 root 的缓存目录这类标准 CI 路径上制造
 // 误报（§9.2 判定准则下，误报会让「转为必需检查」的前置条件永远不成立）。
@@ -255,7 +255,7 @@ export function scanText(text, fileLabel) {
 }
 
 // AGENTS.md 含有规则文本本身对这些模式的描述，扫描它只会命中规则文本自身——
-// 这不是豁免：它的内容由人工评审把关（AGENTS.md §8.6「人工逐条」）。
+// 这不是豁免：它的内容由人工评审把关（docs/development/publication.md「人工逐条」）。
 //
 // scripts/rule-checks.mjs 不在这张表里：上面的拼装写法已经让它对自己干净
 // （由「自扫命中数为 0」的契约测试守住），豁免反而会让这个文件变成全仓库
@@ -269,7 +269,7 @@ const SCAN_EXCLUDES = [':(top,exclude)AGENTS.md']
 // §8.3 PR 体量上限
 // ---------------------------------------------------------------------------
 
-/** AGENTS.md §8.3：代码 ≤ 1000 行，文档 ≤ 1500 行（增删之和）。 */
+/** AGENTS.md §8：代码 ≤ 1000 行，文档 ≤ 1500 行（增删之和）。 */
 export const BUDGETS = { code: 1000, docs: 1500 }
 
 /**
@@ -336,7 +336,7 @@ export function bucketOf(path) {
 }
 
 /**
- * AGENTS.md §8.3「排除 pnpm-lock.yaml 与生成物」的可判定表述：按路径前缀/
+ * AGENTS.md §8「排除 pnpm-lock.yaml 与生成物」的可判定表述：按路径前缀/
  * 目录段判定而不是精确字符串匹配，覆盖嵌套锁文件、其它包管理器的锁文件、
  * 以及常见生成目录。导出给契约测试断言「规则文本 ↔ 实现」一致。
  */
@@ -424,7 +424,7 @@ export function disclosure(base, deps = {}) {
     console.log('机械扫描通过，覆盖范围：对 base 的新增行、范围内每个提交单独引入的新增行、')
     console.log('每个提交信息、PR 描述（经 PR_BODY 传入时）——以上均未命中任何已知模式。')
     console.log('')
-    console.log('注意这只覆盖可机械判定的一类。AGENTS.md §8.6 的通过条件是人工把五个')
+    console.log('注意这只覆盖可机械判定的一类。docs/development/publication.md 的通过条件是人工把五个')
     console.log('类目（凭据 / 本机路径与身份 / 账号与个人信息 / 内部系统 / 保密字样）')
     console.log('逐条过一遍——这个检查不能替代那一步。')
     return 0
@@ -440,7 +440,7 @@ export function disclosure(base, deps = {}) {
   console.log('事后删除无法从缓存视图、PR ref 与第三方镜像中回收。')
   console.log('未推送的分支用 git commit --amend 或交互式 rebase 重写；已推送的分支光靠')
   console.log('「再提交一次删除」不够——上面列出的提交仍可按 SHA 取到旧内容，需要改写历史。')
-  console.log('同时删除本次 workflow run（AGENTS.md §8.6 的恢复流程，日志本身也是发布面）。')
+  console.log('同时删除本次 workflow run（docs/development/publication.md 的恢复流程，日志本身也是发布面）。')
   return 1
 }
 
@@ -460,7 +460,7 @@ export function size(base, deps = {}) {
     const label = bucket === 'code' ? '代码' : '文档'
     console.log(`${label}：${used} / ${budget} 行（增删之和）`)
     if (used > budget) {
-      annotate('error', `${label}改动 ${used} 行，超过 AGENTS.md §8.3 的 ${budget} 行上限`)
+      annotate('error', `${label}改动 ${used} 行，超过 AGENTS.md §8 的 ${budget} 行上限`)
       failed = true
     }
   }
@@ -473,7 +473,7 @@ export function size(base, deps = {}) {
 
   if (failed) {
     console.log('')
-    console.log('超出即拆分（AGENTS.md §8.3 第 2 条）。拆分的依据是 §5.1 的四个判据，')
+    console.log('超出即拆分（AGENTS.md §8 第 2 条）。拆分的依据是 AGENTS.md §4 的批次判据，')
     console.log('不是「把同一个风险摊成更多文件提交」——每个子 PR 都要能单独验收。')
     console.log('看板上的 `Size` 字段用于在动手之前声明预计量级，避免在评审时才发现。')
     return 1

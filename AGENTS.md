@@ -1,580 +1,136 @@
-# AGENTS.md —— harness-projects 仓库工作约定
+# AGENTS.md —— harness-projects 工作约定
 
-> 本文件是本仓库的**唯一权威约定**。
-> `CLAUDE.md` 是指向本文件的相对软链接（`CLAUDE.md -> AGENTS.md`），任何修改只改本文件。
-> ExecPlan 的格式权威是 `PLANS.md`。本文件出现的所有路径都是仓库内相对路径。
-
----
+本文件是仓库根级指令入口。`CLAUDE.md` 是指向本文件的相对软链接；ExecPlan 格式以 `PLANS.md` 为准。根文件只保留跨任务都必须知道的导航、边界和门禁，详细流程按任务读取 `docs/` 下的文档。
 
 ## 0. 快速开始
 
-| 我要做的事 | 去哪里做 |
+| 任务 | 入口 |
 |---|---|
-| 澄清一个需求、写设计 | 新建 `docs/exec-plan/active/YYYY-MM-DD-<slug>.md`，先写 Design / Spec 章节 |
-| 把设计变成可执行计划 | 同一个文件的 Plan of Work 章节（**不新建 plan 文件**） |
-| 开始动手实现 | 按批次执行该 ExecPlan（§6） |
-| 写长期架构说明 | `docs/architecture/` |
-| 记录一个不可回退的技术决策 | `docs/adr/` |
-| 写产品范围、术语、目标形态 | `docs/product/` |
-| 提交 PR 或做评审 | `.github/pull_request_template.md`（模板）+ `docs/review/README.md`（评审标准与证据选择） |
-| 登记与推进工作项 | `docs/project-management/README.md`（GitHub Projects 字段与维护命令） |
-| 配置本地工具（含 Engram 记忆作用域） | `docs/development/README.md` |
-| 需要隔离工作区 | `.worktrees/<task-slug>/`（§7） |
-| 开 issue、写标题与标签 | `.github/ISSUE_TEMPLATE/` 表单 + §8.7 的格式（英文标题、`kind`/`area`/`gate` 标签） |
-| 提交代码 | 分支 + PR，禁止直接推 `main`，禁止自行合并（§8）；提交与开 PR 前先做敏感信息自查（§8.6）；PR 必须 link issue（§8.3） |
-| 合并评审队列里排队的一批 PR | `docs/project-management/merge-queue.md`（合并顺序、如何验证"无冲突"声明、GitHub 的 rebase merge 拒绝时怎么本地处理） |
+| 设计、实现、验证跨步骤工作 | `docs/exec-plan/active/YYYY-MM-DD-<slug>.md`，格式见 `PLANS.md` |
+| 理解架构和依赖 | `docs/architecture/`、本文件 §2 |
+| 日常开发和验证 | `docs/development/workflow.md`、`docs/development/ci.md` |
+| 记录长期决策 | `docs/adr/` |
+| 提交 PR / 处理评审 | `docs/review/README.md`、`docs/review/responding.md` |
+| 合并堆叠 PR | `docs/project-management/merge-queue.md` |
+| 项目看板语义和 agent 写入 | `docs/product/board-semantics.md`、`docs/project-management/README.md` |
+| 发布面与敏感信息 | `docs/development/publication.md` |
+| 隔离工作区 | `.worktrees/<task-slug>/` |
 
----
+## 1. 系统边界
 
-## 1. 这个仓库是什么
+这是一个项目交付工作台：Planning、Development、Delivery、Execution 和 Storage Provider 被显式组合，工程执行事实不能篡位规划事实。
 
-### 1.1 一句话
+### 1.1 不变量
 
-一个**项目交付工作台**：让项目规划事实源（GitHub Projects / 本地）与工程执行事实（本地 Git、GitHub、CI、Agent 执行）在同一个工作空间里被显式关联，而不是靠人去记忆和脑补。
-
-### 1.2 五个能力域
-
-| 能力域 | 回答的问题 | 首个版本的 Provider |
-|---|---|---|
-| Planning | 要做什么、现在什么状态 | `planning-github-projects`、`planning-local` |
-| Development | 代码在哪里、怎么改 | `development-local-git`、`development-github` |
-| Delivery | 改完怎么验证、怎么上线 | `delivery-github-actions` |
-| Execution | 谁来执行、执行到哪一步 | `execution-harness`、`execution-human` |
-| Storage | 本地权威状态存在哪里 | `storage-sqlite` |
-
-### 1.3 七条不变量（不可回退）
-
-任何实现、重构或依赖调整都不得破坏以下不变量；破坏其中任何一条，必须回到 `docs/adr/` 重新评审：
+任何实现、重构、依赖调整或自动化都必须保持：
 
 1. 一个工作空间同一时刻只有一个 Planning 事实源。
 2. 一个工作空间可以连接多个研发与交付提供方。
-3. 项目规划状态与工程执行状态正交（CI 失败、Agent 完成、PR 合并都不得默认覆盖规划状态）。
-4. 工程执行采用"阶段 + 并行门禁"模型。
-5. 关键关联显式优先，LLM 不进入项目管理控制路径。
+3. 规划状态与工程执行状态正交；CI、Agent、PR 合并不得默认覆盖规划状态。
+4. 工程执行采用“阶段 + 并行门禁”模型。
+5. 关键关联显式优先；LLM 不进入规划状态、关系语义或发布门禁控制路径。
 6. 工程产物关系沿谱系传播，不反复重新识别。
-7. 核心无界面：Host 拥有权威状态，前端只是消费者。
+7. Host 拥有权威状态，前端只是消费者。
 
-补充两条实现级硬约束：
+实现级硬约束：外部写入得到 Provider ack / reconcile 前，本地不得显示权威 `Saved`；凭据只保存 secret 服务句柄，不进入 Project 数据库。
 
-- 外部写入未确认前，本地不得把 attempted value 标记为权威成功（`Saving…` 可以立刻显示，`Saved` 必须等 Provider ack / reconcile）。
-- 凭据不进 Project 数据库：只保存指向 secret 服务的句柄。
+### 1.2 当前门禁
 
-### 1.4 当前阶段
+Gate E1（跨 Provider 对象身份与同步幂等性）通过前，不冻结本地数据模型 v1。当前优先交付不依赖真实 GitHub 的纵向切片。Gate R1 是 MVP 发布门禁。
 
-- 产品与工程设计已冻结到可实施程度。
-- **实现前必须通过 Gate E1**（跨 Provider 对象身份与同步幂等性验证），结论决定本地数据模型是否可以冻结为 v1。
-- 在此之前，优先交付"不依赖真实 GitHub 也能验收"的纵向切片。
+## 2. 仓库地图与依赖
 
-### 1.5 上游设计输入（本地只读参考，不随仓库分发）
+依赖方向：`providers/*` 与 `storage/*` → `capabilities` → `core` → `controller` → `client` → `ui-model` → `ui` → `apps/*`。`domain` 是叶子；ui 不调用 Provider；apps 只做壳。
 
-本项目在开工前有一份**外部设计输入**（产品与工程设计文档：范围、界面规范、工程设计、数据模型、接口契约、身份验证计划、实施计划、测试与发布门禁、决策记录初稿）。
+- `packages/domain`：实体、枚举、稳定标识和关系语义，零外部层依赖。
+- `packages/capabilities`：能力契约与错误模型，不 import Provider 实现。
+- `packages/core`：生命周期、Provider 组合、状态策略、关系图和投影。
+- `packages/controller` / `packages/client`：类型化 API、命令流、快照与重连；client 不依赖 React。
+- `packages/ui-model` / `packages/ui`：展示结构与 React 页面；ui 不调用外部平台 API。
+- `packages/providers/*`：能力域实现，只依赖 capabilities 与 domain，Provider 之间不互调。
+- `packages/storage/sqlite`：首个 Storage 实现。
+- `apps/*`：Harness/Web 壳；`tests/contract`、`tests/integration`、`tests/e2e` 按测试对象分层。
 
-它**不在本仓库内分发**：出于发布资格与品牌承诺的考虑，已从仓库历史中移除，仅作为所有者本地的只读参考保留在 `deepseek-harness-project-delivery-engineering-pack-v0.1/`，该路径由 `.gitignore` 忽略。背景与证据见 `docs/exec-plan/completed/2026-09-17-disclosure-audit-and-license.md`。
+依赖边由 `tests/contract/package-boundaries.test.js` 保证。新增反向依赖、跨层跳跃或同一事实的第二个权威源，先写 ADR 和契约测试。
 
-规则：
+## 3. 文档与事实源
 
-- **仓库内文档是唯一可分发表述**：任何对外可读的结论都必须能在本仓库 `docs/` 下独立成立，不能依赖外部包里的内容才说得通。
-- 需要长期维护的概念，在本仓库 `docs/` 下**重新表述**，而不是引用外部文件。
-- 引用该输入时只使用"上游设计输入"这类中性描述，不复述其内部版本号、文档编号与目录结构。
-- 外部输入与仓库内文档冲突时，以仓库内文档为准，并在 ExecPlan 的 Decision Log 中记录原因。
+- 正式文档全部在 `docs/`；运行态 `.superpowers/` 和 `.worktrees/` 不进文档。
+- spec 与 plan 合在同一份 active ExecPlan；完成后移到 `docs/exec-plan/completed/` 并更新 `docs/README.md`。
+- 文档正文中文；代码标识符、路径和命令英文。公开 issue 标题和正文用英文。
+- 上游设计输入只作为本地参考；仓库内 `docs/` 必须自包含，不能引用本机路径或内部系统。
 
----
+## 4. ExecPlan
 
-## 2. 目录结构与所有权
+跨越设计、实现和验证的工作必须使用 ExecPlan。计划必须包含 `PLANS.md` 的全部章节，尤其是可执行的验证命令、Progress、Surprises & Discoveries、Decision Log、恢复路径和技术债务。每批遵循：对齐 → 隔离 → 实现 → 验证 → 记录 → 提交 → 汇报。计划已批准后，不为批次之间的继续执行重复询问；只有缺凭据、需求歧义或外部系统阻塞才暂停。
 
-### 2.1 目录表
+## 5. 执行原则（GPT-6 适配）
 
-```text
-apps/
-  harness-plugin/        Harness 客户端模块注册、Slot 接入、主题/布局桥接
-  web/                   独立 Web 外壳：路由、连接、布局（复用 packages/ui）
-packages/
-  domain/                领域实体、枚举、稳定标识、关系语义（纯数据，零依赖）
-  capabilities/          能力定义与注册契约（不自带任何 Provider 实现）
-  core/                  工作空间生命周期、Provider 组合、状态策略、关系图、投影
-  controller/            对外类型化 API、命令与增量流、权限边界
-  client/                React-free 客户端模型：稳定身份、快照、增量、重连
-  ui-model/              领域对象 → 展示结构（看板列、Sprint 摘要、交付行）
-  ui/                    共享 React 页面与组件（不调用任何外部平台 API）
-  providers/             能力域实现，只依赖 capabilities
-    planning-local/
-    planning-github-projects/
-    development-local-git/
-    development-github/
-    delivery-github-actions/
-    execution-harness/
-    execution-human/
-  storage/
-    sqlite/              本仓库首个 Storage 实现
-tests/
-  contract/              能力契约、包边界、错误模型、幂等语义
-  integration/           跨包集成（SQLite、Local Git、控制器往返）
-  e2e/                   端到端用户链路
-docs/                    见 §3
-```
+用户要求行动时，依据上下文推断范围并持续完成可逆工作；不要只确认能力、只给计划或在可执行时提前停下。只有缺失信息会改变不可逆操作、公开行为、安全边界、公共接口、数据迁移或高成本决策时才提问。若需要批准，先准备可审阅结果，把批准放在最后一步。
 
-### 2.2 依赖方向（硬规则）
+指令冲突时，用户指令优先于技能和仓库约定；仓库约定优先于普通建议。若技能导致暂停或偏离，说明具体技能路径、原文要求和它如何适用。发现事实推翻假设时更新计划和下一道门，不保护旧结论。
 
-```text
-providers/*  ─┐
-              ├─→ capabilities ─→ core ─→ controller ─→ client ─→ ui-model ─→ ui ─→ apps/*
-storage/*   ─┘
-```
+优先减少任务的 context radius：先搜索和定位 1–3 个核心模块，保持单一架构职责、显式状态拥有者和可定位接口；不要为满足 LOC 数字机械拆分连续算法。先跑最窄的有判别力验证，只有新失败、风险信号或跨边界变化才扩大范围。
 
-- `domain` 是叶子：不依赖任何其他包，尤其不依赖 Provider、SQLite、React、Harness UI。
-- `capabilities` 只定义契约，不 import 任何 `providers/*`。
-- `core` 只依赖 `domain`、`capabilities`（以及经能力定义抽象的存储契约），不 import 具体 Provider。
-- `client` 与 `ui-model` 不依赖 React；`ui` 才依赖 React。
-- Provider 之间不得互相直接调用（`planning-*` 不得 import `development-*`）。
-- `apps/*` 是壳：只做注册、路由、Slot、主题，不承载业务规则。
-- 反向依赖与跨层跳跃（如 `ui` 直接 import `providers/*`）一律禁止。
+并行只用于互不共享写入区域的调查或实现；同一架构单元由一个 owner 修改。多 agent 的模型、推理等级和任务边界由当前任务选择，不能把示例模型变成仓库默认。
 
-这些规则**由测试保证**，不是靠自觉：`tests/contract/package-boundaries.test.js` 维护允许的依赖边矩阵，`pnpm run boundaries` 可单独运行。
+## 6. 工作区与 Git
 
-### 2.3 违反示例
+开始前检查 `git rev-parse --git-dir --git-common-dir`、`git status --short --branch`、`git worktree list --porcelain` 和 `git check-ignore -v .worktrees/`。
 
-| 违规写法 | 为什么错 |
+隔离工作区必须位于 `.worktrees/<task-slug>/`；保持任务文件集互不重叠。`main` 是唯一长期分支，工作分支使用 `feature/`、`fix/`、`docs/`、`chore/` 或 `project-management/` 前缀，名称不含工具品牌。不要直接推 `main`，不要自行合并 PR。共享历史改写、force-with-lease、复杂 rebase、worktree 清理交给 `git-expert-operations` 流程并先建立恢复锚点。
+
+提交格式：`<type>(<scope>): <中文摘要>`，正文说明为什么，末尾用 `Closes #N` 或 `Refs #N`。每个 PR 必须关联同仓 issue，且是一个可独立验收、合并、回滚的能力闭环；代码变更 ≤1000 行、文档变更 ≤1500 行，排除锁文件和生成目录。合并时只使用 rebase merge；是否合并由人类伙伴决定。
+
+开 PR 前、以及最终 push 前，必须先整理本地 commit：移除 debug / fixup / 临时提交，把同一批次收敛成可独立审阅的提交序列；整理后重新检查 diff、提交信息、规模和敏感信息。分支已推送时，先建立 backup ref，再使用精确的 force-with-lease 推送。最终 push 后回读远端 head、base、checks、issue 关联和 review threads；验证通过后才执行 `gh pr ready <n>`。如果 PR 已是 ready，仍需在最终 push 后重新回读，不把旧状态当作当前状态。
+
+## 7. 发布面与外部写入
+
+公开仓库的分支、标签、PR ref、PR 描述、commit message 和自托管日志都是发布面。提交和开 PR 前执行 `docs/development/publication.md` 的机械扫描和人工五类目检查：凭据、本机身份、账号个人信息、内部系统、保密字样。命中先改成占位符；已推送历史不要用追加删除假装修复。
+
+本地 Git 使用 argv / library API，不拼接 shell 字符串；破坏性删除默认不做。外部写入记录 actor、目标 ProviderBinding、幂等键和结果。agent 可以执行机械推导的看板字段回填和索引维护；`Status`、`blocked-by` / `blocking` 关系必须有人类批准，批准要具体指向目标并写入所属 ExecPlan 的 Decision Log。
+
+worktree 路径在交给 Git 操作前必须规范化为 realpath，拒绝 `..` 穿越、逃逸允许根目录和未经允许的符号链接；允许根目录、目标路径和清理范围必须逐项核对。
+
+## 8. PR、Issue 与规模
+
+Issue 标题是 `<kind>(<area>): <英文祈使句摘要>`；kind 与提交类型一致，area 取 `node scripts/policy-check.mjs areas`，标签是 `kind:*` 恰好一个、`area:*` 至少一个、`gate:*` 至多一个。Issue 表单在 `.github/ISSUE_TEMPLATE/`，关联检查是 advisory。
+
+PR 描述必须包含闭环、ExecPlan + Batch、`Closes` / `Refs`、真实验证证据、风险和回滚。机器 PR 按 `user.type == Bot` 豁免 issue 关联，标题与标签规则仍适用。
+
+## 9. 验证与 CI
+
+日常入口：`pnpm install --frozen-lockfile`、`pnpm verify`、`pnpm run boundaries`、`node scripts/workflow-check.mjs`、`node scripts/rule-checks.mjs disclosure <base-ref>`、`node scripts/rule-checks.mjs size <base-ref>` 和 `git diff --check <base>...HEAD`。
+
+按改动风险选择最窄有效证据：文档只执行文档命令和链接检查；包行为跑相关测试；边界跑 `boundaries`；配置或门禁变更跑 `pnpm verify` 加相应检查；身份、持久化、并发、安全和外部写入再扩大到集成 / E2E 或人工回读。不要把“测试通过”当成完整产品闭环证据。
+
+`PR Fast Gate` 是分支保护唯一必需检查。它由聚合 job 发布，不 checkout PR 代码、不读 secrets，只汇总执行 lane。现有 CI 与每个 workflow 的 W1–W7 约束以 `.github/workflows/`、`scripts/workflow-check.mjs` 和 `docs/development/ci.md` 为准；新增 workflow 必须同步规则、契约测试和文档。workflow 解析、目录、jobs 映射等未知情况 fail closed。
+
+## 10. 三类协作工作流
+
+- 开发：先读 `docs/development/workflow.md`，建立 facts / constraints / assumptions / invariants，形成 ExecPlan，开 draft PR 并 link issue，再按 disjoint ownership 并行实现，最后由指定验收者重构和验证；未经人类评审不得合并。
+- MVP 评审：先锁定 PR head/base、所有线程和真实 checks，建立 P0/P1/P2/P3 风险矩阵，再分层查代码、产品、架构、测试和 issue 验收；一次性提交 inline 意见，不因首个 P1 提前收工。见 `docs/review/mvp-review.md`。
+- 回复评审：先判断意见是否属实及是否改变系统不变量，再按根因修改，补判别性测试，整理 commits、push 后回读当前 head，逐条回复并 resolve thread；不能用表演式同意代替证据。见 `docs/review/responding.md`。
+
+## 11. 参考入口
+
+`PLANS.md`、`docs/README.md`、`docs/architecture/README.md`、`docs/development/README.md`、`docs/development/repository-rules.md`、`docs/development/ci.md`、`docs/development/publication.md`、`docs/review/README.md`、`docs/review/mvp-review.md`、`docs/review/responding.md`、`docs/project-management/merge-queue.md`。
+
+## 12. 旧章节兼容映射
+
+历史 ExecPlan、脚本注释和外部引用仍可能使用旧编号；这些编号的当前规范落点如下，避免引用静默失效：
+
+| 旧引用 | 当前规范 |
 |---|---|
-| `core` import `provider-planning-github-projects` | 使 Planning Provider 不可替换 |
-| `ui` 里出现 `fetch('https://api.github.com')` | 事实源被前端的临时实现篡位 |
-| `client` import `react` | 破坏"模型可被 Harness 与独立 Web 共享" |
-| `planning-*` import `development-*` | 跨能力域耦合，Provider 无法独立替换 |
-| `domain` import `storage-sqlite` | 存储实现泄漏进领域模型 |
-
----
-
-## 3. 文档规范
-
-### 3.1 落点规则
-
-持久文档一律落在 `docs/<rest>`。上游工作流默认的 `docs/superpowers/<rest>`（以及历史版本中的单数 `docs/superpower/<rest>`）在本仓库统一改写：
-
-| 上游约定 | 本仓库约定 |
-|---|---|
-| `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` | `docs/exec-plan/active/YYYY-MM-DD-<slug>.md` 的 Design / Spec 章节 |
-| `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` | 同一个 `docs/exec-plan/active/YYYY-MM-DD-<slug>.md` 的 Plan of Work 章节 |
-| `docs/superpowers/<rest>` | `docs/<rest>` |
-| `docs/superpower/<rest>`（单数） | `docs/<rest>` |
-| `.superpowers/brainstorm/`、`.superpowers/sdd/` | **保持不变**：技能定义的 git-ignored 运行态，见 §3.4 |
-| `~/.config/superpowers/worktrees/`、`.worktrees/<branch>/` | `.worktrees/<task-slug>/`（§7） |
-
-一句话概括：**工具品牌不出现在正式路径与命名中；spec 与 plan 不再分家。**
-
-### 3.2 spec 与 plan 都保留，但只维护一份文档
-
-流程没有被简化掉，只是收敛了产物：
-
-- **spec 阶段**：澄清意图、给出 2–3 个方案与取舍、得到确认。产物写进 ExecPlan 的 `Design / Spec` 章节。
-- **plan 阶段**：把设计拆成带确切路径、命令与期望输出的批次。产物写进同一份 ExecPlan 的 `Plan of Work` 章节。
-
-不允许出现"设计在一个文件、计划在另一个文件"的情况；两者漂移的代价远大于合写带来的篇幅。
-
-### 3.3 语言、命名与格式
-
-- 文档正文用中文；代码标识符、路径、命令、类型名用英文。
-- **例外**：issue 的标题与正文用英文（§8.7）——它是公开可检索的索引面。提交信息与 PR 描述仍按本仓库既有习惯写中文摘要。
-- 章节标题保持与 `PLANS.md` 的章节名一致（英文名），便于检索与脚本处理。
-- 分支与文档命名保持中立（§8.1）；不要在路径、分支名、标题里写工具品牌。
-- 文档中的命令必须是**可复制执行**的，并写明期望输出。
-
-### 3.4 运行态不写入 docs
-
-`.superpowers/brainstorm/`、`.superpowers/sdd/` 以及工具产生的其他临时工作区属于**运行态**：它们由技能定义、被 `.gitignore` 忽略、可以随时丢弃，**不是** `docs/superpowers/*`，因此不参与 §3.1 的改写，也不需要长期维护。
-
-判定标准：如果一份内容删掉之后，下一个接手的人会缺失决策依据，那它是持久文档（进 `docs/`）；否则是运行态（进 `.superpowers/`）。
-
----
-
-## 4. 计划驱动：ExecPlan
-
-### 4.1 谁需要 ExecPlan
-
-- 任何跨越"设计 + 实现 + 验证"的任务，都需要一份 ExecPlan。
-- 单行修复、文案调整、依赖小版本升级不需要；但如果是它促成了一个决策，把决策记到 `docs/adr/`。
-
-### 4.2 生命周期
-
-```text
-新建 → docs/exec-plan/active/YYYY-MM-DD-<slug>.md
-  ↓ 执行中持续更新 Progress / Decision Log / Surprises
-全部验收通过 → 移到 docs/exec-plan/completed/（同一文件名）
-```
-
-- `<slug>` 用小写英文连字符，描述任务而不是工具（`repo-bootstrap`、`planning-identity-model`）。
-- 移动文件时同步更新 `docs/README.md` 的索引。
-- 一个任务一份 ExecPlan；不要把多个不相关的目标塞进同一份文档。
-
-### 4.3 强制章节
-
-格式权威是 `PLANS.md`，`docs/exec-plan/completed/2026-09-17-repo-bootstrap.md` 是一个完整样例。最低要求：
-
-`Purpose / Big Picture`、`Context and Orientation`、`Design / Spec`、`Global Constraints`、`Plan of Work`、`Validation and Acceptance`、`Progress`、`Surprises & Discoveries`、`Decision Log`、`Idempotence and Recovery`、`Interfaces and Dependencies`、`Outcomes & Retrospective`、`Bottom Change Note`。
-
-### 4.4 更新义务
-
-- 每完成一个批次：更新 `Progress`（勾选 + 日期）。
-- 每遇到与预期不符的事实：写进 `Surprises & Discoveries`，附证据（命令输出、文件路径、上游文档）。
-- 每做一个不可轻易反悔的选择：写进 `Decision Log`，含 Rationale 与日期。
-- 计划变更：直接改文件，并在 `Bottom Change Note` 追加一条"何时、为何改"。
-
-ExecPlan 的价值在于**让无上下文的实现者（人或 agent）只读这一份文件就能继续**。因此禁止占位符：不写"TBD"、"稍后补充"、"参考上文"；写不出具体内容，说明还没想清楚。
-
----
-
-## 5. 拆分原则与批次
-
-### 5.1 四个判据（第一性原理）
-
-一批工作存在的唯一理由是：**它能把一个此前无法判定的问题变成可判定的反馈。**
-
-1. **可判定**：本批结束后，有确切命令或检查从"未知/失败"变成"通过"。
-2. **可回滚**：撤销范围等于本批 diff，不牵连其他批次已交付的能力。
-3. **最小闭环**：批内不包含两个可以分别验收的风险。
-4. **不聚合、不摊薄**：不为减少 issue 数量而合并批次；也不把同一风险摊成多个文件级提交。
-
-第 4 条要展开说：**敏捷不是把同一个风险拆成更多文件提交**。把一次改动切成十个只改一个文件的提交，不会缩短反馈，只会让 review 失去判断点——因为没有任何一个提交能被单独验收。真正要缩短的是"从动手到能判定对错"的距离。
-
-### 5.2 纵向优先
-
-优先按**纵向最小闭环**切分（一条链路从入口到可观察结果），而不是按技术层次切分（先写完所有类型定义，再写所有实现，最后写所有测试）。横向切分的问题是：每一层单独都无法验收，风险全部堆积到最后一次集成。
-
-### 5.3 反模式
-
-| 反模式 | 症状 | 修正 |
-|---|---|---|
-| 按文件拆批 | 提交历史很"干净"，但没有一批能独立验收 | 按"能跑通什么检查"重新划分 |
-| 按 issue 凑数 | 为了少开 PR 把不相关改动塞在一起 | 回到判据 1 与 2：合并后还能独立回滚吗 |
-| 无限细化 | 一个批次要跑十次全量测试 | 增大粒度到"一次反馈能判定" |
-| 批次内并行改同一文件区域 | review 时无法判断哪个改动导致回归 | 批次边界落在文件/模块所有权上 |
-
----
-
-## 6. 执行阶段：exec-plan 批次流程
-
-本仓库的执行阶段使用**自定义 exec-plan 流程**（不套用上游的子代理任务制执行技能）。
-
-### 6.1 每批的固定动作
-
-1. **对齐**：读该批在 ExecPlan 中的最小闭环、涉及文件、验证命令。
-2. **隔离**：确认工作在 `.worktrees/<task-slug>/` 或明确的工作分支上（§7）。
-3. **实现**：只改本批涉及的文件；不顺手重构批次外的代码。
-4. **验证**：执行本批声明的验证命令，把结果（成功或失败）如实记录。
-5. **记录**：更新 ExecPlan 的 `Progress`，必要时补 `Surprises & Discoveries` 与 `Decision Log`。
-6. **提交**：按 §8.2 提交本批（一个批次一个提交，或在同一批次内保持可读的少量提交）。
-7. **汇报**：向人类伙伴报告"本批闭环 + 验证证据 + 下一批"。
-
-批次之间不要停下来征求"是否继续"的许可——计划已经批准，继续执行；只有真正阻塞（缺凭据、需求歧义、外部系统不可用）才停下。
-
-### 6.2 验证要求
-
-- 涉及行为的改动：先写会失败的测试，再让它通过（TDD），并在批次记录里留下"失败 → 通过"的证据。
-- 涉及结构的改动：用契约测试或边界测试证明结构约束。
-- 无法自动验证的验收项：写成可复制的人工步骤，并实际执行一次。
-- 禁止用"应该可以"、"看起来没问题"作为验收结论。
-
-### 6.3 阻塞处理
-
-阻塞时更新 ExecPlan 的 `Surprises & Discoveries`（发生了什么、证据是什么），并把 `Progress` 中该项标记为阻塞；然后向人类伙伴提出**一个**具体问题，而不是一串猜测。
-
-### 6.4 全部批次完成之后：重构与提交整理
-
-ExecPlan 的所有批次完成后，**必须再做一轮**：
-
-1. **代码重构**：消除重复、统一命名、把批次间临时形成的结构收敛到 §2 的所有权划分；重构**不得改变验收结果**，重构后所有验证命令必须重新全绿。
-2. **提交重新组织**：把中间态提交（fixup、typo、临时调试）合并进对应批次提交，让 `git log --oneline` 与 ExecPlan 的批次一一对应；历史改写前先建 `backup/pre-rebase` 分支。
-3. **回填**：更新 ExecPlan 的 `Outcomes & Retrospective`，然后把文件移到 `docs/exec-plan/completed/`。
-
-这一轮不是可选项：它是把"实现过程"变成"可被人读懂的历史"的唯一机会。
-
----
-
-## 7. 隔离工作区（worktree）
-
-### 7.1 路径规则
-
-- 所有隔离工作区位于 **`.worktrees/<task-slug>/`**，`<task-slug>` 与分支名的 slug 一致。
-- 该规则**覆盖**任何工具或技能的默认值，包括全局工作区目录（如 `~/.config/.../worktrees/`）与 `.worktrees/<branch-name>/` 这类按分支名命名的形态。
-- `.worktrees/` 已被 `.gitignore` 忽略；如果发现未被忽略，先补忽略规则再创建。
-
-### 7.2 创建前检查
-
-```bash
-# 1) 是否已经在隔离工作区里（避免嵌套创建）
-git rev-parse --git-dir --git-common-dir
-# 2) 目录是否被忽略
-git check-ignore -v .worktrees/
-# 3) 创建
-git worktree add .worktrees/<task-slug> -b <type>/<task-slug>
-```
-
-### 7.3 收尾
-
-- 分支合并后，显式 `git worktree remove .worktrees/<task-slug>`；不要自动清理有未提交修改的工作区。
-- 工作区只放该任务的工作；不要把它当成共享暂存区。
-- 沙箱或权限导致无法创建时，在原工作区开工，并在 ExecPlan 中记录这一偏差。
-
----
-
-## 8. 分支、提交与 PR
-
-### 8.1 分支命名
-
-`main` 是唯一长期分支。工作分支：
-
-| 前缀 | 用途 |
-|---|---|
-| `feature/<task-slug>` | 新能力、新纵向切片 |
-| `fix/<task-slug>` | 缺陷修复 |
-| `docs/<task-slug>` | 文档、规范、示例 |
-| `chore/<task-slug>` | 工具链、依赖、工程配置 |
-| `project-management/<task-slug>` | 项目管理本身（issue 结构、项目字段、流程配置） |
-
-`<task-slug>` 使用小写英文连字符。分支名中不出现工具品牌名（例如不要写 `claude/...`、`cursor/...`）。
-
-### 8.2 提交信息
-
-采用 Conventional Commits：`<type>(<scope>): <中文摘要>`。
-
-- `type`：`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `perf`。
-- `scope`：包名或区域（`domain`、`core`、`providers`、`docs`、`repo`）。
-- 正文写**为什么**，不重复 diff；结尾用 `Closes #N` / `Refs #N` 关联 issue。
-- 一个提交对应一个批次（或批次内一个可独立理解的步骤），禁止把无关改动混在同一提交里。
-
-### 8.3 PR 规则
-
-1. **一个 PR 可以关闭多个 issue**，但必须共同构成一个**可独立验收、合并、回滚的能力闭环**；不会单纯为了减少 issue 数量而聚合。
-2. **改动规模**：代码 ≤ 1000 行，文档 ≤ 1500 行（`git diff --shortstat` 的增删之和；排除锁文件与生成目录）。权威实现是 `node scripts/rule-checks.mjs size <base-ref>` 的 `SIZE_EXCLUDE_RULES`：按路径前缀/目录段判定，覆盖 `pnpm-lock.yaml`/`package-lock.json`/`yarn.lock`（含任意嵌套深度）与 `dist/`、`generated/` 目录，不是只匹配仓库根的精确文件名。超出即拆分。
-3. **禁止自行合并**：提交 PR 后不得 merge，即使 CI 全绿、即使无人 review。是否合并由人类伙伴决定。
-4. **合并方式**：被要求合并时使用 **rebase merge**。仓库设置已禁用 merge commit 与 squash，因此"只允许 rebase"是环境保证而非口头约定。
-5. **评审方式**：被要求评审时，使用 **GitHub inline review comment**（针对具体行的评论），而不是只在 PR 顶层留一条总结评论。
-6. 每个 PR 必须关联 ExecPlan：PR 描述里给出 ExecPlan 路径与批次名。
-7. **每个 PR 必须 link 同仓 issue**：完成写 `Closes #N`，未完成写 `Refs #N`；`Issue policy` 检查会核对（§8.7）。
-   **唯一例外：机器开的 PR 不受此约束**（判定按 GitHub 的 `user.type == 'Bot'`，不是按 bot 名单）。理由是这条规则要保证的是「改动可以追溯到一个**被规划过**的工作项」，而机器开的 PR 没有——触发它的是上游发布，PR 本身就是工作项。强行要求会变成「人事后补一个 issue 去给 bot 的改动找理由」，issue 正文只能重述 PR 正文，没有信息增量；更糟的是这个 advisory 检查会在一整类 PR 上**长期变红**，把人训练成忽略它——那是 §9.2 警告的「绿了就等于查过了」的镜像形态。
-8. `main` 受分支保护：必须通过 PR、必须通过 `PR Fast Gate`、必须有批准、线性历史、禁止强推与删除。
-
-### 8.4 PR 描述模板
-
-```markdown
-## 闭环
-<这个 PR 独立解决了什么，验收标准是什么，怎么回滚>
-
-## 关联
-- ExecPlan: docs/exec-plan/active/YYYY-MM-DD-<slug>.md（Batch N）
-- Closes #N
-- Refs #M
-
-## 验证证据
-- [ ] `pnpm install --frozen-lockfile`
-- [ ] `pnpm verify`
-- [ ] 敏感信息自查（§8.6）：本 PR 的 diff、commit message 与描述均不含本机路径、用户名/主机名、凭据或内部系统信息
-- [ ] <本批特有的验证命令与结果>
-
-## 风险与回滚
-<最坏情况是什么；如何回滚>
-```
-
-### 8.5 评审规范（inline）
-
-完整标准见 `docs/review/README.md`（评审前核实事实、按改动面选证据、阻塞与建议的判定、意见落在哪里）。摘要：
-
-- **意见落在行上**：可定位到具体行的缺陷用 GitHub inline review comment，跨文件或整体结论用 PR 级评论。
-- **阻塞与建议分开**：标 `[blocking]` / `[suggestion]`；一条有证据的阻塞问题胜过一堆风格提醒。
-- **不提已被绿色门禁覆盖的问题**；只报告实际执行过的命令与观察到的输出。
-
-行级评论命令：
-
-```bash
-gh api repos/{owner}/{repo}/pulls/{number}/comments \
-  -f body='这里允许 ui 直接依赖 providers 实现，会破坏能力可替换性（AGENTS.md §2.2）。' \
-  -f path='packages/ui/src/index.ts' \
-  -F line=12 \
-  -f side=RIGHT \
-  -f commit_id="$(gh api repos/{owner}/{repo}/pulls/{number} --jq .head.sha)"
-```
-
-评审输出要可执行：指出具体行、对应哪条约定、建议怎么改。不要输出"整体看起来不错"这类无法行动的结论。
-
-### 8.6 提交与 PR 前的敏感信息自查（公开仓库）
-
-**本仓库是 public 仓库，发布面（publication surface）包括分支、标签与 PR ref**——草稿分支一旦推送到远端、PR 描述一旦提交，就等同于公开发布；事后删除**无法**从缓存视图、PR ref 与第三方镜像中回收；自托管 runner 的 Actions 日志（含 `Runner name`、`Machine name` 与工作目录）同样是公开面。"发布面"的完整定义与判定标准见 `docs/exec-plan/completed/2026-09-17-disclosure-audit-and-license.md`。
-
-因此**每次提交前、每次开 PR 前**都必须做一次敏感信息自查，范围包含 commit message、PR 描述与 CI 日志。不得以"这是内部仓库""以后再清理"为前提。评审侧的对应必查项是 `docs/review/README.md` 的"评审者：必查项 → 安全边界"：**作者自查与评审复核是两道独立的门，不能用其中一道替代另一道。**
-
-不得进入发布面的内容（沿用该计划的机械扫描类目）：
-
-| 类目 | 说明 |
-|---|---|
-| 凭据 | token、key、secret、Bearer、私钥、口令；真实 secret 的**值**，以及 `.credentials` 类文件的内容 |
-| 本机路径与身份 | `/Users/<name>/…`、`/home/<name>/…`、本机用户名、主机名、runner 注册名、`*.local`、`*.internal`、`*.home`、`*.intranet` |
-| 账号与个人信息 | 邮箱、手机号、个人标识、组织与署名信息 |
-| 内部系统 | 内网地址与端口（含 RFC1918 私网字面量）、内部服务/跳板/runner 名、未公开的配置与拓扑 |
-| 保密字样 | 内部 / 保密 / NDA / confidential / 禁止外传，及其所描述的实体 |
-
-**写法**：一律用占位符代替真实值——`~/.dsh/…`、`$DSH_HOME/…`、`<runner-name>`、`<host>`、`<workspace>`。要说明"某台机器上存在某个文件"时，只写相对结构与文件名，不写绝对路径、用户名与本机名。**不要在工作流里 `echo $(hostname)` / `echo $(pwd)`**——自托管 runner 的日志是公开的（这一条来自一次真实事故：一次性冒烟工作流的日志把机器名与用户路径一起公开了）。
-
-**权威机械实现**：`node scripts/rule-checks.mjs disclosure <base-ref>`（随 `pnpm verify` 之外的 advisory `Rule checks` job 跑在每个 PR 上，见 §9.2）。它比下面这条本地 grep 覆盖得更完整，是五个类目里**可机械判定的子集**的权威判定，而不是下面 grep 命令的简化替代：
-
-- 覆盖四个来源：对 base 的新增行、范围内每个提交各自引入的新增行（能捕捉"先加后删"——树对树的差异看不见净变化为零的历史）、每个提交信息、以及经 `PR_BODY` 环境变量传入的 PR 描述（在 workflow 里必须经 `env` 传入，不得插值进 `run:`）。PR 标题与分支名同样属于本节开篇定义的发布面，尚未接入这条机械扫描，人工自查仍需覆盖。
-- 除本机路径与内网主机名外，还机械识别常见凭据**形状**（GitHub 令牌 `gh[pousr]_…`/`github_pat_…`、AWS Access Key `AKIA…`、私钥 PEM 头）与 RFC1918 私网地址字面量——这是 §10 唯一写成硬约束的类目（"密钥、token、私钥永不入库"），也是最容易机械判定的一类。它**不能**识别任意口令或业务侧的私密值，人工五类目自查仍是通过条件。
-- 命中时只打印文件、模式名与打码后的摘要，不把原始敏感内容回显进 Actions 日志（日志本身也是发布面）；先加后删的命中会带上提交 SHA，提示需要的是改写历史而不是再提交一次删除；命中或先加后删的情形都要求额外删除本次 workflow run。
-
-**检查命令**（本地快速自查的子集，只覆盖本机路径与部分内网主机名，不含凭据形状、RFC1918、先加后删、提交信息与 PR 描述——完整判定用上面的 `disclosure` 命令；只判定本次改动，不扫全树；因为本节的规则文本本身含有这些模式，必须排除 `AGENTS.md`；**期望输出为空**）：
-
-```bash
-# 提交前：暂存区的新增行
-git diff --cached -U0 -- . ':(exclude)AGENTS.md' | grep -E '^\+' | grep -vE '^\+\+\+' \
-  | grep -nE '/Users/[^/ ]+|/home/[^/ ]+|[A-Za-z0-9._-]+\.(local|internal|lan|corp|home|intranet)\b'
-
-# 开 PR 前：相对 main 的全部新增行
-git diff origin/main...HEAD -U0 -- . ':(exclude)AGENTS.md' | grep -E '^\+' | grep -vE '^\+\+\+' \
-  | grep -nE '/Users/[^/ ]+|/home/[^/ ]+|[A-Za-z0-9._-]+\.(local|internal|lan|corp|home|intranet)\b'
-```
-
-命中即**阻塞项**：改成占位符后重新提交。**未推送**的分支用 `git commit --amend` 或交互式 rebase 重写；**已推送**的分支只靠"再提交一次删除"不够——历史与 PR ref 仍在发布面上，旧提交对象在 GitHub 上仍可按 SHA 取到，须由人类伙伴决定是否重写历史并清理关联记录（例如删除已失效的 workflow run）。该正则只覆盖可机械判定的一类，**人工按上表逐条过一遍才是通过条件**；结论勾选进 PR 描述的"验证证据"（§8.4）。
-### 8.7 Issue 与标签约定
-
-**标题格式（强制）**：`<kind>(<area>): <英文祈使句摘要>`
-
-- `kind` ∈ `feat` / `fix` / `docs` / `chore` / `refactor` / `test`，与提交类型同一套词汇。
-- `area` 取仓库里真实存在的位置：`packages/*` 的顶层目录名、`apps`、`tests`、`docs` 本身与 `docs/*` 的子目录名；另加不对应目录的过程域 `ci`、`repo`。
-- 查看当前 area 取值：`node scripts/policy-check.mjs areas`（当前输出 21 行；这个数字由 `AREAS` 决定，权威源是命令本身的输出而不是这句话——`AREAS` 变了不用回来改这句话）。
-- `area:*` 标签与 Project 的 `Area` 字段是同一套词汇的两份**投影**，权威源是脚本，同步时以该命令的输出为准。
-- `AREAS` 是否覆盖了仓库里每个真实目录，由契约测试核对（`requiredAreas()` 读 `packages/*` 与 `docs/*` 的目录名）；该核对只统计匹配 `/^[a-z0-9-]+$/` 的目录名。点目录（如 `.vitepress`）、下划线目录（如 `ui_kit`）这类名字永远无法出现在上面的标题格式里，因此也不计入"`AREAS` 必须覆盖"的范围——不加这道过滤，两条断言会互相矛盾：把这类目录加进 `AREAS` 会让标题格式的测试变红，不加又会让覆盖率测试变红，谁都补不平。
-- 标题用**英文**（§3.3 的例外，理由：issue 是公开可检索的索引面）；前缀小写；摘要不以句号结尾、不超过 80 字符。
-- 例：`feat(storage): add the SQLite schema and migration skeleton`
-
-**标签（强制）**
-
-| 命名空间 | 数量 | 取值 |
-|---|---|---|
-| `kind:*` | 恰好 1 个 | 与标题前缀一致 |
-| `area:*` | 至少 1 个 | 包含标题括号内的区域（可再加相关区域） |
-| `gate:*` | 至多 1 个 | `E1`（阻塞数据模型冻结）、`R1`（MVP 发布门禁） |
-
-标签是**权威分类**（可搜索、可筛选、可被检查）；GitHub Projects 的 `Kind` / `Area` / `Gate` 字段是它的看板投影，取值来自同一套词汇。不引入优先级或严重度标签：本仓库没有事故语义，`gate:*` 已经表达"阻塞下一里程碑"。
-
-**正文结构**：由 `.github/ISSUE_TEMPLATE/` 的表单保证，不允许自由格式。
-
-- Task：`Context` → `Scope`（in / out）→ `Acceptance criteria`（每条可独立验证，写明确切命令或产物）→ `References` → `Notes`
-- Bug：`What happens` → `What should happen` → `How to reproduce` → `Evidence` → `References` → `Notes`
-
-**PR 与 issue 的绑定（强制）**：每个 PR 在描述里 link 至少一个同仓 issue——完成写 `Closes #N`，未完成写 `Refs #N`。一个 PR 仍须构成一个可独立验收、合并、回滚的闭环（§8.3）。关键字后可选一个冒号、大小写不限（`Closes: #12`、`CLOSES #12`，与 GitHub 官方文档给出的形态一致）；号码可以写成 `#N`、同仓完整 URL，或同仓 `owner/repo#N` 长形式——三种写法同判，跨仓写法（长形式或 URL）一律不算。判定实现在 `linkedIssues()`，由契约测试逐形态守住。
-
-**例外：机器开的 PR**（`user.type == 'Bot'`，例如 Dependabot 的依赖升级）跳过这条绑定判定，理由见 §8.3 第 7 条。判定写在 `scripts/policy-check.mjs` 的 `linkRuleExemption()` 里、由契约测试守住，不是 workflow 里的一行 `if` —— 豁免本身也是一条规则，应当可被证伪。其余判定（标题、标签）不受豁免影响。
-
-**执行**
-
-```bash
-node scripts/policy-check.mjs issue <n>   # 标题 + 标签
-node scripts/policy-check.mjs pr <n>      # 是否 link issue，且被 link 的 issue 合规
-```
-
-`.github/workflows/issue-policy.yml` 在 issue 与 PR 事件上运行同一个检查，检查名为 `Issue policy`。它**刻意不进分支保护**：格式问题应当可见，但不应让合并取决于某个 issue 的措辞；稳定一段时间后再考虑提升为必需检查。
-
----
-
-## 9. 验证与门禁
-
-### 9.1 本地命令
-
-```bash
-node scripts/policy-check.mjs issue <n>   # 核对某个 issue 的标题与标签（§8.7）
-node scripts/policy-check.mjs pr <n>      # 核对某个 PR 是否 link 了合规的 issue
-pnpm install                 # 建立工作区
-pnpm verify                  # typecheck + 全部测试（提交前必须全绿）
-pnpm typecheck               # tsc --noEmit
-pnpm test                    # node --test tests/{contract,integration,e2e}
-pnpm run boundaries          # 只跑包边界契约测试
-```
-
-### 9.2 CI 门禁
-
-- **PR Fast Gate** 是唯一被分支保护引用的检查名。它由**聚合 job** 发布：聚合 job 不 checkout PR 代码、不读 secrets，只汇总各 lane 的结果。因此新增 lane（例如将来的集成测试或端到端测试）不需要修改保护配置，也不会让"发布必需状态"的 job 执行不可信代码。
-- 改名 `PR Fast Gate` 必须同步修改保护配置与本文档——两者是同一个契约。
-- **Merge Gate**（后续按需扩展）：契约测试全量、集成测试、端到端、迁移测试、包边界测试。
-- **Scheduled Regression**（后续）：大数据量 fixture、重复/乱序事件压测、重连循环、性能趋势。
-
-**门禁级别的判定准则**
-
-> 一条规则做成必需检查还是 advisory，判据不是"重要性"，而是**可判定性与误报代价**：
-> 机械可判定、且没有需要人来判断的误报类别 → 进 `pnpm verify`（随 `PR Fast Gate` 成为必需）；
-> 判定里含人的解释（措辞、体量、披露类目）→ 做成可见但不阻塞的 advisory 检查，并写明提升为必需检查的前置条件。
-> 已有三例：`package-boundaries`（必需）、`Issue policy`（advisory）、`Rule checks`（advisory）。
-
-### 9.3 验收对标
-
-- 实现级验收对标十类不变量：身份分离、幂等、恢复、能力边界（清单见 `tests/README.md`）。
-- 阶段门禁：**Gate E1**（身份与同步验证）通过前不冻结数据模型 v1；**Gate R1** 是 MVP 发布门禁。
-- 门禁清单的**可分发表述**在本仓库内维护（`AGENTS.md` §9 与 `docs/architecture/`），不指向任何仓库外文件。
-
-### 9.4 完成前自查
-
-在宣布"完成"之前逐条回答：
-
-1. 验证命令是否实际执行过，输出是什么？
-2. 是否有任何一个验收项只有推断、没有证据？
-3. 是否引入了新的路径/分支/文档命名，且它不含工具品牌？
-4. 是否更新了 ExecPlan 的 `Progress`、`Decision Log`、`Surprises & Discoveries`？
-5. 若把本批改动整体回退，仓库是否仍处于可工作状态？
-6. 本次改动（含 commit message、PR 描述与自托管 runner 日志）是否已按 §8.6 做过敏感信息自查，且发布面上没有本机路径、本机用户名/主机名、凭据或内部系统信息？
-
-### 9.5 workflow 不变量
-
-`.github/workflows/*` 必须共同满足下表的不变量；判定由 `scripts/workflow-check.mjs` 机械执行。
-
-| id | 不变量 | 判定 |
-|---|---|---|
-| **W1** | 每个**非 `uses:` 形态**的 job 声明 `timeout-minutes`，整数且 `1 ≤ n ≤ 15` | 缺失或越界即违规。`jobs.<id>.uses`（可复用 workflow 调用）豁免——GitHub 不允许在这类 job 上声明这个键，强行要求就是制造一个无法满足的红门禁 |
-| **W2** | 每个 checkout step —— `uses` 的 `<owner>/<repo>` 部分（去掉 `@ref` 与子路径后）按 GitHub 语义**大小写不敏感**等于 `actions/checkout` —— 声明 `with.persist-credentials: false` | `with` 不存在、`persist-credentials` 键不存在、或取值不是 `false` 即违规。按 action 精确匹配，不是字符串前缀匹配（`actions/checkout-sarif` 不算命中，`Actions/Checkout` 算） |
-| **W3** | 每个 step 的 `uses`、以及每个 job 的 `uses`（`jobs.<id>.uses`，可复用 workflow 调用）若不是本地引用（不以 `./` 开头），必须写成 `<owner>/<repo>[/<path>]@<40 位十六进制>` | 不是 40 位 hex 即违规。job 级与 step 级 `uses` 受同一条规则约束——可复用 workflow 调用带着仓库 token 运行，movable ref 与 step 级同样危险 |
-| **W4** | 每个 workflow 顶层声明 `permissions`；**顶层与任一 job（含 `uses:` 形态）显式声明的** `permissions` 里任何键的取值都不得是 `write`（值不以 `write` 开头）。此外，若任一**非 `uses:` 形态**的 job 判定为 self-hosted，顶层 `permissions` 必须是空映射 `{}`，且该 job 不得用 job 级 `permissions` 覆盖出非空权限。`runs-on` 按字符串 / 数组 / `{labels}` 映射三种写法摊平成标签列表后判定 self-hosted：标签等于字面量 `self-hosted`，或不在托管标签白名单内（含未展开的 `${{ }}` 表达式，以及摊平不出任何标签的未知形状），都按 self-hosted 处理（fail-closed on unknown） | 缺失、含 write、自托管顶层非 `{}`、或自托管 job 覆盖出非空权限即违规。job 级 `permissions` 会覆盖顶层，只查顶层等于给最小权限留一个后门；只认字面量 `self-hosted` 或只支持字符串/数组两种形状，会被 GitHub 文档化的 `{group, labels}` 对象形式、未展开的矩阵表达式、或不含该字面量但仍匹配到自托管机器标签集的写法绕过——本仓库自己的 runner 就注册在 `[self-hosted, macOS, ARM64, dsh]` 这样的标签集下。`jobs.<id>.uses` 没有 `runs-on`，不参与 self-hosted 判定，但仍然受"不得 write"约束 |
-| **W5** | 若 workflow 的 `on.push` 会覆盖默认分支，则顶层与**每个 job**（`jobs.<id>.concurrency` 与顶层同一条判据）的 `concurrency.cancel-in-progress` 都不得等价于真值字面量——**布尔值 `true`，以及带引号的字符串标量 `'true'`（大小写、首尾空白不敏感）都算**。「覆盖默认分支」＝ `on` 写成 `push` 字符串、或写成含 `push` 的数组、或 `push` 存在且（`branches` 未限定或按 GitHub 的 glob 语义（`*`/`**`）匹配到 `main`，且未用 `branches-ignore` 以同样的 glob 语义排除 `main`） | 等价于真值字面量即违规，顶层与 job 级都查。`on: push` 与 `on: [push, …]` 是合法写法且覆盖全部分支，必须一并拦下；`branches`/`branches-ignore` 按通配符匹配，不是字面量数组包含（`branches: ['**']` 必须命中）；`branches-ignore` 排除 `main` 时取消是安全的，不得误报；`${{ github.event_name == 'pull_request' }}` 这类表达式字符串不算真值字面量，必须继续放行——`ci.yml` 依赖这个写法 |
-| **W6** | 若顶层或**任一 job** 声明了 `concurrency`，必须显式声明 `cancel-in-progress` | 缺失即违规，顶层与 job 级都查 |
-| **W7** | workflow 顶层必须声明 `jobs`，且取值必须是**非空**映射 | 缺失、不是映射（例如写成 YAML 列表）、或是空映射 `{}` 即违规——语法能解析但结构不对、或数量为零的输入都必须被拦下，不能因为不是 W1–W6 能处理的形状、或"至少不是别的形状"就放过；`jobs: {}` 与"目录存在但零匹配"是同一类假绿：文件本身合法，却创建零个检查 |
-
-检查器用法（在仓库根运行；无 finding 且 exit 0 表示合规，合规时打印一行汇总，包含已检查的文件数）：
-
-```bash
-node scripts/workflow-check.mjs
-```
-
-该检查随 `pnpm verify` 进入 `PR Fast Gate`，是**必需**检查（判定准则见 §9.2）。以下情形一律 **fail closed**、以 exit code 3 结束（与 W1–W7 规则违规的 exit code 1 区分开，方便调用方分辨"检查器没跑起来"和"跑起来了但不合规"）：`.github/workflows` 目录不存在；目录存在但一个 `*.yml`/`*.yaml` 都没匹配到（两者都曾经被当成"没有 workflow＝合规"而返回空结果，这正是本节要堵住的假绿）；workflow 文件读取失败（权限、损坏的文件描述符等，措辞为"无法读取"）；workflow 解析失败（措辞为"无法解析"，两者分开措辞方便定位是权限问题还是内容问题）。**符号链接指向的 workflow 文件同样会被检查**（用 `statSync` 而不是目录项自带的文件类型跟随符号链接）。"语法错的 workflow 只是完全不创建检查"是已经发生过的事故，检查器不能重复它，也不能在其它 fail-closed 场景下重复它的变体。
-
-**W1 的上界取 15 的理由**：本仓库当前最长的 lane 实测 18 秒（#12 的 PR 描述），15 分钟是 50 倍余量，同时把"卡住的 job 占满 runner 默认 360 分钟"这类浪费挡在门外。将来出现合法需要更长时间的真实 lane 时，改这个上界是一次有意识的决策（改检查 + 改本节），而不是在单个 workflow 里悄悄放宽。
-
-**W3 不设官方/第三方豁免的理由**：`actions/*` 的 tag 同样可移动，`jobs.<id>.uses` 的可复用 workflow 引用也一样。用"厂商身份"做豁免等于在检查器里引入一份需要人工维护的分类表——那正是 RM3 本身。pin 之后的升级由 `.github/dependabot.yml`（`github-actions` ecosystem，由 #35 引入）承担。
-
-**W4 的托管 runner 标签白名单只收窄、不为个别 workflow 放宽的理由**：判定 self-hosted 时"不在白名单内即 self-hosted"是刻意保守的 fail-closed 默认值，与 W1 的 15 分钟上界同一种姿态——出现合法的新托管标签（例如新的 GitHub 托管镜像版本）时，扩表是一次有意识的决策（改 `GITHUB_HOSTED_RUNNERS` + 改本节），不是在单个 workflow 里悄悄放宽判定。
-
----
-
-## 10. 安全与信任边界
-
-- 密钥、token、私钥永不入库；Project 数据库只保存指向 secret 服务的句柄（`secret_ref`）。本仓库是 **public** 仓库：提交与 PR 前必须做敏感信息自查（§8.6）——本机绝对路径与本机用户名、主机名 / runner 名、内网地址与端口、未公开的配置与拓扑，同样属于不得进入发布面的内容。
-- 本地 Git 操作使用 argv / library API，不拼接 shell 字符串；worktree 路径必须规范化并位于允许的根目录内。
-- 外部写操作必须可追踪：记录 actor、目标 ProviderBinding、本地幂等键与结果状态。
-- LLM（包括本 agent）不参与规划状态、关系语义或发布门禁的控制路径；只做确定性规则明确允许的辅助。
-- 上一条的**适用范围**是产品的运行时控制路径——`packages/core` 与各 Provider 跑起来之后如何判定、传播、覆盖规划状态与关系语义；不包括本仓库自身作为该产品第一个用户时，agent 在 GitHub Projects 上替人操作看板这件事本身。后者受下面三条约束，不能援引"这只是自举练习"而豁免。
-- 在本仓库自身的项目管理上，agent 可以作为人类伙伴的操作代理执行**确定性写入**——取值能从别处机械推导、agent 不引入任何新判断的那一类：字段回填（例如把 `area:*`/`kind:*`/`gate:*` 标签同步到 Project 的 `Area`/`Kind`/`Gate` 字段）、批量赋值（例如对一批已核实的条目统一写入 `ExecPlan`/`Batch` 文本字段）、索引与文档维护（例如更新 `docs/project-management/README.md` 的字段 ID 表、`docs/README.md` 的 ExecPlan 索引）。
-- 以下两类写入必须先经人类伙伴**批准**，agent 不得单方面执行，即使技术上可以调用同一组 API：`Status` 的取值变更（它断言"规划所有者接受该工作项完成"，规划所有者是人）；`blocked-by` / `blocking` 关系边的新增或删除（它直接决定另一个条目能不能开始）。这两类分别对应上面"规划状态"与"关系语义"两个词，不是新增约束，是把已有约束具体到字段。
-- 批准必须留痕，且痕迹不能只存在于一次会话里：批准记录进该写入所属 ExecPlan 的 `Decision Log`，写明日期与决定者（人类伙伴姓名，或标注"人类伙伴裁决"）。一条 `Decision Log` 记录能否算作某次写入的批准，标准是它**能不能具体识别到这次写入的目标**——点名对应的字段/条目，或点名对应的 issue 编号组合（例如"#7 blocked-by #4"）；只说明"什么情况下应该建边/改字段"的通用政策性陈述不构成对某一条已发生写入的批准，即使那次写入本身符合该政策。找不到满足这个标准的记录，就视为**未批准**；这条判定只约束**agent 发起的写入**（呼应上一条"agent 不得单方面执行"的主语，人类伙伴亲手做的 `Status` 变更或 `blocked-by` 边不在此列）——未批准的 agent 写入视为**无效**。
-- 这条判定**目前是人工复核项，不是机械检查**：`grep -rlE 'Decision Log|批准|approval' scripts/` 目前无输出，`scripts/` 下没有代码执行它——用这条命令本身核实这个结论是否仍然成立，不要假设它永远如此。提升为机械检查的前置条件（写入到 ExecPlan 的归属规则、可 grep 的批准记录格式、配套脚本与契约测试）追踪于 #67；落地前本节只给判断标准，由人对照 `Decision Log` 逐条判断——按 §9.2 的判定准则，含人的解释的判定只能是 advisory，不能声称可机械执行。
-- 无效即"发现即回滚或补批准"，但这条后果只约束**自本节此次修订（2026-09-18）起**新产生的写入；此前已经存在的写入——本仓库 2026-09-18 那批 164 次字段写入与 18 条 `blocked-by` 边（PR #57 描述记录在案）——不因本次修订自动判定无效、不自动触发回滚，逐条复核并入 #67 的范围，不在本条即时生效之列。
-- 破坏性操作（删除分支、清理工作区、删除远端仓库）默认不做；必须由人类显式要求。
-- **自托管 runner 不是一次性环境**：job 与登录用户的其它进程共享同一台机器。因此（a）凭据只经环境变量或文件描述符传递，**绝不进 argv**——同机进程可读进程表，Actions 的 secret 掩码不覆盖进程表；（b）临时文件只用 `$RUNNER_TEMP`，不写 `/tmp` 这类可预测的共享路径；（c）不调用任何 GitHub API 的 job 声明 `permissions: {}`。在托管 runner 上可以忽略的写法，在这里不是。
-
----
-
-## 11. 参考
-
-| 文档 | 内容 |
-|---|---|
-| `PLANS.md` | ExecPlan 格式与生命周期 |
-| `docs/README.md` | 文档地图 |
-| `docs/exec-plan/completed/2026-09-17-repo-bootstrap.md` | ExecPlan 样例（仓库引导，已完成） |
-| `docs/exec-plan/completed/2026-09-17-disclosure-audit-and-license.md` | 发布面审计、上游输入下架与许可证决策 |
-| `docs/review/README.md` | 评审标准：事实核实、证据选择、必查项、意见落点、归属与安全姿态 |
-| `.github/ISSUE_TEMPLATE/` | issue 表单：Task 与 Bug 的正文结构（§8.7） |
-| `docs/project-management/README.md` | 工作项看板：GitHub Projects 字段、状态语义与维护命令 |
-| `docs/development/README.md` | 本地工具链与 Engram 记忆作用域的配置与实测边界 |
-| `LICENSE` | Apache-2.0 许可证全文 |
+| §1.3 | 本文件 §1.1 不变量 |
+| §2.2 | 本文件 §2 依赖方向 |
+| §3.3 | 本文件 §3 文档与事实源 |
+| §5.1 | 本文件 §4 ExecPlan 批次与 docs/development/workflow.md |
+| §6.2 | docs/review/README.md §2 证据选择 |
+| §8.2 | 本文件 §6 提交格式 |
+| §8.3 | 本文件 §6/§8 与 docs/development/repository-rules.md §4 |
+| §8.6 | docs/development/publication.md 与 docs/development/repository-rules.md §1 |
+| §8.7 | docs/development/repository-rules.md §4 Issue 规则 |
+| §9.2 | 本文件 §9 风险驱动验证 |
+| §9.5 | docs/development/repository-rules.md §2 W1–W7 |
+| §10 | 本文件 §7 发布面与外部写入；`docs/development/repository-rules.md` §3 项目写入与状态拥有；其中自托管 runner 安全边界见 `docs/development/ci.md` 与 `docs/review/github-runner.md` |

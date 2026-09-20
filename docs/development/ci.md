@@ -1,0 +1,29 @@
+# CI 结构与演进
+
+## 当前已经实施
+
+远端 main 当前有五类 workflow：
+
+| workflow | 触发与职责 | 门禁 |
+|---|---|---|
+| CI | pull_request、push main、手动运行；执行 install、typecheck、测试并发布 PR Fast Gate | PR Fast Gate 是唯一必需状态 |
+| Issue policy | issue / PR 事件；检查标题、标签和 issue 关联 | advisory |
+| Rule checks | PR 事件；发布面和 PR 体量 | advisory |
+| Board invariants | 每日 schedule；读取 Project 工作流启停并与裁决表比较 | advisory；需要 PROJECTS_TOKEN |
+| GitHub review session | ready_for_review 的 pull_request_target；只转发 payload，不 checkout PR 代码 | 不属于合并门禁 |
+
+Board invariants 只从默认分支按日运行，使用 Project token 读取九条内置 workflow，发现 unknown / missing / 状态偏离就失败；它不 checkout PR ref，也不进入分支保护。Review session 是特例：它运行在 self-hosted runner 上，默认分支 workflow 固定定义，权限为空，secret 只经 env 进入签名过程，响应体写 $RUNNER_TEMP。普通 PR 代码 lane 使用 pull_request；不得把 pull_request_target 用作执行不可信 PR 代码的入口。
+
+CI workflow 的 action 必须 pin 到 40 位 commit；checkout 必须关闭 persist-credentials；权限最小；main push 运行不能因后续 push 被取消。新增 workflow 必须同时更新 workflow-check、契约测试和本文件。
+
+## W1–W7
+
+详细判定和 fail-closed 退出码见 repository-rules.md。CI 必须使 workflow-check 通过后才宣称门禁完整。解析失败、未知 jobs 结构、无 workflow 文件和空 jobs 都是检查失败，不可当作“没有需要检查的内容”。
+
+## 合并后的演进
+
+Merge queue / merge_group、integration、E2E 和 weekly regression 只有在仓库出现对应真实测试、耗时基线和稳定入口后才新增。新增 lane 先写 ExecPlan，证明它提供新的系统反馈；不得把同一组契约测试复制到多个 workflow 来制造覆盖率。
+
+未来若启用 merge_group，复用 PR Fast Gate 的稳定聚合检查名，确保 required check 在 queue 中有状态上报。慢测和组合矩阵应放到非必需的 main / weekly workflow；不取消 main 的验证记录。self-hosted lane 需要隔离 workspace、临时目录、端口、数据库和子进程，并避免在长期 runner 上执行不可信 fork 代码。
+
+CI 效率以 time-to-first-failure、队列等待、job 耗时、flake 和重复验证衡量；coverage 是风险信号，不是单独的质量目标。没有实际慢测试前不创建 weekly workflow。

@@ -72,7 +72,7 @@ export const EXPECTED = [
 /**
  * 必须保持 `enabled: false` 的工作流名单，由 EXPECTED **推导**而不是另行维护。
  *
- * 手写第二份清单就是再造一处会漂移的副本——那正是 AGENTS.md §8.7 为 area 词表
+ * 手写第二份清单就是再造一处会漂移的副本——那正是 docs/development/repository-rules.md §4 为 area 词表
  * 消除掉的那类问题。当前推导结果是 7 条。
  */
 export const MUST_BE_DISABLED = EXPECTED.filter((rule) => !rule.enabled).map((rule) => rule.name)
@@ -91,7 +91,7 @@ export const MUST_BE_DISABLED = EXPECTED.filter((rule) => !rule.enabled).map((ru
  * 默认没有被裁决过。一份只查「该关的有没有开」的清单会对第十条视而不见——所以未裁决
  * 的工作流必须让检查变红，逼一次显式判断，而不是默认放行。
  *
- * Fail-closed 的输入校验（与 AGENTS.md §9.5「解析不了的 workflow 会让检查直接失败，
+ * Fail-closed 的输入校验（与 docs/development/repository-rules.md §2「解析不了的 workflow 会让检查直接失败，
  * 不会静默放行」同一立场）：输入形状不对不会被吞掉变成「没有偏离」。一个解析不出结构
  * 的输入不代表合规，那是调用方或数据源坏了，必须显式抛错——否则运行时接线出问题时，
  * 这条检查会安静地变绿，正好是它要防的那种失效。
