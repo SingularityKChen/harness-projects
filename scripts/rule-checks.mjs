@@ -4,6 +4,12 @@
 //   node scripts/rule-checks.mjs disclosure <base-ref>   # §8.6 发布面机械扫描
 //   node scripts/rule-checks.mjs size <base-ref>         # §8.3 PR 体量上限
 //
+// <base-ref> 是判定基线，必须是**这个 PR 自己声明的 base**（CI 传的是
+// github.base_ref，见 .github/workflows/rule-checks.yml）。栈上 PR 的 base 是
+// 栈内上一层，传 origin/main 会把整个栈的累计读成这一个 PR 的体量：PR #95 的
+// 真实改动是 900 行，用 main 当基线得到 7837 行（issue #96）。两个子命令都把
+// 实际使用的基线打印在首行；栈累计另起一行，只记录、不判定、不设预算。
+//
 // disclosure 覆盖四个来源：对 base 的三点差异新增行、范围内每个提交单独引入
 // 的新增行（捕捉「先加后删」）、每个提交信息、以及经 PR_BODY 传入的 PR 描述。
 // 只看「相对 base 的本次改动」，不扫全树：规则约束的是本次要推上发布面的
@@ -381,6 +387,39 @@ export function tally(numstat) {
 }
 
 // ---------------------------------------------------------------------------
+// 判定基线的可观测性
+// ---------------------------------------------------------------------------
+
+/**
+ * 未显式传 base-ref 时的默认基线。它只在「PR 面向 main」的日常场景下正确，
+ * 因此输出必须打印实际使用的基线：在栈上裸跑会把整个栈的累计读成这个 PR 的
+ * 体量（issue #96），而读者需要能一眼看出量的是哪一段。
+ */
+export const DEFAULT_BASE = 'origin/main'
+
+/** `origin/main`、`refs/heads/main` 与 `main` 指向同一条基线；比较前归一化。 */
+export function normalizeBaseRef(ref) {
+  return ref.replace(/^refs\/heads\//, '').replace(/^origin\//, '')
+}
+
+/**
+ * 让判定自描述：给出基线 ref 与它解析到的提交。
+ *
+ * 解析失败不抛错——这只是给读者的定位信息；「基线不存在」的 fail-closed 判定
+ * 在 CLI 的 baseRefExists() 里（exit 3），报告层不重复一次，也不回退到任何
+ * 默认基线：回退会把「量错了」变成永久的静默错误。
+ */
+export function describeBaseline(base, deps = {}) {
+  const { resolveRef = (ref) => git(['rev-parse', '--verify', '--short=12', `${ref}^{commit}`]) } = deps
+  try {
+    // git 的输出带结尾换行：不 trim 会把这一行拆成两行，读起来像两条信息。
+    return `${base} @ ${String(resolveRef(base)).trim()}`
+  } catch {
+    return `${base}（无法解析成提交）`
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CLI（与可注入 git 数据源的导出函数）
 // ---------------------------------------------------------------------------
 
@@ -390,7 +429,7 @@ const annotate = (level, message) => console.log(`::${level}::${message}`)
 /**
  * §8.6 发布面机械扫描：覆盖四个来源。
  * @param {string} base
- * @param {{readDiff?: Function, listCommits?: Function, readCommitDiff?: Function, readCommitMessage?: Function, prBody?: string}} deps
+ * @param {{readDiff?: Function, listCommits?: Function, readCommitDiff?: Function, readCommitMessage?: Function, resolveRef?: Function, prBody?: string}} deps
  *   全部可注入，默认调用真实 git 与 `process.env.PR_BODY`——测试借此离线验证
  *   exit code 契约与「先加后删」「提交信息泄露」两类不经文件内容就能发生的场景。
  */
@@ -401,8 +440,13 @@ export function disclosure(base, deps = {}) {
     listCommits = (range) => git(['log', '--format=%H', range]).split('\n').filter(Boolean),
     readCommitDiff = (sha) => git(['diff', '-U0', `${sha}^!`, '--', ':(top)', ...SCAN_EXCLUDES]),
     readCommitMessage = (sha) => git(['log', '-1', '--format=%B', sha]),
+    resolveRef,
     prBody = process.env.PR_BODY ?? '',
   } = deps
+
+  // 扫描范围取决于基线：base 不是 main 时，这里的「新增行」与「每个提交」都
+  // 只是本 PR 相对栈内上一层的改动。打印出来，免得把它读成整个栈。
+  console.log(`基线：${describeBaseline(base, { resolveRef })}（扫描范围 ${base}...HEAD）`)
 
   const treeHits = scanDiff(readDiff(`${base}...HEAD`))
 
@@ -446,13 +490,26 @@ export function disclosure(base, deps = {}) {
 
 /**
  * §8.3 PR 体量上限。
+ *
+ * 判定范围是 `${base}...HEAD`：PR 相对它声明的 base 的三点差异。base 由调用方
+ * 传入（CI 传 `github.base_ref`），不由本函数或触发器的分支过滤器决定——两者
+ * 一旦混同，栈上 PR 就会被量成整个栈的累计（issue #96）。
+ *
  * @param {string} base
- * @param {{readNumstat?: Function}} deps
+ * @param {{readNumstat?: Function, resolveRef?: Function, mainRef?: string}} deps
+ *   `readNumstat` 会被用于两个范围：判定范围 `${base}...HEAD`，以及 base 不是
+ *   `mainRef` 时的栈累计范围 `${mainRef}...HEAD`。默认实现读真实 git。
  */
 export function size(base, deps = {}) {
-  const { readNumstat = (range) => git(['diff', '--numstat', range]) } = deps
+  const {
+    readNumstat = (range) => git(['diff', '--numstat', range]),
+    resolveRef,
+    mainRef = DEFAULT_BASE,
+  } = deps
   const { totals, files } = tally(readNumstat(`${base}...HEAD`))
   let failed = false
+
+  console.log(`基线：${describeBaseline(base, { resolveRef })}（判定范围 ${base}...HEAD）`)
 
   for (const bucket of ['code', 'docs']) {
     const budget = BUDGETS[bucket]
@@ -465,8 +522,23 @@ export function size(base, deps = {}) {
     }
   }
 
+  // 栈累计：base 不是 main 时，额外记录「这个 head 相对 main 还有多少没进」。
+  // 它只记录、不判定——AGENTS.md §8 的预算是单个 PR 的闭环规模，栈累计是另一
+  // 个量，因此这里不设阈值、不影响 exit code（ExecPlan 2026-09-20 的 Decision
+  // Log：栈累计不设预算）。算不出来也只降级成一行说明。
+  if (normalizeBaseRef(base) !== normalizeBaseRef(mainRef)) {
+    try {
+      const cumulative = tally(readNumstat(`${mainRef}...HEAD`))
+      console.log(
+        `栈累计（相对 ${mainRef}，仅记录，不计入判定）：代码 ${cumulative.totals.code} 行、文档 ${cumulative.totals.docs} 行`,
+      )
+    } catch (error) {
+      console.log(`栈累计：相对 ${mainRef} 计算失败（${error.message}）——这一行只是记录，判定不受影响`)
+    }
+  }
+
   if (files.length > 0) {
-    console.log('\n贡献最多的文件：')
+    console.log('\n本 PR 贡献最多的文件：')
     for (const f of files.slice(0, 10)) console.log(`  ${String(f.churn).padStart(6)}  ${f.path}`)
   }
   console.log(`\n已排除：${SIZE_EXCLUDE_RULES.map((r) => r.label).join('、')}`)
@@ -496,7 +568,10 @@ function baseRefExists(base) {
 // 只在被直接执行时跑 CLI。契约测试 import 本文件是为了验证纯函数，
 // 不加这道判断，import 会立刻触发 git 调用并 process.exit。
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const [command, base = 'origin/main'] = process.argv.slice(2)
+  // 默认基线只在「当前分支的 PR 面向 main」时正确。在栈上省略 base-ref 会把
+  // 整个栈的累计读成这个 PR 的体量，所以两个子命令都会把实际用的基线打印
+  // 出来；DEFAULT_BASE 的说明见上。
+  const [command, base = DEFAULT_BASE] = process.argv.slice(2)
   if (!Object.hasOwn(commands, command)) {
     console.error(`用法：node scripts/rule-checks.mjs <${Object.keys(commands).join('|')}> [base-ref]`)
     process.exit(2)
