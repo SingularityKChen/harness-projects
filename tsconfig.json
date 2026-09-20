@@ -16,6 +16,7 @@
       "@harness-projects/provider-delivery-github-actions": ["./packages/providers/delivery-github-actions/src/index.ts"],
       "@harness-projects/provider-execution-harness": ["./packages/providers/execution-harness/src/index.ts"],
       "@harness-projects/provider-execution-human": ["./packages/providers/execution-human/src/index.ts"],
+      "@harness-projects/provider-fake": ["./packages/providers/fake/src/index.ts"],
       "@harness-projects/storage-sqlite": ["./packages/storage/sqlite/src/index.ts"],
       "@harness-projects/app-harness-plugin": ["./apps/harness-plugin/src/index.ts"],
       "@harness-projects/app-web": ["./apps/web/src/index.ts"]

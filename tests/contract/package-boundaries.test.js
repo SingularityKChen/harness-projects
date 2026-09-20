@@ -75,6 +75,10 @@ const EXPECTED = {
     'packages/domain',
     'packages/capabilities',
   ]),
+  'packages/providers/fake': pkg('@harness-projects/provider-fake', [
+    'packages/domain',
+    'packages/capabilities',
+  ]),
   'packages/storage/sqlite': pkg('@harness-projects/storage-sqlite', [
     'packages/domain',
     'packages/capabilities',

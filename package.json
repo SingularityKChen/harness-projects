@@ -30,6 +30,7 @@
     "@harness-projects/provider-development-local-git": "workspace:*",
     "@harness-projects/provider-execution-harness": "workspace:*",
     "@harness-projects/provider-execution-human": "workspace:*",
+    "@harness-projects/provider-fake": "workspace:*",
     "@harness-projects/provider-planning-github-projects": "workspace:*",
     "@harness-projects/provider-planning-local": "workspace:*",
     "@harness-projects/storage-sqlite": "workspace:*",

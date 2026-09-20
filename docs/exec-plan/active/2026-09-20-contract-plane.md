@@ -144,21 +144,43 @@ node scripts/rule-checks.mjs size feat/domain-identity-model
 
 **回滚**：`git revert` 本批提交；A1 与 F1 不受影响（回滚后该包回到只导出 `packageId` 的骨架状态）。
 
-**批次划分订正（2026-09-20）**：原方案把 #29 与 #30 合成一个 PR。实测五个域的接口定义连同离线 provider 与 Planning 契约套件会超过 `AGENTS.md` §8 的 1000 行代码上限，因此拆成两个 PR：#29 只交付契约层（本批次）；#30 与 #31 合并为下一个 PR（见 Batch A3），由它一并交付离线替身与四域套件。被取代的控制计划决定见 `2026-09-20-mvp0-parallel-stacks.md` 的 Decision Log。
+**批次划分订正（2026-09-20）**：原方案把 #29 与 #30 合成一个 PR。实测五个域的接口定义连同离线 provider 与 Planning 契约套件会超过 `AGENTS.md` §8 的 1000 行代码上限，因此拆成两个 PR：#29 只交付契约层（本批次）；#30 与 #31 合并为下一个 PR，由它一并交付离线替身与四域套件。该合并随后在 Batch A3 被第二次订正（#30 与 #31 仍各自独立，见下）。被取代的控制计划决定见 `2026-09-20-mvp0-parallel-stacks.md` 的 Decision Log。
 
-### Batch A3 · 离线替身与四个域的套件（Closes #30 #31）
+### Batch A3 · Planning 套件与离线替身（Closes #30）
 
-**最小闭环**：Planning 契约套件连同通过它的离线 provider 一起存在；development / delivery / execution 三域也有套件与离线替身，Storage 的内存替身满足其契约；MVP-0 链路需要的全部构件都能在无凭据条件下构造。本批次合并了原方案的 #30 与 #31（见 Batch A2 的划分订正）。
+**最小闭环**：Planning 契约套件连同通过它的离线 Planning 替身一起存在；`packages/providers/fake` 建立并在 manifest、`tsconfig.json` 的 `paths`、边界矩阵、根 `devDependencies` 四处登记；Storage 的内存替身与套件同批交付，因为契约栈的下一步（core 组合）首先需要它，且它与 Planning 替身共享同一套故障注入与内存状态约定。
 
-**涉及文件**：`packages/providers/fake/{package.json,src/**}`、`tests/contract/suites/{planning,development,delivery,execution,storage}.js`、`tests/contract/{planning,development,delivery,execution,storage}-contract.test.js`、`package.json`（根，新增该包的 devDependency）、`pnpm-lock.yaml`、`tsconfig.json`、`tests/contract/package-boundaries.test.js`
+**涉及文件**：`packages/providers/fake/{package.json,src/**}`、`tests/contract/suites/{planning,storage}.js`、`tests/contract/{planning,storage}-contract.test.js`、`package.json`（根，新增该包的 devDependency）、`pnpm-lock.yaml`、`tsconfig.json`、`tests/contract/package-boundaries.test.js`
 
-- [ ] 离线 Planning provider：分页、内容三态、字段写、draft→issue 转换、故障开关
-- [ ] Planning 契约套件：列出与分页、内容三态、缺能力、权限被拒、离线、重复观察得到同一稳定键
+- [x] 离线 Planning provider：分页、内容三态、字段定义与迭代、字段写、draft→issue 转换、故障开关
+- [x] Planning 契约套件：分页遍历不重不漏、内容三态、缺能力、权限被拒、离线、重复观察得到同一稳定键
+- [x] Storage 内存替身：事务、工作区与绑定、身份、规划投影、执行上下文、关系、写尝试、修订号，并支持"换一个实例读同一份内容"以模拟重启
+- [x] 两个套件各至少一条判别性用例
+
+**验证**：
+
+```bash
+node --test tests/contract
+node_modules/.bin/tsc --noEmit
+node scripts/rule-checks.mjs size feat/capability-contracts
+```
+
+期望：全部通过；删掉 Planning 替身的可选能力闸门后，`not supported` 用例失败；让 Storage 替身的状态导出返回空快照后，`换一个实例读同一份内容` 用例失败。
+
+**回滚**：`git revert` 本批提交；A2 的契约层不受影响（本批只新增目录与测试文件，不动 `packages/capabilities`）。
+
+**批次划分订正（2026-09-20，第二次）**：上一次订正把 #30 与 #31 合成一个 PR。实测 Planning 套件 + Planning 替身 + Storage 替身已接近 1000 行代码上限，再并入 development / delivery / execution 三域必然超限，因此再拆一次：#30 为 Batch A3（本批次），#31 为 Batch A4。
+
+### Batch A4 · development / delivery / execution 三域套件与替身（Closes #31）
+
+**最小闭环**：development / delivery / execution 三域也有套件与离线替身，MVP-0 链路需要的全部构件都能在无凭据条件下构造。
+
+**涉及文件**：`packages/providers/fake/src/**`、`tests/contract/suites/{development,delivery,execution}.js`、`tests/contract/{development,delivery,execution}-contract.test.js`
+
 - [ ] development 替身：仓库身份、分支创建、工作树创建/移除、变更请求读写、原生谱系
 - [ ] delivery 替身：按提交查流水线与检查、可选部署能力、写操作返回 not supported 且不改状态
 - [ ] execution 替身：启动、查询、可选取消、失败映射到带阶段的错误
-- [ ] Storage 内存替身：事务、身份与实体、执行上下文、关系、写尝试、修订号，并支持"换一个实例读同一份内容"以模拟重启
-- [ ] 五个套件各至少一条判别性用例
+- [ ] 三个套件各至少一条判别性用例
 
 **验证**：
 
@@ -167,9 +189,9 @@ node --test tests/contract
 pnpm run boundaries
 ```
 
-期望：全部通过；从离线 provider 移除一个可选能力后，对应的 "not supported" 用例失败；把 delivery 替身的写操作改成静默成功，`not supported` 用例失败。
+期望：全部通过；把 delivery 替身的写操作改成静默成功，`not supported` 用例失败。
 
-**回滚**：`git revert` 本批提交；A2 的 Planning 套件仍自洽（A2 只含契约层，回滚 A3 不会碰它）。
+**回滚**：`git revert` 本批提交；A3 的 Planning 与 Storage 套件仍自洽。
 
 ## Validation and Acceptance
 
@@ -187,7 +209,8 @@ pnpm run boundaries
 
 - [ ] Batch A1 · 领域模型（#75）
 - [x] (2026-09-20) Batch A2 · 能力契约与结构化错误模型（#29）
-- [ ] Batch A3 · 离线替身与四个域的套件（#30 #31）
+- [x] (2026-09-20) Batch A3 · Planning 套件与离线替身（#30）
+- [ ] Batch A4 · development / delivery / execution 三域套件与替身（#31）
 
 ## Surprises & Discoveries
 
@@ -244,3 +267,4 @@ ProviderObservation / dedupe key 规则
 
 - 2026-09-20：首次创建。原因：控制计划把 MVP-0 切出四条栈，契约栈需要自己的设计取舍与批次验收记录。
 - 2026-09-20：订正批次划分：#29 独立成一个 PR（Batch A2），#30 与 #31 合并为下一个 PR（Batch A3）。原因：原方案单个 PR 含五域接口、离线替身与 Planning 契约套件，代码变更超过 `AGENTS.md` §8 的 1000 行上限；拆分后每批仍可独立验收。
+- 2026-09-20：第二次订正批次划分：#30 独立成 Batch A3（Planning 套件 + 离线替身包 + Storage 替身），#31 独立成 Batch A4（development / delivery / execution 三域套件与替身）。原因：实测 Batch A3 代码变更 975 行（`node scripts/rule-checks.mjs size feat/capability-contracts`），再并入三域必然超过 `AGENTS.md` §8 的 1000 行上限。
