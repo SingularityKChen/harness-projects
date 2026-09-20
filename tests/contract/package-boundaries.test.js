@@ -241,9 +241,13 @@ test('依赖：源码中的跨包 import 必须落在允许的边上', async () 
 test('依赖：源码 import 的兄弟包必须在本包 manifest 中声明', async () => {
   for (const dir of Object.keys(EXPECTED)) {
     const manifest = await readJson(path.join(repoRoot, dir, 'package.json'))
+    // devDependencies 也算声明：它同样让一个包在运行时解析到兄弟包，
+    // 漏掉它就是一个可用的越界通道（对抗验证实测：只查 dependencies 时，
+    // 把越界依赖写进 devDependencies 可以让整份检查保持全绿）。
     const declared = new Set([
       ...Object.keys(manifest.dependencies ?? {}),
       ...Object.keys(manifest.peerDependencies ?? {}),
+      ...Object.keys(manifest.devDependencies ?? {}),
     ])
     for (const file of await sourceFiles(path.join(repoRoot, dir, 'src'))) {
       const source = await readFile(file, 'utf8')
@@ -279,6 +283,7 @@ test('依赖：manifest 中声明的内部与外部依赖同样受约束', async
     const declared = {
       ...(manifest.dependencies ?? {}),
       ...(manifest.peerDependencies ?? {}),
+      ...(manifest.devDependencies ?? {}),
     }
     for (const dependency of Object.keys(declared)) {
       const target = resolveInternal(dependency)
