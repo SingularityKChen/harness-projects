@@ -1,10 +1,7 @@
 /**
- * Batch C4 端到端：交付谱系（issue #78 / ExecPlan D5、D6）。全部离线：无凭据、无网络，provider 由
- * 测试层装配（ExecPlan D1）。
- *
- * 用例名说明它保护哪条不变量：每一跳都是带显式 provenance 的关系且沿谱系传播（不变量 6）；确定性
- * 发现的关系先进候选、只有显式确认才升级；缺可选能力报 unavailable 而不是 error；只读交付方的写
- * 尝试返回 not supported 且不改任何状态。
+ * Batch C4 端到端：交付谱系（issue #78 / ExecPlan D5、D6）。全部离线：无凭据、无网络，provider 由测试层装配（ExecPlan D1）。用例名说明它保护哪条
+ * 不变量：每一跳都是带显式 provenance 的关系且沿谱系传播（不变量 6）；确定性发现的关系先进候选、只有显式确认才升级；未观察过的链路读回 0 跳且本地
+ * 不留骨架关系（事实/观察边界）；缺可选能力报 unavailable 而不是 error；只读交付方的写尝试返回 not supported 且不改任何状态。
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -15,6 +12,8 @@ import { createFakeProviders, exportFakeStorageState, refOf } from '@harness-pro
 
 const WORKSPACE = { id: newWorkspaceId(), name: 'MVP-0' }
 const REPOSITORY = 'repo-alpha'
+// 替身按仓库种下流水线运行；要构造"整条链从未被观察"必须换一个没有任何种子的仓库，否则 0 跳断言会被种子掩盖。
+const UNOBSERVED_REPOSITORY = 'repo-unobserved'
 const REQUEST = { repositoryId: REPOSITORY, actor: { kind: 'agent' } }
 const CHAIN_TYPES = ['tracks', 'has_worktree', 'derived_from', 'produced_by', 'runs_on']
 
@@ -33,8 +32,7 @@ async function startChain(providers, core, idempotencyKey) {
   assert.equal(started.confirmed, true, 'git 步骤拿到 provider ack 才算链路推进')
   const created = await providers.development.createChangeRequest({
     repository: refOf(providers.development.gate.bindingId, 'repository', REPOSITORY),
-    head: started.branchExternalId, base: 'main', title: '交付谱系占位', body: '占位正文',
-  })
+    head: started.branchExternalId, base: 'main', title: '交付谱系占位', body: '占位正文' })
   assert.equal(created.ok, true, '变更请求必须创建成功')
   return { workItemId, started, scope: { workItemId, repositoryId: REPOSITORY } }
 }
@@ -50,8 +48,7 @@ test('交付谱系：每一跳都是带显式 provenance 的关系，且按已�
   assert.ok(hops.every((hop) => hop.source === RelationSource.Lineage), '谱系跳必须标记为 lineage 来源')
   assert.ok(
     hops.every((hop) => hop.provenance !== undefined && hop.relationSource !== undefined && hop.relationState !== undefined),
-    '每一跳都要带显式 provenance（来源 + 确认态 + 建立方式）',
-  )
+    '每一跳都要带显式 provenance（来源 + 确认态 + 建立方式）')
   const contextHop = hops.find((hop) => hop.relationType === 'tracks')
   assert.equal(contextHop.to, chain.started.executionContextId, '上下文跳必须回指 startWork 返回的同一个 id，不重新识别')
   const worktreeHop = hops.find((hop) => hop.relationType === 'has_worktree')
@@ -64,6 +61,21 @@ test('交付谱系：每一跳都是带显式 provenance 的关系，且按已�
   assert.equal(await planningSnapshot(core), before, '读交付谱系不得改写规划状态')
 })
 
+test('负向：从未观察过的链路读回 0 跳，本地不得持有未观察事实（评审 P1 / ExecPlan D3）', async () => {
+  const providers = createFakeProviders()
+  // composeCore 只做首轮规划水合；此处不调用 bootstrapWorkspace，也不 startWork，链上没有任何真实事实。
+  const core = await compose(providers)
+  const workItemId = await workItemIdOf(core)
+  const scope = { workItemId, repositoryId: UNOBSERVED_REPOSITORY }
+  const projection = await core.queries.getDeliveryProjection(scope)
+  assert.equal(projection.error, undefined, '查询必须成功：0 跳来自"没有观察"，不是降级或错误')
+  assert.equal(projection.hops.length, 0, 'observed=false 的骨架跳不得进交付投影')
+  assert.equal((await core.queries.getDeliveryLineage(scope)).length, 0, '交付谱系必须同样是 0 跳')
+  assert.equal(
+    exportFakeStorageState(providers.storage).relations.length, 0,
+    '本地不得落任何 artifact_relation 行：推断出的拓扑不是存储事实')
+})
+
 test('候选关系：确定性发现先进候选，显式确认才升级，同一三元组不重复（issue #78）', async () => {
   const providers = createFakeProviders()
   const core = await compose(providers)
@@ -72,16 +84,13 @@ test('候选关系：确定性发现先进候选，显式确认才升级，同�
   const discovered = first.find((hop) => hop.relationType === 'derived_from')
   assert.equal(discovered.relationState, RelationState.Candidate, '确定性发现的边必须先是候选')
   const stored = () => providers.storage.listRelations(WORKSPACE.id)
-  const recorded = (await stored()).find(
-    (relation) => relation.from === discovered.from && relation.to === discovered.to && relation.type === discovered.relationType,
-  )
+  const recorded = (await stored()).find((relation) =>
+    relation.from === discovered.from && relation.to === discovered.to && relation.type === discovered.relationType)
   assert.equal(recorded.state, RelationState.Candidate, '候选边未确认前不得被读成已确认关系')
   const countBefore = (await stored()).length
   await core.queries.getDeliveryLineage(chain.scope)
   assert.equal((await stored()).length, countBefore, '重复读取不得产生第二个三元组')
-  const confirmed = await core.commands.confirmRelation({
-    from: discovered.from, to: discovered.to, type: discovered.relationType,
-  })
+  const confirmed = await core.commands.confirmRelation({ from: discovered.from, to: discovered.to, type: discovered.relationType })
   assert.equal(confirmed.relation.state, RelationState.Confirmed, '显式确认必须把候选升级为已确认')
   assert.equal(confirmed.created, false, '确认复用既有边，不新建关系')
   const reread = (await core.queries.getDeliveryLineage(chain.scope)).find((hop) => hop.relationType === 'derived_from')
