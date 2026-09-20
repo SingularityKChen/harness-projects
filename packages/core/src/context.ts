@@ -6,13 +6,15 @@ import {
   type AccessLevel, type CapabilityKey, type ExternalObjectRef, type ProviderRegistry, type Storage,
 } from '@harness-projects/capabilities'
 import {
-  StatusPolicy, newEntityId, newExternalIdentityId, newRelationId, newWorkspaceId,
+  StatusPolicy, WriteState, newEntityId, newExternalIdentityId, newRelationId, newWorkspaceId,
   type EntityId, type ExternalIdentityId, type RelationId, type WorkspaceId,
 } from '@harness-projects/domain'
 import { bootstrapWorkspace, type BootstrapResult } from './bootstrap.ts'
+import { rerunPipeline, type DeliveryWriteAttempt } from './delivery.ts'
 import { startWorkUnavailable, type StartWorkRequest, type StartWorkResult } from './execution-context.ts'
 import { createQueries, type CoreQueries } from './queries.ts'
 import { registerBindings, type CoreProviderTable } from './registry.ts'
+import { confirmRelation, type RecordedEdge, type RelationRef } from './relations.ts'
 import { startWork } from './start-work.ts'
 
 export interface IdFactory {
@@ -57,6 +59,10 @@ export interface CoreContext {
 export interface CoreCommands {
   bootstrapWorkspace(): Promise<BootstrapResult>
   startWork(request: StartWorkRequest): Promise<StartWorkResult>
+  /** 显式确认一条候选边：唯一把 candidate 变成 confirmed 的入口；边不存在时不造关系。 */
+  confirmRelation(ref: RelationRef): Promise<RecordedEdge | undefined>
+  /** 对只读交付方的写尝试：只回结构化 not supported，不改任何状态。 */
+  rerunPipeline(ref: ExternalObjectRef): Promise<DeliveryWriteAttempt>
 }
 
 /**
@@ -106,6 +112,8 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
     commands: namespace({
       bootstrapWorkspace: () => bootstrapWorkspace(context),
       startWork: (request: StartWorkRequest) => startWork(context, request),
+      confirmRelation: (ref: RelationRef) => confirmRelation(context, ref),
+      rerunPipeline: (ref: ExternalObjectRef) => rerunPipeline(context, ref),
     }),
   }
 }
@@ -117,12 +125,22 @@ function unavailableCore(reason: string): CoreApi {
     listPlanningItems: async () => [],
     getItemDetail: async () => undefined,
     getExecutionContext: async () => undefined,
+    getDeliveryProjection: async (scope) => ({
+      workItemId: typeof scope === 'string' ? scope : scope.workItemId,
+      repositoryId: typeof scope === 'string' ? undefined : scope.repositoryId,
+      hops: [], optional: [], degraded: true, error,
+    }),
+    getDeliveryLineage: async () => [],
   }
   const commands: CoreCommands = {
     bootstrapWorkspace: async () => ({
       ok: false, entities: 0, workItems: 0, changeRequests: 0, revision: 0, degraded: true, error,
     }),
     startWork: async () => startWorkUnavailable(error),
+    confirmRelation: async () => undefined,
+    rerunPipeline: async () => ({
+      supported: false, writeState: WriteState.Failed, saving: false, confirmed: false, error,
+    }),
   }
   return { queries: namespace(queries), commands: namespace(commands) }
 }
