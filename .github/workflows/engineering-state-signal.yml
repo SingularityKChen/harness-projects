@@ -1,0 +1,22 @@
+name: Engineering state signal
+
+# 评审事件来自 PR 上下文，故这里只发出无权限、无 secret 的 reconcile signal。
+# 真正写入 project 的 workflow_run 消费者来自默认分支，并重新查询当前 PR snapshot。
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions: {}
+
+jobs:
+  signal:
+    name: Accept trusted reviewer signal
+    if: >-
+      github.event.action == 'dismissed' ||
+      contains(fromJSON('["COLLABORATOR","MEMBER","OWNER"]'), github.event.review.author_association)
+    permissions: {}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Print accepted signal
+        run: echo 'Engineering state signal accepted by reviewer admission control'

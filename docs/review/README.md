@@ -114,5 +114,6 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 | 记录 | 范围 | 结论 |
 |---|---|---|
 | [2026-09-18-mvp-delivery-review](2026-09-18-mvp-delivery-review.md) | 9 个开放 PR（#3 #11 #12 #13 #19 #21 #33 #35 #37）的 MVP 交付评审 | 8 个合并、#37 因两条 P0 暂缓；风险矩阵、38 条行级意见、13 个跟踪 issue（#38–#50） |
+| [2026-09-21-pr37-mvp-review](2026-09-21-pr37-mvp-review.md) | PR37 最新 head 的最终复评与合并收尾 | P0–P2 无新增阻塞项；已 rebase、归档并 rebase merge |
 
 记录按 `PLANS.md` §3 的 ExecPlan 章节写——评审本身也是一次有批次、有验收、有决策的工作。
