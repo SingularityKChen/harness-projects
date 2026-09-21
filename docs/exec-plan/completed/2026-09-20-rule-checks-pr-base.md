@@ -1,6 +1,6 @@
 # PR 体量检查的基线解耦 ExecPlan
 
-> 状态：Active
+> 状态：Completed（2026-09-21 由 61d6833 归档到 `completed/`；2026-09-21 由 PR #100 就地订正）
 > 创建：2026-09-20
 > 范围：`.github/workflows/rule-checks.yml` 的 `pull_request` 触发器与 `scripts/rule-checks.mjs` 的基线报告；不改 `ci.yml`，不改 `AGENTS.md` §8 的预算数字
 > 上游输入：issue #96、`AGENTS.md` §8/§9、`docs/project-management/merge-queue.md` §6.1、`docs/development/repository-rules.md` §2/§4、`docs/development/ci.md`
@@ -76,7 +76,7 @@ $ echo $?
 
 **选定方案 A：解耦准入与基线**
 
-1. `.github/workflows/rule-checks.yml` 的 `on.pull_request` 去掉 `branches: [main]`，保留 `types: [opened, synchronize, reopened, edited]`。触发器不再约束 base，`github.base_ref` 恢复成"PR 自己声明的 base"，`${base}...HEAD` 恢复成"本 PR 的差异"。
+1. `.github/workflows/rule-checks.yml` 的 `on.pull_request` 去掉 `branches: [main]`，保留 `types: [opened, synchronize, reopened, edited]`。**订正（2026-09-21）**：本条原写"触发器不再约束 base，`github.base_ref` 恢复成 PR 自己声明的 base"，这个因果是错的。过滤器只是准入谓词，它**不会改写** `github.base_ref`；对 GitHub 原生 stack 的成员 PR，运行时 base 本来就是**栈的 base 分支**（`main`），去掉过滤器也改变不了它。实测见 run `35511506461`：PR #94 的 API `base.ref=feat/core-start-work`，而该 run 的 job 日志回显 `BASE_REF: main`。因此去掉过滤器只修好了"非 `main` 的普通 PR 完全不触发"那一半；基线来源问题由 `docs/exec-plan/active/2026-09-21-rule-checks-api-base.md`（issue #99）接手。
 2. `edited` 已经在 `types` 里（原本是为 `disclosure` 读 PR 描述而加）。它顺带成为**改 base 时重算**的机制：栈向上 retarget（子 PR 的 base 从栈内上一层改成 `main`）会触发一次重算，判定自愈，不需要额外机制。
 3. `size()` 与 `disclosure()` 在输出首行打印 `基线：<ref> @ <sha>`。
 4. `size()` 在 base 不是 `main` 时额外打印一行栈累计，措辞显式排除判定：`栈累计（相对 origin/main，仅记录，不计入判定）：…`。
@@ -87,7 +87,7 @@ $ echo $?
 |---|---|---|
 | B | 保留过滤器，脚本从本地 refs 推断"最近的祖先分支"当基线 | 把"声明的 base"换成"推断的 base"，违反 `AGENTS.md` §1.1 不变量 5（关键关联显式优先）；`pull_request` 事件下 HEAD 是 `refs/pull/N/merge` 合并提交，其父提交之一就是 head 分支自身，"最近祖先"会命中 head 分支，需要额外排除规则；且直接对栈内上一层开的 PR 仍然完全不触发，#83/#88 那类门禁缺失照旧 |
 | C | 保留过滤器，只加可观测性（打印 base/range/累计），判定仍按 `main` | "能跑的时候基线永远是 `main`"这一点没有改变，红叉照旧且永久；只是把误报解释得更清楚，不满足 I1/I2 |
-| D | 用 `github.event.pull_request.base.sha`（事件负载里的 base 提交）作为范围起点 | 栈上 `gh stack rebase` 会 force-push 父分支（`docs/project-management/merge-queue.md` §2.3/§2.4 记录的常规操作），事件时刻的 base sha 可能变得不可达，脚本会 exit 3——把常规操作变成门禁中断。而"当前 base 分支 tip 的三点差异"在三种情形下都仍然只算子分支的提交：base 前进、子分支尚未 rebase、父分支被改写 |
+| D | 用 `github.event.pull_request.base.sha`（事件负载里的 base 提交）作为范围起点 | 栈上 `gh stack rebase` 会 force-push 父分支（`docs/project-management/merge-queue.md` §2.3/§2.4 记录的常规操作），事件时刻的 base sha 可能变得不可达，脚本会 exit 3——把常规操作变成门禁中断。而"当前 base 分支 tip 的三点差异"在三种情形下都仍然只算子分支的提交：base 前进、子分支尚未 rebase、父分支被改写。**订正（2026-09-21，PR #100 评审 P1）**：最后这句把三点差异的性质说宽了。`git diff B...H` 只相对于**给定的两个对象**成立；base 被 force-push 到无关历史时共同祖先后退，base 自己的提交会被算进这个 PR（真实 git 回归用例：固定对象对 5 行 / 移动 tip 1205 行）。因此"固定到不可变对象"这个方向是对的，本计划的拒绝理由站不住——接手者 `2026-09-21-rule-checks-api-base.md` 的 Batch 6 已把判定输入改成 `(base_sha, head_sha)` |
 
 **被考虑后否决的小改动**
 
@@ -188,7 +188,7 @@ node scripts/rule-checks.mjs size origin/main
 | 6 | W1–W7 与 workflow 契约未破坏 | `node scripts/workflow-check.mjs` → `no findings（已检查 5 个文件）`、exit 0 | 通过 |
 | 7 | 门禁与配置变更的完整回归 | `tsc --noEmit` exit 0；`node --test tests/contract tests/integration tests/e2e` → pass 175 / fail 0 | 通过（`verify` 的两个组成命令逐条执行，见遗留 6） |
 | 8 | 体量与发布面合规 | `size origin/main` 两个桶都在预算内；`disclosure origin/main` 机械扫描 exit 0；五类目人工核对无命中 | 通过 |
-| 9 | 触发器语义在真实事件上得到证实 | 合并后栈内某个 PR 收到一次 push，`gh run list` 出现 base 为该 PR 声明 base 的新 run | **本次无法验证**（需要合并后的真实事件，见遗留 2） |
+| 9 | 触发器语义在真实事件上得到证实 | 合并后栈内某个 PR 收到一次 push，`gh run list` 出现 base 为该 PR 声明 base 的新 run | **已反证（2026-09-21）**：run `35511506461`（PR #94，head `8c660b06`）在过滤器已移除的 workflow 上运行，`github.base_ref` 仍是 `main`，体量 4796 行。I1 的"不得由触发器决定"成立，但"去掉过滤器就能让基线变成声明 base"不成立——改由 `2026-09-21-rule-checks-api-base.md` 从 PR API 取基线 |
 | 10 | 独立对抗验收（无实现上下文）未能证伪四条主张，且它提出的 P2 已补判别性测试 | 验收报告：verdict `not_falsified`；四条主张 A–D 全部 holds；六个必跑命令复现；五个指定注入全部有牙（2/2/1/1/3 条测试变红）；它额外构造的"三点差异→两点差异"注入当时 175 条全绿，现已由新增的真实 git 用例接住 | 通过 |
 
 ## Progress
@@ -205,6 +205,8 @@ node scripts/rule-checks.mjs size origin/main
 ## Surprises & Discoveries
 
 1. **同一个配置值承担了两个职责。** `on.pull_request.branches: [main]` 既是准入谓词，又通过 `github.base_ref` 决定度量基线。此前 `rule-checks.yml` 的注释把它当作纯准入（"即使 base_ref 被 `branches: [main]` 约束成只可能是 main，也不在 shell 里展开"）——那句话描述的就是这条耦合，只是当时把它读成了安全性质而不是缺陷。证据：10 个栈内 PR 的报告值 = 相对 `origin/main` 的三点差异。
+
+   **订正（2026-09-21）**：这条观察把耦合的方向说反了。过滤器**没有**改写 `github.base_ref`，它只是让取值不是 `main` 的 PR 不触发；栈成员的运行时 base 之所以是 `main`，是 GitHub stack 语义。当时的证据是欠定的——12 个栈内 PR 里没有反例，两种解释都拟合数据；后来 #82/#83（不在栈内）在过滤器移除后第一次被检查并量到了自己的父分支，才把两种解释区分开。见 issue #99 与 `2026-09-21-rule-checks-api-base.md`。
 
 2. **反向失效同样存在，而且此前没有被记录。** 栈内 PR 在 base 不是 `main` 时 workflow 完全不触发：PR #83 的 head `c55080ed5b`、PR #88 的 head `39285d938c` 在该 workflow 的 73 次运行里一次都没出现。也就是说 `PR size` 与 `Disclosure scan` 对这两个 head 都是空白——不是绿，是没有结论。
 
@@ -232,7 +234,7 @@ node scripts/rule-checks.mjs size origin/main
 | 全部批次由 **1 个 PR** 承载 | 改动集中在同一根因、同一组文件，拆开会让"advisory 误报修复"与"文档同步"互相等待 | 2026-09-20 / 用户决定 |
 | **暂不放开 `ci.yml` 的触发器** | 保持本次改动面在 advisory 的 `Rule checks` 内；栈内 PR 拿不到 `PR Fast Gate` 的缺口另立工作项 | 2026-09-20 / 用户决定 |
 | 采用方案 A（去掉分支过滤器），否决 B/C/D | 见 `Design / Spec` 的放弃理由：B 用推断替代声明并遗漏"完全不触发"那一半；C 不改变基线因而不满足 I1/I2；D 会把 `gh stack rebase` 之后的常规状态变成 exit 3 | 2026-09-20 / 本计划 |
-| 不把 `github.base_ref` 改写成 `github.event.pull_request.base.ref` | 两者在 `pull_request` 下取值相同，不改变行为；防复发由契约测试承担，不做纯外观改动 | 2026-09-20 / 本计划 |
+| 不把 `github.base_ref` 改写成 `github.event.pull_request.base.ref` | 两者在 `pull_request` 下取值相同，不改变行为；防复发由契约测试承担，不做纯外观改动 | 2026-09-20 / 本计划。**订正（2026-09-21）**：理由的前半句未经实测，"取值相同"对 GitHub 原生 stack 的成员 PR 不成立——运行时 base 是栈的 base 分支。结论也变了：基线不再从任何 Actions 表达式取，改由 PR API 解析（issue #99） |
 | 分支基于 `origin/main`，不基于 PR #80 | 修复必须能先于栈合并（`merge-queue.md` §6.1）；基于 #80 会把本修复的落地耦合成"#80 先合并"，而 #80 之上还有 11 个 PR 在等 | 2026-09-20 / 本计划 |
 | 只引用 `origin/main` 上已存在的文件 | `AGENTS.md` §3 要求 `docs/` 自包含；引用未合并的计划文件就是悬空链接 | 2026-09-20 / 本计划 |
 | 交付前跑一次**无实现上下文**的独立对抗验收，而不是自证 | 实现者自己写的验收表与实现同源，最容易被"桩忽略参数"这类盲区骗过；本次验收 agent 确实找到了三点差异零覆盖这个盲区（Surprises 8） | 2026-09-20 / 用户要求 + 本计划 |
@@ -282,4 +284,6 @@ node scripts/rule-checks.mjs size origin/main
 - 2026-09-20：修正引用来源。发现栈的控制计划由 PR #80 引入、尚未在 `main` 上，故改为只引用 `main` 已存在的 `AGENTS.md` §8 与 `merge-queue.md` §6.1；Batch 3 去掉对那份计划的修改，改列遗留项；补记"分支基于 `origin/main`"的决策与 `docs/README.md` 的冲突处理方式。
 - 2026-09-20：三个批次完成，回填 Progress、验收结果（1–8 通过、9 待合并后真实事件）、Surprises 6–7（`describeBaseline()` 换行缺陷、工作区缺 `node_modules` 造成的假红）与 Outcomes，新增遗留 6（`pnpm verify` 的沙箱限制与等价证据）。
 - 2026-09-20：登记交付载体 PR #98 与真实 CI 事件的报告证据（run `35499369649` 的 `size` / `disclosure` 两个 job 日志都打印了基线），并写明它不替代验收项 9。
+- 2026-09-21：**订正三点差异的性质**（PR #100 评审 P1 的连带影响）。Design 的放弃方案 D 与 Surprises 8 把"三点差异"说成对 base 前进/改写都稳健；正确表述是它只相对于给定的对象对成立，base 被改写到无关历史时会误计。判定输入因此在新计划里改成不可变对象对 `(base_sha, head_sha)`。
+- 2026-09-21：**就地订正归因错误**。run `35511506461` 证明：过滤器移除之后栈成员的 `github.base_ref` 仍是 `main`，因此 Design 第 1 条、不变量 I1 的说明、Surprises 1、Decision Log 的"取值相同"以及验收项 9 都按事实改写；本计划修好的只是"非 main 的普通 PR 完全不触发"那一半，基线来源改由 `2026-09-21-rule-checks-api-base.md`（issue #99）负责。本文件已由 61d6833 归档到 `completed/`（`docs/README.md` 的索引行也由 PR #100 移到 Completed 表）；订正落在归档后的新路径上。
 - 2026-09-20：加入验收项 10 与对抗验收的结果处理——新增两条测试钉住三点差异（其中一条是真实 git 的"base 前进"用例）、`normalizeBaseRef` 覆盖 `refs/remotes/<remote>/` 与首尾空白、`ci.md` 补上"`runs` API 的 base.ref/head.sha 是实时快照"这条复核陷阱；Surprises 8–10、Decision Log 两条与 Progress 同步更新。
