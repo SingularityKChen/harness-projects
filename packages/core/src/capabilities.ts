@@ -1,11 +1,11 @@
 /**
- * 核心能力门：有效访问级别与命令入口的拒绝检查（issue #76 / ExecPlan D1）。
  *
- * 有效访问级别 = capability ∩ permission ∩ policy，由 `registerBindings` 用 capabilities 层的
- * `effectiveCapabilities` 算出；本文件只消费结论：read 命令在 read_only 下仍可执行，write 命令必须
  * 被拒绝，缺能力一律是结构化不可用。
  */
-import { AccessLevel, type CapabilityKey, type ProviderRegistry } from '@harness-projects/capabilities'
+import {
+  AccessLevel, projectCodeForProviderError,
+  type CapabilityKey, type ProviderError, type ProviderRegistry, type ResolvedBinding,
+} from '@harness-projects/capabilities'
 import {
   ProjectErrorCode, projectError, type ProjectError, type ProviderBindingId,
 } from '@harness-projects/domain'
@@ -47,4 +47,27 @@ function denied(
   access: AccessLevel, bindingId: ProviderBindingId | undefined, error: ProjectError,
 ): CommandGate {
   return { allowed: false, access, degraded: false, bindingId, error }
+}
+
+/** 缺能力/缺绑定的统一结构化拒绝；调用方据此走降级而不是抛错。 */
+export function unsupportedCapability(key: CapabilityKey): ProjectError {
+  return projectError(ProjectErrorCode.NotSupported, `能力 ${key} 不可用`)
+}
+
+/** provider 结构化错误 → 调用方错误，保留错误码规定的恢复动作与 retryable 判定。 */
+export function toProjectError(error: ProviderError): ProjectError {
+  return projectError(projectCodeForProviderError(error.code), error.message)
+}
+
+/** 写命令的目标绑定：门拒绝或绑定缺失时 binding 为 undefined，error 一定可回答"为什么失败"。 */
+export interface WriteTarget {
+  readonly binding: ResolvedBinding | undefined
+  readonly error: ProjectError | undefined
+}
+
+export function resolveWriteTarget(registry: ProviderRegistry, key: CapabilityKey): WriteTarget {
+  const gate = gateCommand(registry, key, 'write')
+  if (!gate.allowed) return { binding: undefined, error: gate.error ?? unsupportedCapability(key) }
+  const binding = registry.bindings.find((item) => item.ref.bindingId === gate.bindingId)
+  return binding === undefined ? { binding: undefined, error: unsupportedCapability(key) } : { binding, error: undefined }
 }

@@ -1,10 +1,5 @@
 /**
- * Storage port：控制事实与投影的持久化边界。
  *
- * 上游只给了 `Storage` 这个名字，没有签名。**以下分组与命名由本批次冻结，不是上游给定的**：
- * 事务 / 工作区与绑定 / 身份 / 规划 / 工程 / 执行 / 关系 / 同步 / 写尝试 / 投影修订号。
- * 方法只读写本地权威控制事实，不做任何外部调用；外部事实必须先由 provider 观察、由 core 写入。
- * 身份记录故意不带 workspaceId（不变量 3）：同一外部对象在两个工作区只有一份身份。
  */
 import type {
   Entity,
@@ -44,6 +39,8 @@ export interface ExecutionContextRecord {
   readonly id: ExecutionContextId; readonly workspaceId: WorkspaceId; readonly workItemId: EntityId
   readonly repositoryId: EntityId; readonly status: ExecutionContextStatus
   readonly branchExternalId: string | undefined; readonly worktreeExternalId: string | undefined
+  /** 认领（Provisioning）开始的时间；终态为 undefined。在途与中断只能靠它区分，见 ExecPlan D3。 */
+  readonly provisioningStartedAt: string | undefined
 }
 
 export interface ExecutionRunRecord {
