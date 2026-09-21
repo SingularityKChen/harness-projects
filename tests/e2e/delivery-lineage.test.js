@@ -11,9 +11,8 @@ import { composeCore } from '@harness-projects/core'
 import { createFakeProviders, exportFakeStorageState, refOf } from '@harness-projects/provider-fake'
 
 const WORKSPACE = { id: newWorkspaceId(), name: 'MVP-0' }
+// 替身按仓库种下流水线运行：负向用例必须用这个有 CI 种子的仓库——若换空仓库，无条件读取同样读不到东西，用例就没有判别力。
 const REPOSITORY = 'repo-alpha'
-// 替身按仓库种下流水线运行；要构造"整条链从未被观察"必须换一个没有任何种子的仓库，否则 0 跳断言会被种子掩盖。
-const UNOBSERVED_REPOSITORY = 'repo-unobserved'
 const REQUEST = { repositoryId: REPOSITORY, actor: { kind: 'agent' } }
 const CHAIN_TYPES = ['tracks', 'has_worktree', 'derived_from', 'produced_by', 'runs_on']
 
@@ -61,19 +60,28 @@ test('交付谱系：每一跳都是带显式 provenance 的关系，且按已�
   assert.equal(await planningSnapshot(core), before, '读交付谱系不得改写规划状态')
 })
 
-test('负向：从未观察过的链路读回 0 跳，本地不得持有未观察事实（评审 P1 / ExecPlan D3）', async () => {
+test('负向：锚点未观察时不读 CI 事实，读回 0 跳且本地无 CI 关系（评审 P1 / ExecPlan D4）', async () => {
   const providers = createFakeProviders()
-  // composeCore 只做首轮规划水合；此处不调用 bootstrapWorkspace，也不 startWork，链上没有任何真实事实。
+  // composeCore 只做首轮规划水合；此处不调用 bootstrapWorkspace，也不 startWork，链上没有已观察到的提交/变更请求。
   const core = await compose(providers)
   const workItemId = await workItemIdOf(core)
-  const scope = { workItemId, repositoryId: UNOBSERVED_REPOSITORY }
+  const scope = { workItemId, repositoryId: REPOSITORY }
   const projection = await core.queries.getDeliveryProjection(scope)
   assert.equal(projection.error, undefined, '查询必须成功：0 跳来自"没有观察"，不是降级或错误')
-  assert.equal(projection.hops.length, 0, 'observed=false 的骨架跳不得进交付投影')
+  assert.equal(projection.hops.length, 0, 'head 未观察到时不得以 commit: undefined 读取整个仓库的流水线')
   assert.equal((await core.queries.getDeliveryLineage(scope)).length, 0, '交付谱系必须同样是 0 跳')
-  assert.equal(
-    exportFakeStorageState(providers.storage).relations.length, 0,
-    '本地不得落任何 artifact_relation 行：推断出的拓扑不是存储事实')
+  const relations = exportFakeStorageState(providers.storage).relations
+  assert.equal(relations.length, 0, '本地不得落任何 artifact_relation 行：推断出的拓扑不是存储事实')
+  assert.equal(relations.filter((relation) => relation.type === 'runs_on').length, 0, '存储里不得出现 CI 关系')
+})
+
+test('正向：真实链路走完后 CI 跳出现（无锚点不读不得削弱真实观察）', async () => {
+  const providers = createFakeProviders()
+  const core = await compose(providers)
+  const chain = await startChain(providers, core, 'lineage-positive-ci-1')
+  const ci = (await core.queries.getDeliveryLineage(chain.scope)).filter((hop) => hop.relationType === 'runs_on')
+  assert.ok(ci.length > 0, '提交被观察到之后必须读到该提交上的流水线运行')
+  assert.ok(ci.every((hop) => hop.observed === true && typeof hop.externalId === 'string'), 'CI 跳必须是真实观察到的运行')
 })
 
 test('候选关系：确定性发现先进候选，显式确认才升级，同一三元组不重复（issue #78）', async () => {
