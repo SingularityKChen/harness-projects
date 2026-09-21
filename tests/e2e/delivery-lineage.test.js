@@ -101,8 +101,9 @@ test('候选关系：确定性发现先进候选，显式确认才升级，同�
 test('缺可选能力：部署与环境报 unavailable 而不是 error（ExecPlan D5）', async () => {
   const providers = createFakeProviders({ delivery: { capabilities: { deployments: false } } })
   const core = await compose(providers)
-  const workItemId = await workItemIdOf(core)
-  const projection = await core.queries.getDeliveryProjection({ workItemId, repositoryId: REPOSITORY })
+  // 必须先走完真实链路：CI 跳只在锚点被观察到之后才存在（ExecPlan D4），未观察时它不得出现。
+  const chain = await startChain(providers, core, 'lineage-optional-1')
+  const projection = await core.queries.getDeliveryProjection(chain.scope)
   assert.equal(projection.error, undefined, '缺可选能力不是错误')
   const deployment = projection.optional.find((entry) => entry.key === 'delivery.deployment.read')
   assert.equal(deployment.available, false, '未声明的可选能力必须报 unavailable')

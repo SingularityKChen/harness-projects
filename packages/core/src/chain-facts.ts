@@ -2,6 +2,7 @@
  * 交付链的 provider 读取（issue #78 / ExecPlan D5）。只读：按提交读流水线、按变更请求读检查、按仓库读分支与变更请求。任何一步缺能力
  * 或 provider 失败都折成一条 `CapabilityGap`，该节点退回骨架（`observed: false`）——读侧降级是"最后已知值 + 显式不可用"，不是异常。
  * 骨架仍有稳定身份（`chainEntityId`），谱系在链路推进前后都查得到且不因重新读取换 id（不变量 6）；本文件不写外部状态，也不触碰规划投影。
+ * 事实只能挂在**已观察到的锚点**上：提交未观察到就不读流水线（绝不以 `commit: undefined` 读整个仓库），变更请求未观察到就不读检查。
  * Gate E1 落地前，同一外部 id 视为各 provider 下的同一对象，E1 通过后由身份表替换这条显式假设。
  */
 import { CapabilityKey, type ExternalObjectRef, type ProviderResult, type ResolvedBinding } from '@harness-projects/capabilities'
@@ -84,7 +85,7 @@ function refFor(binding: ResolvedBinding, kind: string, externalId: string): Ext
   return { bindingId: binding.ref.bindingId, objectKind: kind, externalId, url: undefined }
 }
 
-async function readPipelines(context: CoreContext, repositoryId: string, commit: string | undefined, gaps: CapabilityGap[]): Promise<readonly ChainNode[]> {
+async function readPipelines(context: CoreContext, repositoryId: string, commit: string, gaps: CapabilityGap[]): Promise<readonly ChainNode[]> {
   const read = await gated(context, CapabilityKey.DeliveryPipelineRead, (binding) =>
     binding.delivery?.listPipelineRuns({ repository: refFor(binding, 'repository', repositoryId), commit, cursor: undefined, limit: PAGE_LIMIT }))
   collect(gaps, read.gap)
@@ -159,7 +160,9 @@ export async function readChainFacts(context: CoreContext, scope: DeliveryScopeI
   const head = repository === undefined ? undefined : await readHeadCommit(context, repository, branch, gaps)
   const crFact = repository === undefined || head === undefined ? undefined : await readChangeRequest(context, repository, head, gaps)
   const changeRequest = changeRequestNode(context, repository, branch, crFact)
-  const observed = scope.repositoryId === undefined ? [] : await readPipelines(context, scope.repositoryId, head, gaps)
+  // 事实必须挂在已观察到的锚点上（ExecPlan D4）：head 未观察到就不读流水线，也不得以 commit: undefined 读取整个仓库的运行；
+  // 检查同理，没有已观察到的变更请求就不读。此时只保留"缺哪一跳"的骨架，骨架不进谱系。
+  const pipelines = head === undefined || scope.repositoryId === undefined ? [] : await readPipelines(context, scope.repositoryId, head, gaps)
   const checks = crFact === undefined ? [] : await readChecks(context, crFact.ref.externalId, gaps)
   const slot = scope.repositoryId ?? 'unbound'
   return {
@@ -168,7 +171,7 @@ export async function readChainFacts(context: CoreContext, scope: DeliveryScopeI
     worktree,
     commit: commitNode(context, scope, repository, branch, head),
     changeRequest,
-    pipelines: observed.length > 0 ? observed : [skeleton(context, EntityKind.PipelineRun, `${slot}|${branch}|pipeline`, branch, '流水线事实尚未观察到')],
+    pipelines: pipelines.length > 0 ? pipelines : [skeleton(context, EntityKind.PipelineRun, `${slot}|${branch}|pipeline`, branch, '流水线事实尚未观察到')],
     checks: checks.length > 0 ? checks : [skeleton(context, EntityKind.CheckRun, `${slot}|${branch}|check`, branch, '检查事实尚未观察到')],
     gaps,
   }
