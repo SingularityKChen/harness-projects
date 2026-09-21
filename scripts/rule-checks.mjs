@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 // 把 AGENTS.md 里两条已经成文、但今天只靠人自觉的规则变成可执行的检查。
 //
-//   node scripts/rule-checks.mjs disclosure <base-ref>   # §8.6 发布面机械扫描
-//   node scripts/rule-checks.mjs size <base-ref>         # §8.3 PR 体量上限
+//   node scripts/rule-checks.mjs disclosure <base-ref> [head-ref]   # §8.6 发布面机械扫描
+//   node scripts/rule-checks.mjs size <base-ref> [head-ref]         # §8.3 PR 体量上限
 //
-// <base-ref> 是判定基线，必须是**这个 PR 自己声明的 base**（CI 传的是
-// github.base_ref，见 .github/workflows/rule-checks.yml）。栈上 PR 的 base 是
-// 栈内上一层，传 origin/main 会把整个栈的累计读成这一个 PR 的体量：PR #95 的
-// 真实改动是 900 行，用 main 当基线得到 7837 行（issue #96）。两个子命令都把
-// 实际使用的基线打印在首行；栈累计另起一行，只记录、不判定、不设预算。
+// 判定是**两个提交的函数**：`git diff <base>...<head>`。`<head-ref>` 省略时取 HEAD
+// （手工运行的常见情形）；CI 传的是两个不可变对象——`resolve-base` job 从 PR API
+// 取的 `base.sha` 与事件负载里的 `head.sha`，因此判定与"运行期间分支是否前进"无关
+// （issue #99 评审 P1：三点差异只相对于给定的对象对成立，base 被 force-push 到无关
+// 历史时 merge-base 会移动，结果会纳入不属于本 PR 的提交）。
+//
+// `<base-ref>` 必须是**这个 PR 自己声明的 base**：栈上 PR 的 base 是栈内上一层，
+// 传 origin/main 会把整个栈的累计读成这一个 PR 的体量——PR #95 的真实改动是 900 行，
+// 用 main 当基线得到 7837 行（issue #96）。两个子命令都把判定对象打印在首行；
+// 栈累计另起一行，只记录、不判定、不设预算。
 //
 // disclosure 覆盖四个来源：对 base 的三点差异新增行、范围内每个提交单独引入
 // 的新增行（捕捉「先加后删」）、每个提交信息、以及经 PR_BODY 传入的 PR 描述。
@@ -398,31 +403,27 @@ export function tally(numstat) {
 export const DEFAULT_BASE = 'origin/main'
 
 /**
- * `origin/main`、`refs/remotes/origin/main`、`refs/heads/main` 与 `main` 指向同一
- * 条基线；比较前归一化。归一化只影响"要不要多打印一行栈累计"，不影响判定。
- * `origin/main~1` 这类**不是**同一个提交的写法故意不归一：它确实不是 main 的
- * tip，按非 main 处理才是对的。
+ * 把一个 ref 或 SHA 解析成**完整**提交。显示时截断成 12 位，比较时用全值——一个
+ * 来源服务两件事，免得"显示的是这个对象、比较的是另一个"。
+ *
+ * 默认实现只在这里定义一次：`describeBaseline` 与 `size()` 都取它。分别写两份
+ * 默认值会漏——`size()` 曾经因为 destructuring 里没有默认值而静默把"base 是不是
+ * main 的 tip"判成 false，栈累计行于是每次都打印。
  */
-export function normalizeBaseRef(ref) {
-  return String(ref)
-    .trim()
-    .replace(/^refs\/heads\//, '')
-    .replace(/^refs\/remotes\/[^/]+\//, '')
-    .replace(/^origin\//, '')
-}
+const resolveCommitRef = (ref) => git(['rev-parse', '--verify', `${ref}^{commit}`])
 
 /**
  * 让判定自描述：给出基线 ref 与它解析到的提交。
  *
  * 解析失败不抛错——这只是给读者的定位信息；「基线不存在」的 fail-closed 判定
- * 在 CLI 的 baseRefExists() 里（exit 3），报告层不重复一次，也不回退到任何
- * 默认基线：回退会把「量错了」变成永久的静默错误。
+ * 在 CLI 的 refExists() 里（exit 3），报告层不重复一次，也不回退到任何默认
+ * 基线：回退会把「量错了」变成永久的静默错误。
  */
 export function describeBaseline(base, deps = {}) {
-  const { resolveRef = (ref) => git(['rev-parse', '--verify', '--short=12', `${ref}^{commit}`]) } = deps
+  const { resolveRef = resolveCommitRef } = deps
   try {
     // git 的输出带结尾换行：不 trim 会把这一行拆成两行，读起来像两条信息。
-    return `${base} @ ${String(resolveRef(base)).trim()}`
+    return `${base} @ ${String(resolveRef(base)).trim().slice(0, 12)}`
   } catch {
     return `${base}（无法解析成提交）`
   }
@@ -437,10 +438,11 @@ const annotate = (level, message) => console.log(`::${level}::${message}`)
 
 /**
  * §8.6 发布面机械扫描：覆盖四个来源。
- * @param {string} base
- * @param {{readDiff?: Function, listCommits?: Function, readCommitDiff?: Function, readCommitMessage?: Function, resolveRef?: Function, prBody?: string}} deps
+ * @param {string} base 判定基线（PR 声明的 base，或它的不可变提交）
+ * @param {{readDiff?: Function, listCommits?: Function, readCommitDiff?: Function, readCommitMessage?: Function, resolveRef?: Function, head?: string, prBody?: string}} deps
  *   全部可注入，默认调用真实 git 与 `process.env.PR_BODY`——测试借此离线验证
  *   exit code 契约与「先加后删」「提交信息泄露」两类不经文件内容就能发生的场景。
+ *   `head` 默认 `'HEAD'`；CI 传事件 head 的完整 SHA，判定因此固定在不可变对象上。
  */
 export function disclosure(base, deps = {}) {
   const {
@@ -449,20 +451,21 @@ export function disclosure(base, deps = {}) {
     listCommits = (range) => git(['log', '--format=%H', range]).split('\n').filter(Boolean),
     readCommitDiff = (sha) => git(['diff', '-U0', `${sha}^!`, '--', ':(top)', ...SCAN_EXCLUDES]),
     readCommitMessage = (sha) => git(['log', '-1', '--format=%B', sha]),
-    resolveRef,
+    resolveRef = resolveCommitRef,
+    head = 'HEAD',
     prBody = process.env.PR_BODY ?? '',
   } = deps
 
-  // 扫描范围取决于基线：base 不是 main 时，这里的「新增行」与「每个提交」都
-  // 只是本 PR 相对栈内上一层的改动。打印出来，免得把它读成整个栈。
-  console.log(`基线：${describeBaseline(base, { resolveRef })}（扫描范围 ${base}...HEAD）`)
+  // 扫描范围取决于判定对象对：base 不是 main 时，这里的「新增行」与「每个提交」
+  // 都只是本 PR 相对栈内上一层的改动。打印出来，免得把它读成整个栈。
+  console.log(`判定对象：${describeBaseline(base, { resolveRef })} · head ${describeBaseline(head, { resolveRef })}`)
 
-  const treeHits = scanDiff(readDiff(`${base}...HEAD`))
+  const treeHits = scanDiff(readDiff(`${base}...${head}`))
 
   // 树对树的三点差异看不见「A 提交加、B 提交删」：净变化是零。因此额外逐个
   // 扫描范围内每个提交自己引入的新增行，命中时带上提交 SHA——这是先加后删
   // 情形下唯一能告诉作者「需要改写历史」而不是「再提交一次删除」的信息。
-  const commits = listCommits(`${base}..HEAD`)
+  const commits = listCommits(`${base}..${head}`)
   const commitDiffHits = commits.flatMap((sha) =>
     scanDiff(readCommitDiff(sha)).map((hit) => ({ ...hit, commit: sha })),
   )
@@ -500,25 +503,31 @@ export function disclosure(base, deps = {}) {
 /**
  * §8.3 PR 体量上限。
  *
- * 判定范围是 `${base}...HEAD`：PR 相对它声明的 base 的三点差异。base 由调用方
- * 传入（CI 传 `github.base_ref`），不由本函数或触发器的分支过滤器决定——两者
- * 一旦混同，栈上 PR 就会被量成整个栈的累计（issue #96）。
+ * 判定是**两个提交的函数**：`${base}...${head}`（`head` 省略时取 HEAD）。base 由
+ * 调用方传入（CI 传 `resolve-base` 解析出的 `base_sha` 与事件 `head_sha`），不由
+ * 本函数、触发器过滤器或任何会移动的 ref 决定——一旦混同，栈上 PR 就会被量成整个
+ * 栈的累计（issue #96）。
  *
  * @param {string} base
- * @param {{readNumstat?: Function, resolveRef?: Function, mainRef?: string}} deps
- *   `readNumstat` 会被用于两个范围：判定范围 `${base}...HEAD`，以及 base 不是
- *   `mainRef` 时的栈累计范围 `${mainRef}...HEAD`。默认实现读真实 git。
+ * @param {{readNumstat?: Function, resolveRef?: Function, mainRef?: string, head?: string}} deps
+ *   `readNumstat` 服务两个范围：判定范围 `${base}...${head}`，以及 base 不是 main 的
+ *   tip 时的栈累计范围 `${mainRef}...${head}`；`resolveRef` 用来判断"base 是不是
+ *   main 的 tip"——比较**解析后的提交**而不是 ref 名字，否则 CI 传进来的 40 位 SHA
+ *   会让这一行每次都打印（评审 P3-1）。默认实现读真实 git。
  */
 export function size(base, deps = {}) {
   const {
     readNumstat = (range) => git(['diff', '--numstat', range]),
-    resolveRef,
+    // 完整提交：用来判断"base 是不是就是 main 的 tip"。比字符串归一化可靠——
+    // CI 传进来的是 40 位 SHA，任何按 ref 名字比较的写法都会漏掉它（issue #99 评审 P3）。
+    resolveRef = resolveCommitRef,
     mainRef = DEFAULT_BASE,
+    head = 'HEAD',
   } = deps
-  const { totals, files } = tally(readNumstat(`${base}...HEAD`))
+  const { totals, files } = tally(readNumstat(`${base}...${head}`))
   let failed = false
 
-  console.log(`基线：${describeBaseline(base, { resolveRef })}（判定范围 ${base}...HEAD）`)
+  console.log(`判定对象：${describeBaseline(base, { resolveRef })} · head ${describeBaseline(head, { resolveRef })}`)
 
   for (const bucket of ['code', 'docs']) {
     const budget = BUDGETS[bucket]
@@ -535,9 +544,19 @@ export function size(base, deps = {}) {
   // 它只记录、不判定——AGENTS.md §8 的预算是单个 PR 的闭环规模，栈累计是另一
   // 个量，因此这里不设阈值、不影响 exit code（ExecPlan 2026-09-20 的 Decision
   // Log：栈累计不设预算）。算不出来也只降级成一行说明。
-  if (normalizeBaseRef(base) !== normalizeBaseRef(mainRef)) {
+  // 只在 base 确实不是 main 的 tip 时才打印：两者是同一个提交时，累计值与上面
+  // 的判定值逐字相同，那一行只会是噪声。比较用**解析后的提交**而不是 ref 名字，
+  // 因为 CI 传的是 SHA（按名字比较会让这一行在每次运行都出现）。
+  let baseIsMainTip = false
+  try {
+    baseIsMainTip = resolveRef(base) === resolveRef(mainRef)
+  } catch {
+    baseIsMainTip = false // 解析不出来时按"不是 main"处理：多打一行记录，不影响判定
+  }
+
+  if (!baseIsMainTip) {
     try {
-      const cumulative = tally(readNumstat(`${mainRef}...HEAD`))
+      const cumulative = tally(readNumstat(`${mainRef}...${head}`))
       console.log(
         `栈累计（相对 ${mainRef}，仅记录，不计入判定）：代码 ${cumulative.totals.code} 行、文档 ${cumulative.totals.docs} 行`,
       )
@@ -564,10 +583,10 @@ export function size(base, deps = {}) {
 
 const commands = { disclosure, size }
 
-/** base ref 在本地是否能解析成一个提交——区分「环境/用法错误」与「真实违规」。 */
-function baseRefExists(base) {
+/** 一个 ref（或提交 SHA）在本地是否能解析成提交——区分「环境/用法错误」与「真实违规」。 */
+function refExists(ref) {
   try {
-    execFileSync('git', ['rev-parse', '--verify', '--quiet', `${base}^{commit}`], { stdio: 'ignore' })
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { stdio: 'ignore' })
     return true
   } catch {
     return false
@@ -578,19 +597,22 @@ function baseRefExists(base) {
 // 不加这道判断，import 会立刻触发 git 调用并 process.exit。
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   // 默认基线只在「当前分支的 PR 面向 main」时正确。在栈上省略 base-ref 会把
-  // 整个栈的累计读成这个 PR 的体量，所以两个子命令都会把实际用的基线打印
-  // 出来；DEFAULT_BASE 的说明见上。
-  const [command, base = DEFAULT_BASE] = process.argv.slice(2)
+  // 整个栈的累计读成这个 PR 的体量，所以两个子命令都会把判定对象打印出来；
+  // DEFAULT_BASE 的说明见上。head 省略时取 HEAD：手工运行的常见情形。
+  const [command, base = DEFAULT_BASE, head = 'HEAD'] = process.argv.slice(2)
   if (!Object.hasOwn(commands, command)) {
-    console.error(`用法：node scripts/rule-checks.mjs <${Object.keys(commands).join('|')}> [base-ref]`)
+    console.error(`用法：node scripts/rule-checks.mjs <${Object.keys(commands).join('|')}> [base-ref] [head-ref]`)
     process.exit(2)
   }
-  if (!baseRefExists(base)) {
-    console.error(`内部错误：base ref "${base}" 无法解析成提交——是否忘记 fetch，或分支名拼错？`)
-    process.exit(3)
+  // 两个对象都必须可解析：判定是它们的函数，缺一个就没有可判定的范围。
+  for (const [label, ref] of [['base', base], ['head', head]]) {
+    if (!refExists(ref)) {
+      console.error(`内部错误：${label} "${ref}" 无法解析成提交——是否忘记 fetch，或分支名/SHA 拼错？`)
+      process.exit(3)
+    }
   }
   try {
-    process.exit(commands[command](base))
+    process.exit(commands[command](base, { head }))
   } catch (error) {
     console.error(`内部错误：${error.message}`)
     process.exit(3)
