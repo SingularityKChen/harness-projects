@@ -1,8 +1,5 @@
 /**
- * @harness-projects/core —— 组合根：注入的 storage、各域 provider 解析表、clock 与 id 工厂。
  *
- * Responsibility: 工作空间生命周期、Provider 组合、状态策略、关系图与投影；不依赖任何具体 Provider。
- * Allowed imports: @harness-projects/domain、@harness-projects/capabilities
  */
 import {
   ProjectErrorCode, projectError, providerRegistry,
@@ -13,8 +10,10 @@ import {
   type EntityId, type ExternalIdentityId, type RelationId, type WorkspaceId,
 } from '@harness-projects/domain'
 import { bootstrapWorkspace, type BootstrapResult } from './bootstrap.ts'
+import { startWorkUnavailable, type StartWorkRequest, type StartWorkResult } from './execution-context.ts'
 import { createQueries, type CoreQueries } from './queries.ts'
 import { registerBindings, type CoreProviderTable } from './registry.ts'
+import { startWork } from './start-work.ts'
 
 export interface IdFactory {
   readonly entityId: () => EntityId
@@ -57,11 +56,10 @@ export interface CoreContext {
 
 export interface CoreCommands {
   bootstrapWorkspace(): Promise<BootstrapResult>
+  startWork(request: StartWorkRequest): Promise<StartWorkResult>
 }
 
 /**
- * 进度轨道 `tests/mvp0/chain.test.js` 的 `needMethod` 对路径每段都要求 `typeof === 'function'`，因此
- * `queries` / `commands` 既是命名空间、本身又必须可调用；见本批次 ExecPlan 的 Surprises。
  */
 export type CoreNamespace<T> = T & (() => T)
 
@@ -105,7 +103,10 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
   }
   return {
     queries: namespace(createQueries(context)),
-    commands: namespace({ bootstrapWorkspace: () => bootstrapWorkspace(context) }),
+    commands: namespace({
+      bootstrapWorkspace: () => bootstrapWorkspace(context),
+      startWork: (request: StartWorkRequest) => startWork(context, request),
+    }),
   }
 }
 
@@ -115,11 +116,13 @@ function unavailableCore(reason: string): CoreApi {
     listProviderBindings: async () => [],
     listPlanningItems: async () => [],
     getItemDetail: async () => undefined,
+    getExecutionContext: async () => undefined,
   }
   const commands: CoreCommands = {
     bootstrapWorkspace: async () => ({
       ok: false, entities: 0, workItems: 0, changeRequests: 0, revision: 0, degraded: true, error,
     }),
+    startWork: async () => startWorkUnavailable(error),
   }
   return { queries: namespace(queries), commands: namespace(commands) }
 }

@@ -1,7 +1,4 @@
 /**
- * 查询 API：绑定列表、规划条目列表与详情（issue #76 / ExecPlan D5）。只读本地权威快照与缓存，不隐式
- * 触发外部写入。provider 最近一次同步失败（游标 degraded / failed）或规划读取能力不可用时，返回的是带
- * `degraded` 标记的最后已知投影，而不是抛错。
  */
 import {
   CapabilityKey,
@@ -13,6 +10,7 @@ import { IdentityRole, type EntityId, type ExternalIdentity } from '@harness-pro
 import { gateCommand } from './capabilities.ts'
 import { PLANNING_SYNC_SCOPE } from './bootstrap.ts'
 import type { CoreContext } from './context.ts'
+import { readExecutionContext, type ExecutionContextQuery, type ExecutionContextView } from './execution-context.ts'
 import {
   toPlanningItemView,
   type PlanningItemDetail,
@@ -24,6 +22,7 @@ export interface CoreQueries {
   listProviderBindings(): Promise<readonly ProviderBindingRecord[]>
   listPlanningItems(): Promise<readonly PlanningItemView[]>
   getItemDetail(entityId: EntityId): Promise<PlanningItemDetail | undefined>
+  getExecutionContext(query: ExecutionContextQuery): Promise<ExecutionContextView | undefined>
 }
 
 export function createQueries(context: CoreContext): CoreQueries {
@@ -50,6 +49,8 @@ export function createQueries(context: CoreContext): CoreQueries {
       const sync = await syncSummary(context)
       return { ...toPlanningItemView(projection, primary, sync), identities }
     },
+
+    getExecutionContext: (query) => readExecutionContext(context, query),
   }
 }
 
