@@ -32,6 +32,8 @@ export interface BootstrapResult {
   readonly error: ProjectError | undefined
 }
 
+interface SyncedItems { counts: SyncCounts; projections: readonly WorkspaceProjection[] }
+
 interface SyncCounts {
   entities: number
   workItems: number
@@ -106,13 +108,14 @@ async function commitSync(
 ): Promise<BootstrapResult> {
   const committed = await context.storage.transaction(async (tx) => {
     const revision = await tx.advanceRevision(context.workspaceId)
-    const counts = await upsertItems(tx, context, items, revision)
+    const synced = await upsertItems(tx, context, items, revision)
     await recordObservations(tx, observations)
+    await tx.replacePlanningProjections({ workspaceId: context.workspaceId, bindingId }, synced.projections)
     await tx.putSyncCursor({
       bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined,
       state: SyncState.Healthy, lastErrorCode: undefined,
     })
-    return { revision, counts }
+    return { revision, counts: synced.counts }
   })
   return {
     ok: true, entities: committed.counts.entities, workItems: committed.counts.workItems,
@@ -120,13 +123,13 @@ async function commitSync(
     degraded: false, error: undefined,
   }
 }
-
 /** 一个条目一个成员：先解析稳定内部实体，再把权威字段与三态内容写成工作区投影。 */
 async function upsertItems(
   tx: StorageTransaction, context: CoreContext,
   items: readonly ProviderPlanningItem[], revision: number,
-): Promise<SyncCounts> {
+): Promise<SyncedItems> {
   const counts: SyncCounts = { entities: 0, workItems: 0, changeRequests: 0 }
+  const projections: WorkspaceProjection[] = []
   for (const item of items) {
     const external = {
       bindingId: item.ref.bindingId,
@@ -135,12 +138,14 @@ async function upsertItems(
     }
     const kind = entityKindFor(item.content.kind, external.externalKind)
     const entityId = await ensureEntity(tx, external, kind, context.ids)
-    await tx.putPlanningProjection(context.workspaceId, toProjection(context.workspaceId, entityId, item, revision))
+    const projection = toProjection(context.workspaceId, entityId, item, revision)
+    await tx.putPlanningProjection(context.workspaceId, projection)
+    projections.push(projection)
     counts.entities += 1
     if (kind === EntityKind.ChangeRequest) counts.changeRequests += 1
     else counts.workItems += 1
   }
-  return counts
+  return { counts, projections }
 }
 
 function toProjection(
