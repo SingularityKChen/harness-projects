@@ -30,6 +30,7 @@
 | [2026-09-20-mvp0-slice](exec-plan/completed/2026-09-20-mvp0-slice.md) | 切片栈（C）：core 引导、Start Work、交付谱系、controller/client 与进度断言变绿 | Completed |
 | [2026-09-20-vertical-path-and-gates](exec-plan/completed/2026-09-20-vertical-path-and-gates.md) | 文档栈（D）：把纵向链路与 R1 门禁逐条重述进仓库 | Completed |
 | [2026-09-21-review-session-reliability](exec-plan/completed/2026-09-21-review-session-reliability.md) | 评审会话可靠性：事件负载只从 `GITHUB_EVENT_PATH` 读、并发按 head 提交去重，两条性质由契约测试固定 | Completed |
+| [2026-09-21-engineering-state-trust-boundary](exec-plan/completed/2026-09-21-engineering-state-trust-boundary.md) | PR37 工程状态信任边界：删除可伪造 artifact，signal 判定与特权 reconcile fail closed | Completed |
 | [2026-09-18-review-feedback-convergence](exec-plan/active/2026-09-18-review-feedback-convergence.md) | 评审反馈根因收敛：#12/#19/#21/#35 的 workflow 不变量、自托管威胁模型与 area 词表单源化 | Active |
 | [2026-09-18-delivery-planning-and-board](exec-plan/active/2026-09-18-delivery-planning-and-board.md) | 交付规划与工作看板重整：重述原始交付 MVP、建立里程碑与迭代、拆分过大工作项、收敛看板自动化 | Batch 1–9 已完成；剩余人工项为两个 view 的分组设置（无法经 API 回读） |
 | [2026-09-20-rule-checks-pr-base](exec-plan/completed/2026-09-20-rule-checks-pr-base.md) | PR 体量检查的基线解耦：把"哪些 PR 进入门禁"与"用哪条基线度量"分开，栈上 PR 按自己声明的 base 判定 | Completed |

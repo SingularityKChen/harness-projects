@@ -1,0 +1,71 @@
+name: Engineering state
+
+# 事件只是 reconcile signal。这个特权 workflow 始终来自默认分支，checkout 也显式
+# 指向默认分支；脚本重新查询 PR 当前 snapshot/reviewDecision 后才投影 Engineering。
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, converted_to_draft, synchronize, closed]
+  workflow_run:
+    workflows: [Engineering state signal]
+    types: [completed]
+
+concurrency:
+  # 触发 run 的关联与 jobs 结论经默认分支脚本验证后才可用；全局串行避免不同来源的
+  # signal 在 query/write 之间交错，从而让较早 snapshot 覆盖较新结果。
+  group: engineering-state-reconcile
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  sync:
+    name: Reconcile engineering state
+    if: >-
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'pull_request_review' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Classify the triggering signal
+        id: signal
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PULL_REQUESTS_JSON: ${{ toJSON(github.event.workflow_run.pull_requests) }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request_target" ]; then
+            case "$TARGET_PR_NUMBER" in
+              ''|*[!0-9]*|0) echo "invalid pull request number" >&2; exit 1 ;;
+            esac
+            printf 'decision=reconcile\nnumber=%s\n' "$TARGET_PR_NUMBER" >> "$GITHUB_OUTPUT"
+          else
+            node scripts/engineering-state-signal.mjs
+          fi
+
+      - name: Reconcile Engineering from current PR snapshot
+        if: steps.signal.outputs.decision == 'reconcile'
+        env:
+          PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          ENGINEERING_FIELD_ID: ${{ vars.PROJECTS_ENGINEERING_FIELD_ID }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RECONCILE_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          PR_NUMBER: ${{ steps.signal.outputs.number }}
+        run: node scripts/sync-engineering-state.mjs "$PR_NUMBER"
