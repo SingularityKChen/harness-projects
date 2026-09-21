@@ -15,10 +15,15 @@ import { FaultKind, createFakeProviders } from '@harness-projects/provider-fake'
 
 async function compose() {
   const providers = createFakeProviders()
+  const workspaceId = newWorkspaceId()
   const core = await composeCore({
-    workspace: { id: newWorkspaceId(), name: 'MVP-0', statusPolicy: StatusPolicy.HostAuthoritative }, providers,
+    workspace: { id: workspaceId, name: 'MVP-0', statusPolicy: StatusPolicy.HostAuthoritative }, providers,
   })
-  return { providers, core, controller: createController(core, { authority: StatusPolicyMode.HarnessManaged }) }
+  const workspaceRevision = () => providers.storage.currentRevision(workspaceId)
+  return {
+    providers, core,
+    controller: createController(core, { authority: StatusPolicyMode.HarnessManaged, workspaceRevision }),
+  }
 }
 
 const openWorkItem = (snapshot) =>
@@ -58,6 +63,27 @@ test('client：基线 N → 按 N 订阅 → 按序应用 delta，实体身份�
   assert.equal(store.get(target.entityId), entry, '更新就地写回同一条目，引用不漂移')
   assert.equal(entry.entity.planningStatus, 'blocked')
   assert.equal(store.isCurrent(target.entityId), true)
+})
+
+test('client：删除最高实体修订后，工作区修订仍单调且订阅识别变化（ExecPlan D5）', async () => {
+  const { providers, controller } = await compose()
+  const first = await controller.baseline()
+  const target = openWorkItem(first)
+  await writeStatus(controller, target, 'blocked', 'revision-delete-1')
+  const beforeDelete = await controller.baseline()
+  assert.ok(beforeDelete.revision > first.revision)
+  assert.equal(beforeDelete.entities.find((entity) => entity.entityId === target.entityId).source.revision, beforeDelete.revision)
+
+  providers.storage.data.projections = providers.storage.data.projections.filter((projection) => projection.entityId !== target.entityId)
+  const deletedRevision = await providers.storage.advanceRevision(providers.storage.data.workspaces[0].id)
+  const watch = controller.watch({ afterRevision: beforeDelete.revision, seed: beforeDelete })
+  const event = await watch.poll()
+
+  assert.equal(deletedRevision, beforeDelete.revision + 1)
+  assert.equal(event.kind, 'delta')
+  assert.equal(event.delta.revision, deletedRevision, '删除后仍使用工作区修订号')
+  assert.deepEqual(event.delta.removed, [target.entityId], '订阅方必须识别实体消失')
+  assert.ok(event.delta.revision >= beforeDelete.revision, '工作区修订号不得倒退')
 })
 
 test('client：错过增量时检测缺口并重拉基线，缺口期间旧值不是当前值（issue #79）', async () => {

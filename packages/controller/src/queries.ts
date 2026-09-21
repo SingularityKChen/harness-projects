@@ -17,10 +17,14 @@ export interface ControllerQueries {
   getDeliveryLineage(scope: DeliveryScope): Promise<readonly DeliveryLineageHop[]>
 }
 
-export function createControllerQueries(core: CoreApi, authority: WireAuthority): ControllerQueries {
+export function createControllerQueries(
+  core: CoreApi, authority: WireAuthority, workspaceRevision?: () => Promise<number>,
+): ControllerQueries {
   return {
     async snapshot(): Promise<WireSnapshot> {
-      return toWireSnapshot(await core.queries.listPlanningItems(), authority)
+      const views = await core.queries.listPlanningItems()
+      const revision = workspaceRevision === undefined ? undefined : await workspaceRevision()
+      return toWireSnapshot(views, authority, revision)
     },
     async getEntity(entityId: string): Promise<WireEntity | undefined> {
       const views = await core.queries.listPlanningItems()
