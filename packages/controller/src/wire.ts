@@ -104,16 +104,18 @@ export function toWireEntity(view: PlanningItemView, authority: WireAuthority): 
   }
 }
 
-/** 工作区修订号取投影里的最大修订：引导后全部相同，部分更新后只有被写的那条前进。 */
+/** 兼容未接入持久化游标的调用方：只用于旧式 wire 转换，不是工作区修订号的事实源。 */
 export function revisionOf(entities: readonly WireEntity[]): number {
   return entities.reduce((max, entity) => Math.max(max, entity.source.revision), 0)
 }
 
-export function toWireSnapshot(views: readonly PlanningItemView[], authority: WireAuthority): WireSnapshot {
+export function toWireSnapshot(
+  views: readonly PlanningItemView[], authority: WireAuthority, workspaceRevision?: number,
+): WireSnapshot {
   const entities = views
     .map((view) => toWireEntity(view, authority))
     .sort((left, right) => (left.entityId < right.entityId ? -1 : 1))
-  const revision = revisionOf(entities)
+  const revision = workspaceRevision ?? revisionOf(entities)
   const degraded = entities.find((entity) => entity.source.freshness === WireFreshness.Degraded)
   return {
     revision,

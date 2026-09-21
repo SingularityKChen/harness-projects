@@ -19,6 +19,8 @@ export * from './watch.ts'
 export interface ControllerOptions {
   /** 工作区的状态策略；wire 层的权威归属由它决定（source_managed / harness_managed / manual）。 */
   readonly authority?: StatusPolicyMode
+  /** 持久化的工作区级单调修订号；实体修订仅用于实体元数据。 */
+  readonly workspaceRevision?: () => Promise<number>
 }
 
 export interface Controller {
@@ -32,7 +34,7 @@ export interface Controller {
 
 export function createController(core: CoreApi, options: ControllerOptions = {}): Controller {
   const authority = authorityFor(options.authority ?? StatusPolicyMode.SourceManaged)
-  const queries = createControllerQueries(core, authority)
+  const queries = createControllerQueries(core, authority, options.workspaceRevision)
   return {
     authority,
     queries,
