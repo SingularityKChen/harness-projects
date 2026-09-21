@@ -1,7 +1,4 @@
-/** 内存 Storage 替身的契约套件装配，外加判别性用例。
- * `restart` 用导出/导入内部状态模拟重启——删掉导出实现后，套件里"换一个实例读同一份内容"必然失败。
- * 额外用例保护事务隔离：未提交的写入在事务外读不到，否则回滚就只是假象；重叠事务必须串行，
- * 否则后提交者会用旧快照覆盖先提交者已确认的写入。 */
+/** 内存 Storage 替身的契约套件装配，外加判别性用例。`restart` 用导出/导入内部状态模拟重启——删掉导出实现后，套件里"换一个实例读同一份内容"必然失败。额外用例保护事务隔离：未提交的写入在事务外读不到，否则回滚就只是假象；重叠事务必须串行，否则后提交者会用旧快照覆盖先提交者已确认的写入。 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createFakeStorage, exportFakeStorageState } from '@harness-projects/provider-fake'
@@ -28,6 +25,23 @@ test('内存 Storage 替身：事务未提交前外部读不到写入，提交�
 
 // 确定性重叠：T1 在事务内挂起（此时尚未提交），T2 随即开始，然后才放行 T1。
 // 修复前两者各自克隆同一份空快照，后提交者整体替换，先提交者的写入必然消失。
+test('内存 Storage 替身：在途事务提交后保留直接写入', { timeout: 5000 }, async () => {
+  const storage = createFakeStorage()
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const transaction = storage.transaction(async (tx) => {
+    await tx.putWorkspace(workspace('ws-t1', 'T1'))
+    await gate
+  })
+  await new Promise((resolve) => setImmediate(resolve))
+  const direct = storage.putWorkspace(workspace('ws-direct', '直接写入'))
+  release()
+  await Promise.all([transaction, direct])
+
+  assert.equal((await storage.getWorkspace('ws-t1'))?.name, 'T1')
+  assert.equal((await storage.getWorkspace('ws-direct'))?.name, '直接写入')
+})
+
 test('内存 Storage 替身：重叠事务串行提交，已确认的写入不被后来者覆盖', { timeout: 5000 }, async () => {
   const storage = createFakeStorage()
   let markSuspended
