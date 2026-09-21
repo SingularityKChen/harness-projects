@@ -86,6 +86,31 @@ export class MemoryStorage implements cap.Storage {
   async putPlanningProjection(workspaceId: domain.WorkspaceId, projection: domain.WorkspaceProjection): Promise<void> {
     return this.#mutate(() => upsert(this.data.projections, projection, (p) => p.workspaceId === workspaceId && p.entityId === projection.entityId))
   }
+
+  /**
+   * 收敛语义：把本 scope 的规划投影集合变成 items。写入与移除在同一次队列变更内完成，
+   * 因此不会出现中间态；未出现在 items 中的投影及其内容实体会被移除，作用域外的投影不受影响。
+   * 不调用 putPlanningProjection：那会排进第二次变更，既破坏原子性，也会在队列内自等。
+   */
+  async replacePlanningProjections(scope: {
+    readonly workspaceId: domain.WorkspaceId; readonly bindingId: domain.ProviderBindingId
+  }, items: readonly domain.WorkspaceProjection[]): Promise<void> {
+    return this.#mutate(() => {
+      const incoming = new Set(items.map((item) => item.entityId))
+      const scoped = new Set(this.data.identities
+        .filter((identity) => identity.bindingId === scope.bindingId)
+        .map((identity) => identity.entityId))
+      const stale = new Set(this.data.projections
+        .filter((projection) => projection.workspaceId === scope.workspaceId && scoped.has(projection.entityId) && !incoming.has(projection.entityId))
+        .map((projection) => projection.entityId))
+      this.data.projections = this.data.projections.filter((projection) => !(projection.workspaceId === scope.workspaceId && stale.has(projection.entityId)))
+      for (const item of items) {
+        upsert(this.data.projections, item, (p) => p.workspaceId === scope.workspaceId && p.entityId === item.entityId)
+      }
+      const retained = new Set(this.data.projections.map((projection) => projection.entityId))
+      this.data.entities = this.data.entities.filter((entity) => !stale.has(entity.id) || retained.has(entity.id))
+    })
+  }
   async getPlanningProjection(workspaceId: domain.WorkspaceId, entityId: domain.EntityId): Promise<domain.WorkspaceProjection | undefined> { return this.data.projections.find((p) => p.workspaceId === workspaceId && p.entityId === entityId) }
   async listPlanningProjections(workspaceId: domain.WorkspaceId): Promise<readonly domain.WorkspaceProjection[]> { return this.data.projections.filter((p) => p.workspaceId === workspaceId) }
   async putRepository(record: cap.RepositoryRecord): Promise<void> {

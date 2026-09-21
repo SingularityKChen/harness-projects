@@ -92,6 +92,7 @@ export interface Storage {
 
   // ── 规划：投影承载权威归一化状态与三态内容 ──
   putPlanningProjection(workspaceId: WorkspaceId, projection: WorkspaceProjection): Promise<void>
+  replacePlanningProjections(scope: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId }, items: readonly WorkspaceProjection[]): Promise<void>
   getPlanningProjection(workspaceId: WorkspaceId, entityId: EntityId): Promise<WorkspaceProjection | undefined>
   listPlanningProjections(workspaceId: WorkspaceId): Promise<readonly WorkspaceProjection[]>
 

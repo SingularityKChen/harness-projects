@@ -85,6 +85,16 @@ test('重启：同一份 Storage 内容上的新 core 解析回同一批内部�
   assert.deepEqual(signatures(await second.queries.listPlanningItems()), before, '重启后外部对象必须解析回同一实体')
 })
 
+test('全量收敛：provider 返回空集合后本地规划条目被移除', async () => {
+  const providers = threeItemComposition()
+  const core = await compose(providers)
+  assert.ok((await core.queries.listPlanningItems()).length > 0)
+  for (const item of [...providers.planning.state.items]) removeItem(providers.planning.state, item.ref)
+  const result = await core.commands.bootstrapWorkspace()
+  assert.equal(result.ok, true)
+  assert.deepEqual(await core.queries.listPlanningItems(), [])
+})
+
 test('降级：规划 provider 离线时返回最后已知值并标记 degraded，而不是抛错（ExecPlan D5）', async () => {
   const providers = threeItemComposition()
   const core = await compose(providers)

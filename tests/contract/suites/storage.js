@@ -60,6 +60,17 @@ export function storageContractSuite(adapter) {
     await storage.putRepository({ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'identity-9' })
     assert.deepEqual((await storage.listRepositories(WORKSPACE)).map((r) => r.id), ['repo-1'])
   })
+  test(`${label}：replace 收敛指定 binding，保留作用域外投影`, async () => {
+    const storage = makeStorage()
+    await storage.putEntity({ id: 'entity-1', kind: 'work_item' })
+    await storage.putEntity({ id: 'entity-2', kind: 'work_item' })
+    await storage.putExternalIdentity({ id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
+    await storage.putExternalIdentity({ id: 'identity-2', entityId: 'entity-2', bindingId: 'binding-2', externalKind: 'issue', externalId: 'issue-2', role: 'primary' })
+    await storage.putPlanningProjection(WORKSPACE, projection)
+    await storage.putPlanningProjection(WORKSPACE, { ...projection, entityId: 'entity-2' })
+    await storage.replacePlanningProjections({ workspaceId: WORKSPACE, bindingId: 'binding-1' }, [])
+    assert.deepEqual(await storage.listPlanningProjections(WORKSPACE), [{ ...projection, entityId: 'entity-2' }])
+  })
 
   test(`${label}：同一工作项+仓库最多一个 active 执行上下文`, async () => {
     const storage = makeStorage()
