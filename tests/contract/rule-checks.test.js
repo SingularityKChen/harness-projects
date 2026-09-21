@@ -28,7 +28,6 @@ import {
   describeBaseline,
   disclosure,
   isSizeExcluded,
-  normalizeBaseRef,
   normalizePath,
   scanDiff,
   size,
@@ -81,6 +80,15 @@ const noGit = {
   readCommitMessage: () => '',
   resolveRef: () => 'deadbeef1234',
   prBody: '',
+}
+
+/** CLI 入口，供 exit code 契约用例复用。 */
+const SCRIPT = fileURLToPath(new URL('../../scripts/rule-checks.mjs', import.meta.url))
+
+/** 真实的 `.github/workflows/rule-checks.yml`，供 CI 接线断言复用。 */
+function loadRuleChecksWorkflow() {
+  const workflowPath = fileURLToPath(new URL('../../.github/workflows/rule-checks.yml', import.meta.url))
+  return parseYaml(readFileSync(workflowPath, 'utf8'))
 }
 
 test('发布面：新增行里的家目录路径会被命中，并归属到正确的文件与行号', () => {
@@ -383,24 +391,161 @@ test('CI 接线：Rule checks 的 on.pull_request 声明 edited 触发类型', (
   assert.ok(required.every((t) => types.includes(t)), `应包含 ${required}（与 issue-policy.yml 的既定写法一致）`)
 })
 
-// issue #96：`on.pull_request.branches` 不只是「哪些 PR 进入本 workflow」的准入
-// 谓词——它同时把 `github.base_ref` 钉成被过滤的那一条，而 base_ref 正是
-// size / disclosure 两个 job 的判定基线。声明成 [main] 之后，能跑的时候基线
-// 必然是 main，栈上 PR 被量成整个栈相对 main 的累计（PR #95：真实 900 行被报成
-// 7837 行），base 不是 main 的 PR 则一次都不触发（#83 / #88 的 head）。
-// 这条断言把「准入不能改写基线」钉在配置层：加回过滤器就会红。
-test('CI 接线：Rule checks 的 on.pull_request 不得声明分支过滤器（它会同时钉住判定基线）', () => {
-  const workflowPath = fileURLToPath(new URL('../../.github/workflows/rule-checks.yml', import.meta.url))
-  const workflow = parseYaml(readFileSync(workflowPath, 'utf8'))
-  const trigger = workflow.on?.pull_request
+// issue #96：`on.pull_request.branches` 是**准入谓词**：它让 workflow 只对 base
+// 为 main 的 PR 触发。base 不是 main 的普通 PR（例如叠在特性分支上的 PR）因此连
+// 一次结论都没有——#83 / #88 的 head 在修掉它之前从未出现在运行里。
+//
+// 注意措辞：过滤器**不会**改写 `github.base_ref`，它只是筛掉取值不是 main 的那些
+// PR。栈成员的运行时 base 之所以是 main，是 stack 语义而不是这个过滤器造成的
+// （issue #99 用 run 35511506461 证伪了旧说法）。这条断言仍然要留着：加回过滤器
+// 会让非 main 的普通 PR 重新失去结论。
+test('CI 接线：Rule checks 的 on.pull_request 不得声明分支过滤器（它会让非 main 的 PR 没有结论）', () => {
+  const trigger = loadRuleChecksWorkflow().on?.pull_request
 
   assert.ok(trigger !== null && typeof trigger === 'object', 'on.pull_request 必须存在且是映射')
   for (const key of ['branches', 'branches-ignore']) {
     assert.equal(
       trigger[key],
       undefined,
-      `on.pull_request.${key} 会把 github.base_ref 钉成被过滤的那一条，size/disclosure 的判定基线随之被改写（issue #96）`,
+      `on.pull_request.${key} 会让 base 不是 main 的 PR 完全不触发（issue #96），修掉它之前 #83 / #88 的 head 从未被检查`,
     )
+  }
+})
+
+// issue #99（含评审 P1）：判定输入是一对**不可变提交**。这组断言把三件事钉在配置层：
+// 解析只有一个来源、两个检查 job 消费同一对值、判定对象不是任何会移动的 ref。
+test('CI 接线：判定对象对来自 PR API 与事件 head，两个检查 job 消费同一次解析结果，且没有一步用移动 ref', () => {
+  const jobs = loadRuleChecksWorkflow().jobs ?? {}
+
+  const resolver = jobs['resolve-base']
+  assert.ok(resolver, '必须有 resolve-base job：它是判定输入的唯一定义点')
+  assert.equal(resolver.outputs?.base_sha, '${{ steps.resolve.outputs.base_sha }}')
+  assert.equal(resolver.outputs?.head_sha, '${{ steps.resolve.outputs.head_sha }}', 'head 也必须由解析 job 统一给出')
+  assert.equal(
+    resolver.outputs?.api_base_sha,
+    '${{ steps.fetch.outputs.api_base_sha }}',
+    'base 也要有独立锚点：它决定两个检查量的范围，而它同样由解析器输出',
+  )
+  assert.ok(!('base_ref' in (resolver.outputs ?? {})), '解析器不再产出 base_ref：判定输入只有两个提交')
+  assert.ok(!('api_base_ref' in (resolver.outputs ?? {})), 'base.ref 只给诊断用，不必经过 job output')
+
+  // 取数与解析必须分两步：token 只出现在不执行 PR 代码的那一步。
+  const apiStep = (resolver.steps ?? []).find((step) => typeof step.run === 'string' && step.run.includes('gh api'))
+  assert.ok(apiStep, '基线必须来自 PR API')
+  assert.match(apiStep.run, /set -euo pipefail/, 'gh 失败必须让这一步直接失败')
+  assert.equal(apiStep.env?.GH_TOKEN, '${{ github.token }}', 'token 只在取数步骤里')
+  assert.match(apiStep.run, /\$RUNNER_TEMP/, '响应写进 runner 临时目录，不经 shell 拼接传递')
+  assert.match(apiStep.run, /api_base_ref=/, '来源说明由这一步回显，解析器的契约里没有它')
+  assert.match(apiStep.run, /tr -d/, '回显前去掉控制字符，保证它是一行')
+  assert.match(apiStep.run, /api_base_sha=/, 'base.sha 也要在这一步读出：它是判定基线的独立锚点')
+
+  const resolveStep = (resolver.steps ?? []).find((step) => step.id === 'resolve')
+  assert.ok(resolveStep, 'resolve-base 必须有一个 id 为 resolve 的步骤')
+  assert.match(resolveStep.run, /scripts\/resolve-pr-base\.mjs/, '解析与校验交给脚本，不写成多行 shell')
+  assert.match(resolveStep.run, /\$GITHUB_OUTPUT/, '判定输入写入 GITHUB_OUTPUT 供下游消费')
+  assert.ok(!('GH_TOKEN' in (resolveStep.env ?? {})), '执行 PR 代码的步骤不得持有 token')
+  assert.equal(
+    resolveStep.env?.EVENT_HEAD_SHA,
+    '${{ github.event.pull_request.head.sha }}',
+    '判定 head 取自事件负载，而不是 github.sha（后者在 pull_request 事件里可能是测试合并提交）',
+  )
+
+  // 取数必须发生在 checkout **之前**。checkout 的 fetch-depth: 0 取的是当时的所有
+  // 分支头，而 base_sha 是取数那一刻的 tip：顺序反过来时，期间前进过的 base 分支
+  // （本地变基后强推是常规操作）会让可达性校验失败、两个 advisory 检查没有结论——
+  // 一个由常规操作触发的误报（§9.2）。放在前面时，后面那次全量 fetch 必然包含刚
+  // 读到的 tip，而且持 token 的步骤执行时工作区还是空的。
+  const steps = resolver.steps ?? []
+  const tokenIndex = steps.findIndex((step) => 'GH_TOKEN' in (step.env ?? {}))
+  const checkoutIndex = steps.findIndex((step) => typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'))
+  assert.ok(tokenIndex >= 0 && checkoutIndex >= 0, '取数步骤与 checkout 都必须存在')
+  assert.ok(tokenIndex < checkoutIndex, '持 token 的取数步骤必须早于 checkout')
+  // base 仓 + `refs/pull/<n>/head`：fork PR 也成立；取 fork 仓会让 base 对象不可达。
+  for (const jobId of ['resolve-base', 'checks']) {
+    const ck = (jobs[jobId].steps ?? []).find((s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout@'))
+    assert.equal(ck?.with?.repository, '${{ github.repository }}', `${jobId}：必须取 base 仓`)
+    assert.equal(
+      ck?.with?.ref,
+      'refs/pull/${{ github.event.pull_request.number }}/head',
+      `${jobId}：必须取 PR head ref（同仓与 fork 都成立）`,
+    )
+  }
+  assert.doesNotMatch(steps[tokenIndex].run, /scripts\//, '持 token 的步骤不得执行 PR 代码')
+
+  // 判定对象由事件 head 定义；checkout 只负责把对象取到本地，取的是 PR head ref
+  // （fork 也能取到），身份校验再确认它与事件 head 一致。
+
+  // 解析 job 先确认两个对象在本地可达：缺一个就没有可判定的范围（fail closed）。
+  const reachability = (resolver.steps ?? []).find((step) => typeof step.run === 'string' && step.run.includes('cat-file'))
+  assert.ok(reachability, 'resolve-base 必须校验两个判定对象在本地可达')
+  assert.match(reachability.run, /exit 1/, '不可达必须失败，不能继续')
+  assert.match(reachability.run, /诊断（不参与判定）：API base\.ref=/, '三个来源要在同一处对照，且逐行标注"不参与判定"')
+  assert.match(reachability.run, /判定对象：base \$\{BASE_SHA\}/, '判定对象单独标注')
+
+  // 两个检查是同一个判定的两种输出，因此只有一个 matrix job：校验只写一处，
+  // 两个检查不可能各用一份基线。检查名必须保持 `PR size` / `Disclosure scan`。
+  const checks = jobs.checks
+  assert.ok(checks, '必须有一个 checks job 承载两个检查')
+  assert.deepEqual(checks.needs, 'resolve-base', 'checks 必须消费 resolve-base 的结果，不能自己解析')
+  assert.deepEqual(
+    (checks.strategy?.matrix?.include ?? []).map((entry) => `${entry.check}:${entry.command}`),
+    ['PR size:size', 'Disclosure scan:disclosure'],
+    'matrix 必须恰好是这两个检查，名字与命令一一对应',
+  )
+
+  const checkout = (checks.steps ?? []).find((s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout@'))
+  assert.ok(checkout, 'checks 必须有 checkout')
+  assert.equal(
+    checkout.with?.ref,
+    'refs/pull/${{ github.event.pull_request.number }}/head',
+    '取 PR head ref 而不是默认的测试合并提交（后者的父结构随 base 移动）',
+  )
+
+  // 身份校验与判定在同一个步骤里：两者是同一个命题的两半，分开写会漂移。
+  const step = (checks.steps ?? []).find((s) => typeof s.run === 'string' && s.run.includes('rule-checks.mjs'))
+  assert.ok(step, 'checks 必须有一个跑 rule-checks.mjs 的步骤')
+  assert.equal(step.env?.BASE_SHA, '${{ needs.resolve-base.outputs.base_sha }}', 'base 必须是不可变对象')
+  assert.equal(step.env?.HEAD_SHA, '${{ needs.resolve-base.outputs.head_sha }}', 'head 必须是同一个对象')
+  assert.equal(step.env?.COMMAND, '${{ matrix.command }}', '命令经 env 传入，不插值进 run')
+  assert.match(step.run, /git rev-parse HEAD/, '必须在判定前校验工作树落在 head 上')
+  assert.match(step.run, /cat-file/, '必须同时校验 base 对象可达')
+  assert.match(step.run, /"\$COMMAND" "\$BASE_SHA" "\$HEAD_SHA"/, '三个输入都经 env 传入并在 shell 里引用')
+  assert.equal(step.env?.EVENT_HEAD_SHA, '${{ github.event.pull_request.head.sha }}', '身份校验要有独立于解析器输出的锚点')
+  assert.match(step.run, /"\$actual" = "\$EVENT_HEAD_SHA"/, '工作树也要与事件 head 比对，解析器"诚实地搞错 head"才会暴露')
+  assert.equal(step.env?.API_BASE_SHA, '${{ needs.resolve-base.outputs.api_base_sha }}', 'base 也要有锚点')
+  assert.match(step.run, /"\$BASE_SHA" = "\$API_BASE_SHA"/, '判定基线要与取数步骤读到的快照比对')
+  // 断言整个表达式而不是子串：GitHub 的 `a && b || c` 在 b 是空串时会落到 c，
+  // 所以操作数顺序反了（`… && '' || <body>`）等于两格都给——子串匹配抓不到。
+  assert.equal(
+    step.env?.PR_BODY,
+    "${{ matrix.command == 'disclosure' && github.event.pull_request.body || '' }}",
+    'PR 描述只给用它的那一格：GitHub 会把整个 env 块打进公开日志',
+  )
+
+  // 判定步骤的输入只能是两个不可变 SHA：`origin/<ref>`、`HEAD^1`、`github.base_ref`
+  // 都会把判定绑到会移动的对象或未文档化的合并结构上（评审 P1）。
+  const offenders = []
+  for (const [jobId, job] of Object.entries(jobs)) {
+    for (const step of job.steps ?? []) {
+      if (typeof step.run !== 'string' || !step.run.includes('rule-checks.mjs')) continue
+      for (const [key, value] of Object.entries(step.env ?? {})) {
+        if (typeof value === 'string' && /origin\/|HEAD\^|github\.base_ref|github\.sha/.test(value)) {
+          offenders.push(`${jobId}/${step.name ?? '?'}: ${key}=${value}`)
+        }
+      }
+      if (/origin\/\$|HEAD\^/.test(step.run)) offenders.push(`${jobId}/${step.name ?? '?'}: run 里出现移动 ref`)
+    }
+  }
+  assert.deepEqual(offenders, [], '判定对象必须固定到不可变提交')
+})
+
+test('CI 接线：permissions 含 pull-requests: read，且没有任何 write', () => {
+  const workflow = loadRuleChecksWorkflow()
+
+  assert.equal(workflow.permissions?.contents, 'read')
+  assert.equal(workflow.permissions?.['pull-requests'], 'read', '读 PR 对象自己的 base 需要 pull-requests: read')
+  for (const [key, value] of Object.entries(workflow.permissions ?? {})) {
+    assert.ok(!String(value).startsWith('write'), `permissions.${key} 不得是 write（W4）`)
   }
 })
 
@@ -459,12 +604,12 @@ test('通过时的横幅如实列出四个来源，不能读成「§8.6 已经�
   assert.match(output, /人工/)
 })
 
-// 判定自描述（issue #96）：扫描范围由 base 决定，读者必须能一眼看出这次用的是
-// 哪一条基线，而不是从「7837 行」这个结果反推。
-test('披露：输出写明判定用的基线与提交，读者不需要反推', () => {
+// 判定自描述（issue #96 / #99）：判定对象是**一对提交**，读者必须能一眼看出这次
+// 判的是哪两个对象，而不是从「7837 行」这个结果反推。
+test('披露：输出写明判定对象对，读者不需要反推', () => {
   const { output } = captureLogs(() => disclosure('origin/feat/stack-parent', noGit))
 
-  assert.match(output, /^基线：origin\/feat\/stack-parent @ deadbeef1234（扫描范围 origin\/feat\/stack-parent\.\.\.HEAD）$/m)
+  assert.match(output, /^判定对象：origin\/feat\/stack-parent @ deadbeef1234 · head HEAD @ deadbeef1234$/m)
 })
 
 test('exit code 契约：size 超预算返回 1，未超返回 0', () => {
@@ -480,64 +625,61 @@ test('exit code 契约：size 超预算返回 1，未超返回 0', () => {
 // 判定基线（issue #96）
 // ---------------------------------------------------------------------------
 
-test('基线：origin/main、refs/heads/main 与 main 是同一条基线的三种写法', () => {
-  for (const ref of ['main', 'origin/main', 'refs/heads/main', 'refs/remotes/origin/main', ' origin/main ']) {
-    assert.equal(normalizeBaseRef(ref), 'main', `${JSON.stringify(ref)} 应归一到 main`)
-  }
-  assert.equal(normalizeBaseRef('origin/feat/stack-parent'), 'feat/stack-parent')
+test('基线：DEFAULT_BASE 是 origin/main；判定范围以传入的 head 为端点，base 就是 main tip 时不打印栈累计', () => {
   assert.equal(DEFAULT_BASE, 'origin/main')
-  // `origin/main~1` 不是 main 的 tip：故意不归一，否则会把"量的是另一个提交"
-  // 说成"量的是 main"。
-  assert.equal(normalizeBaseRef('origin/main~1'), 'main~1')
+
+  const MAIN = 'c0ffee'.repeat(6) + 'c0ff' // 40 位，模拟 CI 传进来的 base.sha
+  const BASE = 'beef01'.repeat(6) + 'beef01'
+  const HEAD = 'b'.repeat(40)
+
+  // 同一个数据源服务两个范围：判定范围给本 PR 的，栈累计范围给整栈的。
+  const run = (base, { head, cumulative = '10\t0\ta.ts' }) => {
+    const ranges = []
+    const { output } = captureLogs(() =>
+      size(base, {
+        head,
+        readNumstat: (range) => {
+          ranges.push(range)
+          return range.startsWith(`${DEFAULT_BASE}...`) ? cumulative : '10\t0\ta.ts'
+        },
+        // main 的几种写法都解析成同一个提交；SHA 解析成自己（真实 git 的行为）。
+        resolveRef: (ref) => (ref.endsWith('main') ? MAIN : ref),
+      }),
+    )
+    return { ranges, output }
+  }
+
+  const explicit = run(BASE, { head: HEAD, cumulative: `${BUDGETS.code * 8}\t0\tc.ts` })
+  assert.deepEqual(explicit.ranges, [`${BASE}...${HEAD}`, `${DEFAULT_BASE}...${HEAD}`], '三点差异，且两个范围都以传入的 head 为端点')
+  assert.match(explicit.output, new RegExp(`判定对象：${BASE} @ ${BASE.slice(0, 12)} · head ${HEAD} @ ${HEAD.slice(0, 12)}`))
+  assert.match(explicit.output, /代码：10 \/ 1000 行/, '栈累计再大也不参与判定')
+  assert.match(explicit.output, /^栈累计（相对 origin\/main，仅记录，不计入判定）：代码 8000 行、文档 0 行$/m)
+
+  // base 就是 main 的 tip：累计值与判定值逐字相同，那一行只是噪声。门控必须比较
+  // **解析后的提交**——CI 传进来的是 40 位 SHA，按 ref 名字比较会让它每次都打印。
+  for (const base of ['origin/main', 'main', MAIN]) {
+    const same = run(base, { head: HEAD })
+    assert.deepEqual(same.ranges, [`${base}...${HEAD}`], `${base} 是 main tip：不读栈累计范围`)
+    assert.doesNotMatch(same.output, /栈累计/, `${base} 是 main tip：不打印栈累计行`)
+  }
+
+  // head 省略时端点回到 HEAD（本地手工跑的形状）。
+  const implicit = run(DEFAULT_BASE, {})
+  assert.deepEqual(implicit.ranges, [`${DEFAULT_BASE}...HEAD`])
 })
 
-// 三点差异是 size / disclosure 与「拒绝方案 D」的共同承重点：它保证 base 分支
-// 前进、子分支尚未 rebase、base 被 force-push 改写这三种情形下，量到的仍然只是
-// 子分支自己的提交。此前没有任何断言检查过传给 git 的 range——把 `...` 换成
-// `..`（打印字符串与桩路由用的字面量全部保留）能让全部测试保持绿色，而在 base
-// 前进的仓库里会把 5 行的 PR 判成 1200 行以上（下一条真实 git 用例复现了它）。
-// 这条契约直接钉住每个数据源收到的范围字符串。
-test('体量与披露：判定侧的范围必须是三点差异，披露的逐提交扫描才是两点差异', () => {
-  const sizeRanges = []
-  captureLogs(() =>
-    size('origin/feat/stack-parent', {
-      readNumstat: (range) => {
-        sizeRanges.push(range)
-        return '10\t0\ta.ts'
-      },
-      resolveRef: () => 'abc123def456',
-    }),
-  )
-  assert.deepEqual(sizeRanges, ['origin/feat/stack-parent...HEAD', 'origin/main...HEAD'])
-
-  const diffRanges = []
-  const logRanges = []
-  captureLogs(() =>
-    disclosure('origin/feat/stack-parent', {
-      ...noGit,
-      readDiff: (range) => {
-        diffRanges.push(range)
-        return ''
-      },
-      listCommits: (range) => {
-        logRanges.push(range)
-        return []
-      },
-    }),
-  )
-  assert.deepEqual(diffRanges, ['origin/feat/stack-parent...HEAD'], '新增行按三点差异取，不能把 base 自己的提交算进来')
-  assert.deepEqual(logRanges, ['origin/feat/stack-parent..HEAD'], '逐提交扫描本来就该用两点差异（只要 HEAD 一侧的提交）')
-})
-
-// 真实 git 下的判别性用例：base 分支在子分支分出之后继续前进（计划把这种情形
-// 当常规——`gh stack rebase` 与 base 前进都会产生它）。共同祖先仍是 base 的旧
-// tip，三点差异因此只算子分支自己的 5 行；换成两点差异会把 base 的 1200 行算
-// 进来，exit 0 翻成 exit 1——正是本 PR 要消灭的那类假红。
-test('体量：base 分支前进时只算子分支自己的改动，不把 base 的新提交算进来（真实 git 仓库）', () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'rule-checks-range-'))
+// 评审 P1 的判别性回归用例（issue #99）：**三点差异不是不变量**。
+//
+// 它保证的是"以给定的两个对象为端点时，只算 head 一侧自共同祖先以来的改动"；
+// 一旦判定用的是"当前的 origin/<base.ref>"，base 被 force-push 到无关历史就会让
+// 共同祖先后退，把 base 分支自己的提交算成本 PR 的改动。下面对同一个 head 跑两次：
+// 固定对象对得到 5 行（正确），移动的 branch tip 得到 1205 行（假红）。
+test('体量：base 被改写到无关历史时，固定对象对只算本 PR，移动的 branch tip 会假红（真实 git 仓库）', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'rule-checks-frozen-'))
   const originalCwd = process.cwd()
   try {
     const run = (args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    const rev = (ref) => execFileSync('git', ['rev-parse', ref], { cwd: dir, encoding: 'utf8' }).trim()
     const lines = (prefix, count) =>
       Array.from({ length: count }, (_, i) => `${prefix}${i}`).join('\n')
 
@@ -549,34 +691,81 @@ test('体量：base 分支前进时只算子分支自己的改动，不把 base 
     run(['commit', '-q', '-m', 'seed'])
 
     run(['checkout', '-q', '-b', 'stack-parent'])
-    writeFileSync(path.join(dir, 'parent.js'), lines('p', 50))
+    writeFileSync(path.join(dir, 'parent.js'), lines('p', 1200))
     run(['add', '-A'])
     run(['commit', '-q', '-m', 'parent'])
+    const baseSnapshot = rev('stack-parent')
 
     run(['checkout', '-q', '-b', 'child'])
     writeFileSync(path.join(dir, 'child.js'), lines('c', 5))
     run(['add', '-A'])
     run(['commit', '-q', '-m', 'child'])
+    const head = rev('child')
 
+    // 常规形状：base 分支在子分支分出之后继续前进（fast-forward）。判定用冻结的
+    // 快照，所以共同祖先仍是分叉点，只算子分支自己的 5 行——这一条与下面那条
+    // force-push 的情形是同一性质的两端。
     run(['checkout', '-q', 'stack-parent'])
-    writeFileSync(path.join(dir, 'parent.js'), lines('m', 1200))
+    writeFileSync(path.join(dir, 'advance.js'), lines('a', 40))
     run(['add', '-A'])
     run(['commit', '-q', '-m', 'parent advances'])
-    run(['checkout', '-q', 'child'])
+    const advancedTip = rev('stack-parent')
+
+    // base 被 force-push 到无关历史：stack-parent 不再包含它自己的那次提交。
+    run(['checkout', '-q', 'stack-parent'])
+    run(['reset', '-q', '--hard', 'main'])
+    writeFileSync(path.join(dir, 'unrelated.js'), lines('u', 20))
+    run(['add', '-A'])
+    run(['commit', '-q', '-m', 'unrelated rewrite'])
+    const movedTip = rev('stack-parent')
+    assert.notEqual(baseSnapshot, movedTip, '前置条件：base 的 tip 必须已经变化')
 
     process.chdir(dir)
-    const { result: code, output } = captureLogs(() => size('stack-parent'))
 
-    assert.equal(code, 0, '子分支只有 5 行：base 的 1200 行不得改变判定')
-    assert.match(output, /代码：5 \/ 1000 行/)
+    // 常规形状：base 前进（fast-forward）后，冻结快照仍是分叉点，只算子分支的 5 行。
+    const fastForward = captureLogs(() => size(advancedTip, { head }))
+    assert.equal(fastForward.result, 0, 'base 前进不改变判定：仍是子分支自己的改动')
+    assert.match(fastForward.output, /代码：5 \/ 1000 行/)
+
+    const frozen = captureLogs(() => size(baseSnapshot, { head }))
+    assert.equal(frozen.result, 0, '固定对象对：本 PR 只有 5 行')
+    assert.match(frozen.output, /代码：5 \/ 1000 行/)
+    assert.match(frozen.output, new RegExp(`判定对象：${baseSnapshot} @ ${baseSnapshot.slice(0, 12)}`))
+
+    const moved = captureLogs(() => size(movedTip, { head }))
+    assert.equal(moved.result, 1, '移动的 branch tip：共同祖先后退，base 自己的 1200 行被算进本 PR')
+    assert.match(moved.output, /代码：1205 \/ 1000 行/)
+    assert.match(moved.output, new RegExp(`· head ${head} @ ${head.slice(0, 12)}`), '两次运行的 head 相同、base 不同')
+
+    // 默认解析器必须真的被接上：CI 传进来的是 SHA、mainRef 是分支名，比较要落在
+    // **解析后的提交**上。这里不注入 resolveRef，走真实 git——`size()` 的
+    // destructuring 曾经漏掉默认值，异常被吞掉后栈累计行在每次运行都打印。
+    const sameTip = captureLogs(() => size(rev('main'), { head, mainRef: 'main' }))
+    assert.doesNotMatch(sameTip.output, /栈累计/, 'base 就是 main 的 tip 时不打印栈累计行')
   } finally {
     process.chdir(originalCwd)
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
+test('CLI：base 或 head 任一无法解析成提交时 exit 3，不静默改用别的对象', () => {
+  const missing = 'f'.repeat(40)
+  const cases = [
+    ['size', [missing]],
+    ['size', ['HEAD', missing]],
+    ['disclosure', [missing]],
+    ['disclosure', ['HEAD', missing]],
+  ]
+
+  for (const [command, args] of cases) {
+    const result = spawnSync(process.execPath, [SCRIPT, command, ...args], { encoding: 'utf8' })
+    assert.equal(result.status, 3, `${command} ${args.join(' ')} 期望 exit 3，实际 ${result.status}`)
+    assert.match(result.stderr, /无法解析成提交/)
+  }
+})
+
 test('基线：git 输出的结尾换行不会把基线行拆成两行，解析失败也不抛错', () => {
-  // 真实 git 的 stdout 带结尾换行；不 trim 会让「基线：…」与后面的括号各占一行。
+  // 真实 git 的 stdout 带结尾换行；不 trim 会让「判定对象：…」那一行被拆成两行。
   assert.equal(describeBaseline('origin/main', { resolveRef: () => 'abc123def456\n' }), 'origin/main @ abc123def456')
   assert.equal(
     describeBaseline('origin/gone', {
@@ -588,24 +777,6 @@ test('基线：git 输出的结尾换行不会把基线行拆成两行，解析�
   )
 })
 
-test('体量：base 不是 main 时打印基线、本 PR 行数与栈累计，判定只按本 PR（issue #96）', () => {
-  const prLocal = '10\t0\tpackages/client/src/sync.ts'
-  const stackCumulative = `${BUDGETS.code * 8}\t0\tpackages/core/src/chain-facts.ts`
-
-  const { result: code, output } = captureLogs(() =>
-    size('origin/feat/stack-parent', {
-      // 同一个数据源服务两个范围：判定范围给本 PR 的，栈累计范围给整栈的。
-      readNumstat: (range) => (range.startsWith(`${DEFAULT_BASE}...`) ? stackCumulative : prLocal),
-      resolveRef: () => 'abc123def456',
-    }),
-  )
-
-  assert.equal(code, 0, '栈累计再大也不参与判定：§8 的预算是单个 PR 的闭环规模')
-  assert.match(output, /^基线：origin\/feat\/stack-parent @ abc123def456（判定范围 origin\/feat\/stack-parent\.\.\.HEAD）$/m)
-  assert.match(output, /代码：10 \/ 1000 行/)
-  assert.match(output, /^栈累计（相对 origin\/main，仅记录，不计入判定）：代码 8000 行、文档 0 行$/m)
-})
-
 test('体量：base 不是 main 时栈累计算不出来也只降级，不影响判定', () => {
   const { result: code, output } = captureLogs(() =>
     size('origin/feat/stack-parent', {
@@ -613,24 +784,13 @@ test('体量：base 不是 main 时栈累计算不出来也只降级，不影响
         if (range.startsWith(`${DEFAULT_BASE}...`)) throw new Error('unknown revision')
         return '10\t0\tpackages/client/src/sync.ts'
       },
-      resolveRef: () => 'abc123def456',
+      resolveRef: (ref) => (ref === DEFAULT_BASE ? 'main-tip' : 'base-tip'),
     }),
   )
 
   assert.equal(code, 0)
   assert.match(output, /栈累计：相对 origin\/main 计算失败/)
   assert.match(output, /判定不受影响/)
-})
-
-test('体量：base 就是 main 时不打印栈累计行，日常路径的输出不被污染', () => {
-  for (const base of ['origin/main', 'main']) {
-    const { result: code, output } = captureLogs(() =>
-      size(base, { readNumstat: () => '10\t0\tpackages/client/src/sync.ts', resolveRef: () => 'abc123def456' }),
-    )
-
-    assert.equal(code, 0)
-    assert.doesNotMatch(output, /栈累计/)
-  }
 })
 
 // ---------------------------------------------------------------------------
