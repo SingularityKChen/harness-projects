@@ -15,20 +15,26 @@ name: Rule checks
 #   大体量生成物）。让它可见、需要解释，比让它阻塞合并更合适。
 #
 # 稳定运行一段时间、并且确认没有误报之后，再考虑提升为必需检查。
+#
+# 判定输入是**一对不可变提交** `(base_sha, head_sha)`，不是「一条 base ref 加隐式
+# HEAD」。两层理由（完整论述与回归证据见 `docs/development/ci.md` 的同名小节）：
+#   1. `github.base_ref` 对 GitHub 原生 stack 的成员 PR 是栈的 base 分支，不是它声明
+#      的父分支；按它度量会把整栈累计读成单个 PR 的体量（issue #99）。
+#   2. 只传 API 的 `base.ref` 也不够：下游会解析**当时**的 `origin/<base.ref>`，
+#      判定就依赖一个会移动的 ref（评审 P1）。
+#
+# 因此 resolve-base 一次解析出两个 SHA，两个检查消费同一对值、显式 checkout 到
+# head_sha、并在判定前校验对象身份。完整论述见 `docs/development/ci.md`。
 
 on:
   pull_request:
-    # 刻意不声明 branches。这个过滤器不只是「哪些 PR 进入本 workflow」的准入
-    # 谓词——它同时决定 github.base_ref 的取值，而 base_ref 正是下面两个 job
-    # 度量体量与发布面范围用的基线。一旦限定成 [main]，能跑的时候基线就必然
-    # 是 main，`${base}...HEAD` 于是退化成「这个 head 分支里还没进 main 的全部
-    # 内容」：栈上 PR 被报成整个栈的累计（PR #95 的真实改动 900 行被报成
-    # 7837 行），而 base 不是 main 的 PR 一次都不触发。两种后果都记录在
-    # issue #96——判定基线只能由 PR 自己声明的 base 决定，触发器不替它选择。
+    # 刻意不声明 branches：这个过滤器只负责**准入**。限定成 [main] 会让 base
+    # 不是 main 的普通 PR（例如叠在特性分支上的 PR）连一次结论都没有——#83 与
+    # #88 的 head 在修掉它之前从未出现在本 workflow 的运行里。
     #
     # 省略 types 时默认不含 edited：PR 描述编辑后不重跑，绿色横幅描述的是
     # 编辑前的旧内容（issue #40 评审项 2）。与 issue-policy.yml 用同一套。
-    # edited 同时覆盖「改 base」：栈向上 retarget 时会重算一次，判定自愈。
+    # edited 同时覆盖「改 base」：retarget 时会用新快照重算一次。
     types: [opened, synchronize, reopened, edited]
 
 concurrency:
@@ -37,42 +43,49 @@ concurrency:
 
 permissions:
   contents: read
+  # 读 PR 对象自己的 base.ref / base.sha——判定基线的唯一权威来源（issue #99）。
+  # 只读：W4 禁止任何 write 权限。
+  pull-requests: read
 
 jobs:
-  disclosure:
-    name: Disclosure scan
+  # 判定输入的唯一定义点。两个检查 job 都消费它的输出，因此不存在"各自选来源"
+  # 的可能；解析失败或对象不可达时它自己变红，两个检查被跳过而不是拿到错误的输入。
+  resolve-base:
+    name: Resolve PR base
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+      api_base_sha: ${{ steps.fetch.outputs.api_base_sha }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          # 需要完整历史才能算出 base...HEAD 的三点差异。
-          fetch-depth: 0
-          persist-credentials: false
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
-        with:
-          node-version-file: .nvmrc
-
-      - name: 扫描本次改动的新增行、每个提交与 PR 描述
-        # base_ref 与 PR 描述都经 env 传入而不是直接插值进 run：两者都是事件
-        # 负载里的值，不在 shell 里展开——PR 描述是自由文本，插值进 run 会是
-        # 任意 shell 注入。disclosure() 内部用 process.env.PR_BODY 读取。
+      - name: 取当前 PR 对象（只读 API，不执行 PR 代码）
+        id: fetch
+        # 刻意放在 checkout **之前**：checkout 取的是它执行那一刻的分支头，而
+        # `base.sha` 是取数那一刻的 tip——反过来的话，期间前进过的 base 会让判定
+        # 对象不在本地，两个 advisory 检查没有结论（详见 ci.md）。放在前面时本
+        # job 的 clone 必然是快照的超集；token 也因此在工作区还空着时就用完。
         #
-        # base_ref 是 PR 自己声明的 base（本 workflow 刻意不声明 branches
-        # 过滤器，理由见文件头）：栈上 PR 扫的是它相对栈内上一层的改动。
+        # `base.ref` 只是来源说明，由这里（持有 JSON 的一方）回显；解析器的契约里
+        # 没有它。
         env:
-          BASE_REF: ${{ github.base_ref }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: node scripts/rule-checks.mjs disclosure "origin/$BASE_REF"
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/pulls/$PR_NUMBER" > "$RUNNER_TEMP/pr.json"
+          api_base_ref=$(jq -r '.base.ref // ""' "$RUNNER_TEMP/pr.json" | tr -d '\000-\037\177')
+          printf 'api_base_ref=%s\n' "$api_base_ref" >> "$GITHUB_OUTPUT"
+          # base.sha 也读出来当锚点：它决定两个检查量的范围，而解析器是 PR 代码。
+          printf 'api_base_sha=%s\n' "$(jq -r '.base.sha // ""' "$RUNNER_TEMP/pr.json")" >> "$GITHUB_OUTPUT"
 
-  size:
-    name: PR size
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          # base 仓 + `refs/pull/<n>/head`：该 ref 在 base 仓里一定存在（fork 也有），
+          # 两个判定对象因此都在本地；取 fork 仓会让 base 对象不可达（详见 ci.md）。
+          repository: ${{ github.repository }}
+          ref: refs/pull/${{ github.event.pull_request.number }}/head
           fetch-depth: 0
           persist-credentials: false
 
@@ -80,10 +93,103 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      - name: 核对 PR 体量上限
-        # base_ref 经 env 传入而不是直接插值进 run：它是事件负载里的值，不在
-        # shell 里展开。基线就是 PR 自己声明的 base；脚本会把实际用的基线
-        # 打印出来，避免读者把它读成整栈的累计。
+      - name: 解析判定对象对
+        id: resolve
+        # 这一步执行 PR 里的脚本，因此**不持有 token**。JSON 从文件进、判定输入
+        # （两行）从 stdout 出；解析器对空输入 fail closed，所以上一步失败时这里
+        # 也会失败，而不是产出一份残缺的判定对象。
         env:
-          BASE_REF: ${{ github.base_ref }}
-        run: node scripts/rule-checks.mjs size "origin/$BASE_REF"
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/resolve-pr-base.mjs < "$RUNNER_TEMP/pr.json" >> "$GITHUB_OUTPUT"
+
+      - name: 校验判定对象可达并回显诊断
+        # 判定是 (base_sha, head_sha) 的函数，两个对象缺一个就没有可判定的范围。
+        # 到这一步仍不可达只可能是快照真的失效了（base 被 force-push 到无关历史），
+        # 那时失败并请人重新触发事件才是对的：不猜新的 origin/<base.ref>，也不回退
+        # main。
+        #
+        # 诊断字段只是给人看的，**不参与判定**。逐行标注，免得下一个复核者又把
+        # github.base_ref 当成权威值——那正是 issue #99 的成因。
+        env:
+          EVENT_BASE_REF: ${{ github.base_ref }}
+          EVENT_PAYLOAD_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          API_BASE_REF: ${{ steps.fetch.outputs.api_base_ref }}
+          BASE_SHA: ${{ steps.resolve.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          for pair in "base:${BASE_SHA}" "head:${HEAD_SHA}"; do
+            git cat-file -e "${pair#*:}^{commit}" 2>/dev/null || {
+              echo "::error::判定对象 ${pair%%:*} ${pair#*:} 在本地不可达——按 fail closed 处理（不回退 main，也不改用当前的 origin/<base.ref>）；请重新触发一次事件"
+              exit 1
+            }
+          done
+          echo "诊断（不参与判定）：github.base_ref=${EVENT_BASE_REF:-<empty>}"
+          echo "诊断（不参与判定）：github.event.pull_request.base.ref=${EVENT_PAYLOAD_BASE_REF:-<empty>}"
+          echo "诊断（不参与判定）：API base.ref=${API_BASE_REF:-<empty>}"
+          echo "判定对象：base ${BASE_SHA} ... head ${HEAD_SHA}（两个都是不可变提交）"
+
+  # 两个检查是同一个判定的两种输出，因此只有一个 job：判定对象校验只写一处，
+  # 两个检查不可能各用一份基线或各自漂移。matrix 只区分命令与检查名。
+  checks:
+    name: ${{ matrix.check }}
+    needs: resolve-base
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: PR size
+            command: size
+          - check: Disclosure scan
+            command: disclosure
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # 与 resolve-base 同理：base 仓 + PR head ref。
+          repository: ${{ github.repository }}
+          # 判定对象是事件里的 head 提交（由身份校验比对），不是默认的测试合并提交：
+          # 合并提交的父结构会随 base 分支移动。需要完整历史才能算出 base...head。
+          ref: refs/pull/${{ github.event.pull_request.number }}/head
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: 校验判定对象后运行检查
+        # 身份校验与判定在同一个步骤里：两者是同一个命题的两半，分开写会漂移。
+        # 三个值都经 env 传入而不是直接插值进 run——PR 描述是自由文本，插值进 run
+        # 会是任意 shell 注入；disclosure() 内部用 process.env.PR_BODY 读取。
+        env:
+          COMMAND: ${{ matrix.command }}
+          BASE_SHA: ${{ needs.resolve-base.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.resolve-base.outputs.head_sha }}
+          # 两个独立锚点：EVENT_HEAD_SHA 来自事件负载，API_BASE_SHA 来自不执行
+          # PR 代码的取数步骤。解析器"诚实地搞错"或"故意改写"都会在这里暴露。
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          API_BASE_SHA: ${{ needs.resolve-base.outputs.api_base_sha }}
+          # 只有 disclosure 读它。GitHub 会把整个 env 块打进公开日志，所以
+          # 不给 size 那一格——否则整段 PR 描述会重复出现在 PR size 的日志里。
+          PR_BODY: ${{ matrix.command == 'disclosure' && github.event.pull_request.body || '' }}
+        run: |
+          set -euo pipefail
+          actual=$(git rev-parse HEAD)
+          # 两个锚点：HEAD_SHA 是本次判定要用的对象，EVENT_HEAD_SHA 来自事件负载。
+          # 后者独立于解析器的输出，因此解析器"诚实地搞错了 head"也会在这里暴露。
+          [ "$actual" = "$HEAD_SHA" ] && [ "$actual" = "$EVENT_HEAD_SHA" ] || {
+            echo "::error::工作树落在 ${actual}，判定对象是 ${HEAD_SHA}，事件 head 是 ${EVENT_HEAD_SHA}"
+            exit 1
+          }
+          # base 也要有独立锚点：它决定两个检查量的范围，而它同样由解析器输出。
+          [ "$BASE_SHA" = "$API_BASE_SHA" ] || {
+            echo "::error::判定基线与取数步骤读到的 API 快照不一致：解析器给了 ${BASE_SHA}，快照是 ${API_BASE_SHA}"
+            exit 1
+          }
+          git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null || {
+            echo "::error::基线对象 ${BASE_SHA} 在本地不可达——按 fail closed 处理"
+            exit 1
+          }
+          node scripts/rule-checks.mjs "$COMMAND" "$BASE_SHA" "$HEAD_SHA"
