@@ -10,6 +10,7 @@
 | workflow.md | GPT-6 适配的开发、ExecPlan、draft PR、并行、验收与请求评审流程 |
 | ci.md | 当前 workflow、PR Fast Gate、merge_group / weekly 的演进边界 |
 | publication.md | disclosure / size 命令与人工五类目检查 |
+| content-placement.md | 流程知识的四桶归属（机械 / 技法 / 约定 / 一次性）与判定规则 |
 
 ## 1. 工具链
 
