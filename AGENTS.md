@@ -55,7 +55,7 @@ Gate E1（跨 Provider 对象身份与同步幂等性）通过前，不冻结本
 
 ## 3. 文档与事实源
 
-- 正式文档全部在 `docs/`；运行态 `.superpowers/` 和 `.worktrees/` 不进文档。
+- 正式文档全部在 `docs/`；运行态**内容**（`.superpowers/` 与 `.worktrees/` 下的状态、日志、清单）不进文档。**路径引用是例外**：证据里可以写 `.worktrees/<slug>` 这类仓库内相对路径来表达执行上下文（`PLANS.md` §4「证据带执行上下文」），本机绝对路径仍然一律不写。
 - spec 与 plan 合在同一份 active ExecPlan；完成后移到 `docs/exec-plan/completed/` 并更新 `docs/README.md`。
 - 文档正文中文；代码标识符、路径和命令英文。公开 issue 标题和正文用英文。
 - 上游设计输入只作为本地参考；仓库内 `docs/` 必须自包含，不能引用本机路径或内部系统。
@@ -78,7 +78,7 @@ Gate E1（跨 Provider 对象身份与同步幂等性）通过前，不冻结本
 
 开始前检查 `git rev-parse --git-dir --git-common-dir`、`git status --short --branch`、`git worktree list --porcelain` 和 `git check-ignore -v .worktrees/`。
 
-隔离工作区必须位于 `.worktrees/<task-slug>/`；保持任务文件集互不重叠。`main` 是唯一长期分支，工作分支使用 `feature/`、`fix/`、`docs/`、`chore/` 或 `project-management/` 前缀，名称不含工具品牌。不要直接推 `main`，不要自行合并 PR。共享历史改写、force-with-lease、复杂 rebase、worktree 清理交给 `git-expert-operations` 流程并先建立恢复锚点。
+隔离工作区必须位于 `.worktrees/<task-slug>/`；保持任务文件集互不重叠。`main` 是唯一长期分支，工作分支使用 `feature/`、`fix/`、`docs/`、`chore/`、`test/` 或 `project-management/` 前缀，名称不含工具品牌。不要直接推 `main`，不要自行合并 PR。共享历史改写、force-with-lease、复杂 rebase、worktree 清理交给 `git-expert-operations` 流程并先建立恢复锚点。
 
 提交格式：`<type>(<scope>): <中文摘要>`，正文说明为什么，末尾用 `Closes #N` 或 `Refs #N`。每个 PR 必须关联同仓 issue，且是一个可独立验收、合并、回滚的能力闭环；代码变更 ≤1000 行、文档变更 ≤1500 行，排除锁文件和生成目录。合并时只使用 rebase merge；是否合并由人类伙伴决定。
 
