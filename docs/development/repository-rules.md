@@ -36,7 +36,7 @@
 
 ## 4. Git、PR 和 issue
 
-工作区创建前检查 git-dir / git-common-dir、`git check-ignore -v .worktrees/` 和现有 worktree；隔离目录使用 `.worktrees/<task-slug>/`。分支前缀是 `feature/`、`fix/`、`docs/`、`chore/` 或 `project-management/`。不要直接推 main，不要自行合并；分支保护要求线性历史、PR Fast Gate、批准和 rebase merge。
+工作区创建前检查 git-dir / git-common-dir、`git check-ignore -v .worktrees/` 和现有 worktree；隔离目录使用 `.worktrees/<task-slug>/`。分支前缀是 `feature/`、`fix/`、`docs/`、`chore/`、`test/` 或 `project-management/`（`test/` 对应提交类型与 issue kind 里的 `test`）。不要直接推 main，不要自行合并；分支保护要求线性历史、PR Fast Gate、批准和 rebase merge。
 
 执行任何 Git 操作前，先用 realpath 规范化 worktree 和目标路径，确认目标位于允许的 workspace 根目录内；拒绝 `..` 穿越、符号链接逃逸和未枚举的清理路径。涉及路径边界的实现必须有契约测试或可复制的人工检查，不能只依赖调用者自觉。
 
