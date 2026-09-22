@@ -11,13 +11,16 @@ pnpm test:mvp0            # 等价于 node --test tests/mvp0
 node --test tests/mvp0    # 直接跑，不需要凭据、不需要网络
 ```
 
-当前**必须失败**。标准输出是 7 条 `✖ 节点 N · …`，每条 `AssertionError` 都点名
-"节点「X」尚未实现"，例如：
+当前 7 条断言**全部通过**（链路已由切片栈实现）。当某个节点尚未实现时，标准输出是
+对应的 `✖ 节点 N · …`，每条 `AssertionError` 都点名"节点「X」尚未实现"，例如：
 
 ```text
 ✖ 节点 1 · 工作区：同一工作空间同一时刻只有一个 Planning 事实源（不变量 1 / tests/README §2.2）
   AssertionError [ERR_ASSERTION]: 节点「工作区」尚未实现：@harness-projects/core 尚未导出 composeCore。该断言保护的不变量：…
 ```
+
+这段形态仍然有效：删掉任一节点的实现，该节点就会以这个形状失败，而**不是**以
+`SyntaxError` / 导入错误失败（见 §2）。
 
 ## 2. 为什么失败信息是断言失败，而不是语法 / 导入错误
 
@@ -40,19 +43,23 @@ node --test tests/mvp0    # 直接跑，不需要凭据、不需要网络
 `chain.test.js` 同时钉下期望的 CoreApi 表面：`composeCore(deps)` → `{ queries, commands }`，方法名沿用
 capabilities 各 port 的动词。后续批次若不采用某个名字，必须显式改对应断言并说明原因。
 
-## 4. 为什么暂时不在 `pnpm verify` 里
+## 4. 它现在归谁跑
 
-两个要求直接冲突，分开是同时满足它们的唯一办法：
+`pnpm verify` **包含**它（`typecheck` + `test` + `test:mvp0`），但 `PR Fast Gate` **不包含**：
+`.github/workflows/ci.yml` 的 verify lane 跑的是 `pnpm typecheck` 与 `pnpm test` 两条命令，
+而不是 `pnpm verify`，所以这条轨道不在任何必需检查里。
 
-- issue #42 要求断言**因正确的原因失败**，且明确禁止 skip；
-- `main` 的分支保护要求必需检查全绿，而 `pnpm verify` 是 `PR Fast Gate` 的一部分。
+历史上这里写的是"暂时不在 `pnpm verify` 里"，理由是 issue #42 要求断言因正确的原因失败、
+而必需检查必须全绿——那时两者直接冲突。链路实现完成后冲突消失，`test:mvp0` 也就进了
+`pnpm verify`；留在门禁外的原因从"必然失败"变成了"`ci.yml` 没有调用 `pnpm verify`"。
+`Merge Gate` 车道（`.github/workflows/merge-gate.yml`）把它跑成一条**有结论**的检查，
+但那条车道目前是 advisory。
 
-把一条必然失败的断言放进 `pnpm verify`，等于让红叉常态化，随后所有人就会开始忽略它。所以它由
-`test:mvp0` 单独运行，`pnpm verify` 里只有 `tests/contract`、`tests/integration`、`tests/e2e` 三层。
-这条轨道因此**不归入 tests/README.md §1 的任何一层**，也不参与分支保护。
+## 5. 什么时候进入必需检查
 
-## 5. 什么时候提升进门禁
+两条路，都需要人类伙伴决定，且都还没有做：
 
-Batch C5 让 7 条断言全绿时（`packages/controller`、`packages/client` 落地，链路可从类型化 API 观测），
-把 `test:mvp0` 加进 `pnpm verify` 的 `test` 或 `verify` 脚本，这条轨道随之升级为必需检查；同时更新
-tests/README.md 的登记与 ExecPlan 的 Progress。
+1. 把 `Merge Gate` 加进分支保护——需先在该 head 上观察到连续两次绿（`docs/architecture/release-gates.md` §2.2）；
+2. 让 `ci.yml` 的 verify lane 改调 `pnpm verify`（或补一条 `pnpm test:mvp0`）——立刻进入已必需的 `PR Fast Gate`，代价是 PR 门禁变慢，而 issue #10 的 Scope 把"让 PR 门禁变慢"列为范围外。
+
+无论走哪条，都要同时更新 `tests/README.md` 的登记与相关 ExecPlan 的 Progress。

@@ -2,14 +2,17 @@
 
 ## 当前已经实施
 
-远端 main 当前有五类 workflow：
+远端 main 当前的 workflow 与门禁归属：
 
 | workflow | 触发与职责 | 门禁 |
 |---|---|---|
 | CI | pull_request、push main、手动运行；执行 install、typecheck、测试并发布 PR Fast Gate | PR Fast Gate 是唯一必需状态 |
+| Merge Gate | pull_request（不声明 base 过滤器）、push main；四条 lane 各跑一层测试并点名它保护的不变量，聚合 job 发布 Merge Gate | advisory；是否加入分支保护由人类伙伴决定 |
 | Issue policy | issue / PR 事件；检查标题、标签和 issue 关联 | advisory |
 | Rule checks | PR 事件；发布面和 PR 体量 | advisory |
 | Board invariants | 每日 schedule；读取 Project 工作流启停并与裁决表比较 | advisory；需要 PROJECTS_TOKEN |
+| Engineering state | pull_request_target（opened / reopened / ready_for_review / converted_to_draft / synchronize / closed）与 Engineering state signal 的 workflow_run；把 PR 生命周期写进看板的 `Engineering` 字段 | advisory；**不写 `Status`**（不变量 3） |
+| Engineering state signal | pull_request_review（submitted / dismissed）；只上报一个信号，由 Engineering state 消费 | advisory；`permissions: {}` |
 | GitHub review session | ready_for_review 的 pull_request_target；只转发 payload，不 checkout PR 代码；按 head 提交去重 | 不属于合并门禁 |
 
 Board invariants 只从默认分支按日运行，使用 Project token 读取九条内置 workflow，发现 unknown / missing / 状态偏离就失败；它不 checkout PR ref，也不进入分支保护。Review session 是特例：它运行在 self-hosted runner 上，默认分支 workflow 固定定义，权限为空，secret 只经 env 进入签名过程，响应体写 $RUNNER_TEMP。普通 PR 代码 lane 使用 pull_request；不得把 pull_request_target 用作执行不可信 PR 代码的入口。
@@ -59,6 +62,26 @@ CI workflow 的 action 必须 pin 到 40 位 commit；checkout 必须关闭 pers
 
 `CI` workflow 仍保留 `pull_request: branches: [main]`。它造成的是另一件事：非栈、base 非 `main` 的 PR 拿不到 `Verify` / `PR Fast Gate`（栈成员因为运行时 base 是 `main` 反而有）。放开它同时改变运行次数与门禁覆盖面，属于独立决策，尚未执行。
 
+### Merge Gate 的四条 lane，以及与 `CI` 的重复为什么是刻意的
+
+`.github/workflows/merge-gate.yml` 把四层测试各自放上一条 lane，每条 lane 点名它保护的不变量：
+
+| job | check 名 | 跑什么 | 保护的不变量 |
+|---|---|---|---|
+| `integration` | Merge Gate · Integration | `node scripts/run-test-layer.mjs tests/integration …` | 迁移可从空库重复执行、失败不留版本记录 |
+| `boundaries` | Merge Gate · Boundaries | `node scripts/run-test-layer.mjs tests/contract/package-boundaries.test.js …` | 依赖方向不反向、不跨层 |
+| `mvp0` | Merge Gate · MVP-0 | `node scripts/run-test-layer.mjs tests/mvp0 …` | 纵向链路每节点有断言，未实现节点必须失败并点名 |
+| `e2e` | Merge Gate · E2E | `node scripts/run-test-layer.mjs tests/e2e …` | 端到端链路与故障降级 |
+| `merge-gate` | Merge Gate | 不 checkout、不读 secrets，只汇总 `needs.*.result` | 任一 lane 未成功即失败 |
+
+`pnpm test` 已经跑过 integration、`package-boundaries.test.js` 与 e2e，所以这个 workflow 与 `CI` 有重复。重复的理由不是覆盖率，而是**判定对象不同**：`CI` 判定“这个 head 的代码是否可用”，`Merge Gate` 判定“这条不变量在候选 head 上是否被断言且非空”。因此重复面被刻意压到最小——只取 `package-boundaries.test.js` 一个文件，不复制其余契约测试（见下面“不得把同一组契约测试复制到多个 workflow”）。`tests/mvp0` 是唯一在 `CI` 里完全缺席的层，它在这里第一次进入门禁。
+
+空层判定放在 `scripts/run-test-layer.mjs`，不放在 YAML 里数文件：`node --test` 对“没有用例”退出 0，在 YAML 里 `find | wc -l` 只能判“有文件”，判不了“用例数非零”。脚本先数 `*.test.js` 文件，再解析 `node --test` 的汇总行，判“真正执行的用例数 = `tests` − `skipped` − `todo`”是否 ≥ 1；任何一步判不出来都 fail closed（exit 1 + `::error::`，并把被保护的不变量写进注解）。Node 26 实测：只有 `describe` 没有用例的文件汇总行是 `ℹ tests 0`，只有 `skip` 的文件是 `ℹ tests 1` / `ℹ skipped 1`，所以只看 `tests` 会把“整层被 skip 掉”读成绿的。
+
+`on.pull_request` 刻意不声明 `branches`：理由与 `Rule checks` 相同（见上一节）——本车道不依赖 `base_ref`，只依赖事件本身，声明过滤器只会让基线不是 `main` 的 PR 拿不到结论。`push` 只限 `main`，且 `concurrency.cancel-in-progress` 是 `${{ github.event_name == 'pull_request' }}`：合并到 `main` 的验证记录不得被后续合并取消（W5）。
+
+`Merge Gate` 目前是 advisory，不是分支保护里的必需检查。是否加入由人类伙伴决定，且加入前要在目标 head 上观察到连续两次绿（`docs/architecture/release-gates.md` §2.2）。本车道**不**改变 `PR Fast Gate` 的唯一必需状态，也不改 `ci.yml`。
+
 ## W1–W7
 
 详细判定和 fail-closed 退出码见 repository-rules.md。CI 必须使 workflow-check 通过后才宣称门禁完整。解析失败、未知 jobs 结构、无 workflow 文件和空 jobs 都是检查失败，不可当作“没有需要检查的内容”。
@@ -66,6 +89,8 @@ CI workflow 的 action 必须 pin 到 40 位 commit；checkout 必须关闭 pers
 ## 合并后的演进
 
 Merge queue / merge_group、integration、E2E 和 weekly regression 只有在仓库出现对应真实测试、耗时基线和稳定入口后才新增。新增 lane 先写 ExecPlan，证明它提供新的系统反馈；不得把同一组契约测试复制到多个 workflow 来制造覆盖率。
+
+integration 与 E2E 的前置条件现已成立：`tests/integration`、`tests/e2e` 各有用例文件，`pnpm verify` 是既有稳定入口，`Merge Gate` 车道按本节顺序（先 ExecPlan）落地。merge queue / merge_group 与 weekly regression 仍然没有对应事实（分支保护只允许 rebase merge，仓库没有 merge queue，也没有实测的慢测试），因此未新增。
 
 未来若启用 merge_group，复用 PR Fast Gate 的稳定聚合检查名，确保 required check 在 queue 中有状态上报。慢测和组合矩阵应放到非必需的 main / weekly workflow；不取消 main 的验证记录。self-hosted lane 需要隔离 workspace、临时目录、端口、数据库和子进程，并避免在长期 runner 上执行不可信 fork 代码。
 
