@@ -36,6 +36,7 @@
 | [2026-09-18-delivery-planning-and-board](exec-plan/active/2026-09-18-delivery-planning-and-board.md) | 交付规划与工作看板重整：重述原始交付 MVP、建立里程碑与迭代、拆分过大工作项、收敛看板自动化 | Batch 1–9 已完成；剩余人工项为两个 view 的分组设置（无法经 API 回读） |
 | [2026-09-21-rule-checks-api-base](exec-plan/active/2026-09-21-rule-checks-api-base.md) | 判定输入改用 PR API 的对象对：判定固定到 `(base_sha, head_sha)` 两个不可变提交，含解析器失败策略与检查 job 的一致性 | Active |
 | [2026-09-21-merge-gate-layers](exec-plan/active/2026-09-21-merge-gate-layers.md) | Merge Gate 车道：integration / 包边界 / MVP-0 / E2E 四层各自成为一条 lane，空层与零用例层响亮失败 | Active |
+| [2026-09-22-engineering-merged-state](exec-plan/active/2026-09-22-engineering-merged-state.md) | 让合并事件真正写进 `Engineering`：修正 GraphQL 枚举误用导致的合并投影不可达，并补上按日的字段漂移观察 | Active |
 
 ### Completed
 
