@@ -17,7 +17,8 @@ test('状态只能经唯一构造器产生，且不能写入规划状态', () =>
 
 test('当前 PR snapshot 决定状态，事件 payload 不参与判定', () => {
   const cases = [
-    [{ state: 'CLOSED', merged: true, isDraft: false, reviewDecision: 'CHANGES_REQUESTED' }, { kind: 'set', value: 'Merged' }],
+    [{ state: 'MERGED', merged: true, isDraft: false, reviewDecision: null }, { kind: 'set', value: 'Merged' }],
+    [{ state: 'MERGED', merged: true, isDraft: false, reviewDecision: 'APPROVED' }, { kind: 'set', value: 'Merged' }],
     [{ state: 'CLOSED', merged: false, isDraft: false, reviewDecision: 'APPROVED' }, { kind: 'clear' }],
     [{ state: 'OPEN', merged: false, isDraft: true, reviewDecision: 'APPROVED' }, { kind: 'clear' }],
     [{ state: 'OPEN', merged: false, isDraft: false, reviewDecision: 'CHANGES_REQUESTED' }, { kind: 'set', value: 'Changes requested' }],
@@ -31,13 +32,57 @@ test('当前 PR snapshot 决定状态，事件 payload 不参与判定', () => {
   }
 })
 
+test('接受的 PR state 集合精确等于 GitHub GraphQL PullRequestState 枚举', () => {
+  // 这条不是机械可推导的（离线拿不到 schema），所以它是一条**钉死**：把接受集合
+  // 改成别的字面量，必须有人解释为什么。
+  //
+  // 它针对的正是 2026-09-22 的故障：当时接受集合是 ['OPEN','CLOSED']——REST 的
+  // 形态——而 GraphQL 对已合并 PR 返回 'MERGED'。于是产出 `Merged` 的分支不可达，
+  // 合并事件上的 reconcile 每次都失败，而其余用例全绿（issue #110）。
+  assert.deepEqual([...engineering.PR_STATES], ['OPEN', 'CLOSED', 'MERGED'])
+})
+
+test('接受的每个 PR state 都有决策，不存在"接受但未处理"的取值', () => {
+  // 键集合与 PR_STATES 精确相等，且每个取值都能走出一条决策路径。
+  //
+  // 这条单独防不住上面的故障（当时两个取值恰好都有决策），所以它与"枚举域钉死"
+  // 必须成对存在：枚举域那条防"漏接受"，这条防"漏处理"。
+  const representatives = {
+    OPEN: { state: 'OPEN', merged: false, isDraft: false, reviewDecision: null },
+    CLOSED: { state: 'CLOSED', merged: false, isDraft: false, reviewDecision: null },
+    MERGED: { state: 'MERGED', merged: true, isDraft: false, reviewDecision: null },
+  }
+  assert.deepEqual([...engineering.PR_STATES].sort(), Object.keys(representatives).sort())
+
+  for (const state of engineering.PR_STATES) {
+    const decision = engineering.stateForSnapshot(representatives[state])
+    assert.ok(
+      decision.kind === 'set' || decision.kind === 'clear',
+      `state ${state} 必须走出一条决策路径，实际为 ${JSON.stringify(decision)}`,
+    )
+  }
+})
+
+test('state 与 merged 矛盾时响亮失败，不挑一个信', () => {
+  // 两者矛盾说明枚举语义漂移。旧代码在 'CLOSED' + merged:true 上按 REST 语义
+  // "蒙对"成 Merged——正是这条暗路让故障藏了两天。
+  assert.throws(
+    () => engineering.stateForSnapshot({ state: 'CLOSED', merged: true, isDraft: false, reviewDecision: null }),
+    /GraphQL 枚举语义漂移/,
+  )
+  assert.throws(
+    () => engineering.stateForSnapshot({ state: 'MERGED', merged: false, isDraft: false, reviewDecision: null }),
+    /MERGED 但 merged 不是 true/,
+  )
+})
+
 test('未知 snapshot 枚举 fail closed', () => {
   assert.throws(
     () => engineering.stateForSnapshot({ state: 'OPEN', merged: false, isDraft: false, reviewDecision: 'PENDING' }),
     /未知 reviewDecision/,
   )
   assert.throws(
-    () => engineering.stateForSnapshot({ state: 'MERGED', merged: true, isDraft: false, reviewDecision: null }),
+    () => engineering.stateForSnapshot({ state: 'DRAFT', merged: false, isDraft: false, reviewDecision: null }),
     /未知 PR state/,
   )
 })

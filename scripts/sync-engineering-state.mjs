@@ -7,6 +7,24 @@ export const OWNER = 'SingularityKChen'
 export const PROJECT_NUMBER = 10
 export const FIELD_NAME = 'Engineering'
 export const STATES = Object.freeze(['PR open', 'Changes requested', 'Approved', 'Merged'])
+
+/**
+ * `stateForSnapshot` 接受的 PR state 集合——即 GitHub GraphQL `PullRequestState`
+ * 枚举的**完整**取值。
+ *
+ * 这里曾经写成 `['OPEN', 'CLOSED']`，那是 **REST** 的形态（REST 的已合并 PR 返回
+ * `state: "closed"` 配 `merged: true`）。GraphQL 不是这样：已合并的 PR 返回
+ * `state: "MERGED"` 且 `merged: true`。于是 `MERGED` 被当成未知枚举抛错，产出
+ * `Merged` 的那条分支永远不可达——2026-09-22 的实测：合并事件上的 reconcile 三次
+ * 全部失败于 `未知 PR state：MERGED`，看板上没有任何条目由本自动化写进过 `Merged`
+ * （见 issue #110）。
+ *
+ * 因此这个常量是"我们认识哪些 state"的唯一声明，由
+ * `tests/contract/engineering-state.test.js` 钉死为字面量并穷举验证：改动它必须是
+ * 一次有意识的决定，而不是一次静默的编辑。
+ */
+export const PR_STATES = Object.freeze(['OPEN', 'CLOSED', 'MERGED'])
+
 const constructedSets = new WeakSet()
 
 export function setEngineeringState(value) {
@@ -19,7 +37,7 @@ export function setEngineeringState(value) {
 const CLEAR = Object.freeze({ kind: 'clear' })
 
 export function stateForSnapshot(snapshot) {
-  if (!snapshot || !['OPEN', 'CLOSED'].includes(snapshot.state)) {
+  if (!snapshot || !PR_STATES.includes(snapshot.state)) {
     throw new Error(`未知 PR state：${String(snapshot?.state)}`)
   }
   if (typeof snapshot.merged !== 'boolean' || typeof snapshot.isDraft !== 'boolean') {
@@ -29,7 +47,19 @@ export function stateForSnapshot(snapshot) {
     throw new Error(`未知 reviewDecision：${String(snapshot.reviewDecision)}`)
   }
 
-  if (snapshot.state === 'CLOSED') return snapshot.merged ? setEngineeringState('Merged') : CLEAR
+  // `state` 与 `merged` 必须互相印证。两者矛盾时不能挑一个信——那正是本次故障的
+  // 形状：旧代码只认 REST 的 `CLOSED` + `merged: true`，于是在 GraphQL 的 `MERGED`
+  // 上抛错，又在该组合上按 REST 语义"蒙对"。两种偏差都应当是响亮的错误。
+  if (snapshot.state === 'MERGED') {
+    if (snapshot.merged !== true) throw new Error('PR state 为 MERGED 但 merged 不是 true')
+    return setEngineeringState('Merged')
+  }
+  if (snapshot.state === 'CLOSED') {
+    if (snapshot.merged === true) {
+      throw new Error('PR state 为 CLOSED 但 merged 为 true：GraphQL 枚举语义漂移，拒绝按 REST 语义猜测')
+    }
+    return CLEAR
+  }
   if (snapshot.merged) throw new Error('OPEN PR 不得同时标记为 merged')
   if (snapshot.isDraft) return CLEAR
   if (snapshot.reviewDecision === 'CHANGES_REQUESTED') return setEngineeringState('Changes requested')

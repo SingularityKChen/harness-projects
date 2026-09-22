@@ -22,6 +22,33 @@
 
 `Status` 只有一个例外允许自动化写入：`Item added to project`（人把条目加入看板时，自动给一个 `Todo` 默认值）。这不算引入工程信号，因为触发它的事件本身就是人的规划动作——「把条目上板」——工作流只是机械地把这个已经发生的人类决定转成字段默认值，没有从任何工程事件（PR、CI、review）推断规划状态。除此之外，`Status` 的每一次变化都应当来自人。
 
+### 2.1 `Engineering` 的投影：当前 PR 快照，不是事件历史
+
+`Engineering` 由自动化拥有，但它的取值**不是**事件累积出来的。PR / review 事件只回答「现在值得重算一次」，不回答「当前状态是什么」：一条 `approved` 可能已被新提交作废，一条 `commented` 也不能证明批准消失。因此每一次 reconcile 都重新读取 PR 的**当前快照** `(state, merged, isDraft, reviewDecision)`，再由唯一受控构造器投影出字段值。
+
+投影表（`scripts/sync-engineering-state.mjs` 的 `stateForSnapshot` 是唯一实现）：
+
+| PR 快照 | `Engineering` |
+|---|---|
+| `state = MERGED`（且 `merged = true`） | `Merged` |
+| `state = OPEN`，`reviewDecision = CHANGES_REQUESTED` | `Changes requested` |
+| `state = OPEN`，`reviewDecision = APPROVED` | `Approved` |
+| `state = OPEN`，其余已知情形（含 `REVIEW_REQUIRED` 与 `null`） | `PR open` |
+| `state = OPEN` 且 `isDraft = true` | 清空 |
+| `state = CLOSED`（且 `merged = false`） | 清空 |
+
+三条 fail-closed 约束：
+
+- **接受集合是 GitHub GraphQL `PullRequestState` 的完整枚举** `OPEN | CLOSED | MERGED`。未知取值一律失败，不猜测。
+- **`state` 与 `merged` 必须互相印证**：`MERGED` 而 `merged ≠ true`、或 `CLOSED` 而 `merged = true`，都是枚举语义漂移，响亮失败。
+- **`OPEN` 不得配 `merged = true`**：两者矛盾时同样失败，不挑一个信。
+
+第二条不是形式主义。2026-09-22 实测到一次：接受集合当时写成 `['OPEN','CLOSED']`——**REST** 的形态，REST 的已合并 PR 返回 `state: "closed"` 配 `merged: true`——而本仓库用的是 GraphQL，它对已合并 PR 返回 `state: "MERGED"`。于是产出 `Merged` 的分支永远不可达，**每一次合并事件上的 reconcile 都失败**，看板停在 `PR open`；44 个条目里 25 个与真值不符，唯一的 `Merged` 是人手动设的（issue #110）。当时若容忍 `CLOSED` + `merged: true` 按 REST 语义「蒙对」，这条暗路会让下一次真正的枚举漂移继续静默通过——所以它必须是错误，而不是兼容分支。
+
+**漂移由观察覆盖，不由约定覆盖。** 上面那次故障里，失败发生在合并**之后**（拦不住合并）、不是必需检查、`Board workflow invariants` 只看工作流启停，而契约测试断言的又是错的行为——四层防线全漏。现在补上的那一层是 `Board invariants` 的 `engineering-field` job：按日把每个条目的 `Engineering` 与「引用它的 PR」的真值比较。判定规则见 `docs/development/ci.md`；判定与投影的纯函数实现在 `scripts/engineering-drift.mjs`，可离线核对。
+
+**这条轴与 `Status` 无关。** 合并 PR 只写 `Engineering`，不写 `Status`——`Item closed → Status = Done` 因此被裁决为关闭（见 §5）。一个已合并的工作项停在 `Status = Todo` 是**正常**的：它表示规划所有者还没有接受这项工作完成。
+
 ## 3. 不变量 3 在看板上如何被满足
 
 `AGENTS.md` §1.3 第 3 条：
@@ -111,7 +138,7 @@
 
 - **Agent 可以写哪些规划状态、一条 `blocked-by` 边算不算有效**——属于 issue #47，交付载体是 `AGENTS.md` §10 的增补，不是本文档。
 - **合并队列的顺序与解冲突记录**——属于 issue #46，交付载体是 `docs/project-management/merge-queue.md`，不是本文档。
-- **运行时可观测性检查**（读真实看板、需要 `PROJECTS_TOKEN`，发现偏离即报警）——属于 issue #45 的运行时半边，交付载体是 PR #61 的 advisory workflow：它负责取数与接线，判定逻辑复用本文档 §5 的可执行形式。本文档与 `scripts/board-workflow-check.mjs` 只提供离线判定的纯函数，不发起任何网络请求、不提供 CLI，因此可以留在 `pnpm verify` 这条离线必需检查里。
+- **运行时可观测性检查**（读真实看板、需要 `PROJECTS_TOKEN`，发现偏离即报警）——属于 issue #45 的运行时半边，交付载体是 PR #61 的 advisory workflow：它负责取数与接线，判定逻辑复用本文档 §5 的可执行形式。本文档与 `scripts/board-workflow-check.mjs` 只提供离线判定的纯函数，不发起任何网络请求、不提供 CLI，因此可以留在 `pnpm verify` 这条离线必需检查里。`Engineering` 字段漂移的观察者是同一个 workflow 的第二个 job（`engineering-field`），判定纯函数在 `scripts/engineering-drift.mjs`，规则见 §2.1 与 `docs/development/ci.md`。
 - **`Milestone` 与 `Iteration` 两条轴是否正交、`M2`/`M3` 两个里程碑的排序是否需要对调**——这是 issue #48 提出的另外两项连带诉求，与「`Status` 是什么」不是同一条根因链，本文档不处理，留待该 issue 自己的批次。
 - **`Kind` / `Area` / `Gate` / `Priority` / `Iteration` 等其余看板字段的完整清单与字段 / 选项 ID**——权威表述在 `docs/project-management/README.md`。该文件尚未同步 `delivery-planning-and-board.md` Batch 2 / Batch 9 新增的字段，这是一个已知缺口，不在本文档的修复范围内。
 - **实际去网页界面切换任何工作流开关**——GitHub GraphQL 没有启停内置工作流的 mutation（只有 `deleteProjectV2Workflow`），只能人工操作。本文档不代替那个操作，只定义「开关应该处在什么状态」，供 `scripts/board-workflow-check.mjs` 核对实际状态是否漂移。
