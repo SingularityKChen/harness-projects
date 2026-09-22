@@ -237,6 +237,30 @@ test('countTestFiles 不把 node_modules 里的用例算进这一层', () => {
   }
 });
 
+test('countTestFiles 只认 *.test.js：这是刻意的窄口径，不是与 node --test 等价', () => {
+  // `node --test` 还会执行 `*-test.js`、`*_test.js`、`test-*.js` 以及 `test/` 下的
+  // `*.js`，而本计数不认这些命名。方向是安全的：只含这类命名的层被报成"空层"并
+  // exit 1（假红），不会把"这一层没有证据"读成通过。这条用例把这个口径**钉住**，
+  // 免得日后有人把它当成与 `node --test` 的完整发现规则等价，在"报空层"与
+  // "命名不匹配"之间做出错误诊断。
+  const fixture = withLayer({
+    'a.test.js': '// 唯一被计入的命名\n',
+    'b-test.js': '// node --test 会跑，本计数不认\n',
+    'c_test.js': '// node --test 会跑，本计数不认\n',
+    'test-d.js': '// node --test 会跑，本计数不认\n',
+    'test/e.js': '// node --test 会跑，本计数不认\n',
+  });
+  try {
+    assert.equal(
+      countTestFiles(fixture.root),
+      1,
+      '只有 *.test.js 计入；放宽命名时必须同时更新这条用例与 countTestFiles 的注释',
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // 真实层：Merge Gate 的四条 lane 各自非空且全绿
 // ---------------------------------------------------------------------------

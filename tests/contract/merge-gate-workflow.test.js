@@ -153,6 +153,29 @@ test('MVP-0 lane 声明的不变量被钉住：tests/mvp0 必须仍然断言 7 �
       `节点 ${node.number} 的标题必须点名它保护的不变量，实际：${node.title}`,
     )
   }
+
+  // 标题只证明"这条用例存在"，不证明它**断言**了什么。lane 对外声明的不变量是
+  // 「纵向链路每节点有断言」，所以用例体必须至少调用一次断言辅助函数；否则把某个
+  // 节点改成空实现（保留标题、删掉断言）仍然全绿，而 lane 打印的不变量会变成假话。
+  // 这里按索引切出每条的用例体，而不是用正则回溯——标题里含全角括号与斜杠，
+  // 靠 `[^']*` 之外的懒惰匹配容易在空体上假通过。
+  const starts = [...sources.matchAll(/^test\(\s*'(节点 (\d+) · [^']*)'/gm)].map((m) => ({
+    number: Number(m[2]),
+    bodyStart: m.index + m[0].length,
+    start: m.index,
+  }));
+  assert.equal(starts.length, 7, '节点标题与用例体必须一一对应，实际切不出 7 段');
+  for (let index = 0; index < starts.length; index += 1) {
+    const end = index + 1 < starts.length ? starts[index + 1].start : sources.length;
+    const body = sources.slice(starts[index].bodyStart, end);
+    assert.ok(body.trim().length > 0, `节点 ${starts[index].number} 的用例体不得为空`);
+    assert.match(
+      body,
+      /\b(?:assert|requireNode|needMethod)\b/,
+      `节点 ${starts[index].number} 的用例体必须至少调用一次断言辅助函数（assert / requireNode / needMethod），` +
+        `否则"每节点有断言"这条不变量没有被这条用例兑现`,
+    );
+  }
 });
 
 test('四条 lane 之间没有 needs：各自独立并行，一条慢不拖住其它层', () => {
@@ -197,6 +220,89 @@ test('聚合 job 叫 Merge Gate，needs 覆盖全部四条 lane，且任一 lane
   assert.match(failStep.run, /exit 1/);
 });
 
+// ---------------------------------------------------------------------------
+// 聚合 job 的判定行为
+// ---------------------------------------------------------------------------
+
+const NEEDS_RESULTS = ['success', 'failure', 'cancelled', 'skipped'];
+
+/**
+ * 计算 needs 结果数组的笛卡尔积：4 条 lane × 4 种结果 = 256 种组合。
+ * 只做字符串拼接，不需要递归或生成器。
+ */
+function cartesian(lanes, results) {
+  let combos = [[]];
+  for (let i = 0; i < lanes.length; i += 1) {
+    combos = combos.flatMap((prefix) => results.map((result) => [...prefix, result]));
+  }
+  return combos;
+}
+
+/**
+ * 只实现本 workflow 真正用到的那一小撮 GitHub Actions 表达式语义：
+ * `contains(<数组或字符串>, <标量>)`、`join(<数组>, <分隔符>)`、`!cancelled()` 与 `||`。
+ * 目的不是做一个通用求值器，而是让"哪条 lane 失败时聚合 job 会红"这个判定可以被
+ * 真实执行——字符串包含断言做不到这件事。
+ */
+function evaluateFailCondition(expression, results) {
+  const cancelled = results.includes('cancelled');
+  return expression
+    .split('||')
+    .map((clause) => clause.trim())
+    .some((clause) => {
+      if (clause === '!cancelled()') return !cancelled;
+      const call = /^contains\(\s*(.+?)\s*,\s*(.+?)\s*\)$/.exec(clause);
+      assert.ok(call, `本求值器不认识的表达式片段：${clause}`);
+      const subject = call[1];
+      const needle = call[2].replace(/^'|'$/g, '');
+      if (subject === 'needs.*.result') return results.includes(needle);
+      const joined = /^join\(\s*needs\.\*\.result\s*,\s*'.*?'\s*\)$/.exec(subject);
+      assert.ok(joined, `本求值器不认识的表达式片段：${subject}`);
+      return results.join(',').includes(needle);
+    });
+}
+
+test('聚合 job 的失败条件被真正执行：任一 lane 未成功即失败，四条全绿才放行', () => {
+  const aggregate = jobOf(AGGREGATE);
+
+  // 判定成立的前提：lane 失败时聚合 job 仍要给出结论。若 `if` 不再包含
+  // `!cancelled()`，job 会因 needs 失败被跳过，"聚合 job 变红"这件事就不会发生
+  // ——合并结论会从"失败"变成"没有状态"。
+  assert.match(
+    String(aggregate.if),
+    /cancelled\(\)/,
+    '聚合 job 的 if 必须让它在上游失败时仍然运行，否则失败会退化成"没有状态"',
+  );
+
+  const failStep = stepsOf(AGGREGATE).find(
+    (step) => typeof step.if === 'string' && step.if.includes('contains(needs.*.result'),
+  );
+  assert.ok(failStep, '期望聚合 job 有一条按 needs 结果判失败的步骤');
+  assert.match(failStep.run, /exit 1/, '失败步骤必须以非零退出码结束，否则 job 仍是绿的');
+
+  // 汇总步骤排在失败步骤之后，任何一条 lane 未成功时都不可达——顺序反过来会
+  // 让"已汇总"出现在失败之前。
+  const steps = stepsOf(AGGREGATE);
+  assert.equal(
+    steps.indexOf(failStep),
+    steps.length - 2,
+    '按 needs 结果判失败的步骤必须是聚合 job 的倒数第二步（其后只允许汇总步骤）',
+  );
+
+  const combos = cartesian(LANE_IDS, NEEDS_RESULTS);
+  assert.equal(combos.length, 256, '4 条 lane × 4 种结果应为 256 种组合');
+
+  for (const results of combos) {
+    const shouldFail = results.some((result) => result !== 'success');
+    assert.equal(
+      evaluateFailCondition(failStep.if, results),
+      shouldFail,
+      `needs 结果为 [${results.join(', ')}] 时，期望"${shouldFail ? '失败' : '放行'}"；` +
+        `判定表达式 ${failStep.if}`,
+    );
+  }
+});
+
 test('聚合 job 不 checkout、不读 secrets：它只汇总结果，不执行候选 head 的代码', () => {
   assert.equal(usesList(jobOf(AGGREGATE)).length, 0, '聚合 job 不应有任何 uses（尤其不 checkout）');
   // 注释里提到 secrets 不算数，因此按解析后的结构判定。
@@ -222,6 +328,16 @@ test('on.pull_request 不声明 branches 过滤器：基线不是 main 的 PR �
 
 test('on.push 只限 main', () => {
   assert.deepEqual(WORKFLOW.on?.push?.branches, ['main']);
+});
+
+test('声明 workflow_dispatch：连续两次绿的第二次运行必须能由人主动取', () => {
+  // `docs/architecture/release-gates.md` §2.2 把"目标 head 上连续两次运行均为绿"
+  // 写成加入分支保护的前置条件。没有这个入口时，第二次运行只能靠重跑同一个 job，
+  // 不能由人在选定 head 上主动取一次。
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(WORKFLOW.on ?? {}, 'workflow_dispatch'),
+    '期望 on.workflow_dispatch 存在，否则 §2.2 的"连续两次绿"没有可执行的取证入口',
+  );
 });
 
 test('concurrency 显式声明取消策略，且 push main 时不取消进行中的验证记录', () => {
