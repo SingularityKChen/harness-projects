@@ -66,11 +66,11 @@ R1 本身不得由 LLM 判定（`AGENTS.md` §1.1 第 5 条）；agent 只能提
 | 9 | 能力缺失时 Core 必须拒绝命令 | `AGENTS.md` §1.1 第 5 条；`tests/README.md` §2 第 6 类（Provider 能力契约） | 断言"provider 返回 `not_supported` 时命令结果为拒绝，且不产生任何本地写入"；关键词"缺能力" |
 | 10 | Start Work 重启后可恢复 | `tests/README.md` §2 第 5 类（跨域编排）；`AGENTS.md` §9 对持久化与恢复的扩大验证要求 | 断言"用同一份 Storage 内容新建 core 后，仍能按工作项与仓库查到执行上下文"；关键词"重启后" |
 
-**当前结论（本文件所在 head 上）**：`tests/mvp0/` 不存在；`tests/e2e/` 与 `tests/integration/` 下没有 `.test.js`（只有 README）；`tests/contract/` 下现有的 6 个用例文件全部是仓库流程与包边界测试，没有一条断言上表 10 项中的任何一项。
+**当前结论（本文件所在 head 上）**：`tests/mvp0/` 有 1 个 `.test.js`；`tests/e2e/` 有 8 个、`tests/integration/` 有 1 个 `.test.js`；`tests/contract/` 有 21 个用例文件。当前这些用例仍主要覆盖仓库流程、包边界与纵向链路，不能据此声称上表 10 项已经逐条完成断言核对。
 
-`tests/` 内出现相关词的地方只有测试分层的说明文字（`tests/README.md`、`tests/e2e/README.md`、`tests/integration/README.md`）与无关用例名，不构成判定证据。因此第 3 条目前是**无法判定**，按 §1 等同于**不满足**。
+上述文件计数只说明测试分层已经存在，不等于上表 10 项已逐条完成断言核对。因此第 3 条目前仍是**无法判定**，按 §1 等同于**不满足**。
 
-当契约栈与切片栈落地后，对每一条重跑上面的两步即可更新结论：任何一条找不到用例，或用例不通过，第 3 条即为不满足；只有 10 条全部被找到且全部通过，第 3 条才满足。
+对每一条仍需重跑上面的两步：找到实际断言该不变量的用例，并确认它在无凭据、无网络下通过；任何一条找不到用例，或用例不通过，第 3 条即为不满足。只有 10 条全部被找到且全部通过，第 3 条才满足。
 
 ### 2.2 第 4、5 条的"稳定"与空层假绿
 
@@ -108,7 +108,9 @@ exit $rc
 
 空层的 `node --test` 输出是 `ℹ tests 0` 且退出 0；上面第 2 步把"用例数为 0"判为失败，因此"目录存在但没有用例"不再能通过第 5 条。同一组检查也适用于第 2 条：`tests/integration` 里没有用例时，"迁移可通过且可重复"无从判定，空层的 exit 0 同样不是证据。
 
-**当前结论（本文件所在 head 上）**：`find tests/integration tests/e2e -name '*.test.js' | wc -l` 为 0，§2.2 第 5 条的两条命令都失败；同时 `Merge Gate` 在 `.github/workflows/` 中还不是一个 lane（`docs/development/ci.md` 的"合并后的演进"记录它要等 integration / E2E 出现真实测试与稳定入口后才新增）。因此第 5 条是**无法判定**，按 §1 等同于**不满足**。第 4 条只有在存在 open PR 时才能在目标 head 上用 §2.2 的命令回读；本地推断与"上一次跑过"都不算证据。
+这段手工脚本现在有机械等价物：`Merge Gate · Integration` 与 `Merge Gate · E2E` 两条 lane 通过 `scripts/run-test-layer.mjs` 做同一组判定，并且更严——它要求"真正执行的用例数 = `tests` − `skipped` − `todo`" ≥ 1，因此整层被 `skip` 或 `todo` 消音时同样失败。有 CI 结论时优先读这两条 check；上面的命令是在没有 CI 结论（例如本地复核某个 head）时的手工复现。
+
+**当前结论（本文件所在 head 上）**：两个层都有用例文件——`find tests/integration tests/e2e -name '*.test.js' | wc -l` 为 9（`tests/integration` 1 个、`tests/e2e` 8 个），逐层运行时 `tests/integration` 为 `ℹ tests 5` / `ℹ fail 0`、`tests/e2e` 为 `ℹ tests 38` / `ℹ fail 0`，两者退出码都是 0，所以 §2.2 第 5 条的两条命令现在都通过。`Merge Gate` 现在是一个 lane：`.github/workflows/merge-gate.yml` 有四条执行 lane（`Merge Gate · Integration` / `Merge Gate · Boundaries` / `Merge Gate · MVP-0` / `Merge Gate · E2E`）与一个聚合 job `Merge Gate`，空层与零用例层由 `scripts/run-test-layer.mjs` 判失败；`docs/development/ci.md` 记录了它与 `CI` 的重复为什么是刻意的。因此第 5 条的"两层非空且全绿"部分**满足**，但"目标 head 上连续两次运行均为绿"必须在目标 head 上用上面的回读命令确认——本文件所在 head 的 CI 结论只能从该 head 的运行记录读，本地推断与"上一次跑过"都不算证据。第 4 条同样只有在存在 open PR 时才能回读。
 
 ## 3. 提前终止条件
 
