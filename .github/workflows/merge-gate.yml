@@ -19,6 +19,9 @@ on:
   pull_request:
   push:
     branches: [main]
+  # 手动触发：`release-gates.md` §2.2 要求把本车道加入分支保护前，在目标 head 上
+  # 观察到连续两次绿。没有这个入口时第二次运行只能靠 job 重跑，不能由人主动取一次。
+  workflow_dispatch:
 
 concurrency:
   group: merge-gate-${{ github.ref }}
