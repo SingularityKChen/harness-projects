@@ -1,0 +1,137 @@
+name: Merge Gate
+
+# 合并阶段门禁（issue #10）。四条 lane 各自跑一层测试，并点名它保护的不变量；
+# 一个聚合 job 发布 check 名 `Merge Gate`。
+#
+# 它是**新增**车道：不改 `.github/workflows/ci.yml`，也不改变 `PR Fast Gate` 是
+# 分支保护唯一必需检查这件事（AGENTS.md §9）。是否把 `Merge Gate` 加进分支保护是
+# 仓库设置，属于人类伙伴的动作，不写在这里。
+#
+# 与 `ci.yml` 的重复是刻意的、也是有限的：`ci.yml` 判定"PR 代码是否可用"，本车道
+# 判定"这条不变量在候选 head 上是否被断言且非空"。因此只取 `package-boundaries.test.js`
+# 一个文件，不复制其余契约测试（`docs/development/ci.md` 禁止用重复跑制造覆盖率）。
+on:
+  # 刻意不声明 `branches`：该过滤器同时决定 `base_ref` 的取值（见 `docs/development/ci.md`
+  # 「Rule checks 的判定基线不由触发器决定」）。本车道不依赖 `base_ref`，只依赖事件本身，
+  # 声明过滤器只会让基线不是 `main` 的 PR 拿不到结论。
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: merge-gate-${{ github.ref }}
+  # PR 上取消旧运行是对的；合并到 main 的验证记录不可被后续合并取消（W5）。
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # 迁移可从空库重复执行、失败不留版本记录（release-gates.md §2 第 2 条）。
+  integration:
+    name: Merge Gate · Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # 版本来自 package.json 的 packageManager 字段，避免两处漂移。
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 迁移可从空库重复执行、失败不留版本记录
+        run: node scripts/run-test-layer.mjs tests/integration "迁移可从空库重复执行、失败不留版本记录"
+
+  # 依赖方向不反向、不跨层（AGENTS.md §2，由 tests/contract/package-boundaries.test.js 保证）。
+  boundaries:
+    name: Merge Gate · Boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 依赖方向不反向、不跨层
+        run: node scripts/run-test-layer.mjs tests/contract/package-boundaries.test.js "依赖方向不反向、不跨层"
+
+  # 纵向链路每节点有断言，未实现节点必须失败并点名（tests/mvp0/README.md、issue #42）。
+  mvp0:
+    name: Merge Gate · MVP-0
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 纵向链路每节点有断言，未实现节点必须失败并点名
+        run: node scripts/run-test-layer.mjs tests/mvp0 "纵向链路每节点有断言，未实现节点必须失败并点名"
+
+  # 端到端链路与故障降级（tests/README.md §1、§3）。
+  e2e:
+    name: Merge Gate · E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 端到端链路与故障降级
+        run: node scripts/run-test-layer.mjs tests/e2e "端到端链路与故障降级"
+
+  # 聚合 job：与 `ci.yml` 的 `fast-gate` 同形——不 checkout、不读 secrets，
+  # 只汇总 needs 的结果。这样增删 lane 不会改变它，也不会让"发布结论"的 job
+  # 执行不可信代码。
+  merge-gate:
+    name: Merge Gate
+    needs: [integration, boundaries, mvp0, e2e]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 任一 lane 未成功则失败
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          echo "::error::Merge Gate：以下 lane 未成功：${{ join(needs.*.result, ', ') }}"
+          exit 1
+
+      - name: 汇总
+        run: |
+          echo "Merge Gate：四条 lane 全部成功（${{ join(needs.*.result, ', ') }}）"
