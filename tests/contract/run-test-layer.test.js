@@ -221,6 +221,22 @@ test('countTestFiles 对目录与单个用例文件都给出一致的计数', ()
   }
 });
 
+test('countTestFiles 不把 node_modules 里的用例算进这一层', () => {
+  // `node --test <dir>` 自己会跳过 node_modules，而 readdirSync 的递归不会。
+  // 两边口径不一致时，某一层一旦长出 fixture 依赖，计数就会把依赖包里的用例
+  // 算进来——方向是"多算"，会让空层判定假绿。
+  const fixture = withLayer({
+    'a.test.js': '// 空文件\n',
+    'node_modules/dep/index.test.js': '// 依赖包自带的用例\n',
+    'nested/node_modules/dep/nested.test.js': '// 嵌套依赖\n',
+  });
+  try {
+    assert.equal(countTestFiles(fixture.root), 1, 'node_modules 下的 *.test.js 不得计入');
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // 真实层：Merge Gate 的四条 lane 各自非空且全绿
 // ---------------------------------------------------------------------------

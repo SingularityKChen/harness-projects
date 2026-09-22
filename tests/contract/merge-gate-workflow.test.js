@@ -119,6 +119,42 @@ test('每条 lane 指向的层真实存在且至少有一个用例文件（空�
   }
 });
 
+test('MVP-0 lane 声明的不变量被钉住：tests/mvp0 必须仍然断言 7 个链路节点', () => {
+  // lane 的名字是「纵向链路每节点有断言，未实现节点必须失败并点名」——那句话是它
+  // 向人承诺的不变量，但 run-test-layer 只强制「用例数 ≥ 1」。没有这条测试，把
+  // chain.test.js 从 7 条削成 1 条平凡通过的用例，lane 依旧全绿，而它自己打印的
+  // 不变量会静默变成假话。节点清单是这条 lane 的判定对象，所以在这里钉住。
+  const layerDir = path.join(REPO_ROOT, 'tests/mvp0');
+  const sources = fs
+    .readdirSync(layerDir)
+    .filter((name) => name.endsWith('.test.js'))
+    .map((name) => fs.readFileSync(path.join(layerDir, name), 'utf8'))
+    .join('\n');
+
+  const nodeTitles = [...sources.matchAll(/^test\(\s*'(节点 (\d+) · [^']*)'/gm)].map((m) => ({
+    number: Number(m[2]),
+    title: m[1],
+  }))
+
+  assert.equal(
+    nodeTitles.length,
+    7,
+    `tests/mvp0 必须恰好断言 7 个链路节点，实际 ${nodeTitles.length} 条：${JSON.stringify(nodeTitles.map((n) => n.number))}`,
+  )
+  assert.deepEqual(
+    nodeTitles.map((n) => n.number),
+    [1, 2, 3, 4, 5, 6, 7],
+    '节点编号必须连续且完整——删掉中间一个节点会让链路少一跳而 lane 仍绿',
+  )
+  for (const node of nodeTitles) {
+    assert.match(
+      node.title,
+      /不变量|tests\/README|AGENTS\.md|ExecPlan/,
+      `节点 ${node.number} 的标题必须点名它保护的不变量，实际：${node.title}`,
+    )
+  }
+});
+
 test('四条 lane 之间没有 needs：各自独立并行，一条慢不拖住其它层', () => {
   for (const lane of LANES) {
     assert.equal(jobOf(lane.id).needs, undefined, `lane ${lane.id} 不应依赖别的 lane`);

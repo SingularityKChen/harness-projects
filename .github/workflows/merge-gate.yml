@@ -11,9 +11,11 @@ name: Merge Gate
 # 判定"这条不变量在候选 head 上是否被断言且非空"。因此只取 `package-boundaries.test.js`
 # 一个文件，不复制其余契约测试（`docs/development/ci.md` 禁止用重复跑制造覆盖率）。
 on:
-  # 刻意不声明 `branches`：该过滤器同时决定 `base_ref` 的取值（见 `docs/development/ci.md`
-  # 「Rule checks 的判定基线不由触发器决定」）。本车道不依赖 `base_ref`，只依赖事件本身，
-  # 声明过滤器只会让基线不是 `main` 的 PR 拿不到结论。
+  # 刻意不声明 `branches`：它是**准入**谓词，只决定哪些 PR 进入本 workflow，不决定
+  # 判定基线（`docs/development/ci.md`「Rule checks 的判定基线来自 PR API，不来自触发器」：
+  # 过滤器不会改写 `base_ref`）。本车道不依赖 `base_ref`，只依赖事件本身；声明成
+  # `[main]` 会让声明的 base 不是 `main` 的 PR 一条结论都拿不到——而那正是本车道要服务
+  # 的那批 PR。
   pull_request:
   push:
     branches: [main]
