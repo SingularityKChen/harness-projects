@@ -27,7 +27,14 @@ const ANSI_PATTERN = /\u001B\[[0-9;]*[A-Za-z]/g;
 /** 捕获 node --test 输出的上限；层输出远小于它，但 spawnSync 默认的 1 MiB 会截断大层。 */
 const MAX_BUFFER = 8 * 1024 * 1024;
 
-/** 该层有多少个 `*.test.js` 用例文件。层可以是目录，也可以是单个用例文件。 */
+/**
+ * 该层有多少个 `*.test.js` 用例文件。层可以是目录，也可以是单个用例文件。
+ *
+ * `node_modules` 必须排除：`node --test <dir>` 自己会跳过它，而 `readdirSync`
+ * 的递归不会。今天 `tests/` 下没有 `node_modules`，所以两边一致；一旦某一层
+ * 长出 fixture 依赖，计数就会把依赖包里的用例算进这一层——方向是"多算"，
+ * 会让空层判定假绿。
+ */
 export function countTestFiles(layer) {
   let stats;
   try {
@@ -46,6 +53,7 @@ export function countTestFiles(layer) {
   }
   return entries.filter((entry) => {
     if (!entry.endsWith('.test.js')) return false;
+    if (entry.split(path.sep).includes('node_modules')) return false;
     try {
       return fs.statSync(path.join(layer, entry)).isFile();
     } catch {
