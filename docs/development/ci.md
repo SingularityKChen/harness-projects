@@ -78,7 +78,7 @@ CI workflow 的 action 必须 pin 到 40 位 commit；checkout 必须关闭 pers
 
 空层判定放在 `scripts/run-test-layer.mjs`，不放在 YAML 里数文件：`node --test` 对“没有用例”退出 0，在 YAML 里 `find | wc -l` 只能判“有文件”，判不了“用例数非零”。脚本先数 `*.test.js` 文件，再解析 `node --test` 的汇总行，判“真正执行的用例数 = `tests` − `skipped` − `todo`”是否 ≥ 1；任何一步判不出来都 fail closed（exit 1 + `::error::`，并把被保护的不变量写进注解）。Node 26 实测：只有 `describe` 没有用例的文件汇总行是 `ℹ tests 0`，只有 `skip` 的文件是 `ℹ tests 1` / `ℹ skipped 1`，所以只看 `tests` 会把“整层被 skip 掉”读成绿的。
 
-`on.pull_request` 刻意不声明 `branches`：理由与 `Rule checks` 相同（见上一节）——本车道不依赖 `base_ref`，只依赖事件本身，声明过滤器只会让基线不是 `main` 的 PR 拿不到结论。`push` 只限 `main`，且 `concurrency.cancel-in-progress` 是 `${{ github.event_name == 'pull_request' }}`：合并到 `main` 的验证记录不得被后续合并取消（W5）。
+`on.pull_request` 刻意不声明 `branches`：理由与 `Rule checks` 相同（见上一节）——本车道不依赖 `base_ref`，只依赖事件本身，声明过滤器只会让基线不是 `main` 的 PR 拿不到结论。`push` 只限 `main`，且 `concurrency.cancel-in-progress` 是 `${{ github.event_name == 'pull_request' }}`：合并到 `main` 的验证记录不得被后续合并取消（W5）。另声明 `workflow_dispatch`：加入分支保护前要在目标 head 上观察到连续两次绿（见下一段），第二次运行需要一个人工入口，不能只靠重跑同一个 job。
 
 `Merge Gate` 目前是 advisory，不是分支保护里的必需检查。是否加入由人类伙伴决定，且加入前要在目标 head 上观察到连续两次绿（`docs/architecture/release-gates.md` §2.2）。本车道**不**改变 `PR Fast Gate` 的唯一必需状态，也不改 `ci.yml`。
 

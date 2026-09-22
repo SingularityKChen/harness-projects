@@ -89,6 +89,8 @@ mkdir -p /tmp/empty-layer && node scripts/run-test-layer.mjs /tmp/empty-layer "�
 
 `push: main` 的 `concurrency` 必须显式声明 `cancel-in-progress: false`（W5/W6）：合并到 `main` 的验证记录不得被后续合并取消。
 
+触发器另有 `workflow_dispatch`（第二轮评审补入）：`release-gates.md` §2.2 要求加入分支保护前在目标 head 上观察到连续两次绿，人工入口是取得第二次运行的可执行路径。它对 `cancel-in-progress` 无影响——该表达式只在事件为 `pull_request` 时求真。
+
 ### D5 与 `ci.yml` 的重复是可接受的，但要说清楚
 
 `pnpm test` 已经跑了 integration / boundaries / e2e。`Merge Gate` 重复跑它们的理由不是"覆盖率"，而是**判定对象不同**：`ci.yml` 判定"PR 代码是否可用"，`Merge Gate` 判定"这条不变量在候选 head 上是否被断言且非空"。`docs/development/ci.md` 明确禁止"把同一组契约测试复制到多个 workflow 来制造覆盖率"，因此本车道**不**重复 `tests/contract` 的其余部分，只取 `package-boundaries.test.js` 这一个文件，并把重复的理由写进文档。
@@ -105,7 +107,7 @@ mkdir -p /tmp/empty-layer && node scripts/run-test-layer.mjs /tmp/empty-layer "�
 
 ## Global Constraints
 
-- 新增/改动文件限定为：`.github/workflows/merge-gate.yml`（新建）、`scripts/run-test-layer.mjs`（新建）、`tests/contract/merge-gate-workflow.test.js`（新建）、`tests/contract/run-test-layer.test.js`（新建）、`docs/development/ci.md`、`docs/architecture/release-gates.md`、`tests/README.md`、`tests/mvp0/README.md`（评审回复轮加入：它当时与新建的车道自相矛盾）、`docs/exec-plan/active/2026-09-21-merge-gate-layers.md`、`docs/README.md`。
+- 新增/改动文件限定为：`.github/workflows/merge-gate.yml`（新建）、`scripts/run-test-layer.mjs`（新建）、`tests/contract/merge-gate-workflow.test.js`（新建）、`tests/contract/run-test-layer.test.js`（新建）、`docs/development/ci.md`、`docs/architecture/release-gates.md`、`docs/product/vertical-path.md`（第二轮评审加入：该文件仍写 `tests/mvp0/` 尚不存在，与本车道自相矛盾）、`tests/README.md`、`tests/mvp0/README.md`（评审回复轮加入：它当时与新建的车道自相矛盾）、`docs/exec-plan/active/2026-09-21-merge-gate-layers.md`、`docs/README.md`。
 - 不改 `.github/workflows/ci.yml`、`package.json` 的既有脚本语义、分支保护设置、体量预算与 `rule-checks` 的任何判定。
 - workflow 必须满足 W1–W7：job 级 `timeout-minutes` 为 1–15 的整数、checkout 固定到 40 位提交且 `persist-credentials: false`、外部 action 固定到 40 位提交、顶层 `permissions` 最小、声明 `concurrency` 时必须显式给出取消策略。
 - 不新增运行时依赖；单文件 ≤ 200 行、单函数 ≤ 40 行。
@@ -148,7 +150,7 @@ node scripts/run-test-layer.mjs tests/mvp0 "MVP-0 每节点有断言"; echo "exi
 **验证**：
 
 ```bash
-node scripts/workflow-check.mjs                            # 期望：no findings（已检查 6 个文件）
+node scripts/workflow-check.mjs                            # 期望：no findings（已检查 8 个文件）
 node --test tests/contract/merge-gate-workflow.test.js     # 期望：pass，fail 0
 pnpm verify                                                # 期望：通过
 ```
@@ -186,6 +188,8 @@ git diff --check origin/main...HEAD                        # 期望：无输出
 | 6 | workflow 满足 W1–W7 | `node scripts/workflow-check.mjs` → no findings，文件数从 5 变 6 | 满足（数字按实测订正）：`workflow-check: no findings（已检查 8 个文件）`，本 head 原为 7 个文件 |
 | 7 | 文档与实现一致 | `ci.md`、`release-gates.md`、`tests/README.md` 三处都描述同一条车道与同一组 lane | 满足：三处都写出四条 lane 与 check 名；`release-gates.md` §2.2 的过期结论按实测重写 |
 
+第二轮评审（2026-09-22）对第 3、5 条各加强了判定：第 3 条原先只断言失败注解里含不变量字符串，现另有一条用例遍历 256 种 needs 结果组合，断言聚合 job 的判定行为；第 5 条原先只覆盖"零用例文件"与"零执行用例"，现把 `countTestFiles` 的窄口径（只认 `*.test.js`）也钉成一条用例，避免把它误当成与 `node --test` 等价的完整发现规则。
+
 ## Progress
 
 - [x] (2026-09-21) 独立验收复核：确认 lane 层运行步骤未设置 `if` 或 `continue-on-error: true`；对 integration lane 注入 `continue-on-error: true` 时契约测试按预期 13 pass / 1 fail，还原后复跑全绿；最终 head `5a15ab3` 的 `gh pr checks 104` 返回 11 项全部 `pass`
@@ -195,6 +199,7 @@ git diff --check origin/main...HEAD                        # 期望：无输出
 - [x] (2026-09-21) Batch 3 · 文档订正
 - [x] (2026-09-21) 注入实验与三态证据（4 项全部变红，还原后复跑确认全绿）
 - [x] (2026-09-21) 索引更新延后到栈级联：本批次不改 `docs/README.md` 与 `docs/architecture/README.md`，由栈级联步骤统一登记
+- [x] (2026-09-22) 第二轮评审修复：聚合 job 失败路径的行为用例、`workflow_dispatch`、`countTestFiles` 口径注释与用例、MVP-0 断言体检查、两处过期文档；注入实验 4/4 变红并还原复跑全绿
 
 ## Surprises & Discoveries
 
@@ -227,6 +232,14 @@ git diff --check origin/main...HEAD                        # 期望：无输出
 - **`tests/mvp0/README.md` 与实际状态矛盾——本轮已修。** 该文件 §1 曾写"当前必须失败"、§4–§5 描述提升前的状态，而 `tests/mvp0` 现在 7 条断言全绿并进入 `Merge Gate · MVP-0`，等于仓库里同时存在"必须失败"与"必须绿"两种说法。评审指出后按实际状态改写：§1 说明 7 条断言当前全绿、失败形态仍然有效；§4 说明 `pnpm verify` **包含**它而 `PR Fast Gate` **不包含**；§5 给出进入必需检查的两条路（把 `Merge Gate` 加进分支保护，或让 `ci.yml` 改调 `pnpm verify`）。该文件因此加入本批次的文件清单。
 
 - **`docs/development/ci.md` 的 workflow 表少了两行——本轮已补齐。** 原文写"远端 main 当前有五类 workflow"，而 `engineering-state.yml` / `engineering-state-signal.yml` 从未进表。本次既加 `Merge Gate` 行又补上这两行，表里现在是八个 workflow，且不再有"表列不全"的隐含声明。
+
+- **第二轮评审发现"聚合 job 的失败路径从未被执行过"——本轮已修。** 原契约测试只断言 `failStep.if` 含 `'failure'`/`'cancelled'`/`'skipped'` 三个字面量、`run` 含 `exit 1`，即只钉住**静态形状**。把 `'failure'` 从析取里删掉时，除了那条字符串匹配之外没有任何用例会因为**行为**变红。本轮补一条按 needs 结果求值的用例：4 条 lane × 4 种结果（`success` / `failure` / `cancelled` / `skipped`）= 256 种组合，逐一断言"至少一条非 success ⇒ 失败步骤执行，全 success ⇒ 不执行"，并额外断言 `if` 含 `cancelled()`、失败步骤是倒数第二步。注入验证见 `Outcomes & Retrospective`。
+
+- **`countTestFiles` 的注释与实现不一致——本轮已订正。** 注释写"与 `node --test <dir>` 的口径一致"，但计数只认 `*.test.js`，而 Node 还会执行 `*-test.js`、`*_test.js`、`test-*.js` 以及 `test/` 目录下的 `*.js`。方向是安全的（只含这些命名的层被报成"空层"并 exit 1，是假红不是假绿），但"空层"这个诊断会掩盖"命名不匹配"。本轮把注释改成如实说明窄口径，并补一条用例把这个口径钉住，免得日后被当成与 `node --test` 的完整发现规则等价。
+
+- **`workflow_dispatch` 的缺失让 §2.2 的前置条件难以取证——本轮已补。** `release-gates.md` §2.2 要求加入分支保护前"目标 head 上连续两次运行均为绿"，而本 workflow 原先只有 `pull_request` 与 `push`，第二次运行只能靠重跑同一个 job。补 `workflow_dispatch:` 后可以由人在选定 head 上主动取一次；契约测试同步加一条断言。
+
+- **`vertical-path.md` 与 `release-gates.md` 各有一处过期结论——本轮已订正。** 前者仍写 `tests/mvp0/` **尚不存在**、MVP-0 **没有可运行的判定**（该目录现有 7 条全绿断言），与 `ci.md` 新增的"`tests/mvp0` 第一次进入门禁"直接矛盾；后者写 `tests/contract/` 有 21 个用例文件，该 head 上实为 22 个。两处都是既有欠账、非本批次引入，但留着会让同一份仓库文档自相矛盾。
 
 ## Decision Log
 
@@ -262,6 +275,14 @@ git diff --check origin/main...HEAD                        # 期望：无输出
   **Rationale**：Global Constraints 不允许新增共享 helper 文件，两份测试各写一份 lane 文案会引入静默漂移；让"YAML 形状与文案"与"这些层确实非空且全绿"各由一个文件负责，职责不重叠。
   **Date/Author**：2026-09-21 / agent
 
+- **Decision**：补 `workflow_dispatch` 触发器，而不是把"连续两次绿"留给 job 重跑。
+  **Rationale**：`release-gates.md` §2.2 把"目标 head 上连续两次运行均为绿"写成加入分支保护的前置条件。只有 `pull_request` 与 `push` 时，第二次运行只能靠重跑同一个 job——那不是"又一次运行"，取证口径也不清楚。补一个人工入口成本极低（不引入 secrets、不改变权限，`cancel-in-progress` 表达式对非 PR 事件求值为 false，符合 W5）。
+  **Date/Author**：2026-09-22 / agent（第二轮评审 P3）
+
+- **Decision**：聚合 job 的失败判定用"求值 needs 结果组合"的行为用例来钉，而不是继续加字符串断言。
+  **Rationale**：字符串断言只能证明"表达式文本里有这三个字面量"，证明不了"某条 lane 失败时 `Merge Gate` 真的变红"。新增的用例实现了本 workflow 真正用到的那一小撮表达式语义（`contains` / `join` / `!cancelled()` / `||`），遍历 4×4×4×4 = 256 种结果组合，把判定行为钉死；代价是测试里多了一个约 20 行的窄求值器，它只服务这一条不变量。
+  **Date/Author**：2026-09-22 / agent（第二轮评审 P2）
+
 ## Idempotence and Recovery
 
 - `run-test-layer.mjs` 与四个层都是只读且可重复的；契约测试用临时目录构造空层与零用例层，不污染仓库。
@@ -289,7 +310,7 @@ git diff --check origin/main...HEAD                        # 期望：无输出
 | `tests/mvp0` | 7 | 0 | 0 | ~117 ms |
 | `tests/e2e` | 38 | 0 | 0 | ~2.3 s |
 
-**新增契约测试**：`run-test-layer.test.js` 15 条、`merge-gate-workflow.test.js` 13 条，全绿。`npm_config_manage_package_manager_versions=false pnpm verify` exit 0（356 + 7 条全绿）；`node scripts/workflow-check.mjs` → `no findings（已检查 8 个文件）`。
+**新增契约测试**：`run-test-layer.test.js` 17 条、`merge-gate-workflow.test.js` 17 条，全绿（第二轮评审修复后：`run-test-layer` 16→17，`merge-gate-workflow` 13→17）。`npm_config_manage_package_manager_versions=false pnpm verify` exit 0（356 + 7 条全绿）；`node scripts/workflow-check.mjs` → `no findings（已检查 8 个文件）`。
 
 **注入实验（4/4 按预期变红，还原后复跑全绿）**
 
@@ -300,12 +321,21 @@ git diff --check origin/main...HEAD                        # 期望：无输出
 | 删掉 `boundaries` lane 的 `timeout-minutes` | `merge-gate-workflow.test.js`：`每个 job 都声明 1–15 分钟的整数 timeout-minutes`（1 条）；同时 `workflow-check` 报 `[W1]`、exit 1 |
 | 去掉 `run-test-layer.mjs` 的"零用例文件"判定 | `run-test-layer.test.js`：`空层必须响亮失败…` 与 `层路径不存在时同样 exit 1…`（2 条） |
 
+**第二轮注入实验（本轮，4/4 按预期变红，还原后复跑 34/34 全绿）**
+
+| 注入 | 变红的用例 |
+|---|---|
+| 从聚合失败条件删掉 `contains(needs.*.result, 'failure')` 析取项 | `聚合 job 叫 Merge Gate…` 与 `聚合 job 的失败条件被真正执行…`（2 条） |
+| 把聚合 job 的 `if: ${{ !cancelled() }}` 改成 `if: true` | 同上 2 条 |
+| 把节点 7 的用例体改成空实现 | `MVP-0 lane 声明的不变量被钉住…`（1 条） |
+| 删掉 `workflow_dispatch` 触发器 | `声明 workflow_dispatch…`（1 条） |
+
 **与计划的偏差**：D2 第 3 条的判据被加强（见 `Decision Log`），零用例 fixture 由 skip-only 改为 describe-only；验收表第 6 条的文件数按实测从 5→6 改成 7→8；Batch 3 的 `docs/README.md` 索引登记按批次要求延后到栈级联。
 
 **剩余清单（还有哪些门禁只在文档或人工动作里成立）**
 
 1. `Merge Gate` 是否加入分支保护——仓库设置，人类伙伴决定；加入前要在目标 head 上连续两次绿。
-2. `release-gates.md` §2.2 第 5 条的"连续两次运行均为绿"只能在该 head 的真实 CI 运行记录上回读；本批次提供的是"两层非空且全绿"与"lane 存在"两部分证据。
+2. `release-gates.md` §2.2 第 5 条的"连续两次运行均为绿"只能在该 head 的真实 CI 运行记录上回读；本批次提供的是"两层非空且全绿"与"lane 存在"两部分证据。第二轮补了 `workflow_dispatch`，第二次运行现在可以由人主动取，但**两次运行本身仍未发生**，这条仍然只能靠回读该 head 的运行记录来判定。
 3. ~~`tests/mvp0/README.md` §4–§5 仍描述提升前的状态~~——评审回复轮已按实际状态改写（见 Surprises）。
 4. ~~`docs/development/ci.md` 的 workflow 表仍缺 `engineering-state.yml` / `engineering-state-signal.yml` 两行~~——评审回复轮已补齐（见 Surprises）。
 5. `pnpm verify` 未在固定版本 `pnpm@10.28.2` 下验证（沙箱不能写工作区外路径）。
@@ -317,3 +347,4 @@ git diff --check origin/main...HEAD                        # 期望：无输出
 - 2026-09-21：首次创建。原因：issue #10 是 M3（MVP-0）最后一个开放条目，且 R1 §2 第 5 条要求 `Merge Gate` 稳定、integration 与 e2e 非空；`ci.md` 的前置条件（真实测试、稳定入口）现已成立。
 - 2026-09-21：执行后回填。改动原因与内容：(1) 三个批次与注入实验全部完成，`Progress`、`Validation and Acceptance`、`Outcomes & Retrospective` 按实测回填；(2) D2 第 3 条的判据加强为"真正执行的用例数 ≥ 1"，因为实测发现 `skip` / `todo` 计入 `ℹ tests`，原判据会漏掉整层被消音的情形；(3) `Context and Orientation` 与验收表第 6 条的 workflow 文件数按实测从 5→6 订正为 7→8；(4) Batch 3 的 `docs/README.md` 索引登记延后到栈级联步骤，本批次不改 `docs/README.md` 与 `docs/architecture/README.md`；(5) 新增 6 条 `Surprises & Discoveries` 与 3 条 `Decision Log`。
 - 2026-09-21：按 PR 评审回复（P1/P2/P2/P3×4）修改。原因与改动：(1) 评审指出本 PR 的"闭环"措辞（"四层测试只有一半在门禁里有结论"）并没有被这次改动关闭——`Merge Gate` 是 advisory，MVP-0 仍不在任何必需检查里；补一条 Decision Log 记录取舍（issue #10 Scope 把"让 PR 门禁变慢"列为范围外）与两条出路，并加进人工项。(2) `merge-gate.yml` 的触发器注释、ExecPlan 的 D4 与 Decision Log 都写着"该过滤器同时决定 `base_ref` 的取值"，而 `main` 已撤回该论断（`ci.md` 现写「过滤器只负责准入，它**不会改写** `base_ref`」）；决策不变，理由换成"准入谓词"并订正悬空的章节引用。(3) 新增契约测试把 `Merge Gate · MVP-0` 声明的不变量钉住：`tests/mvp0` 必须仍然断言 7 个连续编号的链路节点，否则把 7 条削成 1 条平凡用例也能让 lane 全绿。(4) `tests/mvp0/README.md` §1/§4/§5 与新建车道自相矛盾（"当前必须失败"vs"必须绿"），按实际状态改写，该文件加入 Global Constraints。(5) `ci.md` 的 workflow 表补上 `engineering-state.yml` / `engineering-state-signal.yml` 两行。(6) `countTestFiles` 排除 `node_modules`，与 `node --test <dir>` 的口径一致。
+- 2026-09-22：按第二轮 PR 评审（P2×2、P3×4）修改。原因与改动：(1) 本文件 Batch 2 的验证命令仍写"已检查 6 个文件"，与本 head 实测的 8 个不符——那条命令照抄执行会得到与文档不同的结论，订正为 8。(2) 聚合 job 的失败路径此前只有静态形状断言，没有任何用例真正执行过"某条 lane 失败 ⇒ `Merge Gate` 变红"这一判定；新增一条按 needs 结果求值的用例（4 条 lane × 4 种结果 = 256 种组合），并断言 `if` 必须让聚合 job 在上游失败时仍然运行、失败步骤必须是倒数第二步。(3) 新增 `workflow_dispatch` 与对应契约用例：`release-gates.md` §2.2 把"连续两次绿"写成加入分支保护的前置条件，没有人工入口时第二次运行只能靠重跑同一个 job。(4) `countTestFiles` 的注释把它说成与 `node --test` 口径一致，实际只认 `*.test.js`（Node 还会跑 `*-test.js` / `*_test.js` / `test-*.js` / `test/**`）；注释改为如实说明"窄口径、方向是假红不是假绿"，并补一条用例把这个口径钉住。(5) `Merge Gate · MVP-0` 的不变量是"每节点有**断言**"，但契约测试只钉标题；补上"每条用例体必须至少调用一次断言辅助函数（`assert` / `requireNode` / `needMethod`）"。(6) 订正两处过期文档：`vertical-path.md` 仍写 `tests/mvp0/` 尚不存在、MVP-0 没有可运行的判定；`release-gates.md` §2.2 写 `tests/contract/` 有 21 个用例文件（实为 22）。注入验证见 `Outcomes & Retrospective`。
