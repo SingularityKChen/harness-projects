@@ -26,6 +26,8 @@ import {
   KINDS,
   missingAreas,
   requiredAreas,
+  checkCloserTarget,
+  checkIssueTarget,
   checkLabels,
   checkPullRequestBody,
   checkTitle,
@@ -465,4 +467,140 @@ test('策略：HTML 注释不嵌套——两条已经正确的判定加回归钉
   // 同理，第一个 --> 提前关闭了外层注释；之后的 Closes #12 已经在注释之外，
   // 是可见正文：算关联。
   assert.deepEqual(linkedIssues('<!-- <!-- --> Closes #12 -->'), { closes: [12], refs: [] })
+})
+
+// ── issue #66：区分 issue 编号与 pull request 编号 ──────────────────────────
+//
+// 根因：GitHub 的 issues API 对 PR 编号同样返回对象（PR 是 issue 的子类型），
+// 而 fetchIssue() 的 --jq 不请求 pull_request 字段，于是引用同仓 PR 编号的正文
+// 被按 issue 规则判定，产出必然的假阳性——PR 标题要求中文摘要、PR 也不要求
+// kind:/area: 标签，所以「不是英文」「缺 kind:*」「缺 area:*」三条必然同时命中。
+//
+// 判据只能来自平台：编号形状推不出对象类型。因此 fetchIssue() 多取一个
+// isPullRequest 布尔字段，判定本身放进下面两个纯函数，测试不需要网络。
+
+test('策略：issue 分支命中 PR 编号时按用法错误处理（exit 2），不再按 issue 规则判定', () => {
+  // 纯函数：PR 判定优先于标题与标签判定，只给一句正确的诊断。
+  const pr = { number: 12, title: '修复登录重定向', labels: [], isPullRequest: true }
+  const problems = checkIssueTarget(12, pr)
+  assert.equal(problems.length, 1, `期望恰好一条诊断，实际：${JSON.stringify(problems)}`)
+  assert.match(problems[0], /is a pull request/)
+  assert.match(problems[0], /pr 12/)
+
+  // 真实 CLI 路径：exit 2（用法错误）而不是 exit 1（规范违规）——被检查对象没有
+  // 违规，是调用方问错了对象，修复方向是换一条命令而不是改标题或标签。
+  const result = runWithStubGh(
+    `printf '%s' '{"number":12,"title":"修复登录重定向","labels":[],"isPullRequest":true}'`,
+    ['issue', '12'],
+  )
+  assert.equal(result.status, 2, `期望 exit 2，实际 ${result.status}\n${result.stderr}`)
+  assert.match(result.stderr, /is a pull request/)
+  // 三条按错误规则判定的报错必须消失，否则「修好了」只是多了一句诊断
+  assert.doesNotMatch(result.stderr, /expected exactly one `kind:\*` label/)
+  assert.doesNotMatch(result.stderr, /expected at least one `area:\*` label/)
+  assert.doesNotMatch(result.stderr, /must be written in English/)
+
+  // 回归：真 issue 走原路径，标题与标签规则一个字都没变
+  const issue = { number: 39, title: 'chore(ci): extend the merge gate', labels: ['kind:chore', 'area:ci'], isPullRequest: false }
+  assert.deepEqual(checkIssueTarget(39, issue), [])
+  assert.match(checkIssueTarget(39, { ...issue, title: 'not a conforming title' })[0], /must match/)
+  assert.match(checkIssueTarget(39, { ...issue, labels: [] })[0], /exactly one `kind:\*`/)
+})
+
+test('契约：fetchIssue 请求的 jq 必须包含 pull_request 类型判据', () => {
+  const result = runWithStubGh(
+    [
+      'case "$*" in',
+      '  *issues/12*pull_request*|*issues/12*isPullRequest*) printf \'%s\' \'{"number":12,"title":"修复登录重定向","labels":[],"isPullRequest":true}\' ;;',
+      '  *) echo "missing pull_request/isPullRequest in gh args" >&2; exit 42 ;;',
+      'esac',
+    ].join('\n'),
+    ['issue', '12'],
+  )
+  // 先挡掉桩的兜底分支：参数里没有判据时桩 exit 42，gh() 会把它归成 exit 3，
+  // 于是下面那条 status 断言会以「实际 exit 3」失败——只看这个数字会以为是桩
+  // 没被调用，而不是 jq 少取了判据。哨兵断言放在前面，失败原因才自解释。
+  assert.doesNotMatch(
+    result.stderr,
+    /missing pull_request\/isPullRequest in gh args/,
+    'gh 参数里缺少 pull_request / isPullRequest 判据，桩落到了兜底分支',
+  )
+  // 换行用单反斜杠的 `\n`；写成双反斜杠会把反斜杠本身打印进失败消息。
+  assert.equal(result.status, 2, `gh jq 必须请求 pull_request 判据；实际 exit ${result.status}\n${result.stderr}`)
+  assert.match(result.stderr, /is a pull request/)
+})
+
+test('策略：Closes 指向 PR 时报出这是 pull request 且 exit 1，不再出现 issue 规则报错', () => {
+  // 夹具：正文写 `Closes #12`，而 #12 是已合并的 PR。GitHub 的 issues API 对
+  // 它返回的对象与真 issue 同形，唯一区别就是 pull_request 字段。
+  const pr = { number: 12, title: '修复登录重定向', labels: [], isPullRequest: true }
+  const problems = checkCloserTarget(12, pr)
+  assert.equal(problems.length, 1, `期望恰好一条诊断，实际：${JSON.stringify(problems)}`)
+  assert.match(problems[0], /is a pull request/)
+  assert.match(problems[0], /Closes/)
+  assert.match(problems[0], /#12/)
+
+  // CLI 路径：pr 分支的 closes 循环命中 PR → exit 1（规范违规），而不是 exit 2：
+  // 这里被检查的是 PR 自己的正文，写错关联是正文的问题。
+  const result = runWithStubGh(
+    [
+      'case "$*" in',
+      `  *pulls/100*) printf '%s' '{"body":"Closes #12","authorType":"User","authorLogin":"someone"}' ;;`,
+      `  *issues/12*) printf '%s' '{"number":12,"title":"修复登录重定向","labels":[],"isPullRequest":true}' ;;`,
+      '  *) exit 1 ;;',
+      'esac',
+    ].join('\n'),
+    ['pr', '100'],
+  )
+  assert.equal(result.status, 1, `期望 exit 1，实际 ${result.status}\n${result.stderr}`)
+  assert.match(result.stderr, /is a pull request/)
+  assert.doesNotMatch(result.stderr, /expected exactly one `kind:\*` label/)
+  assert.doesNotMatch(result.stderr, /expected at least one `area:\*` label/)
+  assert.doesNotMatch(result.stderr, /must be written in English/)
+})
+
+test('策略：Closes 指向真实 issue 时判定与诊断前缀都不变（回归）', () => {
+  const issue = { number: 39, title: 'chore(ci): extend the merge gate', labels: ['kind:chore', 'area:ci'], isPullRequest: false }
+  assert.deepEqual(checkCloserTarget(39, issue), [])
+
+  // 不合规的 issue 仍然逐条报出，前缀仍是 `linked issue #<n>: `——引用 PR 时
+  // 才改口径，真 issue 的既有输出形态必须原样保留。
+  const bad = checkCloserTarget(39, { ...issue, title: 'not a conforming title', labels: [] })
+  assert.match(bad[0], /^linked issue #39: /)
+  assert.ok(
+    bad.some((p) => /exactly one `kind:\*`/.test(p)),
+    `期望保留 kind 标签报错，实际：${JSON.stringify(bad)}`,
+  )
+
+  // CLI 回归：Closes #39（真 issue，合规）仍然 exit 0
+  const result = runWithStubGh(
+    [
+      'case "$*" in',
+      `  *pulls/100*) printf '%s' '{"body":"Closes #39","authorType":"User","authorLogin":"someone"}' ;;`,
+      `  *issues/39*) printf '%s' '{"number":39,"title":"chore(ci): extend the merge gate","labels":["kind:chore","area:ci"],"isPullRequest":false}' ;;`,
+      '  *) exit 1 ;;',
+      'esac',
+    ].join('\n'),
+    ['pr', '100'],
+  )
+  assert.equal(result.status, 0, `期望 exit 0，实际 ${result.status}\n${result.stderr}`)
+  assert.match(result.stdout, /conforms/)
+})
+
+test('策略：Refs 指向 PR 不校验——刻意的边界，不是遗漏', () => {
+  // 理由：Refs 表达「相关」，指向另一个 PR 是合法且常见的交叉引用（PR #100
+  // 正文里的 `Refs #96 #98` 中 #98 就是 PR，Issue policy 全绿）。把它一并拒掉
+  // 会制造第二类假阳性，并把 §8.3.7 从「必须关联 issue」扩大成「不得提到 PR」。
+  // 这条边界由主流程保证：refs 从不进入关闭目标校验，所以下面的 CLI 用例应当
+  // 只因为「有链接」而 exit 0，而不会去取 #98 的元数据。
+  assert.deepEqual(linkedIssues('Refs #98'), { closes: [], refs: [98] })
+  assert.deepEqual(checkPullRequestBody('Refs #98'), [])
+
+  const result = runWithStubGh(
+    // 桩只回答 pulls：若实现误把 refs 也送去取数，这里会落到 *) exit 1 → exit 3
+    `printf '%s' '{"body":"Refs #98","authorType":"User","authorLogin":"someone"}'`,
+    ['pr', '100'],
+  )
+  assert.equal(result.status, 0, `期望 exit 0，实际 ${result.status}\n${result.stderr}`)
+  assert.match(result.stdout, /Refs #98/)
 })
