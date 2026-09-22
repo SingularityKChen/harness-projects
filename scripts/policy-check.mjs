@@ -381,12 +381,35 @@ export function checkIssueTarget(number, meta) {
  */
 export function checkCloserTarget(number, meta) {
   if (meta?.isPullRequest) {
-    return [`linked #${number} is a pull request; \`Closes\` must name an issue`]
+    // Name the whole closing-keyword family rather than `Closes` alone:
+    // linkedIssues matches close[sd]?|fix(?:e[sd])?|resolve[sd]?, so a body
+    // writing `Fixes #12` would otherwise be told about a keyword it never used
+    // — in the one message that is the entire product of this check.
+    return [
+      `linked #${number} is a pull request; a closing keyword (\`Closes\` / \`Fixes\` / \`Resolves\`) must name an issue — use \`Refs #${number}\` to cross-reference it`,
+    ]
   }
   return [
     ...checkTitle(meta.title).map((problem) => `linked issue #${number}: ${problem}`),
     ...checkLabels(meta.labels, meta.title).map((problem) => `linked issue #${number}: ${problem}`),
   ]
+}
+
+/**
+ * Whether fetched issue metadata is shaped like an issue.
+ *
+ * Mirrors `hasPullRequestMetadata`. Every real issue carries a title and a
+ * labels array, so a response that parses but lacks either was never actually
+ * fetched — empty stdout, a missing scope, a `--jq` miss — not an issue that
+ * genuinely has neither. The distinction is contractual (exit 3 = could not
+ * check, exit 1 = checked and it violates); dereferencing undefined would
+ * report a fetch failure as a rule violation and surface as a bare Node stack
+ * instead of an `::error::`.
+ *
+ * @returns {boolean}
+ */
+export function hasIssueMetadata(meta) {
+  return typeof meta?.title === 'string' && Array.isArray(meta?.labels)
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
@@ -470,8 +493,18 @@ function usageError(messages) {
   process.exit(2)
 }
 
+/**
+ * Report a response that parsed but is not shaped like the object it claims to
+ * be (exit 3), rather than letting a missing field become a rule violation.
+ */
+function unreadable(what) {
+  console.error(`could not read ${what}: response is missing issue metadata`)
+  process.exit(3)
+}
+
 function runIssue(repo, number) {
   const issue = fetchIssue(repo, number)
+  if (!hasIssueMetadata(issue)) unreadable(`issue #${number}`)
   const problems = checkIssueTarget(issue.number, issue)
   if (problems.length === 0) {
     console.log(`#${issue.number} conforms: ${issue.title}`)
@@ -483,7 +516,11 @@ function runIssue(repo, number) {
 
 /** Check every `Closes #<n>` target; `refs` is deliberately left unchecked. */
 function closerProblems(repo, closes) {
-  return closes.flatMap((number) => checkCloserTarget(number, fetchIssue(repo, number)))
+  return closes.flatMap((number) => {
+    const issue = fetchIssue(repo, number)
+    if (!hasIssueMetadata(issue)) unreadable(`linked issue #${number}`)
+    return checkCloserTarget(number, issue)
+  })
 }
 
 function runPullRequest(repo, number) {

@@ -31,6 +31,7 @@ import {
   checkLabels,
   checkPullRequestBody,
   checkTitle,
+  hasIssueMetadata,
   hasPullRequestMetadata,
   linkRuleExemption,
   linkedIssues,
@@ -539,6 +540,20 @@ test('策略：Closes 指向 PR 时报出这是 pull request 且 exit 1，不再
   assert.match(problems[0], /is a pull request/)
   assert.match(problems[0], /Closes/)
   assert.match(problems[0], /#12/)
+  // 诊断必须点名整族关闭关键字，而不是只写 `Closes`：linkedIssues 匹配的是
+  // close[sd]?|fix(?:e[sd])?|resolve[sd]?，写 `Fixes #12` 的作者不该被告知一个
+  // 自己没用过的关键字。这一条是这条诊断唯一的产物，措辞错就等于诊断错。
+  assert.match(problems[0], /Fixes/)
+  assert.match(problems[0], /Resolves/)
+  // 诊断还必须给出补救方式：作者看到「关闭关键字必须指向 issue」后的下一个问题
+  // 就是「那我该写什么」，答案是 `Refs`——本 PR 刻意保留的合法交叉引用路径。
+  assert.match(problems[0], /Refs #12/)
+
+  // 同一诊断必须对 `Fixes #12` 同样成立——否则「措辞覆盖整族」只是文案，
+  // 而这条路径根本没有被走到过。
+  assert.deepEqual(linkedIssues('Fixes #12'), { closes: [12], refs: [] })
+  const fixes = checkCloserTarget(12, pr)
+  assert.match(fixes[0], /Fixes/)
 
   // CLI 路径：pr 分支的 closes 循环命中 PR → exit 1（规范违规），而不是 exit 2：
   // 这里被检查的是 PR 自己的正文，写错关联是正文的问题。
@@ -587,6 +602,40 @@ test('策略：Closes 指向真实 issue 时判定与诊断前缀都不变（回
   assert.match(result.stdout, /conforms/)
 })
 
+test('策略：取数成功但形状不对时报 exit 3，不报成规范违规', () => {
+  // 分类契约（docs/development/repository-rules.md）：exit 3 = 没能检查，
+  // exit 1 = 检查过且不合规。一个解析成功但缺 title / labels 的响应属于前者——
+  // 真实 issue 永远带这两个字段，缺了就说明这次取数根本没成功。旧实现会在
+  // checkTitle(undefined) 处抛 TypeError，输出裸 Node 栈并以 exit 1 收场，
+  // 把取数失败报成被检查对象的错。
+  assert.equal(hasIssueMetadata({ number: 5, title: 'x', labels: [] }), true)
+  assert.equal(hasIssueMetadata({ number: 5, labels: [] }), false)
+  assert.equal(hasIssueMetadata({ number: 5, title: 'x' }), false)
+  assert.equal(hasIssueMetadata({ number: 5, title: 'x', labels: 'kind:fix' }), false)
+  assert.equal(hasIssueMetadata(undefined), false)
+
+  // 调用点一：issue 模式
+  const asIssue = runWithStubGh(`printf '%s' '{"number":5}'`, ['issue', '5'])
+  assert.equal(asIssue.status, 3, `期望 exit 3，实际 ${asIssue.status}\n${asIssue.stderr}`)
+  assert.match(asIssue.stderr, /could not read issue #5/)
+  assert.doesNotMatch(asIssue.stderr, /at .*policy-check\.mjs/, '不得输出裸 Node 栈')
+
+  // 调用点二：pr 模式的关闭目标
+  const asCloser = runWithStubGh(
+    [
+      'case "$*" in',
+      `  *pulls/100*) printf '%s' '{"body":"Closes #5","authorType":"User","authorLogin":"someone"}' ;;`,
+      `  *issues/5*) printf '%s' '{"number":5}' ;;`,
+      '  *) exit 1 ;;',
+      'esac',
+    ].join('\n'),
+    ['pr', '100'],
+  )
+  assert.equal(asCloser.status, 3, `期望 exit 3，实际 ${asCloser.status}\n${asCloser.stderr}`)
+  assert.match(asCloser.stderr, /could not read linked issue #5/)
+  assert.doesNotMatch(asCloser.stderr, /at .*policy-check\.mjs/, '不得输出裸 Node 栈')
+})
+
 test('策略：Refs 指向 PR 不校验——刻意的边界，不是遗漏', () => {
   // 理由：Refs 表达「相关」，指向另一个 PR 是合法且常见的交叉引用（PR #100
   // 正文里的 `Refs #96 #98` 中 #98 就是 PR，Issue policy 全绿）。把它一并拒掉
@@ -597,8 +646,15 @@ test('策略：Refs 指向 PR 不校验——刻意的边界，不是遗漏', ()
   assert.deepEqual(checkPullRequestBody('Refs #98'), [])
 
   const result = runWithStubGh(
-    // 桩只回答 pulls：若实现误把 refs 也送去取数，这里会落到 *) exit 1 → exit 3
-    `printf '%s' '{"body":"Refs #98","authorType":"User","authorLogin":"someone"}'`,
+    // 桩只回答 pulls：若实现误把 refs 也送去取数，会落到 *) exit 1 → 取数失败
+    // → exit 3。裸 printf 会让这条断言失去意义——它会对任何调用都返回同一个
+    // 对象，于是「refs 没有触发取数」这件事根本没有被检验。
+    [
+      'case "$*" in',
+      `  *pulls/100*) printf '%s' '{"body":"Refs #98","authorType":"User","authorLogin":"someone"}' ;;`,
+      '  *) echo "refs 不应触发对 issues 的取数" >&2; exit 1 ;;',
+      'esac',
+    ].join('\n'),
     ['pr', '100'],
   )
   assert.equal(result.status, 0, `期望 exit 0，实际 ${result.status}\n${result.stderr}`)
