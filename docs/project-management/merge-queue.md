@@ -219,6 +219,153 @@ gh pr view <pr> --json baseRefName,closingIssuesReferences
 
 **C 栈的一次假绿与修复（必须知道）**：C 栈顶端交付前，独立验证者证明 `tests/mvp0` 的节点 6/7 在**没有任何真实观察**时也能通过——`getDeliveryLineage` 会返回 `observed:false / chain_skeleton / candidate` 的骨架跳，而断言只查关系类型。同一批注入还显示节点 3（身份幂等）与节点 5（Start Work 幂等）同样没被钉住。修复落在 #95 的最后三个提交：`getDeliveryLineage` 只返回 `observed=true` 的跳，断言改为走真实链路并断言观察事实；五条注入（去重守卫、复用守卫、change_request 建工作项、CI 写规划状态、交付读数为空）在修复后都能让对应断言变红。**评审 #95 时应优先复核这五条注入**，因为把一条假绿的断言提进必需门禁，比没有门禁更危险。
 
+### 4.3 本轮队列（2026-09-21）
+
+本轮远端开放 7 个 PR：两条独立的单 PR 分支（#103、#104）加一条**四层 E1 栈**（#105 → #106 → #107 → #108）。刷新命令返回的 #100（`fix/rule-checks-api-base`，另一会话，base `main`）不属于本轮排位，位置未在本批次确定，因此不占表格行——按 §3 的列约定，位置列不允许"待定"。
+
+| 位置 | PR | 分支 | base | 交付 | 依赖 | 已知冲突点与解法 |
+|---|---|---|---|---|---|---|
+| 1 | #103 | `fix/policy-check-pr-number` | `main` | Closes #66——`policy-check` 在 `Closes #N` 指向 PR 时按 issue 规则误判，改为区分 issue 与 pull request 编号 | 无 | 实现在 `scripts/policy-check.mjs` 与其测试；**与 #104 在 `docs/README.md` 的 ExecPlan 索引表上必然冲突**（两者都在同一个锚点行之后插入自己的一行，谁先合谁就占了锚点），解法见下方「位置 1 与 2 的索引冲突」 |
+| 2 | #104 | `chore/merge-gate-layers` | `main` | Closes #10——为集成、边界与 MVP-0 层建立 Merge Gate 车道 | 无 | 实现在 `.github/workflows/merge-gate.yml`、`scripts/run-test-layer.mjs` 与它们的契约测试；冲突点同位置 1 |
+| 3 | #105（E1-1，本 PR） | `test/e1-content-identities` | `main` | Closes #22——Gate E1 的沙箱定义、九字段记录模板与三类内容身份观测 | 无（E1 栈的栈底） | 新增 `docs/architecture/gate-e1-sandbox.md`、`docs/architecture/gate-e1-content-identities.md` 与 `tests/contract/e1-evidence-consistency.test.js`；改 `docs/architecture/README.md`、`docs/README.md`（+1/−1）、本文件 §4.3 / §4.4，以及三个**共享规则文件**——`AGENTS.md`（§6 分支前缀补 `test/`、§3 worktree 路径边界）、`PLANS.md`（§4 增补四条活文档一致性规则）、`docs/development/repository-rules.md`（分支前缀）。第三轮评审补齐本行原先漏列的后五个文件；预演时优先看这三个共享文件，它们最可能与别的 PR 重叠 |
+| 4 | #106（E1-2） | `test/e1-membership-and-draft` | `test/e1-content-identities` | Closes #23——多项目成员关系与 draft 转换下的工作项身份 | **3**（栈序：base 是 #105 的 head） | 复用 #105 的沙箱与模板；本层只新增自己的 ExecPlan |
+| 5 | #107（E1-3） | `test/e1-write-and-events` | `test/e1-membership-and-draft` | Closes #24——写确认与事件可靠性语义 | **4**（栈序） | 同上 |
+| 6 | #108（E1-4） | `test/e1-ruling` | `test/e1-write-and-events` | Closes #25，并 Refs #4（父门禁）——读三份记录并裁决 Gate E1 | **5**（栈序） | 同上；它是唯一读全栈记录的一层，必须最后合并 |
+
+读表要点：
+
+- **位置 1–3 互不依赖**（base 都是 `main`），彼此顺序不限；但三者都必须先于位置 4——#106 的 base 是 #105 的 head。
+- **E1 栈内必须自下而上合并**，与 §4.2 的 C 栈同理：单看栈内某一层，它的检查结果不是 CI 证据（`.github/workflows/ci.yml` 的触发分支是 `main`）。
+- **冲突预演状态（2026-09-21 实测）**：`gh api repos/SingularityKChen/harness-projects/pulls/<n>/files` 的状态计数为：#103=`{"added":1,"modified":2}`、#104=`{"added":5,"modified":3}`、#105=`{"added":3,"modified":1}`、#106=`{"added":2}`、#107=`{"added":2}`、#108=`{"added":6,"modified":1}`。这些是当时各 PR 相对其 base 的文件状态快照，不能据此推断文件重叠或可干净变基。**这不构成"无冲突"声明**：按 §2.2 的规则，每个 PR 在自己的位置之前必须对排在它前面的每一个 PR 重新预演一次，不能用这张快照代替。快照随时会过期——本轮在它之后又追加了独立验收提交与索引提交，重新计数必然不同。
+
+**位置 1 与 2 的索引冲突（已知点，未预演）**：
+
+`docs/README.md` §2 的 ExecPlan 索引表是**按行插入**维护的，而 #103 与 #104 的 base 都是 `main`、都把新增行插在 `最后一行 Active 计划之后`。因此无论谁先合并，另一个在自己的位置上变基时都会在同一个插入点冲突。
+
+**解法**：两边都保留，两行都在（它们是两份不同的计划，没有覆盖关系）；顺序按编号升序（#103 的行在前、#104 的行在后），因为本轮队列里 #103 是位置 1。这与 §2.3 里"两边都保留、按小节手动拼合"的既有形态同类。
+
+**为什么这条不在 #103 / #104 里预先解决**：两份索引行的插入都发生在栈级联步骤，而栈级联在各 PR 自己的分支上完成；把两行同时写进任一个分支都会让另一个分支的索引行指向一个尚未存在于 `main` 的计划文件（悬空索引）。让它们各自携带自己的一行、在合并位置解决，是唯一不制造悬空引用的做法。
+
+刷新这张表的命令（2026-09-21 实测输出即上表）：
+
+```bash
+git fetch origin
+gh api 'repos/SingularityKChen/harness-projects/pulls?state=open&per_page=100' \
+  --jq '.[] | {number,title,draft,base:.base.ref,head:.head.ref,sha:.head.sha}'
+```
+
+**本轮各 PR 的最终 head 不在本文里快照**：它是易失状态，写进来就会在下一次 push 后变成错的（这正是 §1 记录的那类失败）。判定对象与证据在各 PR 描述末尾的「最终 head 回读」一节，实时值以上面的刷新命令为准。
+
+### 4.4 栈内 PR 的关闭引用：两次相反的实测与一条操作结论
+
+§4.2 记录过上一轮堆叠 PR 的 `closingIssuesReferences` 现象与配方。本轮在四层 E1 栈上复测，先得到"栈内 PR 没有关闭引用"，随后同一批对象上又读到"关闭引用齐全、`willCloseTarget: true`"——**两次结论相反，本节以第二次为准并保留第一次作为反例**，因为它决定"合并前该看什么、合并后该补什么"。
+
+**实测（2026-09-21，同一会话内两次回读，结论相反）**：
+
+| PR | base | PR 侧 `closingIssuesReferences` | issue 侧 `closedByPullRequestsReferences` | 时间线 `willCloseTarget` |
+|---|---|---|---|---|
+| #103 | `main` | `[66]` | #66 → `[103]` | `true` |
+| #104 | `main` | `[10]` | #10 → `[104]` | `true` |
+| #105 | `main` | `[22]` | #22 → `[105]` | `true` |
+| #106 | `test/e1-content-identities` | 先 `[]`，后 `[23]` | #23 → 先 `[]`，后 `[106]` | 先 `false`，后 `true` |
+| #107 | `test/e1-membership-and-draft` | 先 `[]`，后 `[24]` | #24 → 先 `[]`，后 `[107]` | 先 `false`，后 `true` |
+| #108 | `test/e1-write-and-events` | 先 `[]`，后 `[4, 25]` | #25 → 后 `[108]`；#4 → 后 `[108]` | 先 `false`，后 `true` |
+
+**"先"与"后"是同一批对象上的两次观测，不是两次实验**：`CROSS_REFERENCED_EVENT` 的 `createdAt` 一直是 PR 创建时刻（#106 `06:52:26Z`、#107 `06:52:43Z`、#108 `06:53:12Z`），变的是这些事件上的 `willCloseTarget` 字段与两侧的关闭引用。两次观测之间 #106 / #107 / #108 的 base 与正文都没有改动；窗口内唯一的外部写入是对另外三个 PR（#103–#105）设置 milestone，与被观测对象无关，因此**不能把 milestone 编辑当作解释**。
+
+**机制：未确定。** 本文件早先的版本写着「GitHub 只在 PR 的 base 是默认分支时才登记关闭引用」，并据此预测栈内 PR 在合并前不会有关闭引用——**该预测已被上表推翻**。现在能确证的只有：同一字段在同一批对象上出现过两种取值，最终稳定为「非空 / `true`」。仓库内没有做过受控实验来定位触发条件（那需要一个 base 非默认分支的对照 PR），因此本文件不再给出机制，只记录两次快照与回读命令。
+
+**两条仍然成立的操作结论**：
+
+1. **"issue 时间线上看得到这个 PR"与"这个 PR 会关闭这个 issue"是两件事**，前者不能当后者的证据；判定关闭关联必须读 `closingIssuesReferences` / `closedByPullRequestsReferences` 本身。
+2. **不要根据 PR 的 base 预测关闭行为。** 既然 base 非默认分支的 PR 也会拿到 `willCloseTarget: true`，那么把 #106 / #107 / #108 合并进各自的父分支**可能**提前关闭 #23 / #24 / #25 / #4——而那时只有栈底那部分改动进了 `main`。**这条后果未实测**（本批次不合并任何 PR），但代价是"父门禁被一个尚未被采纳的裁决关掉"，所以每一层合并后都必须回读 issue 状态；若发现提前关闭，按 `gh issue reopen <n>` 重开并在本文件记一条。
+
+**关闭引用生效的两条路径**（在本文件写下时被当作"唯一路径"，现已不成立，保留作为历史与备选动作）：
+
+1. **自动 retarget**：下层 PR 合并后，如果它的 head 分支被删除，GitHub 会把以它为 base 的 PR 的 base 改成默认分支。**未实测**。
+2. **人工 retarget**：`gh pr edit <n> --base main`。**本地 `gh stack` 扩展的登记与 GitHub 服务端的行为是两件事，不要互相推断。** 本地侧的实测（2026-09-22；`gh stack view` 不接受分支参数，只读当前 checkout，所以命令必须带执行目录）：
+
+   ```bash
+   $ (cd .worktrees/w4-e1-2 && gh stack view)     # 该 worktree 检出 test/e1-membership-and-draft
+   ✗ current branch "test/e1-membership-and-draft" is not part of a stack
+   $ (cd .worktrees/w5-e1-3 && gh stack view)     # 检出 test/e1-write-and-events
+   ✗ current branch "test/e1-write-and-events" is not part of a stack
+   $ (cd .worktrees/w6-e1-4 && gh stack view)     # 检出 test/e1-ruling
+   ✗ current branch "test/e1-ruling" is not part of a stack
+   $ gh stack view definitely-not-a-real-branch-xyz   # 从仓库根跑；参数被静默忽略
+   ✗ current branch "main" is not part of a stack
+   ```
+
+   这**只**说明 `gh stack` 扩展自己的登记里没有这条栈，**不能**用来推断 GitHub 服务端有没有把它当成栈——服务端的症状（下一段）显示它当成了。改 base 之前先读下一段。
+
+**同一时刻一起变化的第三件事：`ci.yml` 开始在栈内 PR 上运行，`PR size` 随之变红**
+
+上表的关闭引用不是单独变的。同一时间窗内还有两个变化，三个症状同时出现，指向同一个原因——**GitHub 在服务端把这条链当成了 native stack**：
+
+| 症状 | 之前 | 之后 | 与 native stack 的关系 |
+|---|---|---|---|
+| 关闭引用 / `willCloseTarget` | `[]` / `false` | `[n]` / `true` | 栈成员对 issue 的关闭语义 |
+| `ci.yml` 的 `Verify` / `PR Fast Gate` | 栈内 PR 上不出现 | 出现且成功 | `branches: [main]` 过滤器看到的是**栈的根分支** |
+| `rule-checks.yml` 的 `PR size` | 按声明的父分支度量，通过 | 按 `main` 度量，**红** | 同一个 `github.base_ref` 取值变化 |
+
+第三行就是 issue #99 记录的缺陷本身：栈成员的 `github.base_ref` 是栈的根分支（`main`），于是体量检查量的是**整条栈相对 `main` 的累计**。
+
+**下面这张表是 2026-09-21 的快照，不要当成当前值**（`PLANS.md` §4「易失状态写成回读命令 + 期望」）。要当前值就重算，两个口径各跑一次（在对应的 worktree 里跑；w4=#106、w5=#107、w6=#108）：
+
+```bash
+$ (cd .worktrees/w4-e1-2 && node scripts/rule-checks.mjs size test/e1-content-identities)   # 按自己声明的 base
+$ (cd .worktrees/w4-e1-2 && node scripts/rule-checks.mjs size origin/main)                  # 按 main（当时 CI 用的口径）
+```
+
+| PR | 按自己声明的 base（快照） | 按 `origin/main`（快照） |
+|---|---|---|
+| #106 | 文档 733 / 1500（通过） | 文档 1803 / 1500（超限） |
+| #107 | 文档 1032 / 1500（通过） | 文档 2835 / 1500（超限） |
+| #108 | 文档 663 / 1500（通过） | 文档 3498 / 1500（超限） |
+
+这张表的**用途不是给数字，而是给方向**：同一个 head 在两个基线口径下结论相反。评审在 2026-09-22 重算时累计列已漂移 54–56 行（"按自己声明的 base"一列仍逐字准确）——所以判定超限时必须先问基线是什么。
+
+**所以 #106 / #107 / #108 上的红 `PR size` 不是这三个 PR 的体量问题，是别人造成的红**（§6.1 的那一类）：修复在 PR #100（`fix/rule-checks-api-base`）。
+
+**该红已经消失（2026-09-21，PR #100 合并进 `main` 为 `dbd9c5d` 之后）**：`rule-checks` 的判定基线改为来自 PR API 的对象对，不再取 `github.base_ref`；四个 E1 分支 rebase 到新 `main` 之后，`PR size` 与 `Resolve PR base` 都是绿的，栈内 PR 也拿到了 `Verify` / `PR Fast Gate`。**上表的对照仍然保留**，因为它记录了"同一个 head 在不同基线口径下结论相反"这件事本身——判定超限时仍然要问清楚基线是什么，本地复核命令是 `node scripts/rule-checks.mjs size <该 PR 声明的 base>`。
+
+**如果将来又出现栈内 PR 的 `PR size` 变红**：先读 `Resolve PR base` job 打印的判定对象对，再看这个红是不是别人造成的，不要直接按超限处理。
+
+`PR size` 是 advisory，不在分支保护里，因此即使变红也不阻塞合并；但它会被读成"这些 PR 有问题"，所以必须写在这里。
+
+**本文件不再断言"栈内 PR 拿不到 `Verify`"**：那句话在本轮同一批对象上先成立、后不成立。判定某个栈内 PR 有没有 CI 结论，读它当前的 checks，不要读 base 的名字。
+
+回读命令（栈内每一层合并后重跑第 1、2 条；第 1 条的期望**不再**是「栈内 PR 为 `[]`」）：
+
+```bash
+# 1) PR 侧的关闭引用：现在六个 PR 都应非空
+for n in 103 104 105 106 107 108; do
+  gh pr view "$n" --repo SingularityKChen/harness-projects \
+    --json number,baseRefName,closingIssuesReferences \
+    --jq '{number,base:.baseRefName,closing:[.closingIssuesReferences[].number]}'
+done
+
+# 2) issue 侧的关闭引用与状态（每层合并后重点看 state 有没有被提前改成 CLOSED）
+for i in 66 10 22 23 24 25 4; do
+  gh issue view "$i" --repo SingularityKChen/harness-projects \
+    --json number,state,closedByPullRequestsReferences \
+    --jq '{number,state,closedBy:[.closedByPullRequestsReferences[].number]}'
+done
+
+# 3) 交叉引用是否仍在，以及 willCloseTarget 是 true 还是 false
+gh api graphql -f query='
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      timelineItems(last: 10, itemTypes: [CROSS_REFERENCED_EVENT]) {
+        totalCount
+        nodes { ... on CrossReferencedEvent { createdAt willCloseTarget
+          source { __typename ... on PullRequest { number baseRefName } } } } } } }
+}' -f owner=SingularityKChen -f name=harness-projects -F number=23
+```
+
+回读判据：`[]` 不变时不要当成"已关联"——按路径 1 或 2 处理，然后重跑第 1、2 条命令，看到 `closing` 从 `[]` 变成 `[<issue>]` 才算登记成功。
+
 ## 5. 历史：2026-09-18 那一轮的实测结果
 
 以下是 2026-09-18 完成的上一轮评审（9 个开放 PR：#12 #19 #21 #3 #11 #13 #33 #35 #37）的**实测记录**，不是当前队列的一部分，也不是可以直接套用的模板——它作为一个已经发生过的具体案例，说明第 2 节的流程为什么长这个样子。来源：`docs/review/2026-09-18-mvp-delivery-review.md`。
@@ -273,3 +420,29 @@ gh pr view <pr> --json baseRefName,closingIssuesReferences
 如实记录，不作为可以照搬的先例：2026-09-18 那一轮合并时，分支保护要求至少 1 个批准，而全部 9 个 PR 的作者与执行合并所用的凭据是同一个账号——GitHub 不允许账号批准自己提交的 PR。人类伙伴显式授权后，8 个 PR 改用管理员权限（`--admin`，仓库的 `enforce_admins=false`）合并，绕过的只是批准门禁：**检查门禁全程是真绿的**，每个 PR 合并前都实跑过 `pnpm verify` 与 `node scripts/workflow-check.mjs` 并得到通过结果。
 
 这不是这份文件可以替你决定的问题：单账号仓库里"必须有 1 个批准"这条约束目前只能靠管理员权限绕过，它作为门禁的实际效力应当被重新评估——要么显式接受它当前是形式性的并写清楚，要么引入第二个账号或评审者让批准门禁真正生效。在这个决定做出之前，任何一次用管理员权限绕过批准合并的操作，都应当像 2026-09-18 这次一样，在合并记录里如实写明"绕过的是批准门禁，检查门禁保持真绿"，不要笼统写成"已合并"。
+
+**关闭引用一旦登记，就不会随正文编辑撤回（2026-09-21 实测）**
+
+这条比上面两条都重要，因为它的后果落在**合并那一刻**，而不是记录里。
+
+实测（#108）：它的正文原本同时写着 `Closes #25` 与 `Closes #4`，于是 PR 侧 `closingIssuesReferences = [4, 25]`、issue #4 侧 `closedByPullRequestsReferences = [108]`。随后把正文里那一行改成 `Refs #4`，又进一步删掉了正文中**所有**字面 `Closes #4`（包括行内代码里的），等 3.5 分钟后回读：
+
+```bash
+gh pr view 108 --json closingIssuesReferences,updatedAt \
+  --jq '"closing=[\([.closingIssuesReferences[].number]|join(","))] bodyUpdatedAt=\(.updatedAt)"'
+# 实测输出：closing=[4,25] bodyUpdatedAt=2026-09-22T03:20:12Z（正文确实已被编辑）
+grep -c -i 'closes #4' <<<"$(gh pr view 108 --json body --jq .body)"   # 实测：0
+```
+
+**结论：`closingIssuesReferences` 不是正文的实时函数。** 它登记之后，改正文不会把它撤下来——至少在这次观测的窗口内没有。所以：
+
+- **写 `Closes #N` 之前先想清楚**：它不是一个可以事后收回的标记。写错了要改，代价是"合并时仍会关闭 #N"，只能靠合并后 `gh issue reopen <n>` 补救。
+- 本仓库自己的 `linkedIssues()`（`scripts/policy-check.mjs`）会把行内代码里的引用剥离，因此它算出的 `closes` 可能**少于** GitHub 实际登记的——`policy-check` 说"只关联了 #25"不代表 GitHub 不会关闭 #4。两套口径不要互相替代。
+- 本文件 §4.4 开头那条"机制未确定"因此再添一例：同一个字段既出现过"从空变非空"，也出现过"清空正文后不变"。**判定关闭关联永远读这两个字段本身，不要从正文推断。**
+
+**#108 的具体后果（需要在合并时处理）**：它现在仍会把 #4 关掉，而 #4 的验收条件是六条行为、其中行为 6 判 `inconclusive`（`release-gates.md` §1：无法判定等同于不满足）。所以合并 #108 之后**必须**回读并重开：
+
+```bash
+gh issue view 4 --json state          # 期望 OPEN；若为 CLOSED 则：
+gh issue reopen 4 -c "被 #108 的关闭引用自动关闭；行为 6 仍为 inconclusive，revise 清单未落地。见 docs/architecture/gate-e1-ruling.md §4（#108 交付）。"
+```
