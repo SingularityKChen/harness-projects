@@ -338,6 +338,57 @@ export function hasPullRequestMetadata(meta) {
   return typeof meta?.authorType === 'string' && typeof meta?.authorLogin === 'string'
 }
 
+/**
+ * Check the object `issue <n>` names, which must actually be an issue.
+ *
+ * A pull request number is a legal input to GitHub's issues API — a pull
+ * request *is* an issue there, the same endpoint returns it — so `issue 12` on
+ * a pull request used to run the title and label rules against it and report
+ * violations that can never be fixed: a pull request title is a Chinese
+ * summary by convention, so the English rule fires on every one of them, and a
+ * pull request that carries no `kind:*` / `area:*` labels adds the other two
+ * (measured: three on #12, one on #100 and #103, which do carry them). An
+ * advisory check that is permanently red on a whole class of input is the
+ * "green means checked" illusion §9.2 warns about, mirrored.
+ *
+ * The object kind comes from the platform's `pull_request` field, never from
+ * the shape of the number: guessing by size or by title language would misfire
+ * on real issues.
+ *
+ * @param {number} number
+ * @param {{title: string, labels: string[], isPullRequest?: boolean}} meta
+ * @returns {string[]} one message per violation; empty means conforming.
+ */
+export function checkIssueTarget(number, meta) {
+  if (meta?.isPullRequest) {
+    return [`#${number} is a pull request, not an issue — use \`pr ${number}\``]
+  }
+  return [...checkTitle(meta.title), ...checkLabels(meta.labels, meta.title)]
+}
+
+/**
+ * Check one `Closes #<n>` target of a pull request body: it must be an issue.
+ *
+ * `Refs #<n>` never reaches this function, on purpose. A reference means
+ * "related", and pointing one at another pull request is a legal and common
+ * cross reference, so rejecting it would trade this false positive for a
+ * second one — and would widen §8.3.7 from "must link an issue" into "must not
+ * mention a pull request".
+ *
+ * @param {number} number
+ * @param {{title: string, labels: string[], isPullRequest?: boolean}} meta
+ * @returns {string[]} one message per violation; empty means conforming.
+ */
+export function checkCloserTarget(number, meta) {
+  if (meta?.isPullRequest) {
+    return [`linked #${number} is a pull request; \`Closes\` must name an issue`]
+  }
+  return [
+    ...checkTitle(meta.title).map((problem) => `linked issue #${number}: ${problem}`),
+    ...checkLabels(meta.labels, meta.title).map((problem) => `linked issue #${number}: ${problem}`),
+  ]
+}
+
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -393,7 +444,12 @@ function parseFetchedJson(raw, description) {
 }
 
 function fetchIssue(repo, number) {
-  const raw = gh(['api', `repos/${repo}/issues/${number}`, '--jq', '{number, title, labels: [.labels[].name]}'])
+  const raw = gh([
+    'api',
+    `repos/${repo}/issues/${number}`,
+    '--jq',
+    '{number, title, labels: [.labels[].name], isPullRequest: (.pull_request != null)}',
+  ])
   return parseFetchedJson(raw, `issue #${number}`)
 }
 
@@ -401,6 +457,63 @@ function fail(messages) {
   for (const message of messages) console.error(`::error::${message}`)
   console.error(`\n${messages.length} problem(s) found. See docs/development/repository-rules.md §4 or run node scripts/policy-check.mjs areas.`)
   process.exit(1)
+}
+
+/**
+ * Report a usage error (exit 2) rather than a rule violation (exit 1): the
+ * object under check has nothing wrong with it, the caller asked about the
+ * wrong kind of object. Pointing at the title and label rules here would send
+ * the reader to fix a title that no rule applies to.
+ */
+function usageError(messages) {
+  for (const message of messages) console.error(`::error::${message}`)
+  process.exit(2)
+}
+
+function runIssue(repo, number) {
+  const issue = fetchIssue(repo, number)
+  const problems = checkIssueTarget(issue.number, issue)
+  if (problems.length === 0) {
+    console.log(`#${issue.number} conforms: ${issue.title}`)
+    return
+  }
+  if (issue.isPullRequest) usageError(problems)
+  fail(problems)
+}
+
+/** Check every `Closes #<n>` target; `refs` is deliberately left unchecked. */
+function closerProblems(repo, closes) {
+  return closes.flatMap((number) => checkCloserTarget(number, fetchIssue(repo, number)))
+}
+
+function runPullRequest(repo, number) {
+  const raw = gh(['api', `repos/${repo}/pulls/${number}`, '--jq', '{body: .body, authorType: .user.type, authorLogin: .user.login}'])
+  const meta = parseFetchedJson(raw, `pull request #${number}`)
+
+  if (!hasPullRequestMetadata(meta)) {
+    // Parsed fine but has no author — every real pull request has one, so
+    // this is a response that was never actually fetched (empty stdout, a
+    // missing scope, a `--jq` miss), not a contributor who wrote nothing.
+    console.error(`could not read pull request #${number}: response is missing author metadata`)
+    process.exit(3)
+  }
+
+  const exemption = linkRuleExemption(meta)
+  if (exemption.exempt) {
+    console.log(`#${number} skipped: ${exemption.reason}`)
+    return
+  }
+
+  const body = meta.body
+  const problems = checkPullRequestBody(body, repo)
+  if (problems.length > 0) fail(problems)
+
+  const { closes, refs } = linkedIssues(body, repo)
+  const nested = closerProblems(repo, closes)
+  if (nested.length > 0) fail(nested)
+
+  const named = [...closes.map((n) => `Closes #${n}`), ...refs.map((n) => `Refs #${n}`)].join(', ')
+  console.log(`#${number} conforms: links ${named}`)
 }
 
 function main(argv) {
@@ -413,49 +526,8 @@ function main(argv) {
 
   const repo = repository()
 
-  if (mode === 'issue' && number) {
-    const issue = fetchIssue(repo, number)
-    const problems = [...checkTitle(issue.title), ...checkLabels(issue.labels, issue.title)]
-    if (problems.length > 0) fail(problems)
-    console.log(`#${issue.number} conforms: ${issue.title}`)
-    return
-  }
-
-  if (mode === 'pr' && number) {
-    const raw = gh(['api', `repos/${repo}/pulls/${number}`, '--jq', '{body: .body, authorType: .user.type, authorLogin: .user.login}'])
-    const meta = parseFetchedJson(raw, `pull request #${number}`)
-
-    if (!hasPullRequestMetadata(meta)) {
-      // Parsed fine but has no author — every real pull request has one, so
-      // this is a response that was never actually fetched (empty stdout, a
-      // missing scope, a `--jq` miss), not a contributor who wrote nothing.
-      console.error(`could not read pull request #${number}: response is missing author metadata`)
-      process.exit(3)
-    }
-
-    const exemption = linkRuleExemption(meta)
-    if (exemption.exempt) {
-      console.log(`#${number} skipped: ${exemption.reason}`)
-      return
-    }
-
-    const body = meta.body
-    const problems = checkPullRequestBody(body, repo)
-    if (problems.length > 0) fail(problems)
-
-    const { closes, refs } = linkedIssues(body, repo)
-    const nested = []
-    for (const linked of closes) {
-      const issue = fetchIssue(repo, linked)
-      nested.push(...checkTitle(issue.title).map((p) => `linked issue #${linked}: ${p}`))
-      nested.push(...checkLabels(issue.labels, issue.title).map((p) => `linked issue #${linked}: ${p}`))
-    }
-    if (nested.length > 0) fail(nested)
-
-    const named = [...closes.map((n) => `Closes #${n}`), ...refs.map((n) => `Refs #${n}`)].join(', ')
-    console.log(`#${number} conforms: links ${named}`)
-    return
-  }
+  if (mode === 'issue' && number) return runIssue(repo, number)
+  if (mode === 'pr' && number) return runPullRequest(repo, number)
 
   console.error('usage: node scripts/policy-check.mjs areas | issue <number> | pr <number>')
   process.exit(2)
