@@ -13,7 +13,7 @@
 
 | 字段 | 类型 | 取值 | 语义 |
 |---|---|---|---|
-| Status | 单选（内置） | `Todo` / `In Progress` / `In Review` / `Done` | 与 PR 生命周期对齐：`In Review` = PR 已提交待评审；`Done` = 已合并或已验收 |
+| Status | 单选（内置） | `Todo` / `In Progress` / `In Review` / `Done` | 定义在 [`docs/product/board-semantics.md`](../product/board-semantics.md) §1–§2。本表只登记字段，不复述语义 |
 | Kind | 单选 | `feat` / `fix` / `docs` / `chore` / `refactor` / `test` | 与提交类型和 issue 标题前缀一致（`AGENTS.md` §8.2、§8.7） |
 | Area | 单选 | 21 个取值：11 个包 + 8 个 `docs/` 子目录 + `ci` / `repo` | 与 `area:*` 标签同一套词汇（`AGENTS.md` §8.7），覆盖包所有权与文档目录 |
 | ExecPlan | 文本 | 计划路径，如 `docs/exec-plan/active/2026-09-17-xxx.md` | 条目所属计划；无计划留空 |
@@ -22,19 +22,32 @@
 
 `Kind` 而不是 `Type`：GitHub 已把 `Type` 保留给原生 issue types，创建同名字段会返回 `Name cannot have a reserved value`。
 
+**`Status` 为什么只给链接、不给定义**：这个字段曾经在仓库里同时有两套互不相容的定义——`docs/product/board-semantics.md` 说它是规划轴，本表曾经把它说成由 PR 生命周期驱动的工程口径。同一个断言写在两处就会漂移，所以定义只留一处，本表只登记字段本身。`Engineering` 字段同理，见 `docs/product/board-semantics.md` §2。
+
 ## 2. 状态流转
 
+`Status` 的四个取值仍然构成一条链，但**推进它的是规划决定，不是工程事件**：
+
 ```text
-Todo ──开始实现──▶ In Progress ──提交 PR──▶ In Review ──合并/验收──▶ Done
-                      ▲                        │
-                      └────────评审要求修改─────┘
+Todo ──规划上启动──▶ In Progress ──规划所有者确认工程已交付──▶ In Review ──规划所有者接受──▶ Done
+                          ▲                                    │
+                          └──────────不接受，继续做──────────────┘
 ```
+
+| 取值 | 规划轴含义 |
+|---|---|
+| `Todo` | 规划上尚未启动（`Item added to project` 的机械默认值，见 `docs/product/board-semantics.md` §2） |
+| `In Progress` | 规划上已启动、正在做 |
+| `In Review` | 工程侧已交付，**等规划所有者验收**——这个取值存在的理由就是让「先别关、等人签字」这个意图有落脚点 |
+| `Done` | 规划所有者**已接受**完成 |
 
 规则：
 
 - 一个条目对应一个可独立验收的闭环；**不为了减少条目数量而聚合**（`AGENTS.md` §5.1）。
 - PR 描述必须给出 ExecPlan 路径与批次；用 `Closes #N` 关联使合并后自动关闭条目。
-- 合并后把 Status 改为 `Done`；如果条目是某个 Gate 的前置条件，先确认 Gate 的验收证据再改。
+- **工程事件不推进 `Status`。** PR 提交、评审通过、合并、CI 变绿都不改它——会写 `Status` 且由工程事件触发的内置工作流已按 `docs/product/board-semantics.md` §5 全部关闭，`Item added to project` 是 §2 的唯一机械例外、保持开启；`Board invariants` 按日核对九条的启停状态。
+- 合并之后由**规划所有者**决定是否接受完成：接受置 `Done`，不接受留在 `In Review` 并写明还差什么。若条目是某个 Gate 的前置条件，先确认 Gate 的验收证据再改。
+- 写入由规划所有者本人执行（看板界面，或 §3 的 `gh project item-edit`）；agent 代写的批准要求见 `docs/development/workflow.md` §3.2——同一条断言只写一处，本表不复述。
 - 阻塞时保留在 `In Progress` 并在条目里写明阻塞原因，不新建"阻塞"状态。
 
 ## 3. 维护命令

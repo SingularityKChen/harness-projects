@@ -28,6 +28,20 @@
 
 分支已推送时先创建 backup ref，再用精确 old head lease 执行 force-with-lease。push 后重新读取 PR 当前 head/base、merge state、checks、closingIssuesReferences 和 review threads。只有最终 head 的验证通过，才用 `gh pr ready <n>` 把 draft 更新为 ready；ready 状态不能沿用旧 head 的结论。
 
+## 3.2 交付后的 `Status`
+
+看板的 `Status` 是**规划轴**字段，回答「规划所有者是否接受这个工作项完成」，定义在 `docs/product/board-semantics.md` §1–§2。**工程事件不推进它**：PR 提交、评审通过、合并、CI 变绿都不改 `Status`——会写 `Status` 且由工程事件触发的内置工作流已按该文档 §5 全部关闭，`Item added to project` 是 §2 的唯一机械例外、保持开启；`Board invariants` 按日核对九条的启停状态。
+
+因此 PR 合并之后：
+
+1. 规划所有者决定这个工作项是否被接受为完成；
+2. 接受则把 `Status` 置 `Done`；不接受就留在 `In Review`，并在条目里写明还差什么；
+3. 写入由规划所有者本人执行——看板界面，或 `docs/project-management/README.md` §3 的 `gh project item-edit`。
+
+**例外**：agent 可以代写，但前置是一条**点名目标**的人类批准，且必须记入所属 ExecPlan 的 `Decision Log`（`AGENTS.md` §7、`docs/development/repository-rules.md` §3）。没有这条批准的 agent 写入视为无效，应回滚或补批准。
+
+这一步没有自动化，是刻意的：合并只是工程事实，接受与否是规划决定。把这个决定交给脚本或内置工作流，正是 `AGENTS.md` §1.1 不变量 3 禁止的「PR 合并默认覆盖规划状态」。
+
 ## 4. 风险驱动验证
 
 文档变化执行链接、命令和规模检查；包边界执行 boundaries；行为变化执行相关契约 / 集成测试；门禁、安全、并发、持久化或外部写入变化扩大到完整相关回归和人工回读。没有新的失败、风险信号或未解问题时，不机械重复更宽测试。
