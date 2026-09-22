@@ -66,7 +66,7 @@ R1 本身不得由 LLM 判定（`AGENTS.md` §1.1 第 5 条）；agent 只能提
 | 9 | 能力缺失时 Core 必须拒绝命令 | `AGENTS.md` §1.1 第 5 条；`tests/README.md` §2 第 6 类（Provider 能力契约） | 断言"provider 返回 `not_supported` 时命令结果为拒绝，且不产生任何本地写入"；关键词"缺能力" |
 | 10 | Start Work 重启后可恢复 | `tests/README.md` §2 第 5 类（跨域编排）；`AGENTS.md` §9 对持久化与恢复的扩大验证要求 | 断言"用同一份 Storage 内容新建 core 后，仍能按工作项与仓库查到执行上下文"；关键词"重启后" |
 
-**当前结论（本文件所在 head 上）**：`tests/mvp0/` 有 1 个 `.test.js`；`tests/e2e/` 有 8 个、`tests/integration/` 有 1 个 `.test.js`；`tests/contract/` 有 21 个用例文件。当前这些用例仍主要覆盖仓库流程、包边界与纵向链路，不能据此声称上表 10 项已经逐条完成断言核对。
+**当前结论（本文件所在 head 上）**：`tests/mvp0/` 有 1 个 `.test.js`；`tests/e2e/` 有 8 个、`tests/integration/` 有 1 个 `.test.js`；`tests/contract/` 有 22 个用例文件。当前这些用例仍主要覆盖仓库流程、包边界与纵向链路，不能据此声称上表 10 项已经逐条完成断言核对。
 
 上述文件计数只说明测试分层已经存在，不等于上表 10 项已逐条完成断言核对。因此第 3 条目前仍是**无法判定**，按 §1 等同于**不满足**。
 
