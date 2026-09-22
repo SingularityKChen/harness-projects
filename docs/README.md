@@ -35,11 +35,13 @@
 | [2026-09-18-delivery-planning-and-board](exec-plan/active/2026-09-18-delivery-planning-and-board.md) | 交付规划与工作看板重整：重述原始交付 MVP、建立里程碑与迭代、拆分过大工作项、收敛看板自动化 | Batch 1–9 已完成；剩余人工项为两个 view 的分组设置（无法经 API 回读） |
 | [2026-09-21-rule-checks-api-base](exec-plan/active/2026-09-21-rule-checks-api-base.md) | 判定输入改用 PR API 的对象对：判定固定到 `(base_sha, head_sha)` 两个不可变提交，含解析器失败策略与检查 job 的一致性 | Active |
 | [2026-09-21-merge-gate-layers](exec-plan/active/2026-09-21-merge-gate-layers.md) | Merge Gate 车道：integration / 包边界 / MVP-0 / E2E 四层各自成为一条 lane，空层与零用例层响亮失败 | Active |
+| [2026-09-21-policy-check-pr-number](exec-plan/completed/2026-09-21-policy-check-pr-number.md) | policy-check 区分 issue 与 pull request 编号：引用 PR 编号时给出正确诊断，而不是三条按 issue 规则判的假阳性 | Completed |
 
 ### Completed
 
 | 计划 | 结论 |
 |---|---|
+| [2026-09-21-policy-check-pr-number](exec-plan/completed/2026-09-21-policy-check-pr-number.md) | policy-check 的目标类型判定已落地：`issue <n>` 命中 PR 编号按用法错误处理（退出码 2）并提示改用 `pr <n>`，`Closes` 指向 PR 按规则违规报出（退出码 1），`Refs` 指向 PR 保持不校验 |
 | [2026-09-20-rule-checks-pr-base](exec-plan/completed/2026-09-20-rule-checks-pr-base.md) | PR 体量检查的基线解耦：把"哪些 PR 进入门禁"与"用哪条基线度量"分开，栈上 PR 按自己声明的 base 判定 |
 | [2026-09-17-repo-bootstrap](exec-plan/completed/2026-09-17-repo-bootstrap.md) | 仓库引导完成：文档治理约定、pnpm 工作区骨架、包边界契约测试、`PR Fast Gate` 与 `main` 分支保护（只允许 rebase 合并） |
 | [2026-09-17-disclosure-audit-and-license](exec-plan/completed/2026-09-17-disclosure-audit-and-license.md) | 发布面审计完成：上游设计输入从仓库历史移除并保留本地只读副本；采用 Apache-2.0；残余暴露面（PR ref）已记录待决 |
