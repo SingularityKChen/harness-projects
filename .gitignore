@@ -2,6 +2,12 @@
 node_modules/
 .pnpm-store/
 
+# pnpm 的本地 XDG 重定向目录。项目 pin 了 pnpm 版本，而受限沙箱不允许它在
+# workspace 之外创建临时安装目录，绕法是把 XDG_CACHE_HOME / XDG_DATA_HOME /
+# XDG_STATE_HOME / TMPDIR 都指到仓库内的这个目录。它是本机运行态，不进版本库；
+# 不写这一条的话 `git add -A` 会把它整个收进去（实测一次误收 515 个文件）。
+.tmp-pnpm/
+
 # 构建产物
 dist/
 build/

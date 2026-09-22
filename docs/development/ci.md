@@ -10,12 +10,26 @@
 | Merge Gate | pull_request（不声明 base 过滤器）、push main；四条 lane 各跑一层测试并点名它保护的不变量，聚合 job 发布 Merge Gate | advisory；是否加入分支保护由人类伙伴决定 |
 | Issue policy | issue / PR 事件；检查标题、标签和 issue 关联 | advisory |
 | Rule checks | PR 事件；发布面和 PR 体量 | advisory |
-| Board invariants | 每日 schedule；读取 Project 工作流启停并与裁决表比较 | advisory；需要 PROJECTS_TOKEN |
+| Board invariants | 每日 schedule；两个 job：读取 Project 工作流启停并与裁决表比较，以及核对 `Engineering` 字段与 PR 真值 | advisory；需要 PROJECTS_TOKEN |
 | Engineering state | pull_request_target（opened / reopened / ready_for_review / converted_to_draft / synchronize / closed）与 Engineering state signal 的 workflow_run；把 PR 生命周期写进看板的 `Engineering` 字段 | advisory；**不写 `Status`**（不变量 3） |
 | Engineering state signal | pull_request_review（submitted / dismissed）；只上报一个信号，由 Engineering state 消费 | advisory；`permissions: {}` |
 | GitHub review session | ready_for_review 的 pull_request_target；只转发 payload，不 checkout PR 代码；按 head 提交去重 | 不属于合并门禁 |
 
-Board invariants 只从默认分支按日运行，使用 Project token 读取九条内置 workflow，发现 unknown / missing / 状态偏离就失败；它不 checkout PR ref，也不进入分支保护。Review session 是特例：它运行在 self-hosted runner 上，默认分支 workflow 固定定义，权限为空，secret 只经 env 进入签名过程，响应体写 $RUNNER_TEMP。普通 PR 代码 lane 使用 pull_request；不得把 pull_request_target 用作执行不可信 PR 代码的入口。
+Board invariants 只从默认分支按日运行，使用 Project token，发现偏离就失败；它不 checkout PR ref，也不进入分支保护。Review session 是特例：它运行在 self-hosted runner 上，默认分支 workflow 固定定义，权限为空，secret 只经 env 进入签名过程，响应体写 $RUNNER_TEMP。普通 PR 代码 lane 使用 pull_request；不得把 pull_request_target 用作执行不可信 PR 代码的入口。
+
+Board invariants 的 `on` **刻意只有 `schedule`**，由 `tests/contract/check-board-workflows-live.test.js` 钉在 `['schedule']` 上。`workflow_dispatch` 带一个 ref 选择器，而被选中的 ref 同时决定 workflow 定义与 checkout 出来的脚本——这两个 job 都持有长效 PAT，于是手选一个 PR 分支就能拿 token 执行任意代码。`merge-gate.yml` 可以用 `workflow_dispatch`，是因为那条 workflow 不读任何 secret；这条区分不是风格，是提权边界。
+
+### Board invariants 的第二个 job：`Engineering` 字段漂移
+
+`engineering-field` job 跑 `scripts/check-engineering-drift-live.mjs`：把看板上每个 issue 条目的 `Engineering` 与「引用它的 PR」的真值比较，不等就报 `::error::` 并 exit 1。
+
+它存在的理由是一次实测：2026-09-22 发现 `scripts/sync-engineering-state.mjs` 的投影函数用 REST 语义校验 GraphQL 枚举（接受集合写成 `['OPEN','CLOSED']`，而 GraphQL 对已合并 PR 返回 `MERGED`），于是产出 `Merged` 的分支不可达、**每一次合并事件上的 reconcile 都失败**，而看板静静停在 `PR open`——44 个条目里 25 个与真值不符（issue #110）。那次故障四层防线全漏，漏掉的那一层就是这里：没有任何东西观察字段取值本身。失败发生在合并**之后**，拦不住合并；它不是必需检查；`Board workflow invariants` 只看工作流启停，不看字段取值；契约测试断言的又是错的行为。
+
+判定规则在 `scripts/engineering-drift.mjs`（纯函数，进 `pnpm verify`）：只要有任一引用该 issue 的 PR 已合并就期望 `Merged`（已合并是终态且单调），否则取创建时间最新的 open PR 的投影，全 closed 未合并则期望为空；没有被任何 PR 引用的条目跳过——`Engineering` 为空是合法状态，不是漂移。
+
+**投影是共享的，选择策略不是。** 单 PR 的 `snapshot → 取值` 投影 import 自 `sync-engineering-state.mjs`（`stateForSnapshot`），所以两侧对同一个快照必然一致；但「同一 issue 被多个 PR 引用时谁说了算」这条**选择策略是观察者独有的**——写入者 `sync-engineering-state.mjs` 只投影触发事件的那一个 PR，没有任何跨 PR 聚合。两者因此可能在多 PR 引用同一 issue 时给出不同取值，这是 issue #115 记录在案的已知缺口，不要把它读成「两侧必然一致」。
+
+PR 列表与看板条目都分页读取，超过 5 页（500 条）上限就 fail closed，不把截断的输入读成「没有漂移」。看板条目按**来源仓库**过滤：项目是 user 级的，可以容纳任意仓库的条目，不过滤的话他仓的 issue #N 会与本仓库 close #N 的 PR 误配。
 
 Review session 的两条结构性质由 `tests/contract/github-review-workflow.test.js` 固定，改 workflow 必须同时改它：
 

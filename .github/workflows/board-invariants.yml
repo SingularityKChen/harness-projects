@@ -1,20 +1,32 @@
 name: Board invariants
 
-# 观察看板内置工作流的启停状态。
+# 观察看板上那两件"只有靠人记得才不会漂"的事：
 #
-# 看板上那几条"由 PR 事件推进条目状态"的内置工作流写的都是 `Status` 且不可
-# 重定向，是 AGENTS.md §1.3 不变量 3 的反例。它们**无法用 API 启停**——GraphQL
-# 只有 `deleteProjectV2Workflow`，没有 enable/disable mutation——所以"关着"
-# 这件事只能靠人记得。
+# 1. 内置工作流的启停状态。
+#    看板上那几条"由 PR 事件推进条目状态"的内置工作流写的都是 `Status` 且不可
+#    重定向，是 AGENTS.md §1.3 不变量 3 的反例。它们**无法用 API 启停**——GraphQL
+#    只有 `deleteProjectV2Workflow`，没有 enable/disable mutation——所以"关着"
+#    这件事只能靠人记得。启用不可自动化，但**观察**可以：`ProjectV2Workflow` 暴露
+#    `enabled`。
 #
-# 启用不可自动化，但**观察**可以：`ProjectV2Workflow` 暴露 `enabled`。
+# 2. `Engineering` 字段是否等于 PR 真值。
+#    2026-09-22 实测：reconcile 在**每一次合并事件**上都失败，而失败发生在合并
+#    之后——它拦不住合并，也不是必需检查，于是看板静静停在 `PR open`，44 个条目里
+#    25 个与真值不符（issue #110）。四层防线全漏的那一层就是这里：没有任何东西
+#    观察字段取值本身。
 #
 # Advisory by design：与 `Issue policy`、`Rule checks` 一样**不进分支保护**。
 # 它依赖网络与 token，把它设成必需检查会让 token 过期直接堵死合并通道，
-# 而它要防的是配置漂移，不是代码缺陷。
+# 而它要防的是配置与投影漂移，不是代码缺陷。
 #
-# 只从默认分支按日调度：这个 job 使用长效 PAT，不能让 PR 代码或手选 ref 进入执行面。
-# 看板可以在没有任何 PR 的情况下漂移，定时观察也正好覆盖这种变化。
+# 只从默认分支按日调度：这两个 job 使用长效 PAT，不能让 PR 代码或手选 ref 进入
+# 执行面。看板可以在没有任何 PR 的情况下漂移，定时观察也正好覆盖这种变化。
+#
+# 刻意**不**声明 `workflow_dispatch`：它带一个 ref 选择器，而被选中的 ref 同时决定
+# workflow 定义与 checkout 出来的脚本——一个手选的 PR 分支就能拿 `PROJECTS_TOKEN`
+# 执行任意代码。`merge-gate.yml` 可以用它，是因为那条 workflow 不读任何 secret。
+# `tests/contract/check-board-workflows-live.test.js` 有一条断言把 `on` 钉在
+# `['schedule']` 上，正是为了防止这次修改。
 
 on:
   schedule:
@@ -49,3 +61,25 @@ jobs:
         env:
           PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
         run: node scripts/check-board-workflows-live.mjs
+
+  engineering-field:
+    name: Engineering field drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PROJECT_OWNER: SingularityKChen
+      PROJECT_NUMBER: 10
+      GITHUB_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: 核对 Engineering 字段与 PR 真值
+        env:
+          PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+        run: node scripts/check-engineering-drift-live.mjs
