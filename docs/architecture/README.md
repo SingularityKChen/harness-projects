@@ -34,5 +34,7 @@
 | 文档 | 回答的问题 |
 |---|---|
 | [release-gates.md](release-gates.md) | 发布门禁 R1 的逐条条件、判定证据与判定者、提前终止条件 |
+| [gate-e1-sandbox.md](gate-e1-sandbox.md) | Gate E1 的一次性观测沙箱：对象清单与 id、重建与拆除步骤、九字段记录模板 |
+| [gate-e1-content-identities.md](gate-e1-content-identities.md) | 三类项目内容（issue / draft / change request）到内部身份的映射观测与判定 |
 
 §内容范围 的其余主题仍待补齐；在补齐之前，涉及这些主题的结论必须在本目录内自包含地写明。
