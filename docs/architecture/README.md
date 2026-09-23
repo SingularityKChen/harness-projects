@@ -37,5 +37,6 @@
 | [gate-e1-sandbox.md](gate-e1-sandbox.md) | Gate E1 的一次性观测沙箱：对象清单与 id、重建与拆除步骤、九字段记录模板 |
 | [gate-e1-content-identities.md](gate-e1-content-identities.md) | 三类项目内容（issue / draft / change request）到内部身份的映射观测与判定 |
 | [gate-e1-membership-and-draft.md](gate-e1-membership-and-draft.md) | 多项目成员关系与 Draft 转换下的身份不变性观测 |
+| [gate-e1-write-and-events.md](gate-e1-write-and-events.md) | 写确认语义、事件可用性与「结果不确定」创建的实测记录 |
 
 §内容范围 的其余主题仍待补齐；在补齐之前，涉及这些主题的结论必须在本目录内自包含地写明。
