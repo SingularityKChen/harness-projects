@@ -40,12 +40,12 @@
 | [2026-09-22-content-placement](exec-plan/completed/2026-09-22-content-placement.md) | 流程知识的四桶归属（机械 / 技法 / 约定 / 一次性）与判定规则：给 §0 路由表的每个入口一个可机械核对的桶 | Completed |
 | [2026-09-22-status-field-writer](exec-plan/completed/2026-09-22-status-field-writer.md) | 给 `Status` 一个定义、一个写入口、一个防漂移的检查：语义收敛到 `board-semantics.md` 单一事实源、写入口写进交付流程、契约测试按「行 + 子句」设防 | Completed |
 | [2026-09-21-gate-e1-write-and-events](exec-plan/active/2026-09-21-gate-e1-write-and-events.md) | Gate E1 写确认与事件可靠性：实测平台无 CAS、事件订不到、重复创建幂等 | Active |
-| [2026-09-21-gate-e1-ruling](exec-plan/active/2026-09-21-gate-e1-ruling.md) | Gate E1 裁决：六条行为逐条裁决，结论 revise，并把四条仍然有效的结论提升为 ADR | Active |
 
 ### Completed
 
 | 计划 | 结论 |
 |---|---|
+| [2026-09-21-gate-e1-ruling](exec-plan/completed/2026-09-21-gate-e1-ruling.md) | Gate E1 裁决：六条行为逐条裁决（1–5 `pass`、6 `inconclusive`），汇总结论 `revise`——本地数据模型 v1 不满足冻结条件；R1–R8 落到表、键或约束上，交 #27/#28 落地；四条结论提升为 ADR（`Proposed`）。#4 保持打开 | Completed |
 | [2026-09-21-gate-e1-content-identities](exec-plan/completed/2026-09-21-gate-e1-content-identities.md) | Gate E1 三类内容身份：一次性沙箱、九字段记录模板与三类内容到内部身份的映射证据；三条实验各按九字段模板填满，change request 不产生第二个工作项 | Completed |
 | [2026-09-21-policy-check-pr-number](exec-plan/completed/2026-09-21-policy-check-pr-number.md) | policy-check 的目标类型判定已落地：`issue <n>` 命中 PR 编号按用法错误处理（退出码 2）并提示改用 `pr <n>`，`Closes` 指向 PR 按规则违规报出（退出码 1），`Refs` 指向 PR 保持不校验 |
 | [2026-09-20-rule-checks-pr-base](exec-plan/completed/2026-09-20-rule-checks-pr-base.md) | PR 体量检查的基线解耦：把"哪些 PR 进入门禁"与"用哪条基线度量"分开，栈上 PR 按自己声明的 base 判定 |
