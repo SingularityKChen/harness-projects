@@ -8,74 +8,23 @@
 // 本文件只交付判定逻辑；取数与 CI 接线在 `check-engineering-drift-live.mjs`。
 // 它不发起网络请求、不 import `child_process`、不提供 CLI 入口，因此可以进
 // `pnpm verify`——那是一条离线、无凭据的必需检查。
+//
+// 投影（`stateForSnapshot`）与**选择策略**（`expectedFor`）都 import 自
+// `sync-engineering-state.mjs`：观察者不再持有自己的「谁说了算」实现，两侧对同一
+// 份引用集合由构造一致（issue #115）。
 
-import { FIELD_NAME, stateForSnapshot } from './sync-engineering-state.mjs'
+import { expectedFor, FIELD_NAME, MAX_PAGES, PAGE_SIZE } from './sync-engineering-state.mjs'
 
-/** 分页上限。超过就 fail closed，不把截断的输入当完整输入。 */
-export const MAX_PAGES = 5
-export const PAGE_SIZE = 100
-
-/**
- * 期望值来自「引用这个 issue 的 PR」，规则按优先级：
- *
- * 1. **有任一 PR 已合并 → 取该 PR 的投影。** 已合并是**终态且单调**：一个 PR 合并之后
- *    不会再变回 open，所以这一条没有歧义。多个已合并 PR 时取创建时间最新的那个——
- *    取值必然都是 `Merged`，选谁只影响 finding 里回显的 PR 编号。
- * 2. **否则有任一 PR 处于 open → 取创建时间最新的那个 open PR 的投影。** 多个 open PR
- *    引用同一 issue 本身可疑，但「最新」是可机械判定且确定的；投影本身仍交给
- *    `stateForSnapshot`，本文件不复制那份规则。
- * 3. **否则（全部 closed 且未合并）→ 取创建时间最新的那个的投影**，也就是清空。
- *
- * 没有被任何 PR 引用的条目**不参与比较**：`Engineering` 为空是合法状态，不是漂移。
- */
-function newestFirst(references) {
-  return [...references].sort((a, b) => {
-    const left = Date.parse(a.createdAt)
-    const right = Date.parse(b.createdAt)
-    if (left !== right) return right - left
-    // createdAt 相同时用编号兜底，保证排序是确定的而不是依赖输入顺序。
-    return b.number - a.number
-  })
-}
-
-function projectionFor(reference) {
-  let decision
-  try {
-    decision = stateForSnapshot({
-      state: reference.state,
-      merged: reference.merged,
-      isDraft: reference.isDraft,
-      reviewDecision: reference.reviewDecision,
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    throw new Error(`PR #${reference.number} 的快照无法投影：${message}`)
-  }
-  return decision.kind === 'clear' ? null : decision.value
-}
+export { MAX_PAGES, PAGE_SIZE }
 
 /**
- * 给定引用同一 issue 的 PR 集合，返回 `{ value, prNumber, rule }`。
- * `value` 为 `null` 表示该 issue 的 `Engineering` 应当是空的。
+ * 判定看板上的 `Engineering` 与 PR 真值的偏离。
+ *
+ * 期望值由 `expectedFor` 给出——**任一已合并 PR 优先**（终态且单调），否则创建时间
+ * 最新的 open PR，否则最新的 closed PR（即清空）；规则本身与写入口共用同一份实现，
+ * 因此这里不再复述。没有被任何 PR 引用的条目**不参与比较**：`Engineering` 为空是
+ * 合法状态，不是漂移。
  */
-export function projectExpected({ references }) {
-  if (!Array.isArray(references) || references.length === 0) {
-    throw new Error('projectExpected 需要至少一个引用 PR')
-  }
-
-  const merged = newestFirst(references.filter((reference) => reference.state === 'MERGED'))
-  if (merged.length > 0) {
-    return { value: projectionFor(merged[0]), prNumber: merged[0].number, rule: 'merged' }
-  }
-
-  const open = newestFirst(references.filter((reference) => reference.state === 'OPEN'))
-  if (open.length > 0) {
-    return { value: projectionFor(open[0]), prNumber: open[0].number, rule: 'open' }
-  }
-
-  const closed = newestFirst(references)
-  return { value: projectionFor(closed[0]), prNumber: closed[0].number, rule: 'closed' }
-}
 
 function requiredString(value, path) {
   if (typeof value !== 'string' || value.trim().length === 0) {
@@ -167,7 +116,7 @@ export function engineeringDriftFindings({ pullRequests, items }) {
       continue
     }
     checked += 1
-    const expected = projectExpected({ references })
+    const expected = expectedFor({ references })
     if (expected.value !== item.engineering) {
       findings.push({
         issue: item.issue,

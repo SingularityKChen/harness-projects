@@ -14,9 +14,10 @@ import { fileURLToPath } from 'node:url'
 
 import { parse as parseYaml } from 'yaml'
 
-import { describeFinding, engineeringDriftFindings, MAX_PAGES, projectExpected } from '../../scripts/engineering-drift.mjs'
+import { describeFinding, engineeringDriftFindings } from '../../scripts/engineering-drift.mjs'
 import { runEngineeringDriftCheck } from '../../scripts/check-engineering-drift-live.mjs'
-import { PR_STATES, stateForSnapshot } from '../../scripts/sync-engineering-state.mjs'
+// 投影与**选择策略**都来自投影权威：观察者没有自己的「谁说了算」实现（issue #115）。
+import { expectedFor, MAX_PAGES, PR_STATES, stateForSnapshot } from '../../scripts/sync-engineering-state.mjs'
 
 const OPEN_APPROVED = { state: 'OPEN', merged: false, isDraft: false, reviewDecision: 'APPROVED' }
 const OPEN_PLAIN = { state: 'OPEN', merged: false, isDraft: false, reviewDecision: null }
@@ -26,7 +27,11 @@ const CLOSED_UNMERGED = { state: 'CLOSED', merged: false, isDraft: false, review
 const REF = (number, createdAt, snapshot, closingIssues) => ({ number, createdAt, closingIssues, ...snapshot })
 const item = ({ issue, engineering, itemId = `item-${issue}` }) => ({ itemId, issue, engineering })
 
-// ── 纯函数：选择规则 ────────────────────────────────────────────────────────
+// ── 选择规则：唯一实现在投影权威里，本文件只从观察者的入口验证它 ──────────────
+//
+// `expectedFor` 住在 `scripts/sync-engineering-state.mjs`（写入口的模块），观察者
+// import 它。因此下面这些用例同时是**写入口**的规则用例：两侧没有第二份实现可以
+// 各自漂移（issue #115）。
 
 test('已合并 PR 的 issue 期望 Merged —— 2026-09-22 故障的形状', () => {
   // 故障当时 reconcile 在合并事件上每次都失败，看板停在 `PR open`。本检查必须报出来。
@@ -57,21 +62,21 @@ test('已合并是终态且单调：有已合并 PR 时不看 open PR', () => {
 
 test('多条已合并 PR 引用同一 issue 时取创建时间最新的，取值恒为 Merged', () => {
   assert.deepEqual(
-    projectExpected({ references: [REF(100, '2026-09-20T00:00:00Z', MERGED, [3]), REF(120, '2026-09-21T00:00:00Z', MERGED, [3])] }),
+    expectedFor({ references: [REF(100, '2026-09-20T00:00:00Z', MERGED, [3]), REF(120, '2026-09-21T00:00:00Z', MERGED, [3])] }),
     { value: 'Merged', prNumber: 120, rule: 'merged' },
   )
 })
 
 test('没有已合并 PR 时取创建时间最新的 open PR，投影交给 stateForSnapshot', () => {
   assert.deepEqual(
-    projectExpected({ references: [REF(10, '2026-09-20T00:00:00Z', OPEN_PLAIN, [5]), REF(11, '2026-09-21T00:00:00Z', OPEN_APPROVED, [5])] }),
+    expectedFor({ references: [REF(10, '2026-09-20T00:00:00Z', OPEN_PLAIN, [5]), REF(11, '2026-09-21T00:00:00Z', OPEN_APPROVED, [5])] }),
     { value: 'Approved', prNumber: 11, rule: 'open' },
   )
 })
 
 test('全部 closed 且未合并时期望为空；草稿 open PR 同样期望为空', () => {
   assert.deepEqual(
-    projectExpected({ references: [REF(9, '2026-09-20T00:00:00Z', CLOSED_UNMERGED, [4])] }),
+    expectedFor({ references: [REF(9, '2026-09-20T00:00:00Z', CLOSED_UNMERGED, [4])] }),
     { value: null, prNumber: 9, rule: 'closed' },
   )
   const draft = { state: 'OPEN', merged: false, isDraft: true, reviewDecision: null }
@@ -107,7 +112,7 @@ test('选择规则对每个被接受的 PR state 都与 stateForSnapshot 一致'
   )
   for (const [state, snapshot] of Object.entries(representatives)) {
     const decision = stateForSnapshot(snapshot)
-    const expected = projectExpected({ references: [REF(1, '2026-09-20T00:00:00Z', snapshot, [1])] })
+    const expected = expectedFor({ references: [REF(1, '2026-09-20T00:00:00Z', snapshot, [1])] })
     assert.equal(expected.value, decision.kind === 'clear' ? null : decision.value, `state ${state} 的选择结果与投影不一致`)
   }
 })
@@ -132,8 +137,23 @@ test('畸形输入 fail closed，不读成"没有漂移"', () => {
 
 test('未知 PR 枚举在监测里也响亮失败，并回显是哪个 PR', () => {
   assert.throws(
-    () => projectExpected({ references: [REF(42, '2026-09-20T00:00:00Z', { state: 'DRAFT', merged: false, isDraft: false, reviewDecision: null }, [1])] }),
+    () => expectedFor({ references: [REF(42, '2026-09-20T00:00:00Z', { state: 'DRAFT', merged: false, isDraft: false, reviewDecision: null }, [1])] }),
     /PR #42 的快照无法投影：未知 PR state/,
+  )
+})
+
+test('未被选中的引用带未知枚举时同样响亮失败，不把它当成 closed', () => {
+  // 只投影被选中的那一个时，一个带未知 state 的引用会掉进 closed 桶被读成
+  // 「未合并」——一次真实的枚举漂移于是静默变成「期望清空」。
+  assert.throws(
+    () => engineeringDriftFindings({
+      pullRequests: [
+        REF(104, '2026-09-22T00:00:00Z', MERGED, [10]),
+        REF(105, '2026-09-23T00:00:00Z', { state: 'DRAFT', merged: false, isDraft: false, reviewDecision: null }, [10]),
+      ],
+      items: [item({ issue: 10, engineering: 'Merged' })],
+    }),
+    /PR #105 的快照无法投影：未知 PR state/,
   )
 })
 
@@ -372,11 +392,63 @@ test('漂移 job 挂在 Board invariants 上，且不引入手选 ref 的入口'
   assert.equal(job.env.GITHUB_REPOSITORY, '${{ github.repository }}')
 })
 
-test('漂移监测复用 sync-engineering-state 的投影，且自身不引入网络或子进程', () => {
+test('观察者与写入口共用同一份选择策略，自身不引入网络或子进程', () => {
   const source = readFileSync(fileURLToPath(new URL('../../scripts/engineering-drift.mjs', import.meta.url)), 'utf8')
 
-  assert.match(source, /import \{ FIELD_NAME, stateForSnapshot \} from '\.\/sync-engineering-state\.mjs'/)
+  // 选择策略的唯一实现在投影权威里；观察者 import 它，而不是自带一份。
+  assert.match(source, /import \{ expectedFor, FIELD_NAME, MAX_PAGES, PAGE_SIZE \} from '\.\/sync-engineering-state\.mjs'/)
+  assert.doesNotMatch(source, /export function projectExpected/)
   // 纯函数模块不得引入网络或子进程，否则它进不了离线的 pnpm verify。
   assert.doesNotMatch(source, /from '(node:)?(child_process|http|https|net)'/)
   assert.doesNotMatch(source, /\bfetch\s*\(/)
+})
+
+/**
+ * 相对 import 的**闭包**：从入口源码出发，递归跟随 `from './…'` 直到不再有本地依赖。
+ *
+ * 为什么不是只扫入口自己：观察者在 issue #115 之后 import 了投影权威，而「离线、无凭据
+ * 的 `pnpm verify`」这条契约保护的是**整张 import 图**，不是某一个文件的文本。只扫入口
+ * 时，往被 import 的模块里加一个顶层 `fetch()` 或 `child_process`，守卫仍然全绿。
+ */
+function relativeImportClosure(entryUrl) {
+  const modules = new Map()
+  const queue = [entryUrl]
+  while (queue.length > 0) {
+    const url = queue.shift()
+    if (modules.has(url.href)) continue
+    const source = readFileSync(fileURLToPath(url), 'utf8')
+    modules.set(url.href, { url, source })
+    for (const specifier of importSpecifiers(source)) {
+      if (specifier.startsWith('.')) queue.push(new URL(specifier, url))
+    }
+  }
+  return modules
+}
+
+/**
+ * 源码里出现的全部 import 说明符：`… from 'x'`、副作用 `import 'x'`、动态 `import('x')`，单双引号都算。
+ * 只认 `from '…'` 时，换一种引号或换一种 import 写法就能把网络 / 子进程模块带进闭包而守卫全绿。
+ */
+function importSpecifiers(source) {
+  return [...source.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)(['"])([^'"]+)\1/g)].map((match) => match[2])
+}
+
+const NETWORK_OR_PROCESS = /^(node:)?(child_process|http|https|net)$/
+
+test('守卫覆盖 import 闭包，而不只是观察者自己的源码文本', () => {
+  const entry = new URL('../../scripts/engineering-drift.mjs', import.meta.url)
+  const closure = relativeImportClosure(entry)
+  const paths = [...closure.values()].map((module) => fileURLToPath(module.url))
+
+  // 闭包必须真的走通了那条 import 边：退化成「只有一个文件」时，下面的扫描会变成与
+  // 上面那条重复的弱断言，而它本来要防的正是这个。
+  assert.equal(closure.size, 2, `观察者的 import 闭包应恰好是它与投影权威两个模块，实际：${paths.join(', ')}`)
+  assert.ok(paths.some((path) => path.endsWith('/sync-engineering-state.mjs')), '闭包必须含投影权威')
+
+  for (const [href, module] of closure) {
+    assert.deepEqual(importSpecifiers(module.source).filter((specifier) => NETWORK_OR_PROCESS.test(specifier)), [],
+      `${href} 不得 import 网络或子进程模块`)
+    assert.doesNotMatch(module.source, /\bfetch\s*\(/,
+      `${href} 不得出现 fetch(...) 调用：闭包里的任何一处都会破坏离线 pnpm verify 的前提`)
+  }
 })

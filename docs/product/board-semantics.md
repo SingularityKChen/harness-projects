@@ -47,6 +47,10 @@
 
 **漂移由观察覆盖，不由约定覆盖。** 上面那次故障里，失败发生在合并**之后**（拦不住合并）、不是必需检查、`Board workflow invariants` 只看工作流启停，而契约测试断言的又是错的行为——四层防线全漏。现在补上的那一层是 `Board invariants` 的 `engineering-field` job：按日把每个条目的 `Engineering` 与「引用它的 PR」的真值比较。判定规则见 `docs/development/ci.md`；判定与投影的纯函数实现在 `scripts/engineering-drift.mjs`，可离线核对。
 
+> **Superseded by** 本节下一段（2026-09-24，issue #115）与 `docs/development/ci.md` 的同一订正：上一句原写作「判定与**投影**的纯函数实现在 `scripts/engineering-drift.mjs`」。**投影与选择策略的权威现在都在 `scripts/sync-engineering-state.mjs`**（`stateForSnapshot` 与 `expectedFor`），`scripts/engineering-drift.mjs` 只保留「把完整快照交给那份策略、产出 finding」的判定逻辑——它仍然可离线核对，但不再是投影的落点。保留原句是因为它记录了缺口当时的位置。
+
+**写入口与观察者对「谁说了算」共用同一份策略。** 一个 issue 被多个 PR 引用时，取值不由「触发事件的那一个 PR」单独决定：`scripts/sync-engineering-state.mjs` 的 `expectedFor` 是这条**选择策略**的唯一实现——**任一已合并 PR 优先**（已合并是终态且单调），否则创建时间最新的 open PR，否则最新的 closed PR；空集合是错误而不是「清空」。写入口按它**聚合**（触发 PR → 它的 `closingIssuesReferences` → 每个 issue 的全部关闭引用 PR），观察者 import 同一个函数，因此两侧由构造一致（issue #115）。引用读取不完整时写入口一律失败，不退回「只按触发 PR 写」。
+
 **这条轴与 `Status` 无关。** 合并 PR 只写 `Engineering`，不写 `Status`——`Item closed → Status = Done` 因此被裁决为关闭（见 §5）。一个已合并的工作项停在 `Status = Todo` 是**正常**的：它表示规划所有者还没有接受这项工作完成。
 
 ## 3. 不变量 3 在看板上如何被满足
