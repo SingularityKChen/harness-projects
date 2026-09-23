@@ -27,7 +27,13 @@ Board invariants 的 `on` **刻意只有 `schedule`**，由 `tests/contract/chec
 
 判定规则在 `scripts/engineering-drift.mjs`（纯函数，进 `pnpm verify`）：只要有任一引用该 issue 的 PR 已合并就期望 `Merged`（已合并是终态且单调），否则取创建时间最新的 open PR 的投影，全 closed 未合并则期望为空；没有被任何 PR 引用的条目跳过——`Engineering` 为空是合法状态，不是漂移。
 
+> **Superseded by** 下一段「投影与选择策略都是共享的」（2026-09-23，issue #115 / PR #159）：判定规则的唯一实现已搬进投影权威 `scripts/sync-engineering-state.mjs`（`expectedFor`），观察者 `scripts/engineering-drift.mjs` import 它、自身不再持有实现；规则内容（Merged 优先且单调 → 最新 open → 全 closed 为空 → 未被引用则跳过）不变。
+
+**投影与选择策略都是共享的。** 单 PR 的 `snapshot → 取值` 投影 import 自 `sync-engineering-state.mjs`（`stateForSnapshot`），所以两侧对同一个快照必然一致；「同一 issue 被多个 PR 引用时谁说了算」这条**选择策略也只有一份实现**（同文件的 `expectedFor`），写入口与观察者都调用它。写入口据此把判定改为**聚合**：取触发 PR → 解析它的 `closingIssuesReferences` → 对每个 issue 读 `Issue.closedByPullRequestsReferences` 的**全部**关闭引用 PR（只读，显式 `includeClosedPrs: true`，分页读到完）→ 用 `expectedFor` 算出该 issue 应有的取值 → 再写。引用读取不完整——分页截断、超上限、`repository` / `issue` 为 null、字段缺失、`state` / `reviewDecision` 未知、集合为空、集合里没有触发 PR——一律抛错，不退回「只按触发 PR 写」。
+
 **投影是共享的，选择策略不是。** 单 PR 的 `snapshot → 取值` 投影 import 自 `sync-engineering-state.mjs`（`stateForSnapshot`），所以两侧对同一个快照必然一致；但「同一 issue 被多个 PR 引用时谁说了算」这条**选择策略是观察者独有的**——写入者 `sync-engineering-state.mjs` 只投影触发事件的那一个 PR，没有任何跨 PR 聚合。两者因此可能在多 PR 引用同一 issue 时给出不同取值，这是 issue #115 记录在案的已知缺口，不要把它读成「两侧必然一致」。
+
+> **Superseded by** 上文「投影与选择策略都是共享的」一段（2026-09-23，issue #115 / PR #159）：写入口已改为聚合、与观察者调用同一份 `expectedFor`，本段描述的缺口已关闭。原文保留，因为它记录了缺口的形状；判定当前事实以上文为准。
 
 PR 列表与看板条目都分页读取，超过 5 页（500 条）上限就 fail closed，不把截断的输入读成「没有漂移」。看板条目按**来源仓库**过滤：项目是 user 级的，可以容纳任意仓库的条目，不过滤的话他仓的 issue #N 会与本仓库 close #N 的 PR 误配。
 

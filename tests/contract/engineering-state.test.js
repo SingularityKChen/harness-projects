@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { parse as parseYaml } from 'yaml'
 
 import * as engineering from '../../scripts/sync-engineering-state.mjs'
+import { engineeringDriftFindings } from '../../scripts/engineering-drift.mjs'
 import * as signal from '../../scripts/engineering-state-signal.mjs'
 
 test('状态只能经唯一构造器产生，且不能写入规划状态', () => {
@@ -179,41 +180,43 @@ test('Engineering 字段契约任一不匹配都拒绝写入', async () => {
 test('repository 或 pullRequest 为 null 时 fail closed，不折叠为空列表', async () => {
   const base = { repository: { pullRequest: null } }
   await assert.rejects(
-    engineering.loadPullRequestSnapshot({ gql: async () => ({ repository: null }), owner: 'o', repo: 'r', prNumber: 1, projectId: 'p' }),
+    engineering.loadTriggerPullRequest({ gql: async () => ({ repository: null }), owner: 'o', repo: 'r', prNumber: 1, projectId: 'p' }),
     /找不到 repository/,
   )
   await assert.rejects(
-    engineering.loadPullRequestSnapshot({ gql: async () => base, owner: 'o', repo: 'r', prNumber: 1, projectId: 'p' }),
+    engineering.loadTriggerPullRequest({ gql: async () => base, owner: 'o', repo: 'r', prNumber: 1, projectId: 'p' }),
     /找不到 pull request/,
   )
 })
 
-test('PR snapshot 同时提供权威评审结论与目标 project items', async () => {
-  const loaded = await engineering.loadPullRequestSnapshot({
-    gql: async () => ({
-      repository: { pullRequest: {
-        state: 'OPEN', merged: false, isDraft: false, reviewDecision: 'APPROVED',
-        closingIssuesReferences: { totalCount: 1, nodes: [
-          { number: 34, projectItems: { totalCount: 2, nodes: [
-            { id: 'item-target', project: { id: 'project-target' } },
-            { id: 'item-other', project: { id: 'project-other' } },
-          ] } },
-        ] },
-      } },
-    }),
+test('触发 PR 的 closing issues 提供目标 project items，且不读它自己的快照', async () => {
+  // 判定输入只有「该 issue 的完整关闭引用集合」；触发 PR 的快照不再是判定对象，
+  // 所以查询里也不该出现它（issue #115）。
+  const seen = []
+  const loaded = await engineering.loadTriggerPullRequest({
+    gql: async (query) => {
+      seen.push(query)
+      return {
+        repository: { pullRequest: {
+          closingIssuesReferences: { totalCount: 1, nodes: [
+            { number: 34, projectItems: { totalCount: 2, nodes: [
+              { id: 'item-target', project: { id: 'project-target' } },
+              { id: 'item-other', project: { id: 'project-other' } },
+            ] } },
+          ] },
+        } },
+      }
+    },
     owner: 'o', repo: 'r', prNumber: 37, projectId: 'project-target',
   })
 
-  assert.deepEqual(loaded, {
-    snapshot: { state: 'OPEN', merged: false, isDraft: false, reviewDecision: 'APPROVED' },
-    items: [{ issue: 34, itemId: 'item-target' }],
-  })
+  assert.deepEqual(loaded, { items: [{ issue: 34, itemId: 'item-target' }] })
+  assert.doesNotMatch(seen[0], /reviewDecision/)
 })
 
-test('PR snapshot 对 closing issues 与 project items 的截断 fail closed', async () => {
+test('触发 PR 对 closing issues 与 project items 的截断 fail closed', async () => {
   const base = {
     repository: { pullRequest: {
-      state: 'OPEN', merged: false, isDraft: false, reviewDecision: null,
       closingIssuesReferences: { totalCount: 2, nodes: [
         { number: 34, projectItems: { totalCount: 1, nodes: [
           { id: 'item-1', project: { id: 'project-target' } },
@@ -222,14 +225,14 @@ test('PR snapshot 对 closing issues 与 project items 的截断 fail closed', a
     } },
   }
   await assert.rejects(
-    engineering.loadPullRequestSnapshot({ gql: async () => base, owner: 'o', repo: 'r', prNumber: 37, projectId: 'project-target' }),
+    engineering.loadTriggerPullRequest({ gql: async () => base, owner: 'o', repo: 'r', prNumber: 37, projectId: 'project-target' }),
     /closingIssuesReferences snapshot 不完整/,
   )
 
   base.repository.pullRequest.closingIssuesReferences.totalCount = 1
   base.repository.pullRequest.closingIssuesReferences.nodes[0].projectItems.totalCount = 2
   await assert.rejects(
-    engineering.loadPullRequestSnapshot({ gql: async () => base, owner: 'o', repo: 'r', prNumber: 37, projectId: 'project-target' }),
+    engineering.loadTriggerPullRequest({ gql: async () => base, owner: 'o', repo: 'r', prNumber: 37, projectId: 'project-target' }),
     /projectItems snapshot 不完整/,
   )
 })
@@ -281,13 +284,11 @@ test('ack 未匹配前 main 不得打印 confirmed 成功日志', async () => {
     const { query, variables } = JSON.parse(init.body)
     let data
     if (query.includes('node(id:$fieldId)')) data = validProjectData()
+    else if (query.includes('closedByPullRequestsReferences')) data = {
+      repository: { issue: { closedByPullRequestsReferences: connection([REF_B_OPEN]) } },
+    }
     else if (query.includes('pullRequest(number:$pr)')) data = {
-      repository: { pullRequest: {
-        state: 'OPEN', merged: false, isDraft: false, reviewDecision: 'APPROVED',
-        closingIssuesReferences: { totalCount: 1, nodes: [
-          { number: 34, projectItems: { totalCount: 1, nodes: [{ id: 'item-1', project: { id: 'PVT_project' } }] } },
-        ] },
-      } },
+      repository: { pullRequest: triggerWith([{ issue: 34, itemId: 'item-1' }]) },
     }
     else data = { updateProjectV2ItemFieldValue: {
       clientMutationId: variables.clientMutationId,
@@ -304,11 +305,309 @@ test('ack 未匹配前 main 不得打印 confirmed 成功日志', async () => {
         GITHUB_REPOSITORY: 'SingularityKChen/harness-projects',
         RECONCILE_ID: 'run-1',
       },
-      argv: ['node', 'script', '37'], fetchImpl, log: (line) => logs.push(line),
+      argv: ['node', 'script', '200'], fetchImpl, log: (line) => logs.push(line),
     }),
     /mutation ack item 不匹配/,
   )
   assert.equal(logs.some((line) => line.includes('confirmed')), false)
+})
+
+// ── 写入口的终态语义（issue #115）────────────────────────────────────────────
+//
+// 这些用例走的是 `main` 的完整取数 + 写入路径，只注入 fetch。它们针对的是
+// 「同一 issue 被多个 PR 引用时谁说了算」：写入口与观察者必须共用同一份选择
+// 策略，且 Merged 是终态、单调。
+
+const OPTIONS = validProjectData().node.options
+const optionIdFor = (name) => OPTIONS.find((option) => option.name === name).id
+const optionNameFor = (id) => OPTIONS.find((option) => option.id === id)?.name
+
+const REF_A_MERGED = {
+  number: 150, state: 'MERGED', merged: true, isDraft: false, reviewDecision: null, createdAt: '2026-09-22T00:00:00Z',
+}
+const REF_B_OPEN = {
+  number: 200, state: 'OPEN', merged: false, isDraft: false, reviewDecision: null, createdAt: '2026-09-23T00:00:00Z',
+}
+
+const connection = (nodes) => ({ totalCount: nodes.length, pageInfo: { hasNextPage: false, endCursor: 'CURSOR-1' }, nodes })
+const triggerWith = (issues) => ({
+  closingIssuesReferences: {
+    totalCount: issues.length,
+    nodes: issues.map(({ issue, itemId }) => ({
+      number: issue,
+      projectItems: { totalCount: 1, nodes: [{ id: itemId, project: { id: 'PVT_project' } }] },
+    })),
+  },
+})
+
+/**
+ * 写入口的取数替身：按查询文本分发，记录 mutation 与查询原文。
+ * 触发 PR 节点带上 `state/merged/isDraft/reviewDecision`——那是 issue #115
+ * 第 4 步里写入口会拿去投影的那份快照；判定必须**不再**只看它。
+ */
+function writerFetch({ trigger, referencesByIssue }) {
+  const mutations = []
+  const queries = []
+  const fetchImpl = async (_url, init) => {
+    const { query, variables } = JSON.parse(init.body)
+    queries.push({ query, variables })
+    if (query.includes('node(id:$fieldId)')) {
+      return response({ json: async () => ({ data: validProjectData() }) })
+    }
+    if (query.includes('closedByPullRequestsReferences')) {
+      const data = { repository: { issue: {
+        closedByPullRequestsReferences: referencesByIssue[variables.issue],
+      } } }
+      return response({ json: async () => ({ data }) })
+    }
+    if (query.includes('pullRequest(number:$pr)')) {
+      return response({ json: async () => ({
+        data: { repository: { pullRequest: {
+          state: 'OPEN', merged: false, isDraft: false, reviewDecision: null, ...trigger,
+        } } },
+      }) })
+    }
+    mutations.push({ query, variables })
+    const key = query.includes('clearProjectV2ItemFieldValue')
+      ? 'clearProjectV2ItemFieldValue' : 'updateProjectV2ItemFieldValue'
+    return response({ json: async () => ({ data: { [key]: {
+      clientMutationId: variables.clientMutationId,
+      projectV2Item: { id: variables.itemId },
+    } } }) })
+  }
+  return { fetchImpl, mutations, queries }
+}
+
+async function runWriter({ trigger, referencesByIssue, prNumber = 200, reconcileId = 'run-1' }) {
+  const { fetchImpl, mutations, queries } = writerFetch({ trigger, referencesByIssue })
+  const logs = []
+  const exitCode = await engineering.main({
+    env: {
+      PROJECTS_TOKEN: 'not-a-real-token',
+      ENGINEERING_FIELD_ID: 'PVTF_engineering',
+      GITHUB_REPOSITORY: 'SingularityKChen/harness-projects',
+      RECONCILE_ID: reconcileId,
+    },
+    argv: ['node', 'script', String(prNumber)],
+    fetchImpl,
+    log: (line) => logs.push(line),
+  })
+  return { exitCode, mutations, queries, logs: logs.join('\n') }
+}
+
+test('写入口在 merged #A + 后开的非 draft #B 上必须写 Merged，而不是 PR open', async () => {
+  // issue #115 的四步复现：A 已合并是终态且单调，后开的 B 不得把它读回未合并。
+  const { exitCode, mutations, logs } = await runWriter({
+    trigger: triggerWith([{ issue: 34, itemId: 'item-34' }]),
+    referencesByIssue: { 34: connection([REF_B_OPEN, REF_A_MERGED]) },
+  })
+
+  assert.equal(exitCode, 0)
+  assert.equal(mutations.length, 1, `期望恰好一次写入，实际：${logs}`)
+  assert.equal(optionNameFor(mutations[0].variables.optionId), 'Merged')
+  assert.match(logs, /confirmed #34: Engineering=Merged/)
+})
+
+test('观察者与写入口对同一输入给出一致结论', async () => {
+  // 写入口写下的取值必须就是观察者的期望：把写下的值交给观察者，findings 必须为空。
+  // 两个脚本各有一份「谁说了算」的实现时，这条必然红。
+  const { mutations } = await runWriter({
+    trigger: triggerWith([{ issue: 34, itemId: 'item-34' }]),
+    referencesByIssue: { 34: connection([REF_B_OPEN, REF_A_MERGED]) },
+  })
+  const written = optionNameFor(mutations[0].variables.optionId)
+
+  const { findings, checked } = engineeringDriftFindings({
+    pullRequests: [REF_A_MERGED, REF_B_OPEN].map((reference) => ({ ...reference, closingIssues: [34] })),
+    items: [{ itemId: 'item-34', issue: 34, engineering: written }],
+  })
+
+  assert.equal(checked, 1)
+  assert.deepEqual(findings, [])
+})
+
+test('一次 reconcile 里每个条目按自己的关闭引用集合取值', async () => {
+  const { mutations, logs } = await runWriter({
+    trigger: triggerWith([{ issue: 34, itemId: 'item-34' }, { issue: 35, itemId: 'item-35' }]),
+    referencesByIssue: {
+      34: connection([REF_B_OPEN, REF_A_MERGED]), // 已合并 #150 是终态
+      35: connection([REF_B_OPEN]), // 只有触发 PR #200 自己
+    },
+  })
+
+  assert.deepEqual(mutations.map((mutation) => optionNameFor(mutation.variables.optionId)), ['Merged', 'PR open'])
+  assert.match(logs, /confirmed #34: Engineering=Merged; 依据 PR #150（规则 merged）/)
+  assert.match(logs, /confirmed #35: Engineering=PR open; 依据 PR #200（规则 open）/)
+})
+
+test('全部关闭且未合并的引用集合写 clear，不是写 PR open', async () => {
+  const closed = {
+    number: 200, state: 'CLOSED', merged: false, isDraft: false, reviewDecision: null, createdAt: '2026-09-23T00:00:00Z',
+  }
+  const { mutations, logs } = await runWriter({
+    trigger: triggerWith([{ issue: 34, itemId: 'item-34' }]),
+    referencesByIssue: { 34: connection([closed]) },
+  })
+
+  assert.equal(mutations.length, 1)
+  assert.match(mutations[0].query, /clearProjectV2ItemFieldValue/)
+  assert.match(logs, /confirmed #34: Engineering=cleared; 依据 PR #200（规则 closed）/)
+})
+
+const WRITER_ENV = {
+  PROJECTS_TOKEN: 'not-a-real-token',
+  ENGINEERING_FIELD_ID: 'PVTF_engineering',
+  GITHUB_REPOSITORY: 'SingularityKChen/harness-projects',
+  RECONCILE_ID: 'run-1',
+}
+
+test('空引用集合与缺少触发 PR 的集合都 fail closed，且不产生任何写入', async () => {
+  // 「不得退回只按触发 PR 写」的两种形状：空集合（被禁止的「清空」）与缺了触发 PR
+  // 的不完整集合（剩下的引用可能给出一个看起来合法的取值）。
+  for (const [name, references, pattern] of [
+    ['空集合', connection([]), /至少一个引用 PR/],
+    ['缺少触发 PR', connection([REF_A_MERGED]), /关闭引用里没有触发 PR #200/],
+  ]) {
+    const { fetchImpl, mutations } = writerFetch({
+      trigger: triggerWith([{ issue: 34, itemId: 'item-34' }]),
+      referencesByIssue: { 34: references },
+    })
+    await assert.rejects(
+      engineering.main({ env: WRITER_ENV, argv: ['node', 'script', '200'], fetchImpl, log: () => {} }),
+      pattern,
+      name,
+    )
+    assert.deepEqual(mutations, [], `${name}：不得产生任何写入`)
+  }
+})
+
+// ── 共享选择策略：语义与 fail closed（写入口与观察者共用一份）────────────────
+
+test('expectedFor 的三条规则与编号兜底', () => {
+  assert.deepEqual(
+    engineering.expectedFor({ references: [REF_B_OPEN, REF_A_MERGED] }),
+    { value: 'Merged', prNumber: 150, rule: 'merged' },
+  )
+  assert.deepEqual(
+    engineering.expectedFor({ references: [REF_B_OPEN] }),
+    { value: 'PR open', prNumber: 200, rule: 'open' },
+  )
+  const closed = {
+    number: 10, state: 'CLOSED', merged: false, isDraft: false, reviewDecision: null, createdAt: '2026-09-20T00:00:00Z',
+  }
+  assert.deepEqual(engineering.expectedFor({ references: [closed] }), { value: null, prNumber: 10, rule: 'closed' })
+
+  // createdAt 相同时按编号降序兜底：排序确定，不依赖输入顺序。
+  const lower = { ...REF_B_OPEN, number: 11, createdAt: '2026-09-23T00:00:00Z' }
+  const higher = { ...REF_B_OPEN, number: 12, createdAt: '2026-09-23T00:00:00Z', reviewDecision: 'APPROVED' }
+  assert.deepEqual(engineering.expectedFor({ references: [lower, higher] }), { value: 'Approved', prNumber: 12, rule: 'open' })
+  assert.deepEqual(engineering.expectedFor({ references: [higher, lower] }), { value: 'Approved', prNumber: 12, rule: 'open' })
+})
+
+test('expectedFor 在空集合上抛错，而不是「清空」', () => {
+  assert.throws(() => engineering.expectedFor({ references: [] }), /至少一个引用 PR/)
+  assert.throws(() => engineering.expectedFor({ references: null }), /至少一个引用 PR/)
+})
+
+test('expectedFor 校验每一个引用：未被选中的未知枚举同样响亮失败', () => {
+  // 只校验被选中的那一个时，一个带未知 state 的引用会掉进 closed 桶被当成
+  // 「未合并」——那是一扇假绿的门。
+  assert.throws(
+    () => engineering.expectedFor({ references: [REF_A_MERGED, { ...REF_B_OPEN, number: 201, state: 'DRAFT' }] }),
+    /PR #201 的快照无法投影：未知 PR state/,
+  )
+  assert.throws(
+    () => engineering.expectedFor({ references: [REF_A_MERGED, { ...REF_B_OPEN, number: 202, reviewDecision: 'PENDING' }] }),
+    /PR #202 的快照无法投影：未知 reviewDecision/,
+  )
+  assert.throws(
+    () => engineering.expectedFor({ references: [{ ...REF_B_OPEN, createdAt: 'not-a-date' }] }),
+    /PR #200 缺少可解析的 createdAt/,
+  )
+  assert.throws(
+    () => engineering.expectedFor({ references: [{ ...REF_B_OPEN, number: 0 }] }),
+    /缺少正整数编号/,
+  )
+})
+
+// ── 关闭引用读取：分页、查询形状与 fail closed ──────────────────────────────
+
+const issueConnection = (nodes, overrides = {}) => ({
+  totalCount: nodes.length,
+  pageInfo: { hasNextPage: false, endCursor: 'CURSOR-1' },
+  nodes,
+  ...overrides,
+})
+
+test('关闭引用逐页读完，查询显式要求 includeClosedPrs 且不读正文', async () => {
+  const seen = []
+  const pages = [
+    issueConnection([REF_A_MERGED], { totalCount: 2, pageInfo: { hasNextPage: true, endCursor: 'CURSOR-1' } }),
+    issueConnection([REF_B_OPEN], { totalCount: 2 }),
+  ]
+  const references = await engineering.loadClosingPullRequests({
+    gql: async (query, variables) => {
+      seen.push({ query, variables })
+      return { repository: { issue: { closedByPullRequestsReferences: pages[seen.length - 1] } } }
+    },
+    owner: 'o', repo: 'r', issueNumber: 34,
+  })
+
+  assert.deepEqual(seen.map((call) => call.variables.cursor), [null, 'CURSOR-1'])
+  assert.deepEqual(references.map((reference) => reference.number), [150, 200])
+  assert.equal(references[0].createdAt, REF_A_MERGED.createdAt)
+
+  // `includeClosedPrs` 的 schema 默认值是 false、字段自述是「open pull requests」，
+  // 而 2026-09-24 实测它不带该参数时也返回了已合并 PR。不依赖默认值：参数必须出现
+  // 在查询里，否则平台侧一旦按描述收敛，已合并 PR 会被静默漏掉——正是本 issue 的形状。
+  assert.match(seen[0].query, /includeClosedPrs:true/)
+  // 关闭引用是**登记事实**，不是正文的函数（merge-queue.md §7 实测）：写入口不得
+  // 从正文重新推导引用，因此查询里不请求 body。
+  assert.doesNotMatch(seen[0].query, /\bbody\b/)
+})
+
+test('关闭引用读取的任何不完整都 fail closed', async (t) => {
+  const cases = [
+    ['repository 为 null', { repository: null }, /找不到 repository/],
+    ['issue 为 null', { repository: { issue: null } }, /找不到 issue/],
+    ['字段为 null', { repository: { issue: { closedByPullRequestsReferences: null } } }, /缺少 closedByPullRequestsReferences/],
+    ['字段是数组', { repository: { issue: { closedByPullRequestsReferences: [] } } }, /缺少 closedByPullRequestsReferences/],
+    ['nodes 不是数组', { repository: { issue: { closedByPullRequestsReferences: { totalCount: 1, pageInfo: { hasNextPage: false }, nodes: 'x' } } } }, /nodes 必须是数组/],
+    ['totalCount 不是非负整数', { repository: { issue: { closedByPullRequestsReferences: issueConnection([REF_B_OPEN], { totalCount: -1 }) } } }, /totalCount 必须是非负整数/],
+    ['截断', { repository: { issue: { closedByPullRequestsReferences: issueConnection([REF_B_OPEN], { totalCount: 5 }) } } }, /关闭引用不完整/],
+    ['pageInfo 为 null', { repository: { issue: { closedByPullRequestsReferences: issueConnection([REF_B_OPEN], { pageInfo: null }) } } }, /pageInfo 必须是对象/],
+    ['hasNextPage 不是布尔值', { repository: { issue: { closedByPullRequestsReferences: issueConnection([REF_B_OPEN], { pageInfo: { hasNextPage: 'false', endCursor: null } }) } } }, /hasNextPage 必须是布尔值/],
+    ['hasNextPage 但 endCursor 为空', { repository: { issue: { closedByPullRequestsReferences: issueConnection([REF_B_OPEN], { totalCount: 2, pageInfo: { hasNextPage: true, endCursor: '' } }) } } }, /endCursor 必须是非空字符串/],
+    ['引用缺编号', { repository: { issue: { closedByPullRequestsReferences: issueConnection([{ ...REF_B_OPEN, number: 0 }]) } } }, /缺少正整数编号/],
+    ['引用缺 createdAt', { repository: { issue: { closedByPullRequestsReferences: issueConnection([{ ...REF_B_OPEN, createdAt: 'x' }]) } } }, /缺少可解析的 createdAt/],
+    ['reviewDecision 不是字符串', { repository: { issue: { closedByPullRequestsReferences: issueConnection([{ ...REF_B_OPEN, reviewDecision: 7 }]) } } }, /reviewDecision 必须是字符串或 null/],
+  ]
+
+  for (const [name, data, pattern] of cases) {
+    await t.test(name, async () => {
+      await assert.rejects(
+        engineering.loadClosingPullRequests({ gql: async () => data, owner: 'o', repo: 'r', issueNumber: 34 }),
+        pattern,
+      )
+    })
+  }
+})
+
+test('关闭引用分页超过上限时 fail closed，不按截断输入写入', async () => {
+  let calls = 0
+  await assert.rejects(
+    engineering.loadClosingPullRequests({
+      gql: async () => {
+        calls += 1
+        return { repository: { issue: { closedByPullRequestsReferences: issueConnection([REF_B_OPEN], {
+          totalCount: 999, pageInfo: { hasNextPage: true, endCursor: 'next' },
+        }) } } }
+      },
+      owner: 'o', repo: 'r', issueNumber: 34,
+    }),
+    /超过 5 页/,
+  )
+  assert.equal(calls, engineering.MAX_PAGES)
 })
 
 test('signal job 判定表对 skipped/success 放行，其它输入 fail closed', () => {

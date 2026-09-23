@@ -10,8 +10,8 @@
 
 import { pathToFileURL } from 'node:url'
 
-import { describeFinding, engineeringDriftFindings, MAX_PAGES, PAGE_SIZE } from './engineering-drift.mjs'
-import { FIELD_NAME } from './sync-engineering-state.mjs'
+import { describeFinding, engineeringDriftFindings } from './engineering-drift.mjs'
+import { FIELD_NAME, MAX_PAGES, PAGE_SIZE } from './sync-engineering-state.mjs'
 
 const ENDPOINT = 'https://api.github.com/graphql'
 
