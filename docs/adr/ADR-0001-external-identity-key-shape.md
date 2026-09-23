@@ -2,7 +2,7 @@
 
 > 状态：Proposed
 > 日期：2026-09-21
-> 来源：`docs/exec-plan/active/2026-09-21-gate-e1-ruling.md`（Batch 1，issue #25）；证据见 `docs/architecture/gate-e1-content-identities.md`（E1-1 / #22）
+> 来源：`docs/exec-plan/completed/2026-09-21-gate-e1-ruling.md`（Batch 1，issue #25）；证据见 `docs/architecture/gate-e1-content-identities.md`（E1-1 / #22）
 
 ## Decision
 

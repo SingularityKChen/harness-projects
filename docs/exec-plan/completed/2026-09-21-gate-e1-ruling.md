@@ -1,6 +1,6 @@
 # Gate E1 · 裁决与 v1 冻结建议 ExecPlan
 
-> 状态：Active
+> 状态：Completed（2026-09-23 归档到 `docs/exec-plan/completed/`，文件名不变）
 > 创建：2026-09-21
 > 范围：读 E1-1 / E1-2 / E1-3 三份观测记录，对 issue #4 的六条行为逐条给出裁决与引用，输出一份只有 `freeze` 或 `revise` 两种取值的裁决；若为 `revise`，逐条给出它影响的表或约束。
 > **#4 的关闭条件**：结论为 `freeze` 时才可以关闭 #4；结论为 `revise` 时 #4 **保持打开**，直到修改清单落地并重新裁决。#4 的验收条件就是那六条行为本身，而 `release-gates.md` §1 把"无法判定"等同于"不满足"——行为 6 判 `inconclusive` 时关闭它，等于用一个未满足的验收条件把父门禁标记成完成。是否关闭最终由人类伙伴确认（`docs/architecture/release-gates.md` §2 第 1 行；`AGENTS.md` §1.2 只写门禁本身，不含判定者）。
@@ -87,7 +87,7 @@ issue #25 Scope 把"重跑已经通过的实验"排除在外。若某条行为�
 ## Global Constraints
 
 - 本批次只改文档。**批次改动的文件集合在本节声明一次**：`Plan of Work` 的「涉及文件」只列主文件；`Progress`、`Decision Log`、`Outcomes & Retrospective`、`Bottom Change Note` 提到它时写"见 `Global Constraints`"，不复述、也不另立一份。
-  - `docs/exec-plan/active/2026-09-21-gate-e1-ruling.md`
+  - `docs/exec-plan/completed/2026-09-21-gate-e1-ruling.md`
   - `docs/architecture/gate-e1-ruling.md`
   - `docs/adr/README.md`
   - `docs/adr/ADR-0001-external-identity-key-shape.md`
@@ -183,6 +183,7 @@ node --test tests/contract/e1-evidence-consistency.test.js             # 期望�
 - [x] (2026-09-23) 响应评审并订正（4 条 P1/P2，另 1 条经复核判定不成立）：①判定者的错误归因从裁决 §9、本计划三处与 `Decision Log` 一处清除，只引 `release-gates.md` §2 第 1 行；②裁决 §6.2 改为"§4.1(a) 快照已过期、§4.1(b) 重建判据未过期"；③乱序规则按源记录编号列统一为三条，并把该处文/表不一致登记为裁决 §6.6；④声明的 base 由远端已不存在的 `test/e1-write-and-events` 订正为 `main`，回读判据由"逐行一致"改为集合相等并注明输出按路径排序；⑤`docs/adr/README.md` 保留 12 条主题清单、只改"当前依据"的表述，理由进 `Decision Log`
 - [x] (2026-09-23) 不成立的评审意见 1 条：评审建议把 `docs/architecture/gate-e1-ruling.md` 加进契约测试的记录集合，但该测试在 base `main@42b584f` 已改为按 `gate-e1-*.md` 通配发现（`gateDocs` 跑 id 不变量、`recordDocs` 才跑九字段模板），裁决书已在覆盖范围内——评审读的是旧版测试。本轮不改测试
 - [x] (2026-09-23) 验证：`node --test tests/contract/` 403 pass / 0 fail；本计划 `Plan of Work` 的六条命令逐条通过；`node scripts/rule-checks.mjs size main` 与 `disclosure main` 期望 exit 0、`git diff --check main...HEAD` 期望无输出（易失值只写回读命令与期望，见 `PLANS.md` §4）
+- [x] (2026-09-23) 归档：本计划从 `docs/exec-plan/active/` 移到 `docs/exec-plan/completed/`（文件名不变，`PLANS.md` §2）；`docs/README.md` 的索引行同步从 Active 表移到 Completed 表；四份 ADR 的「来源」路径改为 `completed/`。**未勾选的两项仍是人类伙伴的人工门**：在 #4 上记录裁决结论、确认 `revise` 的采纳与 #4 的关闭——agent 不改看板字段，本批次不关闭 #4
 
 ## Surprises & Discoveries
 
@@ -312,3 +313,4 @@ node --test tests/contract/e1-evidence-consistency.test.js             # 期望�
 - 2026-09-21：明确 #4 的关闭条件。原因：范围行原文写"裁决通过后关闭 #4"，而"通过"在 `revise` 结论下不成立；PR 描述里同时写着 `Closes #25` 与 `Closes #4`，一旦合并就会把验收条件尚未全部满足的父门禁自动关掉（`release-gates.md` §1：无法判定等同于不满足；行为 6 判 `inconclusive`）。改为：只有 `freeze` 才关闭 #4，`revise` 时保持打开，PR 侧改为 `Refs #4`。
 - 2026-09-22：按 `PLANS.md` §4 的活文档一致性规则修正本计划，只改本文件。（1）**一个事实只写一处**：`Global Constraints` 改为声明实测的完整文件集合并附回读命令，`Plan of Work` 的「涉及文件」只列主文件。（2）**被推翻的结论就地标注**：五处"本批次不写两个索引文件"的结论在原处追加 `Superseded by` 标记、原文保留。（3）**证据带执行上下文**：为 `gh pr view` / `gh pr checks` 补上工作目录与 `-R`，为验证代码块补执行上下文。（4）**易失状态**维持"回读命令 + 期望"的写法：本次未把 check 列表、条数、提交数或 head SHA 写成正文事实。（5）订正 `Validation and Acceptance` 第 6 行的证据：原文写 `grep -c 'ADR-' docs/adr/README.md` = 9，与该命令的实测输出不符（该计数含 4 行格式说明），索引行数改用 `grep -c 'ADR-000'` 回读并写为期望着。原因：原计划声明"本批次不改 `docs/README.md` 与 `docs/architecture/README.md`"，而本 PR 自己的回填提交改了这两个文件，计划与执行互相否证。
 - 2026-09-23：响应评审，订正五处。（1）**声明的 base 失效**：`test/e1-write-and-events` 在远端已删除（下层三层变基进 `main`），按它回读会失败或得到 13 个路径；`Global Constraints`、`Plan of Work` 验证块与 `Decision Log` 的 base 全部改为 `main`，判据由"逐行一致"改为集合相等（`git diff --name-only` 按路径排序）。（2）**判定者错误归因**：`AGENTS.md` §1.2 不含"人类伙伴"，本计划三处与该条 `Decision Log` 改引 `release-gates.md` §2 第 1 行。（3）**乱序规则计数**：2026-09-21 只读源记录正文的"两条规则"就改成两条并写下"计数已统一"，而 `Outcomes` 仍写三条；现按源记录编号列统一为三条，源记录的文/表不一致登记为裁决 §6.6。（4）**ADR 索引的治理表述**：保留 12 条主题清单、只改"当前依据"，理由进 `Decision Log`。（5）**验收证据**：`Validation and Acceptance` 第 6 行的行数回读改用 `grep -cE '^\| \[ADR-000'`（`grep -c 'ADR-000'` 会计入正文提及，2026-09-23 实测为 5）。原因：评审在 head `ae8644c` 上给出 3 条 P1 与 2 条 P2，其中 4 条成立、1 条（契约测试覆盖面）经复核不成立并在 `Progress` 记明。
+- 2026-09-23：归档。`Validation and Acceptance` 七项全部通过，按 `PLANS.md` §2 移到 `docs/exec-plan/completed/`（文件名不变），`docs/README.md` 索引行移到 Completed 表，四份 ADR 的「来源」路径同步改为 `completed/`。**两处未勾选的 Progress 项不因归档而关闭**：它们是人类伙伴的人工门（在 #4 上记录裁决结论、确认 `revise` 的采纳与 #4 的关闭），agent 不改看板字段；本批次不关闭 #4，`revise` 的 R1–R8 由 #27/#28 落地。
