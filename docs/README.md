@@ -45,6 +45,7 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-09-24-harness-host-spike](exec-plan/completed/2026-09-24-harness-host-spike.md) | 宿主承载能力探针：四个承载问题各按「机制存在 / 承载能力已实测」两半观测，产出一份记录与 `embed` / `fallback-web` 裁决；裁决为 `fallback-web`，由问题四（插件在一个 slot 里挂载一个页面）决定。无代码合并，探针已删除 | Completed |
 | [2026-09-21-gate-e1-ruling](exec-plan/completed/2026-09-21-gate-e1-ruling.md) | Gate E1 裁决：六条行为逐条裁决（1–5 `pass`、6 `inconclusive`），汇总结论 `revise`——本地数据模型 v1 不满足冻结条件；R1–R8 落到表、键或约束上，交 #27/#28 落地；四条结论提升为 ADR（`Proposed`）。#4 保持打开 | Completed |
 | [2026-09-21-gate-e1-content-identities](exec-plan/completed/2026-09-21-gate-e1-content-identities.md) | Gate E1 三类内容身份：一次性沙箱、九字段记录模板与三类内容到内部身份的映射证据；三条实验各按九字段模板填满，change request 不产生第二个工作项 | Completed |
 | [2026-09-21-policy-check-pr-number](exec-plan/completed/2026-09-21-policy-check-pr-number.md) | policy-check 的目标类型判定已落地：`issue <n>` 命中 PR 编号按用法错误处理（退出码 2）并提示改用 `pr <n>`，`Closes` 指向 PR 按规则违规报出（退出码 1），`Refs` 指向 PR 保持不校验 |
