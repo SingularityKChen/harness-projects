@@ -366,6 +366,57 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 回读判据：`[]` 不变时不要当成"已关联"——按路径 1 或 2 处理，然后重跑第 1、2 条命令，看到 `closing` 从 `[]` 变成 `[<issue>]` 才算登记成功。
 
+### 4.7 MVP-1 三交付批次队列（2026-09-24 起）
+
+这一轮是**三个交付、五个 PR**：每个 PR 关闭恰好一个 issue，各自构成可独立验收、合并、回滚的能力闭环。它与 §4.2 的 MVP-0 轮同形——既有独立 PR，也有栈：**D2 与 D3 各自是一条两层的栈，栈内必须自下而上合并**；D1 与其余四层没有依赖关系，因此**不叠进任何栈**（把它塞进栈里会强制一条没有依据的合并顺序，违反 §2.1）。
+
+| 位置 | PR | 分支 | base | 交付 | 依赖 | 已知冲突点与解法 |
+|---|---|---|---|---|---|---|
+| 1 | #159（D1） | `fix/engineering-merged-terminal` | `main` | Closes #115——`Engineering` 写入口与观察者共用一份终态选择策略，Merged 终态且单调 | 无 | 改 `docs/README.md` 的 Active 索引表、`docs/development/ci.md`、`docs/product/board-semantics.md` 与本文件 §4.7；**与在飞栈及本批次其余四层在索引表上必然冲突**，解法见下 |
+| 本轮不合并 | #160（D2-L1） | `feat/local-git-worktree` | `main` | Closes #137——本机真的出现 worktree 与 branch，路径安全在 Git 命令之前生效 | 无 | **第二轮 MMP 评审（2026-09-23）2 × P1，本轮不合并**：`createWorktree` 对不可复用的状态报 `conflict`，core 据此报假 `Ready` / `confirmed`；#137 验收 3 在 core 层不成立。证据与反例见 `docs/review/2026-09-23-mvp1-batch-review.md`；修复后重新排队，仍排在 #161 之前。改 `tests/contract/suites/development.js`——**本批次只有它改这个文件**，其余四层不得改 |
+| 本轮不合并 | #161（D2-L2） | `feat/human-execution-provider` | `feat/local-git-worktree` | 声明 Closes #139——一个**可绑定**的人工执行 provider（`running` 的人工运行，不写 Storage），工作树与分支仍在；core 的降级触发点不改（#171），运行的外部身份不落库（#172）。原写「会话启动失败降级为**一等人工执行状态**」，与 #161 收窄后的交付不符，2026-09-23 第二轮评审订正 | **#160**（栈序：base 是 #160 的 head） | **第二轮 MMP 评审 1 × P1，本轮不合并**：`Closes #139` 与验收 2 不符，需人类裁决改 `Refs #139` 或改写验收；且依赖的 #160 有 P1。改 `tests/contract/execution-contract.test.js`（人工 provider 的适配器块与判别性用例），`tests/contract/suites/execution.js` **不改**（原写「改 `tests/contract/suites/execution.js`——只有它改」，与 diff 不符，2026-09-23 订正）；`tests/integration/README.md` 与位置 2、以及在飞 PR #122 都可能重叠，**两边都保留、按小节拼合**；`packages/providers/fake/**` 不改实现，需要时只改 `tests/contract/*.test.js` |
+| 4 | #162（D3-L1） | `test/harness-host-spike` | `main` | Closes #125——宿主能否承载 controller + 一个页面，有**观测结论**与裁决（交付物是记录，不是代码） | 无 | 改 `docs/architecture/` 与 `docs/README.md`；探针代码不合并。**已合并（2026-09-23T09:54:15Z，rebase merge 落在 `main` 的 `c841227`、`940046e`）；head 分支已删除** |
+| 5 | #158（D3-L2） | `feat/ui-model-presentation` | `main`（原为 `test/harness-host-spike`） | Closes #128——客户端模型派生出项目首页 / 工作项列表 / 统一详情的展示结构 | 无（栈序依赖已随位置 4 合并消失） | 改 `packages/ui-model/**` 与 `docs/README.md`。**位置 4 合并后 head 分支被删除，GitHub 把本行的 base 自动改成 `main`**——它已不是栈的一层，而是一条独立 PR；用 `git rebase --onto origin/main <旧 base> HEAD` 把已被合并进 `main` 的探针提交丢掉即可（`git rebase origin/main` 的 patch-id 去重**不成立**：`main` 上是两个提交、分支上带的是四个，内容被压过）。该步已执行，回读判据：`git merge-base origin/main origin/feat/ui-model-presentation` 是 `main` 上的提交，且 `git diff --name-only origin/main...origin/feat/ui-model-presentation` 只含本层文件。与位置 1 在 `docs/README.md` 索引表上冲突，两边都保留 |
+
+读表要点：
+
+- **位置 1 先合并**，判据是 §6.1 的那一条——不是「谁更重要」，而是「谁的红叉是别人造成的」。#115 修的是「一个 issue 被多个 PR 引用时写入口与观察者不一致」，而观察者的红**没有事件能清掉**；本批次把堆叠 PR 变成常规操作，先合并它，后续四层的 advisory 红才不会被误读成「这些 PR 有问题」。
+- **位置 2 与位置 4 曾经互不依赖**（base 都是 `main`），彼此顺序不限；位置 4 已于 2026-09-23 合并，因此现在只剩位置 2 → 3 这一条栈：位置 3 的 base 是位置 2 的 head，**位置 2 合并前位置 3 不可合并**。位置 5 已随位置 4 的合并脱离栈（见上表第 5 行）。
+- **栈内 PR 有没有 `CI` 结论，取决于它有没有登记进 GitHub stack；判定永远读它当前的 checks，不要从 base 的名字推断**（与 §4.4 同口径）。本批次实测（2026-09-23，只读）：
+  - **登记进 stack 之后，base 不是 `main` 也拿得到 `Verify` 与 `PR Fast Gate`。** PR #161（base `feat/local-git-worktree`，07:47:48Z retarget、此后未变）的 head `2b900b36` 上有 success 的 `Verify（typecheck + 契约测试）`（09:33:49Z）与 `PR Fast Gate`（09:34:18Z），来自 CI run `35843669687`，该 run 的 `pull_requests[].base.ref` 就是 `feat/local-git-worktree`。PR #158（base `test/harness-host-spike`）的 head `f42cab08` 同样有 CI run `35843700676`（09:34:06Z，success）。
+  - **登记之前测到的是中间态。** 同一个 head 在栈登记之前没有这两条结论，登记之后有；两次 CI 都紧跟 `added_to_stack` 约 2 秒启动（#161：09:33:45Z → 09:33:47Z；#158：09:34:04Z → 09:34:06Z）。
+  - **机制未确证。** 本文件只记录上面两次快照与它们的回读命令，**不**断言 GitHub 为什么这么触发。复核方式：`gh pr checks <n>` 读当前结论，`gh api repos/SingularityKChen/harness-projects/actions/runs/<run-id> --jq '.pull_requests[].base.ref'` 读该 run 认定的 base。
+  - **仍然成立的推论**：`main` 的分支保护只作用于以 `main` 为 base 的 PR，因此栈内层的 `mergeStateStatus` 可以是 `CLEAN` 而没有待满足的必需检查——**看起来绿不等于 fast gate 跑过**，栈内某一层的绿也不能替代整栈合并后的复跑。
+- **本节的编号取 §4.7 而不是 §4.5**：另一条在飞栈（#157 所在的分支）已经写了 `### 4.5` 与 `### 4.6` 两个小节。两边合并时按编号各自保留，不重排、不覆盖。实测（2026-09-23，第二轮评审的并集预演）：把 #121 变基到本批次四个 PR 的并集之上，冲突正落在本文件 `### 4.7` 与 `### 4.5` / `### 4.6` 的同一插入点；解法即本条——三节都保留，按 4.5、4.6、4.7 排列。
+
+**与在飞栈的关系**：本批次之外还有一条独立栈在飞——**#121**（base `main`，head `test/e1-uncertain-create`）、**#122**（base `test/e1-uncertain-create`）、**#157**（base `feature/storage-identity-membership-tables`）及其后续层。成员以回读为准：`gh api 'repos/SingularityKChen/harness-projects/pulls?state=open&per_page=100' --jq '.[] | select(.head.ref | startswith("feature/storage") or . == "test/e1-uncertain-create") | {number, base: .base.ref, head: .head.ref}'`（2026-09-23 第二轮评审时是 #121 → #122 → #157 → #167 → #170 → #175）。它们是 Gate E1 / SQLite v1 数据模型那条线的产物，**不属于本批次排位**，与本批次五个 PR 之间没有依赖；两者唯一的必然交织是 `docs/README.md` 的 Active ExecPlan 索引表。
+
+**`docs/README.md` Active 索引表的冲突（已知点，未预演）**：这张表按行插入维护，本批次五层各插自己一行，在飞栈也改同一个文件。无论谁先合并，后合并的一方在自己的位置上变基时都会在同一个插入点冲突。**解法**：两边都保留、按合并位置排序（位置靠前的行在前），每层只插自己那一行、不为别人预留空行；这与 §4.3「位置 1 与 2 的索引冲突」的既有形态同类。
+
+**合并顺序（一句话版）**：`4 → 5` 已解耦（位置 4 已合并，位置 5 现在是一条独立 PR）；剩下 `1` 与 `2 → 3`，`1` 先合并，`2 → 3` 自下而上。
+
+> **Superseded by** 下文「第二轮 MMP 评审结论」（2026-09-23）：本轮只合并 `1 → 5`（#159 → #158）；#160 → #161 本轮不合并，修复后重新排队时仍自下而上。
+
+**本轮交付状态（2026-09-23，评审响应后）**：**位置 4（#162）已合并**，其余四个 PR 都已 ready 并完成一轮人工评审响应，等待人类评审；**尚未合并其余任何一个**。
+
+> **Superseded by** 下一段「第二轮 MMP 评审结论」（2026-09-23）：上一句是第一轮评审响应后的快照。
+
+**第二轮 MMP 评审结论（2026-09-23）**：锁定 #158 `8ed0d65`、#159 `300e2a3`、#160 `1830136`、#161 `c013dc9`，按本表顺序（#159 → #160 → #161 → #158）在一次性 clone 里做并集预演：冲突只在 `docs/README.md` 的 Active 索引表（两边都保留），并集树上 `pnpm verify` 532 / 532 + 7 / 7、`pnpm run boundaries` 7 / 7、`node scripts/workflow-check.mjs` 无发现——并集层无 P0。逐 PR：**#159 与 #158 无 P0 / P1**，机械可修的 P2 / P3 就地修复后按位置 1 → 5 以 rebase merge 合入；**#160（2 × P1）与 #161（1 × P1，且依赖 #160）本轮不合并**。34 条 inline 意见、风险矩阵与证据见 `docs/review/2026-09-23-mvp1-batch-review.md`。合并与否以回读为准：`gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,mergeCommit`。
+
+第一轮评审共提出 30 条 inline 意见（#158 十条、#159 四条、#160 九条、#161 七条），逐条核实后**绝大多数属实**，其中四条是真缺陷而不是风格意见：`#160` 的 `conflict` 把「可复用」与「不可复用」折成同一个码、core 据此报**假 `Ready`**；`#161` 的人工运行引用从不落库、「重启后读回不变」只对运行记录成立；`#159` 的「失败会被下一次事件重试」风险论据被 `concurrency` 组取消事件这一实测证伪；`#158` 的 `execution_context` 谱系入口挂在一个 core 读该事实时**从不经过**的 capability key 上。修复按**根因分组**做（不是逐条打补丁），每组都配了先红后绿的判别性证据与变异实验；30 条 thread 已逐条回复并 resolve。
+
+三处**有意留在本批次之外**的缺陷已各自登记，不要在本批次里顺手修：
+
+- **#165**——core 的 `recordStartFacts` 让同一份工作树在恢复路径上得到第二个实体 id 与第二条 confirmed `has_worktree` 关系（不变量 6）。根因在 `packages/core`，不在 #137 的 provider；#160 里那两条表征断言明确点名它并给出收口条件。
+- **#171** / **#172**——#161 暴露的两条 core/Storage 缺口：Start Work 的降级触发点从不咨询人工 provider；执行运行的外部身份没有成为 core 的 run 事实（`ExecutionRunRecord` 无 `externalId`，`getRun`/`cancelRun` 在生产代码里零调用点）。后者是跨层 Storage 契约 + SQLite 迁移，与在飞的 SQLite v1 栈同片文件，因此必须独立成 PR。
+- **#173** / **#174**——`Engineering` 的「更新的 draft PR 会清空字段」语义（预先存在，与 base 逐字一致）；本地 Git provider 因体量上限而未补的两条边界/错误注入用例。
+
+**#166** 曾按「栈内 PR 拿不到 `CI` 车道结论」登记，**该前提已被本节上方的实测证伪**（登记进 stack 之后拿得到）。issue 已改写：残留的真问题收窄为**分支保护只作用于 `main`，所以合进父分支这一步没有必需检查**——「跑过」与「被要求跑」是两件事。
+
+另有一条**只能在合并后回读**的未闭环项：#115 的真实事件路径（`Engineering state` 是 `pull_request_target`，workflow 定义取自默认分支）。合并 #159 之后回读 `gh run list --workflow=engineering-state.yml`，期望出现 `::notice::confirmed #115: Engineering=…`。
+
+> **Superseded by**（2026-09-23，第二轮 MMP 评审）：`gh run view --log` 把 `::notice::` 渲染成 `##[notice]`，照字面 grep 会漏；命令须带 `-R`。改为 `gh run list -R SingularityKChen/harness-projects --workflow=engineering-state.yml --event pull_request_target --limit 5` 找到合并后那次运行，再 `gh run view <id> -R SingularityKChen/harness-projects --log | grep -E 'PR_NUMBER|##\[notice\]confirmed'`，期望 `PR_NUMBER: 159` 与 `##[notice]confirmed #115: Engineering=Merged; 依据 PR #159（规则 merged）`。
+
 ## 5. 历史：2026-09-18 那一轮的实测结果
 
 以下是 2026-09-18 完成的上一轮评审（9 个开放 PR：#12 #19 #21 #3 #11 #13 #33 #35 #37）的**实测记录**，不是当前队列的一部分，也不是可以直接套用的模板——它作为一个已经发生过的具体案例，说明第 2 节的流程为什么长这个样子。来源：`docs/review/2026-09-18-mvp-delivery-review.md`。
