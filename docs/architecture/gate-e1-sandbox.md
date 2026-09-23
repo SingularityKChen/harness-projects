@@ -15,11 +15,14 @@
 
 ### 2.1 变量
 
-本文件是这些变量的**唯一赋值处**（这条只约束变量赋值：正文里出现的 id 字面量属观测值，不构成第二赋值处）。记录文件与后续批次一律引用变量名，不重复写值。
+本文件是**沙箱级 `$E1_*` 变量**的唯一赋值处：记录文件与后续批次一律引用变量名，不重复写值。这条只约束**变量赋值**——记录文件里出现的 id 字面量属观测值（「这次调用返回了哪个 id」），不构成第二赋值处。
+
+> **已知缺口（2026-09-22）**：上面这条约束没有被完全执行，记录文件里出现过 `E1_*=…` 赋值。[gate-e1-membership-and-draft.md](gate-e1-membership-and-draft.md) §2.2 为它自己的两个夹具定义了本文件没有定义的变量（它声明那处是那些变量的唯一赋值处），并把 §2.4 已记录的 Project A `Status` 字段 id 又赋给 `E1_STATUS_FIELD_A`；[gate-e1-write-and-events.md](gate-e1-write-and-events.md) 的「命令约定」重列了沙箱级变量名（多数写成 `<...>` 占位符）。本批次**不为这一项加机械检查**——修它要动已合并的记录文件；缺口如实记在这里，不写成「全部合规」。
 
 ```bash
 E1_OWNER=SingularityKChen                    # 公开账号，与本仓库 owner 相同
 E1_REPO=e1-sandbox                           # 私有沙箱仓库
+E1_CLONE=<sandbox-clone>                     # 会话内的临时目录占位符（不是真实路径）
 E1_PROJECT_A=11                              # Project A 的 number
 E1_PROJECT_B=12                              # Project B 的 number
 E1_PROJECT_A_ID=PVT_kwHOAY1ahM4BkJ9r         # Project A 的 node id（GraphQL 用）
@@ -84,6 +87,24 @@ Project A 比 Project B 多三个自定义字段，实测 `fields.totalCount` �
 
 三个 `E1 *` 字段属于 E1-3 的使用范围，本批次只读。
 
+### 2.5 清单外的 id
+
+记录文件里出现过、但不在 §2.3（夹具）与 §2.4（字段）两张表里的 id。登记它们是为了让「记录文件里的每个 id 字面量都能在本文件找到出处」这条不变量成立。来源分四类：观测期间临时创建并已删除、转换动作产生、内置字段、另一个 project 的字段。
+
+| id | 是什么 | 何时产生 / 删除 | 为什么不在 §2.3 / §2.4 |
+|---|---|---|---|
+| `PVTI_lAHOAY1ahM4BkJ9rzg75sRg` | E1-3 探测 `contentId` 接受范围时临时创建的第一个 draft 夹具在 Project A 的成员关系 | E1-3 探测期间创建，写记录前删除；删除后 Project A 回到 7 条 | 临时夹具，不是 §2.3 登记的那七个保留条目 |
+| `PVTI_lAHOAY1ahM4BkJ9rzg75sTE` | 同上，第二个临时 draft 夹具 | 同上 | 同上 |
+| `I_kwDOUjWAl88AAAABSUC8og` | E1-2 的 draft-convert 夹具转换后得到的内容 id（issue #6） | E1-2 执行 `convertProjectV2DraftIssueItemToIssue` 时由转换动作产生，不是新建夹具 | §2.3 登记的是转换前的 draft 内容 id `DI_lAHOAY1ahM4BkJ9rzgLKQZ0`；转换后的 issue 不是独立夹具 |
+| `PVTSSF_lAHOAY1ahM4BkJ9szhi7jXQ` | Project B 的 `Status` 字段 id | 建沙箱时随 Project B 产生，未删除；E1-2 观测时读到 | §2.4 的表只列 Project A 的字段 |
+| `PVTF_lAHOAY1ahM4BkJ9rzhi7jWQ` | Project A 的 `Title` 字段 id；E1-3 实验 1 §4.2 的响应里它以 `name = "Title"` 出现 | 建 Project A 时就有，未删除 | §2.4 的表只列自定义字段与 E1 用到的字段，`Title` 没有登记；它的值属内容派生，按 §6 不计入「规划字段值」行 |
+
+### 2.6 构造的输入（不是平台对象）
+
+- `I_kwDOUjWAl88AAAABST4XXXX`：E1-3 为取得 `NOT_FOUND` 原文而**故意写错**的 id（把一个真实 issue node id 的末四位替换成 `XXXX`），从来不是平台对象。
+
+本节列的是**输入**，不是被观测对象：上面这个 id 没有被创建，也没有对应的平台对象；登记它是为了让「记录文件里的每个 id 字面量都能在本文件找到出处」这条不变量成立，并让复现步骤完整。
+
 ## 3. 创建步骤
 
 命令形式以 `gh <cmd> --help` 逐条核对（2026-09-21）；对象本身创建于本批次开工之前，因此**创建步骤没有逐条重跑**——重跑会在正在被 E1-2 / E1-3 观测的沙箱里留下重复夹具。可执行的部分（字段创建、条目创建、条目读取、项目删除）在 §4.2 的一次性探针里实测过，输出见该节。
@@ -117,7 +138,7 @@ gh issue create --repo "$E1_OWNER/$E1_REPO" \
   --body "Gate E1 fixture. Read-only observation target."
 
 # 5) change request 夹具（pr-gamma）：空提交 + 一个分支 + 一个 PR
-E1_CLONE=<sandbox-clone>                     # 会话内的临时目录占位符，不进文档
+# $E1_CLONE 见 §2.1：会话内的临时目录占位符，不是真实路径
 git clone "https://github.com/$E1_OWNER/$E1_REPO.git" "$E1_CLONE" && cd "$E1_CLONE"
 git checkout -b fixture/gamma && git commit --allow-empty -m "fixture gamma" && git push -u origin fixture/gamma
 gh pr create --repo "$E1_OWNER/$E1_REPO" --head fixture/gamma --base main \
@@ -310,6 +331,8 @@ gh api "repos/$E1_OWNER/$E1_REPO" ; echo "exit=$?"   # 期望：404，exit 1
 
 「本地应有行」的**「行数」列只有一个计数口径**：「规划字段值」这一行**只计用户可写的规划字段值**；内容派生的系统字段值（`ProjectV2ItemFieldRepositoryValue`，字段名 `Repository`）与内容字段（`Title`）不计入。其它行按各自表的主键计数。这条定义只写在这里，实验记录引用它、不复述。
 
+**这一行的名字是固定的，不能改名、也不能拆成多条物理表名行。** 跨记录可比性是这一行存在的唯一目的，而 E1-4（#25）的裁决要横向读三份记录——行名一改，逐行校验就空转。记录自己的落点结构（领域表名、投影表等）可以另起若干行写在它旁边，但「规划字段值」这一行必须在，计数按上面的口径；`tests/contract/e1-evidence-consistency.test.js` 的 (b0) 断言会在记录缺这一行时响亮失败（唯一的例外是 `PLANNING_ROW_EXEMPT` 里带日期与理由的显式豁免）。
+
 三条填写纪律：
 
 - **不补全**：平台没返回的字段不许用"应该会返回 X"补齐。字段不存在（例如 draft 没有 `repository`）要如实写成"不存在"，并给出证明它的那次调用原文。
@@ -335,7 +358,9 @@ gh api "repos/$E1_OWNER/$E1_REPO" ; echo "exit=$?"   # 期望：404，exit 1
 node scripts/rule-checks.mjs disclosure origin/main   # 期望：exit 0
 ```
 
-机械扫描不覆盖任意口令、业务秘密、标题和分支名，因此提交前仍需人工过一遍上表五类。
+`disclosure` 当前机械扫描的模式（`scripts/rule-checks.mjs` 的 `DISCLOSURE_PATTERNS`）里，与本机路径和身份有关的有**两类**：**家目录路径**（以 `/Users` 或 `/home` 开头、后接用户名的那类绝对路径；首段为 `node` 或 `dashboard` 时豁免）与**内网主机名**（TLD 为 `.local` / `.internal` / `.lan` / `.corp` / `.home` / `.intranet`，且 TLD 前的标签含数字或连字符）；另有一类 **RFC1918 私网地址**，其余四类是凭据模式（GitHub 令牌、GitHub 细粒度 PAT、AWS Access Key、私钥 PEM 头）。
+
+因此上表「本机路径」这一行**不能**只靠机械扫描判定：`/tmp/...`、`/var/...` 这类非家目录的绝对路径，以及不带上述内网后缀的 hostname，都不在扫描范围内，只能人工核对。机械扫描不覆盖任意口令、业务秘密、标题和分支名，因此提交前仍需人工过一遍上表五类。
 
 ## 8. 已知边界
 
