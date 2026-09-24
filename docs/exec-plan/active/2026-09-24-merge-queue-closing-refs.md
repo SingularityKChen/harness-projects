@@ -48,7 +48,9 @@ gh issue view 139 --json closedByPullRequestsReferences   # 改前 [161] → 改
 
 - `docs/project-management/merge-queue.md` —— 本次唯一改动的文件（§7 与 §4.7）。
 - `docs/review/responding.md` —— 回复评审与回读的既有流程。
-- `docs/exec-plan/active/2026-09-24-human-execution-provider.md` —— 证伪发生的那一层的计划，它的 `Surprises & Discoveries` S8 记了原始观测。
+- **证伪的原始观测**记在 PR #161 那一层的 ExecPlan（`Surprises & Discoveries` S8）里。该文件当前**只存在于未合并的 `feat/human-execution-provider` 分支**上，`main` 上没有它；回读命令是 `git show origin/feat/human-execution-provider:docs/exec-plan/active/2026-09-24-human-execution-provider.md | grep -n -A 8 '^### S8'`。因为本计划必须在 `main` 上自足（`PLANS.md` §4），**观测本身写在下面**，不把可解析性押在那条路径上：
+
+  > S8（2026-09-23）：正文里的 `Closes #139` 改成 `Refs #139`，等 3.5 分钟后回读，`gh pr view 161 --json closingIssuesReferences` 从 `[139]` 变成 `[]`，`gh issue view 139 --json closedByPullRequestsReferences` 从 `[161]` 变成 `[]`，#139 仍 `OPEN`。
 - `AGENTS.md` §6、`docs/development/repository-rules.md` §4 —— 分支前缀白名单。
 
 **当前状态。** `#159`（`2026-09-23T14:00:26Z`）与 `#158`（`2026-09-23T14:07:31Z`）已合入 `main`，`#115` 与 `#128` 随之 `CLOSED`；`#160` 与 `#161` 仍 OPEN，正在按第二轮评审修复。
@@ -59,7 +61,7 @@ gh issue view 139 --json closedByPullRequestsReferences   # 改前 [161] → 改
 
 **决策 2：不给出机制。** 本文件在 §4.4 已经因为「把相关性写成机制」返工过一次（同一批次里，栈内 PR 的 CI 结论那条断言被实测证伪）。所以这次只写观测与回读命令，机制留给受控实验。
 
-**决策 3：`feat/` 前缀按已登记偏差处理，不改名。** 改一个 PR 的 head 分支在 GitHub 上不可行——只能关掉再重开，那会连同全部 review thread 一起丢失，代价远大于前缀不一致。所以：登记偏差、写明后续新分支用白名单前缀、是否把 `feat/` 收进白名单留给维护者。**放弃的方案**：改 `AGENTS.md` 的白名单来迁就现状——那是「让规则追上实践」，而仓库里 `feature/` 也有 11 条在用，规则并没有被实践统一否定。
+**决策 3：`feat/` 前缀按已登记偏差处理，不改名。** 改一个 PR 的 head 分支在 GitHub 上不可行——只能关掉再重开，那会连同全部 review thread 一起丢失，代价远大于前缀不一致。所以：登记偏差、写明后续新分支用白名单前缀、是否把 `feat/` 收进白名单留给维护者。**放弃的方案**：改 `AGENTS.md` 的白名单来迁就现状——那是「让规则追上实践」，而远端上 `feature/` 反而比 `feat/` 多（2026-09-24 实测 `feat/` 2 条、`feature/` 5 条），规则并没有被实践统一否定。
 
 **不变量。** 本次不改任何代码、不改任何 workflow、不改任何 capability；只改一份文档。
 
@@ -101,6 +103,7 @@ git diff --check origin/main...HEAD                                 # 期望无�
 | 4 | 分支前缀偏差已登记 | §4.7 有「已登记偏差」一段，含白名单原文与不改名的理由 |
 | 5 | 体量与发布面 | `rule-checks size`/`disclosure` exit 0；`git diff --check` 无输出 |
 | 6 | issue 关联 | PR 侧 `closingIssuesReferences = [180]`，issue 侧 `closedByPullRequestsReferences` 含本 PR |
+| 7 | 本计划引用的每个仓库路径都能解析 | 逐条 `test -e <path>`；**只列本计划引用的、位于本仓库内的路径**，不列命令、不列分支上才有的路径。实测命令：见下 |
 
 ## Progress
 
@@ -118,6 +121,7 @@ git diff --check origin/main...HEAD                                 # 期望无�
 | D1 | 保留两次观测、删掉普适结论 | 两次都是真的且都可复现；删掉任何一次都会让下一个人重犯同一个错 | 2026-09-24 / 批次执行者 |
 | D2 | 不给机制 | 本文件 §4.4 已因「把相关性写成机制」返工过一次（栈内 PR 的 CI 结论那条被实测证伪） | 2026-09-24 / 批次执行者 |
 | D3 | `feat/` 前缀不改名，按已登记偏差处理 | 改名必须关掉再重开 PR，会连同 review thread 一起丢失；代价远大于前缀不一致 | 2026-09-24 / 批次执行者 |
+| D4 | 链接守卫不在本 PR 做，另开 #182 | 朴素扩展实测 448 条引用 291 条误报（fenced code / 命令行 / 相对文件名 / `<placeholder>`），不是二十行扩展；`content-placement.md` §5 已把这类检查记为需要自己的设计批次 | 2026-09-24 / 批次执行者 |
 
 ## Idempotence and Recovery
 
@@ -132,8 +136,15 @@ git diff --check origin/main...HEAD                                 # 期望无�
 
 ## Outcomes & Retrospective
 
-（完成后回填。）
+本批次只改文档，实现与验证都已落地：
+
+- **§7 的普适断言已删除**，两次相反的观测都在，结论换成两条操作规则；标题只描述「读到了什么」，不写因果（D2）。
+- **§4.7 补了两段**：合并结果回读（#159/#158 已合并、#160/#161 仍 OPEN）、分支前缀的已登记偏差。
+- **一处 P1 由独立评审发现并已修**：本计划原来引用 `docs/exec-plan/active/2026-09-24-human-execution-provider.md`，而该路径只存在于未合并的 #161 分支上——`main` 上悬空。已把观测本身写进本计划，并把那条路径标注为「只在该分支上」+ 回读命令。
+- **一处 P2 已修**：`feat/` : `feature/` 的计数原来是 `git for-each-ref` 的口径（含本地陈旧分支与 remote-tracking ref），15 : 11 是错的；远端权威口径是 2 : 5。
+- **没有做、已登记的事**：`docs/` 的引用/链接检查（`AGENTS.md` §9 要求、`docs/development/content-placement.md` §5 记为「从未实现」）仍然没有机械守卫。本计划的探针显示朴素的扩展不可行——把 `tests/contract/content-placement.test.js` 的提取器直接套到 `docs/exec-plan/active/**` 上，448 条引用里 **291 条误报**（fenced code、命令行、相对文件名、`<placeholder>` 都被当成仓库路径）。这需要自己的设计批次，已另开 **#182**（含上面那组误报测量）。
 
 ## Bottom Change Note
 
 - (2026-09-24) 创建：§7 订正、§4.7 合并结果回读与分支前缀偏差登记。
+- (2026-09-24) 评审响应：修 P1 悬空路径（把观测内联）、修 P2 因果标题与失真的前缀计数、补 P3 的 §4.7 一致性、回填 Outcomes、登记链接守卫为独立批次。
