@@ -75,6 +75,24 @@ test('负向：锚点未观察时不读 CI 事实，读回 0 跳且本地无 CI 
   assert.equal(relations.filter((relation) => relation.type === 'runs_on').length, 0, '存储里不得出现 CI 关系')
 })
 
+test('负向：未创建执行上下文时，即使同名分支有事实也不得制造工作树谱系', async () => {
+  const providers = createFakeProviders()
+  const core = await compose(providers)
+  const repository = refOf(providers.development.gate.bindingId, 'repository', REPOSITORY)
+  const branch = await providers.development.createBranch({ repository, name: 'work/orphan', fromRef: 'main' })
+  assert.equal(branch.ok, true)
+  const changeRequest = await providers.development.createChangeRequest({
+    repository, head: 'work/orphan', base: 'main', title: '孤立分支', body: '不应进入未创建工作树的谱系',
+  })
+  assert.equal(changeRequest.ok, true)
+
+  const projection = await core.queries.getDeliveryProjection({ workItemId: 'orphan', repositoryId: REPOSITORY })
+  assert.equal(projection.error, undefined)
+  assert.equal(projection.hops.length, 0, '未观察到执行上下文时，同名分支不得成为谱系锚点')
+  assert.equal((await core.queries.getDeliveryLineage({ workItemId: 'orphan', repositoryId: REPOSITORY })).length, 0)
+  assert.equal(exportFakeStorageState(providers.storage).relations.length, 0, '骨架不得落成关系')
+})
+
 test('正向：真实链路走完后 CI 跳出现（无锚点不读不得削弱真实观察）', async () => {
   const providers = createFakeProviders()
   const core = await compose(providers)

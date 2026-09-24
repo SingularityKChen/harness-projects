@@ -33,6 +33,8 @@ export interface StartWorkResult {
   readonly status: ExecutionContextStatus | undefined
   readonly branchExternalId: string | undefined
   readonly worktreeExternalId: string | undefined
+  /** 实际落地的分支头提交；接管一个既有分支时它是事实，不是可推导的值。 */
+  readonly branchHeadCommit: string | undefined
   readonly runExternalId: string | undefined
   readonly fallback: StartWorkFallback | undefined
   readonly degraded: boolean
@@ -63,6 +65,7 @@ export interface StartOutcome {
   readonly status: ExecutionContextStatus
   readonly branchExternalId: string | undefined
   readonly worktreeExternalId: string | undefined
+  readonly branchHeadCommit: string | undefined
   readonly fallback: StartWorkFallback | undefined
   readonly runExternalId: string | undefined
 }
@@ -84,7 +87,7 @@ export function startWorkUnavailable(error: ProjectError): StartWorkResult {
   return {
     phase: WritePhase.Failed, writeState: WriteState.Failed, saving: false, confirmed: false,
     executionContextId: undefined, status: undefined, branchExternalId: undefined,
-    worktreeExternalId: undefined, runExternalId: undefined, fallback: undefined,
+    worktreeExternalId: undefined, branchHeadCommit: undefined, runExternalId: undefined, fallback: undefined,
     degraded: true, error,
   }
 }
@@ -94,6 +97,7 @@ export function toResult(report: WriteReport, outcome: StartOutcome | undefined,
     phase: report.phase, writeState: report.writeState, saving: report.saving, confirmed: report.confirmed,
     executionContextId: outcome?.contextId, status: outcome?.status,
     branchExternalId: outcome?.branchExternalId, worktreeExternalId: outcome?.worktreeExternalId,
+    branchHeadCommit: outcome?.branchHeadCommit,
     runExternalId: outcome?.runExternalId, fallback: outcome?.fallback,
     degraded: error !== undefined || outcome?.fallback !== undefined,
     error: error ?? report.error,

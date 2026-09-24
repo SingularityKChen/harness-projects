@@ -6,7 +6,7 @@
  * Gate E1 落地前，同一外部 id 视为各 provider 下的同一对象，E1 通过后由身份表替换这条显式假设。
  */
 import { CapabilityKey, type ExternalObjectRef, type ProviderResult, type ResolvedBinding } from '@harness-projects/capabilities'
-import { EngineeringFactKind, EntityKind } from '@harness-projects/domain'
+import { EngineeringFactKind, EntityKind, type EntityId, type WorkspaceId } from '@harness-projects/domain'
 import { gateCommand } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
 import { contextIdFor, readExecutionContext } from './execution-context.ts'
@@ -26,6 +26,27 @@ type ReadResult<T> = { readonly value: T | undefined; readonly gap: CapabilityGa
 interface ChangeRequestFact { readonly ref: ExternalObjectRef; readonly label: string }
 
 const PAGE_LIMIT = 50
+
+/**
+ * 工作树实体的**唯一身份定义**：这个工作项**在这个仓库上**的工作树。
+ *
+ * 路径不是身份，是属性。把路径放进键里会造出**第二个派生点**：写入路径（`recordStartFacts`）拿的是
+ * 请求声明的路径，投影路径（`worktreeNode`）拿的是 provider 回填的句柄；真实 provider 上这两者不同
+ * （首次创建返回规范化绝对路径，复用返回调用方字符串），于是**读一次谱系**就会为同一份工作树写出
+ * 第二条 confirmed 关系、造出第二个实体——违反 `AGENTS.md` §1.1 不变量 6。改路径重试、恢复时句柄被
+ * 覆盖成相对路径，都是同一个洞的其它入口。
+ *
+ * **作用域是仓库，不是 binding**：binding 的解析有多个来源——写入侧走 `DevelopmentWorktreeCreate`、
+ * 投影侧走 `DevelopmentRepositoryRead`——两个 capability key 可以独立不可用，于是同一份工作树会拿到
+ * 两个身份，这正是上面那个洞的第五个入口。`repositoryId` 两侧都从**执行上下文记录**取（记录里本来
+ * 就有这一列），不需要任何 capability 解析，分叉因此从构造上不存在。三元组
+ * `(workspaceId, repositoryId, workItemId)` 与 `contextIdFor` 完全一致：一个执行上下文一份工作树。
+ *
+ * 写入与投影两处都调这一个函数，谁都不许再自己拼键。
+ */
+export function worktreeEntityId(workspaceId: WorkspaceId, repositoryId: string, workItemId: string): EntityId {
+  return chainEntityId(workspaceId, EntityKind.Worktree, `${repositoryId}|${workItemId}`)
+}
 
 export function chainNode(id: ChainNode['id'], kind: EntityKind, externalId: string | undefined,
   label: string | undefined, observed: boolean, detail?: string, fact?: EngineeringFactKind): ChainNode {
@@ -54,6 +75,12 @@ async function gated<T>(context: CoreContext, key: CapabilityKey,
 
 function collect(gaps: CapabilityGap[], gap: CapabilityGap | undefined): void { if (gap !== undefined) gaps.push(gap) }
 
+/**
+ * 把仓库 id 解析成一个 binding 作用域的 provider 引用——**只用于调用 provider**（读分支头、变更请求、
+ * 流水线）。它**不参与任何实体身份**：工作树的身份只从执行上下文记录取 `repositoryId`（见
+ * `worktreeEntityId`），因为这条解析走的是 `DevelopmentRepositoryRead`，与写入侧走的
+ * `DevelopmentWorktreeCreate` 是两个可以独立不可用的 capability key。
+ */
 async function resolveRepository(context: CoreContext, repositoryId: string, gaps: CapabilityGap[]): Promise<ExternalObjectRef | undefined> {
   const key = CapabilityKey.DevelopmentRepositoryRead
   const gate = gateCommand(context.registry, key, 'read')
@@ -124,11 +151,18 @@ function contextNode(context: CoreContext, scope: DeliveryScopeInput, observedId
   return chainNode(asEntityId(id), EntityKind.ExecutionContext, id, undefined, observedId !== undefined, detail)
 }
 
-function worktreeNode(context: CoreContext, scope: DeliveryScopeInput, view: ChainView | undefined, repository: ExternalObjectRef | undefined): ChainNode {
+/**
+ * 工作树节点。身份只从**执行上下文记录**取 `repositoryId`——不碰 `resolveRepository` 的返回值，
+ * 否则投影侧的身份就会依赖 `DevelopmentRepositoryRead` 的解析结果，与写入侧分叉。
+ * 上下文尚未创建时（骨架节点）退到调用方给的作用域：给定 `repositoryId` 时这个 id 与创建后的真实工作树**同一身份**
+ * （这正是骨架要的稳定身份）；骨架跳因 `observed = false` 不落成关系，所以不会与真实工作树的关系重复。
+ */
+function worktreeNode(context: CoreContext, scope: DeliveryScopeInput, view: ChainView | undefined): ChainNode {
   const branch = view?.branchExternalId ?? branchNameFor(scope.workItemId)
+  // `slot` 只是**属性**（provider 的句柄，移除工作树要用它），不参与身份——身份由 `worktreeEntityId` 唯一决定。
   const slot = view?.worktreeExternalId ?? worktreePathFor(scope.workItemId)
   const observed = view?.worktreeExternalId !== undefined
-  return chainNode(chainEntityId(context.workspaceId, EntityKind.Worktree, `${repository?.bindingId ?? 'unbound'}|${slot}`),
+  return chainNode(worktreeEntityId(context.workspaceId, view?.repositoryId ?? scope.repositoryId ?? '', scope.workItemId),
     EntityKind.Worktree, slot, branch, observed, observed ? undefined : '工作树尚未创建')
 }
 
@@ -155,9 +189,13 @@ export async function readChainFacts(context: CoreContext, scope: DeliveryScopeI
   const gaps: CapabilityGap[] = []
   const view = await readExecutionContext(context, { workItemId: scope.workItemId, repositoryId: scope.repositoryId ?? '' })
   const repository = scope.repositoryId === undefined ? undefined : await resolveRepository(context, scope.repositoryId, gaps)
-  const worktree = worktreeNode(context, scope, view, repository)
+  const worktree = worktreeNode(context, scope, view)
   const branch = worktree.label ?? branchNameFor(scope.workItemId)
-  const head = repository === undefined ? undefined : await readHeadCommit(context, repository, branch, gaps)
+  // A default branch name is only a skeleton label, never an observation. Without a recorded worktree
+  // handle there is no provisioned artifact to anchor branch, change-request, or CI facts to; reading
+  // `work/<workItemId>` here would let an unrelated/manual branch manufacture lineage for a missing context.
+  const hasObservedWorktree = view?.worktreeExternalId !== undefined
+  const head = repository === undefined || !hasObservedWorktree ? undefined : await readHeadCommit(context, repository, branch, gaps)
   const crFact = repository === undefined || head === undefined ? undefined : await readChangeRequest(context, repository, head, gaps)
   const changeRequest = changeRequestNode(context, repository, branch, crFact)
   // 事实必须挂在已观察到的锚点上（ExecPlan D4）：head 未观察到就不读流水线，也不得以 commit: undefined 读取整个仓库的运行；

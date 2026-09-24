@@ -8,16 +8,16 @@ import {
   type EntityId, type ExecutionContextId, type ProjectError,
 } from '@harness-projects/domain'
 import { resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
-import { chainNode } from './chain-facts.ts'
+import { chainNode, worktreeEntityId } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
 import {
   StartWorkFallback, contextIdFor, contextRecord, reportForExisting, runIdFor, runStatusFor,
   startWorkUnavailable, toResult,
   type StartWorkRequest, type StartWorkResult,
 } from './execution-context.ts'
-import { namesFor, outcomeOf, provisionGit, type GitOutcome } from './git-provisioning.ts'
-import { EdgeProvenance, asEntityId, chainEntityId, recordEdges, type DiscoveredEdge } from './relations.ts'
-import { createWriteLedger, type WriteLedger, type WriteReport } from './write-machine.ts'
+import { namesFor, namesProblem, outcomeOf, provisionGit, type GitOutcome } from './git-provisioning.ts'
+import { EdgeProvenance, asEntityId, recordEdges, type DiscoveredEdge } from './relations.ts'
+import { beginWrite, createWriteLedger, markFailed, type WriteLedger, type WriteReport } from './write-machine.ts'
 
 function actorKind(request: StartWorkRequest): string | undefined {
   const actor: StartWorkRequest['actor'] | undefined = request.actor
@@ -30,6 +30,7 @@ function validateRequest(request: StartWorkRequest): ProjectError | undefined {
   if (typeof request.workItemId !== 'string' || request.workItemId.trim() === '') return invalid('workItemId 不能为空')
   if (typeof request.repositoryId !== 'string' || request.repositoryId.trim() === '') return invalid('repositoryId 不能为空')
   if (typeof request.idempotencyKey !== 'string' || request.idempotencyKey.trim() === '') return invalid('idempotencyKey 不能为空')
+  if (request.branchName !== undefined && (typeof request.branchName !== 'string' || request.branchName.trim() === '')) return invalid('branchName 不能为空')
   if (actorKind(request) === undefined) return invalid('actor 必须声明发起方')
   return undefined
 }
@@ -61,6 +62,27 @@ function leaseExpired(startedAt: string | undefined, now: string): boolean {
   return current - started >= PROVISIONING_LEASE_MS
 }
 
+/**
+ * 终态：端口把它定义为**非 active**——`packages/capabilities/src/storage.ts` 的执行段写的是
+ * 「同一工作项 + 仓库最多一个 **active** 上下文」，而替身的 `isActiveContext` 明确排除 `Closed` 与
+ * `Failed`。所以终态不挡下一次开始。
+ */
+function isTerminal(status: ExecutionContextStatus): boolean {
+  return status === ExecutionContextStatus.Closed || status === ExecutionContextStatus.Failed
+}
+
+/**
+ * 认领上下文。**只有幂等键没有命中账本时才会走到这里**（`startWork` 先 `ledger.replay`），因此：
+ * 同一个 key 返回那一次的报告、不重新尝试；**换一个新 key 才是重试**。
+ *
+ * **不要把这条读成「key 绑定了这一个确切的请求」。** 账本只按 `(workspaceId, idempotencyKey)` 查
+ * （`findMutationAttempt`），**不校验工作项、仓库或任何其它参数**。所以同 key 换一个工作项会命中旧记录、
+ * 返回那一次的 `saved` 报告，而**什么都没有供应**——一次静默的假成功。要关掉它得让账本记请求指纹，
+ * 那是 write ledger 的跨层变更，不在本批次（见批次计划「遗留」§2）。
+ *
+ * 三种可认领的情形：记录不存在（`new`）、在途且租约过期（`resume`）、**终态**（`resume`）。
+ * 在途且租约未过期一律挡住（`in-flight`）；`Ready` 等 active 状态返回 `existing`，不重新供应。
+ */
 async function claimContext(
   context: CoreContext, contextId: ExecutionContextId, request: StartWorkRequest,
 ): Promise<'new' | 'resume' | 'in-flight' | 'existing'> {
@@ -70,6 +92,17 @@ async function claimContext(
     if (existing === undefined) {
       await tx.putExecutionContext(contextRecord(context, contextId, request, ExecutionContextStatus.Provisioning, undefined, undefined, now))
       return 'new'
+    }
+    // 终态可以被接管：一次失败不再把 (工作项, 仓库) 永久锁死。在此之前 `reportForExisting` 那句
+    // 「需显式重试或关闭」是一条没有兑现的承诺——端口没有删除入口、`Closed` 没有写者，而
+    // `contextIdFor` 是确定性的，所以永远只有这一条记录。
+    //
+    // **必须保留已记录的步骤字段**（`branchExternalId` / `worktreeExternalId`）：接管的是同一条记录，
+    // 不是新建一条。用 `contextRecord(..., undefined, undefined)` 重建会把分步回填的成果抹掉，重放于是
+    // 重新推导供应输入——那正是「基线前进后重试失败」的来源。
+    if (isTerminal(existing.status)) {
+      await tx.putExecutionContext({ ...existing, status: ExecutionContextStatus.Provisioning, provisioningStartedAt: now })
+      return 'resume'
     }
     if (existing.status !== ExecutionContextStatus.Provisioning) return 'existing'
     if (!leaseExpired(existing.provisioningStartedAt, now)) return 'in-flight'
@@ -81,7 +114,17 @@ async function claimContext(
 async function provision(
   context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, ledger: WriteLedger,
 ): Promise<StartWorkResult> {
-  const git = await provisionGit(context, request, namesFor(request), contextId)
+  const names = namesFor(request)
+  // 身份闸门先于任何外部写入：退化的工作项 id 会让两个工作项共用同一个分支名。
+  const problem = namesProblem(request.workItemId)
+  if (problem !== undefined) {
+    const error = projectError(ProjectErrorCode.InvalidInput, problem)
+    await saveContext(context, contextId, request, ExecutionContextStatus.Failed, undefined, undefined)
+    return toResult(markFailed(beginWrite(names.path), error), undefined, error)
+  }
+  // 每一步成功后立刻回填：中断在两步之间时，重放跳过已完成的那一步（批次计划 D2）。
+  const git = await provisionGit(context, request, names, contextId, (outcome) =>
+    saveContext(context, contextId, request, outcome.status, outcome.branchExternalId, outcome.worktreeExternalId))
   await saveContext(context, contextId, request, git.status, git.branchExternalId, git.worktreeExternalId)
   await recordStartFacts(context, request, contextId, git)
   if (git.bindingId !== undefined) {
@@ -104,7 +147,15 @@ async function recordStartFacts(context: CoreContext, request: StartWorkRequest,
   }]
   const slot = git.worktreeExternalId ?? git.branchExternalId
   if (slot !== undefined) {
-    const worktreeId = chainEntityId(context.workspaceId, EntityKind.Worktree, `${git.bindingId}|${slot}`)
+    // 工作树的**实体身份**只由 `worktreeEntityId` 定义：这个工作项**在这个仓库上**的工作树。
+    // 路径（`git.worktreeExternalId`）随供应路径变化——首次创建时它是 provider 的规范化路径，复用
+    // （conflict）时它是调用方传入的字符串，工作树步失败时它连值都没有——把它放进键里，同一份工作树
+    // 就会拿到第二个实体 id，违反 `AGENTS.md` §1.1 不变量 6。
+    // 作用域用 `request.repositoryId` 而不是 `git.bindingId`：binding 的解析有多个来源，投影侧走的是
+    // 另一个 capability key，两者可以独立不可用；`repositoryId` 在执行上下文记录里本来就有，两侧取
+    // 同一个事实，分叉从构造上不存在。投影侧（`worktreeNode`）调的是同一个函数。
+    // provider 的值仍然作为**句柄**挂在图谱节点上（移除工作树要用它）——身份稳定，句柄权威。
+    const worktreeId = worktreeEntityId(context.workspaceId, request.repositoryId, request.workItemId)
     edges.push({
       from: contextEntityId, to: worktreeId, type: RelationType.HasWorktree, provenance: EdgeProvenance.Command,
       artifact: chainNode(worktreeId, EntityKind.Worktree, slot, git.branchExternalId ?? slot, true),
@@ -127,7 +178,11 @@ async function startExecution(
   }
   const run = await provider.startRun({
     context: { bindingId: target.binding.ref.bindingId, objectKind: 'execution_context', externalId: contextId, url: undefined },
-    command: `harness run ${namesFor(request).branch}`, environment: {},
+    // 分支身份由序列决定，不由本次请求重新推导：重放时调用方可以省略 `branchName`，那时
+    // `namesFor(request).branch` 是默认名，而序列已经决定的是记录里的那个名字。用错会让 run command
+    // 指向一个不存在的分支——这正是 `git-provisioning.ts` 里「序列一旦决定了身份，后续每一步都必须
+    // 用它」那条命题的下一步。
+    command: `harness run ${git.branchExternalId ?? namesFor(request).branch}`, environment: {},
   })
   if (!run.ok) return manualFallback(context, contextId, git, toProjectError(run.error))
   await recordRun(context, contextId, runStatusFor(run.value.status))
@@ -152,7 +207,14 @@ async function saveContext(
   context: CoreContext, contextId: ExecutionContextId, request: StartWorkRequest,
   status: ExecutionContextStatus, branchExternalId: string | undefined, worktreeExternalId: string | undefined,
 ): Promise<void> {
-  await context.storage.putExecutionContext(contextRecord(context, contextId, request, status, branchExternalId, worktreeExternalId, undefined))
+  // 分步回填会在 `Provisioning` 中途写记录；清掉租约起点会让在途保护失效（`claimContext` 用它
+  // 判断租约是否过期），所以中途写入必须保留它。终态不再被租约查询，按原样清空。
+  const existing = await context.storage.getExecutionContext(contextId)
+  const keepLease = status === ExecutionContextStatus.Provisioning ? existing?.provisioningStartedAt : undefined
+  await context.storage.putExecutionContext({
+    ...contextRecord(context, contextId, request, status, branchExternalId, worktreeExternalId, undefined),
+    provisioningStartedAt: keepLease,
+  })
 }
 
 async function existingResult(
@@ -168,6 +230,9 @@ async function existingResult(
   const fallback = run?.status === ExecutionRunStatus.Failed ? StartWorkFallback.Manual : undefined
   return toResult(report, {
     contextId, status: record.status, branchExternalId: record.branchExternalId,
-    worktreeExternalId: record.worktreeExternalId, fallback, runExternalId: undefined,
+    worktreeExternalId: record.worktreeExternalId,
+    // 上下文记录里没有分支头提交这一列（Storage 契约不归本批次改），所以读回路径报不出来。
+    branchHeadCommit: undefined,
+    fallback, runExternalId: undefined,
   }, report.error)
 }
