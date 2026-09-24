@@ -403,6 +403,10 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 **第二轮 MMP 评审结论（2026-09-23）**：锁定 #158 `8ed0d65`、#159 `300e2a3`、#160 `1830136`、#161 `c013dc9`，按本表顺序（#159 → #160 → #161 → #158）在一次性 clone 里做并集预演：冲突只在 `docs/README.md` 的 Active 索引表（两边都保留），并集树上 `pnpm verify` 532 / 532 + 7 / 7、`pnpm run boundaries` 7 / 7、`node scripts/workflow-check.mjs` 无发现——并集层无 P0。逐 PR：**#159 与 #158 无 P0 / P1**，机械可修的 P2 / P3 就地修复后按位置 1 → 5 以 rebase merge 合入；**#160（2 × P1）与 #161（1 × P1，且依赖 #160）本轮不合并**。34 条 inline 意见、风险矩阵与证据见 `docs/review/2026-09-23-mvp1-batch-review.md`。合并与否以回读为准：`gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,mergeCommit`。
 
+**合并结果回读（2026-09-23）**：上一条的裁决已执行完毕。`#159` 于 `2026-09-23T14:00:26Z` 合入 `main`（#115 随之 `CLOSED`），`#158` 于 `2026-09-23T14:07:31Z` 合入（#128 随之 `CLOSED`）；两条 head 分支均已删除。**`#160` 与 `#161` 仍 OPEN**，正在按第二轮评审的 P1 修复（#160 的两条 P1 是同一个根因：`conflict` 被用来表达「名字被占」，而 core 只把它读成「可复用」；#161 的 P1 是 `Closes #139` 与验收 2 不符，已改成 `Refs #139` 并回读确认关闭引用已撤回）。修复后重新排队时仍自下而上（#160 → #161）。
+
+**分支前缀的一处已登记偏差**：`#160`（`feat/local-git-worktree`）与 `#161`（`feat/human-execution-provider`）用的是 `feat/`，而 `AGENTS.md` §6 与 `docs/development/repository-rules.md` §4 的白名单是 `feature/`、`fix/`、`docs/`、`chore/`、`test/`、`project-management/`。仓库里两种前缀都在用（`feat/` 15 条、`feature/` 11 条），但**白名单里只有 `feature/`**。不改名的理由是改名必须关掉再重开 PR，会连同 review thread 一起丢失；因此按「已登记偏差」处理，**后续新分支一律用白名单前缀**，是否把 `feat/` 收进白名单由维护者决定（那是改 `AGENTS.md` 与 `repository-rules.md` 的另一个闭环）。
+
 第一轮评审共提出 30 条 inline 意见（#158 十条、#159 四条、#160 九条、#161 七条），逐条核实后**绝大多数属实**，其中四条是真缺陷而不是风格意见：`#160` 的 `conflict` 把「可复用」与「不可复用」折成同一个码、core 据此报**假 `Ready`**；`#161` 的人工运行引用从不落库、「重启后读回不变」只对运行记录成立；`#159` 的「失败会被下一次事件重试」风险论据被 `concurrency` 组取消事件这一实测证伪；`#158` 的 `execution_context` 谱系入口挂在一个 core 读该事实时**从不经过**的 capability key 上。修复按**根因分组**做（不是逐条打补丁），每组都配了先红后绿的判别性证据与变异实验；30 条 thread 已逐条回复并 resolve。
 
 三处**有意留在本批次之外**的缺陷已各自登记，不要在本批次里顺手修：
@@ -472,11 +476,11 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 这不是这份文件可以替你决定的问题：单账号仓库里"必须有 1 个批准"这条约束目前只能靠管理员权限绕过，它作为门禁的实际效力应当被重新评估——要么显式接受它当前是形式性的并写清楚，要么引入第二个账号或评审者让批准门禁真正生效。在这个决定做出之前，任何一次用管理员权限绕过批准合并的操作，都应当像 2026-09-18 这次一样，在合并记录里如实写明"绕过的是批准门禁，检查门禁保持真绿"，不要笼统写成"已合并"。
 
-**关闭引用一旦登记，就不会随正文编辑撤回（2026-09-21 实测）**
+**关闭引用与正文编辑：两次相反的实测，两个方向都不能推断（2026-09-21 与 2026-09-23）**
 
-这条比上面两条都重要，因为它的后果落在**合并那一刻**，而不是记录里。
+这一节原来只写了第一次观测，并据此下了一句普适结论（「关闭引用一旦登记，就不会随正文编辑撤回」）。第二次观测把它推翻了，所以两次都留在这里——第一次作为反例，不是被删掉。
 
-实测（#108）：它的正文原本同时写着 `Closes #25` 与 `Closes #4`，于是 PR 侧 `closingIssuesReferences = [4, 25]`、issue #4 侧 `closedByPullRequestsReferences = [108]`。随后把正文里那一行改成 `Refs #4`，又进一步删掉了正文中**所有**字面 `Closes #4`（包括行内代码里的），等 3.5 分钟后回读：
+**观测一（#108，2026-09-21）：改正文没有撤回。** 它的正文原本同时写着 `Closes #25` 与 `Closes #4`，于是 PR 侧 `closingIssuesReferences = [4, 25]`、issue #4 侧 `closedByPullRequestsReferences = [108]`。随后把正文里那一行改成 `Refs #4`，又进一步删掉了正文中**所有**字面 `Closes #4`（包括行内代码里的），等 3.5 分钟后回读：
 
 ```bash
 gh pr view 108 --json closingIssuesReferences,updatedAt \
@@ -485,11 +489,18 @@ gh pr view 108 --json closingIssuesReferences,updatedAt \
 grep -c -i 'closes #4' <<<"$(gh pr view 108 --json body --jq .body)"   # 实测：0
 ```
 
-**结论：`closingIssuesReferences` 不是正文的实时函数。** 它登记之后，改正文不会把它撤下来——至少在这次观测的窗口内没有。所以：
+**观测二（#161，2026-09-23）：改正文撤回了。** 正文里的 `Closes #139` 改成 `Refs #139`，同样等 3.5 分钟后回读：
 
-- **写 `Closes #N` 之前先想清楚**：它不是一个可以事后收回的标记。写错了要改，代价是"合并时仍会关闭 #N"，只能靠合并后 `gh issue reopen <n>` 补救。
-- 本仓库自己的 `linkedIssues()`（`scripts/policy-check.mjs`）会把行内代码里的引用剥离，因此它算出的 `closes` 可能**少于** GitHub 实际登记的——`policy-check` 说"只关联了 #25"不代表 GitHub 不会关闭 #4。两套口径不要互相替代。
-- 本文件 §4.4 开头那条"机制未确定"因此再添一例：同一个字段既出现过"从空变非空"，也出现过"清空正文后不变"。**判定关闭关联永远读这两个字段本身，不要从正文推断。**
+```bash
+gh pr view 161 --json closingIssuesReferences             # 改前 [139] → 改后 []
+gh issue view 139 --json closedByPullRequestsReferences   # 改前 [161] → 改后 []
+```
+
+**结论：`closingIssuesReferences` 不是正文的实时函数，两个方向都不成立。** 它既出现过「清空正文后不变」，也出现过「改一行就撤回」。本文件**不给出机制**（那需要受控实验），只给两条操作结论：
+
+- **改完正文必须回读这两个字段本身**，不要假定「已经撤回了」或「一定撤不回」——两种假定都被实测推翻过。回读命令就是上面那两条。
+- **写 `Closes #N` 之前先想清楚**：如果回读显示没有撤回，它就不是一个可以事后收回的标记，写错了只能靠合并后 `gh issue reopen <n>` 补救（下面 #108 那一节就是这个形态）。本仓库自己的 `linkedIssues()`（`scripts/policy-check.mjs`）会把行内代码里的引用剥离，因此它算出的 `closes` 可能**少于** GitHub 实际登记的——两套口径不要互相替代。
+- 本文件 §4.4 开头那条「机制未确定」因此再添一例。**判定关闭关联永远读这两个字段本身，不要从正文推断。**
 
 **#108 的具体后果（需要在合并时处理）**：它现在仍会把 #4 关掉，而 #4 的验收条件是六条行为、其中行为 6 判 `inconclusive`（`release-gates.md` §1：无法判定等同于不满足）。所以合并 #108 之后**必须**回读并重开：
 
