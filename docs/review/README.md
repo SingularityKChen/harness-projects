@@ -119,6 +119,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 | [2026-09-20-pr37-pr61-rereview](2026-09-20-pr37-pr61-rereview.md) | PR #37 / #61 的合并后续栈复评，只复评当前 head | #37 Blocked（新增 P1）；#61 无新增 P0/P1，可在满足批准门禁后继续合并 |
 | [2026-09-21-pr37-mvp-review](2026-09-21-pr37-mvp-review.md) | PR37 最新 head 的最终复评与合并收尾 | P0–P2 无新增阻塞项；已 rebase、归档并 rebase merge |
 | [2026-09-23-mvp1-batch-review](2026-09-23-mvp1-batch-review.md) | MVP-1 三交付批次剩余四个 PR（#158 #159 #160 #161）的第二轮 MMP 交付评审：并集预演、P1 独立复现、34 条行级意见 | #159、#158 修复后合并；#160（2 × P1）与 #161（1 × P1）本轮不合并；follow-up #176–#178 |
+| [2026-09-24-start-work-batch-review](2026-09-24-start-work-batch-review.md) | Start Work 批次 #160（第三轮）→ #161（第三轮）与 #185（第一轮）：两种顺序的并集预演、P1 的 base / head / 并集对照复现、33 条行级意见 | #185 改 `Refs #183` 后合并；#160（2 × P1）与 #161（叠在其上）本轮不合并；follow-up #192–#194 |
 
 单 PR 的记录（`pr-NN-mvp-review.md` 与 `2026-09-21-pr-NN-risk-matrix.md`）同样放在本目录，但不进上表——判据就是上面那条：**跨多个 PR、且删掉之后接手的人会缺失决策依据**的才登记。
 
