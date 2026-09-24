@@ -350,6 +350,9 @@ git diff --check origin/main...HEAD
 - **Decision**：批次队列表写进 `docs/project-management/merge-queue.md` **§4.7**，分支用实际名 `fix/engineering-merged-terminal`。
   **Rationale**：§4.5 / §4.6 已被另一条在飞栈占用（#157 所在分支），两边合并时按编号各自保留；批次控制输入的表里写的分支名是 `fix/engineering-merged-state`，实际建出的分支是 `fix/engineering-merged-terminal`，以实际分支为准并在此记录。
   **Date/Author**：2026-09-24 / agent
+- **Decision**：issue #115 的看板条目 `PVTI_lAHOAY1ahM4BjzAQzg8Q4sk` 的 `Status` 由 `In Review` 置为 `Done`（规划所有者接受完成）。
+  **Rationale**：规划所有者（@SingularityKChen）在 2026-09-24 的会话里点名批准「#115、#128 在看板上的 Status 改为 done」，由 agent 按 `docs/development/workflow.md` §3.2 代写。前提已回读：PR #159 已合并（`main` 上 `61abaa5` … `721e42a`），合并事件的真实 reconcile 写出 `Engineering=Merged`（run `35871047694`），issue 已 `CLOSED`。写入记录（`AGENTS.md` §7）：2026-09-24T00:53:23Z，actor = agent（受人类批准代写），目标 project 10（`PVT_kwHOAY1ahM4BjzAQ`）字段 `Status`（`PVTSSF_lAHOAY1ahM4BjzAQzhimAjM`）→ `Done`（`9311f042`），幂等键 `clientMutationId = status-done-2026-09-24:PVTI_lAHOAY1ahM4BjzAQzg8Q4sk`；结果回读 `Status=Done`、`Engineering=Merged` 未变、issue 仍 `CLOSED`。
+  **Date/Author**：2026-09-24 / 规划所有者批准，agent 代写
 
 ## Idempotence and Recovery
 
