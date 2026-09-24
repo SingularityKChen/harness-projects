@@ -97,7 +97,11 @@ export interface Storage {
   putRepository(record: RepositoryRecord): Promise<void>
   listRepositories(workspaceId: WorkspaceId): Promise<readonly RepositoryRecord[]>
 
-  // ── 执行：同一工作项 + 仓库最多一个 active 上下文（重复开始不得产生第二份） ──
+  // ── 执行：同一工作项 + 仓库最多一个 **active** 上下文（重复开始不得产生第二份） ──
+  //
+  // `active` 的判据是**状态不是终态**：`Closed` 与 `Failed` 都不是 active，因此它们不挡下一次开始
+  // （`startWork` 的 `claimContext` 会接管它们并覆写**同一条**记录——`contextIdFor` 是确定性的，
+  // 所以「不得产生第二份」比删除重建更强地成立）。`findActiveExecutionContext` 回答的就是这个问题。
   putExecutionContext(record: ExecutionContextRecord): Promise<void>
   getExecutionContext(id: ExecutionContextId): Promise<ExecutionContextRecord | undefined>
   findActiveExecutionContext(workspaceId: WorkspaceId, workItemId: EntityId, repositoryId: EntityId): Promise<ExecutionContextRecord | undefined>

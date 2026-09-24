@@ -23,6 +23,26 @@ test('内存 Storage 替身：事务未提交前外部读不到写入，提交�
   assert.equal((await storage.getWorkspace('ws-1'))?.name, '工作区')
 })
 
+// 终态不是 active：`startWork` 的 `claimContext` 靠这条语义接管一条失败的上下文（issue #184）。
+// 判据写在 `packages/capabilities/src/storage.ts` 的执行段；这里把它钉成可失败的断言。
+test('内存 Storage 替身：Failed 与 Closed 不是 active，findActive 不返回它们', async () => {
+  const storage = createFakeStorage()
+  const context = (status) => ({
+    id: 'ctx-terminal', workspaceId: 'ws-terminal', workItemId: 'entity-terminal', repositoryId: 'repo-1',
+    status, branchExternalId: 'work/entity-terminal', worktreeExternalId: undefined, provisioningStartedAt: undefined,
+  })
+  const find = () => storage.findActiveExecutionContext('ws-terminal', 'entity-terminal', 'repo-1')
+
+  await storage.putExecutionContext(context('failed'))
+  assert.equal(await find(), undefined, 'Failed 不是 active：它不挡下一次开始，所以可以被接管')
+
+  await storage.putExecutionContext(context('closed'))
+  assert.equal(await find(), undefined, 'Closed 同样不是 active')
+
+  await storage.putExecutionContext(context('provisioning'))
+  assert.equal((await find())?.id, 'ctx-terminal', 'Provisioning 是 active：在途必须继续挡住')
+})
+
 // 确定性重叠：T1 在事务内挂起（此时尚未提交），T2 随即开始，然后才放行 T1。
 // 修复前两者各自克隆同一份空快照，后提交者整体替换，先提交者的写入必然消失。
 test('内存 Storage 替身：在途事务提交后保留直接写入', { timeout: 5000 }, async () => {
