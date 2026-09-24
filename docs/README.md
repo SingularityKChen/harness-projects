@@ -45,6 +45,7 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-09-24-start-work-recovery](exec-plan/completed/2026-09-24-start-work-recovery.md) | Start Work 的补偿序列可恢复：分支步结果分步落盘、重放跳过已完成的分支步（#183 部分）；`Failed` 可被接管重试（#184）；工作树实体身份收敛到一处定义（#165）。#183 的真实仓库用例与 >100 分支的头提交等剩余项仍开启；follow-up #192 / #193 / #194 | Completed |
 | [2026-09-24-ui-model-presentation](exec-plan/completed/2026-09-24-ui-model-presentation.md) | `packages/ui-model` 从客户端模型派生项目首页、工作项列表与统一详情（issue #128）：动作可用性只来自 capability key，陈旧快照不返回空列表，降级只算一次。第二轮 MMP 评审无 P0 / P1；输入契约的组装留给 #178 | Completed |
 | [2026-09-24-engineering-writer-terminal](exec-plan/completed/2026-09-24-engineering-writer-terminal.md) | `Engineering` 写入口与观察者共用一份终态选择策略（issue #115 option 1）：`expectedFor` 是唯一实现，写入口聚合 issue 侧全部关闭引用并 fail closed，Merged 终态且单调。第二轮 MMP 评审无 P0 / P1；遗留 #173 / #176 / #177 与合并后的真实事件回读 | Completed |
 | [2026-09-24-harness-host-spike](exec-plan/completed/2026-09-24-harness-host-spike.md) | 宿主承载能力探针：四个承载问题各按「机制存在 / 承载能力已实测」两半观测，产出一份记录与 `embed` / `fallback-web` 裁决；裁决为 `fallback-web`，由问题四（插件在一个 slot 里挂载一个页面）决定。无代码合并，探针已删除 | Completed |
