@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { makeObservation, observationDedupeKey, scopedSubjectKey, stablePayloadHash } from '@harness-projects/capabilities'
+import { compareSourceVersion, isComparableSourceVersion, makeObservation, observationDedupeKey, scopedSubjectKey, stablePayloadHash } from '@harness-projects/capabilities'
 
 const subject = (bindingId = 'binding-a', externalId = 'issue-1') => ({ bindingId, objectKind: 'issue', externalId, url: undefined })
 
@@ -48,4 +48,25 @@ test('scopedSubjectKey 在同一 binding 内唯一标识对象，且带 binding 
   assert.equal(scopedSubjectKey(subject()), scopedSubjectKey(subject()))
   assert.notEqual(scopedSubjectKey(subject('binding-a')), scopedSubjectKey(subject('binding-b')))
   assert.notEqual(scopedSubjectKey(subject()), scopedSubjectKey({ ...subject(), objectKind: 'draft' }))
+})
+
+test('比较器边界：按码点序而非 UTF-16 码元序，undefined 最小，空串不是合法载体', () => {
+  // U+FF5E 与 U+1F600：码点序是 U+FF5E < U+1F600，而 JS 的 `<` 比 UTF-16 码元（0xFF5E > 0xD83D）给出相反结论。
+  assert.equal(compareSourceVersion('\uff5e', '\u{1F600}'), -1)
+  assert.equal(compareSourceVersion('\u{1F600}', '\uff5e'), 1)
+  assert.ok(!('\uff5e' < '\u{1F600}'), 'JS 的 < 是 UTF-16 码元序，不得用作版本判据')
+  // undefined 最小：没有版本排在所有合法载体之前。
+  assert.equal(compareSourceVersion(undefined, 'v1'), -1)
+  assert.equal(compareSourceVersion('v1', undefined), 1)
+  assert.equal(compareSourceVersion(undefined, undefined), 0)
+  // ASCII 内部的顺序同样钉住（第五轮评审）：大小写按码点（'Z' < 'z'，localeCompare 会给出相反结论），前缀更短者更小。
+  assert.equal(compareSourceVersion('2026-09-21T07:11:54Z', '2026-09-21T07:11:54z'), -1)
+  assert.equal(compareSourceVersion('v1', 'v10'), -1)
+  assert.equal(compareSourceVersion('v1', 'v1'), 0)
+  // 定义域是**非空** ASCII 可打印：空串与 undefined 是两个不同的东西，空串被拒绝。
+  assert.equal(isComparableSourceVersion(''), false, '空串不是合法载体：undefined 是"没有版本"的唯一表达')
+  assert.equal(isComparableSourceVersion('2026-09-21T07:11:54Z'), true)
+  assert.equal(isComparableSourceVersion('~'), true, 'ASCII 可打印的最右端点仍在定义域内')
+  assert.equal(isComparableSourceVersion('版本'), false, '非 ASCII 不是可比的载体')
+  assert.equal(isComparableSourceVersion('\u007f'), false, 'DEL 不是可打印 ASCII')
 })

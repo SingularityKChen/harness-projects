@@ -77,6 +77,12 @@ export interface ObservationRecord {
   readonly observation: ProviderObservation; readonly state: ObservationState
 }
 
+/** R5：游标表示某工作区最近一次全量对账完成时刻，不是平台 updated_at 增量游标。 */
+export interface ReconcileCursorRecord {
+  readonly workspaceId: WorkspaceId
+  readonly lastReconciledAt: string
+}
+
 /**
  * 成员关系（裁决 R1）：内容对象挂在某工作区某 project 条目上的那一行。同一 `(workspaceId, projectExternalId,
  * contentKind, contentExternalId)` 至多一条；同一内容出现在两个工作区时是**两条**、互不覆盖（行为 1，ADR-0002）。
@@ -152,15 +158,27 @@ export interface Storage {
   getExecutionRun(id: ExecutionRunId): Promise<ExecutionRunRecord | undefined>
 
   // ── 关系：类别与确认态由 domain 规则决定，storage 只如实保存 ──
+  // 关系：调用方给语义（类别、来源、确认态），storage 定表示——confirmed 与 candidate 分开存
+  // （AGENTS.md §1.1 不变量 5：关键关联显式优先），listRelations 合并两者返回。
+  // 不变量 5 的直接推论：**候选不得降级已确认**——同键已有 confirmed 行时，写入 candidate 是 no-op。
   putRelation(workspaceId: WorkspaceId, relation: Relation): Promise<void>
   listRelations(workspaceId: WorkspaceId): Promise<readonly Relation[]>
 
-  // ── 同步：dedupe 由 (binding, dedupeKey) 唯一约束实现；重复观察返回 false 且不覆盖 ──
+  // ── 同步：重复或乱序观察返回 false，表示本次观察未被应用，调用方不得读成“已应用” ──
+  // 主体是 `ProviderObservation.subject = (bindingId, objectKind, externalId)`，作用域是**连接**；观察**可以先于
+  // 成员关系落账**（对账先到、成员关系后到），storage 不要求成员关系存在。`sourceVersion` 必须可直接按字典序
+  // 比较且是 ASCII（比较器只有 `compareSourceVersion` 一份），非 ASCII 与空串在入口被拒绝——拒绝是裸异常，core 的同步
+  // 事务整笔回滚、游标不变 degraded（#199 承载结构化失败）。`payload` 由 provider
+  // 负责脱敏（见 `ProviderObservation` 的契约注释），storage 原样持久化。
   recordObservation(record: ObservationRecord): Promise<boolean>
   getSyncCursor(bindingId: ProviderBindingId, scopeKey: string): Promise<SyncCursorRecord | undefined>
   putSyncCursor(record: SyncCursorRecord): Promise<void>
+  getReconcileCursor(workspaceId: WorkspaceId): Promise<ReconcileCursorRecord | undefined>
+  putReconcileCursor(record: ReconcileCursorRecord): Promise<void>
 
-  // ── 写尝试：以 (workspace, idempotencyKey) 唯一去重，同键重放返回原结果 ──
+  // ── 写尝试：**一行一键**——同 (workspace, idempotencyKey) 只有一行，写入是幂等覆盖（后写的状态取代先写的），
+  // `id` 在工作区内唯一。「未决行存在时不得发起第二次外部写」是**调用方**的义务，当前没有强制点（core 在外部写完成后才记录，#204），
+  // storage 只保证同键只有一行、不会被并发写成两行。
   findMutationAttempt(workspaceId: WorkspaceId, idempotencyKey: string): Promise<MutationAttemptRecord | undefined>
   putMutationAttempt(record: MutationAttemptRecord): Promise<void>
   listMutationAttempts(workspaceId: WorkspaceId): Promise<readonly MutationAttemptRecord[]>
