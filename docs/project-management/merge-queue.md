@@ -282,7 +282,7 @@ gh api 'repos/SingularityKChen/harness-projects/pulls?state=open&per_page=100' \
 
 **关闭引用生效的两条路径**（在本文件写下时被当作"唯一路径"，现已不成立，保留作为历史与备选动作）：
 
-1. **自动 retarget**：下层 PR 合并后，如果它的 head 分支被删除，GitHub 会把以它为 base 的 PR 的 base 改成默认分支。**未实测**。
+1. **自动 retarget**：下层 PR 合并后，如果它的 head 分支被删除，GitHub 会把以它为 base 的 PR 的 base 改成默认分支。**未实测**。**实测（2026-09-23）**：路径 1 成立——PR #108 合并（`03:37:49Z`）且 `test/e1-ruling` 被删除后，#121 的时间线出现 `automatic_base_change_succeeded`（`03:37:50Z`），`baseRefName` 由 `test/e1-ruling` 变为 `main`；"未实测"只适用于本节写下时。
 2. **人工 retarget**：`gh pr edit <n> --base main`。**本地 `gh stack` 扩展的登记与 GitHub 服务端的行为是两件事，不要互相推断。** 本地侧的实测（2026-09-22；`gh stack view` 不接受分支参数，只读当前 checkout，所以命令必须带执行目录）：
 
    ```bash
@@ -366,6 +366,53 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 回读判据：`[]` 不变时不要当成"已关联"——按路径 1 或 2 处理，然后重跑第 1、2 条命令，看到 `closing` 从 `[]` 变成 `[<issue>]` 才算登记成功。
 
+### 4.5 往一个已存在的栈上追加层（2026-09-23 实测）
+
+上一轮的 E1 四层栈（#105 / #106 / #107 / #108）在 #105–#107 合并、分支删除之后**在服务端仍然登记为一个栈**。这决定了追加新层的命令形态：
+
+```bash
+# 从检出待追加分支的工作树根目录运行；`gh stack link` 的第一个参数是栈号时，其余参数追加到栈顶
+$ gh stack link 108 121
+✗ Cannot update stack: this would remove #105, #106, #107 from the stack
+Current stack: #105, #106, #107, #108
+Include all existing PRs in the command to update the stack
+
+$ gh stack link 105 106 107 108 121
+⚠ failed to update base branch for PR #106 to test/e1-content-identities: HTTP 422: Validation Failed
+PullRequest.base is invalid
+⚠ failed to update base branch for PR #107 to test/e1-membership-and-draft: HTTP 422: Validation Failed
+PullRequest.base is invalid
+⚠ failed to update base branch for PR #108 to test/e1-write-and-events: HTTP 422: Validation Failed
+PullRequest.base is invalid
+✓ Updated base branch for PR #121 to test/e1-ruling
+✓ Updated stack to 5 PRs (stack #109)
+```
+
+三条**已合并**成员的 base 更新失败是预期的：它们指向的父分支已被删除，GitHub 对已合并 PR 的 base 改写返回 422。失败只影响那三条已合并成员（它们的 base 保持 `main`），**不影响**追加结果：#108 的 base 仍是 `main`，#121 的 base 变成 `test/e1-ruling`。 **Superseded by L1 级联（2026-09-23）**：`#121 的 base 变成 test/e1-ruling` 是**追加那一刻的观测**（时间线 `base_ref_changed`，`03:14:49Z`，由 `gh stack link` 触发），不是当前值——PR #108 于 `03:37:49Z` 合并、`test/e1-ruling` 被删除后，GitHub **自动**把 #121 的 base 改回默认分支（时间线 `automatic_base_change_succeeded`，`03:37:50Z`），`gh pr view 121 --json baseRefName` 现在返回 `main`。机制与路径见 §4.4 的路径 1，原文保留。
+
+追加后按 §4.4 的第 1、2 条命令回读，`closingIssuesReferences` 与 `closedByPullRequestsReferences` 在 base 改写后**保留**（#121 → `closing: [119]`；#119 → `closedBy: [121]`）。
+
+**操作结论**：追加第 2 层时要把栈内全部成员列出来（或直接读错误信息里那份清单）；**追加第 3 层及以后**用 `gh stack link <栈号> <新 PR 号>`，不要再列全部成员——栈号就是上面输出里的 `stack #109` 那个数字。栈号与 PR 号不会冲突：数字首参只在命中已存在的栈时才按栈解释。**合并栈成员**（第三轮评审观测）：`gh pr merge` 对栈成员返回 “This pull request is part of a stack and must be merged using the asynchronous merge REST API”，改用 `gh api -X PUT repos/SingularityKChen/harness-projects/pulls/<n>/merge-async -f merge_method=rebase`；每合并一层（`delete_branch_on_merge=true`，上层自动 retarget 到 `main`），上层都要 `git rebase --onto origin/main <下层合并前的 head> <上层分支>` 后按 §2.4 强推，再重跑验证。
+
+### 4.6 声明的 base 被强推之后，`size` 的判定基线会退到 merge-base（2026-09-23 实测）
+
+`node scripts/rule-checks.mjs size <base-ref>` 用三点 diff（`git diff <base-ref>...HEAD`）度量，即 **merge-base 到 head**。当 `<base-ref>` 指向的分支被强推成一条**不包含本分支提交**的历史时，merge-base 会退到两条线的共同祖先（通常就是 `main`），于是这条命令量的是**整条栈相对 main 的累计**，而不是本层。
+
+实测（本层 = 栈内 L1 `test/e1-uncertain-create`；**每个数字只对跑它时的那个 head 成立**，行数是本分支自己的函数。**下表里的 `18315f2` / `a951105` / `f13a444` / `a48ccae` 是观察时刻快照，且都已不可解析**——它们只挂在已删除的远端 `backup/*` 上，在全新 clone 里 `git cat-file -t <sha>` 报 `fatal: Not a valid object name`。这张表因此**不可复核**，保留它只为记录机制；要复跑请在当前 head 上按下面两条操作结论自测）：
+
+| 跑它时的 head | `a48ccae` 是本分支祖先？ | `size a48ccae`（L0 重写前版本的父提交） | `size origin/main`（本层声明的 base） |
+|---|---|---|---|
+| `18315f2`（级联前，父提交就是 `a48ccae`） | 是 | 文档 **548 / 1500**，exit 0（本层自己的体量） | 文档 **1255 / 1500**，**exit 0**：merge-base 退到旧 `main` 尖端，把 L0 重写前版本算了进来——量到的是**整条栈的累计**而不是本层，只是当时仍未超限（**2026-09-24 评审订正**：原写 exit 1，与脚本逻辑矛盾——`failed` 只在 `used > budget` 时置真，1255 ≤ 1500 必然 exit 0） |
+| `a951105`（级联到 `origin/main` 之后） | 否 | 文档 **2078 / 1500**，exit 1 | 文档 **1385 / 1500**，exit 0（本层自己的体量） |
+| `f13a444`（本节订正时的 head） | 否 | 文档 **2158 / 1500**，exit 1 | 文档 **1483 / 1500**，exit 0 |
+
+**同一命令在不同 head 上结论相反，判据只有一条：这个 head 还以该 base 为祖先吗。** 级联前父提交是 `a48ccae`，所以 `size a48ccae` 量的是本层、`size origin/main` 退到 merge-base；级联到 `origin/main` 之后两者互换——`size origin/main` 量的是本层，`size a48ccae` 退到旧 `main` 尖端。
+
+**`size` 在 base 不是 `main` 尖端时会额外打印一行「栈累计（相对 origin/main，仅记录，不计入判定）」，它不是判定值。** 本节早先的版本正是把这一行读成了 `a48ccae` 的判定：在 head `a951105` 上跑 `size a48ccae`，判定值是「文档 2078 / 1500」（exit 1），同一输出末尾的旁注才是「文档 1385」——旁注与判定被互换，于是表里两行的结论整体写反。`size origin/test/e1-ruling` 另报 exit 3（`base "origin/test/e1-ruling" 无法解析成提交`）：该分支随 PR #108 合并被删除，这是响亮失败，可以信任。
+
+1. **判超限前先问基线是什么**（与 §4.4 的"同一个 head 在两个基线口径下结论相反"同类）。本地复核用**真实父提交**（上一层的 head SHA），不要用可能已被重写的分支名。
+2. **exit 0 / exit 1 的数字必须先确认基线**，否则会把整条栈的累计读成单层体量；只有 base 分支被删除时的 exit 3 可以不看基线直接信任。
+3. **栈级联之后重量一次**：级联把本层重放到新的父提交上，三点 diff 的 merge-base 随之变成真实父提交，量到的才是本层。**真正的假超限是另一格**：级联后拿一个已不是该 head 祖先的旧父提交去跑（`size a48ccae`），三点 diff 退到旧 `main` 尖端，报出 2078 / exit 1。**订正 2026-09-24**：本行原写「`18315f2` 上的 `size origin/main` 是 1255，级联后同一口径是 1385；差的就是 L0 重写前版本那一块」——1385 − 1255 = **+130**，方向与「扣掉 L0」相反，而且 1255 量的是（L0 + 当时的 L1）、1385 量的是级联后已经变大的 L1 本身，两者之差不是任何单一的一块。原文的算术与归因都不成立，结论（"级联后必须重量"）不变。
 ### 4.7 MVP-1 三交付批次队列（2026-09-24 起）
 
 这一轮是**三个交付、五个 PR**：每个 PR 关闭恰好一个 issue，各自构成可独立验收、合并、回滚的能力闭环。它与 §4.2 的 MVP-0 轮同形——既有独立 PR，也有栈：**D2 与 D3 各自是一条两层的栈，栈内必须自下而上合并**；D1 与其余四层没有依赖关系，因此**不叠进任何栈**（把它塞进栈里会强制一条没有依据的合并顺序，违反 §2.1）。
@@ -495,5 +542,7 @@ grep -c -i 'closes #4' <<<"$(gh pr view 108 --json body --jq .body)"   # 实测�
 
 ```bash
 gh issue view 4 --json state          # 期望 OPEN；若为 CLOSED 则：
-gh issue reopen 4 -c "被 #108 的关闭引用自动关闭；行为 6 仍为 inconclusive，revise 清单未落地。见 docs/architecture/gate-e1-ruling.md §4（#108 交付）。"
+gh issue reopen 4 -c "被 #108 的关闭引用自动关闭；revise 清单（R1–R8）未落地，见 docs/architecture/gate-e1-ruling.md §4（#108 交付）。行为 6 已由 L1（#119）补测，L1 提议改判 pass（待人类伙伴采纳），不再是重开的理由。"
 ```
+
+**Superseded by L1（#119，2026-09-23）**：上面这段的前提"行为 6 判 `inconclusive`"已不成立——L1 补测后**提议**行为 6 改判 `pass`（裁决 §2.6；**采纳权在人类伙伴**，采纳前不得作为事实写入 #4），因此"无法判定等同于不满足"这条理由不再适用于行为 6；#4 保持打开的理由改为 **`revise` 的 R1–R8 尚未落地**（其中行为 1 的成员关系落点仍缺模型落点）。`gh issue reopen` 的命令文案已按此订正，避免往 #4 写入"行为 6 仍为 inconclusive"这条与裁决相反的话。**回读（2026-09-23）**：`gh issue view 4 --repo SingularityKChen/harness-projects --json state,comments` → `state = OPEN`、无评论，即 #108 的关闭引用没有实际关闭 #4，这段补救文案没有被执行过。
