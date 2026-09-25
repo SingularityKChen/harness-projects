@@ -36,7 +36,7 @@
 | [ADR-0001](ADR-0001-external-identity-key-shape.md) | 外部身份注册表的键是「平台绑定 + 对象种类 + 平台全局 node id」 | Proposed |
 | [ADR-0002](ADR-0002-membership-identity-separate-from-content.md) | 成员关系身份与内容身份分离，成员关系落在独立的工作区作用域表 | Proposed |
 | [ADR-0003](ADR-0003-events-are-not-the-correctness-mechanism.md) | 事件不是正确性机制，对账是 | Proposed |
-| [ADR-0004](ADR-0004-unknown-external-create-is-product-visible.md) | 结果不确定的外部创建先对账再重试；没有自然键时它是产品可见状态 | Proposed |
+| [ADR-0004](ADR-0004-unknown-external-create-is-product-visible.md) | 结果不确定的外部创建先对账再重试；没有自然键时它是产品可见状态。**订正 2026-09-23（L1 / #119）**：证据边界与结论句「平台不提供可对账的输入」按实测就地订正——调用方**自带**的唯一标记 + 作者 + 时间窗可对账，标记不唯一时不可判定。**订正 2026-09-24（评审响应）**：状态列的**类型**取 `packages/domain` 的 `WriteState`（结果轴），L1 给出的是**获知方式**四个标注（`confirmed` / `reconciled` / `rejected` / `unresolved`）——原文写的「状态取值集合 4 个」是两轴合一，**Superseded by `docs/architecture/gate-e1-uncertain-create.md` §2（2026-09-24）** | Proposed |
 
 本目录只登记**已在仓库内有证据**的决策：上表四条来自 Gate E1 的实测记录，`Proposed` 表示证据已进仓库、采纳权在人类伙伴（`docs/architecture/release-gates.md` §2 第 1 行把 Gate E1 的判定者列为人类伙伴，§1 规定 R1 不得由 LLM 判定；裁决见 `docs/architecture/gate-e1-ruling.md`，该行对 `AGENTS.md` §1.2 的错误归因登记在裁决 §6.5）。
 

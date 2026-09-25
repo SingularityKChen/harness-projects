@@ -272,7 +272,7 @@ node --test tests/contract/e1-evidence-consistency.test.js             # 期望�
 
 **汇总结论**：`revise`（无修饰、无条件）。本地数据模型 v1 不满足冻结条件。
 
-**六条行为的判定分布**：5 条 `pass`（行为 1–5）、1 条 `inconclusive`（行为 6）。
+**六条行为的判定分布**：5 条 `pass`（行为 1–5）、1 条 `inconclusive`（行为 6）。**Superseded by L1（#119，2026-09-23）**：行为 6 已由 `docs/architecture/gate-e1-uncertain-create.md` 实验 1–4 补测，L1 **提议**改判 `pass`（裁决 §2.6）；**采纳权在人类伙伴**，采纳前分布仍是 5 条 `pass` + 1 条 `inconclusive`。原文保留以记录当时的证据边界。
 
 **`revise` 的实际修改点数量**：8 条（R1–R8），全部落在表、键或约束上，无一条以 provider 为条件：
 
@@ -285,7 +285,7 @@ node --test tests/contract/e1-evidence-consistency.test.js             # 期望�
 | R5 | `reconcile_cursor` 的语义为"上次全量对账时刻" |
 | R6 | `webhook_subscription` 不得成为唯一更新来源 |
 | R7 | `external_identity` 的 `role` 约束：`historical` 不得作为平台查询参数 |
-| R8 | `pending_external_write` 的幂等键与补证据项（状态机取值集合待补证据后冻结） |
+| R8 | `pending_external_write` 的幂等键与补证据项（状态机取值集合待补证据后冻结）。**Superseded by L1（#119，2026-09-23）**：状态取值集合已补证据；**再订正（2026-09-24 评审响应）**：不是「4 个取值」——状态列的**类型**取 `WriteState`，L1 补的是**获知方式**四个标注，两轴合一已被 `docs/architecture/gate-e1-uncertain-create.md` §2 就地推翻。R8 本身仍是 `revise` 的落地项，由 #28 建表 |
 
 **被观测推翻的假设**：14 条（见 `Surprises & Discoveries`）。其中 3 条直接影响表结构（响应回显不可靠、`updatedAt` 不可定序、写入报错不等于未生效），2 条直接影响身份键（REST 数字 id 不唯一、两个 API 面对同一编号答案相反）。
 
@@ -293,7 +293,7 @@ node --test tests/contract/e1-evidence-consistency.test.js             # 期望�
 
 **"E1 之后还有哪些身份假设没有平台证据"的剩余清单**（交给后续批次，本裁决不补跑）：
 
-1. "创建内容那一步响应丢失"时的平台行为（E1-3 实验 3 §8 自述未实测）——R8 的直接依赖。
+1. "创建内容那一步响应丢失"时的平台行为（E1-3 实验 3 §8 自述未实测）——R8 的直接依赖。**Superseded by L1（#119，2026-09-23）**：该分支已补测（`docs/architecture/gate-e1-uncertain-create.md` 实验 1–4）；仍未证明的是对账窗口的边界值与"创建内容"这一步的键形状（L1 记录 §3 第 1、6 条）。
 2. `ProjectV2ItemType.REDACTED` 的触发条件与 `content` 形状（沙箱定义 §8）。
 3. 成员关系被移除或归档时的身份行为（E1-2 §5 的"未覆盖"）。
 4. change request 加入两个 project 时的成员关系形态（E1-1 实验 3 的"未证明"清单）。
@@ -303,7 +303,7 @@ node --test tests/contract/e1-evidence-consistency.test.js             # 期望�
 
 **回溯**：本批次没有新增代码，也没有重跑任何实验；全部产出是"读证据 + 定案 + 落表名"。最大的收获不是结论本身，而是发现**下层记录之间存在一处必须由裁决解决的矛盾**（成员关系落点）——若不裁决，`#27` 会同时按两种落行开工。其次是确认了"行为 6 的缺口是记录自述的"，因此 `inconclusive` 有可引用的出处，不需要裁决方替记录补理由。
 
-**技术债务**：R8 的状态机取值集合在补证据前不能冻结；`docs/README.md` 与 `docs/architecture/README.md` 的索引条目待栈级联补齐。**Superseded by `Global Constraints` 的文件集合条目（2026-09-22）**：这两个索引文件已由本 PR 的回填提交写入索引条目，不再属于待补齐的技术债务。
+**技术债务**：R8 的状态机取值集合在补证据前不能冻结（**Superseded by L1（#119，2026-09-23）**：状态集已补证据；**再订正（2026-09-24）**：「4 个取值」是两轴合一，现为「类型取 `WriteState` + 四个获知方式标注」）；`docs/README.md` 与 `docs/architecture/README.md` 的索引条目待栈级联补齐。**Superseded by `Global Constraints` 的文件集合条目（2026-09-22）**：这两个索引文件已由本 PR 的回填提交写入索引条目，不再属于待补齐的技术债务。
 
 ## Bottom Change Note
 
@@ -314,3 +314,4 @@ node --test tests/contract/e1-evidence-consistency.test.js             # 期望�
 - 2026-09-22：按 `PLANS.md` §4 的活文档一致性规则修正本计划，只改本文件。（1）**一个事实只写一处**：`Global Constraints` 改为声明实测的完整文件集合并附回读命令，`Plan of Work` 的「涉及文件」只列主文件。（2）**被推翻的结论就地标注**：五处"本批次不写两个索引文件"的结论在原处追加 `Superseded by` 标记、原文保留。（3）**证据带执行上下文**：为 `gh pr view` / `gh pr checks` 补上工作目录与 `-R`，为验证代码块补执行上下文。（4）**易失状态**维持"回读命令 + 期望"的写法：本次未把 check 列表、条数、提交数或 head SHA 写成正文事实。（5）订正 `Validation and Acceptance` 第 6 行的证据：原文写 `grep -c 'ADR-' docs/adr/README.md` = 9，与该命令的实测输出不符（该计数含 4 行格式说明），索引行数改用 `grep -c 'ADR-000'` 回读并写为期望着。原因：原计划声明"本批次不改 `docs/README.md` 与 `docs/architecture/README.md`"，而本 PR 自己的回填提交改了这两个文件，计划与执行互相否证。
 - 2026-09-23：响应评审，订正五处。（1）**声明的 base 失效**：`test/e1-write-and-events` 在远端已删除（下层三层变基进 `main`），按它回读会失败或得到 13 个路径；`Global Constraints`、`Plan of Work` 验证块与 `Decision Log` 的 base 全部改为 `main`，判据由"逐行一致"改为集合相等（`git diff --name-only` 按路径排序）。（2）**判定者错误归因**：`AGENTS.md` §1.2 不含"人类伙伴"，本计划三处与该条 `Decision Log` 改引 `release-gates.md` §2 第 1 行。（3）**乱序规则计数**：2026-09-21 只读源记录正文的"两条规则"就改成两条并写下"计数已统一"，而 `Outcomes` 仍写三条；现按源记录编号列统一为三条，源记录的文/表不一致登记为裁决 §6.6。（4）**ADR 索引的治理表述**：保留 12 条主题清单、只改"当前依据"，理由进 `Decision Log`。（5）**验收证据**：`Validation and Acceptance` 第 6 行的行数回读改用 `grep -cE '^\| \[ADR-000'`（`grep -c 'ADR-000'` 会计入正文提及，2026-09-23 实测为 5）。原因：评审在 head `ae8644c` 上给出 3 条 P1 与 2 条 P2，其中 4 条成立、1 条（契约测试覆盖面）经复核不成立并在 `Progress` 记明。
 - 2026-09-23：归档。`Validation and Acceptance` 七项全部通过，按 `PLANS.md` §2 移到 `docs/exec-plan/completed/`（文件名不变），`docs/README.md` 索引行移到 Completed 表，四份 ADR 的「来源」路径同步改为 `completed/`。**两处未勾选的 Progress 项不因归档而关闭**：它们是人类伙伴的人工门（在 #4 上记录裁决结论、确认 `revise` 的采纳与 #4 的关闭），agent 不改看板字段；本批次不关闭 #4，`revise` 的 R1–R8 由 #27/#28 落地。
+- 2026-09-23：L1（#119）复核轮按 `PLANS.md` §4「被推翻的结论就地标注」在本文件追加四处 `Superseded by L1（#119，2026-09-23）`（判定分布、R8 行的状态集、剩余清单第 1 项、技术债务），原文全部保留。原因：行为 6 由 L1 补测后判 `pass`，本文件的四处表述与裁决 §2.6 相反；只改裁决会让归档计划继续自证相反。
