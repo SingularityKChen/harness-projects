@@ -63,18 +63,22 @@ export class MemoryStorage implements cap.Storage {
   data: FakeStorageData
   /** 事务队列：重叠事务按调用顺序串行，每个事务在前一个 settle 后才克隆状态。 */
   #queue: Promise<unknown> = Promise.resolve()
-  constructor(data: FakeStorageData = emptyStorageData()) {
+  /** 事务作用域标记：类型层的 `StorageTransaction = Omit<Storage, 'transaction'>` 不会在运行时移除方法，嵌套事务必须在这里被显式拒绝（L3 计划遗留 0 的收口条件）。 */
+  #transactionScope: boolean
+  constructor(data: FakeStorageData = emptyStorageData(), transactionScope = false) {
     this.data = data
+    this.#transactionScope = transactionScope
   }
   #mutate<T>(fn: () => T | PromiseLike<T>): Promise<T> {
     const run = this.#queue.then(fn)
     this.#queue = run.then(() => undefined, () => undefined); return run
   }
-  /** 事务内抛错即整体回滚：草稿只在 work 成功返回后替换正式状态；克隆与执行都排在队列里，因此后到的事务看到的是前一个事务提交后的状态，不会用旧快照覆盖已提交写入。 */
-  transaction<T>(work: (tx: cap.StorageTransaction) => Promise<T>): Promise<T> {
+  /** 事务内抛错即整体回滚：草稿只在 work 成功返回后替换正式状态；克隆与执行都排在队列里，因此后到的事务看到的是前一个事务提交后的状态，不会用旧快照覆盖已提交写入。事务作用域内的实例拒绝嵌套，避免内层写入被静默丢弃。 */
+  async transaction<T>(work: (tx: cap.StorageTransaction) => Promise<T>): Promise<T> {
+    if (this.#transactionScope) throw new Error('嵌套事务不被支持：一个事务内不得再开事务')
     return this.#mutate(async () => {
       const draft = structuredClone(this.data)
-      const result = await work(new MemoryStorage(draft))
+      const result = await work(new MemoryStorage(draft, true))
       this.data = draft
       return result
     })
