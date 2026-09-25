@@ -41,11 +41,14 @@
 | [2026-09-22-status-field-writer](exec-plan/completed/2026-09-22-status-field-writer.md) | 给 `Status` 一个定义、一个写入口、一个防漂移的检查：语义收敛到 `board-semantics.md` 单一事实源、写入口写进交付流程、契约测试按「行 + 子句」设防 | Completed |
 | [2026-09-21-gate-e1-write-and-events](exec-plan/active/2026-09-21-gate-e1-write-and-events.md) | Gate E1 写确认与事件可靠性：实测平台无 CAS、事件订不到、重复创建幂等 | Active |
 | [2026-09-23-sqlite-v1-stack](exec-plan/active/2026-09-23-sqlite-v1-stack.md) | SQLite v1 数据模型栈控制计划：六层堆叠 PR（L1–L6）的拓扑、每层目标与判定命令；**交付状态一律回读**（`gh pr list -R SingularityKChen/harness-projects --head <分支> --state all`），不在索引里断言；是否冻结仍由人类伙伴决定 | Active |
+| [2026-09-24-stack-review-response](exec-plan/active/2026-09-24-stack-review-response.md) | 第二轮评审响应的执行计划：逐条处置 21 条意见（L1 11 条 + L2 10 条）、栈序表与验收表改成回读命令、R8 收敛到两轴 | Active |
+| [2026-09-24-review-root-cause-convergence](exec-plan/active/2026-09-24-review-root-cause-convergence.md) | 第三轮响应与第四轮收敛：按"拥有该事实的层"重排批次、删副本加机械判据；含 72 行逐条处置表 | Active |
 
 ### Completed
 
 | 计划 | 结论 |
 |---|---|
+| [2026-09-23-storage-identity-membership](exec-plan/completed/2026-09-23-storage-identity-membership.md) | SQLite 身份与成员表（Batch L2 / #27）：迁移 002 的八张表（连接锚点与工作区挂载拆开，ADR-0006）与 R1/R2/R3/R7 约束、成员关系与字段值的端口面、表 → 出处映射与变异实验；行为 2 的强制点在 core `entityKindFor` + e2e（ADR-0005），storage 只保证同一工作区同一实体一行投影，种类一致性登记为 core 推导义务。#27 保持开启：验收 3 只到「至多一个 primary」（#190），约束测试债见 #201 | Completed |
 | [2026-09-23-e1-uncertain-create](exec-plan/completed/2026-09-23-e1-uncertain-create.md) | 不确定外部创建的裁决证据（栈内 L1 / #119）：四条沙箱实验补测「创建内容本身」的重复创建计数、对账唯一性与可见延迟、平台显式拒绝后的空对账、draft 的对账作用域，并给出 `pending_external_write` 的**获知方式**四个标注及其到 `WriteState` 结果轴的映射（评审响应订正：原先把结果轴与获知方式轴装进同一个集合，才会出现「`pending` 与 `uncertain` 不可判别」的伪约束）。#119 保持开启：验收 1 待人类伙伴在补观测与收窄验收之间决定 | Completed |
 | [2026-09-24-start-work-recovery](exec-plan/completed/2026-09-24-start-work-recovery.md) | Start Work 的补偿序列可恢复：分支步结果分步落盘、重放跳过已完成的分支步（#183 部分）；`Failed` 可被接管重试（#184）；工作树实体身份收敛到一处定义（#165）。#183 的真实仓库用例与 >100 分支的头提交等剩余项仍开启；follow-up #192 / #193 / #194 | Completed |
 | [2026-09-24-ui-model-presentation](exec-plan/completed/2026-09-24-ui-model-presentation.md) | `packages/ui-model` 从客户端模型派生项目首页、工作项列表与统一详情（issue #128）：动作可用性只来自 capability key，陈旧快照不返回空列表，降级只算一次。第二轮 MMP 评审无 P0 / P1；输入契约的组装留给 #178 | Completed |
