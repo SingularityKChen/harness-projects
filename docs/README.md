@@ -48,6 +48,7 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-09-23-storage-control-facts](exec-plan/completed/2026-09-23-storage-control-facts.md) | SQLite 执行、关系、观察、游标、webhook、写尝试（`mutation_attempt`，一行一键）与工作区修订表（Batch L3 / #28）：003 迁移、R4/R5/R6/R8 约束、定序与对账游标端口语义；账本主体 = 端口主体（连接级）、载体校验取非空 ASCII。#28 保持开启：关闭归属待人类伙伴决定；R8 的强制点见 #204，约束测试债见 #201 | Completed |
 | [2026-09-23-storage-identity-membership](exec-plan/completed/2026-09-23-storage-identity-membership.md) | SQLite 身份与成员表（Batch L2 / #27）：迁移 002 的八张表（连接锚点与工作区挂载拆开，ADR-0006）与 R1/R2/R3/R7 约束、成员关系与字段值的端口面、表 → 出处映射与变异实验；行为 2 的强制点在 core `entityKindFor` + e2e（ADR-0005），storage 只保证同一工作区同一实体一行投影，种类一致性登记为 core 推导义务。#27 保持开启：验收 3 只到「至多一个 primary」（#190），约束测试债见 #201 | Completed |
 | [2026-09-23-e1-uncertain-create](exec-plan/completed/2026-09-23-e1-uncertain-create.md) | 不确定外部创建的裁决证据（栈内 L1 / #119）：四条沙箱实验补测「创建内容本身」的重复创建计数、对账唯一性与可见延迟、平台显式拒绝后的空对账、draft 的对账作用域，并给出 `pending_external_write` 的**获知方式**四个标注及其到 `WriteState` 结果轴的映射（评审响应订正：原先把结果轴与获知方式轴装进同一个集合，才会出现「`pending` 与 `uncertain` 不可判别」的伪约束）。#119 保持开启：验收 1 待人类伙伴在补观测与收窄验收之间决定 | Completed |
 | [2026-09-24-start-work-recovery](exec-plan/completed/2026-09-24-start-work-recovery.md) | Start Work 的补偿序列可恢复：分支步结果分步落盘、重放跳过已完成的分支步（#183 部分）；`Failed` 可被接管重试（#184）；工作树实体身份收敛到一处定义（#165）。#183 的真实仓库用例与 >100 分支的头提交等剩余项仍开启；follow-up #192 / #193 / #194 | Completed |

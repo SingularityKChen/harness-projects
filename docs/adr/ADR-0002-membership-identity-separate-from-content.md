@@ -9,7 +9,7 @@
 1. **内容身份**落在 `external_identity`，键为 `(binding_id, external_kind, external_id)`，**故意不含** `workspace_id`（见 ADR-0001）。
 2. **成员关系**不是内容身份，落在独立表 `project_item_membership(workspace_id, project_external_id, item_external_id, content_external_kind, content_external_id, …)`，唯一约束为 `UNIQUE(workspace_id, project_external_id, item_external_id)` 与 `UNIQUE(workspace_id, project_external_id, content_external_kind, content_external_id)`。
 3. `ProjectV2Item` **不**加入 `ExternalIdentityKind`。
-4. 规划字段值、条目顺序、同步观察三者的外键都指向 `project_item_membership.item_external_id`，不指向 `external_identity`。
+4. 规划字段值、条目顺序、同步观察三者的外键都指向 `project_item_membership.item_external_id`，不指向 `external_identity`。**Superseded（2026-09-24，第三轮评审；2026-09-26 订正为只划掉同步观察一项）**：同步观察一项不再成立——观察账本已改为以**端口主体** `(binding, objectKind, externalId)` 为键、作用域是连接，因此它不引用成员关系——条目 id 是会被改写的当前挂载点，放进只追加账本的身份键会让定序主体随成员关系漂移。见 `packages/storage/sqlite/migrations/003_control_facts.sql` 的 `sync_observation` 注释。规划字段值与条目顺序两项不变。
 
 ## Why
 
@@ -30,7 +30,7 @@
 ## Consequences
 
 - `external_identity` 的键形状保持不变，ADR-0001 不受影响。
-- `planning_field_value`、条目顺序表、`sync_observation` 的外键目标是成员关系，不是内容身份；成员关系被移除时这三处随外键处理，内容身份保留。
+- `planning_field_value`、条目顺序表、`sync_observation` 的外键目标是成员关系，不是内容身份；成员关系被移除时这三处随外键处理，内容身份保留。**Superseded（2026-09-24）**：`sync_observation` 不再属于这一条（见上），其余两处不变。
 - 对账的最小作用域是 `(workspace, project, content)`，与第二条唯一约束同形（E1-3 实验 3 §4.2 实测 `(project, content)` 在平台侧唯一）。
 - 工作区投影按 `(workspace_id, entity_id)` 各记一行；实体表仍由内容身份派生。
 - 尚未观测的形态（成员关系被移除或归档、`REDACTED` 条目类型）落地前，不得给本表增加"成员关系必然长期存在"的假设（见 `docs/architecture/gate-e1-sandbox.md` §8、`docs/architecture/gate-e1-ruling.md` §8）。

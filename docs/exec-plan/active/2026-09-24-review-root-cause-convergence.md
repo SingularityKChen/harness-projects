@@ -145,7 +145,7 @@
 
 ### Batch C · L3 #157：版本载体的定义域、003 的约束审查与计划/head 一致（`Refs #28`）
 
-**最小闭环**：空串不是合法载体；003 的 63 列与每条约束都有判别性证据；层计划与裁决的偏离就地标注。
+**最小闭环**：空串不是合法载体；003 的 63 列都在审计白名单内，约束的判别性证据见集成用例（**第五轮订正**：45 个 DDL 变异中仍有未钉住的，见 #201），不是每条约束都有判别性证据；层计划与裁决的偏离就地标注。
 **涉及文件**：`packages/capabilities/src/observation.ts`、`packages/storage/sqlite/migrations/003_control_facts.sql`、`packages/providers/fake/src/storage.ts`、`tests/contract/capabilities-observation.test.js`、`tests/integration/execution-relation-write-schema.test.js`、`docs/architecture/gate-e1-ruling.md`、`docs/adr/ADR-0002-membership-identity-separate-from-content.md`、层计划
 **验证**：`node --test tests/contract tests/integration`；注入实验：正则放宽回允许空串 → 空串用例红；去掉一条 CHECK → 对应用例红；删白名单一列 → 审计用例红。
 **回滚**：`git revert` 本层提交。
@@ -279,7 +279,7 @@
 
 ## Progress
 
-> **本节只写 L2 这个合并点为真的事实**（`AGENTS.md` §6：每个 PR 要能独立验收、合并、回滚）。L3–L6 的批次在本层**未交付**，因此不勾选——它们的交付状态由各自的副本与本层 D2 的回读命令判定。
+> **本节只写 L3 这个合并点为真的事实**（`AGENTS.md` §6：每个 PR 要能独立验收、合并、回滚）。L4–L6 的批次在本层**未交付**，因此不勾选——它们的交付状态由各自的副本与本层 D2 的回读命令判定。
 
 - [x] (2026-09-24) 取证：72 条未解决 inline 逐条读取、六层源码与套件逐行对照、体量与 `gh pr view` 回读、六层基线测试全绿
 - [x] (2026-09-24) 归并根因：同一事实的多个副本 + 没有机械判据（D1）
@@ -288,10 +288,11 @@
 - [x] (2026-09-24) Batch X · 开 issue：#195 / #196 / #197 / #198 / #199（逐条回读标题与标签）；`#132` 的 `blocked-by` 待人类批准
 - [x] (2026-09-24) 三条规则的**级联预检**：用与守卫同判据的离线脚本逐层跑，发现本计划自己有 5 处违规（跨层 glob 路径、`size <SHA>` 无标注、Batch 标题里的字面关闭断言、处置表引用评审原文），已全部修掉
 - [x] (2026-09-24) 把守卫的范围从「逐文档声明」改成**按内容自发现**：声明式清单会让每一层都必须回来改 L1 的文件，而漏登记就静默缩小范围
-- [ ] Batch C · L3 #157、Batch D · L4 #167、Batch E · L5 #170、Batch F · L6 #175：**本层未交付**
+- [x] (2026-09-24) Batch C · L3 #157（六个提交；本层体量与测试见下方「本层实测」）
+- [ ] Batch D · L4 #167、Batch E · L5 #170、Batch F · L6 #175：**本层未交付**
 - [ ] 收尾 · 级联、整理提交、回读、刷新 PR 描述、逐条回复并 resolve：**本层未做**
 
-**本层实测（回读式，不写死）**：体量用 `BASE=$(gh pr view 122 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)` 再跑 `size "$BASE"`（期望 exit 0）；测试用 `node --test tests/contract tests/integration tests/e2e tests/mvp0`（期望全绿）；72 条回复文本按逐条判定写在运行态文件里，推送后逐条发帖并 resolve。
+**本层实测（回读式，不写死）**：体量用 `BASE=$(gh pr view 157 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)` 再跑 `size "$BASE"`（期望 exit 0）；测试用 `node --test tests/contract tests/integration tests/e2e tests/mvp0`（期望全绿）；72 条回复文本按逐条判定写在运行态文件里，推送后逐条发帖并 resolve。
 
 ## Surprises & Discoveries
 
