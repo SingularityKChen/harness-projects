@@ -59,8 +59,10 @@ E1_DRAFT_BETA=DI_lAHOAY1ahM4BkJ9rzgLKQZo     # draft-beta 的内容 id
 | draft-convert | DraftIssue | Project A | `DI_lAHOAY1ahM4BkJ9rzgLKQZ0` | E1-2 |
 | issue-writable | Issue | Project A | `#3`，node id `I_kwDOUjWAl88AAAABST4XVQ` | E1-3 |
 | issue-dupe | Issue | Project A | `#4`，node id `I_kwDOUjWAl88AAAABST4X6Q` | E1-2 / E1-3 |
+| uncertain-create 系列 | Issue ×6 / DraftIssue ×2 | 仓库 `$E1_OWNER/$E1_REPO`（issue）与 Project A（draft；本批次后 Project A 为 9 条） | `#7` `I_kwDOUjWAl88AAAABSrWbUA`、`#8` `I_kwDOUjWAl88AAAABSrWb2Q`（重复创建对）；`#9` `I_kwDOUjWAl88AAAABSrWjOg`（对账分支 A）；`#10` `I_kwDOUjWAl88AAAABSrWy6Q`、`#11` `I_kwDOUjWAl88AAAABSrWzUQ`（标签探针）；`#12` `I_kwDOUjWAl88AAAABSrXogw`（拒绝后重试）；draft 条目 `PVTI_lAHOAY1ahM4BkJ9rzg8P9K4`（内容 `DI_lAHOAY1ahM4BkJ9rzgLLTqU`）、`PVTI_lAHOAY1ahM4BkJ9rzg8P9ek`（内容 `DI_lAHOAY1ahM4BkJ9rzgLLTsE`） | #119（栈内 L1） |
+| label-auto-created | Label（**仓库级对象**，不在 Project A / B 的条目里） | 仓库 `$E1_OWNER/$E1_REPO` | `e1-label-that-does-not-exist`，`createdAt = 2026-09-23T03:41:55Z` | #119（栈内 L1） |
 
-`issue-dupe` 与 `issue-writable` 的具体归属以 E1-2（#23）与 E1-3（#24）的 ExecPlan 为准；两者在本批次都只读，因此归属分歧不影响本批次的观测。
+`issue-dupe` 与 `issue-writable` 的具体归属以 E1-2（#23）与 E1-3（#24）的 ExecPlan 为准；两者在本批次都只读，因此归属分歧不影响本批次的观测。`label-auto-created` 不是 project 条目，因此不进入 §4.1(b) 的条目数判据；它由实验 3(b) 的平台行为自动创建（REST 接受未知标签并建标签），**重建沙箱时不创建它**：它的存在本身就是那条平台行为的证据，重建时手动创建它只会得到同样的结论，却多一个不受创建步骤控制的副作用。
 
 夹具正文都是 `Gate E1 fixture.` 开头的一句话，说明它是可删除的观测目标：
 
@@ -168,6 +170,8 @@ gh project item-create "$E1_PROJECT_A" --owner "$E1_OWNER" \
 ```
 
 `issue-dupe` 的夹具定义是"同一个 issue 加入同一个 project 两次"。沙箱的运行态清单记录过这条观测：第二次 `item-add` 返回**同一条** item id，因此 Project A 仍然是 7 条而不是 8 条。本批次**没有重跑**这次重复添加——重跑会在正在被 E1-2 / E1-3 观测的共享沙箱里制造额外副作用；重建等价沙箱时把上面第 7 步最后一条 issue 的 `item-add` 执行两次即可复现。
+
+`label-auto-created`（§2.3 的仓库级对象）**不在上面的创建步骤里**：它是 E1-3 / L1 实验 3(b) 的观测产物（平台自动创建未知标签），重建沙箱时不创建它；要复现它，跑的是那条提交未知标签的 REST 调用，不是一条建标签的命令。
 
 `gh repo create` 会新建仓库，`gh project create` 会消耗一个 project 编号（本次沙箱拿到 `11`、`12`）。**编号不是契约**：重建出来的等价沙箱会有不同的编号与 node id，等价性由 §4.1(b) 的判据决定，不是由 id 字面量决定。
 
@@ -330,6 +334,8 @@ gh api "repos/$E1_OWNER/$E1_REPO" ; echo "exit=$?"   # 期望：404，exit 1
 | 9 | 复现 | 从本文件出发重跑本实验的命令序列 |
 
 「本地应有行」的**「行数」列只有一个计数口径**：「规划字段值」这一行**只计用户可写的规划字段值**；内容派生的系统字段值（`ProjectV2ItemFieldRepositoryValue`，字段名 `Repository`）与内容字段（`Title`）不计入。其它行按各自表的主键计数。这条定义只写在这里，实验记录引用它、不复述。
+
+**「行数」列的数字必须在同一行的内容列里按这条定义复述一次，写法只有两种**：非零写「只有 `A` / `B` 可写」（枚举出全部用户可写字段），零写「只有 0 个用户可写规划字段值」（零无法用记号枚举，用数字 `0` 表达）。`tests/contract/e1-evidence-consistency.test.js` 按这两种写法逐行核对「行数」列与枚举项数；缺这一句不是风格问题——它会让那条核对空转（实测：四个「0」行都不带枚举时，把其中一个改成任意数字仍然全绿）。
 
 **这一行的名字是固定的，不能改名、也不能拆成多条物理表名行。** 跨记录可比性是这一行存在的唯一目的，而 E1-4（#25）的裁决要横向读三份记录——行名一改，逐行校验就空转。记录自己的落点结构（领域表名、投影表等）可以另起若干行写在它旁边，但「规划字段值」这一行必须在，计数按上面的口径；`tests/contract/e1-evidence-consistency.test.js` 的 (b0) 断言会在记录缺这一行时响亮失败（唯一的例外是 `PLANNING_ROW_EXEMPT` 里带日期与理由的显式豁免）。
 

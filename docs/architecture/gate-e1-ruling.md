@@ -29,7 +29,7 @@
 | 3 | draft 转成真实对象后内部工作项身份不变，旧外部身份降级为历史别名 | E1-2 实验 2 | pass |
 | 4 | 同一观察处理 N 次与处理一次得到相同的实体与关系计数 | E1-3 实验 3（§4.1、§4.2）；E1-3 实验 2（§4.6） | pass |
 | 5 | 乱序观察不覆盖更新的快照 | E1-3 实验 1（§4.3、§4.4）；E1-3 实验 2（§4.6） | pass |
-| 6 | 结果不确定的外部创建先对账再重试，且不盲目重试 | E1-3 实验 3（§4.1、§4.2、§4.4 支持"先对账"；§8 自述"创建内容那一步响应丢失"分支未实测） | inconclusive |
+| 6 | 结果不确定的外部创建先对账再重试，且不盲目重试 | E1-3 实验 3（§4.1、§4.2、§4.4）；L1 实验 1–4（`docs/architecture/gate-e1-uncertain-create.md`） | pass（**L1 提议，待人类伙伴采纳**，见 §2.6 与 §9） |
 
 ### 2.1 行为 1 · 一条内容身份、两条成员关系、每工作区一条投影
 
@@ -75,11 +75,15 @@
 
 **已观测的部分**：E1-3 实验 3 §4.1、§4.2 实测 `(project, content)` 在平台侧唯一，重复加入的计数为 1；§4.3 实测 `contentId` 的接受范围（issue / change request 的 node id 通过、draft 报 `VALIDATION`、不存在的 id 报 `NOT_FOUND`）；§4.4 实测 `contentId` 是稳定可重查的自然键，而 issue 标题**不是**（宽泛关键词命中 5 条，且标题可变）。§7 据此给出恢复路径：写前持久化 `contentId` 与 `(project, contentId)`；响应丢失时先重读 project 条目集合按 `contentId` 找既有成员关系；找到就采纳、不发第二次写入；找不到才重试 `addProjectV2ItemById`。
 
-**未观测的部分**：E1-3 实验 3 §8 的限定原文——"**'创建内容那一步响应丢失'这一分支没有实测**，本批次只观测了'加入既有内容'这一步的幂等性。因此 §7 里第 5 条恢复路径是基于'标题不是可靠自然键'这一实测结论推导出来的，不是直接观测到的平台行为。" §7 也写明"结果不确定"只在**创建 `contentId` 本身的那一步**（`createIssue` / `addProjectV2DraftIssue`）响应丢失时出现，并自述"这一条**本批次没有实测**"。
+**未观测的部分（E1-3 当时的自述）**：E1-3 实验 3 §8 的限定原文——"**'创建内容那一步响应丢失'这一分支没有实测**，本批次只观测了'加入既有内容'这一步的幂等性。因此 §7 里第 5 条恢复路径是基于'标题不是可靠自然键'这一实测结论推导出来的，不是直接观测到的平台行为。" §7 也写明"结果不确定"只在**创建 `contentId` 本身的那一步**（`createIssue` / `addProjectV2DraftIssue`）响应丢失时出现，并自述"这一条**本批次没有实测**"。
 
-**裁决依据**：本条行为的后半句"never blindly retries"在记录里唯一的落点就是 §7 第 5 条（没有自然键时进入产品可见的"结果不确定"、不允许静默重试），而该分支被记录自己声明为未实测。前半句"reconciles before any retry"有实测支持，后半句没有。按 ExecPlan D1，引用不到实验的裁决判为 `inconclusive`——这里不是"完全没有引用"，而是"决定性的一半没有观测"，两种情形在结论上同归 `revise`。
+**该空白已由 L1（#119，2026-09-23）补测**：`docs/architecture/gate-e1-uncertain-create.md` 的四条实验，逐条对上是：实验 1 用逐字相同的参数两次 `createIssue`，实测对象计数 **2**（`#7` / `#8` 两个不同的 node id）——平台**不**对内容创建去重，因此"绝不盲重试"不是保守估计而是实测后果；实验 2 丢弃一次创建的响应后，按「标记 + 作者 + 创建时间窗」对账，仓库侧列表路径唯一命中（可见延迟 ≈0 s），搜索索引路径 ≈9 s 后也唯一命中，但**窗口内返回 0 命中而对象已经存在**；实验 3 用平台显式拒绝（`422`，非法 `assignees`）取得"写入确实没发生"，同形对账两条路径都是 0 命中、仓库编号集合无新增，随后的重试按标记计数 **1**；实验 4 实测 `addProjectV2DraftIssue` 的对账作用域只能是 project 条目连接（仓库侧列表与搜索都是 0 命中），可见延迟 ≈4 s。该记录 §2 由这四条观测推出 `pending_external_write` 的**获知方式**四个标注（`confirmed` / `reconciled` / `rejected` / `unresolved`）及其到结果轴 `WriteState` 的映射，逐个指到支持它的观测，并排除推不出支持的候选取值。**`pending` 不是被合并掉的候选**：它是结果轴上的合法取值，由本地写入记录直接判定，不需要平台观测——原先把「结果轴」与「获知方式轴」装进同一个集合，才会出现"没有平台观测所以必须合并"的伪约束（该记录 §2 的两轴表述与 §3 第 12 条）。
 
-**裁决**：inconclusive，计入 `revise`（§4 的 R8）。
+**仍未证明的部分（本层收窄，未清零）**：`docs/architecture/gate-e1-uncertain-create.md` §3 逐条点名，与 R8 直接相关的两条是：① 对账窗口的边界值只有两个 n = 1 的样本（≈9 s / ≈4 s），"窗口取多少秒"没有证据；② **"创建内容"这一步的 `pending_external_write` 幂等键取什么没有观测支持**——只能确定它不能是 `content_id`（创建前不存在），也不能是标题（实验 1 实测两次同名标题产生两条对象）。E1-3 实验 3 §4.3、§4.5 对平台侧幂等键输入的排除依然成立，L1 没有新增探测。
+
+**裁决依据**：前半句"reconciles before any retry"由 L1 实验 2（对账唯一命中）与实验 3（显式拒绝 + 对账为空 + 重试计数 1）直接支撑；后半句"never blindly retries"由 L1 实验 1 直接支撑（同参数两次创建得到两条对象，平台不去重）。两半各有观测，且都带墙钟时间与平台原文；E1-3 实验 3 §8 自述的空白分支正是被这三条覆盖的。
+
+**裁决**：pass（**待人类伙伴采纳**：本段是 L1 依据 #119 的证据提出的改判，门禁行为的采纳权在人类伙伴，见 §9；采纳之前本裁决仍按 §3 的 `revise` 推进）。**Superseded by 本段（2026-09-23，L1 / #119）**：本节原判 `inconclusive`，理由是"后半句没有观测"；该理由已被 L1 实验 1 的实测计数 2 推翻。附带两条约束：状态列的类型与取值按 §4 的 R8 行（结果轴取 `packages/domain` 的 `WriteState`，L1 实验支持的四个取值是**获知方式**标注）；**键形状仍未证明**，L3 建 `pending_external_write` 时按 L1 记录 §3 第 6 条处理。
 
 ## 3. 汇总结论
 
@@ -87,7 +91,7 @@
 
 这个取值只有 `freeze` 与 `revise` 两个候选，本裁决取 `revise`，无修饰、无条件：
 
-1. 六条行为中五条有观测支持（行为 1–5 判 pass），行为 6 判 `inconclusive`；按 ExecPlan D1，`inconclusive` 等同于需要 `revise`——模型还没有证据，不是"没有发现问题"。
+1. 六条行为**全部**有观测支持：行为 1–5 判 pass；行为 6 由 L1（#119，2026-09-23）补上"创建内容那一步响应丢失"的证据后**提议**判 pass（见 §2.6；**采纳权在人类伙伴，采纳前本项只是提议**）。**Superseded by 本项（2026-09-23）**：本项原文是"六条行为中五条有观测支持（行为 1–5 判 pass），行为 6 判 `inconclusive`；按 ExecPlan D1，`inconclusive` 等同于需要 `revise`——模型还没有证据，不是'没有发现问题'"；该依据已消失，`revise` 的依据只剩第 2 条。
 2. 行为 1 虽然判 pass，但它的成员关系部分在冻结模型里没有落点（E1-2 实验 1 §5 自述的模型缺口），且 E1-2 与 E1-3 对同一件事给出了互相矛盾的落行（§6 的矛盾 1）。
 3. 因此本地数据模型 v1 **不满足冻结条件**；`revise` 的完成条件是 §4 的 R1–R8 全部落地，或按 §8 显式收窄。
 
@@ -109,11 +113,11 @@
 | R1 | 新增表 `project_item_membership`；`external_identity` 的键形状不变 | 新增 `project_item_membership(workspace_id, project_external_id, item_external_id, content_external_kind, content_external_id, membership_created_at, membership_updated_at)`；`UNIQUE(workspace_id, project_external_id, item_external_id)` 与 `UNIQUE(workspace_id, project_external_id, content_external_kind, content_external_id)`；**不**把 `ProjectV2Item` 加进 `ExternalIdentityKind` | 成员关系是工作区作用域的：E1-2 实验 1 §4 实测两条成员关系的 Status 值互不覆盖。`external_identity` 的键故意不含工作区：E1-1 实验 1 §7 与 `packages/domain/src/identity.ts` 的 `externalObjectKey`。把成员关系登记成 `external_identity` 行要求给该表加 `workspace_id`，同一内容对象就会在两个工作区产生两条内容身份，与行为 1 冲突（E1-2 实验 1 §5 末段已给出同一结论）。第二条唯一约束来自 E1-3 实验 3 §4.2 的实测"`(project, content)` 在平台侧是唯一的" |
 | R2 | `planning_field_value` 的键与唯一约束 | 键 `(workspace_id, item_external_id, project_field_id)`；`UNIQUE(workspace_id, item_external_id, project_field_id)`；定位字段值**不得**使用可选值 id | E1-2 实验 1 §7 实测两个 project 的 Status 字段 id 不同（`PVTSSF_lAHOAY1ahM4BkJ9rzhi7jWY` / `PVTSSF_lAHOAY1ahM4BkJ9szhi7jXQ`）而可选值 id 完全相同（`f75ad846` / `47fc9ee4` / `98236657`），因此 `(option_id)` 不能定位字段值 |
 | R3 | `planning_field_value` 的列集合与写入约束 | 不设 `revision` / `etag` / `version` 列；写入路径不得依赖 compare-and-set；权威值必须由一次独立读回支撑（读回写入 `sync_observation` 行） | E1-3 实验 1 §4.5 实测 `ProjectV2Item` 字段全集无 ETag / revision / version / lock，mutation 输入无前置条件参数；§4.2 实测 mutation 回显的 `fieldValues` connection 会丢值（`Status` / `E1 Date` / `E1 Iteration` 三个节点只回 `__typename`）；§4.3、§4.4 实测 `updatedAt` 秒级、同值不推进、同秒碰撞 |
-| R4 | `sync_observation` 表与乱序约束 | 键 `(item_external_id, observed_at)`，`observed_at` 是本地接收时刻；约束：① `updated_at` 更大者更新；② `updated_at == committed.updated_at` 时以整快照替换，不逐字段合并；③ `updated_at < committed.updated_at` 的观察被拒绝；投影只在读回成功后提交 | E1-3 实验 2 §4.6 的三条规则（该处正文写"两条"、编号列三条，见 §6.6），其输入由 E1-3 实验 1 §4.3、§4.4 实测；"投影只在读回成功后提交"另有 E1-2 实验 1 §6 的单次未复现读回不一致作为残余风险依据 |
+| R4 | `sync_observation` 表与乱序约束 | 键 `(item_external_id, observed_at)`，`observed_at` 是本地接收时刻；约束：① `updated_at` 更大者更新；② `updated_at == committed.updated_at` 时以整快照替换，不逐字段合并；③ `updated_at < committed.updated_at` 的观察被拒绝；投影只在读回成功后提交 | E1-3 实验 2 §4.6 的三条规则（该处正文写"两条"、编号列三条，见 §6.6），其输入由 E1-3 实验 1 §4.3、§4.4 实测；"投影只在读回成功后提交"另有 E1-2 实验 1 §6 的单次未复现读回不一致作为残余风险依据。 |
 | R5 | `reconcile_cursor` 表 | 键 `UNIQUE(workspace_id)`；游标语义为"上次全量对账时刻"，**不得**存 `updated_at` 作为增量游标；对账按对象全量比对 | E1-3 实验 2 §4.1 实测 `projects_v2_item` 在仓库 webhook 上被 `422` 拒绝；§4.3 实测 user-owned project 没有可用 webhook 作用域；§4.6 实测 `updatedAt` 秒级 + 同秒碰撞 + 同值不推进，无法作为增量游标 |
 | R6 | `webhook_subscription` 表 | 该表不得成为 `planning_field_value` 或 `project_item_membership` 的唯一更新来源；事件缺失时同步必须收敛 | E1-3 实验 2 §4.1、§4.3 的实测拒绝与 `404`；§4.4 实测 legacy `project*` 事件名被接受但属于 classic Projects，不构成 Project v2 事件可用的证据 |
 | R7 | `external_identity` 的 `role` 约束 | 只有 `role = primary` 的 `external_id` 可作为平台查询参数或同步游标；`role = historical` 的行仅本地可读 | E1-2 实验 2 §4 实测旧 `DI_*` id 在转换后立即返回 `NOT_FOUND`，平台上不存在"旧 id 仍可解析"的过渡窗口；§5 的历史别名表最后一行写明"历史别名解决的是'这个新内容 id 该接到哪条内部记录上'，不是'旧 id 还能被平台查到'" |
-| R8 | `pending_external_write` 表（补证据项） | 键 `idempotency_key = content_id`；存在未决行时不得发起第二次外部写。**补证据前不得冻结该表的状态机取值集合** | 已实测：E1-3 实验 3 §4.1、§4.2 的幂等计数 1；§4.4 的 `contentId` 自然键与"标题不是自然键"。未实测：E1-3 实验 3 §8 自述"创建内容那一步响应丢失"分支没有实测。行为 6 因此判 `inconclusive` |
+| R8 | `pending_external_write` 表 | 键 `idempotency_key`：「加入既有内容」这一步取 `content_id`（调用方本来就持有）；**「创建内容」这一步不得取 `content_id`**（创建前不存在），也不得取标题（L1 实验 1 实测同参数两次创建得到两条对象）。状态列的**类型**是 `packages/domain/src/enums.ts` 的 `WriteState`（`pending` / `saved` / `unknown` / `conflict` / `failed`）——枚举的单一权威在 `packages/domain`（`AGENTS.md` §2），R8 不另立一套取值。这是**结果轴**：`pending`（写入已发起、尚无结论）由本地写入记录直接判定，**不需要平台观测**。L1 实验 1–4 支持的是**获知方式轴**的四个标注及其到结果轴的映射：`confirmed`→`saved`（响应带回对象标识）、`reconciled`→`saved`（对账唯一命中并采纳）、`rejected`→`failed`（平台显式拒绝或客户端发出前拒绝，且同形对账为空）、`unresolved`→`unknown`（对账**窗口结束后**仍未给出唯一结论；窗口值见 L1 记录 §3 第 1 条，保持开口）。L1 的观测**没有**支持 `conflict` 在这个表上的可达性——它属于 L3 写路径的判断。**产品可见的"结果不确定"以「`state = unknown` 且对账**窗口结束后**仍未给出唯一结论」为条件**（ADR-0004 第 3 条；窗口值见 L1 记录 §3 第 1 条，保持开口）；`pending` 不得单独触发人工确认，否则实验 2 里 ≈9 s 自愈的写入会在对账完成前就被呈现为"需要人工确认"。存在未决行时不得发起第二次外部写（按 `state IN ('pending','unknown')` 判定） | 已实测：E1-3 实验 3 §4.1、§4.2 的幂等计数 1；§4.4 的 `contentId` 自然键与"标题不是自然键"；L1（#119）实验 1–4（`docs/architecture/gate-e1-uncertain-create.md` §2 逐条给出四个获知方式标注的观测支持与映射）。**仍未证明**：创建内容这一步的键形状、对账窗口的边界值（L1 记录 §3 第 1、6 条）；`conflict` 在本表上的可达性（L3 写路径）。 |
 
 **R1 的连带影响**：`planning_field_value`（R2、R3）、`sync_observation`（R4）、条目顺序表（E1-3 实验 1 §5 的 `item_position`）三处指向成员关系的外键都落在 `project_item_membership.item_external_id` 上，而不是落在 `external_identity` 上。
 
@@ -219,7 +223,7 @@ E1-3 实验 3 §4.2 没有给出这次读回的墙钟时间，E1-2 实验 2 的�
 
 ## 8. 未覆盖与残余风险
 
-1. **行为 6 的补证据项**：E1-3 实验 3 §8 自述的"创建内容那一步响应丢失"分支没有实测。补证据属于下层批次的修订，不混进本裁决（ExecPlan D4）；R8 在它落地前不得冻结 `pending_external_write` 的状态机取值集合。
+1. **行为 6 的补证据项**：E1-3 实验 3 §8 自述的"创建内容那一步响应丢失"分支没有实测。补证据属于下层批次的修订，不混进本裁决（ExecPlan D4）；R8 在它落地前不得冻结 `pending_external_write` 的状态机取值集合。**Superseded by L1（#119，2026-09-23）**：该分支已由 `docs/architecture/gate-e1-uncertain-create.md` 实验 1–4 补测，状态列的类型（`WriteState`）与获知方式标注的来源都有出处；残余风险收窄为"对账窗口的边界值只有两个 n = 1 的样本"、"创建内容这一步的幂等键形状未证明"与"结果轴上的迁移判据属 L3 写路径"（L1 记录 §3 第 1、6、18 条）。原文保留以记录当时的证据边界。
 2. **`REDACTED` 条目类型**：`docs/architecture/gate-e1-sandbox.md` §8 记录该枚举取值存在但没有夹具被删除，触发条件与 `content` 形状未观测。成员关系被移除或归档时的身份行为同样未观测（E1-2 §5 的"未覆盖"）。
 3. **change request 的多 project 成员关系形态**：E1-1 实验 3 的未证明清单列出该空白；E1-1 只观测了 issue 的多 project 形态。
 4. **E1-2 实验 1 §6 的单次未复现读回不一致**：作为残余风险保留，对应 R4 的"投影只在读回成功后提交"。
@@ -234,5 +238,6 @@ E1-3 实验 3 §4.2 没有给出这次读回的墙钟时间，E1-2 实验 2 的�
 - `docs/architecture/release-gates.md` §1：R1 是合取门禁，"无法判定"等同于不满足，且 **R1 本身不得由 LLM 判定**；agent 只能提供证据与草稿。
 - `AGENTS.md` §1.2：Gate E1（跨 Provider 对象身份与同步幂等性）通过前不冻结本地数据模型 v1。
 - `docs/architecture/release-gates.md` §2 第 1 行：该门禁的判定者是**人类伙伴**。该行把这一条同时归因于 `AGENTS.md` §1.2，是源文件的错误归因（§6.5）；正确落点就是该行本身，本裁决不引用那次归因。
+- **待人类伙伴决策的两项（2026-09-24 评审补登，2026-09-26 补第二项）**：① 是否采纳 L1 对**行为 6** 的改判（`inconclusive` → `pass`，依据见 §2.6 与 `docs/architecture/gate-e1-uncertain-create.md`）。在本项被采纳之前，§2 的汇总表、§3 第 1 项与归档计划里的相关行都带「L1 提议，待采纳」限定，`merge-queue.md` §7 的 `gh issue reopen` 文案同样按提议措辞。 ② #119 验收 1（3(a) 的对账与标签回读没有逐条墙钟）是补观测还是收窄验收，两条出路见 `docs/exec-plan/completed/2026-09-23-e1-uncertain-create.md` 的 `Decision Log`；决定之前 #119 保持开启，本层只写 `Refs #119`。
 
 因此：`revise` 这个取值的最终采纳、§4 修改清单的取舍、以及是否关闭 issue #4，由人类伙伴确认。在人类伙伴确认之前，本地数据模型 v1 保持未冻结，`packages/storage/sqlite` 的身份与成员表（#27）、执行与关系表（#28）以本裁决的 R1–R8 作为设计输入而不是冻结依据。
