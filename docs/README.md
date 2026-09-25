@@ -43,6 +43,7 @@
 | [2026-09-23-sqlite-v1-stack](exec-plan/active/2026-09-23-sqlite-v1-stack.md) | SQLite v1 数据模型栈控制计划：六层堆叠 PR（L1–L6）的拓扑、每层目标与判定命令；**交付状态一律回读**（`gh pr list -R SingularityKChen/harness-projects --head <分支> --state all`），不在索引里断言；是否冻结仍由人类伙伴决定 | Active |
 | [2026-09-24-stack-review-response](exec-plan/active/2026-09-24-stack-review-response.md) | 第二轮评审响应的执行计划：逐条处置 21 条意见（L1 11 条 + L2 10 条）、栈序表与验收表改成回读命令、R8 收敛到两轴 | Active |
 | [2026-09-24-review-root-cause-convergence](exec-plan/active/2026-09-24-review-root-cause-convergence.md) | 第三轮响应与第四轮收敛：按"拥有该事实的层"重排批次、删副本加机械判据；含 72 行逐条处置表 | Active |
+| [2026-09-23-storage-sqlite-port](exec-plan/active/2026-09-23-storage-sqlite-port.md) | SQLite 端口的机制与地基面（Batch L4 / #163）：契约套件按端口面切成地基 / 同步 / 执行三组、事务与嵌套事务的运行时拒绝、工作区 / 绑定 / 实体 / 身份 / 投影 / 仓库 / 修订号落库、文件库重启用例；同步组与执行组未交付 | Active |
 
 ### Completed
 

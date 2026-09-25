@@ -279,7 +279,7 @@
 
 ## Progress
 
-> **本节只写 L3 这个合并点为真的事实**（`AGENTS.md` §6：每个 PR 要能独立验收、合并、回滚）。L4–L6 的批次在本层**未交付**，因此不勾选——它们的交付状态由各自的副本与本层 D2 的回读命令判定。
+> **本节只写 L4 这个合并点为真的事实**（`AGENTS.md` §6：每个 PR 要能独立验收、合并、回滚）。L5–L6 的批次在本层**未交付**，因此不勾选——它们的交付状态由各自的副本与本层 D2 的回读命令判定。
 
 - [x] (2026-09-24) 取证：72 条未解决 inline 逐条读取、六层源码与套件逐行对照、体量与 `gh pr view` 回读、六层基线测试全绿
 - [x] (2026-09-24) 归并根因：同一事实的多个副本 + 没有机械判据（D1）
@@ -289,10 +289,11 @@
 - [x] (2026-09-24) 三条规则的**级联预检**：用与守卫同判据的离线脚本逐层跑，发现本计划自己有 5 处违规（跨层 glob 路径、`size <SHA>` 无标注、Batch 标题里的字面关闭断言、处置表引用评审原文），已全部修掉
 - [x] (2026-09-24) 把守卫的范围从「逐文档声明」改成**按内容自发现**：声明式清单会让每一层都必须回来改 L1 的文件，而漏登记就静默缩小范围
 - [x] (2026-09-24) Batch C · L3 #157（六个提交；本层体量与测试见下方「本层实测」）
-- [ ] Batch D · L4 #167、Batch E · L5 #170、Batch F · L6 #175：**本层未交付**
+- [x] (2026-09-24) Batch D · L4 #167（本层体量与测试见下方「本层实测」；**第五轮订正**：第四轮回复称已修的 11 条里有 5 条当时不在 head 上，第五轮由评审者补齐令牌用例、原文消息、来处回读与「遗留」名字引用，切分守卫的基线来源转 #201）
+- [ ] Batch E · L5 #170、Batch F · L6 #175：**本层未交付**
 - [ ] 收尾 · 级联、整理提交、回读、刷新 PR 描述、逐条回复并 resolve：**本层未做**
 
-**本层实测（回读式，不写死）**：体量用 `BASE=$(gh pr view 157 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)` 再跑 `size "$BASE"`（期望 exit 0）；测试用 `node --test tests/contract tests/integration tests/e2e tests/mvp0`（期望全绿）；72 条回复文本按逐条判定写在运行态文件里，推送后逐条发帖并 resolve。
+**本层实测（回读式，不写死）**：体量用 `BASE=$(gh pr view 167 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)` 再跑 `size "$BASE"`（期望 exit 0）；测试用 `node --test tests/contract tests/integration tests/e2e tests/mvp0`（期望全绿）；72 条回复文本按逐条判定写在运行态文件里，推送后逐条发帖并 resolve。
 
 ## Surprises & Discoveries
 
