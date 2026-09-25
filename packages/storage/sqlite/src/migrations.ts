@@ -18,6 +18,7 @@ export interface Migration {
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, file: '001_init.sql' },
   { version: 2, file: '002_identity_membership.sql' },
+  { version: 3, file: '003_control_facts.sql' },
 ]
 
 /** 迁移体所在目录，按本模块位置解析，不依赖进程工作目录。 */

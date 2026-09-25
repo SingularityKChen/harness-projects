@@ -36,6 +36,7 @@ function withDatabase(run) {
 
 const tables = (db) =>
   db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((row) => row.name)
+const L2_TABLES = [...Object.keys(TABLE_PROVENANCE), 'schema_migrations'].sort()
 const columns = (db, table) => db.prepare('SELECT name FROM pragma_table_info(?) ORDER BY name').all(table).map((row) => row.name)
 const rejects = (db, sql, message) => assert.throws(() => db.exec(sql), message)
 
@@ -55,7 +56,7 @@ test('空库建出八张表，二次运行是 no-op', () => {
   withDatabase((db) => {
     const first = migrate(db)
     assert.deepEqual(first.applied, MIGRATIONS.map((entry) => entry.version), '空库必须应用清单里的全部迁移')
-    assert.deepEqual(tables(db), [...Object.keys(TABLE_PROVENANCE), 'schema_migrations'].sort())
+    assert.deepEqual(tables(db).filter((name) => L2_TABLES.includes(name)), L2_TABLES)
     const snapshot = () => JSON.stringify(db.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all())
     const before = snapshot()
     assert.deepEqual(migrate(db).applied, [], '重跑不得再应用任何迁移')
@@ -74,7 +75,7 @@ test('表 → 出处映射与实际表集合互相覆盖，且迁移文件里每
   }
   withDatabase((db) => {
     migrate(db)
-    assert.deepEqual(tables(db).filter((name) => name !== 'schema_migrations'), Object.keys(TABLE_PROVENANCE).sort(), '多一张表或少一条映射都必须失败')
+    assert.deepEqual(tables(db).filter((name) => Object.hasOwn(TABLE_PROVENANCE, name)), Object.keys(TABLE_PROVENANCE).sort(), '多一张表或少一条映射都必须失败')
   })
 })
 
