@@ -12,10 +12,10 @@ const developmentBinding = (id, overrides = {}) => ({ ...binding(id), domain: 'd
 const projection = {
   workspaceId: WORKSPACE, entityId: 'entity-1', planningStatus: 'todo', revision: 1, content: { contentKind: 'work_item', title: '标题', body: '正文' },
 }
-const observation = (dedupeKey, state = ObservationState.Pending) => ({ state, observation: {
+const observation = (dedupeKey, state = ObservationState.Pending, overrides = {}) => ({ state, observation: {
   bindingId: 'binding-1', dedupeKey, type: 'issue.updated', eventTime: undefined, receivedTime: '2026-09-20T00:00:01Z',
   subject: { bindingId: 'binding-1', objectKind: 'issue', externalId: 'issue-1', url: undefined },
-  sourceVersion: 'v1', payloadHash: 'payload-hash', payload: {} } })
+  sourceVersion: 'v1', payloadHash: 'payload-hash', payload: {}, ...overrides } })
 // 成员关系：定位键 (workspaceId, itemExternalId)；同一内容在两个工作区是两条（行为 1）。字段值：只存原样值，键不含可选值 id（R2）。
 const membership = (overrides = {}) => ({ workspaceId: WORKSPACE, projectExternalId: 'project-1', itemExternalId: 'item-1', contentKind: 'issue',
   contentExternalId: 'issue-1', membershipCreatedAt: '2026-09-20T00:00:00Z', membershipUpdatedAt: '2026-09-20T00:00:00Z', ...overrides })
@@ -112,32 +112,51 @@ export function storageContractSuite(adapter) {
     const relation = { from: 'entity-1', to: 'entity-2', type: 'depends_on', class: 'business_semantics', source: 'deterministic', state: 'candidate' }
     await storage.putRelation(WORKSPACE, relation)
     await storage.putRelation(WORKSPACE, { ...relation, state: 'confirmed' })
+    // 不变量 5：候选不得降级已确认。
+    await storage.putRelation(WORKSPACE, { ...relation, state: 'candidate' })
+    assert.equal((await storage.listRelations(WORKSPACE)).filter((item) => item.state === 'confirmed').length, 1, '候选写入不得把已确认行降级')
     const relations = await storage.listRelations(WORKSPACE)
     assert.equal(relations.length, 1)
     assert.equal(relations[0].state, 'confirmed')
     assert.deepEqual(await storage.listRelations('ws-other'), [])
   })
 
-  test(`${label}：重复观察返回 false，不产生第二条记录`, async () => {
+  test(`${label}：重复或乱序观察返回 false，新版本应用且同版本整条替换`, async () => {
     const storage = makeStorage()
-    assert.equal(await storage.recordObservation(observation('key-1')), true)
-    assert.equal(await storage.recordObservation(observation('key-1', 'ignored')), false)
-    assert.equal(await storage.recordObservation(observation('key-2')), true)
-    assert.equal(await storage.getSyncCursor('binding-1', 'scope-1'), undefined)
+    const makeObservation = (key, version, payload) => observation(key, 'pending', {
+      sourceVersion: version, payload, receivedTime: `${version}:00Z`,
+    })
+    assert.equal(await storage.recordObservation(makeObservation('key-1', 'v2', { value: 'new' })), true)
+    assert.equal(await storage.recordObservation(makeObservation('key-old', 'v1', { value: 'old' })), false)
+    assert.equal(await storage.recordObservation(makeObservation('key-1', 'v2', { value: 'replacement' })), false)
+    assert.equal(await storage.recordObservation(makeObservation('key-2', 'v3', { value: 'latest' })), true)
+    assert.equal((await storage.getSyncCursor('binding-1', 'scope-1')), undefined)
     await storage.putSyncCursor({ bindingId: 'binding-1', scopeKey: 'scope-1', cursorValue: 'cursor-1', state: 'healthy', lastErrorCode: undefined })
+    await storage.putReconcileCursor({ workspaceId: WORKSPACE, lastReconciledAt: '2026-09-20T00:00:00Z' })
+    await storage.putReconcileCursor({ workspaceId: 'ws-other', lastReconciledAt: '2026-09-21T00:00:00Z' })
+    assert.equal((await storage.getReconcileCursor(WORKSPACE))?.lastReconciledAt, '2026-09-20T00:00:00Z')
+    assert.equal((await storage.getReconcileCursor('ws-other'))?.lastReconciledAt, '2026-09-21T00:00:00Z')
     assert.equal((await storage.getSyncCursor('binding-1', 'scope-1'))?.cursorValue, 'cursor-1')
   })
 
-  test(`${label}：写尝试同幂等键重放返回原结果`, async () => {
-    const storage = makeStorage()
+  // 一行一键（2026-09-24 评审：旧模型在 DDL / 端口 / 替身 / core 之间有四种说法）：同 (工作区, 幂等键) 只有一行，
+  // 状态原地推进；`id` 在工作区内唯一，跨工作区同键同 id 互不影响。
+  test(`${label}：写尝试一行一键，状态原地推进且 id 在工作区内唯一`, async () => {
+    const storage = makeStorage(); await seedWorkspace(storage); await seedWorkspace(storage, 'ws-2')
+    await storage.putProviderBinding(binding('binding-1'))
+    await storage.putProviderBinding({ ...binding('binding-1'), workspaceId: 'ws-2' })
     const attempt = {
       id: 'attempt-1', workspaceId: WORKSPACE, bindingId: 'binding-1', commandName: 'updatePlanningFields',
-      idempotencyKey: 'key-1', state: 'pending', expectedSourceVersion: 'v1', errorCode: undefined,
+      idempotencyKey: 'key-1', state: 'pending', expectedSourceVersion: '2026-09-20T00:00:00Z', errorCode: undefined,
     }
     await storage.putMutationAttempt(attempt)
-    await storage.putMutationAttempt({ ...attempt, id: 'attempt-2', state: 'saved' })
-    assert.equal((await storage.findMutationAttempt(WORKSPACE, 'key-1'))?.state, 'pending')
-    assert.equal((await storage.listMutationAttempts(WORKSPACE)).length, 1)
+    await storage.putMutationAttempt({ ...attempt, state: 'saved' })
+    assert.equal((await storage.findMutationAttempt(WORKSPACE, 'key-1'))?.state, 'saved', '同键是幂等覆盖，不是保留首次结果')
+    assert.deepEqual((await storage.listMutationAttempts(WORKSPACE)).map((a) => a.id), ['attempt-1'], '同键只有一行')
+    await assert.rejects(storage.putMutationAttempt({ ...attempt, idempotencyKey: 'key-2' }), '同一工作区内同一个 id 不得复用')
+    await storage.putMutationAttempt({ ...attempt, workspaceId: 'ws-2', state: 'pending' })
+    assert.equal((await storage.findMutationAttempt('ws-2', 'key-1'))?.state, 'pending', '幂等键的作用域是工作区')
+    assert.deepEqual((await storage.listMutationAttempts(WORKSPACE)).map((a) => a.id), ['attempt-1'], '另一个工作区的写入不得进入本工作区')
   })
 
   // 「移出 → 移回」：旧替身在这里删掉实体却留下身份，重新加入时撞上"实体不存在"，此后每次同步都失败。
@@ -225,6 +244,31 @@ export function storageContractSuite(adapter) {
     await assert.rejects(storage.putFieldValue(fieldValue({ itemExternalId: 'item-2' })), '成员关系是工作区作用域的，不得跨工作区挂靠字段值')
     assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-2'), [], '被拒绝的写入不得留下任何行')
     assert.deepEqual(await storage.listFieldValues('ws-2', 'item-2'), [], '被拒绝的写入不得落到另一个工作区')
+  })
+
+  test(`${label}：定序取已提交版本的最大值，介于中间与更旧的版本都必须被拒绝（R4）`, async () => {
+    const storage = makeStorage()
+    await seedWorkspace(storage)
+    const at = (key, version) => observation(key, ObservationState.Pending, { sourceVersion: version, receivedTime: version })
+    assert.equal(await storage.recordObservation(at('k1', '2026-09-21T07:11:00Z')), true)
+    assert.equal(await storage.recordObservation(at('k2', '2026-09-21T07:11:54Z')), true, '更新的 ISO 版本必须被接受')
+    // 判别性（2026-09-24 评审）：`v1, v3, v2` 这一格把"取最大"与"取最小"分开——旧用例的乱序观察都比**全部**
+    // 已见版本更旧，所以把比较方向反过来（取最旧）也全绿。
+    assert.equal(await storage.recordObservation(at('k3', '2026-09-21T07:11:30Z')), false, '介于中间（比已提交旧、比最早的新）的版本必须被拒绝')
+    assert.equal(await storage.recordObservation(at('k4', '2026-09-21T07:10:00Z')), false, '更旧的 ISO 版本必须被拒绝')
+    assert.equal(await storage.recordObservation(at('k1', '2026-09-21T07:11:00Z')), false, '同版本重复投递必须被拒绝')
+  })
+
+  test(`${label}：版本载体必须是可比的 ASCII，非 ASCII 在入口被拒绝（R4）`, async () => {
+    const storage = makeStorage()
+    await seedWorkspace(storage)
+    const at = (key, version) => observation(key, ObservationState.Pending, { sourceVersion: version, receivedTime: '2026-09-21T07:11:00Z' })
+    // 判别性（2026-09-24 评审）：JS 的 `<` 比较 UTF-16 码元，SQLite 的 BINARY 比较 UTF-8 字节，两者在
+    // U+E000–U+FFFF 与增补平面之间结论相反。判据收敛到 capabilities 的 `compareSourceVersion`（码点序）之后，
+    // 非 ASCII 载体在入口被拒绝，这条分叉从"未被发现"变成"不可达"。
+    await assert.rejects(storage.recordObservation(at('k1', '～')), /ASCII/, '非 ASCII 的 sourceVersion 必须被拒绝')
+    await assert.rejects(storage.recordObservation(at('k2', '😀')), /ASCII/, '增补平面字符同样必须被拒绝')
+    assert.equal(await storage.recordObservation(at('k3', 'v1')), true, 'ASCII 载体照常接受（provider 的义务是让它可比）')
   })
 
   test(`${label}：换一个实例能读到同一份内容（模拟重启）`, async () => {

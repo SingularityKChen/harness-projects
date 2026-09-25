@@ -25,6 +25,7 @@ export interface FakeStorageData {
   relations: { workspaceId: domain.WorkspaceId; relation: domain.Relation }[]
   observations: cap.ObservationRecord[]
   cursors: cap.SyncCursorRecord[]
+  reconcileCursors: cap.ReconcileCursorRecord[]
   attempts: cap.MutationAttemptRecord[]
   revisions: { workspaceId: domain.WorkspaceId; revision: number }[]
   memberships: cap.MembershipRecord[]
@@ -32,8 +33,10 @@ export interface FakeStorageData {
 }
 export function emptyStorageData(): FakeStorageData {
   return { workspaces: [], providerBindings: [], workspaceBindings: [], entities: [], identities: [], projections: [], repositories: [],
-    contexts: [], runs: [], relations: [], observations: [], cursors: [], attempts: [], revisions: [], memberships: [], fieldValues: [] }
+    contexts: [], runs: [], relations: [], observations: [], cursors: [], reconcileCursors: [], attempts: [], revisions: [], memberships: [], fieldValues: [] }
 }
+/** 版本定序的唯一判据来自 capabilities（与 SQLite 的 BINARY 同判据）；本文件不再自写一份比较器。 */
+const compareSourceVersion = cap.compareSourceVersion
 function upsert<T>(list: T[], record: T, match: (item: T) => boolean): void {
   const index = list.findIndex(match)
   if (index === -1) list.push(record); else list[index] = record
@@ -217,15 +220,35 @@ export class MemoryStorage implements cap.Storage {
   }
   async getExecutionRun(id: domain.ExecutionRunId): Promise<cap.ExecutionRunRecord | undefined> { return this.data.runs.find((r) => r.id === id) }
   async putRelation(workspaceId: domain.WorkspaceId, relation: domain.Relation): Promise<void> {
-    return this.#mutate(() => upsert(this.data.relations, { workspaceId, relation }, (r) =>
-      r.workspaceId === workspaceId && r.relation.from === relation.from && r.relation.to === relation.to && r.relation.type === relation.type))
+    return this.#mutate(() => {
+      const sameKey = (r: (typeof this.data.relations)[number]): boolean => r.workspaceId === workspaceId && r.relation.from === relation.from
+        && r.relation.to === relation.to && r.relation.type === relation.type
+      // 不变量 5：候选不得降级已确认——同键已有 confirmed 时，写入 candidate 是 no-op。
+      if (relation.state !== 'confirmed' && this.data.relations.some((r) => sameKey(r) && r.relation.state === 'confirmed')) return
+      upsert(this.data.relations, { workspaceId, relation }, sameKey)
+    })
   }
   async listRelations(workspaceId: domain.WorkspaceId): Promise<readonly domain.Relation[]> { return this.data.relations.filter((r) => r.workspaceId === workspaceId).map((r) => r.relation) }
-  /** dedupe 由 (binding, dedupeKey) 唯一实现：重复观察返回 false，且不覆盖已存记录。 */
+  /** false 表示本次观察未被应用（重复或乱序），调用方不得读成“已应用”。 */
   async recordObservation(record: cap.ObservationRecord): Promise<boolean> {
     return this.#mutate(() => {
-      const key = `${record.observation.bindingId}|${record.observation.dedupeKey}`
-      if (this.data.observations.some((o) => `${o.observation.bindingId}|${o.observation.dedupeKey}` === key)) return false
+      const { observation } = record
+      if (observation.sourceVersion !== undefined && !cap.isComparableSourceVersion(observation.sourceVersion)) {
+        throw new Error(`sourceVersion 必须是可比的 ASCII 载体：${observation.sourceVersion}`)
+      }
+      const key = `${observation.bindingId}|${observation.dedupeKey}`
+      // 去重账本与快照槽位分开：账本按 (bindingId, dedupeKey) 只追加，永不被后来的同版本观察顶掉，
+      // 否则"同一观察再投递一次"会第二次返回 true，调用方据此重放副作用。
+      if (this.data.observations.some((item) => `${item.observation.bindingId}|${item.observation.dedupeKey}` === key)) return false
+      const sameSubject = this.data.observations.filter((item) => item.observation.bindingId === observation.bindingId
+        && item.observation.subject.objectKind === observation.subject.objectKind
+        && item.observation.subject.externalId === observation.subject.externalId)
+      // 已提交快照 = 该主体里 sourceVersion 最大的那条（相等时取最后写入的一条，即整快照替换）。
+      let committed: cap.ObservationRecord | undefined
+      for (const item of sameSubject) {
+        if (committed === undefined || compareSourceVersion(item.observation.sourceVersion, committed.observation.sourceVersion) >= 0) committed = item
+      }
+      if (committed !== undefined && compareSourceVersion(observation.sourceVersion, committed.observation.sourceVersion) < 0) return false
       this.data.observations.push(record)
       return true
     })
@@ -234,12 +257,21 @@ export class MemoryStorage implements cap.Storage {
   async putSyncCursor(record: cap.SyncCursorRecord): Promise<void> {
     return this.#mutate(() => upsert(this.data.cursors, record, (c) => c.bindingId === record.bindingId && c.scopeKey === record.scopeKey))
   }
-  /** 写尝试以 (workspace, idempotencyKey) 唯一：同键重放返回原记录，不覆盖成新结果。 */
+  async getReconcileCursor(workspaceId: domain.WorkspaceId): Promise<cap.ReconcileCursorRecord | undefined> {
+    return this.data.reconcileCursors.find((cursor) => cursor.workspaceId === workspaceId)
+  }
+  async putReconcileCursor(record: cap.ReconcileCursorRecord): Promise<void> {
+    return this.#mutate(() => upsert(this.data.reconcileCursors, record, (cursor) => cursor.workspaceId === record.workspaceId))
+  }
+  /** 写尝试以 (workspace, idempotencyKey) 唯一：同键重放是幂等覆盖（UPSERT），后写的记录取代先写的。 */
   async findMutationAttempt(workspaceId: domain.WorkspaceId, idempotencyKey: string): Promise<cap.MutationAttemptRecord | undefined> { return this.data.attempts.find((a) => a.workspaceId === workspaceId && a.idempotencyKey === idempotencyKey) }
+  /** 一行一键（与 003 同模型）：同 (工作区, 幂等键) 是幂等覆盖，`id` 在工作区内唯一。 */
   async putMutationAttempt(record: cap.MutationAttemptRecord): Promise<void> {
     return this.#mutate(() => {
-      if (this.data.attempts.some((a) => a.workspaceId === record.workspaceId && a.idempotencyKey === record.idempotencyKey)) return
-      this.data.attempts.push(record)
+      const clash = this.data.attempts.find((a) => a.workspaceId === record.workspaceId
+        && a.id === record.id && a.idempotencyKey !== record.idempotencyKey)
+      if (clash !== undefined) throw new Error('mutation attempt id already used in this workspace')
+      upsert(this.data.attempts, record, (a) => a.workspaceId === record.workspaceId && a.idempotencyKey === record.idempotencyKey)
     })
   }
   async listMutationAttempts(workspaceId: domain.WorkspaceId): Promise<readonly cap.MutationAttemptRecord[]> { return this.data.attempts.filter((a) => a.workspaceId === workspaceId) }
