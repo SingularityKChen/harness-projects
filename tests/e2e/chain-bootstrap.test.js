@@ -129,6 +129,14 @@ test('工程事实：CI 结果只产生派生标记，不改写规划状态（�
 test('身份：Draft→Issue 提升只换外部 id，内部实体 id 不变（不变量 1）', async () => {
   const providers = threeItemComposition()
   const core = await compose(providers)
+  // #27 验收 3 的生命周期断言（2026-09-24 评审订正）：不能走 listPlanningItems / getItemDetail——它们会跳过零
+  // primary 的实体；改为按 provider 条目逐项解析实体，再断言**恰好一个** primary（库只强制"至多一个"）。
+  for (const item of providers.planning.state.items) {
+    const identity = await providers.storage.findExternalIdentity(providers.planning.bindingId, item.ref.objectKind, item.ref.externalId)
+    assert.ok(identity, `provider 条目 ${item.ref.externalId} 必须解析出内部实体`)
+    const primaries = (await providers.storage.listIdentitiesForEntity(identity.entityId)).filter((i) => i.role === 'primary')
+    assert.equal(primaries.length, 1, `ensureEntity 建的实体 ${identity.entityId} 必须恰好一个 primary 身份`)
+  }
   const draft = (await core.queries.listPlanningItems()).find((view) => view.content.identity.externalKind === 'draft')
   assert.ok(draft, '三个条目里必须有一个 draft')
   const outcome = await providers.storage.transaction((tx) => promoteEntityIdentity(tx, draft.entityId, 'issue-100'))

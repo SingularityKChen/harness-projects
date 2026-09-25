@@ -12,10 +12,13 @@ export interface Migration {
  * 有序迁移清单。刻意不扫描目录：目录扫描会把"文件被删或改名"变成静默的版本缺失，
  * 显式清单把同一件事变成一次可见的自检失败。
  *
- * 决策（不实现 downgrade）：已应用过的迁移文件不得再修改，新变更使用新版本号；
- * 回滚靠从备份恢复，而不是反向迁移。这是决策，不是遗漏。
+ * 决策（不实现 downgrade）：首次 MVP 发布前允许整份迁移体重写；发布后的变更另行评审，
+ * 不在本清单里暗示兼容层或双写路径。回滚靠从备份恢复，而不是反向迁移。
  */
-export const MIGRATIONS: readonly Migration[] = [{ version: 1, file: '001_init.sql' }]
+export const MIGRATIONS: readonly Migration[] = [
+  { version: 1, file: '001_init.sql' },
+  { version: 2, file: '002_identity_membership.sql' },
+]
 
 /** 迁移体所在目录，按本模块位置解析，不依赖进程工作目录。 */
 export const MIGRATIONS_DIR = fileURLToPath(new URL('../migrations/', import.meta.url))

@@ -3,14 +3,16 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createFakeStorage, exportFakeStorageState } from '@harness-projects/provider-fake'
 import { storageContractSuite } from './suites/storage.js'
+import { storageIdentityFoundationSuite, storageIdentitySyncSuite } from './suites/storage-identity-membership.js'
 
 const workspace = (id, name) => ({ id, name, statusPolicy: 'provider_authoritative' })
 
-storageContractSuite({
-  label: '内存 Storage 替身',
-  makeStorage: () => createFakeStorage(),
-  restart: (storage) => createFakeStorage(exportFakeStorageState(storage)),
-})
+const fake = { label: '内存 Storage 替身', makeStorage: () => createFakeStorage(),
+  restart: (storage) => createFakeStorage(exportFakeStorageState(storage)) }
+// 身份与成员关系面：替身两组都跑；SQLite 侧的地基组在 L4 注册、同步组在 L5/L6 注册（见该文件头注释）。
+storageContractSuite(fake)
+storageIdentityFoundationSuite(fake)
+storageIdentitySyncSuite(fake)
 
 test('内存 Storage 替身：事务未提交前外部读不到写入，提交后才可见', async () => {
   const storage = createFakeStorage()
@@ -98,6 +100,9 @@ const DUPLICATE_OBSERVATION = { state: 'pending', observation: { bindingId: 'bin
 
 test('内存 Storage 替身：同一观察记录两次后身份/实体/成员计数与只记录一次完全相同', async () => {
   const ingest = async (storage, identityId) => storage.transaction(async (tx) => {
+    // 身份以外键指向连接锚点与实体：前置行只走端口建（2026-09-24 评审：旧版靠替身接受悬空引用才通过）。
+    await tx.putWorkspace({ id: 'ws-1', name: '工作区', statusPolicy: 'provider_authoritative' })
+    await tx.putProviderBinding({ id: 'binding-1', workspaceId: 'ws-1', domain: 'planning', implementationKey: 'fake', enabled: true, isDefault: false })
     if (!(await tx.recordObservation(DUPLICATE_OBSERVATION))) return false
     await tx.putEntity({ id: 'entity-1', kind: 'work_item' })
     await tx.putExternalIdentity({ id: identityId, entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
