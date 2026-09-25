@@ -120,6 +120,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 | [2026-09-21-pr37-mvp-review](2026-09-21-pr37-mvp-review.md) | PR37 最新 head 的最终复评与合并收尾 | P0–P2 无新增阻塞项；已 rebase、归档并 rebase merge |
 | [2026-09-23-mvp1-batch-review](2026-09-23-mvp1-batch-review.md) | MVP-1 三交付批次剩余四个 PR（#158 #159 #160 #161）的第二轮 MMP 交付评审：并集预演、P1 独立复现、34 条行级意见 | #159、#158 修复后合并；#160（2 × P1）与 #161（1 × P1）本轮不合并；follow-up #176–#178 |
 | [2026-09-24-start-work-batch-review](2026-09-24-start-work-batch-review.md) | Start Work 批次 #160（第三轮）→ #161（第三轮）与 #185（第一轮）：两种顺序的并集预演、P1 的 base / head / 并集对照复现、33 条行级意见 | #185 改 `Refs #183` 后合并；#160（2 × P1）与 #161（叠在其上）本轮不合并；follow-up #192–#194 |
+| [2026-09-26-mmp-round5-batch-review](2026-09-26-mmp-round5-batch-review.md) | SQLite v1 栈第五轮（#121–#175）与 Start Work 栈第四轮（#160 → #161）：两栈两种顺序的并集预演、五条 P1 的独立复现、101 条行级意见、L1–L4 的修复与合并 | #121 / #122 / #157 / #167 修复后合并；#170（1 × P1）、#175（2 × P1）、#160（2 × P1 + 体量）不合并，#161 受 #160 阻塞；新开 #201–#204 |
 
 单 PR 的记录（`pr-NN-mvp-review.md` 与 `2026-09-21-pr-NN-risk-matrix.md`）同样放在本目录，但不进上表——判据就是上面那条：**跨多个 PR、且删掉之后接手的人会缺失决策依据**的才登记。
 
