@@ -13,6 +13,12 @@ export const ExternalIdentityKind = {
 } as const
 export type ExternalIdentityKind = (typeof ExternalIdentityKind)[keyof typeof ExternalIdentityKind]
 
+/** 成员关系的内容种类：project 条目的内容只能是这三类。比 `ExternalIdentityKind` 窄（`branch` / `worktree` 不是 project 条目的内容），且**刻意不并入** `ExternalIdentityKind`——裁决 R1 要求 `ProjectV2Item` 不得成为身份种类，成员关系落在独立的工作区作用域表上（`docs/adr/ADR-0002-membership-identity-separate-from-content.md`）。 */
+export const MembershipContentKind = {
+  Issue: 'issue', Draft: 'draft', ChangeRequest: 'change_request',
+} as const
+export type MembershipContentKind = (typeof MembershipContentKind)[keyof typeof MembershipContentKind]
+
 /** 一个平台对象在系统内的唯一登记；加 workspaceId 就等于把同一对象复制成多份身份。 */
 export interface ExternalIdentity {
   readonly id: ExternalIdentityId

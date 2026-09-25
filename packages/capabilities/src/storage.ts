@@ -10,6 +10,7 @@ import type {
   ExecutionRunStatus,
   ExternalIdentity,
   ExternalIdentityId,
+  MembershipContentKind,
   ProjectErrorCode,
   ProviderBindingId,
   Relation,
@@ -25,7 +26,12 @@ export interface WorkspaceRecord {
   readonly id: WorkspaceId; readonly name: string; readonly statusPolicy: StatusPolicy
 }
 
-/** 一个工作空间同一时刻只能有一个启用的 planning 绑定；putProviderBinding 必须自行保证 isDefault 唯一。 */
+/**
+ * 工作区挂载视图：**一条连接锚点 + 某工作区对它的启用状态**（ADR-0006）。写入语义（两个实现必须一致）：
+ * 同一个 `id` 换 `implementationKey` 被拒绝（它是 provider **实现**标识，不是能力域）；同一工作区同一 `domain`
+ * 的第二个**启用** planning 挂载被拒绝（不变量 1，issue #27 验收 1 要求由数据库拒绝）；同一工作区同一 `domain`
+ * 至多一个启用的默认挂载，写新的默认把同域旧的默认降级；挂载所属的工作区必须已存在（与 002 的外键同语义），否则拒绝且不留行。
+ */
 export interface ProviderBindingRecord {
   readonly id: ProviderBindingId; readonly workspaceId: WorkspaceId; readonly domain: CapabilityDomain
   readonly implementationKey: string; readonly enabled: boolean; readonly isDefault: boolean
@@ -71,6 +77,31 @@ export interface ObservationRecord {
   readonly observation: ProviderObservation; readonly state: ObservationState
 }
 
+/**
+ * 成员关系（裁决 R1）：内容对象挂在某工作区某 project 条目上的那一行。同一 `(workspaceId, projectExternalId,
+ * contentKind, contentExternalId)` 至多一条；同一内容出现在两个工作区时是**两条**、互不覆盖（行为 1，ADR-0002）。
+ */
+export interface MembershipRecord {
+  readonly workspaceId: WorkspaceId
+  readonly projectExternalId: string
+  readonly itemExternalId: string
+  readonly contentKind: MembershipContentKind
+  readonly contentExternalId: string
+  readonly membershipCreatedAt: string | undefined
+  readonly membershipUpdatedAt: string | undefined
+}
+
+/**
+ * 规划字段值：**只存平台原样值**，归一化由 core 做（裁决 R2 / R3）；定位键不含可选值 id；不设版本列。
+ */
+export interface FieldValueRecord {
+  readonly workspaceId: WorkspaceId
+  readonly itemExternalId: string
+  readonly projectFieldId: string
+  readonly value: string
+  readonly observedAt: string
+}
+
 export interface Storage {
   // ── 事务：一个 transaction 内的写入要么全部生效，要么全部不生效 ──
   transaction<T>(work: (tx: StorageTransaction) => Promise<T>): Promise<T>
@@ -82,12 +113,24 @@ export interface Storage {
   listProviderBindings(workspaceId: WorkspaceId): Promise<readonly ProviderBindingRecord[]>
 
   // ── 身份：外部身份全局一份，实体是内在锚点 ──
+  // 强制面（ADR-0006）：storage 强制「至多一个 primary」与引用完整性（身份必须指向存在的实体与连接锚点，被拒绝的写入不留行）。
+  // 「恰好一个」由写入生命周期保证：`putEntity` 必须与 primary 身份在同一事务里写入（core 的 `ensureEntity` 如此），e2e 有断言。
   putEntity(record: Entity): Promise<void>
   putExternalIdentity(record: ExternalIdentity): Promise<void>
   findExternalIdentity(bindingId: ProviderBindingId, externalKind: string, externalId: string): Promise<ExternalIdentity | undefined>
   listIdentitiesForEntity(entityId: EntityId): Promise<readonly ExternalIdentity[]>
 
+  // ── 成员关系与字段值：平台原样事实，storage 只存不推导 ──
+  // 冲突规则：同一 (workspaceId, itemExternalId) 幂等覆盖；同 (工作区, 项目, 内容) 的第二次写入取代旧行（须 UPSERT）。
+  // 引用完整性是**共有的契约**：指向不存在的父行必须被拒绝，且被拒绝的写入不得留下任何行；`listMemberships` 按 `itemExternalId` 的码点序升序（等价于 SQLite TEXT 的 BINARY/UTF-8 字节序，不是 JS 的 UTF-16 码元序）。
+  putMembership(record: MembershipRecord): Promise<void>
+  getMembership(workspaceId: WorkspaceId, itemExternalId: string): Promise<MembershipRecord | undefined>
+  listMemberships(workspaceId: WorkspaceId, projectExternalId: string): Promise<readonly MembershipRecord[]>
+  putFieldValue(record: FieldValueRecord): Promise<void>
+  listFieldValues(workspaceId: WorkspaceId, itemExternalId: string): Promise<readonly FieldValueRecord[]>
+
   // ── 规划：投影承载权威归一化状态与三态内容 ──
+  // replace 的实体语义：移除本 scope 的投影但保留实体与身份（实体仍被身份引用，与 002 的外键同语义）。
   putPlanningProjection(workspaceId: WorkspaceId, projection: WorkspaceProjection): Promise<void>
   replacePlanningProjections(scope: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId }, items: readonly WorkspaceProjection[]): Promise<void>
   getPlanningProjection(workspaceId: WorkspaceId, entityId: EntityId): Promise<WorkspaceProjection | undefined>
