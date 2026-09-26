@@ -186,7 +186,7 @@ async function startExecution(
     command: `harness run ${git.branchExternalId ?? namesFor(request).branch}`, environment: {},
   })
   if (!run.ok) return manualFallback(context, contextId, git, toProjectError(run.error))
-  await recordRun(context, contextId, runStatusFor(run.value.status))
+  await recordRun(context, contextId, runStatusFor(run.value.status), run.value.ref)
   return toResult(git.report, outcomeOf(git, undefined, run.value.ref.externalId), undefined)
 }
 
@@ -194,13 +194,25 @@ async function startExecution(
 async function manualFallback(
   context: CoreContext, contextId: ExecutionContextId, git: GitOutcome, error: ProjectError,
 ): Promise<StartWorkResult> {
+  const fallback = resolveCapability(context.registry, CapabilityKey.ExecutionRunFallback)
+  if (fallback.available && fallback.binding.execution !== undefined) {
+    const run = await fallback.binding.execution.startRun({
+      context: { bindingId: fallback.binding.ref.bindingId, objectKind: 'execution_context', externalId: contextId, url: undefined },
+      command: `manual fallback ${git.branchExternalId ?? ''}`.trim(), environment: {},
+    })
+    if (run.ok) {
+      await recordRun(context, contextId, runStatusFor(run.value.status), run.value.ref)
+      return toResult(git.report, outcomeOf(git, StartWorkFallback.Manual, run.value.ref.externalId), undefined)
+    }
+  }
   await recordRun(context, contextId, ExecutionRunStatus.Failed)
   return toResult(git.report, outcomeOf(git, StartWorkFallback.Manual), error)
 }
 
-async function recordRun(context: CoreContext, contextId: ExecutionContextId, status: ExecutionRunStatus): Promise<void> {
+async function recordRun(context: CoreContext, contextId: ExecutionContextId, status: ExecutionRunStatus, providerRef?: import('@harness-projects/capabilities').ExternalObjectRef): Promise<void> {
   await context.storage.putExecutionRun({
     id: runIdFor(contextId), workspaceId: context.workspaceId, contextId, status, updatedAt: context.clock(),
+    ...(providerRef === undefined ? {} : { providerRef }),
   })
 }
 
@@ -247,7 +259,7 @@ async function existingResult(
     worktreeExternalId: record.worktreeExternalId,
     // 上下文记录里没有分支头提交这一列（Storage 契约不归本批次改），所以读回路径报不出来。
     branchHeadCommit: undefined,
-    fallback, runExternalId: undefined,
+    fallback, runExternalId: run?.providerRef?.externalId,
   }, report.error)
 }
 

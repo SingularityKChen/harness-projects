@@ -28,7 +28,7 @@ import { SqliteSyncSurface } from './storage-sync.ts'
 
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。
 const CONTEXT_COLUMNS = 'id, workspace_id, work_item_id, repository_id, status, branch_external_id, worktree_external_id, provisioning_started_at'
-const RUN_COLUMNS = 'id, workspace_id, context_id, status, updated_at'
+const RUN_COLUMNS = 'id, workspace_id, context_id, status, updated_at, provider_ref_json'
 const ATTEMPT_COLUMNS = 'id, workspace_id, binding_id, command_name, idempotency_key, state, expected_source_version, error_code'
 /** 两张关系表的列名相同：路由到哪张表由 `state` 决定，读回形状因此只有一份。 */
 const RELATION_COLUMNS = 'from_entity_id, to_entity_id, relation_type, relation_class, source, state'
@@ -79,10 +79,10 @@ export class SqliteExecutionSurface extends SqliteSyncSurface {
   }
 
   putExecutionRun(record: ExecutionRunRecord): Promise<void> {
-    return this.write(`INSERT INTO execution_run (${RUN_COLUMNS}) VALUES (?, ?, ?, ?, ?)
+    return this.write(`INSERT INTO execution_run (${RUN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT (id) DO UPDATE SET workspace_id = excluded.workspace_id, context_id = excluded.context_id,
-        status = excluded.status, updated_at = excluded.updated_at`,
-      record.id, record.workspaceId, record.contextId, record.status, record.updatedAt)
+        status = excluded.status, updated_at = excluded.updated_at, provider_ref_json = excluded.provider_ref_json`,
+      record.id, record.workspaceId, record.contextId, record.status, record.updatedAt, record.providerRef === undefined ? null : JSON.stringify(record.providerRef))
   }
 
   getExecutionRun(id: ExecutionRunId): Promise<ExecutionRunRecord | undefined> {

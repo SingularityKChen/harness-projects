@@ -56,9 +56,13 @@ export const rowToExecutionContext = (row: Row): ExecutionContextRecord => ({ id
   branchExternalId: optionalText(row, 'branch_external_id'), worktreeExternalId: optionalText(row, 'worktree_external_id'),
   provisioningStartedAt: optionalText(row, 'provisioning_started_at') })
 
-export const rowToExecutionRun = (row: Row): ExecutionRunRecord => ({ id: text(row, 'id') as ExecutionRunId,
-  workspaceId: text(row, 'workspace_id') as WorkspaceId, contextId: text(row, 'context_id') as ExecutionContextId,
-  status: text(row, 'status') as ExecutionRunStatus, updatedAt: text(row, 'updated_at') })
+export const rowToExecutionRun = (row: Row): ExecutionRunRecord => {
+  const providerRefJson = optionalText(row, 'provider_ref_json')
+  return { id: text(row, 'id') as ExecutionRunId,
+    workspaceId: text(row, 'workspace_id') as WorkspaceId, contextId: text(row, 'context_id') as ExecutionContextId,
+    status: text(row, 'status') as ExecutionRunStatus, updatedAt: text(row, 'updated_at'),
+    ...(providerRefJson === undefined ? {} : { providerRef: JSON.parse(providerRefJson) }) }
+}
 
 export const rowToRelation = (row: Row): Relation => ({ from: text(row, 'from_entity_id') as EntityId,
   to: text(row, 'to_entity_id') as EntityId, type: text(row, 'relation_type') as RelationType,
