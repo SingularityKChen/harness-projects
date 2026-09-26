@@ -20,6 +20,7 @@ export interface CoreProviderTable {
   readonly development?: DevelopmentProvider
   readonly delivery?: DeliveryProvider
   readonly execution?: ExecutionProvider
+  readonly executionFallback?: ExecutionProvider
   readonly storage?: Storage
 }
 
@@ -50,7 +51,7 @@ function resolvedBinding(
 export async function registerBindings(input: RegisterBindingsInput): Promise<readonly ResolvedBinding[]> {
   const bindings: ResolvedBinding[] = []
   for (const domain of PROVIDER_DOMAINS) {
-    const provider = input.providers[domain]
+    const provider = domain === 'execution' ? input.providers.execution : input.providers[domain]
     if (provider === undefined) continue
     const snapshot = await provider.describeCapabilities()
     const capabilities = effectiveCapabilities(snapshot, input.policy)
@@ -59,6 +60,13 @@ export async function registerBindings(input: RegisterBindingsInput): Promise<re
       implementationKey: domain, enabled: true, isDefault: true,
     })
     bindings.push(resolvedBinding(input.providers, domain, snapshot.bindingId, input.workspaceId, capabilities))
+    if (domain === 'execution' && input.providers.executionFallback !== undefined) {
+      const fallback = input.providers.executionFallback
+      const fallbackSnapshot = await fallback.describeCapabilities()
+      const fallbackCapabilities = effectiveCapabilities(fallbackSnapshot, input.policy)
+      await input.storage.putProviderBinding({ id: fallbackSnapshot.bindingId, workspaceId: input.workspaceId, domain, implementationKey: domain, enabled: true, isDefault: false })
+      bindings.push(resolvedBinding({ ...input.providers, execution: fallback }, domain, fallbackSnapshot.bindingId, input.workspaceId, fallbackCapabilities))
+    }
   }
   return bindings
 }

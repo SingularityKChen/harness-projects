@@ -21,6 +21,7 @@ import type {
 } from '@harness-projects/domain'
 import type { CapabilityDomain } from './capability-keys.ts'
 import type { ProviderObservation } from './observation.ts'
+import type { ExternalObjectRef } from './observation.ts'
 
 export interface WorkspaceRecord {
   readonly id: WorkspaceId; readonly name: string; readonly statusPolicy: StatusPolicy
@@ -51,7 +52,7 @@ export interface ExecutionContextRecord {
 
 export interface ExecutionRunRecord {
   readonly id: ExecutionRunId; readonly workspaceId: WorkspaceId; readonly contextId: ExecutionContextId
-  readonly status: ExecutionRunStatus; readonly updatedAt: string
+  readonly status: ExecutionRunStatus; readonly updatedAt: string; readonly providerRef?: ExternalObjectRef
 }
 
 export interface MutationAttemptRecord {

@@ -70,6 +70,17 @@
 | 分支被别处检出 | core 不得报成功 |
 | 默认允许根与基线 | 不注入 `allowedRoot` 时首个工作树仍能建出；只有 `trunk` 且无 `origin/HEAD` 的仓库仍能供应 |
 
+## 人工执行 provider（#139）
+
+`human-execution-provider.test.js` 组装**真实的**本地 Git provider + 人工执行 provider + 离线 Storage，在 `mkdtemp` 生成的临时仓库上跑 `startWork`（不触网）：
+
+| 用例 | 保护的不变量 |
+|---|---|
+| 开始工作 | 工作树与分支真的落在磁盘上并被 Git 登记；运行是人工标记（Storage 里 `running`、`runExternalId` 是 `manual-run:` 引用）；Storage 里只有 core 的 `recordRun` 写过的那一条运行 |
+| 执行 provider 起不来 | 上下文保留为 `ready`、工作树与分支仍在磁盘上、结果是 `manual_fallback`。**这不是** `vertical-path.md` §2 步骤 8 的失败形态本身：它证明的是"绑定的执行 provider 起不来时 core 保留工作树与分支"，而"harness 起不来之后降级给人工"需要 core 的降级触发点咨询执行 provider（issue #171） |
+| 重启 | 同一份 Storage 上重建 core 与新的 provider 实例后，**执行上下文、运行记录和 providerRef** 逐字段不变；查询结果回填 `runExternalId`，拿同一引用可继续 `getRun`。binding id 必须由宿主稳定注入，不能依赖随机默认值 |
+| 接管重试 | 复用路径与创建路径报出的句柄规范化后**指向同一份工作树**，磁盘上按**总数**只有一份（主检出 + 1）。断言的是不变量，不是「两个字符串必然不同」——后者只在调用方传相对路径时成立，且会把 core 的句柄缺口（#206）钉成期望值 |
+
 ## 约定
 
 - 每个用例使用独立的临时目录/临时数据库，测试之间不共享状态。
