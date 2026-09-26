@@ -8,6 +8,7 @@ import { createFakeStorage, exportFakeStorageState } from '@harness-projects/pro
 import { createSqliteStorage, openDatabase } from '@harness-projects/storage-sqlite'
 import { STORAGE_SUITE_GROUPS, countSuiteCases, PRE_SPLIT_CASE_COUNT, ADDED_CASE_COUNT, INHERITED_CASE_COUNTS } from './suites/storage.js'
 import { storageIdentityFoundationSuite, storageIdentitySyncSuite } from './suites/storage-identity-membership.js'
+import { storageExecutionDivergenceSuite } from './suites/storage-execution.js'
 import { developmentBinding, fieldValue, membership, observation, WORKSPACE } from './suites/storage-fixtures.js'
 
 const workspace = (id, name) => ({ id, name, statusPolicy: 'provider_authoritative' })
@@ -31,8 +32,8 @@ function assemble(adapter, groups) {
   }
 }
 
-// SQLite 适配器：L4 / #163 交付地基组与身份地基组，L5 / #164 补同步组与身份同步组——执行组的方法仍显式抛出
-// `not implemented in L4: <method>`，注册进来只会得到"未实现"的假红。`restart` 是真的关句柄再打开同一个文件。
+// SQLite 适配器：L4 / #163 交付地基组与身份地基组，L5 / #164 补同步组与身份同步组，L6 / #120 补执行组（见下方
+// 执行组装配）。`restart` 是真的关句柄再打开同一个文件。
 const sqliteDir = mkdtempSync(join(tmpdir(), 'storage-sqlite-contract-'))
 let sqliteCount = 0
 after(() => rmSync(sqliteDir, { recursive: true, force: true }))
@@ -46,17 +47,30 @@ assemble(sqliteAdapter('SQLite Storage（地基组）', 'storage'), ['foundation
 assemble({ ...sqliteAdapter('SQLite Storage（同步组）', 'storage-sync'), inject: (storage) => failSqliteInsert(storage) }, ['sync', 'sharedSync'])
 assemble(sqliteAdapter('SQLite Storage（身份地基组）', 'storage-identity'), ['identityFoundation'])
 assemble(sqliteAdapter('SQLite Storage（身份同步组）', 'storage-identity-sync'), ['identitySync'])
+// L6 / #120：执行面落地之后，SQLite 侧也注册执行组——执行面的 10 个方法第一次在 SQLite 上跑契约。
+assemble(sqliteAdapter('SQLite Storage（执行组）', 'storage-execution'), ['execution'])
 
 /**
  * 守卫的**独立**期望：标签 → 它必须装配的组。它是守卫自己的一份陈述，不由 `assemble` 的实参推导——
  * 从实参推导的话，删掉装配调用会连期望一起删掉，守卫就永远绿（这正是本守卫要消灭的缺陷形态）。
  */
+// 依赖 core 的三格（执行上下文 → 仓库、执行上下文 → 工作项、关系端点）在替身上被接受、在 SQLite 上被外键拒绝。
+// 仓库一格是 core 尚无登记仓库的生产调用者（#188）；工作项与关系端点两格是 core 的生产路径写入悬空引用（#196 / #187）。
+// 三格都**必须是显式且被守卫的**：能力位按适配器声明，注册数由守卫独立写成 3。
+const fakeDivergence = { label: '内存 Storage 替身（分叉格）', makeStorage: () => createFakeStorage(), acceptsDanglingCoreParents: true }
+const sqliteDivergence = { ...sqliteAdapter('SQLite Storage（分叉格）', 'storage-divergence'), acceptsDanglingCoreParents: false }
+const DIVERGENCE_REGISTERED = [fakeDivergence, sqliteDivergence].map((adapter) => storageExecutionDivergenceSuite(adapter))
+test('执行组守卫：依赖 core 的三格分叉用例必须在两个适配器上都注册', () => {
+  assert.deepEqual(DIVERGENCE_REGISTERED, [3, 3], '两个适配器都必须注册全部三格：删掉一条显式分叉用例会在这里变红')
+})
+
 const EXPECTED_ASSEMBLY = {
   '内存 Storage 替身': ['foundation', 'sync', 'execution', 'identityFoundation', 'identitySync', 'sharedSync'],
   'SQLite Storage（地基组）': ['foundation'],
   'SQLite Storage（同步组）': ['sync', 'sharedSync'],
   'SQLite Storage（身份地基组）': ['identityFoundation'],
   'SQLite Storage（身份同步组）': ['identitySync'],
+  'SQLite Storage（执行组）': ['execution'],
 }
 
 // 切分守卫（两层）。**条数层**：三组用例数之和必须等于切分前的条数（再加切分后新增的那几条）——删掉任何一个
@@ -66,7 +80,7 @@ const EXPECTED_ASSEMBLY = {
 // `assert.deepEqual(a, b)` 改成 `assert.deepEqual(a, a)` 同样全绿。断言层因此比对三组文件里 `assert.` 语句的
 // **多重集**（去掉空白后的整行文本）：基线里任何一条文本在当前文件里少出现一次即失败。新增断言不受影响；
 // 要放宽必须**有意**从基线里删掉对应文本，并在提交信息里写明放宽了哪一条。
-const CASE_LEDGER = { foundation: { inherited: INHERITED_CASE_COUNTS.foundation, added: 6 }, sync: { inherited: INHERITED_CASE_COUNTS.sync, added: 0 }, execution: { inherited: INHERITED_CASE_COUNTS.execution, added: 0 } }
+const CASE_LEDGER = { foundation: { inherited: INHERITED_CASE_COUNTS.foundation, added: 6 }, sync: { inherited: INHERITED_CASE_COUNTS.sync, added: 0 }, execution: { inherited: INHERITED_CASE_COUNTS.execution, added: 10 } }
 const SUITE_FILES = { foundation: 'storage.js', sync: 'storage-sync.js', execution: 'storage-execution.js' }
 /** 切分完成时三组 `assert.` 语句的多重集基线（2026-09-24 实测）：元素是语句**去掉空白后的整行文本**，同一文本出现几次就写几项。 */
 const ASSERTION_BASELINE = {
@@ -113,6 +127,7 @@ test('storage 契约套件装配守卫：每个适配器实际注册的条数等
 // 判据写在 `packages/capabilities/src/storage.ts` 的执行段；这里把它钉成可失败的断言。
 test('内存 Storage 替身：Failed 与 Closed 不是 active，findActive 不返回它们', async () => {
   const storage = createFakeStorage()
+  await storage.putWorkspace(workspace('ws-terminal'))
   const context = (status) => ({
     id: 'ctx-terminal', workspaceId: 'ws-terminal', workItemId: 'entity-terminal', repositoryId: 'repo-1',
     status, branchExternalId: 'work/entity-terminal', worktreeExternalId: undefined, provisioningStartedAt: undefined,

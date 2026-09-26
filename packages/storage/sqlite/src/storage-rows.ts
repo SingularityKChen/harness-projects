@@ -1,6 +1,8 @@
-import type { CapabilityDomain, FieldValueRecord, MembershipRecord, ProviderBindingRecord, ReconcileCursorRecord, RepositoryRecord, SyncCursorRecord, SyncState, WorkspaceRecord } from '@harness-projects/capabilities'
-import type { EntityId, ExternalIdentity, ExternalIdentityId, IdentityRole, MembershipContentKind, NormalizedStatus, PlanningContent, ProviderBindingId,
-  RedactionReason, StatusPolicy, WorkspaceId, WorkspaceProjection } from '@harness-projects/domain'
+/** SQLite 行 → 端口记录的映射：列名是 snake_case，端口字段是 camelCase，本模块是两者之间唯一的翻译层（换列名只改这里，改一处）。 */
+import type { CapabilityDomain, ExecutionContextRecord, ExecutionRunRecord, FieldValueRecord, MembershipRecord, MutationAttemptRecord, ProviderBindingRecord, ReconcileCursorRecord, RepositoryRecord, SyncCursorRecord, SyncState, WorkspaceRecord } from '@harness-projects/capabilities'
+import type { EntityId, ExecutionContextId, ExecutionContextStatus, ExecutionRunId, ExecutionRunStatus, ExternalIdentity, ExternalIdentityId, IdentityRole, MembershipContentKind,
+  NormalizedStatus, PlanningContent, ProjectErrorCode, ProviderBindingId, RedactionReason, Relation, RelationClass, RelationSource, RelationState, RelationType, StatusPolicy,
+  WorkspaceId, WorkspaceProjection, WriteState } from '@harness-projects/domain'
 
 export type Row = Record<string, unknown>
 
@@ -10,7 +12,7 @@ const optionalText = (row: Row, column: string): string | undefined => (row[colu
 const flag = (row: Row, column: string): boolean => row[column] === 1
 export const toFlag = (value: boolean): number => (value ? 1 : 0)
 
-/** 单行读的统一形状：`get()` 的 `undefined` 原样传回（与端口一致），有行才走映射——两个面共用，不各写一份三目。 */
+/** 单行读的统一形状：`get()` 的 `undefined` 原样传回（与端口一致），有行才走映射——三个面共用，不各写一份三目。 */
 export const optional = <T>(row: unknown, map: (row: Row) => T): T | undefined => (row === undefined ? undefined : map(row as Row))
 
 export const rowToWorkspace = (row: Row): WorkspaceRecord => ({ id: text(row, 'id') as WorkspaceId,
@@ -45,6 +47,30 @@ export const rowToSyncCursor = (row: Row): SyncCursorRecord => ({ bindingId: tex
 export const rowToReconcileCursor = (row: Row): ReconcileCursorRecord => ({ workspaceId: text(row, 'workspace_id') as WorkspaceId,
   lastReconciledAt: text(row, 'last_reconciled_at') })
 
+// 执行面（Batch L6）的四张映射表。执行上下文的两个外部 id 与认领时刻可空（端口用 undefined），执行运行的
+// `updated_at` 是 NOT NULL；两张关系表的列名相同，读回形状只有一份（路由由 `state` 决定，见 storage-execution.ts）；
+// 写尝试的 `expected_source_version` / `error_code` 可空，端口同样用 undefined。
+export const rowToExecutionContext = (row: Row): ExecutionContextRecord => ({ id: text(row, 'id') as ExecutionContextId,
+  workspaceId: text(row, 'workspace_id') as WorkspaceId, workItemId: text(row, 'work_item_id') as EntityId,
+  repositoryId: text(row, 'repository_id') as EntityId, status: text(row, 'status') as ExecutionContextStatus,
+  branchExternalId: optionalText(row, 'branch_external_id'), worktreeExternalId: optionalText(row, 'worktree_external_id'),
+  provisioningStartedAt: optionalText(row, 'provisioning_started_at') })
+
+export const rowToExecutionRun = (row: Row): ExecutionRunRecord => ({ id: text(row, 'id') as ExecutionRunId,
+  workspaceId: text(row, 'workspace_id') as WorkspaceId, contextId: text(row, 'context_id') as ExecutionContextId,
+  status: text(row, 'status') as ExecutionRunStatus, updatedAt: text(row, 'updated_at') })
+
+export const rowToRelation = (row: Row): Relation => ({ from: text(row, 'from_entity_id') as EntityId,
+  to: text(row, 'to_entity_id') as EntityId, type: text(row, 'relation_type') as RelationType,
+  class: text(row, 'relation_class') as RelationClass, source: text(row, 'source') as RelationSource,
+  state: text(row, 'state') as RelationState })
+
+export const rowToMutationAttempt = (row: Row): MutationAttemptRecord => ({ id: text(row, 'id'),
+  workspaceId: text(row, 'workspace_id') as WorkspaceId, bindingId: text(row, 'binding_id') as ProviderBindingId,
+  commandName: text(row, 'command_name'), idempotencyKey: text(row, 'idempotency_key'), state: text(row, 'state') as WriteState,
+  expectedSourceVersion: optionalText(row, 'expected_source_version'), errorCode: optionalText(row, 'error_code') as ProjectErrorCode | undefined })
+
+/** 内容三态 → 列值，列顺序与 INSERT 的列清单一致；redacted 没有标题（表级 CHECK 保证）。 */
 export function contentColumns(content: PlanningContent): readonly [string, string | null, string | null, number | null, string | null] {
   if (content.contentKind === 'redacted') return [content.contentKind, null, null, null, content.reason]
   if (content.contentKind === 'change_request') return [content.contentKind, content.title, content.body, content.number, null]
