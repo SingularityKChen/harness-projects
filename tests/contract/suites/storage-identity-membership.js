@@ -1,6 +1,8 @@
 /**
- * 身份与成员关系面：L2（#27）的判别性断言（每条配过一次注入实验）。本合并点只有内存替身注册（`storage-contract.test.js`）；
- * 地基组在 L4 注册给 SQLite，同步组要等 L5/L6。本文件按端口面独立成文，L4 及以上原样继承。
+ * 身份与成员关系面：L2（#27）的判别性断言（每条配过一次注入实验）。本文件按端口面独立成文、L4 及以上原样继承；
+ * 两个适配器（内存替身与 SQLite）现在都注册两组（地基组在 L4、同步组在 L5）。两个 suite 接受 `register` 参数
+ * （默认 `test`），因此可以走 `storage-contract.test.js` 的 `assemble` 装配台账——直接注册会绕过"实际注册条数"
+ * 守卫，删掉某一组装配时套件静默少跑（第四轮评审 P2 的缺陷形态）。
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -21,10 +23,10 @@ const seedWorkspace = (storage, id = WORKSPACE) => storage.putWorkspace(workspac
 const seedEntity = (storage, id) => storage.putEntity({ id, kind: 'work_item' })
 
 /** 地基面：绑定、身份与投影。 */
-export function storageIdentityFoundationSuite(adapter) {
+export function storageIdentityFoundationSuite(adapter, register = test) {
   const { label, makeStorage } = adapter
 
-    test(`${label}：绑定锚点跨工作区共享，挂载规则由工作区与域决定`, async () => {
+    register(`${label}：绑定锚点跨工作区共享，挂载规则由工作区与域决定`, async () => {
       const storage = makeStorage()
       await seedWorkspace(storage)
       await storage.putProviderBinding(binding('binding-1'))
@@ -46,7 +48,7 @@ export function storageIdentityFoundationSuite(adapter) {
       assert.equal(bindings.find((b) => b.id === 'binding-4')?.isDefault, false, '禁用挂载不得被当成默认')
     })
 
-    test(`${label}：每个实体至多一个 primary 身份，同一个身份 id 不得换对象键`, async () => {
+    register(`${label}：每个实体至多一个 primary 身份，同一个身份 id 不得换对象键`, async () => {
       const storage = makeStorage()
       await seedWorkspace(storage)
       await storage.putProviderBinding(binding('binding-1'))
@@ -70,7 +72,7 @@ export function storageIdentityFoundationSuite(adapter) {
       assert.deepEqual(await storage.listIdentitiesForEntity('entity-2'), [], '覆盖不得把身份搬到另一个实体')
     })
 
-    test(`${label}：投影指向不存在的工作区或实体必须被拒绝且不留行`, async () => {
+    register(`${label}：投影指向不存在的工作区或实体必须被拒绝且不留行`, async () => {
       const storage = makeStorage()
       await seedWorkspace(storage)
       await assert.rejects(storage.putPlanningProjection(WORKSPACE, projection), '投影的实体必须先存在')
@@ -82,7 +84,7 @@ export function storageIdentityFoundationSuite(adapter) {
       assert.deepEqual((await storage.listPlanningProjections(WORKSPACE)).map((p) => p.entityId), ['entity-1'], '工作区与实体都存在时同一写入必须成功')
     })
 
-    test(`${label}：引用完整性——指向不存在的父行必须被拒绝且不留行`, async () => {
+    register(`${label}：引用完整性——指向不存在的父行必须被拒绝且不留行`, async () => {
       const storage = makeStorage()
       await seedWorkspace(storage)
       await seedEntity(storage, 'entity-1')
@@ -99,10 +101,10 @@ export function storageIdentityFoundationSuite(adapter) {
 }
 
 /** 同步面：成员关系与字段值。 */
-export function storageIdentitySyncSuite(adapter) {
+export function storageIdentitySyncSuite(adapter, register = test) {
   const { label, makeStorage } = adapter
 
-    test(`${label}：同一条连接被两个工作区挂载时，同一外部对象只有一条身份、两个工作区各有成员关系`, async () => {
+    register(`${label}：同一条连接被两个工作区挂载时，同一外部对象只有一条身份、两个工作区各有成员关系`, async () => {
       const storage = makeStorage()
       await seedWorkspace(storage)
       await seedWorkspace(storage, 'ws-2')
@@ -122,7 +124,7 @@ export function storageIdentitySyncSuite(adapter) {
       assert.deepEqual((await storage.listMemberships('ws-2', 'project-1')).map((m) => m.itemExternalId), ['item-2'], '成员关系是工作区作用域的：同一对象在两个工作区各有自己的挂载点')
     })
 
-    test(`${label}：project 是成员关系的定位分量——同工作区两个 project 的同内容各自成条`, async () => {
+    register(`${label}：project 是成员关系的定位分量——同工作区两个 project 的同内容各自成条`, async () => {
       const storage = makeStorage()
       await seedWorkspace(storage)
       await storage.putMembership(membership({ projectExternalId: 'project-1', itemExternalId: 'item-1' }))
@@ -133,7 +135,7 @@ export function storageIdentitySyncSuite(adapter) {
       assert.equal((await storage.getMembership(WORKSPACE, 'item-2'))?.projectExternalId, 'project-2')
     })
 
-    test(`${label}：listMemberships 按 itemExternalId 升序返回`, async () => {
+    register(`${label}：listMemberships 按 itemExternalId 升序返回`, async () => {
       const storage = makeStorage()
       await seedWorkspace(storage)
       await storage.putMembership(membership({ itemExternalId: 'item-b', contentExternalId: 'issue-b' }))
@@ -145,7 +147,7 @@ export function storageIdentitySyncSuite(adapter) {
       assert.deepEqual((await storage.listMemberships(WORKSPACE, 'project-1')).map((m) => m.itemExternalId), ['item-a', 'item-b', 'item-\uFF5E', 'item-\u{1F600}'], '码点序：U+FF5E 在增补平面字符之前（UTF-16 码元序会给出相反结果）')
     })
 
-    test(`${label}：成员关系被取代时旧条目名下的字段值一并删除`, async () => {
+    register(`${label}：成员关系被取代时旧条目名下的字段值一并删除`, async () => {
       const storage = makeStorage()
       await seedWorkspace(storage)
       await storage.putMembership(membership({ itemExternalId: 'item-1' }))
@@ -158,7 +160,7 @@ export function storageIdentitySyncSuite(adapter) {
       assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-1'), [], '字段值是被删除而不是读取时过滤：旧 item id 重新加入不得让旧值复活')
     })
 
-    test(`${label}：item 是字段值的定位分量——两个条目同一 projectFieldId 各自一条`, async () => {
+    register(`${label}：item 是字段值的定位分量——两个条目同一 projectFieldId 各自一条`, async () => {
       const storage = makeStorage()
       await seedWorkspace(storage)
       await storage.putMembership(membership({ itemExternalId: 'item-1' }))

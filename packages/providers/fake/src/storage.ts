@@ -253,19 +253,29 @@ export class MemoryStorage implements cap.Storage {
         if (committed === undefined || compareSourceVersion(item.observation.sourceVersion, committed.observation.sourceVersion) >= 0) committed = item
       }
       if (committed !== undefined && compareSourceVersion(observation.sourceVersion, committed.observation.sourceVersion) < 0) return false
+      // 绑定必须存在（与 SQLite 的 `sync_observation.binding_id` 外键同语义）；检查放在 INSERT 的位置，失败顺序一致。
+      if (!this.data.providerBindings.some((anchor) => anchor.id === observation.bindingId)) throw new Error('observation binding does not exist')
       this.data.observations.push(record)
       return true
     })
   }
   async getSyncCursor(bindingId: domain.ProviderBindingId, scopeKey: string): Promise<cap.SyncCursorRecord | undefined> { return this.data.cursors.find((c) => c.bindingId === bindingId && c.scopeKey === scopeKey) }
   async putSyncCursor(record: cap.SyncCursorRecord): Promise<void> {
-    return this.#mutate(() => upsert(this.data.cursors, record, (c) => c.bindingId === record.bindingId && c.scopeKey === record.scopeKey))
+    return this.#mutate(() => {
+      // 游标必须挂在存在的连接锚点上（与 SQLite 的 sync_cursor.binding_id 外键同语义，第四轮评审 R4-4）。
+      if (!this.data.providerBindings.some((anchor) => anchor.id === record.bindingId)) throw new Error('sync cursor binding does not exist')
+      upsert(this.data.cursors, record, (c) => c.bindingId === record.bindingId && c.scopeKey === record.scopeKey)
+    })
   }
   async getReconcileCursor(workspaceId: domain.WorkspaceId): Promise<cap.ReconcileCursorRecord | undefined> {
     return this.data.reconcileCursors.find((cursor) => cursor.workspaceId === workspaceId)
   }
   async putReconcileCursor(record: cap.ReconcileCursorRecord): Promise<void> {
-    return this.#mutate(() => upsert(this.data.reconcileCursors, record, (cursor) => cursor.workspaceId === record.workspaceId))
+    return this.#mutate(() => {
+      // 对账游标必须属于存在的工作区（与 SQLite 的 reconcile_cursor.workspace_id 外键同语义，第四轮评审 R4-4）。
+      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('reconcile cursor workspace does not exist')
+      upsert(this.data.reconcileCursors, record, (cursor) => cursor.workspaceId === record.workspaceId)
+    })
   }
   /** 写尝试以 (workspace, idempotencyKey) 唯一：同键重放是幂等覆盖（UPSERT），后写的记录取代先写的。 */
   async findMutationAttempt(workspaceId: domain.WorkspaceId, idempotencyKey: string): Promise<cap.MutationAttemptRecord | undefined> { return this.data.attempts.find((a) => a.workspaceId === workspaceId && a.idempotencyKey === idempotencyKey) }

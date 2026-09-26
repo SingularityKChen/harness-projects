@@ -1,16 +1,18 @@
-/** 同步组：成员关系 / 字段值 / 观察 / 游标，以及它们共有的引用完整性。L4 的 SQLite 实现尚未交付这一组（方法显式抛出 `not implemented in L4: <method>`），因此本组当前只在内存替身上运行。 */
+/** 同步组：成员关系 / 字段值 / 观察 / 游标，以及它们共有的引用完整性。两个实现（内存替身与 SQLite）都跑本组。 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { ObservationState } from '@harness-projects/capabilities'
 import { ExternalIdentityKind, MembershipContentKind } from '@harness-projects/domain'
-import { fieldValue, membership, observation, seedEntity, seedWorkspace, WORKSPACE, projection } from './storage-fixtures.js'
+import { binding, fieldValue, membership, observation, seedEntity, seedWorkspace, WORKSPACE, projection } from './storage-fixtures.js'
 
 export function storageSyncSuite(adapter, register = test) {
   const { label, makeStorage, restart } = adapter
 
   register(`${label}：重复或乱序观察返回 false，新版本应用且同版本整条替换`, async () => {
-    const storage = makeStorage()
+    // 前置状态只走端口（第四轮评审）：观察与游标引用 ws-1 / binding-1，不再靠装配处直插绕过外键。
+    const storage = makeStorage(); await seedWorkspace(storage, 'ws-other')
+    await seedWorkspace(storage); await storage.putProviderBinding(binding('binding-1'))
     const makeObservation = (key, version, payload) => observation(key, 'pending', {
       sourceVersion: version, payload, receivedTime: `${version}:00Z`,
     })
@@ -88,6 +90,7 @@ export function storageSyncSuite(adapter, register = test) {
   register(`${label}：定序取已提交版本的最大值，介于中间与更旧的版本都必须被拒绝（R4）`, async () => {
     const storage = makeStorage()
     await seedWorkspace(storage)
+    await storage.putProviderBinding(binding('binding-1'))
     const at = (key, version) => observation(key, ObservationState.Pending, { sourceVersion: version, receivedTime: version })
     assert.equal(await storage.recordObservation(at('k1', '2026-09-21T07:11:00Z')), true)
     assert.equal(await storage.recordObservation(at('k2', '2026-09-21T07:11:54Z')), true, '更新的 ISO 版本必须被接受')
@@ -101,6 +104,7 @@ export function storageSyncSuite(adapter, register = test) {
   register(`${label}：版本载体必须是可比的 ASCII，非 ASCII 在入口被拒绝（R4）`, async () => {
     const storage = makeStorage()
     await seedWorkspace(storage)
+    await storage.putProviderBinding(binding('binding-1'))
     const at = (key, version) => observation(key, ObservationState.Pending, { sourceVersion: version, receivedTime: '2026-09-21T07:11:00Z' })
     // 判别性（2026-09-24 评审）：JS 的 `<` 比较 UTF-16 码元，SQLite 的 BINARY 比较 UTF-8 字节，两者在
     // U+E000–U+FFFF 与增补平面之间结论相反。判据收敛到 capabilities 的 `compareSourceVersion`（码点序）之后，
@@ -112,6 +116,7 @@ export function storageSyncSuite(adapter, register = test) {
 
   register(`${label}：换一个实例能读到同一份内容（模拟重启）`, async () => {
     const storage = makeStorage(); await seedWorkspace(storage); await seedEntity(storage, 'entity-1')
+    await storage.putProviderBinding(binding('binding-1'))
     await storage.putPlanningProjection(WORKSPACE, projection)
     await storage.advanceRevision(WORKSPACE)
     await storage.recordObservation(observation('key-1'))
