@@ -164,3 +164,28 @@ test('非 main 且没有 origin/HEAD 的仓库上 Start Work 必须成立', asyn
   assert.equal(outcome.status, ExecutionContextStatus.Ready, 'core 的 baseRef 不得把「不知道」换成 main 而让供应必然失败')
   assert.equal(outcome.branchExternalId, 'work/wi-trunk')
 })
+
+test('已 ready 上下文的工作树或分支消失后不得继续报 confirmed', async (t) => {
+  const fixture = await fixtureFor(t)
+  const { context } = await coreContextFor(fixture)
+  const request = { workItemId: 'wi-stale', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'stale-1' }
+  const first = await startWork(context, request)
+  assert.equal(first.status, ExecutionContextStatus.Ready)
+  await fixture.run(['worktree', 'remove', '--force', first.worktreeExternalId])
+  await fixture.run(['branch', '-D', first.branchExternalId])
+
+  const replay = await startWork(context, { ...request, idempotencyKey: 'stale-2' })
+  assert.notEqual(replay.status, ExecutionContextStatus.Ready, '磁盘对象消失后不得继续报 ready')
+  assert.equal(replay.confirmed, false, '没有 provider read-back 不得报 confirmed')
+})
+
+test('无法确定仓库基线时不得由 core 猜测 main', async (t) => {
+  const fixture = await fixtureFor(t, 'alpha')
+  await fixture.run(['branch', 'beta'])
+  const request = { workItemId: 'wi-no-base', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'no-base-1' }
+  const outcome = await provisionGit((await coreContextFor(fixture)).context, request, namesFor(request), 'ctx-no-base')
+  assert.equal(outcome.ok, false)
+  assert.equal(outcome.report.error?.code, 'not_found')
+  assert.match(outcome.report.error?.message ?? '', /无法确定仓库基线/)
+  assert.deepEqual((await git(['for-each-ref', '--format=%(refname:short)', 'refs/heads'], fixture.repositoryPath)).trim().split('\n').sort(), ['alpha', 'beta'])
+})

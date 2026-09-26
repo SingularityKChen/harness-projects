@@ -49,6 +49,7 @@ export interface ProviderCreateBranchInput {
 export interface ProviderCreateWorktreeInput {
   readonly repository: ExternalObjectRef; readonly path: string; readonly branch: string
 }
+export interface ProviderGetWorktreeInput { readonly worktree: ExternalObjectRef }
 
 export interface ProviderCreateChangeRequestInput {
   readonly repository: ExternalObjectRef; readonly head: string; readonly base: string; readonly title: string; readonly body: string
@@ -67,6 +68,7 @@ export interface DevelopmentProvider {
   listChangeRequests(input: ProviderListChangeRequestsInput): Promise<ProviderResult<ProviderPage<ProviderChangeRequest>>>
   createBranch?(input: ProviderCreateBranchInput): Promise<ProviderResult<ProviderBranch>>
   createWorktree?(input: ProviderCreateWorktreeInput): Promise<ProviderResult<ProviderWorktree>>
+  getWorktree?(input: ProviderGetWorktreeInput): Promise<ProviderResult<ProviderWorktree>>
   createChangeRequest?(input: ProviderCreateChangeRequestInput): Promise<ProviderResult<ProviderChangeRequest>>
   removeWorktree?(input: ProviderRemoveWorktreeInput): Promise<ProviderResult<void>>
   reconcile?(scope: ProviderReconcileScope): AsyncIterable<ProviderObservation>

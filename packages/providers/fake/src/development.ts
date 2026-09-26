@@ -14,10 +14,10 @@ import { FakeGate, providerFail } from './gate.ts'
 import { byExternalId, itemKey, paginate, refOf } from './state.ts'
 
 export type FakeDevelopmentCapabilities = {
-  branchCreate: boolean; worktreeCreate: boolean; worktreeRemove: boolean; changeRequestCreate: boolean
+  branchCreate: boolean; worktreeCreate: boolean; worktreeRead: boolean; worktreeRemove: boolean; changeRequestCreate: boolean
 }
 const ALL_CAPABILITIES: FakeDevelopmentCapabilities = {
-  branchCreate: true, worktreeCreate: true, worktreeRemove: true, changeRequestCreate: true,
+  branchCreate: true, worktreeCreate: true, worktreeRead: true, worktreeRemove: true, changeRequestCreate: true,
 }
 
 /** 未启用的能力不出现在快照里：调用方据此提前得到 unavailable，而不是等一次失败才知道。 */
@@ -28,6 +28,7 @@ function declaredCapabilities(flags: FakeDevelopmentCapabilities): Partial<Recor
   }
   if (flags.branchCreate) map[cap.CapabilityKey.DevelopmentBranchCreate] = cap.AccessLevel.Available
   if (flags.worktreeCreate) map[cap.CapabilityKey.DevelopmentWorktreeCreate] = cap.AccessLevel.Available
+  if (flags.worktreeRead) map[cap.CapabilityKey.DevelopmentWorktreeRead] = cap.AccessLevel.Available
   // 移除是破坏性能力，单独声明：能创建不等于能移除（AGENTS.md §7 破坏性删除默认不做）。
   if (flags.worktreeRemove) map[cap.CapabilityKey.DevelopmentWorktreeRemove] = cap.AccessLevel.Available
   if (flags.changeRequestCreate) map[cap.CapabilityKey.DevelopmentChangeRequestCreate] = cap.AccessLevel.Available
@@ -171,6 +172,17 @@ export class FakeDevelopmentProvider implements cap.DevelopmentProvider {
     }
     this.state.worktrees.push(record)
     return cap.providerOk({ ref: record.ref, path: record.path, branch: record.branch })
+  }
+
+  async getWorktree(input: cap.ProviderGetWorktreeInput): Promise<cap.ProviderResult<cap.ProviderWorktree>> {
+    const blocked = this.gate.blocked<cap.ProviderWorktree>()
+    if (blocked !== undefined) return blocked
+    if (!this.flags.worktreeRead) return this.gate.unsupported(cap.CapabilityKey.DevelopmentWorktreeRead)
+    if (!this.owns(input.worktree)) return this.gate.notFound('工作树')
+    const found = this.state.worktrees.find((w) => itemKey(w.ref) === itemKey(input.worktree))
+    return found === undefined
+      ? this.gate.notFound('工作树')
+      : cap.providerOk({ ref: found.ref, path: found.path, branch: found.branch })
   }
 
   async removeWorktree(input: cap.ProviderRemoveWorktreeInput): Promise<cap.ProviderResult<void>> {
