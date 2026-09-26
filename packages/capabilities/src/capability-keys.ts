@@ -34,6 +34,7 @@ export const CapabilityKey = {
   DevelopmentRepositoryRead: 'development.repository.read',
   DevelopmentBranchCreate: 'development.branch.create',
   DevelopmentWorktreeCreate: 'development.worktree.create',
+  DevelopmentWorktreeRemove: 'development.worktree.remove',
   DevelopmentChangeRequestRead: 'development.change_request.read',
   DevelopmentChangeRequestCreate: 'development.change_request.create',
   DevelopmentReviewRead: 'development.review.read',
