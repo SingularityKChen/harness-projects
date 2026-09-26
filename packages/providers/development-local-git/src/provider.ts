@@ -17,7 +17,7 @@ export interface LocalGitRepositoryConfig {
 }
 
 export interface LocalGitCapabilityFlags {
-  readonly branchCreate?: boolean; readonly worktreeCreate?: boolean
+  readonly branchCreate?: boolean; readonly worktreeCreate?: boolean; readonly worktreeRead?: boolean
 }
 
 export interface LocalGitDevelopmentProviderOptions {
@@ -86,8 +86,9 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     this.derivedRoot = options.allowedRoot === undefined
     this.allowedRoot = options.allowedRoot ?? path.join(path.resolve(options.repository.path), '.worktrees')
     this.flags = {
-      branchCreate: options.capabilities?.branchCreate ?? true,
-      worktreeCreate: options.capabilities?.worktreeCreate ?? true,
+    branchCreate: options.capabilities?.branchCreate ?? true,
+    worktreeCreate: options.capabilities?.worktreeCreate ?? true,
+      worktreeRead: options.capabilities?.worktreeRead ?? true,
     }
     this.runGit = options.runGit ?? defaultGitRunner
     this.observedAt = options.observedAt ?? new Date().toISOString()
@@ -99,6 +100,7 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
       [cap.CapabilityKey.DevelopmentRepositoryRead]: available,
       ...(this.flags.branchCreate ? { [cap.CapabilityKey.DevelopmentBranchCreate]: available } : {}),
       ...(this.flags.worktreeCreate ? { [cap.CapabilityKey.DevelopmentWorktreeCreate]: available } : {}),
+      ...(this.flags.worktreeRead ? { [cap.CapabilityKey.DevelopmentWorktreeRead]: available } : {}),
     }
     return Promise.resolve({ bindingId: this.bindingId, capability, permission: capability, observedAt: this.observedAt })
   }
@@ -249,6 +251,18 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
       return this.fail(ProviderErrorCode.AmbiguousResult, `工作树写入结果不确定：登记里没有 ${target}，请 reconcile 后再决定是否重试`)
     }
     return cap.providerOk({ ref: this.refOf('worktree', target), path: target, branch: input.branch })
+  }
+
+  async getWorktree(input: cap.ProviderGetWorktreeInput): Promise<cap.ProviderResult<cap.ProviderWorktree>> {
+    if (!this.flags.worktreeRead) return this.notSupported(cap.CapabilityKey.DevelopmentWorktreeRead)
+    if (input.worktree.bindingId !== this.bindingId || input.worktree.objectKind !== 'worktree') return this.notFound('工作树')
+    const resolved = await this.resolveTarget(input.worktree.externalId)
+    if (!resolved.ok) return this.invalidInput(resolved.message)
+    const listed = await this.listWorktrees()
+    if (listed.error !== undefined) return cap.providerErr(listed.error)
+    const target = listed.records.find((record) => record.path === resolved.path || record.path === input.worktree.externalId)
+    if (target === undefined || target.prunable || !(await occupied(target.path)) || target.branch === undefined) return this.notFound('工作树')
+    return cap.providerOk({ ref: input.worktree, path: target.path, branch: target.branch.replace(/^refs\/heads\//, '') })
   }
 
   private async git(args: readonly string[]): Promise<GitInvocation> {
