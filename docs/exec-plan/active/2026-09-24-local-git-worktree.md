@@ -389,6 +389,7 @@ core 的 `baseRef` 回落到 `main` 只在这条链失败时才可能触发。
       `rev-parse` 加 `--end-of-options`；README 的 #207 一节移交 #209。逐条处置见「评审响应（第五轮）」。
 - [x] 2026-09-26 系统级根因分析：把五轮 9 条 P1 归成三族，指出**两条的根在 core 而不是本层**，
       并据此拒绝在 provider 侧继续加补偿（R1/R2/R3，见「系统级根因分析」）。新增 ADR-0007 与 #212 / #213 / #214。
+- [x] 2026-09-26 W2 路径信任边界修复：新增 `repo/alias -> allowedRoot` + `alias/new` 零 Git 调用反例；删除 ancestor 守卫时 23 / 24，恢复 `firstLink` ancestor 自身 `lstat` 后 24 / 24。
 
 ## Surprises & Discoveries
 
@@ -492,6 +493,10 @@ core 的 `baseRef` 回落到 `main` 只在这条链失败时才可能触发。
     `.message` 被读，`reason` 与那个五元 union 零消费。按「先找 dead code」应当删掉，但它只有 1 行，
     且是结构化诊断词汇，删除会缩掉后续消费者可用的信息面；保留并在 `Decision Log` D31 之外如实登记，
     不作为压缩预算的手段。
+19. **目标 ancestor 自身符号链接会被 `firstLink(target.ancestor, candidate)` 跳过**：仓库内 `alias` 指向仓库外
+    `allowedRoot` 时，`alias/new` 的最近存在祖先就是链接本身；旧实现从其子项开始扫描，导致解析成功并允许 Git 写入。
+    先以变异实验确认新增测试在无守卫时稳定失败，再在 ancestor 上执行 `lstat`，恢复后 provider 在任何 Git argv 前返回
+    `invalid_input`，且 runner 调用数为零。
 
 ## Decision Log
 
@@ -524,6 +529,7 @@ core 的 `baseRef` 回落到 `main` 只在这条链失败时才可能触发。
 | D29 | `rev-parse` 加 `--end-of-options`，**不**另加「`fromRef` 以 `-` 开头即 `invalid_input`」的校验 | git 官方对不可信名字的推荐写法；一个机制而不是两套。判别性证据钉 argv 形状（当前不可利用，`^{commit}` 后缀偶然挡住）。调研另确认 `git worktree add` 不接受该选项，故那条命令的防线是绝对路径而不是标志 | 2026-09-26 / agent（第六轮响应） |
 | D30 | **驳回**「在 provider 的起点缺失消息里加补救提示」，改在 core 侧不编造基线 | `main` 是 core 的 `baseRef()` 的 `?? 'main'`；provider 判不了这个名字的来源，加提示等于把 core 的兜底写进 provider 的措辞——A/B/C 三族的共同形态。provider 保留它真正的义务：点名缺失的 ref | 2026-09-26 / agent（第六轮响应，**需要人类确认**是否接受该驳回） |
 | D31 | 跨层根因写进 **ADR-0007**，三条根因各开一个 issue（#212 / #213 / #214），不在本层加补偿 | 九条 P1 里两条的根在 core、一条的上游在 core；本层已有的补偿（`reuseBlockedBy`、基线推断链）今天仍承重，保留但不再新增。ADR 收录标准是「被推翻会让已写好的接口重做」 | 2026-09-26 / agent（第六轮响应） |
+| D32 | W2 在 `firstLink` 入口检查已存在 ancestor 自身；不迁移默认 allowedRoot | 当前 P1 的根因是 `target.ancestor` 为符号链接时从子项开始扫描；ancestor `lstat` 是最小机制修复，默认根迁移属于 #214 后续产品决策 | 2026-09-26 / W2 执行者 |
 
 ## Idempotence and Recovery
 
@@ -946,3 +952,6 @@ argv-only 源码扫描）拆成叠加 PR——它是一个结构类约束，与�
   §9 判据换成不变量并删掉 `rootWithin`；`rev-parse` 加 `--end-of-options`；README 的 #207 一节移交 #209；
   Purpose / AC5 / AC12 / D2 / 遗留问题 / issue 偏差六处就地标注 Superseded；新增 D27–D31 与 ADR-0007，
   并开 #212 / #213 / #214。代码 1014 / 1000（超出 14，来源与可选拆法见「评审响应（第五轮）」的体量小节）。
+- 2026-09-26：**Batch 1 W2 路径信任边界**。在本 PR worktree 先写 `alias/new` 反例；删除 ancestor `lstat` 守卫时
+  聚焦集成命令为 23 pass / 1 fail，恢复后为 24 pass / 0 fail。实现仅改 `paths.ts` 的 `firstLink` ancestor 检查与集成测试，
+  未迁移默认根、未修改 #209/#161 文件；完整门禁结果以本批次提交后的命令回读为准。

@@ -50,6 +50,8 @@ async function deepestExisting(target: string): Promise<string | undefined> {
  *  返回 undefined。悬空链接对 `stat` 不可见（ENOENT），只有逐分量 `lstat` 能看到。同一处判定服务两件事：
  *  目标的尾部不得是悬空链接（#137 验收 1），允许根在检出内的分量不得是任何链接（第五轮 P1）。 */
 async function firstLink(ancestor: string, target: string): Promise<string | undefined> {
+  const ancestorInfo = await lstat(ancestor).catch(() => undefined)
+  if (ancestorInfo?.isSymbolicLink()) return ancestor
   const relative = path.relative(ancestor, target)
   if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined
   let current = ancestor

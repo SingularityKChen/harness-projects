@@ -68,6 +68,27 @@ test('路径安全：越界、含 .. 与符号链接逃逸都在任何 Git 命�
   assert.equal((await worktreePaths(fixture)).length, 1, '被拒的路径不得留下任何工作树')
 })
 
+test('路径安全：已存在的目标祖先是符号链接时，带新尾部的路径也在任何 Git 命令之前被拒', async (t) => {
+  const fixture = await fixtureFor(t)
+  // 允许根在仓库外；仓库内容把 alias 指向该根时，alias/new 仍不得借由 realpath 落入已批准根。
+  await symlink(fixture.root, path.join(fixture.repositoryPath, 'alias'))
+  const recorder = recordingRunner()
+  const provider = providerFor(fixture, { runGit: recorder.runGit })
+  const target = path.join('alias', 'new')
+
+  const resolved = await resolveWorktreePath(target, {
+    repositoryPath: fixture.repositoryPath,
+    allowedRoot: fixture.root,
+  })
+  assert.equal(resolved.ok, false, '已存在的目标祖先是符号链接时必须拒绝')
+
+  const result = await provider.createWorktree({ repository: repositoryRef, path: target, branch: 'main' })
+  assert.deepEqual(recorder.calls, [], '目标祖先符号链接必须在任何 Git 命令之前被拒')
+  assert.equal(result.ok, false)
+  assert.equal(result.error.code, 'invalid_input')
+  assert.equal(result.error.retryable, false)
+})
+
 test('幂等：同一路径第二次创建报 conflict；登记在册但不可复用的形态都硬失败', async (t) => {
   const fixture = await fixtureFor(t)
   const provider = providerFor(fixture)
