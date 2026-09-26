@@ -955,3 +955,8 @@ argv-only 源码扫描）拆成叠加 PR——它是一个结构类约束，与�
 - 2026-09-26：**Batch 1 W2 路径信任边界**。在本 PR worktree 先写 `alias/new` 反例；删除 ancestor `lstat` 守卫时
   聚焦集成命令为 23 pass / 1 fail，恢复后为 24 pass / 0 fail。实现仅改 `paths.ts` 的 `firstLink` ancestor 检查与集成测试，
   未迁移默认根、未修改 #209/#161 文件；完整门禁结果以本批次提交后的命令回读为准。
++## Root-cause repair batch (2026-09-26)
+
+- W1/W3 implementation is carried by commit `c989be9` after rebasing onto #160 head `7160718`.
+- Development worktree read capability now gates conflict reuse and ready-state revalidation; unknown repository base returns a structured failure instead of guessing `main`.
+- Focused evidence on this head: typecheck pass; Development contract 42/42; core provisioning 8/8. The remaining relation target identity assertion is tracked as P2 and is not claimed complete.
