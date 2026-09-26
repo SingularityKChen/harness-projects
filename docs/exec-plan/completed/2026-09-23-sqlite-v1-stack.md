@@ -1,6 +1,6 @@
 # SQLite v1 数据模型栈 ExecPlan
 
-> 状态：Active
+> 状态：Completed（2026-09-26：六层随 #121 → #175 以 rebase merge 合入 `main` 后归档，交付状态以 D2 的回读命令为准；v1 是否冻结、#28 / #5 的关闭归属、裁决 R4 / R8 偏离的采纳仍待人类伙伴决定）
 > 创建：2026-09-23
 > 范围：把 Gate E1 裁决的 revise 清单（R1–R8）落成 SQLite 的表与约束，并用一个真实的 `Storage` 实现验证这套模型可用。本轮推进冻结条件；不做真实 provider 切片。
 > 上游输入：`docs/architecture/gate-e1-ruling.md`（PR #108）、`docs/architecture/release-gates.md` §2、`docs/project-management/merge-queue.md` §4、`docs/development/workflow.md`、`tests/integration/README.md`；issue #4 #5 #27 #28 #119 #120
@@ -242,12 +242,12 @@ L1 的 base 就是 `main`，因此它相对 `origin/main` 报数；L2–L6 一�
 
 ### 收尾 · 文档、债务与交付
 
-- [ ] 在 `Outcomes & Retrospective` 里给出**表 → 端口方法**映射，逐张核对 002/003 建出的表都有写者与读者（D6 的验收项）；确实没有消费者的表要么补上方法，要么写明为什么它可以只被库层面用例证明
-- [ ] 更新 `docs/README.md` 的 Active 计划索引与 `docs/architecture/README.md` 的文档清单（后者由 L1 完成，若 L1 已改则此处只回读）
-- [ ] 六层逐层 `rebase --onto` 到新父并复验（`git rebase --onto <新父> <旧父>`），每层跑自己的验证命令
-- [ ] 每层整理提交（折叠 fixup、删临时调试），建 backup ref 后精确 `--force-with-lease` 推送
-- [ ] 回读每层 head、base、checks、`closingIssuesReferences`，以及被引用 issue 的 `closedByPullRequestsReferences`
-- [ ] 请求人类评审；不自行合并
+- [x] 在 `Outcomes & Retrospective` 里给出**表 → 端口方法**映射，逐张核对 002/003 建出的表都有写者与读者（D6 的验收项）；确实没有消费者的表要么补上方法，要么写明为什么它可以只被库层面用例证明（2026-09-26：见 `Outcomes & Retrospective`「目标表 → 端口方法映射」）
+- [x] 更新 `docs/README.md` 的 Active 计划索引与 `docs/architecture/README.md` 的文档清单（后者由 L1 完成，若 L1 已改则此处只回读）（2026-09-26：本计划随栈顶 #175 移入 `docs/README.md` 的 Completed）
+- [x] 六层逐层 `rebase --onto` 到新父并复验（`git rebase --onto <新父> <旧父>`），每层跑自己的验证命令（每轮级联逐层执行，见各层计划的 `Progress`）
+- [x] 每层整理提交（折叠 fixup、删临时调试），建 backup ref 后精确 `--force-with-lease` 推送（第五、六轮按可独立回滚的交付物整理，见 `docs/review/2026-09-26-*` 记录）
+- [x] 回读每层 head、base、checks、`closingIssuesReferences`，以及被引用 issue 的 `closedByPullRequestsReferences`（合并前逐层回读，命令见 D2）
+- [x] 请求人类评审；不自行合并（合并由人类伙伴在第五、六轮评审任务中明确授权：无 P0 / P1 代码问题时修复后 rebase merge）
 
 ## Validation and Acceptance
 
@@ -276,9 +276,9 @@ L1 的 base 就是 `main`，因此它相对 `origin/main` 报数；L2–L6 一�
 - [x] (2026-09-23) 取证：读裁决、存储现状、端口面、契约套件、沙箱与看板
 - [x] (2026-09-23) 栈设计定稿：栈序、文件所有权、关键路径（本文件）；原定四层，后按"验收单元必须等于交付单元"拆成六层（见 D2 与 Batch L4–L6）
 - [x] (2026-09-23) Batch L1 · #119 不确定创建的证据与裁决订正（四条实验：重复创建计数 **2**（平台不去重）、对账唯一命中且搜索索引可见延迟 ≈9 s、平台显式拒绝后同形对账为空、draft 的对账作用域只有 project 条目连接；获知方式四个标注与 14 条未证明项逐条点名。**订正（2026-09-24 评审响应）**：原写"状态取值集合 = 4 个"把结果轴与获知方式轴混成一个集合；现按 §4 R8 行改成「类型取 `WriteState`、四个标注是获知方式」，`pending` 不再是被合并掉的候选；见 `docs/architecture/gate-e1-uncertain-create.md` §2/§3）
-- [ ] Batch L2–L6：**本文件不断言它们的交付状态**（`AGENTS.md` §6：一个 PR 要能独立验收、合并、回滚，而本文件随 L1 进入 `main`）。逐层状态与逐层结论回读：`gh pr list -R SingularityKChen/harness-projects --head <分支> --state all --json number,baseRefName,headRefOid,state`，加上该层自己计划里的验证命令。分支名见 D2 的栈序表。
+- [x] Batch L2–L6：**本文件不断言它们的交付状态**（`AGENTS.md` §6：一个 PR 要能独立验收、合并、回滚，而本文件随 L1 进入 `main`）。逐层状态与逐层结论回读：`gh pr list -R SingularityKChen/harness-projects --head <分支> --state all --json number,baseRefName,headRefOid,state`，加上该层自己计划里的验证命令。分支名见 D2 的栈序表。（2026-09-26：交付状态仍以 D2 的回读命令为准，本计划随栈顶 #175 归档）
 - [x] (2026-09-23/24) 收口与两轮评审响应：回填栈序表与验收表；撤掉栈底对 L2–L6 的交付断言与裁决里的上层注记；R8 收敛到两轴；栈序表与验收表改成回读命令。取证：逐层 `gh pr list -R SingularityKChen/harness-projects --head <分支> --state all --json number,baseRefName,headRefOid`
-- [ ] 收尾 · 债务登记、栈内 rebase、整理提交、回读、请求评审
+- [x] 收尾 · 债务登记、栈内 rebase、整理提交、回读、请求评审（2026-09-26 完成，遗留见各层计划的「遗留问题与技术债务」与 #187 / #188 / #189 / #196 / #201–#204）
 
 ## Surprises & Discoveries
 

@@ -3,7 +3,7 @@
 > 状态：Completed（2026-09-26 随 #121 合并归档；#119 保持开启，验收 1 待人类伙伴在补观测与收窄验收之间决定）
 > 创建：2026-09-23
 > 范围：栈内 L1（issue #119）。为 issue #4 的行为 6「结果不确定的外部创建先对账再重试，且不盲目重试」补上它缺的那一半证据，并据此给出 `pending_external_write` 的**结果轴与获知方式标注**；只改文档与一个契约守卫，不写产品代码。**关联**：`Refs #119`（不是 `Closes`）——验收 1 要求每条观测带墙钟与确切命令，本层记录在 3(a) 与标签回读两处没有逐条记录；补观测要重跑沙箱实验、收窄验收属人类决定，见 `Decision Log` 与 `Progress`。`Closes` 的唯一权威是 `gh pr view 121 -R SingularityKChen/harness-projects --json closingIssuesReferences`。
-> 上游输入：`docs/exec-plan/active/2026-09-23-sqlite-v1-stack.md`（控制计划，本层是它的 Batch L1）、`docs/architecture/gate-e1-ruling.md`（裁决，§2.6 与 §4 的 R8）、`docs/architecture/gate-e1-sandbox.md`（沙箱定义与九字段记录模板）、`docs/architecture/gate-e1-write-and-events.md`（E1-3 记录，本层的直接上游）、`PLANS.md`
+> 上游输入：`docs/exec-plan/completed/2026-09-23-sqlite-v1-stack.md`（控制计划，本层是它的 Batch L1）、`docs/architecture/gate-e1-ruling.md`（裁决，§2.6 与 §4 的 R8）、`docs/architecture/gate-e1-sandbox.md`（沙箱定义与九字段记录模板）、`docs/architecture/gate-e1-write-and-events.md`（E1-3 记录，本层的直接上游）、`PLANS.md`
 
 ## Purpose / Big Picture
 
@@ -61,7 +61,7 @@
 | `docs/architecture/gate-e1-ruling.md` | 本层只改 §2.6 的裁决与 §4 的 R8 行 |
 | `docs/architecture/gate-e1-write-and-events.md` | 上一批的记录文件，本层照它的写法与详细程度写；它的实验 3 是本层的直接上游 |
 | `docs/README.md` | 只在 Active 表加本层计划一行 |
-| `docs/exec-plan/active/2026-09-23-sqlite-v1-stack.md` | 控制计划；本层按 `Global Constraints` 的文件集合改它的 Batch L1 步骤、`Progress`、验收表第 1 项与栈级收口段落 |
+| `docs/exec-plan/completed/2026-09-23-sqlite-v1-stack.md` | 控制计划；本层按 `Global Constraints` 的文件集合改它的 Batch L1 步骤、`Progress`、验收表第 1 项与栈级收口段落 |
 
 ## Design / Spec
 
@@ -117,7 +117,7 @@ draft 没有仓库侧列表：它不是 issue，`gh issue list` 与 `gh search i
 
 ## Global Constraints
 
-- **文件所有权（本层只改这些）**：`docs/exec-plan/completed/2026-09-23-e1-uncertain-create.md`（本文件）、`docs/architecture/gate-e1-uncertain-create.md`、`docs/architecture/gate-e1-sandbox.md`（§2.3 夹具表、§3 创建步骤、§6 记录模板）、`docs/architecture/gate-e1-ruling.md`（§2.6 与 §4 的 R8 行，外加 §2 汇总表第 6 行、§3 第 1 项、§8 第 1 项这三处**同一事实的派生表述**，理由见 `Decision Log`）、`docs/README.md`、`docs/exec-plan/active/2026-09-23-sqlite-v1-stack.md`（Batch L1 的步骤与验证、`Progress`、验收表第 1 项）、`docs/exec-plan/completed/2026-09-21-gate-e1-ruling.md`（`Outcomes` 的两处）、`docs/adr/ADR-0004-unknown-external-create-is-product-visible.md`、`docs/adr/README.md`、`docs/project-management/merge-queue.md`（§4.4 的自动 retarget 实测、§4.5 的栈链接实测、§4.6 的 `size` 基线实测、§7 的两处）、`docs/architecture/README.md`（本层记录进索引）、`docs/review/2026-09-24-pr-121-mmp-round3.md`（本层评审记录的归档）、`tests/contract/e1-evidence-consistency.test.js`、`tests/contract/plan-facts-consistency.test.js`。**2026-09-24 评审订正**：这份清单是「本层改了哪些文件」的**唯一权威**（控制计划的所有权表已删、改口指向这里），因此必须与实际 diff 逐一相等；上一版漏了 `docs/architecture/README.md` 与评审记录，并把 `merge-queue.md` 的改动误写成「§7 的两处」。
+- **文件所有权（本层只改这些）**：`docs/exec-plan/completed/2026-09-23-e1-uncertain-create.md`（本文件）、`docs/architecture/gate-e1-uncertain-create.md`、`docs/architecture/gate-e1-sandbox.md`（§2.3 夹具表、§3 创建步骤、§6 记录模板）、`docs/architecture/gate-e1-ruling.md`（§2.6 与 §4 的 R8 行，外加 §2 汇总表第 6 行、§3 第 1 项、§8 第 1 项这三处**同一事实的派生表述**，理由见 `Decision Log`）、`docs/README.md`、`docs/exec-plan/completed/2026-09-23-sqlite-v1-stack.md`（Batch L1 的步骤与验证、`Progress`、验收表第 1 项）、`docs/exec-plan/completed/2026-09-21-gate-e1-ruling.md`（`Outcomes` 的两处）、`docs/adr/ADR-0004-unknown-external-create-is-product-visible.md`、`docs/adr/README.md`、`docs/project-management/merge-queue.md`（§4.4 的自动 retarget 实测、§4.5 的栈链接实测、§4.6 的 `size` 基线实测、§7 的两处）、`docs/architecture/README.md`（本层记录进索引）、`docs/review/2026-09-24-pr-121-mmp-round3.md`（本层评审记录的归档）、`tests/contract/e1-evidence-consistency.test.js`、`tests/contract/plan-facts-consistency.test.js`。**2026-09-24 评审订正**：这份清单是「本层改了哪些文件」的**唯一权威**（控制计划的所有权表已删、改口指向这里），因此必须与实际 diff 逐一相等；上一版漏了 `docs/architecture/README.md` 与评审记录，并把 `merge-queue.md` 的改动误写成「§7 的两处」。
 - **只读**：`packages/**`、`docs/architecture/gate-e1-content-identities.md`、`...-membership-and-draft.md`、`...-write-and-events.md`、其它 `docs/architecture/**`、其它工作树。
 - **2026-09-23 复核轮由人类伙伴显式扩大授权**：上面从控制计划起的三份文档、`docs/adr/**`、`docs/project-management/**` 与 `tests/contract/e1-evidence-consistency.test.js` 原先都在"只读"里；第一轮复核的发现要求改的正是这些文件（同一事实的全部落点、ADR 的证据边界、契约测试的粒度），因此按用户指令把它们移入所有权。`packages/**` 的禁令不变。
 - 沙箱写入只落在 `$E1_OWNER/$E1_REPO` 与本层新建的 draft 条目上；不写 `SingularityKChen/harness-projects` 及其看板。
@@ -132,7 +132,7 @@ draft 没有仓库侧列表：它不是 issue，`gh issue list` 与 `gh search i
 
 **最小闭环**：行为 6 从 `inconclusive` 变成有证据的裁决，R8 的状态集有出处或明确保持开口。
 
-**涉及文件**：本文件、`docs/architecture/gate-e1-uncertain-create.md`、`docs/architecture/gate-e1-sandbox.md`、`docs/architecture/gate-e1-ruling.md`、`docs/README.md`、`docs/exec-plan/active/2026-09-23-sqlite-v1-stack.md`
+**涉及文件**：本文件、`docs/architecture/gate-e1-uncertain-create.md`、`docs/architecture/gate-e1-sandbox.md`、`docs/architecture/gate-e1-ruling.md`、`docs/README.md`、`docs/exec-plan/completed/2026-09-23-sqlite-v1-stack.md`
 
 **步骤**：
 
@@ -252,7 +252,7 @@ node --test tests/contract/e1-evidence-consistency.test.js   # 本层的记录�
 - [x] (2026-09-23) 实验 ①–④、记录、三处引用与验证全部完成。体量是易失值，回读命令：`node scripts/rule-checks.mjs size origin/main`
 - [x] (2026-09-23) 复核轮（人类伙伴授权的文件集合）：把 `pending` 合并进 `uncertain`（4 个取值）并改到同一事实的全部落点；订正实验 4 的「规划字段值」计数 0 → 1（含实验 1–4 的逐条复核）；补 §3 的三条证据边界；收宽 `failed` 的定义；补观测命令与时间；登记仓库级对象 `e1-label-that-does-not-exist`；订正 ADR-0004 的证据边界与 5 处「行为 6 仍 inconclusive」的表述；契约测试改成每节实验粒度并把「0 个用户可写字段值」写成可解析形式（两次变异实验：计数改 99 → 变红、删掉一节的行 → 变红，还原后 3 pass / 0 fail）
 - [x] (2026-09-23) 第三轮（评审 9 条）：契约测试的每节守卫改为标题级别不敏感 + 级别断言、新增架构索引守卫；记录 §2 补产品可见性条件；本文件登记豁免的收口条件；控制计划按实测订正栈底与体量口径；`merge-queue.md` §4.6 的 `size` 表按 head 重测并订正方向、§4.5/§4.4 补自动 retarget 实测
-- [x] (2026-09-24) **评审响应轮（11 条，按根因修）**：① 撤掉栈底对 L2–L6 的交付断言与裁决里 R4/L5、R8/L3 两处上层注记——栈必须自下而上合并，本层只能写本层合并时为真的事实；② R8 从「一条混合集合」改成**两条正交轴**（结果轴取 `packages/domain` 的 `WriteState`，L1 的四个取值降为获知方式标注并改名 `failed`→`rejected`、`uncertain`→`unresolved`），修掉「R8 同一行两套答案」与「`pending` 不可判别」的伪约束；③ 控制计划的栈序表与验收表从「写死的 SHA 与逐层结论」改成「回读命令 + 期望」；④ 证据守卫从「宽松正则发现 + 跨文档下限」改成**逐文档声明式清单**（改名 / 降级 / 升级 / 删节 / 加节 / 未登记新文档全部响亮失败，六个变异逐个实测红绿）；⑤ 记录 §3 补登三条漏项（结果未知且对象不存在、GraphQL `errors[]` 协议、`Status = Todo` 的创建归因），并把搜索路径从对账证据里剔除；⑥ `merge-queue.md` §4.6 那一格的 exit 码按脚本逻辑订正为 0；⑦ 行为 6 的改判行补「采纳权在人类伙伴」。逐条处置见 **PR #122** 携带的 `docs/exec-plan/active/2026-09-24-review-root-cause-convergence.md`（该文件随 L2 合入，因此本层只写 PR 引用、不写路径——`AGENTS.md` §3 要求 `docs/` 自包含）
+- [x] (2026-09-24) **评审响应轮（11 条，按根因修）**：① 撤掉栈底对 L2–L6 的交付断言与裁决里 R4/L5、R8/L3 两处上层注记——栈必须自下而上合并，本层只能写本层合并时为真的事实；② R8 从「一条混合集合」改成**两条正交轴**（结果轴取 `packages/domain` 的 `WriteState`，L1 的四个取值降为获知方式标注并改名 `failed`→`rejected`、`uncertain`→`unresolved`），修掉「R8 同一行两套答案」与「`pending` 不可判别」的伪约束；③ 控制计划的栈序表与验收表从「写死的 SHA 与逐层结论」改成「回读命令 + 期望」；④ 证据守卫从「宽松正则发现 + 跨文档下限」改成**逐文档声明式清单**（改名 / 降级 / 升级 / 删节 / 加节 / 未登记新文档全部响亮失败，六个变异逐个实测红绿）；⑤ 记录 §3 补登三条漏项（结果未知且对象不存在、GraphQL `errors[]` 协议、`Status = Todo` 的创建归因），并把搜索路径从对账证据里剔除；⑥ `merge-queue.md` §4.6 那一格的 exit 码按脚本逻辑订正为 0；⑦ 行为 6 的改判行补「采纳权在人类伙伴」。逐条处置见 **PR #122** 携带的 `docs/exec-plan/completed/2026-09-24-review-root-cause-convergence.md`（该文件随 L2 合入，因此本层只写 PR 引用、不写路径——`AGENTS.md` §3 要求 `docs/` 自包含）
 
 - [x] (2026-09-24) **第四轮评审响应（15 条）**：① 控制计划删除属于上层的副本（空节、空表、「目标表 → 端口方法映射」），`Closes` 列与六个 Batch 标题不再写死关闭关系；② 本文件与本层记录里指向 L2 才有的文件的两处指针改成 PR 引用；③ 证据指针从"提交正文"改成 PR 描述与 `Outcomes`（重组后提交正文为空）；④ 不可解析的 SHA 与分支名基线按 `PLANS.md` §4 就地标注或改成回读命令；⑤ 验收 1 的墙钟缺口如实登记，两条出路写进 `Decision Log`（人类伙伴决定）；⑥ 文件所有权清单补齐到与实际 diff 逐一相等；⑦ 证据守卫的两个逃逸收口（引号 / `export` / 缩进绕过的行首绑定、沙箱绑定进 `localNamesById`）。逐条判定见 **PR #122** 携带的 `2026-09-24-review-root-cause-convergence.md`。
 
