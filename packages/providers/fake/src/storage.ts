@@ -42,7 +42,8 @@ function upsert<T>(list: T[], record: T, match: (item: T) => boolean): void {
   if (index === -1) list.push(record); else list[index] = record
 }
 function toBindingRecord(mount: FakeWorkspaceBindingMount, anchors: readonly FakeProviderBindingAnchor[]): cap.ProviderBindingRecord {
-  const anchor = anchors.find((candidate) => candidate.id === mount.bindingId); if (anchor === undefined) throw new Error('workspace binding has no connection anchor')
+  const anchor = anchors.find((candidate) => candidate.id === mount.bindingId)
+  if (anchor === undefined) throw new Error('workspace binding has no connection anchor')
   return { id: mount.bindingId, workspaceId: mount.workspaceId, domain: mount.domain,
     implementationKey: anchor.implementationKey, enabled: mount.enabled, isDefault: mount.isDefault }
 }
@@ -56,6 +57,12 @@ function byItemExternalId(left: cap.MembershipRecord, right: cap.MembershipRecor
   for (let i = 0; i < a.length && i < b.length; i++) if (a[i] !== b[i]) return (a[i] ?? 0) - (b[i] ?? 0)
   return a.length - b.length
 }
+/** 状态 / 来源枚举：替身侧按 domain 的取值拒绝未知值，与 003 各表的 CHECK 同语义（枚举只有 domain 一份事实源）。 */
+const CONTEXT_STATUSES: readonly string[] = Object.values(domain.ExecutionContextStatus)
+const RUN_STATUSES: readonly string[] = Object.values(domain.ExecutionRunStatus)
+const WRITE_STATES: readonly string[] = Object.values(domain.WriteState)
+const RELATION_STATES: readonly string[] = Object.values(domain.RelationState)
+const RELATION_SOURCES: readonly string[] = Object.values(domain.RelationSource)
 const isActiveContext = (status: domain.ExecutionContextStatus): boolean =>
   status !== domain.ExecutionContextStatus.Closed && status !== domain.ExecutionContextStatus.Failed
 export class MemoryStorage implements cap.Storage {
@@ -63,7 +70,7 @@ export class MemoryStorage implements cap.Storage {
   data: FakeStorageData
   /** 事务队列：重叠事务按调用顺序串行，每个事务在前一个 settle 后才克隆状态。 */
   #queue: Promise<unknown> = Promise.resolve()
-  /** 事务作用域标记：类型层的 `StorageTransaction = Omit<Storage, 'transaction'>` 不会在运行时移除方法，嵌套事务必须在这里被显式拒绝（L3 计划遗留 0 的收口条件）。 */
+  /** 事务作用域标记：类型层的 `StorageTransaction = Omit<Storage, 'transaction'>` 不会在运行时移除方法，嵌套事务必须在这里被显式拒绝（L3 计划遗留「嵌套事务在运行时静默吞写」的收口条件）。 */
   #transactionScope: boolean
   constructor(data: FakeStorageData = emptyStorageData(), transactionScope = false) {
     this.data = data
@@ -95,8 +102,9 @@ export class MemoryStorage implements cap.Storage {
       if (anchor !== undefined && anchor.implementationKey !== record.implementationKey) {
         throw new Error('provider binding id already points at another implementation')
       }
-      const planningTaken = record.domain === cap.CapabilityDomain.Planning && record.enabled && this.data.workspaceBindings.some((mount) =>
-        mount.workspaceId === record.workspaceId && mount.domain === record.domain && mount.enabled && mount.bindingId !== record.id)
+      const planningTaken = record.domain === cap.CapabilityDomain.Planning && record.enabled
+        && this.data.workspaceBindings.some((mount) => mount.workspaceId === record.workspaceId
+          && mount.domain === record.domain && mount.enabled && mount.bindingId !== record.id)
       if (planningTaken) throw new Error('workspace already has an enabled planning binding')
       if (record.isDefault) {
         this.data.workspaceBindings = this.data.workspaceBindings.map((mount) => mount.workspaceId === record.workspaceId
@@ -119,7 +127,8 @@ export class MemoryStorage implements cap.Storage {
       const key = domain.externalObjectKey(record.bindingId, record.externalKind, record.externalId)
       const index = this.data.identities.findIndex((identity) => domain.externalObjectKey(identity.bindingId, identity.externalKind, identity.externalId) === key)
       const existing = this.data.identities[index]
-      const sameId = this.data.identities.find((identity) => identity.id === record.id); if (sameId !== undefined && sameId !== existing) throw new Error('external identity id already points at another object')
+      const sameId = this.data.identities.find((identity) => identity.id === record.id)
+      if (sameId !== undefined && sameId !== existing) throw new Error('external identity id already points at another object')
       const entityId = existing?.entityId ?? record.entityId
       if (!this.data.entities.some((entity) => entity.id === entityId)) throw new Error('external identity entity does not exist')
       if (!this.data.providerBindings.some((anchor) => anchor.id === record.bindingId)) throw new Error('external identity binding does not exist')
@@ -197,6 +206,7 @@ export class MemoryStorage implements cap.Storage {
   }
   async getPlanningProjection(workspaceId: domain.WorkspaceId, entityId: domain.EntityId): Promise<domain.WorkspaceProjection | undefined> { return this.data.projections.find((p) => p.workspaceId === workspaceId && p.entityId === entityId) }
   async listPlanningProjections(workspaceId: domain.WorkspaceId): Promise<readonly domain.WorkspaceProjection[]> { return this.data.projections.filter((p) => p.workspaceId === workspaceId) }
+  /** 仓库以外键指向工作区与身份：两者任一不存在即拒绝（与 SQLite 的 `repository` 两条外键同语义，L6 评审 F1）。 */
   async putRepository(record: cap.RepositoryRecord): Promise<void> {
     return this.#mutate(() => {
       if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('repository workspace does not exist')
@@ -205,12 +215,22 @@ export class MemoryStorage implements cap.Storage {
     })
   }
   async listRepositories(workspaceId: domain.WorkspaceId): Promise<readonly cap.RepositoryRecord[]> { return this.data.repositories.filter((r) => r.workspaceId === workspaceId) }
-  /** 同一 (工作项, 仓库) 最多一个 active 上下文：写入新的 active 会把旧的置为 closed。 */
+  /**
+   * 同一 (工作项, 仓库) 最多一个 active 上下文：写入新的 active 会把旧的置为 closed，并把旧行的
+   * `provisioningStartedAt` 清成 `undefined`——端口契约写明该列"终态为 undefined"（L6 评审 F3）。
+   * 工作区父边与状态枚举按 SQLite 的同语义检查（`execution_context.workspace_id` 外键与 `status` 的 CHECK），
+   * 两条**依赖 core 的父边仍然分叉**：`repositoryId`（core 尚无登记仓库的生产调用者，收口见本层计划遗留
+   * 「没有生产代码调用 `putRepository`」，承载 issue #188）与 `workItemId`（core 会把上下文写到未登记的工作项上，
+   * 承载 issue #196）——SQLite 的复合外键拒绝，替身接受；分叉由执行组的显式用例按能力位断言。
+   */
   async putExecutionContext(record: cap.ExecutionContextRecord): Promise<void> {
     return this.#mutate(() => {
+      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('execution context workspace does not exist')
+      if (!CONTEXT_STATUSES.includes(record.status)) throw new Error(`execution context status is not a known value: ${record.status}`)
       if (isActiveContext(record.status)) this.data.contexts = this.data.contexts.map((c) =>
         c.workspaceId === record.workspaceId && c.workItemId === record.workItemId && c.repositoryId === record.repositoryId
-          && c.id !== record.id && isActiveContext(c.status) ? { ...c, status: domain.ExecutionContextStatus.Closed } : c)
+          && c.id !== record.id && isActiveContext(c.status)
+          ? { ...c, status: domain.ExecutionContextStatus.Closed, provisioningStartedAt: undefined } : c)
       upsert(this.data.contexts, record, (c) => c.id === record.id)
     })
   }
@@ -219,12 +239,28 @@ export class MemoryStorage implements cap.Storage {
     return this.data.contexts.find((c) =>
       c.workspaceId === workspaceId && c.workItemId === workItemId && c.repositoryId === repositoryId && isActiveContext(c.status))
   }
+  /** 执行运行必须挂在存在的上下文与工作区上、状态必须是已知取值：与 SQLite 的 `execution_run` 两条外键（上下文是 `(workspace_id, context_id)` 复合键：必须在同一工作区）与 `status` 的 CHECK 同语义（L6 评审 F1；第四轮评审补工作区与枚举；第六轮评审补复合键）。 */
   async putExecutionRun(record: cap.ExecutionRunRecord): Promise<void> {
-    return this.#mutate(() => upsert(this.data.runs, record, (r) => r.id === record.id))
+    return this.#mutate(() => {
+      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('execution run workspace does not exist')
+      if (!this.data.contexts.some((context) => context.id === record.contextId && context.workspaceId === record.workspaceId)) throw new Error('execution run context does not exist in the run workspace')
+      if (!RUN_STATUSES.includes(record.status)) throw new Error(`execution run status is not a known value: ${record.status}`)
+      upsert(this.data.runs, record, (r) => r.id === record.id)
+    })
   }
   async getExecutionRun(id: domain.ExecutionRunId): Promise<cap.ExecutionRunRecord | undefined> { return this.data.runs.find((r) => r.id === id) }
+  /**
+   * 关系：工作区必须存在，`state` / `source` 必须是 domain 的已知取值，candidate 不接受 `explicit`
+   * （`explicit` 按 domain 的 `initialRelationState` 只能进 confirmed）——三条与 SQLite 的
+   * `relation` / `candidate_relation` CHECK 同语义。两端（`from` / `to`）**仍然分叉**：SQLite 的外键拒绝未登记的
+   * 实体，替身接受——core 会把谱系边写到从未 `putEntity` 的实体上（issue #187），由执行组的显式用例按能力位断言。
+   */
   async putRelation(workspaceId: domain.WorkspaceId, relation: domain.Relation): Promise<void> {
     return this.#mutate(() => {
+      if (!this.data.workspaces.some((workspace) => workspace.id === workspaceId)) throw new Error('relation workspace does not exist')
+      if (!RELATION_STATES.includes(relation.state)) throw new Error(`relation state is not a known value: ${relation.state}`)
+      if (!RELATION_SOURCES.includes(relation.source)) throw new Error(`relation source is not a known value: ${relation.source}`)
+      if (relation.state === domain.RelationState.Candidate && relation.source === domain.RelationSource.Explicit) throw new Error('candidate relation source must be deterministic or lineage')
       const sameKey = (r: (typeof this.data.relations)[number]): boolean => r.workspaceId === workspaceId && r.relation.from === relation.from
         && r.relation.to === relation.to && r.relation.type === relation.type
       // 不变量 5：候选不得降级已确认——同键已有 confirmed 时，写入 candidate 是 no-op。
@@ -233,10 +269,15 @@ export class MemoryStorage implements cap.Storage {
     })
   }
   async listRelations(workspaceId: domain.WorkspaceId): Promise<readonly domain.Relation[]> { return this.data.relations.filter((r) => r.workspaceId === workspaceId).map((r) => r.relation) }
-  /** false 表示本次观察未被应用（重复或乱序），调用方不得读成“已应用”。 */
+  /**
+   * false 表示本次观察未被应用（重复或乱序），调用方不得读成“已应用”。
+   * 观察的主体是连接：`bindingId` 必须已登记（与 SQLite 的 `sync_observation.binding_id` 外键同语义）——
+   * 但**不要求成员关系存在**，账本主体是端口主体，对账可以先于成员关系落账（端口契约的执行段）。
+   */
   async recordObservation(record: cap.ObservationRecord): Promise<boolean> {
     return this.#mutate(() => {
       const { observation } = record
+      if (!this.data.providerBindings.some((binding) => binding.id === observation.bindingId)) throw new Error('observation binding does not exist')
       if (observation.sourceVersion !== undefined && !cap.isComparableSourceVersion(observation.sourceVersion)) {
         throw new Error(`sourceVersion 必须是可比的 ASCII 载体：${observation.sourceVersion}`)
       }
@@ -253,8 +294,6 @@ export class MemoryStorage implements cap.Storage {
         if (committed === undefined || compareSourceVersion(item.observation.sourceVersion, committed.observation.sourceVersion) >= 0) committed = item
       }
       if (committed !== undefined && compareSourceVersion(observation.sourceVersion, committed.observation.sourceVersion) < 0) return false
-      // 绑定必须存在（与 SQLite 的 `sync_observation.binding_id` 外键同语义）；检查放在 INSERT 的位置，失败顺序一致。
-      if (!this.data.providerBindings.some((anchor) => anchor.id === observation.bindingId)) throw new Error('observation binding does not exist')
       this.data.observations.push(record)
       return true
     })
@@ -277,11 +316,13 @@ export class MemoryStorage implements cap.Storage {
       upsert(this.data.reconcileCursors, record, (cursor) => cursor.workspaceId === record.workspaceId)
     })
   }
-  /** 写尝试以 (workspace, idempotencyKey) 唯一：同键重放是幂等覆盖（UPSERT），后写的记录取代先写的。 */
+  /** 写尝试以 (workspace, idempotencyKey) 唯一：同键重放是**幂等覆盖**（与 003 的 `PRIMARY KEY (workspace_id, idempotency_key)` 同模型），`id` 在工作区内唯一。工作区与绑定两条父边、`state` 枚举都与 SQLite 的 `mutation_attempt` 外键与 CHECK 同语义（L6 评审 F1；第四轮评审补工作区与枚举）。 */
   async findMutationAttempt(workspaceId: domain.WorkspaceId, idempotencyKey: string): Promise<cap.MutationAttemptRecord | undefined> { return this.data.attempts.find((a) => a.workspaceId === workspaceId && a.idempotencyKey === idempotencyKey) }
-  /** 一行一键（与 003 同模型）：同 (工作区, 幂等键) 是幂等覆盖，`id` 在工作区内唯一。 */
   async putMutationAttempt(record: cap.MutationAttemptRecord): Promise<void> {
     return this.#mutate(() => {
+      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('mutation attempt workspace does not exist')
+      if (!this.data.providerBindings.some((binding) => binding.id === record.bindingId)) throw new Error('mutation attempt binding does not exist')
+      if (!WRITE_STATES.includes(record.state)) throw new Error(`mutation attempt state is not a known value: ${record.state}`)
       const clash = this.data.attempts.find((a) => a.workspaceId === record.workspaceId
         && a.id === record.id && a.idempotencyKey !== record.idempotencyKey)
       if (clash !== undefined) throw new Error('mutation attempt id already used in this workspace')

@@ -1,8 +1,8 @@
 /**
  * @harness-projects/storage-sqlite —— 写者 / 读者路径机制与同步面（Batch L5 / #164）：成员关系、字段值、观察账本与游标。
  *
- * **机制只有这一份**，落在 `SqliteSyncSurface`：`SqliteStorage`（地基面 `storage.ts`）继承它，因此两个面在同一个
- * 实例上排**同一条**队列，而不是各有一条。四件机制各自只有一处声明：
+ * **机制只有这一份**，落在 `SqliteSyncSurface`：执行面（`storage-execution.ts`）与地基面（`storage.ts`）逐层继承它，
+ * 因此三组在同一个实例上排**同一条**队列，而不是各有一条。四件机制各自只有一处声明：
  *   - `#queue`：实例级串行点。`mutate` 是唯一入口，`read` 复用同一条队列——外部读因此拿到**结算后**的值，
  *     永远看不到未提交的写入；`write` 是单语句变更的便捷入口，`atomic` 是多语句变更的**唯一原子入口**
  *     （作用域内直接执行，根实例上包一层 `transaction`），方法体不再各自决定要不要开事务。
@@ -31,7 +31,6 @@ import { compareSourceVersion, isComparableSourceVersion, type FieldValueRecord,
 import type { ProviderBindingId, WorkspaceId } from '@harness-projects/domain'
 import type { WorkspaceDatabase } from './db.ts'
 import { optional, rowToFieldValue, rowToMembership, rowToReconcileCursor, rowToSyncCursor, type Row } from './storage-rows.ts'
-import { UnimplementedPort } from './storage-unimplemented.ts'
 
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。
 const MEMBERSHIP_COLUMNS = 'workspace_id, project_external_id, item_external_id, content_external_kind, content_external_id, membership_created_at, membership_updated_at'
@@ -65,11 +64,12 @@ const columnToVersion = (value: string | undefined): string | undefined => (valu
 const rollbackQuietly = (db: WorkspaceDatabase): void => { try { db.exec('ROLLBACK') } catch { /* 已回滚 */ } }
 
 /**
- * 写者 / 读者路径机制 + 同步面。机制只在这里声明一次：子类（地基面）不再各写一份队列。
+ * 写者 / 读者路径机制 + 同步面。机制只在这里声明一次：子类（执行面、地基面）不再各写一份队列。
  * 私有 `#` 辅助（`#assertRewrittenSchema` / `#hasSeenObservation` / `#committedVersion`）**不是入口**：它们只在构造函数里
  * 或 `mutate` 体内被调用，自己从不单独碰连接——因此"读必须经过 `read`"这条对端口方法成立，对它们也成立。
+ * 端口三组的方法已全部落地（Batch L6 之后没有未实现桩），因此本类不再继承 `UnimplementedPort`。
  */
-export class SqliteSyncSurface extends UnimplementedPort {
+export class SqliteSyncSurface {
   protected readonly db: WorkspaceDatabase
   /** 库文件位置：重启用例靠它关掉句柄后再打开同一个文件。 */
   readonly location: string
@@ -82,7 +82,7 @@ export class SqliteSyncSurface extends UnimplementedPort {
   /** 本实例作为作用域实例时所持的令牌；根实例上写入它没有读者（根实例认 `TX_SCOPE` 里的令牌）。 */
   #token: TransactionToken | undefined
   constructor(location: string, db: WorkspaceDatabase, scoped = false, state?: { closed: boolean }, token?: TransactionToken) {
-    super(); this.location = location; this.db = db; this.scoped = scoped
+    this.location = location; this.db = db; this.scoped = scoped
     this.#state = state ?? { closed: false }; this.#token = token
     // 自检失败必须把句柄关掉（P3）：`createSqliteStorage` 拿不到实例，它那条 catch 也就无从关闭，句柄会一直泄漏。
     if (!scoped) { try { this.#assertRewrittenSchema() } catch (error) { this.db.close(); throw error } }

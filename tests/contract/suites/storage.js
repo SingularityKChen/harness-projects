@@ -10,7 +10,7 @@ import { storageSyncSuite } from './storage-sync.js'
 
 export { storageExecutionSuite, storageSyncSuite }
 
-/** 事务内再开事务的错误必须可识别：类型层 `StorageTransaction = Omit<Storage, 'transaction'>` 不会在运行时移除方法，两个实现都必须在运行时显式拒绝（L3 计划遗留 0 与 L4 同批修）。这是**约定**文本而不是共享常量：依赖方向（`providers/fake` 不得依赖 `storage-sqlite`）决定两个字面量只能各自维护，因此断言钉整串——任何一侧改写措辞都会变红。 */
+/** 事务内再开事务的错误必须可识别：类型层 `StorageTransaction = Omit<Storage, 'transaction'>` 不会在运行时移除方法，两个实现都必须在运行时显式拒绝（L3 计划遗留「嵌套事务在运行时静默吞写」与 L4 同批修）。这是**约定**文本而不是共享常量：依赖方向（`providers/fake` 不得依赖 `storage-sqlite`）决定两个字面量只能各自维护，因此断言钉整串——任何一侧改写措辞都会变红。 */
 export const NESTED_TRANSACTION_MESSAGE = '嵌套事务不被支持：一个事务内不得再开事务'
 
 export function storageFoundationSuite(adapter, register = test) {
@@ -185,10 +185,11 @@ export function storageFoundationSuite(adapter, register = test) {
 export const PRE_SPLIT_CASE_COUNT = 18
 /**
  * 切分之后新增的用例条数：地基组 6 条——L4 修复轮的 4 条（嵌套事务 + 重叠事务串行提交、在途事务不吞直接写入、
- * 在途事务回滚后直接写入仍落库）与修复轮 2 的 2 条（读隔离、投影覆盖）；同步组与执行组在本层是纯移动，0 条。
+ * 在途事务回滚后直接写入仍落库）与修复轮 2 的 2 条（读隔离、投影覆盖）；同步组在 L4 / L5 是纯移动，0 条；执行组
+ * 由 L6 新增 10 条（执行面的读隔离、原子性、悬空父边与枚举等），合计 16。
  * 逐组账见 `tests/contract/storage-contract.test.js` 的 `CASE_LEDGER`；"新增"一旦跨组增长，写成单个标量就只能在账上写假数。
  */
-export const ADDED_CASE_COUNT = 6
+export const ADDED_CASE_COUNT = 16
 /** 三组各自从切分前继承的条数：foundation 7 + sync 8 + execution 3 = 18。 */
 export const INHERITED_CASE_COUNTS = { foundation: 7, sync: 8, execution: 3 }
 /** 组名 → suite：守卫与组合入口共用同一张表，组名不再以字符串形式散落在两处。 */
@@ -202,7 +203,7 @@ export function countSuiteCases(suite) {
   return count
 }
 
-/** 组合入口：两个实现最终都要跑全部三组；本层 SQLite 只注册地基组，见 `tests/contract/storage-contract.test.js`。 */
+/** 组合入口：两个实现最终都要跑全部三组；真实装配在 `tests/contract/storage-contract.test.js`（SQLite 侧逐组注册，L6 起执行组也注册）。 */
 export function storageContractSuite(adapter) {
   storageFoundationSuite(adapter)
   storageSyncSuite(adapter)

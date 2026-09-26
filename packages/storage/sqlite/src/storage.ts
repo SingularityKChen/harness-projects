@@ -1,13 +1,14 @@
 /**
- * @harness-projects/storage-sqlite —— Storage 端口的 SQLite 实现：地基面（Batch L4 / #163）与同步面（Batch L5 / #164）。本文件是地基面：工作区 / 绑定 / 实体 / 身份 / 规划投影 / 仓库 / 投影修订号；同步面（成员关系 / 字段值 / 观察 / 游标）与**写者 / 读者路径机制**在 `storage-sync.ts`，本类继承它——机制只有那一份，本文件不再有队列、作用域标记或关闭标记。执行组的方法仍继承 `UnimplementedPort` 并显式抛出 `not implemented in L4: <method>`，让「还没做」与「没有数据」可区分。
- * 读写路径：每个方法都经过基类的唯一入口（`read` / `mutate` / `write`），因此外部读拿到**结算后**的值、看不到未提交的写入；事务在队列内从 BEGIN IMMEDIATE 持有到 COMMIT / ROLLBACK，重叠事务串行提交，在途事务期间的直接写入等到结算后才执行。多语句写入只有一个原子入口 `atomic`。代价也相同：事务的 work 里必须用 `tx.*`（队列内自等，用 AsyncLocalStorage 标记事务作用域）；嵌套事务在运行时被拒绝，抛错后 ROLLBACK、重开句柄读不到半写行；结算后泄漏出 work 的 `tx.*` 快速失败。快速失败文本由基类持有，这里只把它们转出包外；约定文本的整串断言在 `tests/contract/suites/storage.js`。列表顺序：端口没有规定，本实现按 rowid（插入序）返回，与内存替身的数组序一致。
+ * @harness-projects/storage-sqlite —— Storage 端口的 SQLite 实现：地基面（Batch L4 / #163）、同步面（Batch L5 / #164）与执行面（Batch L6 / #120、#5）。本文件是地基面：工作区 / 绑定 / 实体 / 身份 / 规划投影 / 仓库 / 投影修订号；同步面（成员关系 / 字段值 / 观察 / 游标）与**写者 / 读者路径机制**在 `storage-sync.ts`，执行面（执行上下文与运行 / 关系 / 写尝试）在 `storage-execution.ts`，本类按面逐层继承——机制只有那一份，本文件不再有队列、作用域标记、关闭标记、`mutate`、`transaction` 或 `close()`。端口三组的方法已全部落地（L6），因此没有 `UnimplementedPort` 桩。
+ * 读写路径：每个方法都经过基类的唯一入口（`read` / `mutate` / `write`），因此外部读拿到**结算后**的值、看不到未提交的写入；事务在队列内从 BEGIN IMMEDIATE 持有到 COMMIT / ROLLBACK，重叠事务串行提交，在途事务期间的直接写入等到结算后才执行。多语句写入只有一个原子入口 `atomic`。代价也相同：事务的 work 里必须用 `tx.*`（队列内自等，用 AsyncLocalStorage 标记事务作用域）；嵌套事务在运行时被拒绝，抛错后 ROLLBACK、重开句柄读不到半写行（L3 计划遗留「嵌套事务在运行时静默吞写」）。快速失败文本由基类持有，这里只把它们转出包外；约定文本的整串断言在 `tests/contract/suites/storage.js`。列表顺序：端口未承诺顺序；本实现各列表的排序见各方法（地基面与同步面按 rowid / 业务键，执行面按主键序），调用方不得依赖。
  */
 import type { ProviderBindingRecord, RepositoryRecord, Storage, StorageTransaction, WorkspaceRecord } from '@harness-projects/capabilities'
 import type { Entity, EntityId, ExternalIdentity, ProviderBindingId, WorkspaceId, WorkspaceProjection } from '@harness-projects/domain'
 import { openDatabase } from './db.ts'
 import { migrate } from './migrate.ts'
 import { contentColumns, optional, rowToBinding, rowToIdentity, rowToProjection, rowToRepository, rowToWorkspace, toFlag, type Row } from './storage-rows.ts'
-import { SqliteSyncSurface, type TransactionToken } from './storage-sync.ts'
+import { SqliteExecutionSurface } from './storage-execution.ts'
+import { type TransactionToken } from './storage-sync.ts'
 
 export { CLOSED_MESSAGE, NESTED_TRANSACTION_MESSAGE, OUTER_INSTANCE_MESSAGE, SETTLED_TRANSACTION_MESSAGE } from './storage-sync.ts'
 
@@ -18,7 +19,7 @@ const PROJECTION_COLUMNS = 'workspace_id, entity_id, planning_status, content_ki
 const REPOSITORY_COLUMNS = 'id, workspace_id, external_identity_id'
 
 /** 地基面。事务作用域与存储实例共用同一连接与同一条队列，因此同一个类同时充当 Storage 与 StorageTransaction；作用域实例（`scoped`）已持有队列，它的读写直接执行。 */
-export class SqliteStorage extends SqliteSyncSurface implements Storage {
+export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   /** 作用域实例就是本类的一个 `scoped` 副本：同一个连接、同一条队列、**共用**的关闭标记与本事务的令牌（见基类的 `transaction()`）。 */
   protected override scopedInstance(state: { closed: boolean }, token: TransactionToken): StorageTransaction { return new SqliteStorage(this.location, this.db, true, state, token) }
 
@@ -56,8 +57,8 @@ export class SqliteStorage extends SqliteSyncSurface implements Storage {
   getPlanningProjection(workspaceId: WorkspaceId, entityId: EntityId): Promise<WorkspaceProjection | undefined> {
     return this.read(() => optional(this.db.prepare(`SELECT ${PROJECTION_COLUMNS} FROM workspace_projection WHERE workspace_id = ? AND entity_id = ?`).get(workspaceId, entityId), rowToProjection))
   }
-  listPlanningProjections(workspaceId: WorkspaceId): Promise<readonly WorkspaceProjection[]> { return this.read(() => (this.db.prepare('SELECT ' + PROJECTION_COLUMNS + ' FROM workspace_projection WHERE workspace_id = ? ORDER BY rowid').all(workspaceId) as Row[]).map(rowToProjection)) }
-  /** 收敛语义与内存替身一致：作用域 = 该 binding 的身份所指实体；作用域内未出现在 items 中的投影被移除，作用域外不受影响。刻意不删除实体——身份以外键指向 entity，删了会留下悬空身份。与内存替身的分叉见 `docs/exec-plan/active/2026-09-23-storage-sqlite-port.md` 遗留「`replacePlanningProjections` 的实体清理在两个实现间不一致」——按**名字**引用而不是编号：编号在重排与级联后必然漂移。 */
+  listPlanningProjections(workspaceId: WorkspaceId): Promise<readonly WorkspaceProjection[]> { return this.read(() => (this.db.prepare(`SELECT ${PROJECTION_COLUMNS} FROM workspace_projection WHERE workspace_id = ? ORDER BY rowid`).all(workspaceId) as Row[]).map(rowToProjection)) }
+  /** 收敛语义与内存替身一致：作用域 = 该 binding 的身份所指实体；作用域内未出现在 items 中的投影被移除，作用域外不受影响。刻意不删除实体——身份以外键指向 entity，删了会留下悬空身份；内存替身同语义（实体与身份保留），判据是共享地基组「投影被收敛移除后实体与身份保留，条目可以重新加入」。 */
   replacePlanningProjections(scope: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId }, items: readonly WorkspaceProjection[]): Promise<void> {
     return this.atomic(() => {
       const incoming = items.map((item) => item.entityId)
