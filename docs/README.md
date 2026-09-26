@@ -40,6 +40,7 @@
 | [2026-09-22-content-placement](exec-plan/completed/2026-09-22-content-placement.md) | 流程知识的四桶归属（机械 / 技法 / 约定 / 一次性）与判定规则：给 §0 路由表的每个入口一个可机械核对的桶 | Completed |
 | [2026-09-22-status-field-writer](exec-plan/completed/2026-09-22-status-field-writer.md) | 给 `Status` 一个定义、一个写入口、一个防漂移的检查：语义收敛到 `board-semantics.md` 单一事实源、写入口写进交付流程、契约测试按「行 + 子句」设防 | Completed |
 | [2026-09-21-gate-e1-write-and-events](exec-plan/active/2026-09-21-gate-e1-write-and-events.md) | Gate E1 写确认与事件可靠性：实测平台无 CAS、事件订不到、重复创建幂等 | Active |
+| [2026-09-24-merge-queue-closing-refs](exec-plan/active/2026-09-24-merge-queue-closing-refs.md) | 订正合并队列里「关闭引用不会随正文编辑撤回」这句被实测证伪的普适断言（保留两次相反的观测），回读本批次已发生的合并，并登记 `feat/` 分支前缀偏差（issue #180） | Active |
 
 ### Completed
 
