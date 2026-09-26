@@ -1,12 +1,16 @@
 /** 本地 Git provider 的集成测试夹具：临时仓库、provider 构造与 runner 注入。只在被导入时定义函数，不建
  * 仓库、不注册用例——`node --test tests/integration` 会加载目录下的文件，模块级副作用会变成难以定位的
- * 额外工作。provider 自身的行为见 development-local-git.test.js。 */
+ * 额外工作。provider 自身行为见 development-local-git.test.js，core 供应序列见
+ * local-git-core-provisioning.test.js。 */
+import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 
+import { createContext, defaultIdFactory } from '@harness-projects/core'
+import { createFakeStorage } from '@harness-projects/provider-fake'
 import { createLocalGitDevelopmentProvider, defaultGitRunner } from '@harness-projects/provider-development-local-git'
 
 const execFileAsync = promisify(execFile)
@@ -42,6 +46,24 @@ export const fixtureFor = (t, initialBranch) => makeFixture((cleanup) => t.after
 export const providerFor = (fixture, options = {}) => createLocalGitDevelopmentProvider({
   bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: fixture.repositoryPath }, allowedRoot: fixture.root, ...options,
 })
+
+/** `coreContextFor` 注入的冻结时钟。**恢复用例依赖它**：`PROVISIONING_LEASE_MS` 是 30 秒，只有写入的
+ *  `provisioningStartedAt` 比这个时刻早 30 秒以上，`claimContext` 才会走 `resume` 分支而不是被 `in-flight`
+ *  挡住。改这个值必须同时改 `local-git-core-provisioning.test.js` 的「恢复供应」那处写入（第五轮评审 P3：
+ *  原先这个大小关系没有任何一处写明，改动任一日期都会让恢复用例静默退化）。 */
+export const FROZEN_NOW = '2026-09-24T00:00:00Z'
+
+/** 组装一个只接本 provider 的 core 上下文：走 core 自己的 `createContext`（先 putWorkspace 再登记
+ *  binding），不在这里复制组装顺序——复制会与 core 的装配契约漂移（第四轮 P2：与 SQLite 栈合在一起
+ *  时会因为 binding 先于 workspace 落库而变红）。时钟冻结在 `FROZEN_NOW`，理由见该常量。 */
+export async function coreContextFor(fixture, providers = { development: providerFor(fixture) }) {
+  const context = await createContext({
+    storage: createFakeStorage(), workspace: { name: '本地 Git provider 集成测试' },
+    providers, policy: {}, clock: () => FROZEN_NOW, ids: defaultIdFactory,
+  })
+  assert.ok(context !== undefined, 'core 必须能从注入的 storage 组装出上下文')
+  return { storage: context.storage, workspaceId: context.workspaceId, context }
+}
 
 /** 记录每一次 Git 调用的 argv，然后交给真实 runner：零调用断言因此是"命令没被拼出来"，不是"命令失败了"。 */
 export function recordingRunner() {
