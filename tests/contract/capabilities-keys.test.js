@@ -25,7 +25,7 @@ const FORBIDDEN_PROVIDER_NAME_FRAGMENTS = [
 
 test('capability key 表中不含任何 provider / 平台名字，取值形状稳定', () => {
   const keys = Object.values(CapabilityKey)
-  assert.equal(keys.length, 28)
+  assert.equal(keys.length, 29)
   const domains = new Set(Object.values(CapabilityDomain))
   for (const key of keys) {
     for (const fragment of FORBIDDEN_PROVIDER_NAME_FRAGMENTS) {

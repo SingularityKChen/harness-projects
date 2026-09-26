@@ -13,8 +13,12 @@ import { createFaultSwitch, FaultKind, type FaultPlan, type FaultSwitch } from '
 import { FakeGate, providerFail } from './gate.ts'
 import { byExternalId, itemKey, paginate, refOf } from './state.ts'
 
-export type FakeDevelopmentCapabilities = { branchCreate: boolean; worktreeCreate: boolean; changeRequestCreate: boolean }
-const ALL_CAPABILITIES: FakeDevelopmentCapabilities = { branchCreate: true, worktreeCreate: true, changeRequestCreate: true }
+export type FakeDevelopmentCapabilities = {
+  branchCreate: boolean; worktreeCreate: boolean; worktreeRemove: boolean; changeRequestCreate: boolean
+}
+const ALL_CAPABILITIES: FakeDevelopmentCapabilities = {
+  branchCreate: true, worktreeCreate: true, worktreeRemove: true, changeRequestCreate: true,
+}
 
 /** 未启用的能力不出现在快照里：调用方据此提前得到 unavailable，而不是等一次失败才知道。 */
 function declaredCapabilities(flags: FakeDevelopmentCapabilities): Partial<Record<cap.CapabilityKey, cap.AccessLevel>> {
@@ -24,6 +28,8 @@ function declaredCapabilities(flags: FakeDevelopmentCapabilities): Partial<Recor
   }
   if (flags.branchCreate) map[cap.CapabilityKey.DevelopmentBranchCreate] = cap.AccessLevel.Available
   if (flags.worktreeCreate) map[cap.CapabilityKey.DevelopmentWorktreeCreate] = cap.AccessLevel.Available
+  // 移除是破坏性能力，单独声明：能创建不等于能移除（AGENTS.md §7 破坏性删除默认不做）。
+  if (flags.worktreeRemove) map[cap.CapabilityKey.DevelopmentWorktreeRemove] = cap.AccessLevel.Available
   if (flags.changeRequestCreate) map[cap.CapabilityKey.DevelopmentChangeRequestCreate] = cap.AccessLevel.Available
   // review.read 在 port 里没有对应方法：键不声明，方法不提供（与 Planning 的 content.write 同一处理）。
   return map
@@ -136,8 +142,10 @@ export class FakeDevelopmentProvider implements cap.DevelopmentProvider {
   async createBranch(input: cap.ProviderCreateBranchInput): Promise<cap.ProviderResult<cap.ProviderBranch>> {
     const blocked = this.gate.blocked<cap.ProviderBranch>()
     if (blocked !== undefined) return blocked
-    if (this.knownRepository(input.repository) === undefined) return this.gate.notFound('仓库')
+    // **能力判定先于身份判定**（port 契约）：未声明的能力对任何输入都答 not_supported，能力整体不存在时
+    // 结论与输入无关；顺序反过来会让「能力没开 + 外来引用」答 not_found，把调用方引向错误的恢复动作。
     if (!this.flags.branchCreate) return this.gate.unsupported(cap.CapabilityKey.DevelopmentBranchCreate)
+    if (this.knownRepository(input.repository) === undefined) return this.gate.notFound('仓库')
     if (this.faultsSwitch.isOn(FaultKind.AmbiguousCreate)) return this.gate.ambiguous('创建分支')
     if (this.branchOf(input.repository, input.name) !== undefined) return providerFail(ProviderErrorCode.Conflict, `分支已存在：${input.name}`)
     const record: FakeBranchRecord = {
@@ -151,8 +159,8 @@ export class FakeDevelopmentProvider implements cap.DevelopmentProvider {
   async createWorktree(input: cap.ProviderCreateWorktreeInput): Promise<cap.ProviderResult<cap.ProviderWorktree>> {
     const blocked = this.gate.blocked<cap.ProviderWorktree>()
     if (blocked !== undefined) return blocked
-    if (this.knownRepository(input.repository) === undefined) return this.gate.notFound('仓库')
     if (!this.flags.worktreeCreate) return this.gate.unsupported(cap.CapabilityKey.DevelopmentWorktreeCreate)
+    if (this.knownRepository(input.repository) === undefined) return this.gate.notFound('仓库')
     if (this.faultsSwitch.isOn(FaultKind.AmbiguousCreate)) return this.gate.ambiguous('创建工作树')
     if (this.branchOf(input.repository, input.branch) === undefined) return this.gate.notFound('分支')
     const ref = refOf(this.gate.bindingId, EntityKind.Worktree, input.path)
@@ -168,7 +176,7 @@ export class FakeDevelopmentProvider implements cap.DevelopmentProvider {
   async removeWorktree(input: cap.ProviderRemoveWorktreeInput): Promise<cap.ProviderResult<void>> {
     const blocked = this.gate.blocked<void>()
     if (blocked !== undefined) return blocked
-    if (!this.flags.worktreeCreate) return this.gate.unsupported(cap.CapabilityKey.DevelopmentWorktreeCreate)
+    if (!this.flags.worktreeRemove) return this.gate.unsupported(cap.CapabilityKey.DevelopmentWorktreeRemove)
     if (!this.owns(input.worktree)) return this.gate.notFound('工作树')
     const index = this.state.worktrees.findIndex((w) => itemKey(w.ref) === itemKey(input.worktree))
     if (index === -1) return this.gate.notFound('工作树')
@@ -182,8 +190,8 @@ export class FakeDevelopmentProvider implements cap.DevelopmentProvider {
   async createChangeRequest(input: cap.ProviderCreateChangeRequestInput): Promise<cap.ProviderResult<cap.ProviderChangeRequest>> {
     const blocked = this.gate.blocked<cap.ProviderChangeRequest>()
     if (blocked !== undefined) return blocked
-    if (this.knownRepository(input.repository) === undefined) return this.gate.notFound('仓库')
     if (!this.flags.changeRequestCreate) return this.gate.unsupported(cap.CapabilityKey.DevelopmentChangeRequestCreate)
+    if (this.knownRepository(input.repository) === undefined) return this.gate.notFound('仓库')
     if (this.faultsSwitch.isOn(FaultKind.AmbiguousCreate)) return this.gate.ambiguous('创建变更请求')
     const head = this.branchOf(input.repository, input.head)?.headCommit ?? input.head
     if (!this.state.commits.some((c) => c.sha === head)) return this.gate.notFound('头部提交')

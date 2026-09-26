@@ -3,6 +3,17 @@
  * 记在提交上（不变量 6）；能力未启用时不落任何外部对象；分支已存在时报 conflict；外来 binding 的仓库
  * 引用不读也不写、不产生任何对象。删掉替身里的任一处实现，
  * 对应用例必须失败。
+ *
+ * 三个额外适配器各自钉住一种**真实 provider 的形态**，它们必须同样通过套件：
+ *
+ * - **只读子集**（`changeRequestCreate: false`，`change_request.read` 仍声明）：读与写是两个独立 key，
+ *   套件不得用读的可用性代替写的可用性（Start Work 栈第五轮评审 blocking）。它表达的是能力子集，不是
+ *   `permission: read_only`——后者答 `permission_denied`，不在套件的判定范围内。
+ * - **未声明工作树移除**：套件不得向 provider 索取一个它没有声明的破坏性能力（issue #205，
+ *   `AGENTS.md` §7 破坏性删除默认不做）。
+ * - **真正省略可选方法**：替身把两个方法定义成类方法，所以 `fn === undefined` 那条分支在其它适配器上
+ *   永远不可达——而「方法不存在」正是本地 Git provider 的真实形态（#160 不实现 `createChangeRequest`
+ *   与 `removeWorktree`）。这里把方法藏掉，让那条分支有覆盖与判别力。
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -13,11 +24,53 @@ import { developmentContractSuite } from './suites/development.js'
 const bindingId = 'binding-fake-development'
 const repository = { bindingId, objectKind: 'repository', externalId: 'repo-alpha', url: undefined }
 const changeRequestInput = { repository, head: 'main', base: 'main', title: '标题占位', body: '正文占位' }
+const suiteExpect = {
+  repository, baseBranch: 'main', headCommit: 'sha-1', pageSize: 1, worktreePath: '/worktrees/wt-1',
+  // 副作用断言要看的对象集合：替身的 state 就是它持有的全部外部对象。
+  objects: (provider) => structuredClone(provider.state),
+}
 
 developmentContractSuite({
   label: '离线 Development 替身',
   makeProvider: (scenario = {}) => createFakeDevelopmentProvider({ bindingId, ...scenario }),
-  expect: { repository, baseBranch: 'main', headCommit: 'sha-1', pageSize: 1, worktreePath: '/worktrees/wt-1' },
+  expect: suiteExpect,
+})
+
+developmentContractSuite({
+  label: '离线 Development 替身（只读凭据：可读变更请求、不可建）',
+  makeProvider: (scenario = {}) => createFakeDevelopmentProvider({
+    bindingId, ...scenario, capabilities: { changeRequestCreate: false, ...scenario.capabilities },
+  }),
+  expect: suiteExpect,
+})
+
+developmentContractSuite({
+  label: '离线 Development 替身（未声明工作树移除）',
+  makeProvider: (scenario = {}) => createFakeDevelopmentProvider({
+    bindingId, ...scenario, capabilities: { worktreeRemove: false, ...scenario.capabilities },
+  }),
+  expect: suiteExpect,
+})
+
+/** 把两个可选方法**藏掉**：`provider[method]` 返回 undefined，快照也不再声明对应 key。 */
+function omittingProvider(scenario = {}) {
+  const provider = createFakeDevelopmentProvider({
+    bindingId, ...scenario, capabilities: { changeRequestCreate: false, worktreeRemove: false, ...scenario.capabilities },
+  })
+  const omitted = new Set(['createChangeRequest', 'removeWorktree'])
+  return new Proxy(provider, {
+    get(target, property, receiver) {
+      if (typeof property === 'string' && omitted.has(property)) return undefined
+      const value = Reflect.get(target, property, receiver)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+}
+
+developmentContractSuite({
+  label: '离线 Development 替身（省略可选方法）',
+  makeProvider: (scenario = {}) => omittingProvider(scenario),
+  expect: suiteExpect,
 })
 
 test('Development 替身：变更请求的反向谱系记在提交上，不重新识别对象', async () => {
