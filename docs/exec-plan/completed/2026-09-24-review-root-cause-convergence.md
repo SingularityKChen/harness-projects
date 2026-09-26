@@ -1,9 +1,9 @@
 # 评审根因收敛 ExecPlan（第三轮响应 + 第四轮收敛）
 
-> 状态：Active
+> 状态：Completed（2026-09-26：随栈顶 #175 以 rebase merge 合入后归档；第五、六轮的处置见 `docs/review/2026-09-26-mmp-round5-batch-review.md` 与 `docs/review/2026-09-26-pr-170-mmp-round6.md` 与 `docs/review/2026-09-26-pr-175-mmp-round6.md`）
 > 创建：2026-09-24
 > 范围：把第三轮 MMP 评审在 PR #121 / #122 / #157 / #167 / #170 / #175 上留下的未解决 inline 收敛成少数几条根因，在**拥有该事实的那一层**修一次；同时如实记录第三轮响应的落地率与第四轮的逐条判定。
-> 上游输入：六份 PR 的第四轮 review threads（未解决 72 条）、逐层记录（`docs/review/2026-09-24-pr-121-mmp-round3.md` 等六份，命名规则见 `docs/review/README.md` §8）、`docs/review/2026-09-24-sqlite-v1-stack-round3.md`（随 L6 合入）、`docs/exec-plan/active/2026-09-23-sqlite-v1-stack.md`（控制计划）、`docs/review/responding.md`、`PLANS.md` §4
+> 上游输入：六份 PR 的第四轮 review threads（未解决 72 条）、逐层记录（`docs/review/2026-09-24-pr-121-mmp-round3.md` 等六份，命名规则见 `docs/review/README.md` §8）、`docs/review/2026-09-24-sqlite-v1-stack-round3.md`（随 L6 合入）、`docs/exec-plan/completed/2026-09-23-sqlite-v1-stack.md`（控制计划）、`docs/review/responding.md`、`PLANS.md` §4
 
 ## Purpose / Big Picture
 
@@ -178,11 +178,11 @@
 
 ### 收尾 · 级联、整理提交、回读、回复
 
-- [ ] 逐层 `git rebase --onto <新父> <旧父>` 并复跑该层验证命令
-- [ ] 每层整理提交（正文 + `Refs`），建 backup ref 后精确 `--force-with-lease` 推送
-- [ ] 回读每层 head、base、checks、`closingIssuesReferences`
-- [ ] 刷新六个 PR 描述（`Closes`/`Refs`、验证证据、风险、回滚）
-- [ ] 逐条回复 72 条 thread 并 resolve（有证据的 resolve；反驳的说明依据）
+- [x] 逐层 `git rebase --onto <新父> <旧父>` 并复跑该层验证命令（第五、六轮逐层执行）
+- [x] 每层整理提交（正文 + `Refs`），建 backup ref 后精确 `--force-with-lease` 推送（第五轮 L1–L4、第六轮 L5 / L6）
+- [x] 回读每层 head、base、checks、`closingIssuesReferences`（合并前逐层回读）
+- [x] 刷新六个 PR 描述（`Closes`/`Refs`、验证证据、风险、回滚）（第五、六轮）
+- [x] 逐条回复 72 条 thread 并 resolve（有证据的 resolve；反驳的说明依据）（第四轮 72 条与第五、六轮意见均已逐条回复）
 
 ## Validation and Acceptance
 
@@ -279,7 +279,7 @@
 
 ## Progress
 
-> **本节只写 L5 这个合并点为真的事实**（`AGENTS.md` §6：每个 PR 要能独立验收、合并、回滚）。L6 的批次在本层**未交付**，因此不勾选——它的交付状态由 L6 的副本与本层 D2 的回读命令判定。
+> **本节写 L6 这个合并点（栈顶）为真的事实**：六层全部交付并推送，72 条 thread 全部回复并 resolve。
 
 - [x] (2026-09-24) 取证：72 条未解决 inline 逐条读取、六层源码与套件逐行对照、体量与 `gh pr view` 回读、六层基线测试全绿
 - [x] (2026-09-24) 归并根因：同一事实的多个副本 + 没有机械判据（D1）
@@ -291,10 +291,10 @@
 - [x] (2026-09-24) Batch C · L3 #157（六个提交；本层体量与测试见下方「本层实测」）
 - [x] (2026-09-24) Batch D · L4 #167（本层体量与测试见下方「本层实测」；**第五轮订正**：第四轮回复称已修的 11 条里有 5 条当时不在 head 上，第五轮由评审者补齐令牌用例、原文消息、来处回读与「遗留」名字引用，切分守卫的基线来源转 #201）
 - [x] (2026-09-24) Batch E · L5 #170（提交数回读 `gh pr view 170 -R SingularityKChen/harness-projects --json commits`；本层体量与测试见下方「本层实测」）
-- [ ] Batch F · L6 #175：**本层未交付**
-- [ ] 收尾 · 级联、整理提交、回读、刷新 PR 描述、逐条回复并 resolve：**本层未做**
+- [x] (2026-09-24) Batch F · L6 #175（提交数回读 `gh pr view 175 -R SingularityKChen/harness-projects --json commits`；本层体量与测试见下方「本层实测」）
+- [x] (2026-09-24) 收尾 · 逐层 `git rebase --onto` 并复跑验证、整理提交、`--force-with-lease` 推送、回读六层 head/base/checks/`closingIssuesReferences`、刷新六个 PR 描述、逐条回复并 resolve 72 条 thread
 
-**本层实测（回读式，不写死）**：体量用 `BASE=$(gh pr view 170 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)` 再跑 `size "$BASE"`（期望 exit 0）；测试用 `node --test tests/contract tests/integration tests/e2e tests/mvp0`（期望全绿）；72 条回复文本按逐条判定写在运行态文件里，推送后逐条发帖并 resolve。
+**本层实测（回读式，不写死）**：体量用 `BASE=$(gh pr view 175 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)` 再跑 `size "$BASE"`（期望 exit 0）；测试用 `node --test tests/contract tests/integration tests/e2e tests/mvp0`（期望全绿）。六层的 head/base/checks/`closingIssuesReferences` 与 72 条 thread 的 resolve 状态一律回读，不写死在本文件里。
 
 ## Surprises & Discoveries
 

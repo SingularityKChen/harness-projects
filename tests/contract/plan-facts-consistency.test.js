@@ -1,7 +1,7 @@
 /**
  * 栈内计划事实一致性契约（离线）。
  *
- * 保护的性质：本栈（SQLite v1 数据模型栈，控制计划 `docs/exec-plan/active/2026-09-23-sqlite-v1-stack.md`）
+ * 保护的性质：本栈（SQLite v1 数据模型栈，控制计划 `docs/exec-plan/completed/2026-09-23-sqlite-v1-stack.md`）
  * 的 ExecPlan 在**每个合并点**只写那个时点为真的事实。三条规则都可机械判定，且都是「第三轮与第四轮各复发
  * 过一次」的那一类：
  *
@@ -65,7 +65,8 @@ function discoverStackPlans() {
 const discovered = discoverStackPlans()
 // 下限断言：发现机制失效时响亮失败，不静默跳过（解析不出任何一份本栈计划就当作违规）。
 assert.ok(
-  discovered.length >= 1 && discovered.includes(path.posix.join('docs/exec-plan/active', CONTROL_PLAN)),
+  // 控制计划在栈进行中位于 active/，随栈顶归档后位于 completed/：两处都算发现到，不能两处都没有。
+  discovered.length >= 1 && PLAN_DIRS.some((dir) => discovered.includes(path.posix.join(dir, CONTROL_PLAN))),
   '栈内计划事实守卫没有发现到控制计划本身：发现规则失效时不能当作通过',
 )
 

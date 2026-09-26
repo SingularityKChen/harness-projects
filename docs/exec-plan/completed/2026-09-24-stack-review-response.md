@@ -1,17 +1,17 @@
 # 栈评审响应 ExecPlan（PR #121 / #122）
 
-> 状态：Active
+> 状态：Completed（2026-09-26：处置已随 L1 / L2 合入，随栈顶 #175 归档）
 > 创建：2026-09-24
 > 范围：处置 PR #121（栈 L1）与 #122（栈 L2）2026-09-24 那一轮的 21 条 inline 意见，按共享根因修复 spec / plan / 代码 / 测试，并按栈序级联 L3–L6
 > 上游输入：`docs/review/2026-09-24-pr-121-mvp-review.md`、`docs/review/2026-09-24-pr-122-mvp-review.md`、`docs/review/responding.md`、`PLANS.md` §4、`AGENTS.md` §6 §7 §10
-> 本计划随 L2 落地：L1 的文档预算在开工时为 1395 / 1500（`docs/exec-plan/active/2026-09-23-sqlite-v1-stack.md` 426 行 + `docs/architecture/gate-e1-uncertain-create.md` 516 行），放不下本计划与两份评审记录；两份记录覆盖两层，因此与计划一起随 L2 进入仓库。L1 的 PR 描述指向 L2。
+> 本计划随 L2 落地：L1 的文档预算在开工时为 1395 / 1500（`docs/exec-plan/completed/2026-09-23-sqlite-v1-stack.md` 426 行 + `docs/architecture/gate-e1-uncertain-create.md` 516 行），放不下本计划与两份评审记录；两份记录覆盖两层，因此与计划一起随 L2 进入仓库。L1 的 PR 描述指向 L2。
 
 ## Purpose / Big Picture
 
 完成后，一个只读仓库的人可以做到三件事：
 
 1. 打开 `docs/architecture/gate-e1-ruling.md`，看到 R4 / R8 只写**本层（L1 / #119）已经确立的事实**，不再出现「已被 L3 / L5 取代」这类指向未合并实现的门禁断言；
-2. 打开 `docs/exec-plan/active/2026-09-23-sqlite-v1-stack.md`，看到栈的**拓扑、每层目标与判定命令**，而每一层的交付状态是一个可复跑的回读命令，不是写死在文档里的结论；
+2. 打开 `docs/exec-plan/completed/2026-09-23-sqlite-v1-stack.md`，看到栈的**拓扑、每层目标与判定命令**，而每一层的交付状态是一个可复跑的回读命令，不是写死在文档里的结论；
 3. 对着同一个库跑 `node --test tests/contract tests/integration`，看到「同一外部对象进入两个工作区只产生一条外部身份」这条 Gate E1 行为 1 被断言，且 `#27` 六条验收逐条有判定证据。
 
 最小成功证据（三条，缺一条本轮不算完成）：
@@ -48,7 +48,7 @@
 |---|---|
 | `docs/architecture/gate-e1-ruling.md` | 门禁权威文档：六条行为裁决 + revise 清单 R1–R8 |
 | `docs/architecture/gate-e1-uncertain-create.md` | L1 的 E1-5 证据记录（#119 的交付物） |
-| `docs/exec-plan/active/2026-09-23-sqlite-v1-stack.md` | 跨六层的控制计划 |
+| `docs/exec-plan/completed/2026-09-23-sqlite-v1-stack.md` | 跨六层的控制计划 |
 | `tests/contract/e1-evidence-consistency.test.js` | 证据守卫：断言记录与沙箱定义的计数一致 |
 | `packages/storage/sqlite/migrations/002_identity_membership.sql` | L2 的迁移：身份、成员关系、字段值、投影 |
 | `packages/capabilities/src/storage.ts` | `Storage` 端口契约（公共接口） |
@@ -132,7 +132,7 @@
 
 ## Plan of Work
 
-**压缩说明（2026-09-24，第三轮评审响应）**：本节原先逐条列了 Batch 1–7 的步骤、验证与回滚（约 100 行）。这些批次已全部执行完毕，且第三轮评审的收敛计划（`docs/exec-plan/active/2026-09-24-review-root-cause-convergence.md`）已按"一个事实只写一处"重述了同一批工作与它们的结果；保留两份逐条步骤只会互相漂移。下面只留批次名与执行结果，逐条细节与证据见该计划。
+**压缩说明（2026-09-24，第三轮评审响应）**：本节原先逐条列了 Batch 1–7 的步骤、验证与回滚（约 100 行）。这些批次已全部执行完毕，且第三轮评审的收敛计划（`docs/exec-plan/completed/2026-09-24-review-root-cause-convergence.md`）已按"一个事实只写一处"重述了同一批工作与它们的结果；保留两份逐条步骤只会互相漂移。下面只留批次名与执行结果，逐条细节与证据见该计划。
 
 | 批次 | 内容 | 结果 |
 |---|---|---|
@@ -173,7 +173,7 @@
 
 ## Surprises & Discoveries
 
-- (2026-09-24) **评审意见与作者回复之间存在一次未被记录的强推**：评审锁定 L1 head `74086b2` / L2 head `7138a5d`，而开工时远端是 `21ece2a` / `2fd1b32`，两者互不为祖先。逐文件比对后确认 L1 的内容在两次 head 之间**没有变化**（只有 `docs/README.md` 与 `merge-queue.md` 因级联冲突解决而改动），即 21 条意见全部仍然成立，不是「已修但未回复」。证据：`git diff 74086b2 21ece2a -- docs/architecture docs/exec-plan/active/2026-09-23-sqlite-v1-stack.md tests/contract/e1-evidence-consistency.test.js` 无输出。
+- (2026-09-24) **评审意见与作者回复之间存在一次未被记录的强推**：评审锁定 L1 head `74086b2` / L2 head `7138a5d`，而开工时远端是 `21ece2a` / `2fd1b32`，两者互不为祖先。逐文件比对后确认 L1 的内容在两次 head 之间**没有变化**（只有 `docs/README.md` 与 `merge-queue.md` 因级联冲突解决而改动），即 21 条意见全部仍然成立，不是「已修但未回复」。证据：`git diff 74086b2 21ece2a -- docs/architecture docs/exec-plan/completed/2026-09-23-sqlite-v1-stack.md tests/contract/e1-evidence-consistency.test.js` 无输出。
 - (2026-09-24) **两条意见过严**：① #121-6 的「预算挤压造成内容丢失」查不到可核对证据（`#119` Scope 不含控制计划这一半属实，但「上一轮第 8 条的修复被删掉」在仓库文本与历史里都找不到对应物），P2 定级偏高；② #122-10 的 `listMemberships` 顺序差异事实成立，但端口与套件都未承诺顺序，**没有排序合同就没有实现错误**，作为 P3 缺陷不成立。
 - (2026-09-24) **三处转述被夸大**，回复时要逐条点名：① #121-4 说 D6 要求「每个状态都要有平台观测」——D6 原文只要求「每个候选取值至少指向一条观测」；② #121-4 说「两个成因各有独立观测」是夸大——该表述在狭义上成立（实验 1 多命中、实验 4 空各一次），夸大的是把实验 2 的**搜索路径**空窗口算作允许对账路径的证据；③ #121-7 说「守卫仍有 4 种逃逸」——`####` 降级、未索引文档、变量重复绑定三类已被现有断言拦住，仍可复现的只有**改名**与 `##` 二级标题。
 - (2026-09-24) **#122-4 分歧表的第 1 行在 SQLite 侧的表现与评审写法不同**：评审写「后者胜取代 item-1 后读 item-1 的字段值 → `[]`」，实测裸插会被唯一约束拒绝（`UNIQUE constraint failed: project_item_membership...`）；要得到 `[]` 必须先按端口语义删除旧成员及其字段值。结论不变（语义欠定义），但复现步骤要写对。

@@ -3,7 +3,7 @@
 > 状态：Completed（2026-09-26 随 #157 合并归档；#28 保持开启，关闭归属待人类伙伴决定——见收敛计划 Decision Log）
 > 创建：2026-09-23
 > 范围：L3 / issue #28；为执行、关系、同步观察、游标、webhook、外部写入与工作区修订建立 SQLite 003 迁移，并将 R4/R5/R8 的可用语义放入 Storage 端口与内存替身。
-> 上游输入：`docs/exec-plan/active/2026-09-23-sqlite-v1-stack.md`、`docs/architecture/gate-e1-ruling.md` §4 R4/R5/R6/R8、`docs/architecture/gate-e1-uncertain-create.md` §2、`docs/exec-plan/completed/2026-09-23-storage-identity-membership.md`、`docs/adr/ADR-0006-connection-anchor-and-workspace-mount.md`、`docs/adr/ADR-0005-projection-anchor-and-behaviour-2-enforcement.md`
+> 上游输入：`docs/exec-plan/completed/2026-09-23-sqlite-v1-stack.md`、`docs/architecture/gate-e1-ruling.md` §4 R4/R5/R6/R8、`docs/architecture/gate-e1-uncertain-create.md` §2、`docs/exec-plan/completed/2026-09-23-storage-identity-membership.md`、`docs/adr/ADR-0006-connection-anchor-and-workspace-mount.md`、`docs/adr/ADR-0005-projection-anchor-and-behaviour-2-enforcement.md`
 
 ## Purpose / Big Picture
 
@@ -124,7 +124,7 @@
 
 ## Progress
 
-- [x] (2026-09-24) **第三轮评审响应（本层 12 条）**：按根因修，不逐条打补丁。① **账本主体改成端口主体** `(binding, object_kind, object_external_id)`、作用域定为**连接**——旧主体用成员关系派生出的条目 id，于是定序主体随成员关系漂移、"对账先到"表达不出来、同连接多工作区时落点取决于挂载顺序（三格都由评审实测）；顺带关掉了"core 的 `recordObservations` 不写成员关系 → SQLite 整笔同步事务回滚"这条 P1 遗留。② **版本定序收敛到一个导出的比较器** `compareSourceVersion`（码点序，与 SQLite 的 BINARY 等价），两个实现都用它，并在 `recordObservation` 入口拒绝非 ASCII 载体——分叉从"未被发现"变成"不可达"。**没有**采纳"只接受 ISO-8601"：development 域合法地用提交 sha 作 `sourceVersion`，收窄会打断它。③ **写尝试取一行一键模型**（主键 `(workspace_id, idempotency_key)`、`id` 工作区内唯一、UPSERT），把 DDL / 端口 / 替身 / core 四份说法收敛成一份。④ 工作区作用域经**复合外键**传递（仓库→执行上下文→运行），并给 `relation` 两端、`candidate_relation` 来源、`mutation_attempt` 的绑定/幂等键/状态补上只因该约束失败的判别性用例。逐条处置见 `docs/exec-plan/active/2026-09-24-review-root-cause-convergence.md`。
+- [x] (2026-09-24) **第三轮评审响应（本层 12 条）**：按根因修，不逐条打补丁。① **账本主体改成端口主体** `(binding, object_kind, object_external_id)`、作用域定为**连接**——旧主体用成员关系派生出的条目 id，于是定序主体随成员关系漂移、"对账先到"表达不出来、同连接多工作区时落点取决于挂载顺序（三格都由评审实测）；顺带关掉了"core 的 `recordObservations` 不写成员关系 → SQLite 整笔同步事务回滚"这条 P1 遗留。② **版本定序收敛到一个导出的比较器** `compareSourceVersion`（码点序，与 SQLite 的 BINARY 等价），两个实现都用它，并在 `recordObservation` 入口拒绝非 ASCII 载体——分叉从"未被发现"变成"不可达"。**没有**采纳"只接受 ISO-8601"：development 域合法地用提交 sha 作 `sourceVersion`，收窄会打断它。③ **写尝试取一行一键模型**（主键 `(workspace_id, idempotency_key)`、`id` 工作区内唯一、UPSERT），把 DDL / 端口 / 替身 / core 四份说法收敛成一份。④ 工作区作用域经**复合外键**传递（仓库→执行上下文→运行），并给 `relation` 两端、`candidate_relation` 来源、`mutation_attempt` 的绑定/幂等键/状态补上只因该约束失败的判别性用例。逐条处置见 `docs/exec-plan/completed/2026-09-24-review-root-cause-convergence.md`。
 - [x] (2026-09-23) 阅读控制计划、裁决、L2 迁移与既有契约模式；确认文件边界。
 - [x] (2026-09-23) 完成 L3-A 判别性测试并记录 RED：先运行既有 L2 schema 用例，确认 003 新表使旧七表精确集合断言变红；新增 L3 用例随后在实现前覆盖端口/DDL 缺口。
 - [x] (2026-09-23) 完成 L3-B 端口与内存替身：契约用例通过（观察时刻快照：20 条），包含旧观察 false、重复/同版本替换和 workspace 游标隔离。

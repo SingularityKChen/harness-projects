@@ -40,15 +40,15 @@
 | [2026-09-22-content-placement](exec-plan/completed/2026-09-22-content-placement.md) | 流程知识的四桶归属（机械 / 技法 / 约定 / 一次性）与判定规则：给 §0 路由表的每个入口一个可机械核对的桶 | Completed |
 | [2026-09-22-status-field-writer](exec-plan/completed/2026-09-22-status-field-writer.md) | 给 `Status` 一个定义、一个写入口、一个防漂移的检查：语义收敛到 `board-semantics.md` 单一事实源、写入口写进交付流程、契约测试按「行 + 子句」设防 | Completed |
 | [2026-09-21-gate-e1-write-and-events](exec-plan/active/2026-09-21-gate-e1-write-and-events.md) | Gate E1 写确认与事件可靠性：实测平台无 CAS、事件订不到、重复创建幂等 | Active |
-| [2026-09-23-sqlite-v1-stack](exec-plan/active/2026-09-23-sqlite-v1-stack.md) | SQLite v1 数据模型栈控制计划：六层堆叠 PR（L1–L6）的拓扑、每层目标与判定命令；**交付状态一律回读**（`gh pr list -R SingularityKChen/harness-projects --head <分支> --state all`），不在索引里断言；是否冻结仍由人类伙伴决定 | Active |
-| [2026-09-24-stack-review-response](exec-plan/active/2026-09-24-stack-review-response.md) | 第二轮评审响应的执行计划：逐条处置 21 条意见（L1 11 条 + L2 10 条）、栈序表与验收表改成回读命令、R8 收敛到两轴 | Active |
-| [2026-09-24-review-root-cause-convergence](exec-plan/active/2026-09-24-review-root-cause-convergence.md) | 第三轮响应与第四轮收敛：按"拥有该事实的层"重排批次、删副本加机械判据；含 72 行逐条处置表 | Active |
-| [2026-09-23-storage-sqlite-port](exec-plan/active/2026-09-23-storage-sqlite-port.md) | SQLite 端口的机制与地基面（Batch L4 / #163）加规划同步面（Batch L5 / #164）：契约套件按端口面切成地基 / 同步 / 执行三组、事务与嵌套事务的运行时拒绝、工作区 / 绑定 / 实体 / 身份 / 投影 / 仓库 / 修订号落库、文件库重启用例、成员关系 / 字段值 / 观察账本与游标落库（账本主体 = 端口主体，观察不解析落点），以及**唯一一份**写者 / 读者路径机制（`SqliteSyncSurface`：实例级队列 + 事务作用域 + 关闭快速失败，两个面的读方法都走同一入口）；执行组未交付 | Active |
 
 ### Completed
 
 | 计划 | 结论 |
 |---|---|
+| [2026-09-23-sqlite-v1-stack](exec-plan/completed/2026-09-23-sqlite-v1-stack.md) | SQLite v1 数据模型栈控制计划：六层堆叠 PR（L1–L6：#121 → #122 → #157 → #167 → #170 → #175）的拓扑、每层目标与判定命令；各层交付状态一律回读（`gh pr list -R SingularityKChen/harness-projects --head <分支> --state all`），随栈顶 #175 归档。v1 是否冻结、#28 / #5 的关闭归属、裁决 R4 / R8 偏离的采纳仍由人类伙伴决定 | Completed |
+| [2026-09-24-stack-review-response](exec-plan/completed/2026-09-24-stack-review-response.md) | 第二轮评审响应的执行计划：逐条处置 21 条意见（L1 11 条 + L2 10 条）、栈序表与验收表改成回读命令、R8 收敛到两轴；随栈顶 #175 归档 | Completed |
+| [2026-09-24-review-root-cause-convergence](exec-plan/completed/2026-09-24-review-root-cause-convergence.md) | 第三轮响应与第四轮收敛：按"拥有该事实的层"重排批次、删副本加机械判据；含 72 行逐条处置表；随栈顶 #175 归档 | Completed |
+| [2026-09-23-storage-sqlite-port](exec-plan/completed/2026-09-23-storage-sqlite-port.md) | SQLite 端口的机制与地基面（Batch L4 / #163）、规划同步面（Batch L5 / #164）与执行面（Batch L6 / #120）：契约套件按端口面切成地基 / 同步 / 执行三组、事务与嵌套事务的运行时拒绝、各表落库、文件库重启用例、观察账本主体 = 端口主体（连接级），以及**唯一一份**写者 / 读者路径机制（`SqliteSyncSurface`）。#120 随 #175 关闭；#28 与 #5 保持 `Refs`：#28 的关闭归属待人类伙伴决定（验收 1 的进程重启 / 逐字节、验收 3 的库层拒绝尚未成立），#5 的验收 3 依赖 #187、#188 与 #132。core 在 SQLite 上的 bootstrap / 列表 / 重启已与替身一致，Start Work 仍受 #187 / #188 / #196 阻塞 | Completed |
 | [2026-09-23-storage-control-facts](exec-plan/completed/2026-09-23-storage-control-facts.md) | SQLite 执行、关系、观察、游标、webhook、写尝试（`mutation_attempt`，一行一键）与工作区修订表（Batch L3 / #28）：003 迁移、R4/R5/R6/R8 约束、定序与对账游标端口语义；账本主体 = 端口主体（连接级）、载体校验取非空 ASCII。#28 保持开启：关闭归属待人类伙伴决定；R8 的强制点见 #204，约束测试债见 #201 | Completed |
 | [2026-09-23-storage-identity-membership](exec-plan/completed/2026-09-23-storage-identity-membership.md) | SQLite 身份与成员表（Batch L2 / #27）：迁移 002 的八张表（连接锚点与工作区挂载拆开，ADR-0006）与 R1/R2/R3/R7 约束、成员关系与字段值的端口面、表 → 出处映射与变异实验；行为 2 的强制点在 core `entityKindFor` + e2e（ADR-0005），storage 只保证同一工作区同一实体一行投影，种类一致性登记为 core 推导义务。#27 保持开启：验收 3 只到「至多一个 primary」（#190），约束测试债见 #201 | Completed |
 | [2026-09-23-e1-uncertain-create](exec-plan/completed/2026-09-23-e1-uncertain-create.md) | 不确定外部创建的裁决证据（栈内 L1 / #119）：四条沙箱实验补测「创建内容本身」的重复创建计数、对账唯一性与可见延迟、平台显式拒绝后的空对账、draft 的对账作用域，并给出 `pending_external_write` 的**获知方式**四个标注及其到 `WriteState` 结果轴的映射（评审响应订正：原先把结果轴与获知方式轴装进同一个集合，才会出现「`pending` 与 `uncertain` 不可判别」的伪约束）。#119 保持开启：验收 1 待人类伙伴在补观测与收窄验收之间决定 | Completed |

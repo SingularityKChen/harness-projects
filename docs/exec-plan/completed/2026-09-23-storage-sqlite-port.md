@@ -1,13 +1,14 @@
-# Storage 端口落地（L4 地基面 + L5 同步面）ExecPlan
+# Storage 端口落地（L4 地基面 + L5 同步面 + L6 执行面）ExecPlan
 
-> 状态：Active（2026-09-24：L4 修复轮 2 见 Batch L4-E、级联 L2/L3 重写见 Batch L4-F；L5 规划同步面见 Batch L5-A / L5-B / L5-C，修复轮见 Batch L5-D，评审修复轮见 Batch L5-E；**重建**见 Batch L5-F——把同步面搬到 L4 新底并把写者 / 读者路径机制统一收进基类；**级联到新 L2/L3 与级联后的 L4** 见 Batch L5-G；**把 L3 的新 003 与 L4 修复轮 2 的语义落到 L5 的新位置** 见 Batch L5-H）
+> 状态：Completed（2026-09-26：第六轮 MMP 评审无 P0 / P1 代码问题，随 PR #175 以 rebase merge 合入后归档到 docs/exec-plan/completed/）
+> 批次索引：L4 见 Batch L4-A / L4-B / L4-C，修复轮见 Batch L4-D / L4-E，级联 L2/L3 重写见 Batch L4-F；L5 规划同步面见 Batch L5-A / L5-B / L5-C，修复轮见 Batch L5-D，评审修复轮见 Batch L5-E；**L5 重建**见 Batch L5-F——把同步面搬到 L4 新底并把写者 / 读者路径机制统一收进基类；**级联到新 L2/L3 与级联后的 L4** 见 Batch L5-G；**把 L3 的新 003 与 L4 修复轮 2 的语义落到 L5 的新位置** 见 Batch L5-H；L6 执行面见 Batch L6-A / L6-B / L6-C，评审修复轮见 Batch L6-D，**L6 重建**见 Batch L6-E——把执行面搬到 L5 新底并把执行面的读收进基类统一读入口；三层级联的汇总见 Batch L4-F / L5-G / L6-F；**第三轮评审收口**见 Batch L6-G——执行面的读隔离参数化成六个读、写尝试对齐 D5 的一行一键模型、三条 P3 计划项；第五轮评审修复（多语句写入走 `atomic`、SQLite 执行组注册、依赖 core 的三格显式分叉）见 D31 与 `Progress` 的 2026-09-26 条目；第六轮的层计划恢复见 `Progress` 与 `Decision Log` 的 2026-09-26（第六轮）条目。
 > 创建：2026-09-23
-> 范围：L4 / issue #163（控制计划里的 #120 / #5）与 L5 / issue #164。**L4 只交付机制与地基面**——事务机制、契约套件的三组切分、以及工作区 / 绑定 / 实体 / 身份 / 规划投影 / 仓库 / 修订号的 SQLite 实现；**L5 交付规划同步面**——成员关系 / 字段值 / 观察账本 / 游标；账本主体 = **端口主体** `(bindingId, objectKind, externalId)`（连接级），观察**不解析落点**（**Superseded by L5-H（2026-09-24）**：原文写"观察落点 = 成员关系"的解析规则，已被账本主体改成端口主体取代，见 D11 的 Superseded 标注）。执行组的端口方法仍显式抛出 `not implemented in L4: <method>`。
-> 上游输入：`docs/exec-plan/active/2026-09-23-sqlite-v1-stack.md`（控制计划 Batch L4）、`docs/exec-plan/completed/2026-09-23-storage-control-facts.md`（L3，遗留「嵌套事务在运行时静默吞写」）、`docs/exec-plan/completed/2026-09-23-storage-identity-membership.md`（L2）、`packages/capabilities/src/storage.ts`（端口契约）、`tests/contract/suites/storage-sync.js`（L5 的规格，7 条）。
+> 范围：L4 / issue #163（控制计划里的 #120 / #5）、L5 / issue #164 与 **L6 / #120**（PR #175 关闭 #120；#5 与 #28 为 `Refs`，#28 的关闭归属待人类伙伴决定，见「本层关闭」段）。**L4 只交付机制与地基面**——事务机制、契约套件的三组切分、以及工作区 / 绑定 / 实体 / 身份 / 规划投影 / 仓库 / 修订号的 SQLite 实现；**L5 交付规划同步面**——成员关系 / 字段值 / 观察账本 / 游标；账本主体 = **端口主体** `(bindingId, objectKind, externalId)`（连接级），观察**不解析落点**（**Superseded by L5-H（2026-09-24）**：原文写"观察落点 = 成员关系"的解析规则，已被账本主体改成端口主体取代，见 D11 的 Superseded 标注）；**L6 交付执行面**——执行上下文与运行 / 关系（确认 / 候选分表）/ 写尝试（一行一键、幂等覆盖），清空未实现桩并删除桩模块，让 SQLite 与内存替身跑同一套三组契约。执行组的端口方法在 L4 / L5 时显式抛出 `not implemented in L4: <method>`（L4 / L5 当时的范围声明；L6 已交付执行组，`storage-unimplemented.ts` 删除）。
+> 上游输入：`docs/exec-plan/completed/2026-09-23-sqlite-v1-stack.md`（控制计划 Batch L4）、`docs/exec-plan/completed/2026-09-23-storage-control-facts.md`（L3，遗留「嵌套事务在运行时静默吞写」）、`docs/exec-plan/completed/2026-09-23-storage-identity-membership.md`（L2）、`packages/capabilities/src/storage.ts`（端口契约）、`tests/contract/suites/storage-sync.js`（L5 的规格，7 条）、`tests/contract/suites/storage-execution.js`（L6 的规格：原 3 条，评审修复轮与重建补到 8 条，其后的条数以切分守卫回读为准）。
 
 ## Purpose / Big Picture
 
-完成后，`Storage` 端口第一次有了真实持久化实现的地基：`createSqliteStorage(location)` 打开（必要时创建）库、应用缺失迁移，并在 002/003 建出的表上实现事务与地基面；"重启后不变"由**关掉句柄再打开同一个文件**证明，而不是内存里导出/导入内部状态。契约套件按端口面切成地基 / 同步 / 执行三组，内存替身跑全部三组，SQLite 本层只跑地基组——两组测试的分工因此是显式的，而不是靠"未实现"堆出来的假红。
+完成后，`Storage` 端口第一次有了真实持久化实现的地基：`createSqliteStorage(location)` 打开（必要时创建）库、应用缺失迁移，并在 002/003 建出的表上实现事务与地基面；"重启后不变"由**关掉句柄再打开同一个文件**证明，而不是内存里导出/导入内部状态。契约套件按端口面切成地基 / 同步 / 执行三组，内存替身跑全部三组，SQLite 本层只跑地基组——两组测试的分工因此是显式的，而不是靠"未实现"堆出来的假红。（这是 L4 时的分工；**L6 之后 SQLite 现跑地基 / 同步 / 执行三组与身份面两组，与内存替身同一套**，见下方 L6 补记与验收第 2 项。）
 
 最小成功证据：
 
@@ -23,6 +24,28 @@ L5 的最小成功证据：
 2. `node --test tests/integration/storage-sync-surface.test.js` 全绿（条数以命令回读为准；原文的 8/8 是观察时刻快照）：文件库上的去重账本（投递 N 次与一次的可观测摘要相同、重开句柄后仍去重；**同一主体、同一接收时刻的两条不同观察互不顶掉**）、定序（更旧不落、同版本整快照替换）、`committed_observation` 取最新行、成员关系后者胜、引用完整性两条、游标按作用域隔离，外加「观察不解析落点：没有成员关系的内容也必须被应用，且不凭空造一条成员关系」（**Superseded by L5-H（2026-09-24）**：原文写"观察落点解析不到必须显式失败"）。
 3. 判别性实验（改坏 → 红 → 还原 → 绿）有实际摘要，见 `Progress`（原五条 + 修复轮的观察键与装配守卫两条；条数是观察时刻快照：7 条）。
 
+**L6 补记（2026-09-23）**：执行面落地之后，`Storage` 端口的**全部方法**都有了 SQLite 实现——执行上下文与运行、关系（确认 / 候选分表）、写尝试（一行一键、幂等覆盖）落在 003 的表上；`storage-unimplemented.ts` 的桩清单清空、模块删除。契约装配里 SQLite 从"地基组 + 同步组"两个标签换成**与内存替身相同的组集合**（`['foundation','sync','execution']`）——组集合与 `suites/storage.js` 的组合入口 `storageContractSuite` 注册的三组逐项相同（组合入口本身当前无人调用，处置见遗留 21）；装配守卫的期望台账同步改成"两个实现都必须装配全部三组"。`tests/integration/storage-restart.test.js` 补上关系与执行上下文的重启断言，以及"对端口写过的库再跑迁移是 no-op"。**Superseded（2026-09-26 第五轮）**：第四轮的级联把这段装配（`assemble` 台账、`EXPECTED_ASSEMBLY` 与装配点 `seedPrereqs`）整段删掉，SQLite 只剩地基组 + 同步组，执行面 10 个方法在契约层零覆盖；第五轮恢复 `assemble` 台账与装配守卫，并补回 SQLite 的执行组注册——现行形状是 SQLite 按组分标签经 `assemble` 装配（地基组 / 同步组 / 身份地基组 / 身份同步组 / 执行组），组集合合起来与内存替身相同，前置行只走端口（`seedExecutionPrereqs`），见验收 2 / 41。
+
+L6 的最小成功证据（**原 L6 分支的历史值**，base `cafc245`；重建后的当前值见下方 L6 重建补记）：
+
+1. `node --test tests/contract` → 443/443，其中 storage 契约在**两个标签下各 24 条**（地基 10 + 同步 7 + 执行 7），即"两个实现跑同一套三组契约"由装配守卫按实际注册条数核账。
+2. `node --test tests/integration` → 39/39：新增"关系（确认 + 候选）与执行上下文 / 运行 / 写尝试关句柄重开后逐字段不变"、"对端口写过的库再跑迁移是 no-op，既有行不被触碰"，以及收口轮补的"未设置的可选列读回严格 `=== undefined`（不是 null），逐字段写清"与"同幂等键经端口重放是幂等覆盖，账上只有一行"。
+3. 判别性实验（改坏 → 红 → 还原 → 绿）有实际摘要，见 `Progress`（原 L6 编号 ⑨–⑳）。
+4. 桩清单为空：`packages/storage/sqlite/src/storage-unimplemented.ts` 删除，`not implemented in L4` 在树里不再出现。
+
+**L6 评审修复轮补记（2026-09-23，针对 PR #175 的三条意见 F1–F3）**：本轮把三条意见逐条复现后按根因收口——执行组的引用完整性在替身侧补上三条父边检查并补一条两实现共用的契约用例（第四条见下方"仍不声称"与遗留 22）、关系路由的候选方向升进契约层、写尝试的跨工作区隔离补断言、强制关闭 active 上下文时由实现清空 `provisioningStartedAt`。契约执行组 3 → 7 条，切分账与守卫同批改成按组核账（详见 D26–D28）。**评审锚点 `62762af` / `ba50406` 是栈内 rebase 前的哈希**，在原 L6 分支上的等价提交分别是 `ca1e5e7` / `cafc245`。
+
+**L6 重建补记（2026-09-23，Batch L6-E）**：原 L6 分支的 base 是**旧** L5（`cafc245`：机制还散在子类里，且不含 L4 修复轮 2），而 L5 已重建为 `5162163`——机制（`#queue` / `TX_SCOPE` / `#closed` / `mutate` / `read` / `transaction()` / `close()`）只声明在基类 `SqliteSyncSurface`。整侧取一都会丢东西：照搬旧 L6 会让执行面的读绕过统一入口（"读不得暴露未提交写入"在执行面上静默失效），只取新底则执行面整组不存在。因此按重建处理：`git branch -f backup/l6-before-rebuild 560533e` → `git reset --hard 5162163` → 逐文件 `git show 560533e:<path>` 取内容（不整树检出），并把执行面的六个读方法全部改走基类的 `read`（D20 / D25）。
+
+L6 重建的判别性证据（两条，见 `Progress` 实验 48 / 49；原 L6 分支编号 36 / 37）：
+
+1. **执行面读改回直接读**：`getExecutionContext` 绕开 `read` → `SQLite Storage（执行组）：事务未提交的 getExecutionContext 写入不得被事务外的读看到` 红（`actual: 'ready'`）→ 还原后绿。这条断言是重建**新增**的（执行组原先没有读隔离断言，见 D25）。
+2. **候选分支整笔 no-op**：`putRelation` 的候选分支直接 `return` → `SQLite Storage（执行组）：只写候选关系就能读到候选` 红（`actual: []`）→ 还原后绿。
+
+L6 重建验证摘要（易失值，以命令回读为准）：`node --test tests/contract` → 514/514；`node --test tests/integration` → 45/45；`node --test tests/e2e` → 38/38；`node --test tests/mvp0` → 7/7；`tsc --noEmit` 退出码 0；`node --test tests/contract/package-boundaries.test.js` → 7/7；体量与发布面用**回读式基线**判定：`BASE=$(gh pr view 175 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)`，再 `node scripts/rule-checks.mjs size "$BASE"`（重建时实测代码 611/1000、文档在预算内）、`node scripts/rule-checks.mjs disclosure "$BASE"`、`git diff --check "$BASE"...HEAD`。**订正（2026-09-24 第三轮评审，P3）**：原文写 `size 6a25971` / `git diff --check 6a25971...HEAD`，那是级联前的哈希，已不是本 head 的祖先，命令在全新 clone 上不可复跑——因此改成回读式 `BASE`，不再把易失哈希写进正文。
+
+L6 的现行证据一律以命令回读为准：`node --test tests/contract tests/integration tests/e2e tests/mvp0` 全绿（条数不写死）；第三轮收口与第五轮修复后的逐轮摘要见 `Progress` 的 Batch L6-G 与 2026-09-26 条目、验收表第 2 / 41 / 62–66 项。
+
 ## Context and Orientation
 
 - 端口：`packages/capabilities/src/storage.ts`。`Storage.transaction(work)` 的语义是"要么全部生效、要么全部不生效"；`StorageTransaction = Omit<Storage, 'transaction'>` **只是类型层**的排除，运行时不移除任何方法（L3 计划遗留「嵌套事务在运行时静默吞写」记录了内存替身因此在事务内静默吞掉内层写入）。
@@ -31,7 +54,7 @@ L5 的最小成功证据：
 - 行为参照：`packages/providers/fake/src/storage.ts`（内存替身）是"同一套断言跑在两个实现上"的另一半。
 - 术语：**地基组** = 工作区 / 绑定 / 实体 / 身份 / 投影 / 仓库 / 修订号 + 事务机制；**同步组** = 成员关系 / 字段值 / 观察 / 游标；**执行组** = 执行上下文与运行 / 关系 / 写尝试。
 
-工作边界：只在检出 `feature/storage-sqlite-sync-surface` 的工作树根目录改文件；不 push，不做 `gh` 写操作，不改迁移文件、`packages/capabilities/**`、`packages/core/**`、`packages/domain/**`、其它层计划与控制计划。
+工作边界：只在检出 `feature/storage-sqlite-sync-surface`（L6 为 `feature/storage-sqlite-execution-surface`）的工作树根目录改文件；不 push，不做 `gh` 写操作，不改迁移文件、`packages/capabilities/**`、`packages/core/**`、`packages/domain/**`、其它层计划与控制计划。
 
 ## Design / Spec
 
@@ -224,13 +247,114 @@ fake  : read-during-tx = undefined (isolated)  after-rollback = undefined
 
 **被放弃的方案**：① 落库前过一层脱敏——storage 不知道各 provider 的 payload 语义，猜出来的脱敏会静默丢字段，而且让"事实"在落库时被改写（账本是历史）；② 只记 `payloadHash` 不记 `payload`——R4 的账本要求整快照可回放，丢了 payload 就没法回放。
 
-### D20. 绑定落库按"连接锚点 + 工作区挂载"两表写，且两条语句同属一个原子作用域（2026-09-24 级联）
+### D20. 执行面单独成模块，继承同步面，读走基类统一入口（2026-09-23；2026-09-23 重建修订）
+
+**判据**：执行面要加 10 个方法（执行上下文 5、关系 2、写尝试 3）。写进 `storage.ts` 或 `storage-sync.ts` 都会把该文件推到 200 行以上，而写者 / 读者路径（`mutate` / `read` / `write` / `#queue` / `scoped`）是三个面共用的机制——复制一份就是同一事实的第二个家。
+
+**决定**：新建 `storage-execution.ts` 的 `SqliteExecutionSurface extends SqliteSyncSurface`，`SqliteStorage` 改为继承它，形成 `地基面 → 执行面 → 同步面` 的三层继承。三个面在同一个实例上排同一条队列，D5 的三条写者路径用例继续在 SQLite 上绿。**重建修订**：机制（`#queue` / `TX_SCOPE` / `#closed` / `mutate` / `read` / `transaction()` / `close()`）在 L5 重建后只声明在基类，因此本文件**不声明**其中任何一个，六个读方法（`getExecutionContext` / `findActiveExecutionContext` / `getExecutionRun` / `listRelations` / `findMutationAttempt` / `listMutationAttempts`）全部经基类 `read` 排队；`putRelation` 体内的存在性 SELECT 是写路径内的读改写，留在 `mutate` 槽里（见 D25）。
+
+**被放弃的方案**：① 把 10 个方法写进 `storage-sync.ts`（超 200 行）；② 用组合（持有 `SqliteSyncSurface` 实例）而不是继承——组合要求把 `db` / `mutate` / `write` 暴露给外部类，写者路径就不再是"同类内可见"的机制；③ 沿用旧 L6 分支的结构（执行面自带的读直接 `prepare`）——那会让"读不得暴露未提交写入"在执行面上静默失效。
+
+### D21. 关系按 `state` 路由到两张表，`listRelations` 合并返回（2026-09-23）
+
+**判据**：003 把确认态与候选态拆成 `relation` 与 `candidate_relation` 两张表（各自的 `state` CHECK 只允许一个取值），而端口只有一个 `putRelation(workspaceId, relation)`——路由必须由实现按 `relation.state` 完成，端口不新增方法（控制计划 D6）。
+
+**决定**：confirmed → `relation`（UPSERT），candidate → `candidate_relation`（UPSERT）。两条不变量：① **候选升为 confirmed 时删掉候选行**——否则 `listRelations` 会同时返回两条同键关系，"关键关联显式优先"就退化成"两条都算"；② **同键已有 confirmed 时写 candidate 是 no-op**——不变量 5 的直接推论，候选不得降级已确认。顺序是先写 confirmed 再删候选：确认写入若被约束拒绝，候选行原样保留（不留下"删了候选又没写进确认"的空档）。
+
+**被放弃的方案**：① 只写 `relation` 表、候选也塞进去——表的 CHECK 直接拒绝，且等于取消候选/确认的分表；② 让 `listRelations` 只读 `relation` 表——候选事实静默消失。
+
+### D22. 写尝试的单语句 no-op 与两个时间戳列（2026-09-23）（**Superseded by 收敛计划 D5 / Batch L6-G（2026-09-24）**，见本节末）
+
+**判据**：端口的语义是"同 (工作区, 幂等键) 重放返回原结果"（内存替身：已有同键行就整笔 no-op），而 003 的部分唯一索引只覆盖**未决**状态（`pending` / `unknown`）——已决行不在索引里，裸 `INSERT` 会插进第二行，`listMutationAttempts` 就多一条。
+
+**决定**：写成单语句 `INSERT ... SELECT ... WHERE NOT EXISTS (SELECT 1 FROM mutation_attempt WHERE workspace_id = ? AND idempotency_key = ?)`：查与插之间没有窗口（不需要"先查后插"），也不依赖部分唯一索引的覆盖范围。DDL 的 `created_at` / `updated_at` 是 NOT NULL 而 `MutationAttemptRecord` 没有时间戳字段，插入时用同一个 ISO-8601 UTC 时刻填两列；端口不读回这两列，所以它们不是第二套事实（只满足库层约束）。
+
+**被放弃的方案**：① 依赖部分唯一索引、让已决行重复写入插第二行——"重放返回原结果"这条端口承诺会被打破；② 给端口记录加时间戳字段——那是改端口契约，且这两个时刻没有任何消费者。
+
+**Superseded by 收敛计划 D5 / Batch L6-G（2026-09-24）**：写尝试取**一行一键**模型——003 的主键改成 `(workspace_id, idempotency_key)`、加 `UNIQUE (workspace_id, id)`、删掉只覆盖未决状态的部分唯一索引；`putMutationAttempt` 改成单语句 UPSERT（同键**幂等覆盖**，后写状态取代先写），不再是 `INSERT ... SELECT ... WHERE NOT EXISTS` 的整笔 no-op。"未决行是否阻塞第二次外部写"成为**调用方**的判据（core 先 `findMutationAttempt` 读当前行），storage 只保证同键只有一行。判据：契约"写尝试一行一键，状态原地推进且 id 在工作区内唯一"×2 与集成"同幂等键经端口重放是幂等覆盖，账上只有一行"。原文保留以记录当时的决定路径。
+
+### D23. 契约装配换成与内存替身相同的组集合，装配守卫的期望台账同批改（2026-09-23）
+
+**判据**：本层的验收判据是"两个实现跑全部三组契约"，而 L4/L5 的装配是 `SQLite Storage（地基组）` + `SQLite Storage（同步组）`两个标签——执行组只在内存替身上运行，覆盖面的差异只写在装配实参里。装配守卫（D16）的 `EXPECTED_ASSEMBLY` 是**独立写下**的期望台账，它若不同批改，守卫要么红、要么（更糟）继续为旧的覆盖面背书。
+
+**决定**：SQLite 装配收敛成一个标签 `SQLite Storage`，组集合 `['foundation','sync','execution']`——**组集合与内存替身逐项相同，也与 `suites/storage.js` 的组合入口 `storageContractSuite` 注册的三组逐项相同**（组合入口当前无人调用：装配走 `assemble` 的显式组清单，这个未使用导出的处置见遗留 21）；`EXPECTED_ASSEMBLY` 同步改成"两个标签都必须装配全部三组"。**订正（2026-09-26 第五轮；第六轮按 head 回读改写）**：第四轮级联把 `assemble` 台账与装配点 `seedPrereqs` 删掉；第五轮恢复了 `assemble` 台账与 `EXPECTED_ASSEMBLY` 守卫，但 SQLite 不再是一个三组标签，而是按组分成地基组 / 同步组（含 `sharedSync`）/ 身份地基组 / 身份同步组 / 执行组五个标签，组集合合起来与内存替身相同；前置行只走端口（`seedExecutionPrereqs`），装配点不再直插。下面关于 `seedPrereqs` 的描述是 L6 实现轮的原文。三组共用的前置行扩成 `seedPrereqs`（补 `entity-1/entity-2`、仓库自己的实体与身份、`repo-1`），因为执行组的执行上下文 / 关系 / 写尝试都以外键指向它们；前置行落在装配点（D13 同型），断言一字未改。
+
+**被放弃的方案**：① 保留分标签、只给执行组再加一个标签——台账能对，但"两个实现跑同一套契约"仍然只是三条装配实参的巧合；② 直接调 `storageContractSuite(adapter)` 而不经过 `assemble` 台账——那样装配守卫就看不到这个标签，等于把 D16 刚修好的判别性又关掉。
+
+### D24. 关系路由的覆盖边界：契约钉"删候选行"与"不降级"，"候选可读"由集成钉住（2026-09-23 收口轮；同日评审修复轮已收口）
+
+**判据**：收口轮实测——把 `putRelation` 的候选分支改成**整笔 no-op**（候选永不落库）后，`node --test tests/contract/storage-contract.test.js` 仍 **47/47 全绿**；同一棵树上 `tests/integration/storage-restart.test.js` 的"关系（确认 + 候选）…逐字段不变"变红。也就是说契约执行组第 2 条对"只写候选即可读到候选"（路由的候选方向）**没有判别性**：那条用例的候选写入被后面的确认写入覆盖，最终只断言"剩一条 confirmed"。
+
+**决定**：验收表的归属按实测改写——**契约执行组第 2 条钉住的是"候选升确认时删掉候选行"与"候选不得降级已确认"两条**；**"候选可读"当时由 `tests/integration/storage-restart.test.js` 的"关系（确认 + 候选）…逐字段不变"钉住**（它先写确认再写候选，断言 `listRelations` 返回两条且候选行逐字段不变）。这条覆盖边界写进验收表第 34 项与本节：**"关系按 `state` 路由"这句话里，确认方向由契约钉住，候选方向只有集成钉得住**。**同日评审修复轮收口**：`suites/**` 解冻后补了"只写候选关系就能读到候选"（D28），候选方向从此也在契约层被钉住；重建后同一改坏让该用例红（实验 49）。
+
+**被放弃的方案**：① 收口轮当时改 `suites/storage-execution.js` 补一条候选可读的用例——那一轮 `suites/**` 冻结（一个字都不许改）；② 只在验收表里删掉"路由"两个字、不写边界——那样下一位读者仍会以为三条路由规则都在契约里被钉住，正是这条 P2 要消灭的读法。
+
+### D25. 可选列的两向断言、同幂等键重放与**执行面读隔离**（2026-09-23 收口轮；2026-09-23 重建补第三条）
+
+**判据**：① 可选列的 `NULL ↔ undefined` 此前只有单向守卫——已有的重启用例给可选列**都取了具体值**，因此"未设置时读回 `undefined` 而不是 `null`"没有任何断言；行映射改成直接读列（NULL → `null`）时全绿。② `#120` 的 Scope 写着"观察去重与写入幂等在文件库上成立"，而 `tests/integration` 里只有观察去重（`storage-sync-surface.test.js`），**同幂等键重放**只在契约层被断言过。③ **重建新增**：读隔离在契约里只有地基组一条（只经过 `getWorkspace`），把执行面的读改回直接读**不会**让它变红——旧 L6 的六个读方法正是直接读，而全部门禁仍然全绿（重建实测）。
+
+**决定**：① 在 `tests/integration/storage-restart.test.js` 补"未设置的可选列读回严格 `=== undefined`（不是 null），逐字段写清"——执行上下文三列与写尝试两列各取 `undefined` 的夹具，逐列 `assert.equal(x, undefined)`（`assert/strict` 下即 `===`）外加逐字段写清的 `deepEqual`，集合读路径同样断言（**实测更正**：执行面里只有这两张表有可选列，`ExecutionRunRecord` 的 `status` / `updatedAt` 都是必填，所以"运行的可选列"这一格没有 NULL 可断言；运行记录的逐字段一致性由已有第 2 条用例的 `run` 夹具钉住）；② 补"同幂等键经端口重放返回原结果，账上只有一行"——同键写两次（换 id、换状态、去掉可空错误码）后 `findMutationAttempt` 仍返回第一行、`listMutationAttempts` 只有一行，关句柄重开后同断言；③ **重建**在 `suites/storage-execution.js` **新增**一条"事务未提交的执行面写入不得被事务外的读看到"（只增不改，与地基组那条同型但打在执行面的读路径上），让"执行面的读必须经过 `read`"成为可判别的契约事实。（**Superseded by 收敛计划 D5 / Batch L6-G（2026-09-24）**：② 的"返回原结果 / 仍返回第一行"已改成同键幂等覆盖、后写状态取代先写，用例名随之改成"同幂等键经端口重放是幂等覆盖，账上只有一行"，见验收第 44 / 50 项。）
+
+**被放弃的方案**：① 把可选列的断言塞进已有重启用例——那条用例的可选列刻意取具体值（用来分辨列被丢掉），两向语义混在一条里会让红的时候分不清是哪一向；② 把同幂等键重放留在契约层不补集成用例——`#120` 的 Scope 明确要求它在**文件库**上成立；③ 重建时只改实现、不补执行组读隔离断言——那样"执行面的读走统一入口"就没有判别性证据，下一位改动者把它改回直接读不会被任何门禁拦住（旧 L6 的实测正是全绿）。
+
+### D26. 执行组四条父边：三条对齐、第四条按实测留给 core（2026-09-23 评审修复轮，F1）
+
+**判据**：F1 说"套件声明引用完整性是两个实现共有的契约，而执行组在 SQLite 上有四条外键边，替身一条都没检查"。逐条复现属实（替身接受、SQLite 抛 `FOREIGN KEY constraint failed`）。
+
+**决定**：替身补上三条父边检查——`repository.externalIdentityId`、`execution_run.contextId`、`mutation_attempt.bindingId`；契约补一条两实现共用的"悬空执行父边必须被拒绝"（含正控与"被拒绝的写入不得留下行"）。**第四条 `execution_context.repositoryId` 不对齐**：对齐它会让 `tests/e2e` 15 个、`tests/mvp0` 4 个用例变红（实测，见 Surprises 27），根因是全仓没有生产代码调用 `putRepository`，而端口契约把仓库写成"可开始工作的前置"——缺口在 core 侧。该缺口与它的收口动作登记为遗留 22「没有生产代码调用 `putRepository`」（承载 issue #188），契约用例的注释也点名这条边还没对齐。
+
+**被放弃的方案**：① 四条一起对齐、同时给 e2e / mvp0 的用例补仓库前置行——那是把 core 的验收测试改成"预置一个 core 自己不做的前置"，等于用测试前置行掩盖真正的缺口，而且越出本层允许面；② 只对齐"能对齐的"却不登记第四条——下一位读者会以为四条都齐了，正是 F1 要消灭的读法；③ 补一条"悬空执行父边被接受"的契约断言把两边钉成同一语义——那是把 SQLite 的 DDL 事实改成"实现说了算"，D11 已否决同型方案。
+
+### D27. `provisioningStartedAt` 在终态由**实现**清空，而不是改端口注释（2026-09-23 评审修复轮，F3）
+
+**判据**：端口契约写"认领开始的时间；终态为 undefined"，而强制关闭 active 上下文时两个实现都保留该列。两个实现一致地保留、且没有任何断言钉住，等于这条规格可以被任一侧单方面改掉。
+
+**决定**：取"实现侧清空"——SQLite 的强制关闭 UPDATE 加 `provisioning_started_at = NULL`，替身的关闭分支把该字段置 `undefined`；契约补一条两实现共用的断言，集成层再补一条"库层那一列真的是 NULL"（否则"在读映射里把 closed 行的这一列藏掉"也能骗过端口断言）。**只清实现自己产生的状态迁移**：调用方显式写入的 `failed` / `closed` 记录不在此列，端口不改调用方给的记录。
+
+**被放弃的方案**：订正端口注释、把"终态为 undefined"删掉。理由：这条规格是调用方分辨"在途 / 中断"的依据（`core/src/start-work.ts` 的 `leaseExpired` 读它），删掉规格等于让终态行的语义无人负责；而注释自身的歧义（"在途与中断只能靠它区分"没有说"中断"是终态行还是租约过期的 provisioning 行）登记为遗留 23，订正注释属 capabilities 所有者。
+
+### D28. 执行组契约 3 → 8 条：切分账按组核账，重建把地基组的账并进来（2026-09-23 评审修复轮 F1 / F2；2026-09-23 重建修订）
+
+**判据**：F2 实测收口轮的实验 ⑭——候选分支整笔 no-op 时契约 47/47 全绿，说明"关系按 `state` 路由"的候选方向在契约层没有判别性；`listMutationAttempts` 的跨工作区隔离全仓无断言；F1 的三条父边也没有断言。**重建追加的判据**：L5 一侧的切分账把 L4 修复轮 2 的两条挂在一个全局标量 `FIX_ROUND_CASE_COUNT` 上（`suites/storage.js` 当时不在改动面内），而重建又要在执行组新增一条——"新增"跨组增长时，单一标量在数学上写不出真数（L6 评审修复轮的 Surprises 26 已实测过这一点）。
+
+**决定**：执行组新增 4 条用例（悬空父边、只写候选、写尝试工作区隔离、强制关闭清 `provisioningStartedAt`），重建再新增 1 条（执行面读隔离），两个实现各跑一次；`suites/storage.js` 的切分账统一成"逐组继承 + **逐组**新增"（`ADDED_CASE_COUNTS = { foundation: 6, sync: 0, execution: 5 }`，总数 `ADDED_CASE_COUNT = 11`），把 L4 修复轮 2 的两条并进地基组、L6 的五条计在执行组，装配守卫的表达式同批改成按组核账——**只把"只有地基组会增长"推广成"每组按继承 + 新增核账"，没有放宽任何断言**。既有 3 条执行组用例里只有第 3 条加了一行父行播种（写尝试的绑定父边现在被检查），断言逐字未动。
+
+**越界说明**：L6 原允许面只列了 `suites/storage-execution.js`，但不改切分账与守卫表达式，`node --test tests/contract` 必红（见 Surprises 26）——两个文件的改动是新增用例的机械后果，且都不涉及断言语义；重建把 L4 修复轮 2 的 2 行账从 `storage-contract.test.js` 移进 `suites/storage.js`，同样是"账的形状"而不是断言。
+
+**Date/Author**：2026-09-23 / L6 评审修复执行者（D26 / D27 / D28 同）；重建修订 / 2026-09-23 / L6 重建执行者。
+
+**Superseded by D30 / Batch L6-G（2026-09-24）**：逐组标量 `ADDED_CASE_COUNTS` 被 L5 的 `CASE_LEDGER` 取代，只留一份逐组账；现行账见验收第 1 项（以守卫常量回读为准）。
+
+### D29. 绑定落库按"连接锚点 + 工作区挂载"两表写，且两条语句同属一个原子作用域（2026-09-24 级联）
 
 **判据**：L2 的迁移 002 把 `provider_binding` 收窄为跨工作区的连接锚点（`(id, implementation_key)`），工作区作用域的 `domain` / `enabled` / `is_default` 移到 `workspace_binding`。端口 `ProviderBindingRecord` 的形状不变（仍是工作区挂载视图），但一次 `putProviderBinding` 现在必须写两张表。两条语句中间失败会留下**孤儿锚点**：身份地基组随后用同一个 id 换域挂载时必须成功，而孤儿锚点的实现键与请求不一致，会让这次合法写入被"同 id 换实现"拒绝——实测正是这条用例把顺序写法的缺陷钉住。
 
-**决定**：① `BINDING_COLUMNS` 改成 join 别名（列名与拆表前逐字相同，`rowToBinding` 不用改）；② `listProviderBindings` 走 `workspace_binding AS wb JOIN provider_binding AS b`，按 `wb.rowid`（插入序）返回；③ `putProviderBinding` 先按 id 读锚点的 `implementation_key` 并比对——`ON CONFLICT (id) DO NOTHING` 会静默吞掉"同一个 id 换实现"，这是唯一必须由端口显式给出的拒绝；④ 锚点写入、同域旧默认降级、挂载 UPSERT 三条语句包进同一个原子作用域（外层调用走一次真实事务，`tx.*` 内直接执行），因此第二个启用的 planning 挂载、`is_default` 蕴含 `enabled`、以及任何未预见的约束失败都会把前面的写入一起回滚。**拒绝仍然由数据库给出**（002 的部分唯一索引与 CHECK，集成用例直接对 schema 断言），端口只是不留下半写状态。
+**决定**：① `BINDING_COLUMNS` 改成 join 别名（列名与拆表前逐字相同，`rowToBinding` 不用改）；② `listProviderBindings` 走 `workspace_binding AS wb JOIN provider_binding AS b`，按 `wb.rowid`（插入序）返回；③ `putProviderBinding` 先按 id 读锚点的 `implementation_key` 并比对——`ON CONFLICT (id) DO NOTHING` 会静默吞掉"同一个 id 换实现"，这是唯一必须由端口显式给出的拒绝；④ 锚点写入、同域旧默认降级、挂载 UPSERT 三条语句包进同一个原子作用域（外层调用走一次真实事务，`tx.*` 内直接执行），因此第二个启用的 planning 挂载、`is_default` 蕴含 `enabled`、以及任何未预见的约束失败都会把前面的写入一起回滚。**拒绝仍然由数据库给出**（002 的部分唯一索引与 CHECK，集成用例直接对 schema 断言），端口只是不留下半写状态。（级联时三层各有一份 `storage.ts`（逐层继承基类），改动在每层各落一次。）
 
 **被放弃的方案**：只做锚点预检、其余靠约束自然失败（即最初的顺序写法）。放弃理由：锚点已经落库、挂载被拒，孤儿锚点让"被拒绝的挂载不得留下任何行"不成立，且下一次用同一个 id 的合法写入会被误拒。另一种是把所有约束在 JS 里逐条预检，那是把 002 的约束抄第二遍，必然漂移。
+
+### D30. 执行面的读隔离按**六个读**参数化，每条都带正控（2026-09-24 第三轮评审收口）
+
+**判据**：第三轮评审的 M5 实测——执行组原先只有一条读隔离用例，且只经过 `getExecutionContext`；把其余五个读（`findActiveExecutionContext` / `getExecutionRun` / `listRelations` / `findMutationAttempt` / `listMutationAttempts`）改回 `this.db.prepare(...)` 直接读，`node --test tests/contract` 仍然全绿。"执行面的每个读都必须经过 `read`"因此只对**一个**读有判别性，其余五个是注释里的承诺，不是可执行的契约事实。
+
+**决定**：`tests/contract/suites/storage-execution.js` 的读隔离用例改成 `READ_ISOLATION_CASES` 表驱动，六个读各注册一条用例（两个实现都跑）。每条走完整四步：① 事务内写入该读对应的事实（`getExecutionRun` 那条先写父行执行上下文，因为运行以外键指向它）；② 从**事务外**读，断言读到的不是未提交值；③ 释放并让事务回滚，再读一次，断言回到已提交状态（单行读 `undefined`、列表读 `[]`）；④ **正控**——把同一笔写入提交，断言同一个读必须能看到它。正控是必需的：少了它，"读不到"可能只是写入被约束拒绝（例如 `mutation_attempt.binding_id` 悬空），用例会以"绿"的形式说谎。
+
+**为什么是六条用例而不是一条循环**：仓库里已有的参数化惯例（`OBSERVATION_SUBJECT_ADAPTERS` / `UNDEFINED_VERSION_ADAPTERS`）就是"一个参数一条 `test`"。六条用例的失败信息各自点名是哪个读，且切分守卫的条数层能看见这次扩张（execution 8 → 13 条）；写成一条循环则条数层看不见，只有断言层能看见，判别力更弱。
+
+**代价**：`CASE_LEDGER` 与 `ASSERTION_LEDGER` 必须按本 head 实测重写（13 / 8 / 13；36 / 45 / 30），`ADDED_CASE_COUNT` 8 → 18。这两个数只能实测（`countSuiteCases` 与组文件的 `assert.` 语句数），照抄上一层必然写假数——L6 分支上的 `ADDED_CASE_COUNTS = { foundation: 6, sync: 0, execution: 5 }`（合计 11）就是照抄的产物：它的 foundation 与 sync 两格与本 head 实测不符。
+
+**订正（2026-09-26 第六轮，按 head 回读）**：上一段的 `ASSERTION_LEDGER` 与 36 / 45 / 30、`ADDED_CASE_COUNT` 18 是 2026-09-24 第三轮收口时的观察时刻快照。现行 head 的断言层是 `ASSERTION_BASELINE`（三组 `assert.` 语句去空白后的多重集，第四轮评审改成集合比对，只防变少），没有 `ASSERTION_LEDGER` 这个常量；条数层 `CASE_LEDGER` 是 13 / 8 / 13（逐组新增 6 / 0 / 10），`ADDED_CASE_COUNT` 为 16，`PRE_SPLIT_CASE_COUNT` 18 + 16 = 34。回读：`grep -n 'PRE_SPLIT_CASE_COUNT = \|ADDED_CASE_COUNT = ' tests/contract/suites/storage.js`、`grep -n 'CASE_LEDGER = \|ASSERTION_BASELINE = ' tests/contract/storage-contract.test.js`。
+
+**被放弃的方案**：① 只把 `getExecutionContext` 那条复制五份、不改正控——五条新用例都会在"写入被约束拒绝"时以绿通过；② 在 `read` 里加计数器、断言六个读都被调用过——那是"读过一次"的证据，不是"读不到未提交值"的证据，且计数器本身要进生产代码。
+
+### D31. 执行面的多语句写入统一走 `atomic`（2026-09-26 第五轮评审）
+
+**判据**：`putExecutionContext`（先关同键旧 active、再 UPSERT 新行）与 `putRelation`（先写 confirmed、再删候选行）在根实例上走 `mutate` 时两条语句各自自动提交，第二条失败就留下半写——旧 active 已关 / confirmed 与候选并存。端口契约的 `transaction` 语义（"要么全部生效、要么全部不生效"）与 `storage-sync.ts` 的"`atomic` 是多语句变更的唯一原子入口"都要求它们落在一个原子作用域里；`replacePlanningProjections` 同批从 `mutate` 恢复为 `atomic`（第四轮级联的回退，见 D5.2）。
+
+**决定**：三处都改/恢复 `this.atomic(...)`——作用域实例上直接执行，根实例上包一个事务；三条集成用例各自在"`atomic` 改回 `mutate`"时变红：`重启：replacePlanningProjections 因外键失败时原有投影一行未变`、`重启：putExecutionContext 因外键失败时旧 active 上下文不得被关闭`（跨工作区搬迁让运行的复合外键 `(workspace_id, context_id)` 悬空）、`重启：putRelation 删候选行失败时已确认行不得落库`（`BEFORE DELETE` 触发器注入第二条语句的失败）。
+
+**被放弃的方案**：① 只改实现、不补用例——三条半写路径都没有判别性证据，改回去不会被任何门禁拦住（第四轮级联正是这样把 `replacePlanningProjections` 的 `atomic` 和它的用例一起丢掉的）；② 给 `putRelation` 换一个语句顺序（先删候选、再写 confirmed）——半写方向反转但不消失，且确认写入被约束拒绝时反而会先丢掉候选行。
+
 ### 被放弃的方案
 
 | 方案 | 为什么放弃 |
@@ -254,6 +378,11 @@ fake  : read-during-tx = undefined (isolated)  after-rollback = undefined
 | 只在队列槽上标记"本实例事务在途"，不用 `AsyncLocalStorage` | 分不清"work 内部的调用"与"事务在途时从外部发起的调用"，会把合法的事务外读也拒掉（见 D8） |
 | 保留 `ORDER BY id` 并在注释里写明"顺序不保证" | 两个实现的列表顺序会随存储实现漂移且没有门禁；端口未规定顺序不等于可以静默分叉，改用 `rowid` 对齐替身的插入序只花 4 行 |
 | 把跨实例自等用例直接放进共享组 | 内存替身的 `#mutate` 没有事务作用域检查，同一动作在它身上是静默挂起（实测 1.2s 不 settle）——共享组会得到一条永远超时的用例，见本层计划遗留「跨实例自等的共享用例缺另一半」 |
+| SQLite 继续按"地基组 / 同步组 / 执行组"分标签装配 | 装配形状本身就在说"覆盖面按实现分叉"；两个实现装配**同一个组集合**（全部三组）才让"两个实现跑同一套契约"成为结构性事实，而不是靠人记住哪一层装了哪一组（D23）。（**Superseded（2026-09-26 第五轮）**：现行 head 又按组分标签装配，但每个标签都进 `assemble` 台账、由 `EXPECTED_ASSEMBLY` 守卫，组集合合起来与内存替身逐项相同——"两个实现跑同一套契约"由台账与守卫保证，见验收第 2 项） |
+| 执行面方法写进 `storage-sync.ts` 或用组合而非继承 | 超单文件 200 行；组合要把 `db` / `mutate` / `write` 暴露出去，写者路径不再是同类内可见的机制（D20） |
+| 关系只写 `relation` 表（候选也塞进去） | 表的 `state` CHECK 直接拒绝，等于取消候选/确认分表（D21） |
+| 写尝试依赖部分唯一索引做去重 | 索引只覆盖未决状态，已决行会插出第二行，"重放返回原结果"被打破（D22）。（D22 已被收敛计划 D5 取代：部分唯一索引删除、主键改成 `(workspace_id, idempotency_key)`、同键幂等覆盖；"不依赖部分唯一索引做去重"的结论不变） |
+| 重建时沿用旧 L6 分支的执行面（读直接 `prepare`） | 读绕过统一入口后，"读不得暴露未提交写入"在执行面上静默失效，而全部门禁仍绿（重建实测，D25 / 实验 48） |
 
 ## Global Constraints
 
@@ -264,7 +393,10 @@ fake  : read-during-tx = undefined (isolated)  after-rollback = undefined
 - **修复轮的越界说明**：本层原本不得改迁移文件。修复轮改了 `packages/storage/sqlite/migrations/003_control_facts.sql`（`sync_observation` 的键加 `dedupe_key`、加 `(binding_id, dedupe_key)` 唯一索引、`committed_observation` 补追加序 tie-break）。依据有两条：① 用户指令明确把该文件列进本轮允许面并指出"控制计划 D12 允许发布前重写迁移"；② 不改键就只能继续让两条不同的观察互相顶掉（P0），那是数据丢失，不是风格问题。同批同步了 `tests/integration/execution-relation-write-schema.test.js` 的列集合与位置式 INSERT（表键变化的必然结果），断言语义未变。
 - 修复轮的其余改动全部落在既有允许面内：`packages/storage/sqlite/src/**`、`tests/contract/storage-contract.test.js`、`tests/contract/suites/storage.js`（**只改守卫与注释**，不动任何断言语义）、`tests/integration/storage-sync-surface.test.js`、本文件。
 - **评审修复轮（Batch L5-E）的允许面**：用户指令把本轮收窄为三个文件——`packages/storage/sqlite/src/storage-sync.ts`、`tests/integration/storage-sync-surface.test.js`、本文件。**迁移文件由 L3 负责**（`8cf7d18` 去掉 `sync_observation` 的成员关系外键、committed 视图含 binding），本层不重复改，也不在报告之外"顺手"改它。
-- 代码 ≤1000 行、文档 ≤1500 行（`BASE=$(gh pr view 167 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)`，再 `node scripts/rule-checks.mjs size "$BASE"`）；单文件 ≤200 行、单函数 ≤40 行。
+- **L6 的允许面**：`packages/storage/sqlite/src/**`（含删除 `storage-unimplemented.ts`）、`tests/contract/storage-contract.test.js`（SQLite 的装配换成与内存替身相同的组集合，即全部三组，并同步装配守卫的期望台账）、`tests/integration/storage-restart.test.js`（补关系与执行上下文的重启断言，加"对端口写过的库再跑迁移是 no-op"）、本文件、`docs/README.md`。**不得改** `tests/contract/suites/**`（L6 实现轮一个字都没改——本层只是换装配的组集合，不需要动分组）、`packages/capabilities/**`、`packages/core/**`、`packages/domain/**`、`packages/providers/fake/**`、迁移文件、其它层计划与控制计划。
+- **L6 评审修复轮的允许面（2026-09-23，PR #175 的 F1–F3）**：`packages/storage/sqlite/src/storage-execution.ts`、`packages/providers/fake/src/storage.ts`、`tests/contract/suites/storage-execution.js`（**只允许新增用例，不许删改既有断言**）、`tests/integration/storage-restart.test.js`、本文件。**两处越界说明**：① 新增用例必然改动切分账，因此同批改了 `tests/contract/suites/storage.js` 的 `ADDED_CASE_COUNT` / 新增 `ADDED_CASE_COUNTS` 与 `tests/contract/storage-contract.test.js` 里那条按组核账的守卫表达式（**只把"地基组会增长"推广成"每组按继承 + 新增核账"，没有放宽任何断言**；不改这两个文件，`node --test tests/contract` 必红）；② 既有执行组用例只加了**一行父行播种**（第 3 条，断言逐字未动），其余两条既有用例一字未改。本轮**没有**改迁移文件、`packages/capabilities/**`、`packages/core/**`、`packages/domain/**`、`tests/e2e/**`、`tests/mvp0/**` 与其它层计划。
+- **L6 重建的允许面（2026-09-23，Batch L6-E）**：`packages/storage/sqlite/src/**`、`packages/providers/fake/src/storage.ts`、`tests/contract/**`、`tests/integration/storage-restart.test.js`、本文件、`docs/README.md`。**越界说明**：`suites/storage-execution.js` 只**新增**一条读隔离用例（既有 7 条断言逐字未动）；`suites/storage.js` 与 `storage-contract.test.js` 只动"账的形状"——把 L4 修复轮 2 挂在 `FIX_ROUND_CASE_COUNT` 上的 2 条并进逐组 `ADDED_CASE_COUNTS.foundation`，没有放宽任何断言。本轮**没有**改迁移文件、`packages/capabilities/**`、`packages/core/**`、`packages/domain/**`、`tests/e2e/**`、`tests/mvp0/**` 与其它层计划。
+- 代码 ≤1000 行、文档 ≤1500 行（`BASE=$(gh pr view 167 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)`，再 `node scripts/rule-checks.mjs size "$BASE"`；L5 取 `gh pr view 170`、L6 取 `gh pr view 175` 的 `baseRefOid`，原文写死的 L6 基线 `cafc245` / `5162163` 是观察时刻快照，不可复跑）；单文件 ≤200 行、单函数 ≤40 行。
 - `storage/sqlite` 只依赖 `@harness-projects/domain` 与 `@harness-projects/capabilities`；不新增运行时依赖，数据库只用 Node 内建 `node:sqlite`，事务作用域标记只用 Node 内建 `node:async_hooks` 的 `AsyncLocalStorage`。
 - 关键语义必须有判别性证据：改坏 → 红 → 还原 → 绿，摘要记入 `Progress`。
 - 提交格式 `<type>(<scope>): <中文摘要>`；不 push、不做 `gh` 写操作；不写本机绝对路径与凭据。
@@ -318,7 +450,7 @@ node_modules/.bin/tsc --noEmit                         # 期望：退出码 0
 
 **最小闭环**：本层计划自包含可复现，`docs/README.md` 的 Active 索引有本层一行。
 
-**涉及文件**：`docs/exec-plan/active/2026-09-23-storage-sqlite-port.md`、`docs/README.md`
+**涉及文件**：本文件（L4 创建时在 active 目录，归档后是 `docs/exec-plan/completed/2026-09-23-storage-sqlite-port.md`）、`docs/README.md`
 
 - [x] 写本文件：设计、批次、验收表、判别性证据、遗留问题
 - [x] `docs/README.md` 只加自己那一行
@@ -575,27 +707,186 @@ node scripts/rule-checks.mjs size "$BASE"          # 期望：退出码 0（体�
 
 **回滚**：`git revert` 本次提交；同步面回到旧 003 的列集合，SQLite 侧在第一次写观察时变红。
 
+### Batch L6-A · 契约装配统一组集合 + 执行面集成用例先红（2026-09-23）
+
+**最小闭环**：SQLite 与内存替身跑同一套三组契约；执行面在文件库上的验收点先红。
+
+**涉及文件**：`tests/contract/storage-contract.test.js`、`tests/integration/storage-restart.test.js`
+
+- [x] SQLite 装配收敛成一个标签 `SQLite Storage`、组集合与内存替身相同（全部三组，D23）
+- [x] 装配守卫的 `EXPECTED_ASSEMBLY` 同步改成"两个标签都必须装配全部三组"（D16 的台账是独立陈述，与实参一起改）
+- [x] 三组共用的前置行扩成 `seedPrereqs`：补 `entity-1/entity-2`、仓库自己的实体与身份、`repo-1`（D23 / D13 同型）
+- [x] 集成补"关系与执行上下文 / 运行 / 写尝试关句柄重开后逐字段不变"与"对端口写过的库再跑迁移是 no-op"
+- [x] 在提交 ① 的树上运行两条最窄命令，确认按预期失败
+
+**验证**（提交 ① 的树，**原 L6 分支的历史值**）：
+
+```bash
+node --test tests/contract/storage-contract.test.js    # 期望：47 tests / 44 pass / 3 fail，红的全是 SQLite 执行组，原因 not implemented in L4
+node --test tests/integration/storage-restart.test.js  # 期望：5 tests / 3 pass / 2 fail，红的是两条新增用例
+```
+
+**回滚**：`git revert` 提交 ①；SQLite 回到"地基组 + 同步组"两个标签，执行组集成用例消失。
+
+**Superseded（2026-09-26 第五轮）**：本批的单标签装配、`EXPECTED_ASSEMBLY` 的"两个标签各装配全部三组"与装配点 `seedPrereqs` 在第四轮级联里被整段删掉——SQLite 的执行组注册随之消失，执行面 10 个方法在契约层零覆盖。第五轮按本批的原意补回：SQLite 按组分标签经 `assemble` 装配（含执行组），`EXPECTED_ASSEMBLY` 与装配守卫恢复，前置行只走端口（`seedExecutionPrereqs`）；现行形状见验收第 2 项。
+
+### Batch L6-B · 执行面落库并清空桩清单（2026-09-23）
+
+**最小闭环**：SQLite 在文件库上通过全部三组契约与新增重启用例，桩清单为空、模块删除。
+
+**涉及文件**：`packages/storage/sqlite/src/storage-execution.ts`（新建）、`storage-rows.ts`、`storage-sync.ts`、`storage.ts`、`storage-unimplemented.ts`（删除）
+
+- [x] `SqliteExecutionSurface extends SqliteSyncSurface`：执行上下文与运行 / 关系 / 写尝试 10 个方法（D20）
+- [x] 执行上下文：写入 active 前把同键其它 active 置 `closed`，与部分唯一索引一致；`findActiveExecutionContext` 共用同一份 active 状态集
+- [x] 关系按 `state` 路由、候选升确认删候选行、候选不降级确认、`listRelations` 合并两表（D21）
+- [x] 写尝试单语句 `INSERT ... SELECT ... WHERE NOT EXISTS`；`created_at` / `updated_at` 用同一时刻填充（D22；**Superseded by Batch L6-G（2026-09-24）**：改成一行一键的单语句 UPSERT，见 D22 末尾）
+- [x] 四张行映射进 `storage-rows.ts`；`storage-sync.ts` 去掉桩基类；`storage-unimplemented.ts` 删除（桩清单为空）
+- [x] 判别性实验（见 `Progress` 原 L6 编号 ⑨–⑬）
+
+**验证**（**原 L6 分支的历史值**）：
+
+```bash
+node --test tests/contract/storage-contract.test.js    # 期望：47 pass / 0 fail（两个实现各 20 条三组 + 守卫与替身专属用例）
+node --test tests/integration/storage-restart.test.js  # 期望：5 pass / 0 fail
+node_modules/.bin/tsc --noEmit                         # 期望：退出码 0
+```
+
+**回滚**：`git revert` 提交 ②；执行面回到显式抛错的桩，三组契约里 SQLite 的执行组与两条新增集成用例随之变红（这正是它们要钉住的东西），需连同用例一起回滚。（原 L6 分支的提交编号；可执行的回滚见 `Idempotence and Recovery`。）
+
+### Batch L6-C · 计划与索引（2026-09-23）
+
+**最小闭环**：本层计划自包含可复现，`docs/README.md` 的索引行覆盖 L6 并写明"关闭 #120；#5 为 `Refs`"（理由见「本层关闭」段；第六轮订正：#28 同为 `Refs`）。
+
+**涉及文件**：本文件、`docs/README.md`
+
+- [x] 本文件补 L6 的范围、Purpose 补记、D20–D23、被放弃的方案、Batch L6-A/B/C、验收表、判别性实验、Surprises、Decision Log、恢复路径、接口清单、Outcomes 与遗留
+- [x] `docs/README.md` 的本层一行补上执行面与"两个实现跑全部三组契约"
+- [x] 写明**不声称**的部分：core 的同步路径仍会在 SQLite 上抛错（遗留 5，当时的不声称；已由 L5-H 收口）、core 侧没有仓库登记（遗留 22）
+
+**验证**（**原 L6 分支的历史值**）：
+
+```bash
+node scripts/rule-checks.mjs size "$BASE"   # 期望：退出码 0，代码 ≤1000、文档 ≤1500（BASE 见 Global Constraints）
+git diff --check cafc245...HEAD             # 期望：无输出
+```
+
+### Batch L6-D · 评审修复轮：执行组引用完整性、候选方向与终态列（2026-09-23，PR #175 的 F1–F3）
+
+**最小闭环**：三条评审意见各自有"改坏 → 红 → 还原 → 绿"的判别性证据；执行组契约从 3 条升到 7 条，两个实现仍跑同一套；第四条父边的分叉与 core 的仓库登记缺口写成一条独立遗留（遗留 22）。
+
+**涉及文件**：`packages/providers/fake/src/storage.ts`、`packages/storage/sqlite/src/storage-execution.ts`、`tests/contract/suites/storage-execution.js`、`tests/contract/suites/storage.js`（切分账，越界说明见 Global Constraints）、`tests/contract/storage-contract.test.js`（守卫表达式，同上）、`tests/integration/storage-restart.test.js`、本文件
+
+- [x] F1：替身补三条父边检查（仓库 → 身份、执行运行 → 执行上下文、写尝试 → 绑定），补一条两实现共用的"悬空执行父边必须被拒绝"用例；第四条（执行上下文 → 仓库）**故意不对齐**并给出实测理由（D26 / Surprises 27 / 遗留 22）
+- [x] F2：补"只写候选 → 读到候选"用例（把路由的候选方向从集成层升进契约层）与"写尝试按工作区隔离"用例；遗留 21 的范围相应收窄到"未使用的组合入口导出"（D28）
+- [x] F3：取"实现侧清空"——SQLite 的强制关闭 UPDATE 与替身的关闭分支都清 `provisioningStartedAt`，补一条两实现共用的断言，并在集成层补一条"库层那一列真的是 NULL"（D27 / 遗留 23）
+- [x] 切分账与装配守卫改成按组核账（`INHERITED_CASE_COUNTS` + `ADDED_CASE_COUNTS`），新增的 4 条用例计入执行组
+- [x] 四条判别性实验 + 全门禁复跑；本文件回填本轮范围、实验、遗留与 rebase 前后的哈希对应
+
+**验证**（**原 L6 分支的历史值**）：
+
+```bash
+node --test tests/contract        # 期望：443 pass / 0 fail（两个实现各 24 条：地基 10 + 同步 7 + 执行 7）
+node --test tests/integration     # 期望：39 pass / 0 fail
+node --test tests/e2e             # 期望：38 pass / 0 fail（本轮对齐三条父边后必须仍然全绿）
+node --test tests/mvp0            # 期望：7 pass / 0 fail
+node_modules/.bin/tsc --noEmit    # 期望：退出码 0
+```
+
+**回滚**：`git revert` 本次提交。回退后替身不再检查三条父边、候选方向在契约层重新失去判别性、终态行的 `provisioningStartedAt` 重新被保留——三者都由新用例钉住，因此必须连同用例一起回退；单独回退用例会让 F1–F3 静默复活。
+
+### Batch L6-E · 重建：把执行面搬到 L5 新底，读收进基类统一入口（2026-09-23）
+
+**为什么是重建而不是 rebase**：L6 原分支的 base 是**旧** L5（`cafc245`：机制还散在子类里、且不含 L4 修复轮 2），而 L5 已重建为 `5162163`——机制（`#queue` / `TX_SCOPE` / `#closed` / `mutate` / `read` / `transaction()` / `close()`）只声明在基类 `SqliteSyncSurface`。两侧在类层次上撞车：整侧取一都会丢东西（照搬旧 L6 会让执行面的读绕过统一入口；只取新底则执行面整组不存在），`git rebase` 只能得到语义冲突。
+
+**最小闭环**：执行面在新底上照搬（执行上下文 / 运行、关系按 `state` 路由、写尝试幂等），六个读方法全部经基类 `read`；`storage.ts` 与 `storage-execution.ts` 都不再声明基类已有的成员；L4 修复轮 2、L5 重建、L6 评审修复轮三侧的修复在同一棵树上同时成立。
+
+**涉及文件**：`packages/storage/sqlite/src/storage-execution.ts`（新建）、`storage.ts`、`storage-sync.ts`、`storage-rows.ts`、`storage-unimplemented.ts`（删除）、`packages/providers/fake/src/storage.ts`、`tests/contract/**`、`tests/integration/storage-restart.test.js`、本文件、`docs/README.md`
+
+- [x] 恢复锚点：`git branch -f backup/l6-before-rebuild 560533e` → `git reset --hard 5162163`；源文件逐条 `git show 560533e:<path>` 取，不 `git checkout` 整树
+- [x] 执行面照搬：`storage-execution.ts`（执行上下文 / 运行、关系按 `state` 路由、写尝试）、`storage-rows.ts` 的四张执行面行映射、`storage-unimplemented.ts` 删除、集成重启断言、执行组四条评审用例、替身三条父边检查与终态清列、契约装配与守卫台账
+- [x] 读走统一入口：六个读方法全部改成 `this.read(() => optional(...))`；`putRelation` 体内的存在性 SELECT 留在 `mutate` 槽里；`storage.ts` 只留 `scopedInstance()` 覆写与地基面方法，`storage-execution.ts` 不声明 `#queue` / `#closed` / `mutate` / `transaction` / `close`
+- [x] 保留 L5 一侧：`optional` 单行读助手仍在 `storage-rows.ts`（三个面共用）、契约装配保留 L4 修复轮 2 的 `close()` / 外层实例用例、切分账并进逐组 `ADDED_CASE_COUNTS`（D28）
+- [x] 新增一条执行组读隔离断言（`suites/storage-execution.js`，**只增不改**）：地基组那条只走 `getWorkspace`，把执行面的读改回直接读不会让它变红（D25）
+- [x] 判别性实验 48 / 49（重建的两条必需实验；原 L6 分支编号 36 / 37）与全门禁复跑
+
+**验证**：
+
+```bash
+node --test tests/contract        # 期望：450 pass / 0 fail（两个实现各 30 条，各跑三组 27 条：地基 12 + 同步 7 + 执行 8）
+node --test tests/integration     # 期望：42 pass / 0 fail
+node --test tests/e2e             # 期望：38 pass / 0 fail
+node --test tests/mvp0            # 期望：7 pass / 0 fail
+../../node_modules/.bin/tsc --noEmit                 # 期望：退出码 0
+node --test tests/contract/package-boundaries.test.js # 期望：7 pass / 0 fail
+node scripts/rule-checks.mjs size "$BASE"            # 期望：退出码 0（体量以回读为准；原文的 598/1000 是观察时刻快照）
+git diff --check 5162163...HEAD                      # 期望：无输出
+```
+
+**回滚**：`git reset --hard backup/l6-before-rebuild` 回到重建前的旧 L6（base `cafc245`）。重建后的提交是自包含的（执行面 + 读收口 + 用例 + 计划），单独 `git revert` 会同时撤掉执行面与装配。
+
+### Batch L4-F / L5-G / L6-F · 级联 L2/L3 重写（2026-09-24）
+
+**最小闭环**：三层在重写过的 L2/L3（`8f11e38（观察时刻快照，不可复跑）`）之上重新可验收——绑定落库改成"连接锚点 + 工作区挂载"两表，观察落点改 join `workspace_binding`，三个实现都跑身份与成员关系面的两组断言，且体量都在预算内。
+
+**判据**：L2 的迁移 002 拆表后，三处实现假设同时失效——`BINDING_COLUMNS` 的平表列、`putProviderBinding` 的单表 UPSERT、`#observationSubject` 的 `provider_binding.workspace_id`。集成用例的第二个绑定也踩到新契约：同一工作区第二个启用的 planning 挂载会被部分唯一索引拒绝。替身侧另有一处：L6 新增的写尝试父边检查引用 `data.bindings`，拆表后该字段已改名（`providerBindings` / `workspaceBindings`），在 L2 的字段面上是 `undefined`。
+
+**涉及文件**：三层各自的 `packages/storage/sqlite/src/storage.ts` 与 `storage-sync.ts`、`packages/providers/fake/src/storage.ts`（L6）、`tests/contract/storage-contract.test.js`、`tests/contract/suites/storage*.js`、`tests/integration/storage-sync-surface.test.js`、本文件
+
+- [x] L4：`backup/storage-sqlite-port2-pre-review-response` + `git rebase --onto <当时的 base> 3e255ed`（6 个提交；当时的 base `8f11e38` 是观察时刻快照，不可复跑）→ `suites/storage.js` 取 L4 的切分结构、两处既有用例改 `development` 域、SQLite 注册身份地基组、绑定改双表（D29）
+- [x] L5：`backup/storage-sqlite-sync-surface-pre-review-response` + `git rebase --onto 8f63983 8f4b5da`（2 个提交）→ 同型绑定改动、`#observationSubject` 改 join、装配 seed 改两条表、SQLite 补注册身份同步组、集成用例第二个绑定改挂 `development` 域
+- [x] L6：`backup/storage-sqlite-execution-surface-pre-review-response` + `git rebase --onto 6a25971 9c1e896`（3 个提交）→ 同型绑定改动（自动继承 L5 的版本）、装配 `seedPrereqs` 改两条表、替身写尝试父边改用 `providerBindings`、SQLite 补注册身份面两组
+- [x] 身份与成员关系面（L2 的 `suites/storage-identity-membership.js`）在两个实现上都注册：它声明了 `register` 参数却直接调 `test(...)`，因此进不了装配台账，只能直接注册（见 Decision Log；**Superseded by 第四轮修复轮（2026-09-26）**：`storage-identity-membership.js` 已接受 `register` 参数并纳入装配台账）
+- [x] 体量：L4 994/1000、L5 829/1000、L6 611/1000，**没有删除或放宽任何断言**
+- [x] **#28 的证据落在本批**（2026-09-26 第五轮补记；**第六轮订正**：#28 为 `Refs`，关闭归属待人类伙伴决定，见「本层关闭」段）：本层新增的 `tests/integration/storage-restart.test.js`「关系（确认 + 候选）与执行上下文/运行/写尝试在关句柄重开后逐字段不变」实测钉住 #28 验收条目 1，加上同文件的失败事务无半写行、迁移二次运行 no-op 等用例，#28 的六条验收标准里除"restart"字面外都有证据。第五轮据收敛计划 D8「谁交付证据谁写关闭引用」把 #28 加进本 PR 的关联；第六轮按同一份收敛计划的 Decision Log「#28 与 #5 的关闭归属待人类伙伴决定」撤回为 `Refs`（实际关闭集合以回读 `closingIssuesReferences` 为准）。
+
+**验证**：三层各自的完整门禁摘要见 `Progress` 的级联条目与验收表第 59 / 60 / 61 项。
+
+**回滚**：`git revert` 对应层的提交；绑定落库回到单表假设，身份面在 SQLite 侧立即变红。
+
+### Batch L6-G · 第三轮评审收口：读隔离参数化、写尝试对齐 D5、三条计划项（2026-09-24）
+
+**为什么是重建而不是 rebase（第二次）**：L6 的 base 是**旧** L5（`fc4dd90`），而 L5 已整体重建为 `4bc3e69`——L3 重写了 003 的观察账本主体、L4 修复轮 2 把事务机制改成可变令牌 + `atomic` + 共用关闭状态、L5 又把机制与账本主体收进同一处。`git rebase --onto 4bc3e69 fc4dd906` 在 8 个文件上只能得到语义冲突，整侧取一都会丢掉另一侧的修复。
+
+**最小闭环**：第三轮评审给 #175 的 8 条逐条有处置——两条 P2 与三条 P3 在本层修掉（各带判别性证据），一条 P2（版本比较声明）与一条 P3（`mutation_attempt.id` 唯一性）由 L3 的 D3 / D5 在基里收口，一条 P2（core 阻塞点少登记一条）补登并开 issue。执行面的"每个读都必须经过 `read`"从"只对 `getExecutionContext` 有判别性"变成**六个读逐一双向可判别**。
+
+**判据**：第三轮评审的 M5 实测——把 `getExecutionContext` 以外的五个读改回 `this.db.prepare(...)`，契约仍然全绿；因此"执行面的每个读都经过 `read`"当时没有判别性。另一条：L6 自己的 `putMutationAttempt` 还是 no-op 模型，而 L3 的 D5 已把 DDL、端口注释与 core 的读法对齐到"一行一键、幂等覆盖"——两个实现在这一格上给出相反答案。
+
+**涉及文件**：`packages/storage/sqlite/src/storage-execution.ts`、`storage-sync.ts`、`storage.ts`、`storage-rows.ts`、`packages/providers/fake/src/storage.ts`、`tests/contract/storage-contract.test.js`、`tests/contract/suites/storage*.js`、`tests/integration/storage-restart.test.js`、`docs/review/2026-09-24-pr-175-mmp-round3.md`、`docs/review/2026-09-24-sqlite-v1-stack-round3.md`、本文件
+
+- [x] 解冲突按"保留 L6 的结构、把 L3/L4/L5 的语义重新落到 L6 的位置"：机制（可变令牌 `TX_SCOPE` / 共用 `#state` / `atomic` / 幂等 `close()` / `settled` 快速失败）取 L5 的新基类，`SqliteStorage extends SqliteExecutionSurface` 与 `scopedInstance(state, token)` 保留 L6 的三层继承；替身取 L5 的 `cap.compareSourceVersion`（**不带回** L6 的自写比较器）并把 L6 的三条父边检查叠加上去
+- [x] **读隔离参数化成六个读**（P2，本轮必做）：`suites/storage-execution.js` 的读隔离用例改成 `READ_ISOLATION_CASES` 表驱动，六个读（`getExecutionContext` / `findActiveExecutionContext` / `getExecutionRun` / `listRelations` / `findMutationAttempt` / `listMutationAttempts`）各自一条用例，每条都走"事务内写入对应事实 → 从外部读 → 断言读到的不是未提交值 → 回滚后为空"，并各带一条正控（同一笔写入提交后同一个读必须能看到它）
+- [x] **写尝试对齐 D5**（P3 的一半）：`putMutationAttempt` 从 `INSERT ... SELECT ... WHERE NOT EXISTS` 改成单语句 UPSERT（同键幂等覆盖、`created_at` 保留首次写入时刻），替身与集成用例同步；这是 L6 分支与 L3 的 D5 之间的**语义分叉**，不是新决定
+- [x] 切分守卫的两层账按当时的 head **实测**重写：`CASE_LEDGER` 13 / 8 / 13、`ASSERTION_LEDGER` 36 / 45 / 30（`ADDED_CASE_COUNT` 18；2026-09-24 观察时刻快照——现行断言层是 `ASSERTION_BASELINE`、没有 `ASSERTION_LEDGER`，`ADDED_CASE_COUNT` 为 16，见 D30 的订正与验收第 64 项）；`ADDED_CASE_COUNTS` 这个中间形状的逐组标量被 L5 的 `CASE_LEDGER` 取代，只留一份逐组账
+- [x] 计划项 P3 之一：`plan:814` 的"第三个阻塞点"补登——core 把谱系关系写到从未登记的实体上，承载 issue [#187](https://github.com/SingularityKChen/harness-projects/issues/187)，并写进「本层不声称」与遗留 24
+- [x] 计划项 P3 之二：L6 重建验证摘要的体量基线从级联前的 `6a25971` 改成**回读式** `BASE=$(gh pr view 175 ... --json baseRefOid -q .baseRefOid)`
+- [x] 计划项 P3 之三：`packages/providers/fake/src/storage.ts` 的遗留编号交叉引用改成**名字**引用（编号在重排与级联后必然漂移）
+- [x] 第三轮评审记录两份随修复一并提交（评审者留在工作区未提交）
+- [x] 判别性实验：六个读**逐个**改回直接读 → 对应用例各自变红（一次只红一条）→ 还原后 95/95 绿
+
+**验证**（命令与摘要见 `Progress` 的 Batch L6-G 条目；体量基线用回读式 `BASE`）。
+
+**回滚**：`git reset --hard backup/l6-pre-round3` 回到第三轮收口前的 L6（base `fc4dd90`）；`git revert` 单个提交会同时撤掉读隔离参数化与写尝试对齐，因此回滚按恢复锚点做。
 
 ## Validation and Acceptance
 
 | # | 验收项 | 判定证据 | 结果 |
 |---|---|---|---|
-| 1 | 契约套件切成三组，切分是纯移动 | 三组条数由切分守卫按 `PRE_SPLIT_CASE_COUNT` + `ADDED_CASE_COUNT` 与 `CASE_LEDGER` 断言；`PRE_SPLIT_CASE_COUNT` 以回读本层 base 的 `tests/contract/suites/storage.js` 为准（`BASE=$(gh pr view 167 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)`，观察时刻快照 18），继承 18（地基 7 / 同步 8 / 执行 3）、新增 6。**Superseded by 2026-09-24 的切分收缩**：原文的 12 / 7 / 3 与 `storage-foundation.js` 已不存在（见 D1） | 通过（2026-09-23；修复轮 2 复核；2026-09-24 按实测订正分解账） |
-| 2 | 内存替身注册全部三组与身份面两组，SQLite 注册地基组 + 同步组 + 身份面两组 | `tests/contract/storage-contract.test.js` 的五次 `assemble(...)`，并由装配守卫按实际注册条数核账（覆盖三组与身份面两组） | 通过（2026-09-26 补回身份同步组与台账覆盖） |
+| 1 | 契约套件切成三组，切分是纯移动 | 三组条数由切分守卫按 `PRE_SPLIT_CASE_COUNT` + `ADDED_CASE_COUNT` 与 `CASE_LEDGER` 断言；`PRE_SPLIT_CASE_COUNT` 以回读本层 base 的 `tests/contract/suites/storage.js` 为准（`BASE=$(gh pr view 167 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)`，观察时刻快照 18），继承 18（地基 7 / 同步 8 / 执行 3）、新增 6。**Superseded by 2026-09-24 的切分收缩**：原文的 12 / 7 / 3 与 `storage-foundation.js` 已不存在（见 D1）。**L6 补记（2026-09-26 第六轮按 head 回读）**：执行组新增之后，现行账是 13 / 8 / 13 = 34 = `PRE_SPLIT_CASE_COUNT`(18) + `ADDED_CASE_COUNT`(16)，逐组新增 6 / 0 / 10（以 `CASE_LEDGER` 与 `suites/storage.js` 的常量回读为准）；L6 历次记下的 12 / 7 / 8 = 27 与逐组标量 `ADDED_CASE_COUNTS` 都是观察时刻快照，已被 `CASE_LEDGER` 取代 | 通过（2026-09-23；修复轮 2 复核；2026-09-24 按实测订正分解账；2026-09-26 第六轮按 head 订正 L6 账） |
+| 2 | **两个实现都注册全部三组**（L4 / L5 时是"内存替身注册全部三组与身份面两组，SQLite 注册地基组 + 同步组 + 身份面两组"） | `tests/contract/storage-contract.test.js` 的 `assemble(...)` 台账：内存替身一个标签装配六组（地基 / 同步 / 执行 + 身份面两组 + `sharedSync`），SQLite 按组分五个标签（地基组 / 同步组（含 `sharedSync`）/ 身份地基组 / 身份同步组 / 执行组），装配守卫按 `EXPECTED_ASSEMBLY` 与实际注册条数逐标签核账；SQLite 的执行组注册由第五轮补回（thread `storage-contract.test.js:49`），执行面 10 个方法从此在两个实现上跑同一套断言；依赖 core 的三格由 `storageExecutionDivergenceSuite` 在两个"分叉格"适配器上各注册 3 条（守卫断言 `[3, 3]`） | 通过（2026-09-26 补回身份同步组与台账覆盖；2026-09-26 第五轮补回 SQLite 执行组注册；**Superseded**：L6 原文的"两次 `assemble(..., ['foundation','sync','execution'])`、两个标签各 30 条"是第四轮单标签装配的形状，第五轮曾写成"替身经 `storageContractSuite`"——与 head 不符，`storageContractSuite` 无调用者，见遗留 21） |
 | 3 | 事务内再调 `tx.transaction(...)` 两个实现都抛错 | 契约用例（两个实现各一次） | 通过 |
 | 4 | 事务原子性：抛错后重开句柄读不到半写行 | `tests/integration/storage-restart.test.js` 第 2 条 | 通过 |
 | 5 | 重开同一文件逐字段不变 | 重启用例第 1 条（工作区/绑定/身份/投影/仓库/修订号） | 通过 |
 | 6 | 再跑迁移是 no-op | 重启用例第 3 条：迁移重跑之前先经端口 `putWorkspace`，迁移后重开逐字段读回（**第五轮订正**：上一版没有这次端口写入却记「通过」；补上后本层字面满足，改为由本层关闭 #163） | 通过 |
-| 7 | 未实现方法显式抛出且不误红地基组 | `UnimplementedPort` + SQLite 地基组全绿（条数以 `node --test tests/contract` 回读为准；观察时刻快照 13） | 通过 |
+| 7 | 未实现方法显式抛出且不误红地基组（L4 / L5 当时的范围声明） | `UnimplementedPort` + SQLite 地基组全绿（条数以 `node --test tests/contract` 回读为准；观察时刻快照 13）。**L6 已收口**：`UnimplementedPort` 与桩模块删除（第 47 项） | 通过 |
 | 8 | 地基组覆盖的端口面（本层交付范围） | 工作区 / 绑定 / 实体 / 身份 / 投影（含 replace）/ 仓库 / 修订号 / 事务 | 通过 |
-| 9 | **未交付范围明确**：只剩执行组 | 10 个方法抛 `not implemented in L4: <method>`；执行组契约用例只在内存替身上运行（同步组已交付，两个实现都跑） | 通过 |
+| 9 | **未交付范围明确**：只剩执行组（L4 / L5 当时的范围声明） | 10 个方法抛 `not implemented in L4: <method>`；执行组契约用例只在内存替身上运行（同步组已交付，两个实现都跑）。**L6 已收口**：执行组落地、桩模块删除、两个实现跑全部三组（第 41 / 47 项） | 通过（2026-09-23） |
 | 10 | `storage/sqlite` 只依赖 capabilities 与 domain | `node --test tests/contract/package-boundaries.test.js` 7/7 | 通过 |
-| 11 | 体量与发布面合规 | `BASE=$(gh pr view 167 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)`，再 `size "$BASE"` / `disclosure "$BASE"` / `git diff --check "$BASE"...HEAD` | 以命令回读为准，不写死数字。**订正 2026-09-24（评审）**：原文写 `size 8f11e38`（该提交在第二次级联后已不是 head 的祖先，不可复跑）与「代码 1103/1000」；体量数字是易失值，且 2026-09-24 已把切分改成只抽出同步组与执行组，被移动的行减半（见 `Outcomes & Retrospective` 的体量说明） |
-| 12 | 全门禁 | `node --test tests/contract`、`node --test tests/integration`、`node --test tests/e2e`、`node --test tests/mvp0`、`tsc --noEmit` 全绿（条数以命令回读为准；观察时刻快照：契约 486、集成 30、e2e 38、mvp0 7） | 通过（2026-09-24 级联复跑） |
+| 11 | 体量与发布面合规 | `BASE=$(gh pr view 167 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)`，再 `size "$BASE"` / `disclosure "$BASE"` / `git diff --check "$BASE"...HEAD`（L5 取 `gh pr view 170`、L6 取 `gh pr view 175` 的 `baseRefOid`） | 以命令回读为准，不写死数字。**订正 2026-09-24（评审）**：原文写 `size 8f11e38`（该提交在第二次级联后已不是 head 的祖先，不可复跑）与「代码 1103/1000」；体量数字是易失值，且 2026-09-24 已把切分改成只抽出同步组与执行组，被移动的行减半（见 `Outcomes & Retrospective` 的体量说明） |
+| 12 | 全门禁 | `node --test tests/contract`、`node --test tests/integration`、`node --test tests/e2e`、`node --test tests/mvp0`、`tsc --noEmit` 全绿（条数以命令回读为准；观察时刻快照：契约 486、集成 30、e2e 38、mvp0 7）；L6 各轮的全门禁见第 48 / 51 / 56 / 58 / 66 项（均为观察时刻快照） | 通过（2026-09-24 级联复跑） |
 | 13 | **同一实例只有一个写者路径**（修复轮） | 三条写者路径用例在"内存 Storage 替身"与"SQLite Storage（地基组）"两个标签下各出现一次 | 通过（D5 / D6） |
 | 14 | 重叠事务不撞驱动级错误、两个事务都提交 | 契约"重叠事务串行提交，已确认的写入不被后来者覆盖"×2；实验 ① 判别性证据 | 通过 |
 | 15 | 事务在途时的直接写入不被并进事务 | 契约"在途事务提交后保留直接写入"与"在途事务回滚后直接写入仍然落库"×2；实验 ② 判别性证据 | 通过 |
-| 16 | **读隔离**（修复轮 2）：事务未提交的写入不得被事务外的读看到 | 共享地基组用例在"内存 Storage 替身"与"SQLite Storage（地基组）"两个标签下各一次；实验 ③ 判别性证据 | 通过（D8 / D9） |
+| 16 | **读隔离**（修复轮 2）：事务未提交的写入不得被事务外的读看到 | 共享地基组用例在"内存 Storage 替身"与"SQLite Storage（地基组）"两个标签下各一次；实验 ③ 判别性证据（L6 另有打在执行面六个读上的同型断言，见第 57 / 62 项） | 通过（D8 / D9；执行面见 D25 / D30） |
 | 17 | 事务作用域误用快速失败：不挂起、不抛驱动文案 | `storage-contract.test.js` 的 SQLite 专属用例（读 / 写 / 再开事务三种调用）；实验 ④ 判别性证据 | 通过（**不声称共享**：见本层计划遗留「跨实例自等的共享用例缺另一半」） |
 | 18 | 事务在途时 `close()`：在途事务与已排队变更快速失败 | 同上 close 用例；实验 ⑤ 判别性证据 | 通过 |
 | 19 | 投影 UPSERT 的覆盖分支有判别性用例 | 共享地基组用例 ×2；实验 ⑥（改 `DO NOTHING` 变红） | 通过（本层计划遗留「投影 UPSERT 的覆盖分支无判别性用例」收口） |
@@ -607,7 +898,7 @@ node scripts/rule-checks.mjs size "$BASE"          # 期望：退出码 0（体�
 | 25 | 引用完整性两条（成员关系→工作区、字段值→成员关系） | 集成第 5 条 + 契约"引用不存在的父行必须被拒绝"；实验 14 | 通过 |
 | 26 | 游标按作用域隔离（绑定 + scopeKey、工作区） | 集成第 7 条；实验 15 | 通过 |
 | 27 | **没有成员关系的观察，两个实现都必须被应用**（账本主体 = 端口主体，观察不解析落点） | 集成用例「观察不解析落点：没有成员关系的内容也必须被应用，且不凭空造一条成员关系」；契约共享用例「没有成员关系的观察必须被应用，换条目后再投递同一观察仍是 false」×2（2026-09-26 从第四轮版本补回） | 通过（2026-09-24 L5-H 重建；**Superseded by L5-H（2026-09-24）**：原文写"观察落点解析不到时显式失败且不留行｜集成第 6 条"，与端口主体语义相反） |
-| 28 | 桩清单只剩执行组，未实现仍显式抛出 | `storage-unimplemented.ts` 的 10 个名字；执行组用例仍只在内存替身上运行 | 通过 |
+| 28 | 桩清单只剩执行组，未实现仍显式抛出（L5 当时的范围声明） | `storage-unimplemented.ts` 的 10 个名字；执行组用例仍只在内存替身上运行。**L6 已收口**：桩清单清空、模块删除（第 47 项） | 通过（2026-09-23） |
 | 29 | 体量与发布面合规 | `node scripts/rule-checks.mjs size "$BASE"` → 退出码 0；`git diff --check "$BASE"...HEAD` 无输出（原文的 `size 6526ded9` 与 476/1000 是观察时刻快照，不可复跑） | 通过（2026-09-23；2026-09-24 改为回读式） |
 | 30 | 全门禁（L5，**修复轮前** head `0aa7c34`） | 契约 429/429、集成 33/33、e2e 38/38、mvp0 7/7、`tsc --noEmit` 0、boundaries 7/7 | 通过（修复轮后的当前值见第 31 项） |
 | 31 | **账本在接收时刻碰撞时仍只追加**（修复轮 P0） | 集成"同一主体、同一接收时刻的两条不同观察互不顶掉"（账本 2 行、第一条再投递 `false`）；契约同步组"换一个实例…"；实验 16 判别性证据 | 通过（D14） |
@@ -620,21 +911,60 @@ node scripts/rule-checks.mjs size "$BASE"          # 期望：退出码 0（体�
 | 38 | **重写前的 003 显式报错**（评审修复轮 P3） | 集成"003 重写后的库自检…"：退回 7 列旧形状的库在打开时抛"重写前的 003，请删除重建"，当前形状的库照常打开；实验 21 判别性证据 | 通过（D18） |
 | 39 | 体量证据可复现（评审修复轮 P3） | 计划里的基线由 `e49f0ee` 改成 `6526ded9`（两个都是观察时刻快照，不可复跑），`node scripts/rule-checks.mjs size "$BASE"` 与 `git diff --check "$BASE"...HEAD` 均按实测记录 | 通过 |
 | 40 | **重建**：机制统一收进基类，两侧修复同时成立 | `SqliteSyncSurface` 持有 `#queue` / `scoped` / `TX_SCOPE` / `#closed` 与唯一入口 `mutate`（`read` 复用同一条串行点）；两个面的读方法全部经过它；`tests/contract` SQLite 地基 12 + 同步 7 = 19 条全绿；实验 22 / 23 判别性证据 | 通过（2026-09-23，见 Batch L5-F） |
-| 41 | **级联后绑定仍按新契约落库**（Batch L4-F） | 身份地基组用例 ×2（替身 + SQLite）：同 id 换实现被拒、第二个启用的 planning 挂载被拒且不留孤儿锚点、同域至多一个启用默认；`listProviderBindings` 走 join 别名 | 通过（2026-09-24） |
-| 42 | **观察主体是端口主体（连接级）**（Batch L5-H；**Superseded by L5-H（2026-09-24）**：原文写"级联后观察落点仍解析到工作区"） | 身份同步组用例 ×2（替身 + SQLite）：同一条连接被两个工作区挂载时同一对象只有一条身份；集成用例「committed 按端口主体定序：两个绑定观察同一内容时各自的版本序列互不影响」与「观察不解析落点…」 | 通过（2026-09-24；2026-09-26 补回 SQLite 身份同步组注册与装配台账覆盖） |
+| 41 | **执行组 10 个方法落库，两个实现跑同一套三组契约** | SQLite 侧注册执行组（`assemble(sqliteAdapter('SQLite Storage（执行组）', …), ['execution'])`，第五轮补回）；判别性证据：把 `findActiveExecutionContext` 的 active 过滤去掉、或让 `getExecutionRun` 绕过 `read`，对应用例各自变红 | 通过（2026-09-23，D23；**Superseded（2026-09-26 第五轮）**：原文写"装配收敛成一个标签 + 装配守卫按实际注册条数核账"，那是第四轮单标签装配的形状；现行 head 仍由 `assemble` 台账与装配守卫核账，但 SQLite 按组分标签，见第 2 项） |
+| 42 | 执行上下文：同一工作项 + 仓库最多一个 active | 契约执行组第 1 条（两个实现）；写入第二个 active 后第一个被置 `closed` | 通过（D20） |
+| 43 | 关系路由：删候选行 / 不降级 / **候选可读**三条都由契约钉住 | **契约执行组第 2 条**钉住"候选升确认时删掉候选行"与"候选不得降级已确认"；**候选方向由评审修复轮新增的"只写候选关系就能读到候选"钉住**（实测：候选分支整笔 no-op 后该条红，而收口轮同一改坏曾让契约 47/47 全绿）；实验 49 判别性证据（重建）；收口轮的零判别性记录见 D24 | 通过（D21 / D24 / D28；重建后复核） |
+| 44 | 写尝试同幂等键是**幂等覆盖**（一行一键，后写状态取代先写） | 契约执行组"写尝试一行一键，状态原地推进且 id 在工作区内唯一"（两个实现）+ 文件库上的"同幂等键经端口重放是幂等覆盖，账上只有一行"（含关句柄重开） | 通过（D25；**Superseded by 收敛计划 D5 / Batch L6-G（2026-09-24）**：原文写"同幂等键重放返回原结果、未决重复被拒"，D22 的 no-op 模型已废） |
+| 45 | 关系与执行上下文 / 运行 / 写尝试重启后逐字段不变 | `tests/integration/storage-restart.test.js` 第 2 条（`close()` 后同路径重开） | 通过（#5 的重启判据；重建后复核） |
+| 46 | 对端口写过的库再跑迁移是 no-op，既有行不被触碰 | 重启用例第 5 条 | 通过 |
+| 47 | 桩清单为空、未实现错误不再出现 | `storage-unimplemented.ts` 删除；树里 `grep -rn "not implemented in L4" packages/` 无命中 | 通过（重建后复核） |
+| 48 | 全门禁（L6，**原分支历史值**，观察时刻快照，不可复跑） | 契约 443/443、集成 39/39、e2e 38/38、mvp0 7/7、`tsc --noEmit` 0、boundaries 7/7、`size cafc245` 退出码 0 | 通过（2026-09-23；重建后的当前值见第 58 项） |
+| 49 | **可选列未设置时读回严格 `undefined`（不是 null）**（收口轮） | 集成"未设置的可选列读回严格 === undefined（不是 null），逐字段写清"：执行上下文三列 + 写尝试两列各取 `undefined` 的夹具，逐列 `assert.equal(x, undefined)`（strict 下即 `===`）与逐字段写清的 `deepEqual`，集合读路径同断言 | 通过（D25） |
+| 50 | **`#120` Scope 的"写入幂等在文件库上成立"有对应用例**（收口轮） | 集成"同幂等键经端口重放是幂等覆盖，账上只有一行"：经端口写两次同键 → 只有一行、后写状态取代先写，关句柄重开后同断言 | 通过（D25；**Superseded by 收敛计划 D5 / Batch L6-G（2026-09-24）**：原文写"返回原结果"） |
+| 51 | 全门禁（L6 收口轮，**原分支历史值**，观察时刻快照，不可复跑） | 契约 443/443、集成 39/39、e2e 38/38、mvp0 7/7、`tsc --noEmit` 0、boundaries 7/7、`size cafc245` 退出码 0、`git diff --check` 无输出 | 通过（2026-09-23） |
+| 52 | **执行组三条父边的引用完整性在两个实现上一致**（F1） | 替身补三条父边检查（仓库 → 身份、执行运行 → 执行上下文、写尝试 → 绑定）；契约新增"悬空执行父边必须被拒绝"（两个实现共用，含正控与"被拒绝的写入不得留下行"） | 通过（D26） |
+| 53 | **只写候选就能读到候选：路由的候选方向升进契约层**（F2） | 契约新增"只写候选关系就能读到候选（关系按 state 路由的候选方向）"；收口轮的零判别性记录（D24）由本轮收口 | 通过（D24 收口 / D28） |
+| 54 | **`listMutationAttempts` 的跨工作区隔离有断言**（F2） | 契约新增"写尝试按工作区隔离，列表读路径不混入另一个工作区"（列表 + 双向 `findMutationAttempt`） | 通过（D28） |
+| 55 | **强制关闭 active 上下文时 `provisioningStartedAt` 清成 undefined**（F3） | 契约新增"强制关闭 active 上下文时把 provisioningStartedAt 清成 undefined"（两个实现）+ 集成"强制关闭 active 上下文时 provisioning_started_at 在库层被清成 NULL" | 通过（D27；端口注释歧义见遗留 23） |
+| 56 | 全门禁（L6 评审修复轮，**原分支历史值**，观察时刻快照，不可复跑） | 契约 443/443、集成 39/39、e2e 38/38、mvp0 7/7、`tsc --noEmit` 0、boundaries 7/7、`size cafc245` 退出码 0、`git diff --check cafc245...HEAD` 无输出 | 通过（2026-09-23） |
+| 57 | **重建**：执行面的读全部走基类统一入口，且有判别性证据 | 六个读方法（`getExecutionContext` / `findActiveExecutionContext` / `getExecutionRun` / `listRelations` / `findMutationAttempt` / `listMutationAttempts`）都经 `read`；`storage.ts` 与 `storage-execution.ts` 都不声明 `#queue` / `#closed` / `mutate` / `transaction` / `close`；`suites/storage-execution.js` 新增执行组读隔离断言（只增不改），实验 48 判别性证据 | 通过（2026-09-23，D20 / D25，Batch L6-E） |
+| 58 | 全门禁（L6 重建） | `node --test tests/contract tests/integration tests/e2e tests/mvp0`、`tsc --noEmit`、`node --test tests/contract/package-boundaries.test.js`、`node scripts/rule-checks.mjs size "$BASE"`、`git diff --check "$BASE"...HEAD` 全部通过（观察时刻值（级联前 base），不可复跑：契约 514、集成 45、e2e 38、mvp0 7、代码 611/1000） | 通过（2026-09-24 级联复跑；2026-09-24 改为回读式 `BASE=$(gh pr view 175 ...)`） |
+| 59 | **级联后绑定仍按新契约落库**（Batch L4-F） | 身份地基组用例 ×2（替身 + SQLite）：同 id 换实现被拒、第二个启用的 planning 挂载被拒且不留孤儿锚点、同域至多一个启用默认；`listProviderBindings` 走 join 别名（观察时刻值（级联前 base），不可复跑：`size 8f11e38` → 代码 994/1000；本层判定用回读式 `BASE`） | 通过（2026-09-24） |
+| 60 | **观察主体是端口主体（连接级）**（Batch L5-H；**Superseded by L5-H（2026-09-24）**：原文写"级联后观察落点仍解析到工作区"） | 身份同步组用例 ×2（替身 + SQLite）：同一条连接被两个工作区挂载时同一对象只有一条身份；集成用例「committed 按端口主体定序：两个绑定观察同一内容时各自的版本序列互不影响」与「观察不解析落点…」（观察时刻值（级联前 base），不可复跑：`size 8f63983` → 代码 829/1000） | 通过（2026-09-24；2026-09-26 补回 SQLite 身份同步组注册与装配台账覆盖） |
+| 61 | **级联后 L6 三组与身份面在两个实现上全绿**（Batch L6-F） | 装配前置行改两条表；替身写尝试父边改用 `providerBindings`（观察时刻值（级联前 base），不可复跑：`size 6a25971` → 代码 611/1000；第四轮评审实测裸 SQL 直插仍在，处置见 inline `storage-contract.test.js:70`；第五轮已删掉装配点的直插，前置行只走端口 `seedExecutionPrereqs`） | 通过（2026-09-24） |
+| 62 | **执行面的六个读逐一双向可判别**（第三轮评审 P2 收口，Batch L6-G） | `suites/storage-execution.js` 的 `READ_ISOLATION_CASES`：六个读各一条用例，每条走"事务内写入 → 外部读不是未提交值 → 回滚后为空"并带正控；六个读**逐个**改回直接读，对应用例各自变红（一次只红一条），还原后 `tests/contract/storage-contract.test.js` 95/95 绿 | 通过（2026-09-24） |
+| 63 | **写尝试在两个实现上是同一个模型（一行一键、幂等覆盖）**（第三轮评审 P3 收口） | `storage-execution.ts` 的 `putMutationAttempt` 改成单语句 UPSERT；契约"写尝试一行一键，状态原地推进且 id 在工作区内唯一"×2 + 集成"同幂等键经端口重放是幂等覆盖，账上只有一行" | 通过（2026-09-24，D5） |
+| 64 | **切分账与断言账按 head 实测**（第三轮评审 P3 收口；第六轮按 head 回读订正） | 条数层 `CASE_LEDGER` 13 / 8 / 13（逐组新增 6 / 0 / 10）= 34 = `PRE_SPLIT_CASE_COUNT`(18) + `ADDED_CASE_COUNT`(16)，由 `countSuiteCases` 实测；断言层是 `ASSERTION_BASELINE`（三组 `assert.` 语句的多重集，只防变少）；以守卫常量回读为准 | 通过（2026-09-24；**订正 2026-09-26（第六轮）**：原文记 `ASSERTION_LEDGER` 36 / 45 / 30、`ADDED_CASE_COUNT` 18，是第三轮收口时的观察时刻快照，head 上已没有 `ASSERTION_LEDGER`） |
+| 65 | **计划里的易失值与编号交叉引用收口**（第三轮评审 P3 收口） | L6 重建验证摘要改成回读式 `BASE=$(gh pr view 175 ...)`；`fake/storage.ts` 的遗留编号改成名字引用；`plan:814` 的第三个阻塞点补登（issue #187） | 通过（2026-09-24） |
+| 66 | 全门禁（Batch L6-G，第三轮评审收口后） | 契约 + 集成 + e2e + mvp0 合计 622/622、`tsc --noEmit` 无输出、boundaries 7/7、`size "$BASE"` 代码 633/1000 文档 680/1500（观察时刻快照，不可复跑）、`disclosure "$BASE"` 退出码 0、`git diff --check "$BASE"...HEAD` 无输出 | 通过（2026-09-24；逐条摘要见 `Progress` 的 Batch L6-G 条目） |
 
-**本层不声称**：#5 的"关系与执行上下文重启后不变"要等执行组落地（L4 只交付地基组，验收表第 9 项显式登记）。**L5 补记**：同步组已经落地——成员关系 / 字段值 / 观察 / 游标在文件库上关句柄重开后逐字段不变（契约同步组最后一条用例真正调用 `restart`）；仍不声称的是**执行组**的关系与执行上下文。
+**本层不声称**：#5 的"关系与执行上下文重启后不变"要等执行组落地（L4 只交付地基组，验收表第 9 项显式登记）。**L5 补记**：同步组已经落地——成员关系 / 字段值 / 观察 / 游标在文件库上关句柄重开后逐字段不变（契约同步组最后一条用例真正调用 `restart`）；仍不声称的是**执行组**的关系与执行上下文。**L6 补记**：L6 补上了执行面——关系（确认 + 候选）与执行上下文 / 运行 / 写尝试在关句柄重开后逐字段不变（第 45 项），**到 L6 为止这一条在端口面上成立**；L6 仍然不声称的部分见下方「本层关闭」段之后的清单。
 
 **"验收表全通过"不能读成"SQLite 已经可以当 core 的 storage"**（2026-09-23 修复轮补记，P2；**2026-09-24 按 head 实测改写**）。**Superseded by L5-H（2026-09-24）**：原文的两条"已知后果"（core 的 `recordObservations` 在 SQLite 上抛"观察无法挂载"、`bootstrapWorkspace()` 被 rejected）已被根因修复消掉——账本主体改成端口主体（连接级）后，观察不解析落点、也不要求成员关系存在。改写后的现状：
 
 1. **core 的首轮同步在 SQLite 上与替身结果一致**：`composeCore({ storage: createSqliteStorage(文件) })` + `createFakeProviders()` 的 `bootstrapWorkspace()` 返回 ok，实体与列表条目与替身逐项相同。
-2. **执行组在本层未交付**：关系与执行上下文的重启不变性、以及 core 的 Start Work 路径在 SQLite 上仍没有端到端证据（验收表第 9 项）；这属于执行组落地范围，不是本层缺陷。
+2. **执行组在本层未交付**：关系与执行上下文的重启不变性、以及 core 的 Start Work 路径在 SQLite 上仍没有端到端证据（验收表第 9 项）；这属于执行组落地范围，不是本层缺陷。（L4 / L5 当时的范围声明；**L6 补记**：执行组已在端口面交付（第 41–47 项），但 core 的 Start Work 在 SQLite 上仍没有端到端证据，见下方清单第 5 条与遗留 22 / 24。）
 
 **订正 2026-09-24（第四轮评审）**：原文写"26 项全通过"与两条 core 后果；条数是易失值（以命令回读为准），后果已被根因修复取代。
 
+**本层关闭 #120；#5 与 #28 为 `Refs`**（2026-09-23 L6；2026-09-24 订正关闭面；2026-09-26 第六轮按收敛计划 Decision Log 订正 #28）：#120 的"Storage 端口全部方法落在 SQLite 上、两个实现跑同一套契约"由上面的验收项钉住（第 2、41–47 项），由 PR #175 关闭。**#28 为 `Refs`**：本层新增的集成用例「关系（确认 + 候选）与执行上下文/运行/写尝试在关句柄重开后逐字段不变」实测钉住 #28 验收条目 1（关系重启后逐字段不变），同文件的失败事务无半写行、迁移二次运行 no-op 等用例也是 #28 的证据；但 #28 的关闭归属**待人类伙伴决定**——依据是 `main` 上收敛计划（`docs/exec-plan/completed/2026-09-24-review-root-cause-convergence.md`）Decision Log 的「#28 与 #5 的关闭归属待人类伙伴决定，各层先写 `Refs`」，本层只提供证据、不自行关闭。**#5 为 `Refs`**：`#5` 的验收 3 在产品层要求 core 能以 SQLite 为 storage，收口依赖 #187、#188 与 #132（本层只交付执行面这一格，见下方清单）；按收敛计划 D8，某层不能字面满足某个 issue 的验收时写 `Refs`。实际关闭集合的唯一权威是回读 `gh pr view 175 -R SingularityKChen/harness-projects --json closingIssuesReferences`，本计划不写死。**订正史**：2026-09-23 原文写"本层关闭 #120 与 #5"，与 PR 的 `closingIssuesReferences`（只有 #120）不符，2026-09-24 订正；2026-09-26 第五轮按收敛计划 D8「谁交付证据谁写关闭引用」改成"关闭 #120 与 #28"，第六轮按同一份收敛计划的 Decision Log 撤回——#28 的关闭归属未决。
+
+仍然不声称的是下面几条（**两个实测的 storage 前置条件 + 两个 core 侧阻塞点 + 一条证据范围声明**）：
+
+1. **仓库没有可用的外部身份种类**（承载 issue [#195](https://github.com/SingularityKChen/harness-projects/issues/195)）：`ExternalIdentityKind` 与 002 的 CHECK 里都没有 `repository`，`packages/core/src/identity.ts` 的 `asExternalKind('repository')` 会静默回落成 `issue`。因此 #188 写的收口条件"core 登记仓库（含外部身份）"照做也做不成；契约夹具目前用 `externalKind: 'branch'` 占位（`suites/storage-execution.js`）。
+2. **未登记工作项在两个实现上的失败形状不同**（承载 issue [#196](https://github.com/SingularityKChen/harness-projects/issues/196)）：形状**合法**但从未 `putEntity` 的工作项 id（如 `wi-unknown`）交给 Start Work 时，内存替身**接受并写入**一条 `ready` 执行上下文（端口探针实测 `getExecutionContext('ctx-unknown')` 返回该行，`entity` 里没有 `wi-unknown`），SQLite 抛裸 `FOREIGN KEY constraint failed`；core 没有把它转成结构化失败（另见 [#199](https://github.com/SingularityKChen/harness-projects/issues/199)）。**订正 2026-09-26（第五轮评审 P2）**：原文写"替身返回结构化的 `invalid_input`、SQLite 抛裸外键"——那个 `invalid_input` 来自形状不合法的 id（`'---'`）在派生分支名时的失败，与"是否登记"无关；实测 `'---'` 仍然先写了一条 `workItemId: '---'` 的上下文（`contexts` 从 0 变 1），所以它不是"替身拒绝悬空引用"的证据。判据：`suites/storage-execution.js` 的 `storageExecutionDivergenceSuite` 按能力位断言这一格当前分叉（#196 验收 1 要求两个实现给出同一个结构化结果）。
+3. **执行组的引用完整性：已对齐的父边与枚举由共享用例逐条钉住，仍分叉的是三格**（2026-09-23 评审修复轮补记，F1；**2026-09-26 第五轮按实测重写**：已对齐的父边与枚举逐条列在 `suites/storage-execution.js` 的实测清单里，由共享用例「悬空父边与非法枚举必须被拒绝」钉住；仍然分叉的是 `execution_context.repositoryId`（#188）、`execution_context.workItemId`（#196）与关系两端点（#187），由 `storageExecutionDivergenceSuite` 按适配器能力位断言）：`execution_context.repositoryId` 这条**仍然分叉**——SQLite 抛 `FOREIGN KEY constraint failed`，替身接受。不对齐的理由是实测的：全仓没有生产代码调用 `putRepository`（只有测试调用），`packages/core/src/start-work.ts` 的每次 `putExecutionContext` 都写一个没登记过的仓库；把这条父边也加进替身后，e2e 15 个 + mvp0 4 个用例立刻变红（实测，见 Surprises 27）。端口契约把仓库写成"可开始工作的前置"（`packages/capabilities/src/storage.ts` 的 `── 工程：仓库是可开始工作的前置 ──`），因此缺口在 core 侧，不在替身。收口条件见遗留「没有生产代码调用 `putRepository`」（承载 issue [#188](https://github.com/SingularityKChen/harness-projects/issues/188)）。
+4. **core 把谱系关系写到从未登记的实体上**（2026-09-23 评审修复轮 F1 登记的 core 侧阻塞点；2026-09-24 第三轮评审点名"少登记一条"后补登，遗留 5 收口后它与仓库登记并列，承载 issue [#187](https://github.com/SingularityKChen/harness-projects/issues/187)）：003 的 `relation` 与 `candidate_relation` **两端都外键到 `entity`**，而 `packages/core/src/start-work.ts` 的 `recordStartFacts` 把谱系边写到它从未 `putEntity` 的两个实体上（执行上下文 id 与工作树 id）。SQLite 上的顺序后果是：外部写入（branch / worktree）已经发生，`FOREIGN KEY constraint failed` 抛在 `ledger.record` **之前**，于是留下一个 `ready` 执行上下文、却没有关系、没有写尝试、也没有运行；同键重试走 `existing` 分支，因此这条谱系边（AGENTS.md §1.1 不变量 6：工程产物关系沿谱系传播）**永远修不回来**。替身不检查关系端点，所以 e2e / mvp0 保持全绿——这正是"验收表全绿 ≠ SQLite 能当 core 的 storage"的**第三个来源**。收口条件（issue #187）：core 在记录谱系边之前登记端点实体，或者端口明文声明"关系端点可以是实体以外的引用"；两种都要补一条在两个实现上都跑的契约用例。**与遗留 5 的关系**：账本主体改成端口主体之后遗留 5 已收口，本条是**独立**的一格——它既不依赖成员关系，也不依赖仓库登记。
+
+5. **执行面没有 core 侧的端到端用例**：本层的验收全部落在端口面（契约 + 文件库集成用例）；`core` 的 Start Work 路径如何在 SQLite 上读写执行上下文与关系，不在本层证据范围内（证据范围声明）。
+
+**#132 的 `blocked-by`（待人类批准，未完成）**：把 #187、#188、#195、#196 登记为 #132 的 `blocked-by` 需要人类伙伴批准（`AGENTS.md` §7：`blocked-by` / `blocking` 关系必须有人类批准，批准要具体指向目标并写入本 ExecPlan 的 Decision Log）；agent 不代写。回读命令：`gh api repos/SingularityKChen/harness-projects/issues/132/dependencies/blocked_by --jq '.[].number'` → 2026-09-26 第五轮时回读是 #120 / #125 / #126，未包含上述四条（观察时刻快照，以回读为准）。**#189 的归属**：`fix(capabilities): Give workspace-scoped sync facts a workspace key`（[#189](https://github.com/SingularityKChen/harness-projects/issues/189)）是多工作区的键空间问题（capabilities 侧），不是 SQLite 专属阻塞点，不登记为 #132 的 blocker 候选。
+
 ## Progress
 
-- [x] (2026-09-24) **第三轮评审响应（本层 9 条）**：① **事务作用域加生命周期**——AsyncLocalStorage 的标记换成可变令牌，`transaction()` 的 `finally` 置 `active = false`，泄漏出 `work` 的 `tx` 在结算后快速失败而不是被并进下一个在途事务；作用域实例与根实例共用关闭状态，`close()` 幂等；新增 `atomic(fn)` 作为多语句写入的唯一原子入口。② **切分守卫加一层断言数基线**，并补回级联时丢掉的两条默认降级断言。③ 重启用例改成"经端口写入 → 关句柄 → 重跑迁移"（**订正 2026-09-24（第四轮评审）**：③ 声称的写法在当时的 head 上不存在；判据是该用例必须包含一次经端口写入，回读 `tests/integration/storage-restart.test.js` 的迁移 no-op 用例）。④ 计划里的体量基线改成回读式，遗留清单补上 `repository` / `workspace_revision` 的引用完整性分叉。逐条处置见 `docs/exec-plan/active/2026-09-24-review-root-cause-convergence.md`。
+- [x] (2026-09-26) **第六轮评审修复（层计划恢复，P1-B 与流程审计 P2）**：第五轮级联时本文件被「整份取一边」——L6 的 Batch L6-A 与 L6-B 正文、D30、D29 的「被放弃的方案」、Global Constraints 的 L6 允许面、Surprises 23–28、L6 的 Decision Log / Progress / 恢复 / 接口 / Outcomes 与遗留整批丢失，L5 已订正的几行（L5 最小成功证据、验收第 1 / 2 项、「本层不声称」与「验收表全通过」两段、Progress 的第三轮条目）被回退。本轮以现行 L5 的本文件为底，逐节并入第四轮 L6 的记录并保留第五轮订正：L6 的实验编号在 L5 的 35 之后顺延（原 24–38 → 36–50），L6 的遗留在 L5 的 18 之后顺延（原 16–21 → 19–24），文中引用同批改，代码与测试里按名字引用的遗留（「没有生产代码调用 `putRepository`」「列表读路径的顺序」等）可解析；标题 / 状态 / 范围 / Purpose 覆盖 L6；#28 改回 `Refs`（关闭归属待人类伙伴决定）；验收第 1 / 2 / 64 项与 D30 按 head 回读订正（`assemble` 台账与 `EXPECTED_ASSEMBLY` 在，没有 `ASSERTION_LEDGER`，`ADDED_CASE_COUNT` 为 16）。判据命令：`node --test tests/contract/plan-facts-consistency.test.js`（计划归档到 completed 目录后运行）。
+- [x] (2026-09-26) **第五轮评审修复（L6 侧 11 条）**：① P1——SQLite 补回执行组注册（`storageExecutionSuite`），执行面 10 个方法首次在 SQLite 上跑契约（thread `storage-contract.test.js:49`）；② P1——`replacePlanningProjections` 恢复 `atomic`，并恢复第四轮被删掉的集成用例（thread `storage.ts:63`）；③ P2——`putExecutionContext` / `putRelation` 改 `atomic` 并各补一条判别性用例（thread `storage-execution.ts:50`，D31）；④ P2——R4-4 落地：执行组头部改成实测清单、依赖 core 的三格写成按能力位断言的显式分叉用例、已对齐的父边与枚举逐条钉住（thread `suites/storage-execution.js:72`）；⑤ P3——替身删掉 `replacePlanningProjections` 的死代码实体清理、订正码点序注释、`workItemId` 的分叉改挂 #196（threads `fake/storage.ts:205` / `:53`）；⑥ P3——`storage.ts` 头注释恢复 `atomic` 一句并订正列表顺序（thread `storage.ts:3`）；⑦ P2——「本层不声称」第 2 条按实测订正（thread `storage-sqlite-port.md:878`）；⑧ P2——`docs/README.md:49` 与「本层关闭」段订正为"关闭 #120 与 #28；#5 为 `Refs`"（threads `docs/README.md:49` / `storage-restart.test.js:83`；**第六轮订正**：#28 的关闭归属待人类伙伴决定，现行表述是"关闭 #120；#5 与 #28 为 `Refs`"，见「本层关闭」段）；⑨ P3——三处编号引用改回名字引用（thread `suites/storage-execution.js:77`）。注入实验 8 条（改坏 → 红 → 还原 → 绿，逐个先打印被改的行），全门禁见验收表第 2 / 41 项与下方变更记录。
+- [x] (2026-09-24) **第三轮评审响应（本层 9 条）**：① **事务作用域加生命周期**——AsyncLocalStorage 的标记换成可变令牌，`transaction()` 的 `finally` 置 `active = false`，泄漏出 `work` 的 `tx` 在结算后快速失败而不是被并进下一个在途事务；作用域实例与根实例共用关闭状态，`close()` 幂等；新增 `atomic(fn)` 作为多语句写入的唯一原子入口。② **切分守卫加一层断言数基线**，并补回级联时丢掉的两条默认降级断言。③ 重启用例改成"经端口写入 → 关句柄 → 重跑迁移"（**订正 2026-09-24（第四轮评审）**：③ 声称的写法在当时的 head 上不存在；判据是该用例必须包含一次经端口写入，回读 `tests/integration/storage-restart.test.js` 的迁移 no-op 用例）。④ 计划里的体量基线改成回读式，遗留清单补上 `repository` / `workspace_revision` 的引用完整性分叉。逐条处置见 `docs/exec-plan/completed/2026-09-24-review-root-cause-convergence.md`。
 - [x] (2026-09-23) 读端口契约、002/003 迁移、内存替身、L3 计划遗留「嵌套事务在运行时静默吞写」，确认文件边界与"只交付地基面"的范围。
 - [x] (2026-09-23) Batch L4-A：三组切分 + 条数守卫 + 嵌套事务用例 + 重启用例，Batch L4-A 的提交。
 - [x] (2026-09-23) 红证据（在 Batch L4-A 的树上运行）：`node --test tests/contract/storage-contract.test.js` → 22 pass / 1 fail，红的是"内存 Storage 替身：事务内再调 tx.transaction(...) 必须运行时抛错"；`node --test tests/integration/storage-restart.test.js` → fail 1（`createSqliteStorage` 尚不存在）。
@@ -717,7 +1047,7 @@ L5 评审修复轮验证摘要（**原 L5 分支的历史值**；易失值，以
 
 重建验证摘要（易失值，以命令回读为准；命令在检出 `feature/storage-sqlite-sync-surface` 的工作树根目录运行；**以下条数与基线 `8f11e38`（观察时刻快照，不可复跑）都是观察时刻快照，不可复跑**）：`node --test tests/contract` → tests 501 / pass 501 / fail 0（SQLite 地基 12 + 同步 7 = 19 条，内存替身 20 条三组）；`node --test tests/integration` → 40/40；`node --test tests/e2e` → 38/38；`node --test tests/mvp0` → 7/7；`../../node_modules/.bin/tsc --noEmit` 退出码 0；`node --test tests/contract/package-boundaries.test.js` → 7/7；`node scripts/rule-checks.mjs size 8f11e38`（观察时刻快照，不可复跑）→ 代码 829/1000、文档 ≤1500；`git diff --check 8f11e38...HEAD`（观察时刻快照，不可复跑）无输出。
 
-- [x] (2026-09-24) **级联到新 L4 底（Batch L4-F + L5-G）**：L2/L3 被重写成"连接锚点 + 工作区挂载"两表（`provider_binding` 只留 `(id, implementation_key)`）并在 `suites/storage-identity-membership.js` 里独立成文。L4 先级联（恢复锚点 `backup/storage-sqlite-port2-pre-review-response`、`git rebase --onto 8f11e38 3e255ed`（观察时刻快照，不可复跑）），L5 再级联到 L4 新 head（恢复锚点 `backup/storage-sqlite-sync-surface-pre-review-response`、`git rebase --onto 8f63983 8f4b5da`）。绑定落库改双表且两条语句同属一个原子作用域（D20）；`#observationSubject` 改 join `workspace_binding`；装配前置行的 seed 改两条表；SQLite 适配器补注册身份同步组；集成用例的第二个绑定改挂 `development` 域。全门禁复跑见 `Progress` 与验收表第 41 / 42 项。
+- [x] (2026-09-24) **级联到新 L4 底（Batch L4-F + L5-G）**：L2/L3 被重写成"连接锚点 + 工作区挂载"两表（`provider_binding` 只留 `(id, implementation_key)`）并在 `suites/storage-identity-membership.js` 里独立成文。L4 先级联（恢复锚点 `backup/storage-sqlite-port2-pre-review-response`、`git rebase --onto 8f11e38 3e255ed`（观察时刻快照，不可复跑）），L5 再级联到 L4 新 head（恢复锚点 `backup/storage-sqlite-sync-surface-pre-review-response`、`git rebase --onto 8f63983 8f4b5da`）。绑定落库改双表且两条语句同属一个原子作用域（D29）；`#observationSubject` 改 join `workspace_binding`；装配前置行的 seed 改两条表；SQLite 适配器补注册身份同步组；集成用例的第二个绑定改挂 `development` 域。全门禁复跑见 `Progress` 与验收表第 41 / 42 项。
 
 级联验证摘要（易失值，以命令回读为准；命令在检出 `feature/storage-sqlite-sync-surface` 的工作树根目录运行；**以下条数与基线 `8f63983` 都是观察时刻快照，不可复跑**）：`node --test tests/contract` → tests 501 / pass 501 / fail 0；`node --test tests/integration` → 40/40；`node --test tests/e2e` → 38/38；`node --test tests/mvp0` → 7/7；`tsc --noEmit` 退出码 0；`node --test tests/contract/package-boundaries.test.js` → 7/7；`node scripts/rule-checks.mjs size 8f63983` → 代码 829/1000、文档 ≤1500；`git diff --check 8f63983...HEAD` 无输出。
 
@@ -739,6 +1069,58 @@ L5-H 验证摘要（易失值，以命令回读为准；命令在检出 `feature
 33. **NULL 映射**：`rowToMembership` 直接取列 → 缺省时间戳读回用例红。
 34. **游标父边**：删掉替身的游标存在性检查 → 悬空游标用例红。
 35. **账本只追加**：`putMembership` 加回 `DELETE FROM sync_observation` → 无成员关系观察用例红。
+
+L6（执行面）的进度记录（2026-09-23 起；实验编号在 L5 的 35 之后顺延，原 L6 分支的 24–38 依次为 36–50；2026-09-26 的第五、六轮条目在本节开头）：
+
+- [x] (2026-09-23) L6 对齐：读执行组规格（3 条）、003 的执行 / 关系 / 写尝试 DDL、内存替身的执行面语义与桩清单，确认三件事：关系要按 `state` 路由到两张表、写尝试的部分唯一索引只覆盖未决状态、契约装配要从两个标签收敛成同一个组集合（台账必须同批改）。
+- [x] (2026-09-23) Batch L6-A：SQLite 装配统一组集合 + 期望台账同批改 + 三组共用前置行 + 两条集成用例，提交 ①。
+- [x] (2026-09-23) L6 红证据（提交 ① 的树，**原 L6 分支的历史值**）：`node --test tests/contract/storage-contract.test.js` → 47 tests / 44 pass / 3 fail（红的全是 `SQLite Storage：` 执行组三条，`Error: not implemented in L4: putExecutionContext` / `putRelation` / `putMutationAttempt`）；`node --test tests/integration/storage-restart.test.js` → 5 tests / 3 pass / 2 fail（两条新增用例）。
+- [x] (2026-09-23) Batch L6-B：`storage-execution.ts` + 四张行映射 + 桩模块删除，提交 ②。
+- [x] (2026-09-23) Batch L6-C：本计划与 `docs/README.md` 索引行，提交 ③。
+- [x] (2026-09-23) 判别性实验与全门禁复跑，摘要见下。
+
+L6 判别性实验（改坏 → 红 → 还原 → 绿，均在检出 `feature/storage-sqlite-execution-surface` 的工作树根目录；**原 L6 分支的历史值**；编号在 L5 的 35 之后顺延——原 L6 分支的 24–35 依次为 36–47；实验 39 / 43 针对当时的写尝试 no-op 模型，该模型已被 Batch L6-G 的一行一键 UPSERT 取代）：
+
+36. **关系路由（候选 → 确认时删候选行）**：删掉 `putRelation` 确认分支里的 `DELETE FROM candidate_relation` → 契约 47 tests / 46 pass / 1 fail：`SQLite Storage：关系按工作区隔离且重复写入不产生第二条` 红（`listRelations` 同时返回确认与候选两条）→ 还原后 47/47 绿。
+37. **候选不得降级已确认**：删掉 `putRelation` 候选分支里的"同键已有 confirmed 就返回"守卫 → 契约 46 pass / 1 fail：同一条用例红（候选写入在确认行旁边多出一条候选行）→ 还原后 47/47 绿。
+38. **执行 active 唯一**：删掉 `putExecutionContext` 里"先把同键其它 active 置为 closed"的 UPDATE → 契约 46 pass / 1 fail：`SQLite Storage：同一工作项+仓库最多一个 active 执行上下文` 红在 `Error: UNIQUE constraint failed: execution_context.workspace_id, execution_context.work_item_id, execution_context.repository_id`（003 的部分唯一索引挡住了第二行）→ 还原后 47/47 绿。
+39. **写尝试同幂等键重放**：删掉 `INSERT ... WHERE NOT EXISTS` 的守卫（连同两个查询参数）→ 契约 46 pass / 1 fail：`SQLite Storage：写尝试同幂等键重放返回原结果` 红在 `suites/storage-execution.js:44`（`listMutationAttempts` 长度 2）——部分唯一索引覆盖不到已决的 `saved` 行，所以第二行真的插进去了，这条语义只有端口守卫钉得住 → 还原后 47/47 绿。
+40. **重启逐字段一致**：`rowToExecutionContext` 的 `provisioningStartedAt` 改成恒 `undefined`（读回丢掉一列）→ 集成 5 tests / 3 pass / 2 fail：两条新用例都红（`deepEqual` 逐字段比对直接命中那一列）→ 还原后 5/5 绿。
+41. **归属实测：候选分支整笔 no-op**：在 `putRelation` 的候选分支插入 `if (relation.state === 'candidate') return`（候选永不落库）→ `node --test tests/contract/storage-contract.test.js` **47 tests / 47 pass / 0 fail（全绿）**：契约执行组第 2 条对"只写候选即可读到候选"没有判别性；同一棵树上 `node --test tests/integration/storage-restart.test.js` **5 tests / 4 pass / 1 fail**：`重启：关系（确认 + 候选）与执行上下文/运行/写尝试在关句柄重开后逐字段不变` 红——候选方向只有集成用例钉得住（D24，验收表第 43 项按此改归属）→ 还原后契约 47/47、集成 5/5 绿。
+42. **可选列 NULL 不得漏成 null**：`rowToExecutionContext` 的三个可选列从 `optionalText(...)` 改成直接读列（NULL → `null`）→ 集成 **7 tests / 6 pass / 1 fail**：`重启：未设置的可选列读回严格 === undefined（不是 null），逐字段写清` 红在 `AssertionError: 执行上下文的 branchExternalId 未设置时必须严格 === undefined，不得是 null`（已设值的第 2 条用例仍绿——它分辨的是"列被丢掉"，不是"NULL 漏成 null"）→ 还原后 7/7 绿。
+43. **同幂等键重放的端口守卫（文件库上）**：删掉 `putMutationAttempt` 的 `WHERE NOT EXISTS (...)` 谓词（连同两个查询参数）→ 集成 **7 tests / 6 pass / 1 fail**：`重启：同幂等键经端口重放返回原结果，账上只有一行` 红在 `AssertionError: 同幂等键只有一行：第二次写入整笔 no-op`（`listMutationAttempts` 实际返回 2 行）——与实验 39 同根因，这次落在文件库上 → 还原后 7/7 绿。
+44. **替身的父边检查**：删掉 `putExecutionRun` 的上下文父边检查 → `node --test tests/contract` **443 tests / 442 pass / 1 fail**：`内存 Storage 替身：悬空执行父边必须被拒绝（仓库身份 / 运行上下文 / 写尝试绑定）` 红（另一侧 SQLite 仍绿，说明这条检查真的落在替身上）→ 还原后 443/443 绿。
+45. **终态列必须由实现清空**：SQLite 的强制关闭 UPDATE 去掉 `provisioning_started_at = NULL` → `node --test tests/contract` **443 / 441 / 2 fail**（`SQLite Storage：强制关闭 active 上下文时把 provisioningStartedAt 清成 undefined` + 汇总集成层的守卫"真实层 tests/integration：非空、全绿"），同一棵树上 `node --test tests/integration` **39 / 38 / 1 fail**：`重启：强制关闭 active 上下文时 provisioning_started_at 在库层被清成 NULL` 红（库层那一列真的是旧值，不是读映射藏起来）→ 还原后 443/443 + 39/39 绿。
+46. **候选方向升进契约层**：同一改坏（候选分支整笔 no-op）→ `node --test tests/contract/storage-contract.test.js` **55 tests / 54 pass / 1 fail**：`SQLite Storage：只写候选关系就能读到候选（关系按 state 路由的候选方向）` 红——同一改坏在收口轮（实验 41）曾让契约 **47/47 全绿**，这正是 F2 说的零判别性，现在被契约钉住 → 还原后 55/55 绿。
+47. **写尝试的跨工作区隔离**：SQLite 的 `listMutationAttempts` 去掉 `WHERE workspace_id = ?` → 同一命令 **55 / 54 / 1 fail**：`SQLite Storage：写尝试按工作区隔离，列表读路径不混入另一个工作区` 红 → 还原后 55/55 绿。
+
+L6 验证摘要（**原 L6 分支的历史值**；易失值，以命令回读为准；**以下条数与基线 `cafc245` 都是观察时刻快照，不可复跑**）：`node --test tests/contract` → 443/443；`node --test tests/integration` → 39/39；`node --test tests/e2e` → 38/38；`node --test tests/mvp0` → 7/7；`tsc --noEmit` 退出码 0；`node --test tests/contract/package-boundaries.test.js` → 7/7；`node scripts/rule-checks.mjs size cafc245` → 代码 400/1000、文档 ≤1500；`git diff --check cafc245...HEAD` 无输出。
+
+- [x] (2026-09-23) **L6 重建对齐（Batch L6-E）**：原 L6 分支的 base 是旧 L5（`cafc245`：机制散在子类、不含 L4 修复轮 2），而 L5 已重建为 `5162163`——两侧在类层次上撞车，`git rebase` 只能得到语义冲突。建立备份锚点 `backup/l6-before-rebuild` 后 `git reset --hard 5162163`，源文件逐条用 `git show 560533e:<path>` 取，不整树检出。
+- [x] (2026-09-23) 执行面照搬 + 读收口：六个读方法全部经基类 `read`；`storage.ts` 与 `storage-execution.ts` 都不声明 `#queue` / `#closed` / `mutate` / `transaction` / `close`；`storage-sync.ts` 去掉 `UnimplementedPort` 基类与 `super()`，`storage-unimplemented.ts` 删除。
+- [x] (2026-09-23) 保留 L5 一侧：`optional` 单行读助手留在 `storage-rows.ts`（三个面共用）、契约装配保留 L4 修复轮 2 的 `close()` / 外层实例用例、切分账并进逐组 `ADDED_CASE_COUNTS`（D28）。
+- [x] (2026-09-23) `suites/storage-execution.js` **新增**一条执行组读隔离断言（只增不改），让"执行面的读必须经过 `read`"成为可判别的契约事实（D25）。
+
+L6 重建判别性实验（原 L6 分支编号 36 / 37；改坏 → 红 → 还原 → 绿，同一工作树；还原用实验前的文件副本逐字节覆盖，`diff -q` 确认一致，`node --test` 复跑确认绿）：
+
+48. **执行面的读改回直接读**：`getExecutionContext` 去掉 `this.read(...)` 包装、直接 `this.db.prepare(...).get(id)` → `node --test tests/contract/storage-contract.test.js` **62 tests / 61 pass / 1 fail**：`SQLite Storage：事务未提交的执行面写入不得被事务外的读看到` 红在 `AssertionError: 未提交的执行上下文不得被事务外的读看到`（`actual: 'ready'`——同一连接看得见自己事务里未提交的写入）；内存替身同一条仍绿 → 还原后 62/62 绿。
+49. **候选分支整笔 no-op（重建后复核）**：在 `putRelation` 的候选分支插入 `if (relation.state === 'candidate') return` → 同一命令 **62 / 61 / 1 fail**：`SQLite Storage：只写候选关系就能读到候选（关系按 state 路由的候选方向）` 红在 `AssertionError: 只写过候选时读路径必须返回候选行本身，而不是空集或确认行`（`actual: []`）→ 还原后 62/62 绿。
+
+L6 重建验证摘要（易失值，以命令回读为准；命令在检出 `feature/storage-sqlite-execution-surface` 的工作树根目录运行；**以下条数与基线 `6a25971` 都是观察时刻快照，不可复跑**）：`node --test tests/contract` → tests 514 / pass 514 / fail 0（两个实现各跑三组 27 条与身份面 8 条）；`node --test tests/integration` → 45/45；`node --test tests/e2e` → 38/38；`node --test tests/mvp0` → 7/7；`../../node_modules/.bin/tsc --noEmit` 退出码 0；`node --test tests/contract/package-boundaries.test.js` → 7/7；`node scripts/rule-checks.mjs size 6a25971` → 代码 611/1000、文档 ≤1500；`git diff --check 6a25971...HEAD` 无输出。
+
+- [x] (2026-09-24) **级联 L2/L3 重写（Batch L4-F / L5-G / L6-F）**：L2/L3 被重写成"连接锚点 + 工作区挂载"两表（`provider_binding` 只留 `(id, implementation_key)`）并在 `suites/storage-identity-membership.js` 里独立成文。三层各自建恢复锚点后 `git rebase --onto`：L4 到 `8f11e38`、L5 到 L4 新 head `8f63983`、L6 到 L5 新 head `6a25971`。绑定落库改双表且两条语句同属一个原子作用域（D29）；`#observationSubject` 改 join `workspace_binding`；装配 seed 改两条表；替身写尝试父边改用 `providerBindings`；三个实现的 SQLite 适配器都注册身份面两组。全门禁复跑见 `Progress` 与验收表第 59 / 60 / 61 项。
+
+L6 级联验证摘要（易失值，以命令回读为准；命令在检出 `feature/storage-sqlite-execution-surface` 的工作树根目录运行；**以下条数与基线 `6a25971` 都是观察时刻快照，不可复跑**）：`node --test tests/contract` → tests 514 / pass 514 / fail 0；`node --test tests/integration` → 45/45；`node --test tests/e2e` → 38/38；`node --test tests/mvp0` → 7/7；`tsc --noEmit` 退出码 0；`node --test tests/contract/package-boundaries.test.js` → 7/7；`node scripts/rule-checks.mjs size 6a25971` → 代码 611/1000、文档 ≤1500；`git diff --check 6a25971...HEAD` 无输出。
+
+- [x] (2026-09-24) **第三轮评审收口（Batch L6-G）**：`backup/l6-pre-round3` 建锚点后 `git rebase --onto 4bc3e69 fc4dd906`（L6 的三个提交）。八个文件只能得到语义冲突，按"保留 L6 的结构、把 L3/L4/L5 的语义重新落到 L6 的位置"解决：机制取 L5 的新基类（可变令牌 `TX_SCOPE` / 共用 `#state` / `atomic` / 幂等 `close()` / `SETTLED_TRANSACTION_MESSAGE`），`SqliteStorage extends SqliteExecutionSurface` + `scopedInstance(state, token)` 保留三层继承；替身取 L5 的 `cap.compareSourceVersion`（L6 第三个提交的"码元序"改动已包含在基里，该提交在变基后为空并被丢弃）；替身的三条父边检查叠加在 L5 版本之上（不丢 L3 的 `putRepository` / `putExternalIdentity` / `advanceRevision` 存在性检查与 D5 的写尝试幂等覆盖）。
+- [x] (2026-09-24) 执行面读隔离参数化成六个读（`READ_ISOLATION_CASES`，D30），切分账与断言账按当时的 head 实测重写（13 / 8 / 13；36 / 45 / 30，观察时刻快照；现行断言层是 `ASSERTION_BASELINE`、没有 `ASSERTION_LEDGER`，见验收第 64 项），写尝试对齐 D5 的一行一键 UPSERT，三条 P3 计划项收口（回读式体量基线、名字引用、第三个阻塞点 + issue #187）。
+- [x] (2026-09-24) 两份第三轮评审记录随修复一并提交（`docs/review/2026-09-24-pr-175-mmp-round3.md`、`docs/review/2026-09-24-sqlite-v1-stack-round3.md`，评审者留在工作区未提交）。
+
+Batch L6-G 判别性实验（原 L6 分支编号 38；改坏 → 红 → 还原 → 绿，同一工作树；每个变异都先打印被改的那一行，还原用实验前的文件副本逐字节覆盖，`git diff --stat` 确认无残留）：
+
+50. **六个读逐个改回直接读**：把 `storage-execution.ts` 里**某一个**读的 `this.read(` 换成 `(async (fn) => fn())(`（同步执行，等价于直接读同一连接），六个读各做一次，每次只改一个。六次实测：`getExecutionContext` → `SQLite Storage：事务未提交的 getExecutionContext 写入不得被事务外的读看到` 红（`AssertionError: getExecutionContext：未提交的写入不得被事务外的读看到`，被改的那一行是 `return (async (fn) => fn())(() => optional(this.db.prepare(...).get(id), rowToExecutionContext))`）；`findActiveExecutionContext` / `getExecutionRun` / `listRelations` / `findMutationAttempt` / `listMutationAttempts` 同样各自只让**对应的那一条**用例红，同一文件 `fail=1`（一次只红一条，说明六条用例彼此独立、不是"改一个全都红"或"改一个都不红"）→ 六次都还原后 `node --test tests/contract/storage-contract.test.js` **95 tests / 95 pass / 0 fail**。
+
+Batch L6-G 验证摘要（易失值，以命令回读为准；命令在检出 `feature/storage-sqlite-execution-surface` 的工作树根目录运行，基线用回读式 `BASE`）：`node --test tests/contract tests/integration tests/e2e tests/mvp0` → tests 622 / pass 622 / fail 0；`node_modules/.bin/tsc --noEmit` 无输出（退出码 0）；`node --test tests/contract/package-boundaries.test.js` → 7/7；`node scripts/rule-checks.mjs size "$BASE"` → 代码 633/1000、文档 680/1500（当时回读到的 `BASE` 是 `4bc3e69`，即本层声明的 base = #170 当时的 head；观察时刻快照，不可复跑）；`node scripts/rule-checks.mjs disclosure "$BASE"` 退出码 0；`git diff --check "$BASE"...HEAD` 无输出。
 
 ## Surprises & Discoveries
 
@@ -795,6 +1177,13 @@ L5-H 验证摘要（易失值，以命令回读为准；命令在检出 `feature
 21. **重写 003 之后，旧库的失效点是"第一次写观察"而不是"打开"**（2026-09-23 评审修复轮，实测）。`migrate()` 只按版本号判断是否已应用（`assertAppliedIsManifestPrefix`），不校验迁移体内容，所以一个已应用版本 3 的旧库会一直"看起来是新的"。把库退回重写前的 7 列形状后实测：自检关掉时 `recordObservation -> no such column: dedupe_key`（驱动级、没有处置）；自检打开时**打开库这一步**就抛 `本地库是重写前的 003（sync_observation 缺 dedupe_key）：请删除库文件重建`。处理见 D18；这是"发布前可整份重写迁移"这条既定取舍的收尾成本，不是新增范围。
 
 22. **级联不是"重放一遍改动"，003 会真的冲突**（2026-09-23 评审修复轮，实测）。L3 的 `8cf7d18` 与本层 `cafc245` 都改了 003 的同一段（注释 + `sync_observation` 的主键 / 外键块）：`git merge-file` 给出两处冲突，解决方式是"两段注释都保留 + 主键含 `dedupe_key` 且不带外键"。把合并结果放回同一棵树后集成 36/36、存储契约 44/44——**冲突是文本层的，语义上没有分歧**。这一条写给收口流程：级联 L5 时不要机械取一侧，两处都要看。
+23. **候选关系的来源被 DDL 收窄，端口类型没有**（2026-09-23，L6 实现时发现，登记为遗留 19）。`candidate_relation.source` 的 CHECK 是 `IN ('deterministic','lineage')`，而端口的 `Relation` 允许 `RelationSource` 的任一取值配任一 `state`——`{ state: 'candidate', source: 'explicit' }` 在内存替身上能写、在 SQLite 上会被 CHECK 拒绝。规格（`suites/storage-execution.js`）只写过 `source: 'deterministic'` 的候选，所以两个实现都能通过；**没有改任何一侧**（迁移与 `suites/**` 当时都冻结），登记为遗留 19 并写明收口条件。
+24. **`mutation_attempt` 有两个端口记录里没有的 NOT NULL 列**（2026-09-23，L6 实现时发现）。DDL 的 `created_at` / `updated_at` 是 NOT NULL，而 `MutationAttemptRecord` 没有时间戳字段，也没有读回它们的端口方法。处理：插入时用同一个 ISO-8601 UTC 时刻填两列（D22），端口不读回，因此它们不构成第二套事实；若日后要有消费者，应先决定这两个时刻由谁提供（调用方还是库层）。（**Superseded by 收敛计划 D5 / Batch L6-G（2026-09-24）**：一行一键的 UPSERT 下 `created_at` 保留首次写入时刻，见 Batch L6-G。）
+25. **写尝试的"已决可重试"在库层成立、在端口被封死**（2026-09-23，L6 实现时发现；收口轮改写成两句话，登记为遗留 20）。**库层要求**：003 的部分唯一索引只覆盖未决状态，注释里写明"已决状态不阻塞同键的新写入——这正是 failed 允许重试"，`tests/integration/execution-relation-write-schema.test.js` 的 R8 用例直接断言了它（同键 `failed` 之后写 `saved` 落成第二行）。**端口实现**：`putMutationAttempt` 用无状态谓词的 `WHERE NOT EXISTS` 把这条封死——同键第二次写入整笔 no-op，写 `failed` 之后同键写 `saved` 仍然返回 `failed` 且只有 1 行（契约执行组第 3 条断言"重放返回原结果"，收口轮把同一断言补到了文件库上）。两侧都是有意为之，落差本身不是缺陷；要不要在端口表达状态迁移由 capabilities 端口契约所有者决定（见遗留 20 的收口责任）。**已收口（2026-09-24，收敛计划 D5）**：写尝试改成一行一键、同键幂等覆盖，"未决是否阻塞"成为调用方的判据，见遗留 20。
+26. **新增用例必然要动切分账，账的形状原来假设"只有地基组会增长"**（2026-09-23 评审修复轮；2026-09-23 重建复核）。`suites/storage.js` 的账是 `INHERITED_CASE_COUNTS`（逐组继承）+ 一个全局 `ADDED_CASE_COUNT`，装配守卫的表达式把"新增"整个算在地基组头上（`foundation: INHERITED.foundation + ADDED_CASE_COUNT`，sync / execution 直接等于继承值）；L5 一侧另把 L4 修复轮 2 的 2 条挂在 `storage-contract.test.js` 的 `FIX_ROUND_CASE_COUNT` 上。执行组一长，这个表达式在数学上无解：让 `execution` 等于 7 就得把 `INHERITED.execution` 写成 7（假陈述）或把 `ADDED_CASE_COUNT` 与 `PRE_SPLIT_CASE_COUNT` 一起改坏。处理：账改成 `INHERITED_CASE_COUNTS` + **逐组** `ADDED_CASE_COUNTS`，守卫按"继承 + 新增"逐组核账，全局 `ADDED_CASE_COUNT` 保留为总数；**重建把 L4 修复轮 2 的 2 条也并进逐组账**（foundation 6 + sync 0 + execution 5 = 11），`FIX_ROUND_CASE_COUNT` 随之消失。教训：**"新增条数"是一个按组分解的量**，写成单个标量时，第二组开始增长的那天就会逼着人写假数。（**Superseded by Batch L6-G（2026-09-24）**：逐组标量 `ADDED_CASE_COUNTS` 被 L5 的 `CASE_LEDGER` 取代，只留一份逐组账。）
+27. **对齐"执行上下文 → 仓库"这条父边会让 19 个用例变红**（2026-09-23 评审修复轮，F1 实测；登记为遗留 22）。F1 要求给替身补齐四条父边检查。四条里三条加上去之后 `tests/contract` 只多出一条红的执行组用例（写尝试的绑定父边缺前置行，已在用例里播种），e2e / mvp0 全绿；**唯独 `execution_context.repositoryId` 这一条加上去之后**，`node --test tests/e2e` 从 38/38 变成 **23 pass / 15 fail**、`node --test tests/mvp0` 从 7/7 变成 **3 pass / 4 fail**。根因实测：全仓没有生产代码调用 `putRepository`（`grep` 只命中端口声明、两个实现与测试），`createFakeProviders()` 也不登记 `RepositoryRecord`（它只在自己的 development provider 状态里有一条 `repo-alpha`），而 `packages/core/src/start-work.ts` 的 `contextRecord` 直接把请求里的 `repositoryId` 写进执行上下文——探针实测 `repositories: []` 与一条 `repositoryId: "repo-alpha"` 的 ready 上下文同时存在。处理：**三条对齐、第四条不对齐**，把缺口登记为遗留 22（端口契约写着"仓库是可开始工作的前置"，所以缺口在 core 侧；第五轮起这一格与 `workItemId`、关系端点一起由 `storageExecutionDivergenceSuite` 按能力位显式断言），并在契约用例的注释里点名这条边还没对齐，避免下一位读者以为四条都齐了。教训：**"让替身更像 SQLite"不是无代价的**——替身一旦严格起来，所有依赖它宽松的调用方都会立刻暴露；这类对齐要先量一遍波及面，再决定本层做到哪一条。
+
+28. **旧 L6 的执行面读全部绕过统一入口，而全部门禁是绿的**（2026-09-23 重建时实测；这是重建最直接的判据）。旧分支的六个读方法都是 `this.db.prepare(...)` 直接读（执行面当时还带着自己的机制，读没有入口可走）；把它原样搬到 L5 新底上，`node --test tests/contract` 与 `tests/integration` 会**全绿**——读隔离在契约里只有地基组一条（只经过 `getWorkspace`），没有任何断言看得见执行面的读。处理：六个读方法全部改走基类 `read`（D20），并在 `suites/storage-execution.js` **新增**一条打在执行面读路径上的读隔离断言（D25 / 实验 48）。教训：**"两个实现跑同一套契约"不等于"每个面都被读隔离钉住"**——断言覆盖的是它实际调用的那条路径，换一个面就要重问一次"这条不变量在这个面上有判别性吗"。
 
 ## Decision Log
 
@@ -812,7 +1201,7 @@ L5-H 验证摘要（易失值，以命令回读为准；命令在检出 `feature
 - **Decision**：列表读改 `ORDER BY rowid`，并在计划里登记"端口未规定顺序"这一事实（本层计划遗留「端口注释没有写明读的排队语义与列表顺序」）。**Rationale**：端口注释不在授权面；两个实现顺序静默分叉会让列表顺序随存储实现漂移且没有门禁，而 `rowid` 用 4 行就把顺序对齐到替身的插入序。**Date/Author**：2026-09-23 / L4 修复执行者 2。
 - **Decision**：跨实例自等的用例暂时落在 SQLite 专属文件，而不是共享组。**Rationale**：见本层计划遗留「跨实例自等的共享用例缺另一半」与 `Surprises & Discoveries` 8——替身同一动作是静默挂起，共享组会得到一条永远超时的用例；`providers/fake` 不在本轮授权面，不扩大越界改动。**Date/Author**：2026-09-23 / L4 修复执行者 2。
 - **Decision**：级联 L2/L3 时，`suites/storage.js` 取 L4 的切分结构，只把 L2 对**既有用例**的两处语义改动带进 `storage-foundation.js`（默认绑定与 replace 各改用 `development` 域），L2 新增的断言不搬进组文件。**Rationale**：L2 把身份与成员关系面单独成文在 `suites/storage-identity-membership.js` 并原样继承，搬一遍就是同一事实的第二份权威副本；两处域改动则是必需的——新契约下第二个启用的 planning 挂载会被拒绝，不改这两条用例会在两个实现上都变红。**Superseded by 第四轮修复轮（2026-09-26）**：`suites/storage-identity-membership.js` 已接受 `register` 参数并纳入装配台账；删掉任何一组装配都会红。**Date/Author**：2026-09-24 / L4 级联执行者。
-- **Decision**：`putProviderBinding` 的两条语句包进原子作用域，而不是把所有约束在端口里预检。**Rationale**：见 D20——约束的权威在 002，端口只负责不留下半写状态；预检会把约束抄第二遍。**Date/Author**：2026-09-24 / L4 级联执行者。
+- **Decision**：`putProviderBinding` 的两条语句包进原子作用域，而不是把所有约束在端口里预检。**Rationale**：见 D29——约束的权威在 002，端口只负责不留下半写状态；预检会把约束抄第二遍。**Date/Author**：2026-09-24 / L4 级联执行者（L5 / L6 级联同型）。
 - **Decision**：身份与成员关系面（`suites/storage-identity-membership.js`）不进 `assemble` 装配台账，直接注册。**Rationale**：L2 的那份文件声明了 `register` 参数却直接调 `test(...)`，`countSuiteCases` 数到 0，硬塞进台账只会让守卫拿到恒 0 的期望；该文件不在本层授权面，本层不改它，把这个缺口写进计划而不是绕过去。**Date/Author**：2026-09-24 / L5 级联执行者。
 - **Decision**：观察落点按 `(绑定 → 工作区, 内容种类 + 内容 id → 成员关系)` 解析，解析不到抛错。**Rationale**：`false` 的端口语义是"重复或乱序"，不能承载"没有落点"；凭空造成员关系是把推导塞进 storage。**Date/Author**：2026-09-23 / L5 实现者。 **Superseded by L5-H（2026-09-24）**：账本主体改成端口主体（连接级）后，观察不解析落点、也不要求成员关系存在。
 - **Decision**：去重键随整条观察快照存进 `snapshot_json`，用 `json_extract` 查，而不是新增列或新表。**Rationale**：迁移文件冻结，账本也没有读回接口；新表是同一事实的第二个家。**Date/Author**：2026-09-23 / L5 实现者。**已被 D14 取代**：这条决定漏掉了"`dedupeKey` 必须参与主键"，实测导致 P0（两条不同的观察互相顶掉，Surprises 16）。
@@ -839,6 +1228,23 @@ L5-H 验证摘要（易失值，以命令回读为准；命令在检出 `feature
 - **Decision**：第四轮修复轮的允许面按本 PR 的实际改动订正（fake 的绑定 / 游标存在性检查、`suites/**` 补前置状态与 `register` 参数），而不是回退改动去迁就旧允许面。**Rationale**：引用完整性是 capabilities 端口注释写明的共有契约，替身不检查会让"两个实现同语义"只停在断言文本上；收敛计划 D6 第 2 条要求对齐替身。**Date/Author**：2026-09-26 / 第四轮修复执行者。
 - **Decision**：`storage-sync.ts` 超过 Global Constraints 的单文件 ≤200 行（行数以 `wc -l packages/storage/sqlite/src/storage-sync.ts` 回读，不写死）；不拆文件，只如实记录。**Rationale**：`AGENTS.md` §5 不鼓励为满足行数机械拆分连续算法，机制与同步面同文件是 D10 的既定决定；行数以 `wc -l` 回读，上限继续约束单函数。**Date/Author**：2026-09-26 / 第四轮修复执行者。
 
+- **Decision**：执行面单独成模块并继承同步面（`地基面 → 执行面 → 同步面`），而不是写进既有文件或用组合；**重建后六个读方法全部经基类 `read`**。**Rationale**：10 个方法写进 `storage.ts` / `storage-sync.ts` 会超单文件 200 行；写者 / 读者路径是三个面共用的机制，组合要求把它暴露出去；读直接 `prepare` 会让"读不得暴露未提交写入"在执行面上静默失效（D20 / Surprises 28）。**Date/Author**：2026-09-23 / L6 实现者；重建修订 / 2026-09-23 / L6 重建执行者。
+- **Decision**：`putRelation` 按 `relation.state` 路由到两张表，确认分支先 UPSERT 再删候选，候选分支在同键已有 confirmed 时 no-op。**Rationale**：003 的 `state` CHECK 决定了分表；不删候选行会让 `listRelations` 返回两条同键关系；允许候选覆盖确认会把不变量 5 降级成"两条都算"（D21）。**Date/Author**：2026-09-23 / L6 实现者。
+- **Decision**：`putMutationAttempt` 用单语句 `INSERT ... SELECT ... WHERE NOT EXISTS` 实现"同键重放返回原结果"，两个时间戳列由库层填同一时刻。**Rationale**：003 的部分唯一索引只覆盖未决状态，已决行会插出第二行；给端口加时间戳字段是改契约且没有消费者（D22）。**Date/Author**：2026-09-23 / L6 实现者。**Superseded by 收敛计划 D5 / Batch L6-G（2026-09-24）**：改成一行一键的单语句 UPSERT，见本节后面的同名条目。
+- **Decision**：SQLite 的契约装配收敛成一个标签、组集合与内存替身逐项相同（全部三组），`EXPECTED_ASSEMBLY` 台账同批改。**Rationale**：分标签的装配形状本身就在说"覆盖面按实现分叉"；台账是独立陈述，不同批改会让守卫继续为旧的覆盖面背书（D23）。**Date/Author**：2026-09-23 / L6 实现者。**Superseded（2026-09-26 第五轮）**：现行 head 按组分标签装配，`assemble` 台账与 `EXPECTED_ASSEMBLY` 守卫仍在，见验收第 2 项。
+- **Decision**：可选列的 `NULL ↔ undefined` 与同幂等键重放各补一条**集成**用例，不塞进已有重启用例。**Rationale**：已有用例的可选列刻意取具体值（分辨列被丢掉），两向语义混在一条里红的时候分不清是哪一向；`#120` 的 Scope 要求"写入幂等在文件库上成立"，契约装配只覆盖 `restart` 那条路径（D25）。**Date/Author**：2026-09-23 / L6 收口执行者。
+- **Decision**：装配守卫的断言消息改成它真正成立的范围（整组不再被装配、组集合不符），组内被删一条 `register(...)` 归切分守卫的逐组账。**Rationale**：原文声称"删掉组里任何一条 register(...) 都会在这里变红"，而两边的数会同步变小——这条消息会让读者以为组内缩水有守卫，实际没有。**Date/Author**：2026-09-23 / L6 收口执行者。
+- **Decision**：`suites/**` 三处过期注释与无人调用的组合入口导出 `storageContractSuite` 一并并入遗留 21 的收口动作，当时不删导出、不改注释。**Rationale**：`storageContractSuite` 是"两个实现跑同一套"的表达，删了会让这句表达变弱，而它当前确实无人调用（装配走显式组清单）——两件事都该在解冻时一次做完。**Date/Author**：2026-09-23 / L6 收口执行者。**2026-09-23 重建更新**：三处注释已在收口轮改对（`suites/**` 解冻），本条只剩「未使用的组合入口导出」一件。
+- **Decision**：执行组的四条父边里**三条对齐、第四条按实测留给 core**。**Rationale**：对齐 `execution_context.repositoryId` 会让 e2e 15 + mvp0 4 个用例变红，根因是全仓没有生产代码调用 `putRepository`——用测试前置行掩盖它会越出本层允许面，且掩盖的是 core 侧的缺口（D26 / Surprises 27 / 遗留 22）。**Date/Author**：2026-09-23 / L6 评审修复执行者。
+- **Decision**：`provisioningStartedAt` 在终态由**实现**清空，而不是改端口注释。**Rationale**：这条规格是调用方分辨"在途 / 中断"的依据；删掉规格等于让终态行的语义无人负责，而注释自身的歧义（"中断"指哪一类行）属 capabilities 所有者（D27 / 遗留 23）。**Date/Author**：2026-09-23 / L6 评审修复执行者。
+- **Decision**：切分账改成"逐组继承 + 逐组新增"（`ADDED_CASE_COUNTS`），装配守卫按组核账；**重建把 L4 修复轮 2 的 2 条从全局标量 `FIX_ROUND_CASE_COUNT` 并进 `ADDED_CASE_COUNTS.foundation`**。**Rationale**：新增用例必然要动账，而"新增"跨组增长时单一标量写不出真数（Surprises 26）；并账只动账的形状，没有放宽任何断言（D28）。**Date/Author**：2026-09-23 / L6 评审修复执行者；重建修订 / 2026-09-23 / L6 重建执行者。**Superseded by 第三轮收口（2026-09-24）**：见本节后面的「切分账回到 L5 的两层形状」。
+- **Decision**：执行面的读隔离按六个读参数化（六条用例），每条带一条"提交后必须看得见"的正控（D30）。**Rationale**：第三轮评审实测"只钉住 `getExecutionContext` 一个"——其余五个读改回直接读时契约全绿；而少了正控，"读不到"可能只是写入被约束拒绝，用例会以绿的形式说谎。**Date/Author**：2026-09-24 / L6 第三轮收口执行者。
+- **Decision**：切分账回到 L5 的**两层**形状（`CASE_LEDGER` 逐组继承 + 新增、`ASSERTION_LEDGER` 断言基线），删掉 L6 分支上的中间形状 `ADDED_CASE_COUNTS`；两组数都按当时的 head 实测（13 / 8 / 13；36 / 45 / 30，观察时刻快照）。**Rationale**：L5 的两层账已经在基里，留着第二份逐组账就是同一事实的两个家；而 L6 分支那份照抄来的数（foundation 6 / sync 0）与本 head 实测不符，正是"照抄必写假数"的证据。**Date/Author**：2026-09-24 / L6 第三轮收口执行者。**订正 2026-09-26（第六轮，按 head 回读）**：现行断言层是 `ASSERTION_BASELINE`（断言文本的多重集），没有 `ASSERTION_LEDGER` 这个常量；`CASE_LEDGER` 是 13 / 8 / 13、`ADDED_CASE_COUNT` 为 16，见 D30 的订正。
+- **Decision**：`putMutationAttempt` 改成单语句 UPSERT（同键幂等覆盖），替身与集成用例同步。**Rationale**：这不是本层的新取舍，而是把 L6 分支与 L3 的 D5 之间的**语义分叉**收掉——003 的主键是 `(workspace_id, idempotency_key)`、端口注释与 core 的读法都写着"幂等覆盖"，只有 L6 分支的实现还是 no-op；两个实现在这一格上给出相反答案会让"两个实现跑同一套"失真。**Date/Author**：2026-09-24 / L6 第三轮收口执行者。
+- **Decision**：第三轮评审的三条 P3 计划项按 D7（易失值写成回读命令、编号引用改名字）收口，并把 core 的第三个阻塞点补登为遗留 24（当时编号 21）+ issue #187。**Rationale**：编号与 SHA 在重排与级联后必然漂移（本轮实测：L6 分支的 `ADDED_CASE_COUNTS`、`遗留 14` 交叉引用、`size 6a25971` 三处都已失真）；而"少登记一条阻塞点"会让读者把"验收表全绿"读成"SQLite 能当 core 的 storage"。**Date/Author**：2026-09-24 / L6 第三轮收口执行者。
+- **Decision**：#28 与 #5 在本层都写 `Refs`，#120 由 PR #175 关闭；撤回第五轮的"关闭 #120 与 #28"。**Rationale**：`main` 上收敛计划 Decision Log 写明「#28 与 #5 的关闭归属待人类伙伴决定，各层先写 `Refs`」；本层的重启用例是 #28 验收条目 1 的证据，但关闭归属不是本层能单方面决定的。实际关闭集合以 `gh pr view 175 -R SingularityKChen/harness-projects --json closingIssuesReferences` 回读为准。**Date/Author**：2026-09-26 / 第六轮评审修复（层计划恢复）。
+- **Decision**：层计划按"现行 L5 的本文件为底 + 第四轮 L6 的记录逐节并入 + 保留第五轮订正"恢复，而不是整份取某一侧；编号冲突时 L6 顺延（实验 36–50、遗留 19–24），文中引用同批改。**Rationale**：第五轮级联「整份取一边」正是丢记录的根因（第五轮教训 1）；L5 已占用实验 24–35 与遗留 16–18，L6 顺延不动 L5 的编号；代码里按名字引用的遗留（「没有生产代码调用 `putRepository`」「列表读路径的顺序」等）不受编号影响。**Date/Author**：2026-09-26 / 第六轮评审修复（层计划恢复）。
+
 ## Idempotence and Recovery
 
 - `createSqliteStorage` 对同一文件可重复调用：迁移按 `schema_migrations` 跳过已应用版本（重启用例第 3 条钉住 no-op）。
@@ -852,6 +1258,11 @@ L5-H 验证摘要（易失值，以命令回读为准；命令在检出 `feature
 - L5 判别性实验都只改一个语义点（去重、定序、UPSERT、外键、游标读路径、观察键、版本读回、装配）；还原靠 `packages/storage/sqlite/src` 与迁移文件的副本逐文件覆盖，并用 `diff` 确认与实验前逐字节一致。
 - L5 修复轮的回退：`git revert` 该提交。观察键、视图 tie-break、用例与守卫是一个闭环——单独回退迁移会让 P0 的三条用例变红，单独回退用例会让 P0 静默复活。已有库文件按临时目录处理：003 在发布前重写，不存在需要保住的旧库。
 
+- L6 的回退顺序（原 L6 分支的提交结构，历史）：`git revert` 提交 ③ → ② → ①（顺序相反）。单独回退 ② 会把实现撤掉而留下红的执行组契约与集成用例；单独回退 ① 会让 SQLite 回到两个标签、执行组没有装配（组集合与台账是一个闭环）。L6 的判别性实验都只改一个语义点（候选行删除、候选降级守卫、active 关闭 UPDATE、写尝试 `NOT EXISTS` 守卫、一列读回、读入口），还原用实验前的文件副本逐字节覆盖，`diff -q` 与 `git status --short` 确认后再复跑。
+- L6 评审修复轮的回退（历史）：`git revert` 该提交。三条父边检查、候选方向的契约用例、终态清列与逐组切分账是一个闭环——单独回退实现会让新用例红，单独回退用例会让 F1–F3 静默复活；本轮**没有**动迁移文件与 `capabilities`。
+- **L6 重建的回退**（历史）：`git reset --hard backup/l6-before-rebuild` 回到旧 L6（base `cafc245`）。重建后的提交自包含（执行面 + 读收口 + 用例 + 计划），单独 `git revert` 会同时撤掉执行面与装配；判别性实验只改读入口与候选分支两处，还原同样用文件副本逐字节覆盖。
+- **L6 的回退（现行）**：按提交逆序 `git revert` 本层的提交（清单以 `git log --oneline "$BASE"..HEAD` 回读，`BASE` 取 `gh pr view 175` 的 `baseRefOid`）。执行面实现、替身父边与枚举检查、执行组契约与分叉守卫、文件库重启用例在同一个 `feat(storage)` 提交里，不能只回退一半；层计划恢复、跨层计划归档与评审记录在同一个 `docs(storage)` 提交里（计划按路径引用这些记录），回退它会把四份跨层计划移回 `active/`。
+
 ## Interfaces and Dependencies
 
 ```text
@@ -864,6 +1275,8 @@ packages/storage/sqlite/src/index.ts
   OUTER_INSTANCE_MESSAGE: string                                           # 约定文本：work 里调外层实例（队列内自等）
   CLOSED_MESSAGE: string                                                   # 约定文本：实例已关闭后的任何调用
   SqliteSyncSurface                                                        # L5 新增（`storage-sync.ts`，包内可见、不对外导出）：**唯一的写者 / 读者路径机制**（`#queue` / `scoped` / `TX_SCOPE` / `#closed` + `mutate` / `read` / `write` / `transaction` / `close`）+ 成员关系 / 字段值 / 观察 / 游标；SqliteStorage 继承它，对外形状不变
+  SqliteExecutionSurface                                                   # L6 新增（`storage-execution.ts`，包内可见、不对外导出）：执行上下文与运行 / 关系 / 写尝试 10 个方法，**六个读方法都经基类 `read`**；SqliteStorage 改为继承它（`地基面 → 执行面 → 同步面`），本类不声明基类已有的机制成员
+  storage-unimplemented.ts                                                 # L6 删除：端口三组的方法全部落地，桩清单为空
 ```
 
 003 的观察账本（**按 L3 的新 003 实测订正，2026-09-24**）：`sync_observation` 主键 `(binding_id, object_kind, object_external_id, observed_at, dedupe_key)`（主体 = 端口 subject，连接级），另有唯一索引 `sync_observation_dedupe (binding_id, dedupe_key)`；`committed_observation` 是视图，判据为 `updated_at` 最大 → `observed_at` 最新 → `rowid` 最大（追加序）。回读命令：`BASE=$(gh pr view 170 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)`；`git show "$BASE":packages/storage/sqlite/migrations/003_control_facts.sql | grep -n 'PRIMARY KEY (binding_id'`。**Superseded by L3 的新 003 / L5-H（2026-09-24）**：原文写主键 `(workspace_id, item_external_id, observed_at, dedupe_key)`，与 head 相反。端口面没有观察查询方法，这两条只有集成用例与 schema 用例读得到。
@@ -917,6 +1330,33 @@ packages/storage/sqlite/src/index.ts
 - 003 在 L3 的新形状上只加 `dedupe_key`；L4 修复轮 2 与 L5（含修复轮、评审修复轮）的断言与记录全部保留在同一棵树上。
 - 集成与契约全绿（条数以 `node --test tests/contract` / `node --test tests/integration` 回读为准；原文的"集成 40、契约 501、SQLite 地基 12 + 同步 7 = 19、身份面 8 ×2、内存替身 20"是观察时刻快照，不可复跑）。
 
+**L6 实际交付（2026-09-23，Batch L6-A/B/C）**：
+
+- `storage-execution.ts` 的 `SqliteExecutionSurface`：执行上下文与运行（active 唯一靠同键旧 active 先置 `closed`）、关系（按 `state` 路由、候选升确认删候选行、候选不降级确认、`listRelations` 合并两表）、写尝试（单语句 `NOT EXISTS`，同键重放整笔 no-op；**Superseded by Batch L6-G（2026-09-24）**：一行一键的单语句 UPSERT，同键幂等覆盖）。
+- 四张执行面行映射进 `storage-rows.ts`；`storage-sync.ts` 去掉桩基类；`storage-unimplemented.ts` 删除（桩清单为空）。
+- 契约装配：SQLite 收敛成一个标签、组集合与内存替身逐项相同（全部三组），`EXPECTED_ASSEMBLY` 同批改，`seedPrereqs` 覆盖三组前置行。（**Superseded（2026-09-26 第五轮）**：现行 head 按组分标签经 `assemble` 装配、前置行只走端口，见验收第 2 项。）
+- 集成：`storage-restart.test.js` 补"关系与执行上下文 / 运行 / 写尝试逐字段不变"、"可选列严格 `undefined`"、"同幂等键重放只有一行"、"对端口写过的库再跑迁移是 no-op"。
+- 判别性实验 36–43（原 L6 分支编号 24–31）与全门禁复跑，摘要见 `Progress`。
+
+**L6 评审修复轮实际交付（2026-09-23，Batch L6-D，PR #175 的 F1–F3）**：
+
+- **F1（引用完整性分叉）**：替身补三条父边检查（仓库 → 身份、执行运行 → 执行上下文、写尝试 → 绑定，与 SQLite 外键同语义）；契约新增"悬空执行父边必须被拒绝"（含正控与"被拒绝的写入不得留下行"）。第四条 `execution_context.repositoryId` 按实测**不对齐**（对齐会让 e2e 15 + mvp0 4 个用例红），缺口登记为遗留 22（D26）。
+- **F2（候选方向零判别性 + 工作区隔离无断言）**：新增"只写候选关系就能读到候选"与"写尝试按工作区隔离"；实验 46 证明同一改坏从收口轮的"契约全绿"变成"契约 1 条红"（D28）。
+- **F3（终态保留 `provisioningStartedAt`）**：取"实现侧清空"——SQLite 的强制关闭 UPDATE 加 `provisioning_started_at = NULL`，替身的关闭分支置 `undefined`；契约补两实现共用的断言，集成补"库层那一列真的是 NULL"（D27 / 遗留 23）。
+- **切分账**：`suites/storage.js` 改成逐组核账（`INHERITED_CASE_COUNTS` + `ADDED_CASE_COUNTS`），装配守卫表达式同批改；执行组 3 → 7 条。
+- 判别性实验 44–47（原 L6 分支编号 32–35）与全门禁复跑（原分支 443/39/38/7 + `tsc` 0）。
+
+**L6 重建实际交付（2026-09-23，Batch L6-E）**：
+
+- 底换成 L5 新 head `5162163`，执行面内容逐文件取回（不整树检出）：`storage-execution.ts`、`storage-rows.ts` 的四张映射、`storage-unimplemented.ts` 删除、`storage-sync.ts` 去掉 `UnimplementedPort` 与 `super()`、`storage.ts` 改继承 `SqliteExecutionSurface`。
+- **读收口**：六个读方法全部改成 `this.read(() => optional(...))`；`putRelation` 体内的存在性 SELECT 留在 `mutate` 槽里；两个文件都不声明 `#queue` / `#closed` / `mutate` / `transaction` / `close`。
+- 三侧修复同树成立：L4 修复轮 2（读排队 / `close()` 快速失败 / 事务作用域快速失败 / 投影覆盖用例，其中 2 条账并进逐组账）、L5 重建（机制在基类、同步面、003 的 `dedupe_key`）、L6 评审修复轮（替身父边检查、候选用例、写尝试跨工作区隔离、`provisioningStartedAt` 清空）。
+- `suites/storage-execution.js` **新增**一条执行组读隔离断言（只增不改）；判别性实验 48 / 49 与全门禁复跑（观察时刻快照：450/42/38/7 + `tsc` 0，代码 598/1000）。
+
+**L6 与计划的偏差**：① 原以为"把 SQLite 的装配加一组执行组"即可，实际是把两个标签收敛成同一个组集合——否则装配形状仍在说"覆盖面按实现分叉"，且台账必须同批改（D23）；② 执行组缺的外键前置行比同步组多（实体、仓库自己的身份与仓库行），前置行只能落在装配点；③ 实测发现两处 DDL 与端口类型/语义的落差（候选关系的 source 收窄、写尝试没有状态迁移出口），**没有**改任何一侧，逐条登记为遗留 19 / 20；④ 本层实现轮未改 `suites/**` 一个字，三处过期注释当时登记为遗留 21（收口轮改完注释、评审修复轮补完候选方向的契约用例，遗留 21 只剩「未使用的组合入口导出」）；⑤ **重建的偏差**：原以为"照搬执行面即可"，实测发现旧 L6 的六个读方法绕过统一入口而全门禁仍绿（Surprises 28）——因此重建不只是搬文件，还要把读收进 `read` 并补一条执行组的读隔离断言；⑥ 重建时发现 L5 一侧把 L4 修复轮 2 的 2 条挂在全局标量上，与 L6 的逐组账并存会出现两个"新增"来源，一并并进 `ADDED_CASE_COUNTS.foundation`（D28）。
+
+**L6 第三轮收口与第五轮修复的交付**：见 Batch L6-G、D30 / D31、`Progress` 的 2026-09-24 与 2026-09-26 条目，以及验收表第 2 / 41 / 62–66 项；第五轮新增的三格显式分叉（`storageExecutionDivergenceSuite`）见「本层关闭」段之后的清单第 2 / 3 条。
+
 **L5 与计划的偏差**：① 原以为"把装配换成地基 + 同步即可"，实测发现同步组缺外键前置行（Surprises 12），只能落在装配点；② 实验 15 的写路径改法给出的是驱动级错误，改读路径后才发现**契约规格对游标隔离没有判别性**（Surprises 14）；③ 实验 14 顺手证伪了"删掉 `PRAGMA foreign_keys = ON` 会红"的直觉（Surprises 13）；④ 集成用例第一版把 `payload` 与 `stablePayloadFields` 混用（覆盖了后者却断言前者），在实现轮才发现并改正——提交 ① 的树已按改正后的断言复跑红证据；⑤ 评审修复轮的范围比"改一行"大：删掉清理后暴露出"不变量在同一张表上互斥"的根因（Surprises 20），本层只能按 L3 的权威 DDL 实现并把级联要求写清楚。
 
 **重建与计划的偏差**：① 原计划是"把 L5 内容搬到新底"，实测发现机制本身也要一起搬——`#queue` / `TX_SCOPE` / `#closed` 分散在两侧的子类里，只有把它们收进基类才能同时满足"两个面共用一条队列"与"不丢任一侧的快速失败"；② 计划文档的三条编号序列（决定 D8–D17、验收项 16–35、Surprises 8–19）与 L4 修复轮 2 的同号序列相撞，重建时把 L5 侧整体后移（D10–D19 / 20–39 / 11–22）并统一实验编号为 1–23；③ 旧库自检用例的"重写前形状"原先带账本外键，新底上 003 已无外键，前置形状随之校正（判据不变）。
@@ -926,14 +1366,14 @@ packages/storage/sqlite/src/index.ts
 ### 遗留问题与技术债务
 
 1. **投影 UPSERT 的覆盖分支无判别性用例**（`Surprises & Discoveries` 2）。**已收口（2026-09-23 修复轮 2）**：在地基组补了"同一 `(工作区, 实体)` 的第二次写入覆盖前值"，一次覆盖两个实现；实验 10 证明把 `DO UPDATE` 改成 `DO NOTHING` 会红。不再挂到同步组落地。
-2. **仓库没有对应的外部身份种类**（`Surprises & Discoveries` 3）。收口条件：真实 provider 切片决定仓库身份的登记方式（新增种类或改用别的锚点）后，把契约夹具里的 `branch` 占位换掉。
-3. **`replacePlanningProjections` 的实体清理在两个实现间不一致**（`Surprises & Discoveries` 4）。收口条件：core 需要"移除投影即移除实体"时，先决定身份与实体的生命周期，再补端口方法或约束；当前契约只覆盖投影集合。
-4. **执行组 10 个端口方法仍未实现**（L5 之后剩执行上下文与运行 / 关系 / 写尝试）。它们是 `not implemented in L4` 的显式桩，`tests/contract/suites/storage-execution.js` 已就绪：下一层把方法实现后，把 SQLite 的装配从"地基组 + 同步组"换成 `storageContractSuite` 即可跑全部三组。**L5 已收口**：同步组的 7 条在两个实现上都跑，且 SQLite 侧真正走 `restart`。
+2. **仓库没有对应的外部身份种类**（`Surprises & Discoveries` 3；第五轮起承载 issue [#195](https://github.com/SingularityKChen/harness-projects/issues/195)，见「本层关闭」段之后的清单第 1 条）。收口条件：真实 provider 切片决定仓库身份的登记方式（新增种类或改用别的锚点）后，把契约夹具里的 `branch` 占位换掉。
+3. **`replacePlanningProjections` 的实体清理在两个实现间不一致**（`Surprises & Discoveries` 4）。**已收口（2026-09-26 第五轮）**：替身那段"删除不再被引用的实体"是**死代码**——`stale` 只来自作用域内有身份的实体，而 `referenced` 包含全部身份的 `entityId`，`stale ⊆ referenced`，filter 永远删不掉任何实体；删掉它之后两个实现都是"投影被移除、实体与身份保留"，判据是共享地基组「投影被收敛移除后实体与身份保留，条目可以重新加入」（SQLite 侧同语义见 `storage.ts` 的"刻意不删除实体"与 002 的外键）。
+4. **执行组 10 个端口方法仍未实现**（L5 之后剩执行上下文与运行 / 关系 / 写尝试）。它们是 `not implemented in L4` 的显式桩，`tests/contract/suites/storage-execution.js` 已就绪：下一层把方法实现后，把 SQLite 的装配从"地基组 + 同步组"换成 `storageContractSuite` 即可跑全部三组。**L5 已收口**：同步组的 7 条在两个实现上都跑，且 SQLite 侧真正走 `restart`。**L6 已收口**：执行组 10 个方法全部落地，SQLite 的组集合与内存替身逐项相同（全部三组），桩模块删除。**第五轮复核（2026-09-26）**：第四轮级联把 SQLite 的执行组注册删掉了，本层的"已收口"当时不成立；第五轮补回注册后重新成立（验收 2 / 41）。
 5. **core 的同步路径不写成员关系，SQLite 上会抛"观察无法挂载"**（Surprises 11 / D11）。`packages/core/src/bootstrap.ts` 的 `recordObservations` 只写投影与观察，而端口的落点解析要求成员关系先存在（D11；原先由账本外键兜底，该外键已由 L3 的 `8cf7d18` 去掉，解析这一步不变）——内存替身不做落点解析，所以这条路径在替身上一直"能用"。**两条具体后果（2026-09-23 修复轮补记，P2）**：① 抛错发生在**同一个同步事务**里，因此整笔事务回滚——投影、修订号与游标全都不落库，不是"只丢了观察"；② `bootstrapWorkspace()` 从"结构化失败"变成 rejected，异常穿透到调用方。收口条件：由写成员关系的那一层（真实 provider 切片或 core 的同步步骤）先落成员关系，再投递观察；届时补一条 core + SQLite 的端到端用例。**在那之前，"验收表 39 项全通过"不得读成"SQLite 已经可以当 core 的 storage"。** **已收口（2026-09-24 L5-H 重建）**：账本主体改成端口主体之后，观察**不解析落点、也不要求成员关系存在**，这条路径不再抛错。
 6. **成员关系换条目时两个实现对旧条目字段值的处理不同**（Surprises 15 / D12）。收口条件：契约套件补一条"换条目后旧条目的字段值"的用例，两个实现按同一语义对齐（预期是连带删除：旧条目已经不存在）。**同一决定的账本那一半已收口**（2026-09-23 评审修复轮）：原先 SQLite 连带删除旧条目上的观察行，于是换条目后同一个 `dedupeKey` 再投递会再次返回 `true`；按 D12 修订删掉该清理后，两个实现在这一格上都是 `false`（判据是集成"成员关系后者胜…"的第二段）。 **已收口（2026-09-24，判据 = 身份同步组用例）**：用例「成员关系被取代时旧条目名下的字段值一并删除」在两个实现上都跑，替身与 SQLite 都连带删除；D12 里的"替身保留孤儿行"已就地订正。
 7. **游标作用域隔离在共享规格里没有判别性用例**（Surprises 14；**订正 2026-09-26**：`suites/**` 已不冻结，收口条件改为"把同一个 scopeKey 在不同绑定下是两条游标补进共享用例"；在此之前由 `tests/integration/storage-sync-surface.test.js` 的"游标按作用域隔离"钉住）。**游标的工作区维度缺失（#189 / ADR-0006 的逐记录作用域表）**：`SyncCursorRecord` 的键只有 `(bindingId, scopeKey)`，而绑定是跨工作区共享的连接锚点——同一绑定被多个工作区挂载时，一个工作区的失败会被另一个工作区的成功覆盖（`degraded` → `healthy`，core 的 freshness 只读这一处）。收口条件属于**端口层**（键里补 `workspaceId` 是签名变更、会波及 core）；本层不改 DDL，只在 `storage-sync.ts` 的 `putSyncCursor` 注释里记录并指向 #189。
 8. **committed 的主体粒度在两个实现间不一致**（Surprises 19 / D17）。内存替身按 `(binding, subject)` 分 committed 槽位，SQLite 侧的主体内涵是 `(workspace, item_external_id)`（账本外键指向成员关系，ADR-0002）——同一个内容被两个绑定观察时，替身保留两个 committed，SQLite 只有一个。**评审修复轮收口**：取"含 binding 维度"（D17）——实现侧 `#committedVersion` 的主体改成 `(binding_id, item_external_id)`，视图侧由 L3 的 `8cf7d18` 同批改；判据是集成"committed 按 (绑定, 条目) 定序…"与 L3 自己的视图用例。仍在契约套件之外（`suites/**` 冻结），收口条件：解冻 `suites/**` 时把这条语义补进同步组。 **已收口（2026-09-24 L5-H 重建）**：主体的内涵与端口 subject 逐字相同（`(binding, objectKind, objectExternalId)`），条目 id 已不在主体里，两个实现同判据。
-9. **列表顺序在两个实现间不一致**（Surprises 19；**2026-09-24 收窄到 `listFieldValues`**）。`listMemberships` 那一半已由身份同步组用例「listMemberships 按 itemExternalId 升序返回」钉住；剩下的只有 `listFieldValues`——内存替身按插入序、SQLite 按 `project_field_id`，契约套件不断言它的顺序，所以两边都能通过。收口条件：补一条契约断言（按 id 排序）**或**在端口注释里写明"顺序不保证、调用方不得依赖"，二者择一。
+9. **列表顺序在两个实现间不一致**（Surprises 19；**2026-09-24 收窄到 `listFieldValues`**）。`listMemberships` 那一半已由身份同步组用例「listMemberships 按 itemExternalId 升序返回」钉住；剩下的只有 `listFieldValues`——内存替身按插入序、SQLite 按 `project_field_id`，契约套件不断言它的顺序，所以两边都能通过。收口条件：补一条契约断言（按 id 排序）**或**在端口注释里写明"顺序不保证、调用方不得依赖"，二者择一。**L6 补记（列表读路径的顺序）**：执行面的 `listRelations`（SQLite 确认行在前、候选行在后，各按 `(from_entity_id, to_entity_id, relation_type)` 排序）与 `listMutationAttempts`（SQLite 按 `id`）在替身上都按插入序，契约同样不断言它们的顺序，收口条件同上；`packages/storage/sqlite/src/storage-execution.ts` 的 `listRelations` 注释以「列表读路径的顺序」按名字引用本条。
 10. **版本比较器在两个实现间不一致**（2026-09-23 修复轮复验时发现）。内存替身用 `localeCompare`（ICU 排序），SQLite 用码点比较（`<`）；实测分歧只出现在大小写 `z` 这一类（`localeCompare` 里小写在大写前，码点里 `Z`(0x5A) < `z`(0x7A)）。当前 R4 的载体是 ISO-8601 UTC 时间戳，不含字母，所以两种比较等价。收口条件：把"载体必须是**大写 `Z`** 结尾的 ISO-8601 UTC"写进定序契约（`packages/capabilities/src/observation.ts` 的 `ProviderObservation.sourceVersion` 注释），把这条隐含前提变成明文约束。 **已收口（2026-09-24 L5-H 重建）**：比较器收敛到 `capabilities` 的 `compareSourceVersion`（码点序，与视图的 BINARY 等价），非 ASCII 载体由 `isComparableSourceVersion` 在 `recordObservation` 入口拒绝。
 11. **"`payload` 由 provider 先脱敏"这条只写在实现与计划里，端口注释没有它**（2026-09-23 评审修复轮，D19）。`snapshot_json` 原样持久化整条 `ProviderObservation`（含 `payload: unknown`），责任划分目前写在 `storage-sync.ts` 的模块注释与本计划里，而**契约层**（`packages/capabilities/src/observation.ts` 的 `ProviderObservation.payload`）没有这句话。收口条件：**允许改 `packages/capabilities` 时**，在 `payload` 的注释里写死"必须由 provider 在构造观察前脱敏（凭据只以 secret 句柄存在，不进入 Project 数据库）；storage 原样持久化，不做二次处理"，并补一条能力契约用例（例如断言观察的 `payload` 不含 `token` / `signature` / 邮箱形状的字段）。在那之前，本层不擅自改契约包。 **已收口（L3）**：端口注释已写明 payload 由 provider 负责脱敏、storage 原样持久化。
 12. **条目 id 被重新登记给另一个内容时，新内容的合法观察仍可能被判成乱序**（2026-09-23 评审修复轮，P2 的第二条后果，本层未收口）。账本主体是 `(工作区, 条目)`（ADR-0002），而端口允许"同 `(工作区, 条目)` 幂等覆盖"——`item-1` 从内容 A 改挂到内容 B 之后，内容 A 的账本行仍挂在 `item-1` 上；内容 B 的首条观察若版本比 A 的已提交版本旧，就会被判成乱序并静默返回 `false`（内存替身按 `(binding, subject)` 分槽位，不会）。D17 的 binding 维度**修不了**这一格：两个内容在同一个绑定、同一个条目下。收口条件：先决定账本主体是否要含内容引用（`sync_observation` 加内容列，或让 committed 主体含 `content_external_kind/id`）——这是 DDL 决策，归 L3；在决定之前本层不擅自加列。判据：契约套件补一条"同条目换内容后新内容的首条观察必须被应用"，两个实现按同一语义对齐。 **已收口（2026-09-24 L5-H 重建）**：账本主体不再含条目 id，条目改挂内容不再影响定序；判据是契约套件的"没有成员关系的观察必须被应用，换条目后再投递同一观察仍是 false"。
@@ -943,6 +1383,13 @@ packages/storage/sqlite/src/index.ts
 16. **替身与 SQLite 在事务语义上的三处分叉**（第五轮评审登记）：读取时刻（事务在途时的外部读）、活性（work 里调外层实例）、作用域生命周期（结算后与未 await 的 `tx.*`，SQLite 已在执行时再查令牌并拒绝，替身照常落库）。收口条件：替身补作用域令牌，或端口注释把三者写成「实现可选的更严行为」。
 17. **投影写入的两处分叉**（第五轮评审登记）：`putPlanningProjection` 的 `workspaceId` 替身以记录为准、SQLite 以参数为准；`replacePlanningProjections` 的 items 指向不存在的实体时替身接受、SQLite 以外键拒绝。收口：共享地基组补两格并统一语义（#201）。
 18. **同一进程对同一文件开第二个句柄**（第五轮评审登记）：事务从 `BEGIN IMMEDIATE` 持锁到 await 结束，`node:sqlite` 是同步驱动、`busy_timeout = 5000`，第二个句柄写入会冻结事件循环约 5 秒后抛驱动文案。今天没有宿主开两个句柄。收口：按 realpath 键控复用句柄，或把 `SQLITE_BUSY` 映射成端口级错误。
+19. **候选关系的来源被 DDL 收窄，端口类型没有**（L6，Surprises 23）。`candidate_relation.source` 的 CHECK 只允许 `deterministic` / `lineage`，而端口的 `Relation` 允许任一 `RelationSource` 配任一 `state`；`{ state: 'candidate', source: 'explicit' }` 在内存替身上可写、在 SQLite 上被 CHECK 拒绝。规格只覆盖 `deterministic` 候选，所以两个实现都能通过。收口条件：在 `suites/storage-execution.js` 补一条"候选关系的来源取值"用例并在两侧选定同一语义（要么把 `explicit` 候选也允许进候选表，要么把"显式只能确认"写进端口注释）；`suites/**` 已在 L6 评审修复轮解冻（见遗留 21「`suites/**` 的三处头部注释已过期，另有一个无人调用的导出待处置」），这条收口动作现在可执行，剩下的阻塞只在迁移与端口注释。
+20. **写尝试的状态迁移没有端口出口：库层允许重试，端口把它封死**（L6，Surprises 25；2026-09-23 收口轮改写成两句话）。**库层要求（L6 当时的 003）**：003 的部分唯一索引只覆盖未决状态（`pending` / `unknown`），已决行不在索引里，因此"已决不阻塞同键新写入"是库层事实——`tests/integration/execution-relation-write-schema.test.js` 的"R8：写尝试用 domain 的 WriteState 词表，未决重复被拒、已决不阻塞重试"直接断言了它（同键 `failed` 之后再写 `saved` 落成第二行，这正是 L1 §2 的"failed 允许重试"）。**端口实现**：L6 当时用无状态谓词的单语句 `INSERT ... SELECT ... WHERE NOT EXISTS (workspace_id, idempotency_key)` 把这条封死——同键第二次写入整笔 no-op，写 `failed` 之后同键写 `saved` 仍然返回 `failed` 且账上只有 1 行。**已收口（2026-09-24 第三轮评审，D5）**：写尝试取**一行一键**模型——003 的主键改成 `(workspace_id, idempotency_key)`、加 `UNIQUE (workspace_id, id)`、删掉只覆盖未决状态的部分唯一索引；端口注释、DDL、两个实现与 core 的读法四者对齐到"同键写入是幂等覆盖"（后写的状态取代先写的）。"未决行是否阻塞第二次外部写"因此成为**调用方**的判据（core 的写状态机先 `findMutationAttempt` 读当前行），storage 只保证同键只有一行、不会被并发写成两行——这条边界写在 003 的表注释里。判据：契约执行组的"写尝试一行一键，状态原地推进且 id 在工作区内唯一"与集成的"同幂等键经端口重放是幂等覆盖，账上只有一行"。
+21. **`suites/**` 的三处头部注释已过期，另有一个无人调用的导出待处置**（L6，本层实现后复读时发现；2026-09-23 收口轮核对）。实测三处：`tests/contract/suites/storage.js` 写"本层 SQLite 只注册地基组与同步组"、`tests/contract/suites/storage-sync.js:1` 与 `tests/contract/suites/storage-execution.js:1` 各写"L4 的 SQLite 实现尚未交付这一组……因此本组当前只在内存替身上运行"——L6 之后两个实现都跑全部三组，这三句都不再成立。**2026-09-23 收口轮更新**：`suites/**` 已解冻（F1/F2 的新增用例是正当理由），三处过期注释改完，D24 记下的"只写候选即可读到候选"缺口也在评审修复轮补成了契约用例（第 53 项 / 实验 46）。**本条因此只剩一件事**：`suites/storage.js` 的 `storageContractSuite` 当前**无人调用**（真实装配走 `assemble` 台账的显式组清单：L6 实现轮是 `assemble({label}, ['foundation','sync','execution'])`，第五轮起 SQLite 按组分标签，组集合合起来与它注册的三组逐项相同，见 D23 与验收第 2 项），要决定它的去留——保留就让它成为唯一装配入口并让守卫跟着它走，删除就要先想清楚"两个实现跑同一套"的表达落在哪里（至今**没有**删它：它是组合入口，删了会让这句表达变弱）。收口条件：下一次动装配入口时一并做掉；在那之前，真实的覆盖面以 `tests/contract/storage-contract.test.js` 的装配与守卫为准。**L6 重建补记**：重建新增的执行组读隔离断言让逐组账变成 execution 8 条；**第三轮评审收口后是 13 条**（读隔离从 1 条参数化成 6 条），组合入口本身未动。
+22. **没有生产代码调用 `putRepository`：core 的 Start Work 在任何强制引用完整性的 storage 上都会失败**（L6 评审修复轮 F1 登记，与遗留 5 并列的**第二个独立阻塞点**；承载 issue [#188](https://github.com/SingularityKChen/harness-projects/issues/188)）。实测（探针脚本，`createFakeProviders()` + `composeCore` + `startWork`）：执行上下文写入成功，而 `exportFakeStorageState(...).repositories` 是**空数组**——`packages/core/src/start-work.ts` 的 `contextRecord` 直接把请求里的 `repositoryId` 写进执行上下文，全仓没有一处生产代码登记仓库（`grep -rn "putRepository"` 只命中端口声明、两个实现与测试）。端口契约写着"仓库是可开始工作的前置"（`packages/capabilities/src/storage.ts`），003 的 `execution_context.repository_id` 又有外键，因此**SQLite 上每一次 `putExecutionContext` 都会撞 `FOREIGN KEY constraint failed`**；替身侧这条父边**故意不对齐**（对齐后 e2e 15 个 + mvp0 4 个用例立刻变红，见 Surprises 27 与 D26），所以分叉仍然存在：`execution_context.repositoryId` 悬空时替身接受、SQLite 拒绝。**两条后果**：① core 的 Start Work 在 SQLite 上不可用（与遗留 5 的同步路径并列，这是"验收表全绿 ≠ SQLite 能当 core 的 storage"的第二个来源）；② 替身与 SQLite 在执行组的引用完整性上还差一条父边。**收口条件**：core 的 Start Work（或它上游的仓库登记步骤）先调用 `putRepository`——那时把这条父边也加进替身、把契约用例从三条扩成四条，并给 e2e / mvp0 的 startWork 用例补仓库前置行；在那之前，本层不得为了让 e2e 变绿而放宽 SQLite 的外键或给测试预置 core 自己不做的前置。**第五轮补记**：这一格已写成 `storageExecutionDivergenceSuite` 按能力位断言的显式分叉用例；另实测仓库没有可用的外部身份种类（#195，遗留 2），因此"core 登记仓库（含外部身份）"需要先收口 #195。
+23. **端口注释对 `provisioningStartedAt` 的两句话有歧义**（L6 评审修复轮 F3 登记）。`packages/capabilities/src/storage.ts` 的 `ExecutionContextRecord` 同时写着"终态为 undefined"与"在途与中断只能靠它区分，见 ExecPlan D3"，但没有说明"中断"指的是**终态行**（`failed`）还是**租约过期的 `provisioning` 行**。本层选定的语义是"实现侧清空"（D27，两个实现 + 库层都有断言钉住）：终态行不带认领时间，`core/src/start-work.ts` 的 `leaseExpired` 只在 `status === provisioning` 的分支上读它——按这个读法两句话不矛盾，但注释本身没有把这件事写清楚。**收口条件**：允许改 `packages/capabilities/**` 时订正注释（点名"中断 = 租约过期的 provisioning 行，不是终态行"），或在端口契约里把终态行的该列语义写成明文约束。
+24. **core 把谱系关系写到从未登记的实体上**（2026-09-24 第三轮评审 P2 点名"core 阻塞点少登记一条"后补登；承载 issue [#187](https://github.com/SingularityKChen/harness-projects/issues/187)，是继遗留 5「同步路径不写成员关系」与遗留 22「没有生产代码调用 `putRepository`」之后的**第三个独立阻塞点**）。003 的 `relation` 与 `candidate_relation` 两端都外键到 `entity`，而 `packages/core/src/start-work.ts` 的 `recordStartFacts` 把谱系边写到它从未 `putEntity` 的两个实体上（执行上下文 id 与工作树 id）。SQLite 上的顺序后果：外部写入（branch / worktree）已经发生，`FOREIGN KEY constraint failed` 抛在 `ledger.record` **之前**，于是留下一个 `ready` 执行上下文而没有关系、没有写尝试、也没有运行；同键重试走 `existing` 分支，因此这条谱系边（AGENTS.md §1.1 不变量 6）**永远修不回来**。替身不检查关系端点，所以 e2e / mvp0 保持全绿。**收口条件**（issue #187）：core 在记录谱系边之前登记端点实体，或者端口明文声明"关系端点可以是实体以外的引用"；两种都要补一条在两个实现上都跑的契约用例，并把本条从"不声称"列表里移走。**与遗留 5 的关系**：账本主体改成端口主体之后遗留 5 已收口，本条是**独立**的一格——既不依赖成员关系，也不依赖仓库登记。**第五轮补记**：关系两端点的分叉由 `storageExecutionDivergenceSuite` 按能力位显式断言。 **时序后果（2026-09-26 第六轮评审 P2）**：若 #188（登记仓库）先于本条修复，Start Work 会先建分支与工作树，再在写关系时抛裸 `FOREIGN KEY`；库里留一条 `ready` 上下文，没有关系、运行与写尝试；同键重试返回 `saved / confirmed`，但 `runExternalId` 为空、运行数不增。收口时必须覆盖这一时序，或约定 #187 先于 #188 合并。
+25. **未登记工作项在两个实现上的失败形状不同**（2026-09-26 第五轮评审登记，承载 issue [#196](https://github.com/SingularityKChen/harness-projects/issues/196)）：形状合法但从未 `putEntity` 的工作项 id 交给 Start Work 时，替身接受并写入执行上下文，SQLite 抛裸外键错误，详见「本层关闭」段之后的清单第 2 条；当前分叉由 `storageExecutionDivergenceSuite` 按能力位断言。收口条件：#196 验收 1（两个实现给出同一个结构化结果）。
 
 ## Bottom Change Note
 
@@ -953,5 +1400,12 @@ packages/storage/sqlite/src/index.ts
 - 2026-09-23（L5 修复轮）：独立对抗验证对 head `0aa7c34` 判 `partially_falsified`，1 条 P0 + 2 条 P1 属实。P0 是账本键缺 `dedupeKey`（同一接收时刻的两条不同观察互相顶掉、已见 key 再投递返回 `true`），按根因改 003 的键并补视图 tie-break（D14）；P1-a 是 `undefined` 版本的空串编码在读回时没有还原（D15）；P1-b 是切分守卫数的是组文件而不是装配结果（D16）。另把 P2/P3 的后果与遗留写进验收表、遗留 5 与遗留 8/9/10，并在 head 上重跑了原有五条实验（旧集成数字系统性差 1）。
 - 2026-09-23（L5 评审修复轮）：PR #170 的六条评审意见全部属实，按根因分两层收口。L3 侧（`8cf7d18`）去掉账本到成员关系的外键、把 committed 视图的主体改成含 binding；本层（Batch L5-E）随之删掉"换条目删账本"的清理（D12 修订）、把 `#committedVersion` 的主体改成 `(binding_id, item_external_id)`（D17）、把恒真断言换成判别性用例、加 003 重写自检（D18）、订正计划里失效的体量基线并把 `snapshot_json` 的安全决定写下来（D19）。本分支上 `成员关系后者胜…` 红在旧外键，级联 L3 后集成 36/36（Surprises 20/19）；`payload` 端口注释一条登记为遗留 11。
 - 2026-09-23（重建）：L5 原分支与 L4 评审修复轮在类层次上撞车（队列在子类 vs 机制该在基类），`git rebase` 只能得到语义冲突。本轮按"重建而不是解冲突"处理：`git reset --hard da902e4` 后逐文件取 L5 内容，把写者 / 读者路径机制统一收进 `SqliteSyncSurface`（唯一入口 `mutate`，`read` 复用同一条串行点），003 在 L3 的新形状上只加 `dedupe_key`，两侧的修复与断言在同一棵树上同时成立；判别性实验 22 / 23 见 `Progress`。
-- 2026-09-24（级联 L2/L3 重写）：L2/L3 被重写成"连接锚点 + 工作区挂载"两表（`provider_binding` 只留 `(id, implementation_key)`）并在 `tests/contract/suites/storage-identity-membership.js` 里独立成文。本轮在恢复锚点 `backup/storage-sqlite-port2-pre-review-response` 之后 `git rebase --onto 8f11e38 3e255ed`，把绑定落库改成双表并让两条语句同属一个原子作用域（D10），`suites/storage.js` 取本层的切分结构、两处既有用例改用 `development` 域，SQLite 侧注册身份地基组（同步组仍等 L5/L6）。证据基准与条数账改为当时的 base（`8f11e38` / 994/1000，观察时刻快照，不可复跑）；2026-09-24 已一律改为 `BASE=$(gh pr view 167 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)` 回读与 `PRE_SPLIT_CASE_COUNT` 实测值。全门禁复跑见 `Progress` 与验收表第 41 项。
+- 2026-09-23（L6）：Batch L6-A/B/C 交付执行面——执行上下文与运行 / 关系 / 写尝试落库，桩模块删除；SQLite 的契约装配换成与内存替身相同的组集合（全部三组），装配守卫的期望台账同批改；重启用例补关系与执行上下文，并补"对端口写过的库再跑迁移是 no-op"。当时写的关闭面是"#120 与 #5"；仍不声称的是 core 的同步路径（`recordObservations` 不写成员关系，在 SQLite 上抛错，见遗留 5）、core 侧没有仓库登记（遗留 22）与执行面的 core 侧端到端用例。实测落差（候选关系来源被 DDL 收窄、写尝试没有状态迁移出口、`suites/**` 三处注释过期）逐条登记为遗留 19–21（当时编号 15–17），未改任何冻结文件。 **订正 2026-09-24**：本条的两处结论已过期——`Closes` 只有 #120（#5 为 `Refs`，理由见「本层关闭」段）；core 的同步路径已由 L5-H 的根因修复收口，不再抛错。**订正 2026-09-26（第六轮）**：#28 同为 `Refs`，关闭归属待人类伙伴决定。
+- 2026-09-23（L6 收口轮）：独立对抗验证在原 head `62762af` 上判 `holds`（无 P0/P1），8 条 P2/P3 逐条收口——关系路由的归属按实测改写并写明覆盖边界（D24）、遗留 20（当时编号 17）改写成"库层要求 / 端口实现"两句话并把收口责任指向 capabilities 端口契约所有者、集成补可选列 `undefined` 与同幂等键重放两条用例（D25）、装配守卫消息改成真实覆盖范围、`suites/**` 过期注释统一成三处并列出路径、遗留 9 扩成"列表读路径的顺序"、组合入口措辞统一并把未使用导出的处置并入遗留 21。
+- 2026-09-23（L6 评审修复轮）：PR #175 的 F1–F3 逐条复现后按根因收口——替身补三条父边检查（第四条按实测留给 core，登记为遗留 22）、关系路由的候选方向与写尝试的工作区隔离升进契约层、强制关闭 active 上下文时由实现清空 `provisioningStartedAt`（端口注释歧义登记为遗留 23）；执行组 3 → 7 条，切分账改成按组核账；判别性实验 44–47 + 全门禁复跑（原分支 443/39/38/7 + `tsc` 0）。评审锚点 `62762af` / `ba50406` 是 rebase 前哈希，等价提交为 `ca1e5e7` / `cafc245`。
+- 2026-09-23（L6 重建）：原 L6 分支的 base 是旧 L5（`cafc245`），与重建后的 L5（`5162163`，机制只在基类）在类层次上撞车——照搬旧 L6 会让执行面的六个读方法绕过统一入口，而**全部门禁仍然全绿**（Surprises 28）。本轮按"重建而不是解冲突"处理：`git branch -f backup/l6-before-rebuild 560533e` → `git reset --hard 5162163` → 逐文件取 L6 内容，把六个读方法改成经基类 `read`，并在 `suites/storage-execution.js` **新增**一条执行组读隔离断言（只增不改）让"执行面的读走统一入口"成为可判别的契约事实（D20 / D25）；同时把 L4 修复轮 2 的 2 条账并进逐组 `ADDED_CASE_COUNTS.foundation`（D28）。三侧修复（L4 修复轮 2 / L5 重建 / L6 评审修复轮）在同一棵树上同时成立；判别性实验 48 / 49 与全门禁 450/42/38/7 + `tsc` 0（观察时刻快照）见 `Progress`。
+- 2026-09-24（级联 L2/L3 重写）：L2/L3 被重写成"连接锚点 + 工作区挂载"两表（`provider_binding` 只留 `(id, implementation_key)`）并在 `tests/contract/suites/storage-identity-membership.js` 里独立成文。三层依次级联（L4 `backup/storage-sqlite-port2-pre-review-response` + `rebase --onto 8f11e38（观察时刻快照，不可复跑） 3e255ed`；L5 `backup/storage-sqlite-sync-surface-pre-review-response` + `rebase --onto 8f63983 8f4b5da`；L6 `backup/storage-sqlite-execution-surface-pre-review-response` + `rebase --onto 6a25971 9c1e896`）：绑定落库改双表且两条语句同属一个原子作用域（D29），`#observationSubject` 改 join `workspace_binding`，装配 seed 改两条表，替身写尝试父边改用 `providerBindings`，三个实现的 SQLite 适配器都注册身份面两组。证据基准与条数账一并改为 `8f11e38（观察时刻快照，不可复跑）` / 各层新 head；L4 侧 2026-09-24 已一律改为 `BASE=$(gh pr view 167 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)` 回读与 `PRE_SPLIT_CASE_COUNT` 实测值，全门禁复跑见 `Progress` 与验收表第 59 / 60 / 61 项。
+- 2026-09-24（L6 第三轮评审收口，Batch L6-G）：`backup/l6-pre-round3` 建锚点后 `git rebase --onto 4bc3e69 fc4dd906`（L6 的三个提交）。八个文件只能得到语义冲突，按"保留 L6 的结构、把 L3/L4/L5 的语义重新落到 L6 的位置"解决：机制取 L5 的新基类（可变令牌 `TX_SCOPE` / 共用 `#state` / `atomic` / 幂等 `close()`），`SqliteStorage extends SqliteExecutionSurface` + `scopedInstance(state, token)` 保留三层继承；替身取 L5 的 `cap.compareSourceVersion`，L6 第三个提交（"码元序"）的改动已包含在基里、变基后为空并被丢弃；替身的三条父边检查叠加在 L5 版本之上，不丢 L3 的存在性检查与 D5 的写尝试幂等覆盖。八条评审意见里：两条 P2 与三条 P3 在本层修掉——执行面读隔离参数化成六个读（D30，六个读逐个改回直接读各让对应用例红，还原后 95/95 绿）、写尝试对齐 D5 的一行一键 UPSERT、切分账按当时的 head 实测重写（13 / 8 / 13；36 / 45 / 30，观察时刻快照；现行断言层见验收第 64 项）、体量基线改成回读式 `BASE`、`fake/storage.ts` 的编号引用改成名字；一条 P2（版本比较声明）与一条 P3（`mutation_attempt.id` 唯一性）由 L3 的 D3 / D5 在基里收口；一条 P2（core 阻塞点少登记一条）补登为遗留 24（当时编号 21）并承载 issue #187。全门禁 622/622 + `tsc --noEmit` 无输出 + boundaries 7/7 + `size "$BASE"` 代码 633/1000 文档 680/1500 + `disclosure` 0 + `git diff --check` 无输出。
 - 2026-09-26：第五轮 MMP 评审无 P0 / P1，评审者就地修复：结算检查改到执行时、令牌生命周期用例放回本层（含未 await 写入的一格；三个变异各红）、#163 验收 6 补端口写入并改为关闭 #163、上游路径指向已归档的 L2 / L3 计划、恢复路径按实际提交描述、遗留清单补登三处分叉；切分守卫基线的来源与 SQLite 注册守卫转 #201。
+- 2026-09-26（第五轮评审修复，L6 侧）：第四轮收敛的级联用「整份文件取一边」解冲突，把 L4/L5 已验收的修复与装配守卫静默丢掉——本轮按根因补回：SQLite 重新注册执行组（执行面 10 个方法在 SQLite 上的契约覆盖从 0 到 13 条 + 3 条分叉用例）、`replacePlanningProjections` 恢复 `atomic` 并恢复被删的集成用例、`putExecutionContext` / `putRelation` 改 `atomic`（D31）、执行组的引用完整性写成实测清单 + 按能力位断言的显式分叉用例、替身的死代码与注释订正、计划与索引按实测订正并补上 #28 的证据（**第六轮订正**：#28 为 `Refs`，关闭归属待人类伙伴决定；threads 逐条处置见 `docs/review/2026-09-26-pr-175-mmp-round5.md`）。
+- 2026-09-26（第六轮评审修复，层计划恢复）：本文件在第五轮级联时被「整份取一边」，L6 的记录整批丢失、L5 的订正被回退（第六轮评审 P1-B）。本轮按"现行 L5 为底 + 第四轮 L6 逐节并入 + 保留第五轮订正"恢复，编号顺延与引用修正见 `Progress` 与 `Decision Log` 的同日条目；#28 改回 `Refs`；标题、状态、范围与 Purpose 覆盖 L4 + L5 + L6。
