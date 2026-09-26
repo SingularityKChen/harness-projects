@@ -45,6 +45,7 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-09-26-development-suite-capability-driven](exec-plan/completed/2026-09-26-development-suite-capability-driven.md) | Development 契约套件按能力快照驱动（#205）：新增 `development.worktree.remove` 让破坏性移除可声明；变更请求三个方法与工作树移除按各自的键驱动，已声明路径要求方法真的实现，`expect.objects` 在每种已知写入后都必须新鲜；port 写明「能力先于身份」与只建模能力声明。#205 保持开启：分支 / 工作树创建按快照驱动（验收 2）与本地 Git provider 通过套件（验收 4，随 #160）仍未成立 | Completed |
 | [2026-09-23-sqlite-v1-stack](exec-plan/completed/2026-09-23-sqlite-v1-stack.md) | SQLite v1 数据模型栈控制计划：六层堆叠 PR（L1–L6：#121 → #122 → #157 → #167 → #170 → #175）的拓扑、每层目标与判定命令；各层交付状态一律回读（`gh pr list -R SingularityKChen/harness-projects --head <分支> --state all`），随栈顶 #175 归档。v1 是否冻结、#28 / #5 的关闭归属、裁决 R4 / R8 偏离的采纳仍由人类伙伴决定 | Completed |
 | [2026-09-24-stack-review-response](exec-plan/completed/2026-09-24-stack-review-response.md) | 第二轮评审响应的执行计划：逐条处置 21 条意见（L1 11 条 + L2 10 条）、栈序表与验收表改成回读命令、R8 收敛到两轴；随栈顶 #175 归档 | Completed |
 | [2026-09-24-review-root-cause-convergence](exec-plan/completed/2026-09-24-review-root-cause-convergence.md) | 第三轮响应与第四轮收敛：按"拥有该事实的层"重排批次、删副本加机械判据；含 72 行逐条处置表；随栈顶 #175 归档 | Completed |
