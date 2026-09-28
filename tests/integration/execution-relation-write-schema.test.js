@@ -225,7 +225,10 @@ test('关系候选分表、执行 active 唯一、修订删除实体不倒退，
   // 工作区作用域经复合外键传递：仓库属于另一个工作区时必须被拒绝（不变量 5）。
   db.exec("INSERT INTO repository VALUES ('repo-2','ws-2','identity-1')")
   rejects(db, "INSERT INTO execution_context VALUES ('context-3','ws-1','entity-1','repo-2','planned',NULL,NULL,NULL)", /FOREIGN KEY constraint failed/)
-  rejects(db, "INSERT INTO execution_run VALUES ('run-2','ws-2','context-1','running','now')", /FOREIGN KEY constraint failed/)
+  rejects(db, "INSERT INTO execution_run (id,workspace_id,context_id,status,updated_at) VALUES ('run-2','ws-2','context-1','running','now')", /FOREIGN KEY constraint failed/)
+  const run = (ref, fallback) => `INSERT INTO execution_run VALUES ('run-4','ws-1','context-1','running','now',${ref},${fallback})`
+  for (const [ref, fallback] of [["'{not json'", 0], ["'null'", 0], ["'[]'", 0], ['NULL', 2]]) rejects(db, run(ref, fallback), /CHECK constraint failed/)
+  db.exec(run(`'{"bindingId":"b","objectKind":"execution_run","externalId":"x"}'`, 1))
   rejects(db, "INSERT INTO webhook_subscription VALUES ('wh-2','ws-1','binding-1','s','issues',2)", /CHECK constraint failed/)
   db.exec("INSERT INTO workspace_revision VALUES ('ws-1',4)")
   rejects(db, "INSERT INTO workspace_revision VALUES ('ws-2',-1)", /CHECK constraint failed/)
@@ -244,7 +247,7 @@ test('003 显式 schema 审查：十一张表的 63 列全部在白名单内，�
     'execution_context.status': '枚举：执行上下文状态', 'execution_context.work_item_id': '标识',
     'execution_context.workspace_id': '标识', 'execution_context.worktree_external_id': '平台原样值',
     'execution_run.context_id': '标识', 'execution_run.id': '标识', 'execution_run.status': '枚举：运行状态',
-    'execution_run.updated_at': '时间戳', 'execution_run.workspace_id': '标识',
+    'execution_run.fallback': '布尔：由降级产生', 'execution_run.provider_ref_json': 'provider 外部引用', 'execution_run.updated_at': '时间戳', 'execution_run.workspace_id': '标识',
     'relation.from_entity_id': '标识', 'relation.relation_class': '枚举：关系类别', 'relation.relation_type': '语义：关系类型',
     'relation.source': '枚举：关系来源', 'relation.state': '枚举：确认态', 'relation.to_entity_id': '标识', 'relation.workspace_id': '标识',
     'candidate_relation.from_entity_id': '标识', 'candidate_relation.relation_class': '枚举：关系类别',
@@ -271,7 +274,7 @@ test('003 显式 schema 审查：十一张表的 63 列全部在白名单内，�
     .flatMap((table) => columns(db, table).map((column) => `${table}.${column}`)).sort()
   assert.deepEqual(actual, Object.keys(AUDITED).sort(),
     '每一条列都必须被显式审计：新增列要同步写进 AUDITED，否则这份审查只是声明')
-  assert.equal(actual.length, 63, '003 建出的十一张表共 63 列')
+  assert.equal(actual.length, 65, '003/004 建出的执行面表共 65 列')
   const credentialLike = /token|password|passwd|secret|credential|private_?key|access_?key|api_?key/i
   assert.deepEqual(actual.filter((qualified) => credentialLike.test(qualified)), [],
     '没有任何列能存凭据材料；凭据只保存 secret 服务句柄')

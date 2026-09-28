@@ -47,6 +47,12 @@ export function storageExecutionSuite(adapter, register = test) {
     assert.equal((await storage.getExecutionContext('context-1'))?.status, 'closed')
     await storage.putExecutionRun({ id: 'run-1', workspaceId: WORKSPACE, contextId: 'context-2', status: 'running', updatedAt: '2026-09-20T00:00:00Z' })
     assert.equal((await storage.getExecutionRun('run-1'))?.status, 'running')
+    // 运行的 provider 引用是运行事实的一部分：重启后路由 getRun / cancelRun 全靠它，两个实现必须逐字段读回
+    // 同一个四元组（SQLite 走 JSON 列，`url: undefined` 不能在往返里变成"没有这个键"）。
+    const providerRef = { bindingId: 'binding-execution', objectKind: 'execution_run', externalId: 'manual-run:x@t~sig', url: undefined }
+    const replaced = { id: 'run-1', workspaceId: WORKSPACE, contextId: 'context-2', status: 'canceled', updatedAt: '2026-09-20T00:00:01Z', providerRef, fallback: true }
+    await storage.putExecutionRun(replaced)
+    assert.deepEqual(await storage.getExecutionRun('run-1'), replaced, '覆盖写入后逐字段读回新的 providerRef 与"由降级产生"')
   })
 
   register(`${label}：关系按工作区隔离且重复写入不产生第二条`, async () => {

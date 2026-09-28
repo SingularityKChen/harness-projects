@@ -2,7 +2,7 @@
  *
  */
 import { createHash } from 'node:crypto'
-import { ProjectErrorCode, projectError, type ProjectError } from '@harness-projects/capabilities'
+import { ProjectErrorCode, projectError, type ExecutionRunRecord, type ProjectError } from '@harness-projects/capabilities'
 import {
   ExecutionContextStatus, ExecutionRunStatus, WriteState, asBrandedId,
   type EntityId, type ExecutionContextId, type ExecutionRunId, type WorkspaceId,
@@ -54,6 +54,7 @@ export interface ExecutionContextView {
   readonly status: ExecutionContextStatus
   readonly branchExternalId: string | undefined
   readonly worktreeExternalId: string | undefined
+  readonly runExternalId: string | undefined
   readonly runId: ExecutionRunId | undefined
   readonly fallback: StartWorkFallback | undefined
   readonly degraded: boolean
@@ -115,6 +116,11 @@ export function reportForExisting(status: ExecutionContextStatus): WriteReport {
   return reportFor(WritePhase.Confirmed, emptyValues(), undefined)
 }
 
+/** 降级结论只从运行记录的 `fallback` 读（ADR-0008），不从 `failed` 反推：主执行 ack 的 failed 不是降级。 */
+export function fallbackOf(run: ExecutionRunRecord | undefined): StartWorkFallback | undefined {
+  return run?.fallback === true ? StartWorkFallback.Manual : undefined
+}
+
 export function runStatusFor(raw: string): ExecutionRunStatus {
   const known: readonly string[] = Object.values(ExecutionRunStatus)
   return known.includes(raw) ? (raw as ExecutionRunStatus) : ExecutionRunStatus.Unknown
@@ -127,10 +133,11 @@ export async function readExecutionContext(
   const record = await context.storage.getExecutionContext(id)
   if (record === undefined) return undefined
   const run = await context.storage.getExecutionRun(runIdFor(id))
-  const fallback = run?.status === ExecutionRunStatus.Failed ? StartWorkFallback.Manual : undefined
+  const fallback = fallbackOf(run)
   return {
     id: record.id, workspaceId: record.workspaceId, workItemId: record.workItemId, repositoryId: record.repositoryId,
     status: record.status, branchExternalId: record.branchExternalId, worktreeExternalId: record.worktreeExternalId,
+    runExternalId: run?.providerRef?.externalId,
     runId: run?.id, fallback, degraded: fallback !== undefined,
   }
 }

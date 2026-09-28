@@ -70,6 +70,21 @@
 | 分支被别处检出 | core 不得报成功 |
 | 默认允许根与基线 | 不注入 `allowedRoot` 时首个工作树仍能建出；只有 `trunk` 且无 `origin/HEAD` 的仓库仍能供应 |
 
+## 人工执行 provider（#139 / #171 / #172）
+
+`human-execution-provider.test.js` 组装**真实的**本地 Git provider + 人工执行 provider + 离线 Storage，在 `mkdtemp` 生成的临时仓库上跑 `startWork`（不触网）。只列本文件真正断言的内容；provider 自身的闸门、签名与构造约束在 `tests/contract/execution-contract.test.js`：
+
+| 用例 | 保护的不变量 |
+|---|---|
+| 开始工作 | 工作树与分支真的落盘（按总数）；Storage 里 `running`，落库的 `providerRef` 就是结果里的 `runExternalId`；Storage 里只有 core 写过的那一条运行 |
+| 执行起不来且没有 fallback 绑定 | 上下文保留为 `ready`、工作树与分支仍在、运行 `failed`、结论 `manual_fallback`，重查一致 |
+| fallback 绑定承接 | 主执行起不来时 core 启动 fallback 绑定、落 `running` 的人工运行（#171）；重启后查询面上的交接快照（工作项、仓库、分支、工作树、运行引用、降级结论）不变，同键重放报出相同的降级结论；接管终态上下文时已有运行不被覆盖、不起新的执行者，首次结果按这条记录报出引用与降级结论 |
+| fallback 的角色与写门 | 主执行 start 无权限或被设为只读时由 fallback 承接、不被当成主执行；主执行自己也声明 fallback 时承接的仍是 fallback 绑定；主执行结果不确定不承接；fallback 只读或 ack 非 running 不落运行；主执行 ack failed 不算降级；首次结论与查询面一致 |
+| 重启 | 重建 core 后执行上下文、运行记录与 `providerRef` 逐字段不变，查询与重放带回同一引用（#172），不重复供应 |
+| 按运行身份取消 | 并发、重复、重启后取消收敛到同一个 canceled 事实：已取消不再调 provider，否则 ack 后事务内原子替换状态与 `providerRef` |
+| 重启后取消 fail closed | binding id 变了（不问任何 provider）、签发密钥变了、取消被设为只读时结构化失败，运行记录一字不改 |
+| 取消与组装的边界 | succeeded / failed / timed_out 拒绝取消且记录不变；`queued` 可取消；有状态 provider 对并发的第二个取消答 conflict 时以运行记录为准；binding id 重复即拒绝组装；只注入 fallback 也承接 |
+
 ## 约定
 
 - 每个用例使用独立的临时目录/临时数据库，测试之间不共享状态。
