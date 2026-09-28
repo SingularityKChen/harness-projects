@@ -52,7 +52,7 @@ node --test tests/contract/engineering-state.test.js
 | `tests/contract/engineering-drift.test.js` | 382 行。覆盖三条选择规则、未被引用条目跳过、分页截断、传输与结构故障表 |
 | `docs/development/ci.md` | 第 30 行写着「**投影是共享的，选择策略不是**……选择策略是观察者独有的」，并点名 issue #115 |
 | `docs/product/board-semantics.md` | §2.1 是 `Engineering` 投影与 fail-closed 约束的权威表述；只描述了单快照投影，没有写「谁决定取值」 |
-| `docs/project-management/merge-queue.md` | §4.4 记录关闭引用在栈上的两次相反实测；§7 记录「关闭引用一旦登记，就不会随正文编辑撤回」 |
+| `docs/project-management/merge-queue.md` | §4.4 记录关闭引用在栈上的两次相反实测；§7 记录「关闭引用一旦登记，就不会随正文编辑撤回」——**Superseded by §7 的订正（2026-09-24，issue #180）**：这句普适断言已被同一批次的第二次实测推翻，§7 现在只描述两次实测与「不能预先推断」，原文以引用块保留在该节内作为反例 |
 
 ### 缺陷的完整形状
 
@@ -146,7 +146,7 @@ export function expectedFor({ references })
 1. **单元级复现 issue 的四步**：`main` 在 merged #A + 后开的非 draft #B 上必须写 `Merged`（mutation 的 `optionId` 是 `Merged` 那一项），不是 `PR open`。实现前先看到它红。
 2. **反向变异**：把共享策略改成「取创建时间最新的 PR，不看 merged」后，上面那条用例必须变红；记录红 / 绿两次实测输出，然后还原。
 3. **观察者与写入口一致**：同一组引用输入上，写入口写下的取值等于观察者的期望（观察者对「写入口刚写下的值」报 0 条 finding）。
-4. **查询形状**：issue 侧查询必须带 `includeClosedPrs: true`，且**不请求 `body`**——关闭引用是登记事实，不是正文的函数（`merge-queue.md` §7 实测：登记后改正文不会撤回）。
+4. **查询形状**：issue 侧查询必须带 `includeClosedPrs: true`，且**不请求 `body`**——关闭引用是登记事实，不是正文的函数（当时引用 `merge-queue.md` §7 的实测：登记后改正文不会撤回。**Superseded by `merge-queue.md` §7 的订正（2026-09-24，issue #180）**：那句断言已被同一批次的第二次实测推翻，§7 现为「两个方向都不成立」；本条的查询形状结论不变——恰恰因为它只依赖「登记事实」而非正文，但「不会撤回」这半句不能再当作理由引用）。
 
 ### 不变量（本计划必须保持）
 
