@@ -40,12 +40,13 @@ test('工作树冲突：按幂等已存在资源复用且不覆盖工作树（Ex
   const providers = createFakeProviders()
   const bindingId = providers.development.gate.bindingId
   const path = '.worktrees/c3-occupied'
-  // 预置同路径工作树：createWorktree 必须 conflict 而不是静默覆盖（脏工作树不自动清理的机械证据）。
-  providers.development.state.worktrees.push({
-    repository: refOf(bindingId, 'repository', REPOSITORY), ref: refOf(bindingId, 'worktree', path), path, branch: 'main',
-  })
   const core = await compose(providers)
   const workItemId = await workItemIdOf(core)
+  // 预置同路径工作树：createWorktree 必须 conflict 而不是静默覆盖（脏工作树不自动清理的机械证据）。
+  providers.development.state.worktrees.push({
+    repository: refOf(bindingId, 'repository', REPOSITORY), ref: refOf(bindingId, 'worktree', path), path,
+    branch: `work/${workItemId}`,
+  })
   const runsBefore = providers.execution.state.runs.length
   const result = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'git-fail-1', worktreePath: path })
   assert.equal(result.status, ExecutionContextStatus.Ready)

@@ -239,8 +239,8 @@ test('能力子集：只声明三个键，且不实现工作树移除', async (t
   const provider = providerFor(fixture)
   assert.deepEqual(
     Object.keys((await provider.describeCapabilities()).capability).sort(),
-    ['development.branch.create', 'development.repository.read', 'development.worktree.create'],
-    '本地 Git 只声明这三个能力键',
+    ['development.branch.create', 'development.repository.read', 'development.worktree.create', 'development.worktree.read'],
+    '本地 Git 声明仓库、分支、工作树创建和工作树读取能力',
   )
   // 移除是破坏性能力，本层不实现也不声明（issue #137 的 Out of scope，由 #138 交付）：能创建不等于能移除。
   assert.equal(provider.removeWorktree, undefined, '本层不得实现工作树移除')
