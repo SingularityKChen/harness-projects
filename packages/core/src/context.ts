@@ -11,7 +11,8 @@ import {
 } from '@harness-projects/domain'
 import { bootstrapWorkspace, type BootstrapResult } from './bootstrap.ts'
 import { rerunPipeline, type DeliveryWriteAttempt } from './delivery.ts'
-import { startWorkUnavailable, type StartWorkRequest, type StartWorkResult } from './execution-context.ts'
+import { startWorkUnavailable, type ExecutionContextQuery, type StartWorkRequest, type StartWorkResult } from './execution-context.ts'
+import { cancelExecutionRun, type CancelExecutionRunResult } from './execution-run.ts'
 import { createQueries, type CoreQueries } from './queries.ts'
 import { registerBindings, type CoreProviderTable } from './registry.ts'
 import { confirmRelation, type RecordedEdge, type RelationRef } from './relations.ts'
@@ -62,6 +63,8 @@ export interface CoreContext {
 export interface CoreCommands {
   bootstrapWorkspace(): Promise<BootstrapResult>
   startWork(request: StartWorkRequest): Promise<StartWorkResult>
+  /** 按运行身份取消：已取消原样返回，否则路由回签发者、ack 后原子替换状态与引用。 */
+  cancelExecutionRun(query: ExecutionContextQuery): Promise<CancelExecutionRunResult>
   /** 显式确认一条候选边：唯一把 candidate 变成 confirmed 的入口；边不存在时不造关系。 */
   confirmRelation(ref: RelationRef): Promise<RecordedEdge | undefined>
   /** 对只读交付方的写尝试：只回结构化 not supported，不改任何状态。 */
@@ -117,6 +120,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
     commands: namespace({
       bootstrapWorkspace: () => bootstrapWorkspace(context),
       startWork: (request: StartWorkRequest) => startWork(context, request),
+      cancelExecutionRun: (query: ExecutionContextQuery) => cancelExecutionRun(context, query),
       confirmRelation: (ref: RelationRef) => confirmRelation(context, ref),
       rerunPipeline: (ref: ExternalObjectRef) => rerunPipeline(context, ref),
       applyPlanningStatus: (command: PlanningStatusCommand) => writePlanningStatus(context, command),
@@ -143,6 +147,7 @@ function unavailableCore(reason: string): CoreApi {
       ok: false, entities: 0, workItems: 0, changeRequests: 0, revision: 0, degraded: true, error,
     }),
     startWork: async () => startWorkUnavailable(error),
+    cancelExecutionRun: async () => ({ status: undefined, runExternalId: undefined, error }),
     confirmRelation: async () => undefined,
     rerunPipeline: async () => ({ supported: false, writeState: WriteState.Failed, saving: false, confirmed: false, error }),
     applyPlanningStatus: async (command: PlanningStatusCommand) => ({

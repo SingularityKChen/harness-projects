@@ -5,8 +5,8 @@
  * `ProjectError`），不是抛错。有效能力在这里由 `capability ∩ permission ∩ policy` 算出。
  */
 import {
-  AccessLevel, bindingForCapability, effectiveCapabilities, projectError,
-  type CapabilityDomain, type CapabilityKey, type DeliveryProvider, type DevelopmentProvider,
+  AccessLevel, CapabilityKey, bindingForCapability, effectiveCapabilities, projectError,
+  type CapabilityDomain, type DeliveryProvider, type DevelopmentProvider,
   type EffectiveCapability, type ExecutionProvider, type PlanningProvider, type ProviderRegistry,
   type ResolvedBinding, type Storage,
 } from '@harness-projects/capabilities'
@@ -20,6 +20,7 @@ export interface CoreProviderTable {
   readonly development?: DevelopmentProvider
   readonly delivery?: DeliveryProvider
   readonly execution?: ExecutionProvider
+  readonly executionFallback?: ExecutionProvider
   readonly storage?: Storage
 }
 
@@ -46,20 +47,24 @@ function resolvedBinding(
   }
 }
 
-/** 登记注入的 provider；同域多个绑定只有一个默认。 */
+/**
+ * 登记注入的 provider。执行域两个角色按能力键分开：主执行不带 `execution.run.fallback`，fallback 绑定不带
+ * `execution.run.start`——否则主执行 start 不可用时 fallback 会被当成主执行选中，降级结论随之消失。
+ */
 export async function registerBindings(input: RegisterBindingsInput): Promise<readonly ResolvedBinding[]> {
   const bindings: ResolvedBinding[] = []
-  for (const domain of PROVIDER_DOMAINS) {
-    const provider = input.providers[domain]
-    if (provider === undefined) continue
-    const snapshot = await provider.describeCapabilities()
-    const capabilities = effectiveCapabilities(snapshot, input.policy)
-    await input.storage.putProviderBinding({
-      id: snapshot.bindingId, workspaceId: input.workspaceId, domain,
-      implementationKey: domain, enabled: true, isDefault: true,
-    })
-    bindings.push(resolvedBinding(input.providers, domain, snapshot.bindingId, input.workspaceId, capabilities))
+  const register = async (providers: CoreProviderTable, domain: typeof PROVIDER_DOMAINS[number], isDefault: boolean, withheld?: CapabilityKey) => {
+    const snapshot = await providers[domain]!.describeCapabilities()
+    if (bindings.some((item) => item.ref.bindingId === snapshot.bindingId)) throw new TypeError(`binding id ${snapshot.bindingId} 重复：两个绑定共用一个身份会让落库引用路由错`)
+    const capabilities = effectiveCapabilities(snapshot, input.policy).filter((item) => item.key !== withheld)
+    await input.storage.putProviderBinding({ id: snapshot.bindingId, workspaceId: input.workspaceId, domain, implementationKey: domain, enabled: true, isDefault })
+    bindings.push(resolvedBinding(providers, domain, snapshot.bindingId, input.workspaceId, capabilities))
   }
+  for (const domain of PROVIDER_DOMAINS) {
+    if (input.providers[domain] !== undefined) await register(input.providers, domain, true, domain === 'execution' ? CapabilityKey.ExecutionRunFallback : undefined)
+  }
+  const fallback = input.providers.executionFallback
+  if (fallback !== undefined) await register({ ...input.providers, execution: fallback }, 'execution', false, CapabilityKey.ExecutionRunStart)
   return bindings
 }
 

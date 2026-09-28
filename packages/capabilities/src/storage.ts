@@ -20,7 +20,7 @@ import type {
   WriteState,
 } from '@harness-projects/domain'
 import type { CapabilityDomain } from './capability-keys.ts'
-import type { ProviderObservation } from './observation.ts'
+import type { ExternalObjectRef, ProviderObservation } from './observation.ts'
 
 export interface WorkspaceRecord {
   readonly id: WorkspaceId; readonly name: string; readonly statusPolicy: StatusPolicy
@@ -52,6 +52,10 @@ export interface ExecutionContextRecord {
 export interface ExecutionRunRecord {
   readonly id: ExecutionRunId; readonly workspaceId: WorkspaceId; readonly contextId: ExecutionContextId
   readonly status: ExecutionRunStatus; readonly updatedAt: string
+  /** 执行 provider 签发的运行引用：重启后路由 getRun / cancelRun 的唯一依据；core 是唯一写者，取消时与状态一起原子替换。 */
+  readonly providerRef?: ExternalObjectRef
+  /** 这次运行由降级产生（主执行起不来之后才有它）。只在为真时写；读回路径据此报 `manual_fallback`。 */
+  readonly fallback?: boolean
 }
 
 export interface MutationAttemptRecord {

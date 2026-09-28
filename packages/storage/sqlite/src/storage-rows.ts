@@ -1,5 +1,5 @@
 /** SQLite 行 → 端口记录的映射：列名是 snake_case，端口字段是 camelCase，本模块是两者之间唯一的翻译层（换列名只改这里，改一处）。 */
-import type { CapabilityDomain, ExecutionContextRecord, ExecutionRunRecord, FieldValueRecord, MembershipRecord, MutationAttemptRecord, ProviderBindingRecord, ReconcileCursorRecord, RepositoryRecord, SyncCursorRecord, SyncState, WorkspaceRecord } from '@harness-projects/capabilities'
+import type { CapabilityDomain, ExecutionContextRecord, ExecutionRunRecord, ExternalObjectRef, FieldValueRecord, MembershipRecord, MutationAttemptRecord, ProviderBindingRecord, ReconcileCursorRecord, RepositoryRecord, SyncCursorRecord, SyncState, WorkspaceRecord } from '@harness-projects/capabilities'
 import type { EntityId, ExecutionContextId, ExecutionContextStatus, ExecutionRunId, ExecutionRunStatus, ExternalIdentity, ExternalIdentityId, IdentityRole, MembershipContentKind,
   NormalizedStatus, PlanningContent, ProjectErrorCode, ProviderBindingId, RedactionReason, Relation, RelationClass, RelationSource, RelationState, RelationType, StatusPolicy,
   WorkspaceId, WorkspaceProjection, WriteState } from '@harness-projects/domain'
@@ -56,9 +56,20 @@ export const rowToExecutionContext = (row: Row): ExecutionContextRecord => ({ id
   branchExternalId: optionalText(row, 'branch_external_id'), worktreeExternalId: optionalText(row, 'worktree_external_id'),
   provisioningStartedAt: optionalText(row, 'provisioning_started_at') })
 
-export const rowToExecutionRun = (row: Row): ExecutionRunRecord => ({ id: text(row, 'id') as ExecutionRunId,
-  workspaceId: text(row, 'workspace_id') as WorkspaceId, contextId: text(row, 'context_id') as ExecutionContextId,
-  status: text(row, 'status') as ExecutionRunStatus, updatedAt: text(row, 'updated_at') })
+/** JSON 往返会把 `url: undefined` 变成"没有这个键"：按端口的四元组显式重建，两个实现才读回同一形状。 */
+function providerRefOf(json: string): ExternalObjectRef {
+  const { bindingId, objectKind, externalId, url } = JSON.parse(json) as ExternalObjectRef
+  return { bindingId, objectKind, externalId, url: url ?? undefined }
+}
+
+export const rowToExecutionRun = (row: Row): ExecutionRunRecord => {
+  const providerRefJson = optionalText(row, 'provider_ref_json')
+  return { id: text(row, 'id') as ExecutionRunId,
+    workspaceId: text(row, 'workspace_id') as WorkspaceId, contextId: text(row, 'context_id') as ExecutionContextId,
+    status: text(row, 'status') as ExecutionRunStatus, updatedAt: text(row, 'updated_at'),
+    ...(providerRefJson === undefined ? {} : { providerRef: providerRefOf(providerRefJson) }),
+    ...(row.fallback === 1 ? { fallback: true } : {}) }
+}
 
 export const rowToRelation = (row: Row): Relation => ({ from: text(row, 'from_entity_id') as EntityId,
   to: text(row, 'to_entity_id') as EntityId, type: text(row, 'relation_type') as RelationType,

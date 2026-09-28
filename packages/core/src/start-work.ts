@@ -2,7 +2,7 @@
  *
  * `git-provisioning.ts`。
  */
-import { CapabilityKey, ProjectErrorCode, projectError } from '@harness-projects/capabilities'
+import { CapabilityKey, ProjectErrorCode, projectError, type ExternalObjectRef } from '@harness-projects/capabilities'
 import {
   EntityKind, ExecutionContextStatus, ExecutionRunStatus, RelationType, asBrandedId,
   type EntityId, type ExecutionContextId, type ProjectError,
@@ -12,7 +12,7 @@ import { resolveCapability } from './registry.ts'
 import { chainNode, worktreeEntityId } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
 import {
-  StartWorkFallback, contextIdFor, contextRecord, reportForExisting, runIdFor, runStatusFor,
+  StartWorkFallback, contextIdFor, contextRecord, fallbackOf, reportForExisting, runIdFor, runStatusFor,
   startWorkUnavailable, toResult,
   type StartWorkRequest, type StartWorkResult,
 } from './execution-context.ts'
@@ -186,21 +186,38 @@ async function startExecution(
     command: `harness run ${git.branchExternalId ?? namesFor(request).branch}`, environment: {},
   })
   if (!run.ok) return manualFallback(context, contextId, git, toProjectError(run.error))
-  await recordRun(context, contextId, runStatusFor(run.value.status))
+  await recordRun(context, contextId, runStatusFor(run.value.status), run.value.ref)
   return toResult(git.report, outcomeOf(git, undefined, run.value.ref.externalId), undefined)
 }
 
-/** 执行启动失败：上下文、工作树与分支都保留，只把这次运行记成 failed 并降级人工执行。 */
+/**
+ * 执行启动失败：上下文、工作树与分支都保留并降级。fallback 绑定过了写门且 ack 了 `running` 才落那条运行，否则记 failed；
+ * 主执行结果不确定（`ambiguous_result`）时它可能已在跑，不起第二个执行者（ADR-0007）；接管时已有运行同理，不覆盖它。
+ */
 async function manualFallback(
   context: CoreContext, contextId: ExecutionContextId, git: GitOutcome, error: ProjectError,
 ): Promise<StartWorkResult> {
-  await recordRun(context, contextId, ExecutionRunStatus.Failed)
+  const existing = await context.storage.getExecutionRun(runIdFor(contextId))
+  if (existing !== undefined) return toResult(git.report, outcomeOf(git, fallbackOf(existing), existing.providerRef?.externalId), undefined)
+  const fallback = error.code === ProjectErrorCode.AmbiguousResult ? undefined : resolveWriteTarget(context.registry, CapabilityKey.ExecutionRunFallback).binding
+  if (fallback?.execution !== undefined) {
+    const run = await fallback.execution.startRun({
+      context: { bindingId: fallback.ref.bindingId, objectKind: 'execution_context', externalId: contextId, url: undefined },
+      command: `manual fallback ${git.branchExternalId ?? ''}`.trim(), environment: {},
+    })
+    if (run.ok && run.value.status === 'running') {
+      await recordRun(context, contextId, runStatusFor(run.value.status), run.value.ref, true)
+      return toResult(git.report, outcomeOf(git, StartWorkFallback.Manual, run.value.ref.externalId), undefined)
+    }
+  }
+  await recordRun(context, contextId, ExecutionRunStatus.Failed, undefined, true)
   return toResult(git.report, outcomeOf(git, StartWorkFallback.Manual), error)
 }
 
-async function recordRun(context: CoreContext, contextId: ExecutionContextId, status: ExecutionRunStatus): Promise<void> {
+async function recordRun(context: CoreContext, contextId: ExecutionContextId, status: ExecutionRunStatus, providerRef?: ExternalObjectRef, fallback = false): Promise<void> {
   await context.storage.putExecutionRun({
     id: runIdFor(contextId), workspaceId: context.workspaceId, contextId, status, updatedAt: context.clock(),
+    ...(providerRef === undefined ? {} : { providerRef }), ...(fallback ? { fallback } : {}),
   })
 }
 
@@ -235,19 +252,19 @@ async function existingResult(
       return toResult(report, {
         contextId, status: ExecutionContextStatus.Failed, branchExternalId: record.branchExternalId,
         worktreeExternalId: record.worktreeExternalId, branchHeadCommit: undefined,
-        fallback: run?.status === ExecutionRunStatus.Failed ? StartWorkFallback.Manual : undefined,
+        fallback: fallbackOf(run),
         runExternalId: undefined,
       }, verified.error)
     }
   }
   const report = supplied ?? reportForExisting(record.status)
-  const fallback = run?.status === ExecutionRunStatus.Failed ? StartWorkFallback.Manual : undefined
+  const fallback = fallbackOf(run)
   return toResult(report, {
     contextId, status: record.status, branchExternalId: record.branchExternalId,
     worktreeExternalId: record.worktreeExternalId,
     // 上下文记录里没有分支头提交这一列（Storage 契约不归本批次改），所以读回路径报不出来。
     branchHeadCommit: undefined,
-    fallback, runExternalId: undefined,
+    fallback, runExternalId: run?.providerRef?.externalId,
   }, report.error)
 }
 
