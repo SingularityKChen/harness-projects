@@ -19,7 +19,7 @@ const runRef = (context, externalId) => ({ ...context, objectKind: 'execution_ru
 export function executionContractSuite(adapter) {
   const { label, makeProvider, expect: expected } = adapter
   const context = expected.context
-  const start = (provider) => provider.startRun({ context, command: 'task verify', environment: { CI: 'true' } })
+  const start = (provider) => provider.startRun({ context, command: 'task verify --probe cmd-7f3a', environment: { CI: 'true', PROBE: 'env-7f3a' } })
 
   test(`${label}：启动后可读回同一运行`, async () => {
     const provider = makeProvider({})
@@ -30,6 +30,9 @@ export function executionContractSuite(adapter) {
     assert.equal(read.ok, true)
     assert.equal(read.value.ref.externalId, started.value.ref.externalId)
     assert.equal(read.value.status, started.value.status, '启动返回的状态必须与随后读回的一致')
+    assert.doesNotMatch(JSON.stringify([started.value, read.value]), /7f3a/, 'port 义务 3：command / environment 不得进入返回的引用或标记')
+    const echoed = await provider.getRun({ ...started.value.ref, url: 'https://evil.example/log', bogus: 1 })
+    assert.deepEqual([echoed.value.ref.url === 'https://evil.example/log', 'bogus' in echoed.value.ref], [false, false], 'port 义务 2：不回显调用方字段')
   })
 
   test(`${label}：种子的历史运行按外部 id 读回`, async () => {
@@ -59,14 +62,27 @@ export function executionContractSuite(adapter) {
     assert.equal(result.ok, false)
     assert.equal(result.error.code, 'not_supported')
     assert.equal(result.error.retryable, false)
+    // **能力判定先于身份判定**（port 义务 1）：能力关闭时，外来 binding / 错误 objectKind / 形态不对的引用
+    // 同样必须答 `not_supported`。只用本 binding 的合法引用测不出顺序——两种顺序在那种输入下完全等价。
+    for (const ref of [
+      { ...runRef(context, expected.runningRunExternalId), bindingId: 'binding-foreign' },
+      { ...runRef(context, expected.runningRunExternalId), objectKind: 'work_item' },
+      { ...runRef(context, expected.runningRunExternalId), externalId: 'not-a-run-ref' },
+    ]) {
+      const refused = await provider.cancelRun(ref)
+      assert.equal(refused.ok, false, `能力关闭时外来/畸形引用也必须结构化失败：${JSON.stringify(ref)}`)
+      assert.equal(refused.error.code, 'not_supported', `能力先于身份：${JSON.stringify(ref)}`)
+      assert.equal(refused.error.retryable, false)
+    }
   })
 
   test(`${label}：声明的取消能力真的能结束运行，且读到的是权威新状态`, async () => {
     const provider = makeProvider({})
     if (typeof provider.cancelRun !== 'function') return
-    const canceled = await provider.cancelRun(runRef(context, expected.runningRunExternalId))
+    const canceled = await provider.cancelRun({ ...runRef(context, expected.runningRunExternalId), url: 'https://evil.example/c', bogus: 1 })
     assert.equal(canceled.ok, true)
     assert.equal(canceled.value.status, 'canceled')
+    assert.deepEqual([canceled.value.ref.url === 'https://evil.example/c', 'bogus' in canceled.value.ref], [false, false], 'port 义务 2：取消返回的引用同样由 provider 构造')
     const read = await provider.getRun(canceled.value.ref)
     assert.equal(read.ok, true)
     assert.equal(read.value.status, 'canceled', '取消必须落到权威状态，不能只改返回值')

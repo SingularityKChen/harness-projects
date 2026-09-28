@@ -46,6 +46,7 @@ export const CapabilityKey = {
   ExecutionRunStart: 'execution.run.start',
   ExecutionRunCancel: 'execution.run.cancel',
   ExecutionRunRead: 'execution.run.read',
+  ExecutionRunFallback: 'execution.run.fallback',
   StorageWorkspaceRead: 'storage.workspace.read',
   StorageWorkspaceWrite: 'storage.workspace.write',
   StorageMigrationApply: 'storage.migration.apply',
