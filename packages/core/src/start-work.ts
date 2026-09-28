@@ -8,6 +8,7 @@ import {
   type EntityId, type ExecutionContextId, type ProjectError,
 } from '@harness-projects/domain'
 import { resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
+import { resolveCapability } from './registry.ts'
 import { chainNode, worktreeEntityId } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
 import {
@@ -226,6 +227,19 @@ async function existingResult(
     return toResult(report, undefined, report.error)
   }
   const run = await context.storage.getExecutionRun(runIdFor(contextId))
+  if (record.status === ExecutionContextStatus.Ready) {
+    const verified = await verifyExistingWorktree(context, record)
+    if (!verified.ok) {
+      await context.storage.putExecutionContext({ ...record, status: ExecutionContextStatus.Failed, provisioningStartedAt: undefined })
+      const report = markFailed(beginWrite(record.worktreeExternalId ?? record.branchExternalId ?? ''), verified.error)
+      return toResult(report, {
+        contextId, status: ExecutionContextStatus.Failed, branchExternalId: record.branchExternalId,
+        worktreeExternalId: record.worktreeExternalId, branchHeadCommit: undefined,
+        fallback: run?.status === ExecutionRunStatus.Failed ? StartWorkFallback.Manual : undefined,
+        runExternalId: undefined,
+      }, verified.error)
+    }
+  }
   const report = supplied ?? reportForExisting(record.status)
   const fallback = run?.status === ExecutionRunStatus.Failed ? StartWorkFallback.Manual : undefined
   return toResult(report, {
@@ -235,4 +249,24 @@ async function existingResult(
     branchHeadCommit: undefined,
     fallback, runExternalId: undefined,
   }, report.error)
+}
+
+async function verifyExistingWorktree(
+  context: CoreContext,
+  record: Awaited<ReturnType<CoreContext['storage']['getExecutionContext']>> & object,
+): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: ProjectError }> {
+  if (record.worktreeExternalId === undefined || record.branchExternalId === undefined) {
+    return { ok: false, error: projectError(ProjectErrorCode.ResultUnknown, 'ready 上下文缺少工作树或分支身份，不能确认 Saved') }
+  }
+  const target = resolveCapability(context.registry, CapabilityKey.DevelopmentWorktreeRead)
+  if (!target.available) return { ok: false, error: target.error }
+  const provider = target.binding.development
+  if (provider?.getWorktree === undefined) return { ok: false, error: projectError(ProjectErrorCode.NotSupported, '当前 Development provider 没有工作树读能力，不能确认 Saved') }
+  const ref = { bindingId: target.binding.ref.bindingId, objectKind: 'worktree', externalId: record.worktreeExternalId, url: undefined }
+  const observed = await provider.getWorktree({ worktree: ref })
+  if (!observed.ok) return { ok: false, error: toProjectError(observed.error) }
+  if (observed.value.branch !== record.branchExternalId) {
+    return { ok: false, error: projectError(ProjectErrorCode.Conflict, `已记录工作树检出的分支 ${observed.value.branch} 与 ${record.branchExternalId} 不一致`) }
+  }
+  return { ok: true }
 }

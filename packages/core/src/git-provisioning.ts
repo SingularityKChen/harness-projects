@@ -2,7 +2,7 @@
  *
  */
 import {
-  CapabilityKey, ProjectErrorCode, projectError, type ExternalObjectRef, type ResolvedBinding,
+  CapabilityKey, ProjectErrorCode, projectError, type ExternalObjectRef, type ProjectError, type ResolvedBinding,
 } from '@harness-projects/capabilities'
 import { ExecutionContextStatus, ProviderErrorCode, type ExecutionContextId, type ProviderBindingId } from '@harness-projects/domain'
 import { resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
@@ -171,7 +171,9 @@ async function ensureBranch(provider: Development, repository: ExternalObjectRef
   if (provider.createBranch === undefined) {
     return { report: markFailed(beginWrite(name), unsupportedCapability(CapabilityKey.DevelopmentBranchCreate)), ok: false, value: undefined }
   }
-  const result = await provider.createBranch({ repository, name, fromRef: await baseRef(provider, repository) })
+  const base = await baseRef(provider, repository)
+  if (!base.ok) return { report: markFailed(beginWrite(name), base.error), ok: false, value: undefined }
+  const result = await provider.createBranch({ repository, name, fromRef: base.value })
   if (result.ok) {
     return { report: confirmWrite(markWriting(beginWrite(name)), name), ok: true, value: name, headCommit: result.value.headCommit }
   }
@@ -200,7 +202,15 @@ async function ensureWorktree(
   const result = await provider.createWorktree({ repository, path, branch })
   if (!result.ok) {
     if (result.error.code === ProviderErrorCode.Conflict) {
-      return { report: confirmWrite(markWriting(beginWrite(path)), path), ok: true, value: path }
+      if (provider.getWorktree === undefined) {
+        return { report: markFailed(beginWrite(path), projectError(ProjectErrorCode.NotSupported, '工作树冲突无法在当前 provider 上确认')), ok: false, value: undefined }
+      }
+      const ref = { bindingId: repository.bindingId, objectKind: 'worktree', externalId: path, url: undefined }
+      const observed = await provider.getWorktree({ worktree: ref })
+      if (observed.ok && observed.value.branch === branch) {
+        return { report: confirmWrite(markWriting(beginWrite(path)), observed.value.path), ok: true, value: observed.value.path }
+      }
+      return { report: markFailed(beginWrite(path), observed.ok ? projectError(ProjectErrorCode.Conflict, '工作树冲突但分支不匹配') : toProjectError(observed.error)), ok: false, value: undefined }
     }
     return { report: markFailed(beginWrite(path), toProjectError(result.error)), ok: false, value: undefined }
   }
@@ -208,9 +218,16 @@ async function ensureWorktree(
 }
 
 /** 基线分支读不到不是致命错误：用约定名继续，创建失败会得到结构化结果。 */
-async function baseRef(provider: Development, repository: ExternalObjectRef): Promise<string> {
+async function baseRef(provider: Development, repository: ExternalObjectRef): Promise<{ readonly ok: true; readonly value: string } | { readonly ok: false; readonly error: ProjectError }> {
   const found = await provider.getRepository(repository)
-  return found.ok ? found.value.defaultBranch ?? 'main' : 'main'
+  if (!found.ok) return { ok: false, error: toProjectError(found.error) }
+  if (found.value.defaultBranch !== undefined && found.value.defaultBranch !== '') {
+    return { ok: true, value: found.value.defaultBranch }
+  }
+  return {
+    ok: false,
+    error: projectError(ProjectErrorCode.NotFound, '无法确定仓库基线；请在 provider binding 注入 defaultBranch，或提供 origin/HEAD、唯一本地分支或约定分支'),
+  }
 }
 
 interface BranchProbe { readonly probe: ReconcileProbe; readonly headCommit: string | undefined }

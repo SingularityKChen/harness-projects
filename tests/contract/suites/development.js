@@ -109,6 +109,12 @@ export function developmentContractSuite(adapter) {
     assert.equal(accessOf(await provider.describeCapabilities(), CapabilityKey.DevelopmentWorktreeCreate), 'available', '工作树能创建时快照必须声明 worktree.create 可用')
     assert.equal(created.value.branch, 'feature/wt')
     assert.equal(created.value.path, expected.worktreePath)
+    const worktreeRead = accessOf(await provider.describeCapabilities(), CapabilityKey.DevelopmentWorktreeRead)
+    if (worktreeRead === 'available') {
+      const read = await provider.getWorktree({ worktree: created.value.ref })
+      assert.equal(read.ok, true, '声明工作树读能力时必须读回创建后的工作树')
+      assert.deepEqual(read.value, created.value)
+    }
     // 移除是**破坏性**能力：能不能移除必须由快照声明，不能由"方法在不在"决定（AGENTS.md §7 破坏性删除
     // 默认不做）。未声明时不是跳过用例，而是断言方法缺失或结构化 not_supported，且不得留下副作用。
     if (accessOf(await provider.describeCapabilities(), CapabilityKey.DevelopmentWorktreeRemove) !== 'available') {
