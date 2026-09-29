@@ -67,6 +67,8 @@ export interface StartWorkView {
   readonly status: string | undefined
   readonly branchExternalId: string | undefined
   readonly worktreeExternalId: string | undefined
+  /** 实际落地的分支头提交（新建时是起点，接管既有分支时是读到的头），只做报告；同键重放拿不到（记录没有这一列）。 */
+  readonly branchHeadCommit: string | undefined
   readonly fallback: string | undefined
   readonly degraded: boolean
 }
@@ -99,6 +101,7 @@ function toStartWorkView(result: StartWorkResult): StartWorkView {
     status: result.status,
     branchExternalId: result.branchExternalId,
     worktreeExternalId: result.worktreeExternalId,
+    branchHeadCommit: result.branchHeadCommit,
     fallback: result.fallback,
     degraded: result.degraded,
   }

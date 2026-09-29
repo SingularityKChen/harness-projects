@@ -6,10 +6,11 @@
  *
  * 为什么需要覆写离线替身的 `createBranch`：仓库的离线 Development 替身**完全不看
  * `fromRef`**（它只把 `fromRef` 当分支名查 head，同名一律报 `Conflict`），所以它表达不了
- * 「同名分支指向别处」这个真实拒绝。真实本地 Git provider 交付在 PR #160，尚未合并进本
- * 分支的 base。这里用最小的覆写复刻它的拒绝语义（同名同起点 → `ok`；同名不同起点 →
- * `invalid_input`），把「基线前进」变成可观测的输入。真实的 provider 端到端集成由 #141
- * 覆盖（它被 #137 / #120 阻塞）。
+ * 「同名分支指向别处」这个真实拒绝。这里用最小的覆写复刻真实本地 Git provider 的拒绝语义
+ * （同名同起点 → `ok`；同名不同起点 → `invalid_input`），把「基线前进」变成可观测的输入。
+ * 真实临时仓库上的证据在 `local-git-start-work-resume.test.js`（恢复）与
+ * `local-git-branch-probe.test.js`（分支多于一页）；本文件只在离线替身上作证。SQLite 与重启
+ * 仍归 #141（它被 #137 / #120 阻塞）。
  *
  * 「进程死在两步之间」用**抛出**模拟：`provision` 的最终 `saveContext` 因此不会执行，
  * 存储里留下的只有分步回填写的那一次——这正是本层要断言的东西。
@@ -17,10 +18,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { providerErr, providerError } from '@harness-projects/capabilities'
+import { providerErr, providerError, providerOk } from '@harness-projects/capabilities'
 import { composeCore } from '@harness-projects/core'
 import { ExecutionContextStatus, ProviderErrorCode, WriteState, newWorkspaceId } from '@harness-projects/domain'
-import { createFakeProviders, exportFakeStorageState } from '@harness-projects/provider-fake'
+import { FaultKind, createFakeProviders, exportFakeStorageState, refOf } from '@harness-projects/provider-fake'
 
 const WORKSPACE = { id: newWorkspaceId(), name: 'recovery' }
 const REQUEST = { repositoryId: 'repo-alpha', actor: { kind: 'agent' } }
@@ -277,4 +278,82 @@ test('重放省略 branchName 时仍然用已决定的身份，不回落到默�
     commands, ['harness run work/alpha'],
     '第三步（启动执行）必须用序列已决定的分支身份；回落到本次请求的默认名会指向一个不存在的分支',
   )
+})
+
+/** 在替身里补 `count` 个排在 `work/` 之前的诱饵分支（`a-000…`），把 `work/<id>` 挤出 `limit: 100` 的第一页。
+ *  100 是 `git-provisioning.ts` 的 `PROBE_PAGE_SIZE`；调大它必须同步调大诱饵数，否则用例退化成单页仍是绿的。 */
+function addDecoyBranches(providers, count) {
+  const seed = providers.development.state.branches[0]
+  const bindingId = seed.ref.bindingId
+  for (let index = 0; index < count; index += 1) {
+    const name = `a-${String(index).padStart(3, '0')}`
+    providers.development.state.branches.push({
+      repository: seed.repository, ref: refOf(bindingId, 'branch', name), name, headCommit: seed.headCommit,
+    })
+  }
+  return seed.repository
+}
+
+test('conflict 复用：目标分支排在第一页之外时仍被认出，而不是 failed / conflict（P3）', async () => {
+  const providers = createFakeProviders()
+  const core = await compose(providers, controllableClock().clock)
+  const workItemId = await workItemIdOf(core)
+  const repository = addDecoyBranches(providers, 110)
+  const name = `work/${workItemId}`
+  providers.development.state.branches.push({
+    repository, ref: refOf(providers.development.gate.bindingId, 'branch', name), name, headCommit: 'sha-1',
+  })
+  const firstPage = await providers.development.listBranches({ repository, cursor: undefined, limit: 100 })
+  assert.equal(firstPage.value.items.some((branch) => branch.name === name), false, '前置条件：目标分支不在第一页')
+  assert.notEqual(firstPage.value.nextCursor, undefined, '前置条件：还有下一页')
+
+  const result = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'k-conflict-paged' })
+
+  assert.equal(result.status, ExecutionContextStatus.Ready, '同名分支在第二页：conflict 后必须读完全部页才说不存在')
+  assert.equal(result.branchHeadCommit, 'sha-1', '复用的头提交必须报出来')
+})
+
+test('conflict 后列表读取失败只报 unknown，恢复读取后可用新键接管既有分支', async () => {
+  const providers = createFakeProviders()
+  const core = await compose(providers, controllableClock().clock)
+  const workItemId = await workItemIdOf(core)
+  const repository = providers.development.state.repositories[0].ref
+  const name = `work/${workItemId}`
+  const created = await providers.development.createBranch({ repository, name, fromRef: 'main' })
+  assert.equal(created.ok, true, '前置条件：目标分支确实存在，createBranch 将报 conflict')
+  const originalList = providers.development.listBranches.bind(providers.development)
+  providers.development.listBranches = async () => providerErr(providerError(ProviderErrorCode.Unavailable, '临时列表故障'))
+
+  const uncertain = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'k-conflict-list-unavailable' })
+
+  assert.equal(uncertain.writeState, WriteState.Unknown, '列表未读完，不能确定分支是否可接管')
+  assert.equal(uncertain.confirmed, false, '没有读回证据，不得显示 Saved')
+  assert.equal(uncertain.error?.code, 'unavailable', '保留探测失败原因，不伪装成确定的 conflict')
+  assert.equal(providers.development.state.worktrees.length, 0, '未知状态下不得创建工作树')
+
+  providers.development.listBranches = originalList
+  const resumed = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'k-conflict-list-recovered' })
+  assert.equal(resumed.status, ExecutionContextStatus.Ready, '列表恢复后可用新键确认并接管原分支')
+  assert.equal(resumed.branchExternalId, name)
+  assert.equal(providers.development.state.branches.filter((branch) => branch.name === name).length, 1)
+})
+
+test('游标永不结束：探测读到页数上限后报 unknown，不判成不存在也不挂住（P4）', { timeout: 5000 }, async () => {
+  const providers = createFakeProviders()
+  providers.development.faultsSwitch.set(FaultKind.AmbiguousCreate, true)
+  const core = await compose(providers, controllableClock().clock)
+  const workItemId = await workItemIdOf(core)
+  let calls = 0
+  // 每次调用让出一个宏任务：只跑微任务的死循环会饿死计时器，超时断言就永远不触发。
+  providers.development.listBranches = async () => {
+    calls += 1
+    await new Promise((resolve) => setImmediate(resolve))
+    return providerOk({ items: [], nextCursor: 'again' })
+  }
+
+  const result = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'k-endless' })
+
+  assert.equal(result.writeState, WriteState.Unknown, '读不完只能说不知道，不能 markFailed')
+  assert.equal(result.error.code, 'result_unknown')
+  assert.ok(calls > 1, `探测必须跟着游标继续读（实际调用 ${calls} 次）`)
 })

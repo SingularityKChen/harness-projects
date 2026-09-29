@@ -40,6 +40,7 @@ function assertNotSupported(result, what) {
 
 /** 可选方法各自对应的 capability key：**判定一律按方法自己的键**，不用家族级的替代键。 */
 const METHOD_KEY = {
+  createBranch: CapabilityKey.DevelopmentBranchCreate,
   createChangeRequest: CapabilityKey.DevelopmentChangeRequestCreate,
   getChangeRequest: CapabilityKey.DevelopmentChangeRequestRead,
   listChangeRequests: CapabilityKey.DevelopmentChangeRequestRead,
@@ -97,6 +98,37 @@ export function developmentContractSuite(adapter) {
     assert.equal(found.value.defaultBranch, expected.baseBranch)
     const listed = await provider.listBranches({ repository, cursor: undefined, limit: 100 })
     assert.ok(listed.value.items.some((branch) => branch.ref.externalId === created.value.ref.externalId))
+  })
+
+  test(`${label}：分支列表逐页读完恰好枚举每个分支一次，最后一页 nextCursor 为 undefined（分页契约）`, async () => {
+    const provider = makeProvider({})
+    // 能建分支时先建三条，让遍历在 pageSize 下至少跨三页；不能建的（只读 provider）就遍历既有分支。
+    if (await declares(provider, 'createBranch')) {
+      for (const name of ['feature/page-a', 'feature/page-b', 'feature/page-c']) {
+        const created = await implemented(provider, 'createBranch')({ repository, name, fromRef: expected.baseBranch })
+        assert.equal(created.ok, true, `${name} 必须建得出来，否则分页遍历没有足够的分支`)
+      }
+    }
+    const whole = await provider.listBranches({ repository, cursor: undefined, limit: 1000 })
+    assert.equal(whole.ok, true)
+    assert.equal(whole.value.nextCursor, undefined, '一次大页装得下全部分支时 nextCursor 必须为 undefined')
+    const wholeNames = whole.value.items.map((branch) => branch.name)
+    // 循环自带上界：坏 provider 的游标不结束时，测试以断言失败告终而不是挂住。
+    const pageBound = wholeNames.length + 2
+    const seen = []
+    let cursor
+    let pages = 0
+    do {
+      assert.ok(pages < pageBound, `游标必须在 ${pageBound} 页之内结束（实际已读 ${pages} 页）`)
+      const page = await provider.listBranches({ repository, cursor, limit: expected.pageSize })
+      assert.equal(page.ok, true)
+      seen.push(...page.value.items.map((branch) => branch.name))
+      cursor = page.value.nextCursor
+      pages += 1
+    } while (cursor !== undefined)
+    assert.deepEqual([...seen].sort(), [...wholeNames].sort(), '逐页遍历必须与一次大页读到同一个分支集合')
+    assert.equal(new Set(seen).size, seen.length, '无并发写入时每个分支恰好出现一次，不得重复')
+    if (wholeNames.length > expected.pageSize) assert.ok(pages > 1, '分支多于 pageSize 时必须真的分页')
   })
 
   test(`${label}：工作树创建后可定位；移除按声明的能力——可读回消失，或结构化 not_supported`, async () => {
