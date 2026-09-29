@@ -46,6 +46,7 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-09-29-start-work-resume-evidence](exec-plan/completed/2026-09-29-start-work-resume-evidence.md) | #183 剩余闭环：真实 Git 上基线前进后恢复、多页分支探测与头提交透传、失败时保留已决定分支；评审响应补上 `conflict` 后列表读失败的 `unknown` 传播。PR #237 的最终远端门禁与合并状态按实时 GitHub 回读。 | Completed |
 | [2026-09-24-merge-queue-closing-refs](exec-plan/completed/2026-09-24-merge-queue-closing-refs.md) | 订正关闭引用的普适断言，保留两次相反观测；回读 #159、#158、#160、#161 的合并结果及 #139 的关联，并登记 `feat/` 前缀偏差（issue #180） | Completed |
 | [2026-09-24-human-execution-provider](exec-plan/completed/2026-09-24-human-execution-provider.md) | 人工执行 provider（#139）：人工运行是 `running`；引用带签发者 HMAC、来源闸门 fail closed，签发者身份由宿主注入；主执行确定起不来时 core 启动声明 `execution.run.fallback` 的绑定（两个角色按能力键分开、受写门约束，#171）；`providerRef` 与降级结论落进运行记录（#172，SQLite 004），取消按运行身份在事务内原子替换（ADR-0008）。库级闭环，宿主装配见 #132，余项见 #215；#139 / #171 / #172 保持 `Refs`，关闭由人类伙伴决定 | Completed |
 | [2026-09-26-development-suite-capability-driven](exec-plan/completed/2026-09-26-development-suite-capability-driven.md) | Development 契约套件按能力快照驱动（#205）：新增 `development.worktree.remove` 让破坏性移除可声明；变更请求三个方法与工作树移除按各自的键驱动，已声明路径要求方法真的实现，`expect.objects` 在每种已知写入后都必须新鲜；port 写明「能力先于身份」与只建模能力声明。#205 保持开启：分支 / 工作树创建按快照驱动（验收 2）与本地 Git provider 通过套件（验收 4，随 #160）仍未成立 | Completed |
