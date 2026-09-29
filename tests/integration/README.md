@@ -15,7 +15,7 @@
 
 ## Start Work 恢复（#183 / #184 / #165）
 
-两个文件在离线替身上组装 core，跑完整的 `startWork` 补偿序列（不触网）：
+四个文件组装 core，跑完整的 `startWork` 补偿序列（不触网）：前两个用离线 Development 替身，后两个（`local-git-*`）用 `mkdtemp` 临时仓库上的真实本地 Git provider：
 
 | 文件 | 用例 | 保护的不变量 |
 |---|---|---|
@@ -26,6 +26,8 @@
 | | 重放不得改变已决定的分支身份 | 序列一旦决定了身份，本次请求就不得改写它：声明另一个分支名是**矛盾**（结构化失败），不是新输入 |
 | | 不去猜 | 记录里没有 `branchExternalId` 时，即使同名分支已存在也必须**重走分支步**——不得用「名字像」推断所有权 |
 | | 重放省略 `branchName` | 第三步（启动执行）也用**已决定**的分支身份：run command 不得回落到本次请求的默认名 |
+| | conflict 复用跨页（P3） | 同名分支排在 `limit: 100` 的第一页之外时仍被认出并报出头提交，不是 `failed / conflict` |
+| | 游标永不结束（P4） | 分支探测读到页数上限后报 `unknown / result_unknown`，不判成「创建未生效」也不挂住（替身每次调用让出宏任务，否则超时断言本身失效） |
 | `start-work-retry-identity.test.js` | 换新幂等键重试 | 可清除的失败之后，同一个上下文能被做完（`Failed` 不再永久锁死） |
 | | 接管保留步骤字段 | 接管用 `{...existing, ...}`；重建记录会让「跳过分支步」失效——与同一文件的 `branchStepCalls === 0` 互为契约 |
 | | 同 key 不重新尝试 | 幂等键重放优先：同 key 返回那一次的报告，**换新 key 才是重试** |
@@ -35,8 +37,13 @@
 | | 身份不随路径变化 | 路径是属性不是身份：改 `worktreePath` 重试仍然只有一个工作树实体 |
 | | 身份的作用域是仓库 | 作用域是 `(workspaceId, repositoryId, workItemId)` 而**不是 binding**：把仓库读能力置为不可用，两侧仍然一致（binding 的解析有多个来源，两个 key 可以独立不可用） |
 | | 两个仓库上的两份工作树 | 同一工作项在同一 binding 的两个仓库上各有一份工作树，是两个实体而不是一个 |
+| `local-git-start-work-resume.test.js` | 基线前进后换新键重试（R1） | 真实仓库：接管中断前建的分支、头提交不变；重试期间的 Git argv 里没有 `branch`、`main^{commit}`、`symbolic-ref`——「基线是否前进」不进入判定 |
+| | 能力不可用不抹掉分支（R2） | 已决定的分支身份写一次：记录与结果面都仍是 `work/<id>`，那一次不新写 `has_worktree`；恢复能力后在基线前进下仍 `ready` |
+| | 不保留工作树句柄（R3） | 写一次只针对分支：没走到工作树步的失败尝试清掉旧句柄，谱系不会把它当作已观察到的锚点 |
+| `local-git-branch-probe.test.js` | 接管跨页（P1） | 目标分支排在第一页之外时头提交仍被报出（诱饵数与探测页大小的耦合写在文件里） |
+| | 写入已落地但响应丢失（P2） | 分支多于一页时对账读完全部页，不把磁盘上已有的分支判成 `not_found`「创建未生效」 |
 
-**替身边界的如实说明**：这两组用例用的是离线 Development 替身（外加一处最小的 `createBranch` 覆写，用来复刻真实 provider「同名分支指向别处」的拒绝语义），**不是**真实临时仓库。真实仓库上的同一条链路归 #141（被 #137 / #120 阻塞）。
+**替身边界的如实说明**：`start-work-*` 两个文件用的是离线 Development 替身（外加一处最小的 `createBranch` 覆写，用来复刻真实 provider「同名分支指向别处」的拒绝语义），**不是**真实临时仓库。真实本地 Git 上的恢复与分页证据在 `local-git-start-work-resume.test.js` 与 `local-git-branch-probe.test.js`；四个文件都用离线 storage，SQLite 与进程重启仍归 #141（被 #137 / #120 阻塞）。「重启」在 R2 / R3 里只是「同一 storage、同一 workspace 换一套能力重新组装」。
 
 ## 本地 Git provider（#137）
 
@@ -46,7 +53,7 @@
 
 | 用例 | 保护的不变量 |
 |---|---|
-| Development 契约套件（能力子集从 `describeCapabilities()` 推导） | 本地子集也满足 Development 契约；未声明的能力是结构化 `not_supported` + 对象集合逐字不变；方法可用时快照必须说 `available`（双向断言）；未声明的工作树移除不被索取 |
+| Development 契约套件（能力子集从 `describeCapabilities()` 推导） | 本地子集也满足 Development 契约；未声明的能力是结构化 `not_supported` + 对象集合逐字不变；方法可用时快照必须说 `available`（双向断言）；未声明的工作树移除不被索取；分支列表按 `pageSize` 逐页读完恰好枚举每个分支一次（分页契约，core 的分支探测依赖它） |
 | 路径安全 + 零 Git 调用 | 越界、含 `..`、符号链接逃逸、悬空符号链接叶子、首尾空白都在**任何 Git 命令之前**被拒（断言注入 runner 的调用次数为 0；argv-only 另由源码扫描契约保证）；`..wi` 是根内合法名字，不得判成逃逸 |
 | 幂等与复用担保 | 同一路径重复创建报 `conflict`；`conflict` 只留给**正面确认可复用**的登记（目录存在、分支一致、确为本仓库的链接工作树）。目录消失 / `.git` 被删（prunable）/ 被换成独立仓库 / 被 lock 后替换 / 指向主检出都硬失败 |
 | 分支名校验 / 同名异指向 | 非法分支名（含 git refname 规则的 10 类）零调用被拒；同名分支只在指向请求声明的起点时复用，否则 `invalid_input`；D/F 引用冲突同样是 `invalid_input` |
