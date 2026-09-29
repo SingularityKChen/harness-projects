@@ -183,6 +183,9 @@ async function ensureBranch(provider: Development, repository: ExternalObjectRef
     if (found.probe.found) {
       return { report: confirmWrite(markWriting(beginWrite(name)), name), ok: true, value: name, headCommit: found.headCommit }
     }
+    if (found.probe.error !== undefined) {
+      return { report: markUnknown(markWriting(beginWrite(name)), found.probe.error), ok: false, value: undefined }
+    }
   }
   if (result.error.code !== ProviderErrorCode.AmbiguousResult) {
     return { report: markFailed(beginWrite(name), error), ok: false, value: undefined }
@@ -232,12 +235,29 @@ async function baseRef(provider: Development, repository: ExternalObjectRef): Pr
 
 interface BranchProbe { readonly probe: ReconcileProbe; readonly headCommit: string | undefined }
 
+const PROBE_PAGE_SIZE = 100
+/** 页数上限：同时兜住「同一游标循环」与「游标一直前进但永不结束」两种违反端口分页义务的 provider。 */
+const PROBE_MAX_PAGES = 1000
+
+/**
+ * 按名字找分支：逐页读、找到即停，只有读完全部页（`nextCursor === undefined`）才回答「不存在」。
+ * 读失败或超过页数上限一律回答「不知道」（`probe.error`），对账因此停在 `unknown` 而不是 `markFailed`——
+ * 三个消费者（conflict 复用、ambiguous 对账、接管路径的头提交报告）因此在分支多于一页时都得到正确事实。
+ * 端口的分页义务见 `development-provider.ts`；头提交只做报告，读不到时报 `undefined`，不改变序列走向。
+ */
 async function branchProbe(provider: Development, repository: ExternalObjectRef, name: string): Promise<BranchProbe> {
-  const page = await provider.listBranches({ repository, cursor: undefined, limit: 100 })
-  if (!page.ok) return { probe: { found: false, value: undefined, error: toProjectError(page.error) }, headCommit: undefined }
-  const found = page.value.items.find((item) => item.name === name)
-  return {
-    probe: { found: found !== undefined, value: found?.name, error: undefined },
-    headCommit: found?.headCommit,
+  let cursor: string | undefined
+  for (let page = 0; page < PROBE_MAX_PAGES; page += 1) {
+    const listed = await provider.listBranches({ repository, cursor, limit: PROBE_PAGE_SIZE })
+    if (!listed.ok) return { probe: { found: false, value: undefined, error: toProjectError(listed.error) }, headCommit: undefined }
+    const found = listed.value.items.find((item) => item.name === name)
+    if (found !== undefined) return { probe: { found: true, value: found.name, error: undefined }, headCommit: found.headCommit }
+    if (listed.value.nextCursor === undefined) return { probe: { found: false, value: undefined, error: undefined }, headCommit: undefined }
+    cursor = listed.value.nextCursor
   }
+  const error = projectError(
+    ProjectErrorCode.ResultUnknown,
+    `读了 ${PROBE_MAX_PAGES} 页仍没有读完分支列表，无法确认分支 ${name} 是否存在：provider 的游标没有结束`,
+  )
+  return { probe: { found: false, value: undefined, error }, headCommit: undefined }
 }

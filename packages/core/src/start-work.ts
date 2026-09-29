@@ -2,7 +2,7 @@
  *
  * `git-provisioning.ts`。
  */
-import { CapabilityKey, ProjectErrorCode, projectError, type ExternalObjectRef } from '@harness-projects/capabilities'
+import { CapabilityKey, ProjectErrorCode, projectError, type ExecutionContextRecord, type ExternalObjectRef } from '@harness-projects/capabilities'
 import {
   EntityKind, ExecutionContextStatus, ExecutionRunStatus, RelationType, asBrandedId,
   type EntityId, type ExecutionContextId, type ProjectError,
@@ -124,9 +124,10 @@ async function provision(
     return toResult(markFailed(beginWrite(names.path), error), undefined, error)
   }
   // 每一步成功后立刻回填：中断在两步之间时，重放跳过已完成的那一步（批次计划 D2）。
-  const git = await provisionGit(context, request, names, contextId, (outcome) =>
-    saveContext(context, contextId, request, outcome.status, outcome.branchExternalId, outcome.worktreeExternalId))
-  await saveContext(context, contextId, request, git.status, git.branchExternalId, git.worktreeExternalId)
+  const git = await provisionGit(context, request, names, contextId, async (outcome) => {
+    await saveContext(context, contextId, request, outcome.status, outcome.branchExternalId, outcome.worktreeExternalId)
+  })
+  const saved = await saveContext(context, contextId, request, git.status, git.branchExternalId, git.worktreeExternalId)
   await recordStartFacts(context, request, contextId, git)
   if (git.bindingId !== undefined) {
     await ledger.record({
@@ -134,7 +135,10 @@ async function provision(
       idempotencyKey: request.idempotencyKey, report: git.report,
     })
   }
-  if (!git.ok) return toResult(git.report, outcomeOf(git), git.report.error)
+  // 失败路径的结果面取自**写入后的记录**，不取本次尝试的中间结果：能力不可用时 `git.branchExternalId` 是
+  // `undefined`（本次没走到分支步），而记录里保留着此前已决定的分支；调用返回一个答案、记录与 `existingResult`
+  // 返回另一个，就是 Host 权威状态分叉。`recordStartFacts` 仍吃 `git`（本次观测到的事实），所以不补写关系。
+  if (!git.ok) return toResult(git.report, outcomeOf({ ...git, branchExternalId: saved.branchExternalId }), git.report.error)
   return startExecution(context, request, contextId, git)
 }
 
@@ -224,15 +228,23 @@ async function recordRun(context: CoreContext, contextId: ExecutionContextId, st
 async function saveContext(
   context: CoreContext, contextId: ExecutionContextId, request: StartWorkRequest,
   status: ExecutionContextStatus, branchExternalId: string | undefined, worktreeExternalId: string | undefined,
-): Promise<void> {
+): Promise<ExecutionContextRecord> {
   // 分步回填会在 `Provisioning` 中途写记录；清掉租约起点会让在途保护失效（`claimContext` 用它
   // 判断租约是否过期），所以中途写入必须保留它。终态不再被租约查询，按原样清空。
   const existing = await context.storage.getExecutionContext(contextId)
   const keepLease = status === ExecutionContextStatus.Provisioning ? existing?.provisioningStartedAt : undefined
-  await context.storage.putExecutionContext({
-    ...contextRecord(context, contextId, request, status, branchExternalId, worktreeExternalId, undefined),
+  // 已决定的分支身份**写一次**：记录里已有的值优先，本次尝试产出的 `undefined` 只表示「没走到这一步」，不表示
+  // 清空。今天两者在能走到这里的路径上不会分歧（重放时 `provisionGit` 只会产出同一个名字），选 `existing ??`
+  // 是为了把这条不变量写成代码，而不是写成「碰巧」。**只保留分支，不保留工作树句柄**：工作树步每次重放都重跑，
+  // 谱系把 `worktreeExternalId !== undefined` 当作「已观察到」的锚点，失败的尝试若留下旧句柄，谱系会在它上面
+  // 读头提交、变更请求与流水线，违反 ack 约束。也不在 `provisionGit` 的能力不可用分支里补传已决定的分支：那会让
+  // `recordStartFacts` 在一条今天不写边的路径上新写一条 confirmed `has_worktree`，扩大 #192 的暴露面。
+  const record: ExecutionContextRecord = {
+    ...contextRecord(context, contextId, request, status, existing?.branchExternalId ?? branchExternalId, worktreeExternalId, undefined),
     provisioningStartedAt: keepLease,
-  })
+  }
+  await context.storage.putExecutionContext(record)
+  return record
 }
 
 async function existingResult(

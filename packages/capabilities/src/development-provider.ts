@@ -15,6 +15,9 @@
  *    是与能力声明正交的另一层，写调用在那一层答 `permission_denied`。
  * 3. **方法缺失必须由快照表达**：不实现某个可选方法时，快照**不得**把对应 key 声明为 `available`
  *    （`capability-keys.ts` 的约定是「未声明的 capability 不出现」）。
+ * 4. **列表方法可以逐页读完**：从 `cursor: undefined` 起逐页读到 `nextCursor === undefined`，无并发写入时
+ *    恰好枚举每个对象一次。core 据此把「读完仍没有」当作「不存在」（Start Work 的分支探测），把「读不完」
+ *    当作「不知道」；游标不结束（包括循环回到旧游标）的 provider 会让对账停在 `unknown`。契约套件的分页用例钉住这一条。
  */
 import type { ProviderCapabilitySnapshot } from './capability-keys.ts'
 import type { ExternalObjectRef, ProviderObservation, ProviderReconcileScope } from './observation.ts'
