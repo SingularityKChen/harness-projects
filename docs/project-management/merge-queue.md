@@ -484,6 +484,18 @@ gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,baseRe
 
 > **Superseded by**（2026-09-23，第二轮 MMP 评审）：`gh run view --log` 把 `::notice::` 渲染成 `##[notice]`，照字面 grep 会漏；命令须带 `-R`。改为 `gh run list -R SingularityKChen/harness-projects --workflow=engineering-state.yml --event pull_request_target --limit 5` 找到合并后那次运行，再 `gh run view <id> -R SingularityKChen/harness-projects --log | grep -E 'PR_NUMBER|##\[notice\]confirmed'`，期望 `PR_NUMBER: 159` 与 `##[notice]confirmed #115: Engineering=Merged; 依据 PR #159（规则 merged）`。
 
+### 4.8 2026-09-30 人类授权的评审修订与整合
+
+人类伙伴授权按修订流程整理并 rebase merge #238、#244、#245；#241由人类伙伴修订，本队列不改其分支。
+
+| 顺序 | PR / issue | 依赖与范围 | 当前状态回读 |
+|---|---|---|---|
+| 1 | #238 / #225 | 宿主复探记录与裁决；#226交接订正；归档计划 | `gh pr view 238 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit` |
+| 2 | #244 / #119 | 独立补观测证据与Superseded守卫修订；基于第1步合并后的main重锁 | `gh pr view 244 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit` |
+| 3 | #245 / #227 | 依赖#238；在第1、2步合并后restack到main，归档构建计划 | `gh pr view 245 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit` |
+
+命令在本仓库检出根目录运行，`gh`使用`-R SingularityKChen/harness-projects`。每步只使用`merge_method=rebase`并锁精确head；顺序中的前项合并后，下一项重新fetch、必要时rebase、验证新base/head/CI/threads，并取得当前head批准。合并回读期望state为MERGED、issue关闭；#4、#226及后续transport issue仍保持原范围。
+
 ## 5. 历史：2026-09-18 那一轮的实测结果
 
 以下是 2026-09-18 完成的上一轮评审（9 个开放 PR：#12 #19 #21 #3 #11 #13 #33 #35 #37）的**实测记录**，不是当前队列的一部分，也不是可以直接套用的模板——它作为一个已经发生过的具体案例，说明第 2 节的流程为什么长这个样子。来源：`docs/review/2026-09-18-mvp-delivery-review.md`。
