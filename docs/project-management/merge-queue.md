@@ -486,13 +486,14 @@ gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,baseRe
 
 ### 4.8 2026-09-30 人类授权的评审修订与整合
 
-人类伙伴授权按修订流程整理并 rebase merge #238、#244、#245；#241由人类伙伴修订，本队列不改其分支。
+人类伙伴授权按修订流程整理并 rebase merge #238、#244、#245；#241由人类伙伴修订，本队列不改其分支。 **Superseded by 2026-10-01 新授权**：#241已完成修订复评，人类伙伴要求修订剩余P3、按交付物整理后rebase merge，作为本队列第4项。
 
 | 顺序 | PR / issue | 依赖与范围 | 当前状态回读 |
 |---|---|---|---|
 | 1 | #238 / #225 | 宿主复探记录与裁决；#226交接订正；归档计划 | `gh pr view 238 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit` |
 | 2 | #244 / #119 | 独立补观测证据与Superseded守卫修订；基于第1步合并后的main重锁 | `gh pr view 244 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit` |
 | 3 | #245 / #227 | 依赖#238；在第1、2步合并后restack到main，归档构建计划 | `gh pr view 245 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit` |
+| 4 | #241 / #70 | 基于前三项实际合并后的main；读取闭环、身份隐藏、归档三个交付提交 | `gh pr view 241 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit` |
 
 命令在本仓库检出根目录运行，`gh`使用`-R SingularityKChen/harness-projects`。每步只使用`merge_method=rebase`并锁精确head；顺序中的前项合并后，下一项重新fetch、必要时rebase、验证新base/head/CI/threads，并取得当前head批准。合并回读期望state为MERGED、issue关闭；#4、#226及后续transport issue仍保持原范围。
 

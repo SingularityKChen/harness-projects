@@ -48,6 +48,7 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-09-29-github-projects-read](exec-plan/completed/2026-09-29-github-projects-read.md) | GitHub Projects 读取投影（#70）：注入 GraphQL transport 读条目与内容三态，产出成员关系与内容观察；端口加成员关系分量，core 不登记非内容身份；故障一律结构化失败，契约套件跑在录制夹具上；Completed：R1/R2及P3修订已验收，按交付物整理并经人类授权整合；状态以PR #241回读为准 |
 | [2026-09-29-harness-plugin-package](exec-plan/completed/2026-09-29-harness-plugin-package.md) | 插件打包（#227）：`apps/harness-plugin` 只凭本仓库构建出宿主入口、client bundle 与生成的安装件 manifest（目标宿主线 `0.2.0-rc.2`，peer 用范围），经 `dsh plugin --profile desktop add` 装进人类伙伴本机 Desktop 的 `desktop` profile、验收后卸载并核对快照；侧栏入口加占位面板；CI 在干净检出上真跑构建并断言产物契约；宿主侧由 agent 读日志与文件，界面由人类伙伴截图确认，按预注册的 K 行执行；Completed：构建、产物契约和Desktop K验收完成；人类伙伴授权整合，ADR-0009已采纳；transport归#228 |
 | [2026-09-29-harness-plugin-reprobe](exec-plan/completed/2026-09-29-harness-plugin-reprobe.md) | 宿主嵌入复探（#225）：仓库外插件包经 `dsh plugin add` 装进一次性 profile，在真实宿主与浏览器里重跑 #125 的问题 2–4；裁决规则、强度分级与 transport 排序先预注册，由契约测试从观测表机械推导 `embed` / `fallback-web`；探针不合并；Completed：Batch 0–6 与评审修订完成，裁决 `embed`（typed remote）；#226 评论及新版复测归属订正已有回执；人类伙伴已授权整合，状态以 PR #238 回读为准 |
 | [2026-09-29-source-version-order](exec-plan/completed/2026-09-29-source-version-order.md) | #203 观察版本载体收窄为规范 UTC 纳秒时间戳；旧行迁移、拒绝与备份恢复，完整迁移交错报告阶段和已提交版本；#70 需调用统一归一函数，R1 第 8 行同步收口 | Completed |
