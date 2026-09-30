@@ -828,3 +828,109 @@ test('E1 证据一致性：docs/architecture 下每份 gate-e1-*.md 都出现在
       + '记录文件在创建它的那次提交里同步加一行索引，否则它在目录里不可发现',
   )
 })
+
+/**
+ * 逐文档声明：要求「每一行 `时间（墙钟）：` 都带 UTC 时刻」的记录，值是这种行的**行数下限**。
+ * 只有 #119 的补观测涉及的这份记录用这种写法；E1-1 到 E1-3 的记录不在 #119 范围内。
+ * 20 = 2026-09-23 的 8 行 + 六个子观测（a-rerun / c-rerun 各 4 行，其余各 1 行）新增的 12 行。
+ */
+const WALLCLOCK_STRICT_DOCS = { 'docs/architecture/gate-e1-uncertain-create.md': 20 }
+
+const WALLCLOCK_PREFIX = '时间（墙钟）：'
+const CLOCK_TIME = /`(?:\d{4}-\d{2}-\d{2}T)?\d{2}:\d{2}:\d{2}Z`/
+const FULL_DATE_CLOCK_TIME = /`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z`/
+const GAP_WORDING = /未[^。；，]{0,4}记录|下界|上界/
+const LABEL = '[a-z0-9]+(?:-[a-z0-9]+)+'
+// `Superseded by` 后紧跟括号标签（可用 ` / ` 连接多个）才算「指向观测标签」；`Superseded by §2`、
+// `Superseded by 第 18 条` 这类既有写法不带括号标签，不受影响。
+const SUPERSEDED_ANY_LABEL = /Superseded by \(/g
+const SUPERSEDED_LABELS = new RegExp(`^Superseded by ((?:\\(${LABEL}\\))(?: / \\(${LABEL}\\))*)`)
+
+const excerpt = (line) => line.slice(0, 80)
+
+function resolvesSuperseded(line, number, anchorsByLabel) {
+  const starts = [...line.matchAll(SUPERSEDED_ANY_LABEL)]
+  if (starts.length === 0) return null
+  for (const { index } of starts) {
+    const tail = line.slice(index)
+    const match = tail.match(SUPERSEDED_LABELS)
+    // 组尾仍有斜线意味着后续标签未被完整解析，不能用前面的合法标签豁免。
+    if (match === null || /^\s*\//.test(tail.slice(match[0].length))) return false
+    const labels = [...match[1].matchAll(new RegExp(`\\((${LABEL})\\)`, 'g'))]
+    if (!labels.every(([, label]) => (anchorsByLabel.get(label) ?? []).some((target) => target !== number))) return false
+  }
+  return true
+}
+
+test('Superseded 回归：一行先合法再引用不存在的标签必须失败', () => {
+  const anchors = new Map([['a-rerun', [1]], ['c-rerun', [2]]])
+  assert.equal(resolvesSuperseded('Superseded by (a-rerun)。 Superseded by (c-rerun)', 3, anchors), true)
+  assert.equal(resolvesSuperseded('Superseded by (a-rerun)。 Superseded by (missing-tag)', 3, anchors), false)
+})
+
+test('Superseded 回归：合法组之后的未解析标签尾部必须失败', () => {
+  const anchors = new Map([['a-rerun', [1]], ['c-rerun', [2]]])
+  assert.equal(resolvesSuperseded('Superseded by (a-rerun) / (c-rerun)', 3, anchors), true)
+  for (const line of [
+    'Superseded by (a-rerun) / (bad)',
+    'Superseded by (a-rerun) / (missing-tag',
+    'Superseded by (a-rerun)。 Superseded by (bad)',
+    'Superseded by (a-rerun)。 Superseded by ()',
+  ]) assert.equal(resolvesSuperseded(line, 3, anchors), false, line)
+})
+
+test('Superseded 回归：非标签订正不受影响，标签自指不能充当落点', () => {
+  assert.equal(resolvesSuperseded('Superseded by §2', 1, new Map()), null)
+  assert.equal(resolvesSuperseded('Superseded by (a-rerun)', 1, new Map([['a-rerun', [1]]])), false)
+})
+
+test('E1 证据一致性：补观测记录里每一行「时间（墙钟）」都带 UTC 时刻，每个 Superseded 标签都落在另一行完整日期的墙钟行上', () => {
+  // 已知限度：它只证明「写成 `时间（墙钟）：` 的行都合规、写出的 Superseded 都有落点」，不证明
+  // 「每条观测都写成了这种行」——后者靠 ExecPlan D0 的审计表。不采用「冒号后 N 个字符之内必须出现
+  // 时刻」这类规则：有的行以「第一次调用」开头，换措辞就会误伤。
+  for (const [docPath, minimum] of Object.entries(WALLCLOCK_STRICT_DOCS)) {
+    const lines = readDoc(docPath).split('\n')
+    const problems = []
+
+    const wallclockRows = lines.flatMap((line, index) => (
+      line.startsWith(WALLCLOCK_PREFIX) ? [{ line, number: index + 1 }] : []
+    ))
+    const isCompliant = (line) => (
+      CLOCK_TIME.test(line) && !GAP_WORDING.test(line) && !line.includes('Superseded by')
+    )
+
+    // 规则二的落点：合规的墙钟行，且带完整日期的时刻；按标签建索引，记下行号以排除自指。
+    const anchorsByLabel = new Map()
+    for (const { line, number } of wallclockRows) {
+      if (!isCompliant(line) || !FULL_DATE_CLOCK_TIME.test(line)) continue
+      for (const [, label] of line.matchAll(new RegExp(`\\((${LABEL})\\)`, 'g'))) {
+        anchorsByLabel.set(label, [...(anchorsByLabel.get(label) ?? []), number])
+      }
+    }
+
+    const resolves = (line, number) => resolvesSuperseded(line, number, anchorsByLabel)
+
+    // 规则一：每一行墙钟行要么合规，要么带 Superseded（且下面的规则二保证它能解析）。
+    for (const { line, number } of wallclockRows) {
+      if (isCompliant(line)) continue
+      if (line.includes('Superseded by') && resolves(line, number) === true) continue
+      problems.push(`${docPath}:${number} → ${excerpt(line)}`)
+    }
+    // 规则二：整份文档任意行上的 Superseded by (<标签>) 都必须解析。
+    lines.forEach((line, index) => {
+      if (resolves(line, index + 1) === false) {
+        problems.push(`${docPath}:${index + 1} → Superseded 标签无落点 → ${excerpt(line)}`)
+      }
+    })
+    // 规则三：行数下限，防止整批墙钟行被删掉后规则一、二空转。
+    if (wallclockRows.length < minimum) {
+      problems.push(`${docPath} → 行数 ${wallclockRows.length} < ${minimum}`)
+    }
+
+    assert.equal(
+      problems.length,
+      0,
+      `${docPath} 的墙钟证据不满足 #119 验收 1 的字面口径：\n${problems.join('\n')}`,
+    )
+  }
+})
