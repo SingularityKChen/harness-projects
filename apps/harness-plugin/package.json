@@ -12,5 +12,12 @@
     "@harness-projects/client": "workspace:*",
     "@harness-projects/ui-model": "workspace:*",
     "@harness-projects/ui": "workspace:*"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "pack:plugin": "node scripts/build.mjs && pnpm --dir dist/package pack --pack-destination .."
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
   }
 }

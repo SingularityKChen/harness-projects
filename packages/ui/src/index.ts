@@ -6,3 +6,4 @@
  */
 
 export const packageId = '@harness-projects/ui' as const
+export { HARNESS_PANEL_TITLE, PlaceholderIcon, PlaceholderPanel } from './placeholder.ts'

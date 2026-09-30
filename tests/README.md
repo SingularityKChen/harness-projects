@@ -23,7 +23,7 @@ ls -l node_modules/@harness-projects/core    # 期望：-> ../../packages/core�
 | 目录 | 验证对象 | 允许的依赖 | 归入门禁 |
 |---|---|---|---|
 | `tests/contract/` | 能力契约、包边界、错误模型、幂等语义、Provider 行为一致性 | 只有代码与 fixture，无网络、无真实凭据 | PR Fast Gate；其中 `package-boundaries.test.js` 另由 Merge Gate · Boundaries 保护 |
-| `tests/integration/` | 跨包集成：SQLite 迁移与恢复、本地 Git 操作、Start Work 补偿序列与身份恢复、控制器往返 | 可用临时目录与临时数据库，仍不触网 | PR Fast Gate（经 `pnpm test`）与 Merge Gate · Integration |
+| `tests/integration/` | 跨包集成：SQLite 迁移与恢复、本地 Git 操作、Start Work 补偿序列与身份恢复、控制器往返、插件安装件构建 | 可用临时目录与临时数据库，仍不触网 | PR Fast Gate（经 `pnpm test`）与 Merge Gate · Integration |
 | `tests/e2e/` | 端到端用户链路与故障降级 | 可以启动真实进程或浏览器；默认使用 Fake Provider | PR Fast Gate（经 `pnpm test`）与 Merge Gate · E2E |
 | `tests/mvp0/` | MVP-0 纵向链路：工作区 → 规划条目 → 工作项 → 开始工作 → 执行上下文 → 分支/变更请求 → CI 的 7 条节点断言（issue #42） | 只有代码与 fixture，无网络、无真实凭据 | Merge Gate · MVP-0 |
 
