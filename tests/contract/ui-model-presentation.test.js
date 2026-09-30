@@ -380,6 +380,9 @@ test('不变量：redacted 内容不回退到缓存标题，规划字段如实�
     '上游带了缓存标题也不得透出')
   assert.equal(deriveWorkItemDetail(leakedRead, 'entity-redacted').planning.body, undefined,
     '上游带了缓存正文也不得透出')
+  // H12：fixture 里的 redacted 条目带着内容外部 id（上游误带）；页面既不给主身份，也不列出任何身份
+  assert.deepEqual([row.source.primary, row.source.identities], [undefined, []], '被扣下条目的内容外部 id 不得进界面')
+  assert.deepEqual(deriveWorkItemDetail(readFor(), 'entity-redacted').source.identities, [])
 })
 
 test('展示：统一详情给出规划段、来源身份与谱系入口，不在模型里的条目返回 undefined', () => {

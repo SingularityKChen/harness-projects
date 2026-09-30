@@ -96,6 +96,9 @@ for (const [label, makeStorage] of [['替身 Storage', createFakeStorage], ['SQL
       assert.ok(after.every((view) => firstIds.includes(view.entityId) && (view.content.contentKind !== 'redacted' || view.content.title === undefined)))
       assert.deepEqual(texts.filter((text, index) => hidden.has(nodes[Math.floor(index / 2)].content.id) && shown.includes(text)), [], '被扣下内容的标题与正文不得出现')
       assert.deepEqual((await state())[0].degraded, renamed)
+      const snapshot = await wire()
+      assert.deepEqual(contentIds.filter((id) => hidden.has(id) && JSON.stringify(snapshot).includes(id)), [], 'H12：被扣下条目的内容 node id 不得出现在 wire 快照里')
+      assert.deepEqual(snapshot.entities.filter(({ content }) => content.contentKind === 'redacted').map(({ content }) => [content.externalKind, content.externalId]), Array(expected).fill([undefined, undefined]), 'H12：内容种类也不出 wire')
     }
     switchTransport(replay)
     assert.equal((await core.commands.bootstrapWorkspace()).ok, true)

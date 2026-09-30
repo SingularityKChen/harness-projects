@@ -11,7 +11,7 @@ export type ClientEntity = StoredEntity['entity']
 /** 权威归属（provider / host / manual）：原样透出，页面不得把 host 权威显示成平台权威。 */
 export type ClientAuthority = ClientEntity['source']['authority']
 /** 外部身份种类（issue / draft / change_request / branch / worktree）。 */
-export type ClientExternalKind = ClientEntity['content']['externalKind']
+export type ClientExternalKind = NonNullable<ClientEntity['content']['externalKind']>
 
 /** capability 快照的一项：与 capabilities 包的 `EffectiveCapability` 结构兼容，宿主可直接传入。 */
 export interface CapabilitySnapshotEntry {
@@ -100,10 +100,10 @@ export interface SourceIdentity {
 }
 
 export interface SourcePresentation {
-  /** 主内容身份：这一条内容来自哪个来源对象的哪个外部 id。 */
-  readonly primary: SourceIdentity
+  /** 主内容身份：这一条内容来自哪个来源对象的哪个外部 id；redacted 条目没有（H12）。 */
+  readonly primary: SourceIdentity | undefined
   readonly authority: ClientAuthority
-  /** 客户端模型当前暴露的全部身份；今天恒为 `[primary]`。 */
+  /** 客户端模型当前暴露的全部身份：有主身份时为 `[primary]`，redacted 条目为空（H12）。 */
   readonly identities: readonly SourceIdentity[]
 }
 

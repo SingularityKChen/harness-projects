@@ -28,11 +28,12 @@ function assertTimestamp(value: string | undefined, field: string): void {
   }
 }
 
-/** 来源身份：客户端模型当前暴露的主内容身份（wire 今天只暴露这一条）。 */
+/** 来源身份：客户端模型当前暴露的主内容身份（wire 今天只暴露这一条）；redacted 或 wire 没给身份就没有，上游误带了也不透出（H12）。 */
 function sourceOf(entity: ClientEntity): SourcePresentation {
   const { bindingId, externalKind, externalId } = entity.content
-  const primary: SourceIdentity = { bindingId, externalKind, externalId }
-  return { primary, authority: entity.source.authority, identities: [primary] }
+  const hidden = entity.content.contentKind === ContentKind.Redacted || externalKind === undefined || externalId === undefined
+  const primary: SourceIdentity | undefined = hidden ? undefined : { bindingId, externalKind, externalId }
+  return { primary, authority: entity.source.authority, identities: primary === undefined ? [] : [primary] }
 }
 
 /** 两个输入都没给原因时补一条中性短语：`reason` 是 display-ready 散文，降级必有解释。 */

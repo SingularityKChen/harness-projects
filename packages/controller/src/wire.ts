@@ -4,8 +4,9 @@
  * 每个实体都携带 `SourceMetadata`：修订号是增量续传的游标，freshness 说明值是不是降级后的"最后已
  * 知"，authority 说明这些字段归谁所有。客户端据此判断"现在能不能把这个值当作当前值"，而不是猜。
  */
+import { ContentKind } from '@harness-projects/domain'
 import type {
-  ContentKind, DerivedFlag, EntityId, EntityKind, ExternalIdentityKind, NormalizedStatus, ProviderBindingId,
+  DerivedFlag, EntityId, EntityKind, ExternalIdentityKind, NormalizedStatus, ProviderBindingId,
 } from '@harness-projects/domain'
 import { StatusPolicyMode } from '@harness-projects/core'
 import type { PlanningItemView, SyncSummary } from '@harness-projects/core'
@@ -35,14 +36,14 @@ export interface SourceMetadata {
   readonly reason: string | undefined
 }
 
-/** 内容引用的 wire 形状：三态判别式 + 内部外部身份，不含 provider 的原生对象。 */
+/** 内容引用的 wire 形状：三态判别式 + 内部外部身份，不含 provider 的原生对象。redacted 不带 externalKind / externalId（H12）。 */
 export interface WireContentRef {
   readonly contentKind: ContentKind
   readonly title: string | undefined
   readonly body: string | undefined
   readonly bindingId: ProviderBindingId
-  readonly externalKind: ExternalIdentityKind
-  readonly externalId: string
+  readonly externalKind: ExternalIdentityKind | undefined
+  readonly externalId: string | undefined
 }
 
 export interface WireEntity {
@@ -87,6 +88,8 @@ function metadataOf(view: PlanningItemView, authority: WireAuthority): SourceMet
 }
 
 export function toWireEntity(view: PlanningItemView, authority: WireAuthority): WireEntity {
+  // redacted 行内部仍以内容外部 id 去重与恢复，但该 id 标识的是无权查看的对象，不出 wire。
+  const shown = view.content.contentKind !== ContentKind.Redacted
   return {
     entityId: view.entityId,
     kind: view.kind,
@@ -96,8 +99,8 @@ export function toWireEntity(view: PlanningItemView, authority: WireAuthority): 
       title: view.content.title,
       body: view.content.body,
       bindingId: view.content.identity.bindingId,
-      externalKind: view.content.identity.externalKind,
-      externalId: view.content.identity.externalId,
+      externalKind: shown ? view.content.identity.externalKind : undefined,
+      externalId: shown ? view.content.identity.externalId : undefined,
     },
     derived: view.engineering.derived,
     source: metadataOf(view, authority),
