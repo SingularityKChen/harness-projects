@@ -28,9 +28,9 @@ const BINDING = 'binding-1'
 const ITEM = 'item-1'
 const OBJECT_KIND = 'issue'
 const OBJECT = 'issue-1'
-const V1 = '2026-09-21T07:10:00Z'
-const V2 = '2026-09-21T07:11:00Z'
-const V3 = '2026-09-21T07:11:54Z'
+const V1 = '2026-09-21T07:10:00.000000000Z'
+const V2 = '2026-09-21T07:11:54.000000000Z'
+const V3 = '2026-09-21T07:11:54.500000000Z'
 const workspace = (id = WORKSPACE, name = '工作区') => ({ id, name, statusPolicy: 'provider_authoritative' })
 const binding = (id = BINDING, workspaceId = WORKSPACE) => ({ id, workspaceId, domain: 'planning', implementationKey: 'fake', enabled: true, isDefault: false })
 const membership = (overrides = {}) => ({ workspaceId: WORKSPACE, projectExternalId: PROJECT, itemExternalId: ITEM, contentKind: 'issue',
@@ -158,7 +158,7 @@ test('committed_observation：committed 是每个端口主体 updated_at 最大�
       const db = openDatabase(location)
       try {
         db.prepare(`INSERT INTO sync_observation (binding_id, object_kind, object_external_id, observed_at, dedupe_key, updated_at, snapshot_json, state)
-          VALUES (?, ?, ?, '2026-09-21T07:12:00Z', 'stale-key', '2026-09-21T07:09:00Z', '{"stale":true}', 'processed')`).run(BINDING, OBJECT_KIND, OBJECT)
+          VALUES (?, ?, ?, '2026-09-21T07:12:00Z', 'stale-key', '2026-09-21T07:09:00.000000000Z', '{"stale":true}', 'processed')`).run(BINDING, OBJECT_KIND, OBJECT)
       } finally { db.close() }
       const rows = committed(location)
       assert.equal(rows.length, 1, '每个主体只有一个 committed 快照')

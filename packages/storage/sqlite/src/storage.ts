@@ -10,7 +10,7 @@ import { contentColumns, optional, rowToBinding, rowToIdentity, rowToProjection,
 import { SqliteExecutionSurface } from './storage-execution.ts'
 import { type TransactionToken } from './storage-sync.ts'
 
-export { CLOSED_MESSAGE, NESTED_TRANSACTION_MESSAGE, OUTER_INSTANCE_MESSAGE, SETTLED_TRANSACTION_MESSAGE } from './storage-sync.ts'
+export { CLOSED_MESSAGE, LEGACY_COMMITTED_VERSION_MESSAGE, NESTED_TRANSACTION_MESSAGE, OUTER_INSTANCE_MESSAGE, SETTLED_TRANSACTION_MESSAGE } from './storage-sync.ts'
 
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。绑定列名与拆表前一致（工作区作用域三列来自挂载、实现键来自连接锚点），`rowToBinding` 因此不用改。
 const BINDING_COLUMNS = 'b.id AS id, wb.workspace_id AS workspace_id, wb.domain AS domain, b.implementation_key AS implementation_key, wb.enabled AS enabled, wb.is_default AS is_default'
@@ -78,7 +78,7 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   }
 }
 
-/** 打开（必要时创建）库、应用缺失迁移并返回端口实现。迁移幂等：对已迁移的文件重复调用是 no-op。自检失败时构造函数已关掉句柄（P3），因此这里不重复关闭。 */
+/** 打开（必要时创建）库、应用缺失迁移并返回端口实现。迁移幂等：对已迁移的文件重复调用是 no-op。迁移失败（含旧库里无法归一的观察版本载体的 `LegacySourceVersionError`，库文件未被修改）时关掉句柄并原样抛出；构造函数自检失败时已关掉句柄（P3），因此这里不重复关闭。 */
 export function createSqliteStorage(location: string | ':memory:'): SqliteStorage {
   const db = openDatabase(location)
   try { migrate(db) } catch (error) { db.close(); throw error }

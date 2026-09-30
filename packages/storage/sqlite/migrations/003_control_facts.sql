@@ -73,10 +73,12 @@ CREATE TABLE candidate_relation (
 -- 后到"表达不出来、同一条连接挂多个工作区时落点取决于挂载顺序（第三轮评审实测的三格）。
 -- 由此：观察**可以先于成员关系落账**；账本不引用 `project_item_membership`。
 -- `observed_at` 取 provider 填入的 `receivedTime`（同版本的 tie-breaker），`updated_at` 是平台版本载体（R4），`dedupe_key` 是端口去重键。
--- `updated_at` 的落库编码（NOT NULL）：`undefined` 落**空串**；空串**不是合法载体**（`isComparableSourceVersion` 要求非空），
+-- `updated_at` 的落库编码（NOT NULL）：`undefined` 落**空串**；空串**不是合法载体**（合法载体只有规范载体，见下），
 -- 因此空串只表示「没有版本」，读回时必须还原成 `undefined`。
+-- `updated_at` 的合法载体只有规范载体：定宽 UTC 纳秒时间戳 `YYYY-MM-DDTHH:MM:SS.fffffffffZ`（#203），由 Storage 端口入口的
+-- `assertComparableSourceVersion` 强制；DDL 不校验载体（裸 SQL 写入不受约束），只在这个定义域上保证 BINARY 字节序 = 时间序。
 -- 定序（updated_at 更小者拒绝、相等时整快照替换）**由 Storage 端口实现**，不是库级约束：跨行比较无法用 CHECK 表达，
--- 判据是 `packages/capabilities` 导出的 `compareSourceVersion`（码点序，与下面的 BINARY 比较等价）。
+-- 判据是 `packages/capabilities` 导出的 `compareSourceVersion`（码点序，在规范载体上与下面的 BINARY 比较等价）。
 CREATE TABLE sync_observation (
   binding_id TEXT NOT NULL REFERENCES provider_binding (id),
   object_kind TEXT NOT NULL,
@@ -95,7 +97,7 @@ CREATE UNIQUE INDEX sync_observation_dedupe ON sync_observation (binding_id, ded
 -- committed_observation：每个**端口主体**的已提交快照 = updated_at 最大、同版本时 observed_at 最新、
 -- 再同则 rowid 最大（最后追加）的那一行。主体键与端口 subject 逐字相同：本层只有内存替身，SQLite 实现由
 -- L4–L6 接入，接入后必须按同一个键定序。同版本时替身取最后写入、本视图取 observed_at 最新，两者可能选出不同快照（统一规则见 #201）。
--- 比较是 SQLite 的 BINARY（UTF-8 字节序），与 `compareSourceVersion` 的码点序等价。
+-- 比较是 SQLite 的 BINARY（UTF-8 字节序），在规范载体上与 `compareSourceVersion` 的码点序等价。
 -- R4 的"乱序观察不得覆盖新观察"因此是**构造性**的：旧行即使落进账本也永远不是 committed，不需要触发器。
 -- 它是视图而不是表：committed 是由账本派生的当前事实，物化成第二张表就是同一事实的第二个家。
 CREATE VIEW committed_observation AS

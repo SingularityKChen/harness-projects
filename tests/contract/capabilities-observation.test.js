@@ -8,6 +8,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
+import * as cap from '@harness-projects/capabilities'
 import { compareSourceVersion, isComparableSourceVersion, makeObservation, observationDedupeKey, scopedSubjectKey, stablePayloadHash } from '@harness-projects/capabilities'
 
 const subject = (bindingId = 'binding-a', externalId = 'issue-1') => ({ bindingId, objectKind: 'issue', externalId, url: undefined })
@@ -17,7 +18,7 @@ const input = (overrides = {}) => ({
   type: 'issue.updated',
   eventTime: '2026-09-20T10:00:00Z',
   receivedTime: '2026-09-20T10:00:05Z',
-  sourceVersion: 'v1',
+  sourceVersion: '2026-09-20T10:00:00.000000000Z',
   stablePayloadFields: { state: 'open', assignee: 'actor-1' },
   payload: { raw: 'x'.repeat(64) },
   ...overrides,
@@ -50,7 +51,7 @@ test('scopedSubjectKey 在同一 binding 内唯一标识对象，且带 binding 
   assert.notEqual(scopedSubjectKey(subject()), scopedSubjectKey({ ...subject(), objectKind: 'draft' }))
 })
 
-test('比较器边界：按码点序而非 UTF-16 码元序，undefined 最小，空串不是合法载体', () => {
+test('比较器边界：码点序、undefined 最小；合法载体只有规范 UTC 纳秒时间戳', () => {
   // U+FF5E 与 U+1F600：码点序是 U+FF5E < U+1F600，而 JS 的 `<` 比 UTF-16 码元（0xFF5E > 0xD83D）给出相反结论。
   assert.equal(compareSourceVersion('\uff5e', '\u{1F600}'), -1)
   assert.equal(compareSourceVersion('\u{1F600}', '\uff5e'), 1)
@@ -63,10 +64,104 @@ test('比较器边界：按码点序而非 UTF-16 码元序，undefined 最小�
   assert.equal(compareSourceVersion('2026-09-21T07:11:54Z', '2026-09-21T07:11:54z'), -1)
   assert.equal(compareSourceVersion('v1', 'v10'), -1)
   assert.equal(compareSourceVersion('v1', 'v1'), 0)
-  // 定义域是**非空** ASCII 可打印：空串与 undefined 是两个不同的东西，空串被拒绝。
+  // 定义域只有规范载体：空串、秒级、非 ASCII、日历非法、小写 t/z 都不是；`undefined` 是"没有版本"的唯一表达。
   assert.equal(isComparableSourceVersion(''), false, '空串不是合法载体：undefined 是"没有版本"的唯一表达')
-  assert.equal(isComparableSourceVersion('2026-09-21T07:11:54Z'), true)
-  assert.equal(isComparableSourceVersion('~'), true, 'ASCII 可打印的最右端点仍在定义域内')
+  assert.equal(isComparableSourceVersion('2026-09-21T07:11:54Z'), false, '秒级未归一，与 .500Z 比较会被判成乱序')
+  assert.equal(isComparableSourceVersion('~'), false, 'ASCII 可打印不再是载体的充分条件')
   assert.equal(isComparableSourceVersion('版本'), false, '非 ASCII 不是可比的载体')
   assert.equal(isComparableSourceVersion('\u007f'), false, 'DEL 不是可打印 ASCII')
+  assert.equal(isComparableSourceVersion('2026-09-21T07:11:54.000000000Z'), true)
+  assert.equal(isComparableSourceVersion('2026-02-30T00:00:00.000000000Z'), false, '形状对但日历非法')
+  assert.equal(isComparableSourceVersion('2026-09-21t07:11:54.000000000z'), false, '小写 t/z 不是不动点')
+})
+
+test('sourceVersionFromTimestamp 把 RFC 3339 无损归一成定宽 UTC 纳秒形态', () => {
+  const cases = [
+    ['2026-09-21T07:11:54Z', '2026-09-21T07:11:54.000000000Z'],
+    ['2026-09-21T07:11:54.5Z', '2026-09-21T07:11:54.500000000Z'],
+    ['2026-09-21T07:11:54.500Z', '2026-09-21T07:11:54.500000000Z'],
+    ['2026-09-21T07:11:54.51Z', '2026-09-21T07:11:54.510000000Z'],
+    ['2026-09-21T07:11:54.123456789Z', '2026-09-21T07:11:54.123456789Z'],
+    ['2026-09-21T15:11:54+08:00', '2026-09-21T07:11:54.000000000Z'],
+    ['2026-09-21T07:11:54-00:00', '2026-09-21T07:11:54.000000000Z'],
+    ['2026-09-21t07:11:54z', '2026-09-21T07:11:54.000000000Z'],
+    ['0050-01-01T00:00:00Z', '0050-01-01T00:00:00.000000000Z'],
+    ['2026-12-31T23:30:00-01:00', '2027-01-01T00:30:00.000000000Z'],
+  ]
+  for (const [raw, expected] of cases) {
+    const out = cap.sourceVersionFromTimestamp(raw)
+    assert.equal(out, expected, raw)
+    assert.match(out, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{9}Z$/)
+    assert.equal(cap.sourceVersionFromTimestamp(out), out, `规范载体是自身的不动点：${raw}`)
+    assert.equal(isComparableSourceVersion(out), true)
+  }
+})
+
+test('归一与进程时区无关：同一输入在 UTC、东八区与有夏令时的时区下逐字相同', () => {
+  // 必需检查在 UTC 下运行，本地时间方法（setHours 一类）的回归在那里与 UTC 方法同值、看不出来。这里在进程内
+  // 切换 TZ（Node 在给 process.env.TZ 赋值时重读时区），让「只用 UTC 方法」在任何运行环境下都承重。
+  // `2026-03-08T02:30:00Z` 落在洛杉矶夏令时跳变的空档（当地 02:00–03:00 不存在）：全程改用本地方法的实现会把它挪走一小时。
+  const cases = [
+    ['2026-09-21T15:11:54+08:00', '2026-09-21T07:11:54.000000000Z'],
+    ['2026-12-31T23:30:00-01:00', '2027-01-01T00:30:00.000000000Z'],
+    ['2026-03-08T02:30:00Z', '2026-03-08T02:30:00.000000000Z'],
+    ['0050-01-01T00:00:00Z', '0050-01-01T00:00:00.000000000Z'],
+  ]
+  const original = process.env.TZ
+  try {
+    for (const tz of ['UTC', 'Asia/Shanghai', 'America/Los_Angeles']) {
+      process.env.TZ = tz
+      for (const [raw, expected] of cases) assert.equal(cap.sourceVersionFromTimestamp(raw), expected, `${tz}：${raw}`)
+      assert.equal(isComparableSourceVersion('2026-09-21T07:11:54.000000000Z'), true, `${tz}：规范载体仍是不动点`)
+      assert.throws(() => cap.sourceVersionFromTimestamp('9999-12-31T23:59:59-01:00'), RangeError, `${tz}：年份越界`)
+    }
+  } finally {
+    if (original === undefined) delete process.env.TZ
+    else process.env.TZ = original
+  }
+})
+
+test('无法无损归一的输入一律抛 RangeError，不截断、不猜测', () => {
+  const invalid = [
+    '2026-09-21T07:11:54', '2026-09-21', '2026-09-21 07:11:54Z', '2026-09-21T07:11:54+0800',
+    '2026-02-30T00:00:00Z', '2100-02-29T00:00:00Z', '2026-13-01T00:00:00Z', '2026-09-00T00:00:00Z',
+    '2026-09-21T24:00:00Z', '2016-12-31T23:59:60Z', '2026-09-21T07:60:00Z', '2026-09-21T07:11:54+24:00', '2026-09-21T07:11:54+08:60',
+    '2026-09-21T07:11:54.1234567891Z', '0000-01-01T00:30:00+01:00', '9999-12-31T23:59:59-01:00',
+    '9', '10', 'v9', 'v10', '0123456789abcdef0123456789abcdef01234567', '',
+    '２０２６-09-21T07:11:54Z',
+  ]
+  for (const raw of invalid) assert.throws(() => cap.sourceVersionFromTimestamp(raw), RangeError, JSON.stringify(raw))
+  assert.doesNotThrow(() => cap.sourceVersionFromTimestamp('2024-02-29T00:00:00Z'))
+  assert.doesNotThrow(() => cap.sourceVersionFromTimestamp('2000-02-29T12:00:00Z'))
+})
+
+test('#203 的反例经归一后码点序即时间序（比较器不变）', () => {
+  const norm = cap.sourceVersionFromTimestamp
+  const pairs = [
+    ['2026-09-21T07:11:54Z', '2026-09-21T07:11:54.500Z'],
+    ['2026-09-21T07:11:54.5Z', '2026-09-21T07:11:54.51Z'],
+    ['2026-09-21T15:11:54+08:00', '2026-09-21T08:00:00Z'],
+    // 钉住右侧补零的方向：`.49` 补成 `.490000000`，`.5` 补成 `.500000000`。
+    ['2026-09-21T07:11:54.49Z', '2026-09-21T07:11:54.5Z'],
+  ]
+  for (const [older, newer] of pairs) assert.equal(compareSourceVersion(norm(older), norm(newer)), -1, `${older} < ${newer}`)
+  // 同一时刻不同写法归一后逐字相等。
+  assert.equal(compareSourceVersion(norm('2026-09-21T07:11:54Z'), norm('2026-09-21T07:11:54.000Z')), 0)
+  assert.equal(compareSourceVersion(norm('2026-09-21T15:11:54+08:00'), norm('2026-09-21T07:11:54Z')), 0)
+  // 对照：原始串直接比较会把更新的判成更旧，这就是必须先归一的原因。
+  assert.equal(compareSourceVersion('2026-09-21T07:11:54.500Z', '2026-09-21T07:11:54Z'), -1)
+  for (const raw of ['9', '10', 'v9', 'v10']) assert.equal(isComparableSourceVersion(raw), false, raw)
+})
+
+test('makeObservation 与入口断言拒绝非规范 sourceVersion', () => {
+  assert.throws(() => makeObservation(input({ sourceVersion: '2026-09-21T07:11:54Z' })), /规范载体/)
+  assert.throws(() => makeObservation(input({ sourceVersion: 'v1' })), /规范载体/)
+  const withoutVersion = makeObservation(input({ sourceVersion: undefined }))
+  const canonical = makeObservation(input({ sourceVersion: '2026-09-21T07:11:54.000000000Z' }))
+  assert.equal(withoutVersion.sourceVersion, undefined)
+  assert.equal(canonical.sourceVersion, '2026-09-21T07:11:54.000000000Z')
+  assert.equal(canonical.dedupeKey, withoutVersion.dedupeKey, 'sourceVersion 不参与去重键')
+  assert.doesNotThrow(() => cap.assertComparableSourceVersion(undefined))
+  assert.throws(() => cap.assertComparableSourceVersion('\uff5e'), /规范载体/)
+  assert.throws(() => cap.assertComparableSourceVersion('\uff5e'), /ASCII/)
 })

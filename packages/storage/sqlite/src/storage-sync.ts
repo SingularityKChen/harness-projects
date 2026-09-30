@@ -21,15 +21,20 @@
  * 不能进只追加账本的身份键——放进去会让定序主体随成员关系漂移、"对账先到、成员关系后到"表达不出来。由此观察
  * **不解析落点、也不要求成员关系存在**，端口与 DDL 不再各说一套。定序与 committed 的主体与端口 subject 逐字相同：
  * 一个工作区可以连接多个提供方（不变量 2），每个绑定有**自己的**版本序列，少了这一维第二个 provider 的首条观察
- * 会被判成乱序而静默丢弃。比较器只有 `capabilities` 的 `compareSourceVersion` 一份（码点序，与视图的 BINARY 等价）；
- * `recordObservation` 在入口拒绝非 ASCII 的 `sourceVersion`，让"载体必须可比"从注释变成契约。
+ * 会被判成乱序而静默丢弃。比较器只有 `capabilities` 的 `compareSourceVersion` 一份（码点序）；`sourceVersion` 的合法载体
+ * 收窄为规范载体（定宽 UTC 纳秒时间戳），在这个定义域上码点序、视图的 BINARY 字节序与时间序三者相同。
+ * `recordObservation` 在入口调用 `assertComparableSourceVersion` 拒绝其余载体（含非 ASCII、秒级或变精度时间戳、带偏移写法、
+ * 不定长编号），让"载体必须可比"从注释变成契约（#203）；归一由 provider 用 `sourceVersionFromTimestamp` 完成。
+ * 入口断言只挡**新**观察：旧版本写过的库里已持久化的旧载体由迁移 005 处理（能归一的归一，不能的整库拒绝，见 `source-version-carrier.ts`），
+ * 005 之后仍混进账本的旧载体在 `recordObservation` 读到已提交版本时响亮失败（`LEGACY_COMMITTED_VERSION_MESSAGE`）。
  *
  * 落库形态（安全，本层决定）：`snapshot_json` **原样**持久化整条 `ProviderObservation`——`payload` 由 provider 负责脱敏，storage 不裁剪、不改写、不丢弃（见 `ProviderObservation` 的契约注释；本层计划遗留「`payload` 由 provider 先脱敏」已收口）。
  */
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { compareSourceVersion, isComparableSourceVersion, type FieldValueRecord, type MembershipRecord, type ObservationRecord, type ReconcileCursorRecord, type StorageTransaction, type SyncCursorRecord } from '@harness-projects/capabilities'
+import { assertComparableSourceVersion, compareSourceVersion, isComparableSourceVersion, type FieldValueRecord, type MembershipRecord, type ObservationRecord, type ReconcileCursorRecord, type StorageTransaction, type SyncCursorRecord } from '@harness-projects/capabilities'
 import type { ProviderBindingId, WorkspaceId } from '@harness-projects/domain'
 import type { WorkspaceDatabase } from './db.ts'
+import { assertRewritten003Shape } from './source-version-carrier.ts'
 import { optional, rowToFieldValue, rowToMembership, rowToReconcileCursor, rowToSyncCursor, type Row } from './storage-rows.ts'
 
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。
@@ -54,8 +59,11 @@ export const SETTLED_TRANSACTION_MESSAGE = '事务作用域已结算：tx.* 只�
 export interface TransactionToken { readonly owner: SqliteSyncSurface; active: boolean }
 const TX_SCOPE = new AsyncLocalStorage<TransactionToken>()
 
-/** 重写前的 003 缺端口主体列与 `dedupe_key`：显式报错，把"旧库"变成一句可执行的处置，而不是第一次写观察时的驱动级报错。 */
-const REWRITTEN_003_MESSAGE = '本地库是重写前的 003（sync_observation 缺端口主体列或 dedupe_key）：请删除库文件重建'
+/**
+ * 迁移 005 之后账本里仍有旧载体（迁移之前就已打开库的旧版本进程继续写入，或裸 SQL 写入）：已提交版本不是规范载体，
+ * 更新的规范观察无法与它定序。响亮失败，不再静默返回 `false`；处置指向显式修复函数。约定整串，由 U8 钉住。
+ */
+export const LEGACY_COMMITTED_VERSION_MESSAGE = '已提交版本不是规范载体（账本里有旧版本写入的观察版本载体）：请停掉旧版本进程，调用 repairLegacySourceVersions(<库文件>, { backupPath }) 先备份再修复，然后重试'
 
 /** 列值 → 端口版本：`undefined` 的 `sourceVersion` 落库时空串（列 NOT NULL），读回必须还原，否则两条都没有 `sourceVersion` 的合法观察里第二条会被判成乱序。 */
 const columnToVersion = (value: string | undefined): string | undefined => (value === '' ? undefined : value)
@@ -93,13 +101,7 @@ export class SqliteSyncSurface {
    * 会保留旧列集合，直到第一次写观察才炸在驱动层（实测 `recordObservation -> no such column: dedupe_key`）。这里把
    * 驱动级报错换成一句可执行的处置。只在根实例上跑（作用域实例共用同一个刚查过的句柄）；未迁移时不判定。
    */
-  #assertRewrittenSchema(): void {
-    const migrated = this.db.prepare(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'`).get()
-    if (migrated === undefined) return
-    const schema = this.db.prepare(`SELECT (SELECT count(*) FROM schema_migrations WHERE version = 3) AS applied,
-      (SELECT count(*) FROM pragma_table_info('sync_observation') WHERE name IN ('object_kind','dedupe_key')) AS subject_columns`).get() as { applied: number; subject_columns: number }
-    if (schema.applied > 0 && schema.subject_columns < 2) throw new Error(REWRITTEN_003_MESSAGE)
-  }
+  #assertRewrittenSchema(): void { assertRewritten003Shape(this.db) }
 
   /**
    * **唯一读写入口**。轮到自己之前不碰连接：事务在途时的直接写入与外部读都等到结算（提交或回滚）后再执行，
@@ -207,16 +209,16 @@ export class SqliteSyncSurface {
    * 观察（R4）：`false` = 本次观察未被应用（重复**或**乱序），调用方不得读成"已应用"。账本只追加，插入是裸
    * `INSERT`——键里含 `dedupe_key`，两条**不同**的观察在物理上不可能互相顶掉；已见的 `(bindingId, dedupeKey)`
    * 在入口就被挡回，因此"同一观察再投递一次"永远第二次返回 `false`（换条目也一样，见 `putMembership`）。
-   * `sourceVersion` 缺失时按空串落 `updated_at`，读回时由 `columnToVersion` 还原再比较；非 ASCII 在入口拒绝。
+   * `sourceVersion` 缺失时按空串落 `updated_at`，读回时由 `columnToVersion` 还原再比较；非规范载体在入口抛错、不写行。
+   * 已提交版本非空且不是规范载体（005 之后旧载体又混进账本）时抛 `LEGACY_COMMITTED_VERSION_MESSAGE`，不再把更新的事实静默判成乱序；内存替身入口已断言，这种状态不可达，所以没有对应守卫。
    */
   recordObservation(record: ObservationRecord): Promise<boolean> {
     return this.mutate(() => {
       const { observation } = record
-      if (observation.sourceVersion !== undefined && !isComparableSourceVersion(observation.sourceVersion)) {
-        throw new Error(`sourceVersion 必须是可比的 ASCII 载体：${observation.sourceVersion}`)
-      }
+      assertComparableSourceVersion(observation.sourceVersion)
       if (this.#hasSeenObservation(observation.bindingId, observation.dedupeKey)) return false
       const committed = this.#committedVersion(observation.bindingId, observation.subject.objectKind, observation.subject.externalId)
+      if (committed !== undefined && !isComparableSourceVersion(committed)) throw new Error(LEGACY_COMMITTED_VERSION_MESSAGE)
       if (committed !== undefined && compareSourceVersion(observation.sourceVersion, committed) < 0) return false
       this.db.prepare(`INSERT INTO sync_observation (${OBSERVATION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(observation.bindingId, observation.subject.objectKind, observation.subject.externalId, observation.receivedTime,

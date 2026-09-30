@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import * as cap from '@harness-projects/capabilities'
 import { ObservationState } from '@harness-projects/capabilities'
 import { ExternalIdentityKind, MembershipContentKind } from '@harness-projects/domain'
 import { binding, fieldValue, membership, observation, seedEntity, seedWorkspace, WORKSPACE, projection } from './storage-fixtures.js'
@@ -13,8 +14,10 @@ export function storageSyncSuite(adapter, register = test) {
     // 前置状态只走端口（第四轮评审）：观察与游标引用 ws-1 / binding-1，不再靠装配处直插绕过外键。
     const storage = makeStorage(); await seedWorkspace(storage, 'ws-other')
     await seedWorkspace(storage); await storage.putProviderBinding(binding('binding-1'))
+    // 夹具简写：v1 / v2 / v3 只是三个递增的时刻，映射成规范载体后再交给端口（入口只接受规范载体，#203）。
+    const CANONICAL = { v1: '2026-09-21T07:10:00.000000000Z', v2: '2026-09-21T07:11:00.000000000Z', v3: '2026-09-21T07:11:54.000000000Z' }
     const makeObservation = (key, version, payload) => observation(key, 'pending', {
-      sourceVersion: version, payload, receivedTime: `${version}:00Z`,
+      sourceVersion: CANONICAL[version], payload, receivedTime: `${version}:00Z`,
     })
     assert.equal(await storage.recordObservation(makeObservation('key-1', 'v2', { value: 'new' })), true)
     assert.equal(await storage.recordObservation(makeObservation('key-old', 'v1', { value: 'old' })), false)
@@ -91,7 +94,8 @@ export function storageSyncSuite(adapter, register = test) {
     const storage = makeStorage()
     await seedWorkspace(storage)
     await storage.putProviderBinding(binding('binding-1'))
-    const at = (key, version) => observation(key, ObservationState.Pending, { sourceVersion: version, receivedTime: version })
+    // 夹具简写：把秒级字面量补成规范载体的 9 位小数，不是归一规则（归一见 `sourceVersionFromTimestamp`）。
+    const at = (key, version) => observation(key, ObservationState.Pending, { sourceVersion: version.replace(/Z$/, '.000000000Z'), receivedTime: version })
     assert.equal(await storage.recordObservation(at('k1', '2026-09-21T07:11:00Z')), true)
     assert.equal(await storage.recordObservation(at('k2', '2026-09-21T07:11:54Z')), true, '更新的 ISO 版本必须被接受')
     // 判别性（2026-09-24 评审）：`v1, v3, v2` 这一格把"取最大"与"取最小"分开——旧用例的乱序观察都比**全部**
@@ -101,7 +105,7 @@ export function storageSyncSuite(adapter, register = test) {
     assert.equal(await storage.recordObservation(at('k1', '2026-09-21T07:11:00Z')), false, '同版本重复投递必须被拒绝')
   })
 
-  register(`${label}：版本载体必须是可比的 ASCII，非 ASCII 在入口被拒绝（R4）`, async () => {
+  register(`${label}：版本载体必须是规范载体：非 ASCII、未归一的时间戳与不定长编号在入口被拒绝且不留行（R4 / #203）`, async () => {
     const storage = makeStorage()
     await seedWorkspace(storage)
     await storage.putProviderBinding(binding('binding-1'))
@@ -111,7 +115,41 @@ export function storageSyncSuite(adapter, register = test) {
     // 非 ASCII 载体在入口被拒绝，这条分叉从"未被发现"变成"不可达"。
     await assert.rejects(storage.recordObservation(at('k1', '～')), /ASCII/, '非 ASCII 的 sourceVersion 必须被拒绝')
     await assert.rejects(storage.recordObservation(at('k2', '😀')), /ASCII/, '增补平面字符同样必须被拒绝')
-    assert.equal(await storage.recordObservation(at('k3', 'v1')), true, 'ASCII 载体照常接受（provider 的义务是让它可比）')
+    // 判别性（#203）：这些都是 ASCII，但码点序与时间序 / 数值序不一致（`10` < `9`；`…54Z` 与 `…54.5Z` 在 `Z` / `.` 处反转；
+    // 偏移写法不同的同一时刻不相等），所以必须在入口拒绝，让 provider 用 `sourceVersionFromTimestamp` 归一后再写。
+    const unnormalized = ['2026-09-21T07:11:54Z', '2026-09-21T07:11:54.5Z', '2026-09-21T07:11:54.500Z', '2026-09-21T15:11:54+08:00',
+      '9', '10', 'v9', 'v10', '0123456789abcdef0123456789abcdef01234567', '2026-09-21t07:11:54.000000000z']
+    for (const [index, version] of unnormalized.entries()) {
+      await assert.rejects(storage.recordObservation(at(`bad-${index}`, version)), /规范载体/, `未归一的 sourceVersion 必须被拒绝：${version}`)
+    }
+    await assert.rejects(storage.recordObservation(at('k3', 'v1')), /规范载体/, '不定长编号 v1 不再是合法载体')
+    assert.equal(await storage.recordObservation(at('k4', '2026-09-21T07:11:54.000000000Z')), true, '被拒绝的写入没有留下行：规范载体首次写入照常应用')
+  })
+
+  register(`${label}：规范载体按时间序定序：#203 的变精度与偏移反例归一后，更新的被应用、更旧的被拒绝，同一时刻不同精度是同一版本`, async () => {
+    const storage = makeStorage()
+    await seedWorkspace(storage)
+    await storage.putProviderBinding(binding('binding-1'))
+    const at = (key, external, version) => observation(key, ObservationState.Pending, {
+      subject: { bindingId: 'binding-1', objectKind: 'issue', externalId: external, url: undefined },
+      sourceVersion: cap.sourceVersionFromTimestamp(version), receivedTime: '2026-09-21T07:11:00Z',
+    })
+    // 三组 #203 反例：旧值码点序大于新值，未归一时新观察会被静默丢弃；归一后按时间序，新的必须被应用。
+    const pairs = [
+      ['precision', '2026-09-21T07:11:54Z', '2026-09-21T07:11:54.5Z'],
+      ['fraction', '2026-09-21T07:11:54.5Z', '2026-09-21T07:11:54.51Z'],
+      ['offset', '2026-09-21T15:11:54+08:00', '2026-09-21T08:00:00Z'],
+    ]
+    for (const [name, older, newer] of pairs) {
+      assert.deepEqual([
+        await storage.recordObservation(at(`${name}-old`, name, older)),
+        await storage.recordObservation(at(`${name}-new`, name, newer)),
+      ], [true, true], `${name}：更新的版本必须被应用`)
+      assert.equal(await storage.recordObservation(at(`${name}-older`, name, older)), false, `${name}：更旧的版本在已提交更新版本之后必须被拒绝`)
+    }
+    // 同一时刻的不同写法归一后逐字相等：R4 ② 同版本整快照替换（换 dedupeKey 返回 true），不是乱序。
+    assert.equal(await storage.recordObservation(at('same-1', 'same', '2026-09-21T07:11:54Z')), true)
+    assert.equal(await storage.recordObservation(at('same-2', 'same', '2026-09-21T07:11:54.000Z')), true, '同一时刻不同精度是同一版本，整快照替换')
   })
 
   register(`${label}：换一个实例能读到同一份内容（模拟重启）`, async () => {
