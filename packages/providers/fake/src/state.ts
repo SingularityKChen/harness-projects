@@ -10,10 +10,11 @@ import {
   type ProviderPlanningFieldDefinition,
   type ProviderPlanningFields,
   type ProviderPlanningItem,
+  type ProviderPlanningMembership,
   type ProviderProject,
 } from '@harness-projects/capabilities'
 export type FakePlanningItemRecord = {
-  ref: ExternalObjectRef; project: ExternalObjectRef; content: ProviderPlanningContent
+  ref: ExternalObjectRef; project: ExternalObjectRef; membership: ProviderPlanningMembership; content: ProviderPlanningContent
   fields: ProviderPlanningFields; sourceVersion: string; sourceUpdatedAt: string
 }
 
@@ -67,7 +68,7 @@ export function nextSourceVersion(state: FakePlanningState): string {
 }
 export function toPlanningItem(record: FakePlanningItemRecord): ProviderPlanningItem {
   return {
-    ref: record.ref, project: record.project, content: record.content,
+    ref: record.ref, project: record.project, membership: record.membership, content: record.content,
     fields: record.fields, sourceVersion: record.sourceVersion, sourceUpdatedAt: record.sourceUpdatedAt,
   }
 }

@@ -66,7 +66,9 @@ export function seedFor(name: FakeFixtureName, bindingId: ProviderBindingId): Fa
   for (const seed of SEEDS[name]) {
     const itemRef = ref(bindingId, seed.objectKind, seed.externalId)
     state.items.push({
-      ref: itemRef, project: projectRef, content: seed.content, fields: { ...emptyFields(), statusKey: seed.statusKey },
+      ref: itemRef, project: projectRef, content: seed.content,
+      membership: { externalId: `m-${seed.externalId}`, createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z' },
+      fields: { ...emptyFields(), statusKey: seed.statusKey },
       sourceVersion: nextSourceVersion(state), sourceUpdatedAt: '2026-09-20T00:00:00Z',
     })
     enqueueObservation(state, {

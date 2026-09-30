@@ -29,8 +29,25 @@ export interface ProviderPlanningFields {
   readonly customFields: Readonly<Record<string, unknown>>
 }
 
+/** 成员关系（裁决 R1）：条目挂在 project 上的那一行；id 与两个时间戳都独立于内容（E1-1 实验 1）。它不是外部身份种类。 */
+export interface ProviderPlanningMembership {
+  readonly externalId: string; readonly createdAt: string | undefined; readonly updatedAt: string | undefined
+}
+
+/** 平台扣下内容身份时，条目 ref 退回成员关系，objectKind 取这个值；调用方不得把它登记为外部身份。 */
+export const PLANNING_MEMBERSHIP_OBJECT_KIND = 'project_item'
+
+/**
+ * 规划条目。四条语义：
+ * 1. `ref` 是**内容身份**（issue / draft / change_request），成员关系 id 在 `membership` 里；
+ * 2. 例外：平台扣下内容身份（内容为 redacted 且无从得知内容 id）时，`ref` 退回成员关系，
+ *    `objectKind` 为 `PLANNING_MEMBERSHIP_OBJECT_KIND`，调用方不得把它登记成外部身份；
+ * 3. `sourceVersion` 是成员关系版本，调用方只做相等比较；
+ * 4. `reconcile` 失败时一条观察都不产出（全有或全无）。
+ */
 export interface ProviderPlanningItem {
-  readonly ref: ExternalObjectRef; readonly project: ExternalObjectRef; readonly content: ProviderPlanningContent
+  readonly ref: ExternalObjectRef; readonly project: ExternalObjectRef; readonly membership: ProviderPlanningMembership
+  readonly content: ProviderPlanningContent
   readonly fields: ProviderPlanningFields; readonly sourceVersion: string | undefined; readonly sourceUpdatedAt: string | undefined
 }
 

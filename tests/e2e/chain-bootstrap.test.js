@@ -16,6 +16,7 @@ import {
 import { composeCore, promoteEntityIdentity, withEngineeringFacts } from '@harness-projects/core'
 import {
   FaultKind,
+  createFakePlanningProvider,
   createFakeProviders,
   createFakeStorage,
   exportFakeStorageState,
@@ -93,6 +94,7 @@ test('全量收敛：provider 返回空集合后本地规划条目被移除', as
   const result = await core.commands.bootstrapWorkspace()
   assert.equal(result.ok, true)
   assert.deepEqual(await core.queries.listPlanningItems(), [])
+  assert.equal((await core.queries.getPlanningSync()).degraded, false, '合法的空项目不是不完整读取')
 })
 
 test('降级：规划 provider 离线时返回最后已知值并标记 degraded，而不是抛错（ExecPlan D5）', async () => {
@@ -111,6 +113,9 @@ test('降级：规划 provider 离线时返回最后已知值并标记 degraded�
     '降级投影必须保留最后已知权威值',
   )
   assert.ok(after.length > 0 && after.every((view) => view.freshness.degraded === true), '每条投影都必须标记 degraded')
+  const denied = await compose({ ...providers, planning: createFakePlanningProvider({ bindingId: providers.planning.bindingId, faults: { permissionDenied: true } }) }, providers.storage)
+  assert.deepEqual((await denied.queries.listPlanningItems()).map((view) => view.freshness.degraded), [true, true, true], '读取能力不可用时旧行是 stale（H11）')
+  assert.deepEqual(await (await composeCore({ workspace: WORKSPACE, providers: {} })).queries.getPlanningSync(), { degraded: true, stale: true, reason: '没有可用的 storage 绑定' })
 })
 
 test('工程事实：CI 结果只产生派生标记，不改写规划状态（不变量 3）', async () => {
@@ -148,4 +153,28 @@ test('身份：Draft→Issue 提升只换外部 id，内部实体 id 不变（�
   assert.equal(primaries.length, 1, '提升后仍只有一个 primary 身份')
   assert.equal(primaries[0].externalKind, 'issue')
   assert.equal(primaries[0].externalId, 'issue-100')
+})
+
+test('身份：没有内容身份的条目不登记外部身份（裁决 R1）', async () => {
+  const providers = threeItemComposition()
+  const { planning } = providers
+  const project = fixtureProjectRef(planning.bindingId)
+  planning.state.items.push({
+    ref: { bindingId: planning.bindingId, objectKind: 'project_item', externalId: 'm-orphan', url: undefined },
+    project,
+    membership: { externalId: 'm-orphan', createdAt: undefined, updatedAt: undefined },
+    content: { kind: 'redacted', reason: 'unavailable' },
+    fields: { statusKey: undefined, priority: undefined, assigneeRefs: [], iterationId: undefined, startDate: undefined, targetDate: undefined, customFields: {} },
+    sourceVersion: 'v-orphan',
+    sourceUpdatedAt: '2026-09-20T00:00:00Z',
+  })
+  const core = await compose(providers)
+  const result = await core.commands.bootstrapWorkspace()
+  assert.deepEqual([result.ok, result.degraded, result.error?.code], [true, true, 'permission_denied'], '可锚定部分已提交，但这次读取不完整')
+  assert.equal(result.unanchored, 1, '没有内容身份、也没有成员关系映射的条目必须计入 unanchored')
+  assert.equal(result.entities, 3, '不得为它新建实体')
+  const { identities } = exportFakeStorageState(providers.storage)
+  assert.equal(identities.some((identity) => identity.externalId === 'm-orphan'), false, '成员关系 id 不得进外部身份表')
+  assert.deepEqual((await core.queries.listPlanningItems()).map((view) => [view.freshness.degraded, view.freshness.reason]), Array(3).fill([false, undefined]), '本次读取确认的可见行保持 fresh（H11）')
+  assert.deepEqual(await core.queries.getPlanningSync(), { degraded: true, stale: false, reason: 'permission_denied' })
 })

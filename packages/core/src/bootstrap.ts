@@ -16,17 +16,21 @@ import {
 } from '@harness-projects/domain'
 import { gateCommand } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
-import { asExternalKind, ensureEntity, entityKindFor } from './identity.ts'
+import { ensureEntity, entityKindFor, planningContentKind } from './identity.ts'
 
 /** 一个工作空间只有一个 Planning 事实源（不变量 1），因此一个绑定只需要一条同步游标。 */
 export const PLANNING_SYNC_SCOPE = 'planning.project'
 const PAGE_LIMIT = 50
+/** 单次引导的页数上界（50 × 1000 = 5 万条）；与成环判定各自独立，任一命中都按不完整读取处理、不提交。 */
+const MAX_PAGES = 1000
 
 export interface BootstrapResult {
   readonly ok: boolean
   readonly entities: number
   readonly workItems: number
   readonly changeRequests: number
+  /** 没有内容身份、且按成员关系也找不回已登记实体的条目数：它们不进投影，其余照常提交，游标记为 healthy 加错误码（D23）。 */
+  readonly unanchored: number
   readonly revision: number
   readonly degraded: boolean
   readonly error: ProjectError | undefined
@@ -38,6 +42,7 @@ interface SyncCounts {
   entities: number
   workItems: number
   changeRequests: number
+  unanchored: number
 }
 
 export async function bootstrapWorkspace(context: CoreContext): Promise<BootstrapResult> {
@@ -77,19 +82,23 @@ async function readProject(
   return providerOk(result.value.ref)
 }
 
-/** 分页读全量条目：游标由 provider 给出，直到 nextCursor 未定义。 */
+/** 分页读全量条目，直到 nextCursor 未定义；游标回到已发送过的值（成环）或超过页数上界时返回结构化失败。 */
 async function readAllItems(
   planning: PlanningProvider, project: ExternalObjectRef,
 ): Promise<ProviderResult<readonly ProviderPlanningItem[]>> {
   const items: ProviderPlanningItem[] = []
+  const sent = new Set<string>()
   let cursor: string | undefined
-  for (;;) {
+  for (let pages = 0; pages < MAX_PAGES; pages += 1) {
     const page = await planning.listPlanningItems({ project, cursor, limit: PAGE_LIMIT })
     if (!page.ok) return page
     items.push(...page.value.items)
     cursor = page.value.nextCursor
     if (cursor === undefined) return providerOk(items)
+    if (sent.has(cursor)) break
+    sent.add(cursor)
   }
+  return providerErr(providerError(ProviderErrorCode.Unavailable, '规划条目分页成环或超过页数上界，本次读取不完整'))
 }
 
 /** 观察流是同步输入（D2）：provider 没有观察流时返回空表，不影响权威读取。 */
@@ -111,16 +120,19 @@ async function commitSync(
     const synced = await upsertItems(tx, context, items, revision)
     await recordObservations(tx, observations)
     await tx.replacePlanningProjections({ workspaceId: context.workspaceId, bindingId }, synced.projections)
+    // 提交成功即 healthy；有缺口只带错误码，不写 degraded（degraded / failed 留给什么都没提交的读取，D23）。
+    const incomplete = synced.counts.unanchored > 0
     await tx.putSyncCursor({
       bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined,
-      state: SyncState.Healthy, lastErrorCode: undefined,
+      state: SyncState.Healthy, lastErrorCode: incomplete ? ProjectErrorCode.PermissionDenied : undefined,
     })
     return { revision, counts: synced.counts }
   })
+  const { unanchored } = committed.counts
   return {
     ok: true, entities: committed.counts.entities, workItems: committed.counts.workItems,
-    changeRequests: committed.counts.changeRequests, revision: committed.revision,
-    degraded: false, error: undefined,
+    changeRequests: committed.counts.changeRequests, unanchored, revision: committed.revision, degraded: unanchored > 0,
+    error: unanchored > 0 ? projectError(ProjectErrorCode.PermissionDenied, `${unanchored} 个条目对当前凭据不可见，按成员关系也找不回本地实体`) : undefined,
   }
 }
 /** 一个条目一个成员：先解析稳定内部实体，再把权威字段与三态内容写成工作区投影。 */
@@ -128,24 +140,45 @@ async function upsertItems(
   tx: StorageTransaction, context: CoreContext,
   items: readonly ProviderPlanningItem[], revision: number,
 ): Promise<SyncedItems> {
-  const counts: SyncCounts = { entities: 0, workItems: 0, changeRequests: 0 }
+  const counts: SyncCounts = { entities: 0, workItems: 0, changeRequests: 0, unanchored: 0 }
   const projections: WorkspaceProjection[] = []
   for (const item of items) {
-    const external = {
-      bindingId: item.ref.bindingId,
-      externalKind: asExternalKind(item.ref.objectKind),
-      externalId: item.ref.externalId,
+    const anchor = await anchorOf(tx, context, item)
+    if (anchor === undefined) {
+      counts.unanchored += 1
+      continue
     }
-    const kind = entityKindFor(item.content.kind, external.externalKind)
-    const entityId = await ensureEntity(tx, external, kind, context.ids)
-    const projection = toProjection(context.workspaceId, entityId, item, revision)
+    const projection = toProjection(context.workspaceId, anchor.entityId, item, revision)
     await tx.putPlanningProjection(context.workspaceId, projection)
     projections.push(projection)
     counts.entities += 1
-    if (kind === EntityKind.ChangeRequest) counts.changeRequests += 1
+    if (anchor.kind === EntityKind.ChangeRequest) counts.changeRequests += 1
     else counts.workItems += 1
   }
   return { counts, projections }
+}
+
+/**
+ * 条目的本地锚点。有内容身份：先记下成员关系 → 内容的映射，再解析（必要时新建）实体。没有内容身份（REDACTED / content 为 null）：
+ * 只读地按成员关系找回上次可见时登记的实体，投影内容仍取本次读到的 redacted，不回退缓存；找不到返回 undefined。
+ */
+async function anchorOf(
+  tx: StorageTransaction, context: CoreContext, item: ProviderPlanningItem,
+): Promise<{ entityId: EntityId; kind: EntityKind } | undefined> {
+  const { workspaceId } = context
+  const contentKind = planningContentKind(item.ref.objectKind)
+  if (contentKind === undefined) {
+    const known = await tx.getMembership(workspaceId, item.membership.externalId)
+    const identity = known && await tx.findExternalIdentity(item.ref.bindingId, known.contentKind, known.contentExternalId)
+    return identity && { entityId: identity.entityId, kind: entityKindFor(item.content.kind, identity.externalKind) }
+  }
+  await tx.putMembership({
+    workspaceId, projectExternalId: item.project.externalId, itemExternalId: item.membership.externalId, contentKind,
+    contentExternalId: item.ref.externalId, membershipCreatedAt: item.membership.createdAt, membershipUpdatedAt: item.membership.updatedAt,
+  })
+  const external = { bindingId: item.ref.bindingId, externalKind: contentKind, externalId: item.ref.externalId }
+  const kind = entityKindFor(item.content.kind, contentKind)
+  return { entityId: await ensureEntity(tx, external, kind, context.ids), kind }
 }
 
 function toProjection(
@@ -189,7 +222,7 @@ async function fail(
     })
   }
   return {
-    ok: false, entities: 0, workItems: 0, changeRequests: 0, degraded: true, error,
+    ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0, degraded: true, error,
     revision: await context.storage.currentRevision(context.workspaceId),
   }
 }
