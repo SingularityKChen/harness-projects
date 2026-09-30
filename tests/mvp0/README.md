@@ -22,6 +22,8 @@ node --test tests/mvp0    # 直接跑，不需要凭据、不需要网络
 这段形态仍然有效：删掉任一节点的实现，该节点就会以这个形状失败，而**不是**以
 `SyntaxError` / 导入错误失败（见 §2）。
 
+> **Superseded by `docs/product/vertical-path.md` §2.1（2026-09-29，#217）**：原文"当前 7 条断言全部通过（链路已由切片栈实现）"里的"链路已实现"不成立：7 条全绿只对应 §2 步骤表中有节点的行；第 8、9、13 行与 Draft→Issue 附行没有节点，第 2 行只有组合期断言，第 9 步没有生产入口。7 条全绿是 MVP-0 的必要条件，不是充分条件。原文保留。
+
 ## 2. 为什么失败信息是断言失败，而不是语法 / 导入错误
 
 `chain.test.js` 只 import 已经存在的包，然后逐节点断言"所需导出已存在、链路能走通"。缺导出时由
@@ -39,6 +41,8 @@ node --test tests/mvp0    # 直接跑，不需要凭据、不需要网络
 | 5 执行上下文 | `queries.getExecutionContext` | 同一工作项 + 仓库最多一个 active 执行上下文，重复开始复用 |
 | 6 分支/变更请求 | `queries.getDeliveryLineage` | 谱系沿已记录关系传播，不重新识别对象（不变量 6） |
 | 7 CI | `queries.getDeliveryLineage` | CI 事实不改写规划状态（不变量 3） |
+
+> **Superseded by `docs/product/vertical-path.md` §2.1 附行（2026-09-29，#217）**：上表第 3 行写节点 3 保护"Draft→Issue 提升后内部 `Entity` id 不变"，不成立：节点 3 的用例体不执行提升，只检查详情回指同一 `entityId`、恰好一个 primary 身份与重复引导后实体数不变；提升的断言在 `tests/e2e/chain-bootstrap.test.js`，且是直接调用 `promoteEntityIdentity` 的旁证层，生产同步路径的反例见 §2.1 复现命令 P1。登记见 `docs/exec-plan/tech-debt-tracker.md` TD-001。原文保留。
 
 `chain.test.js` 同时钉下期望的 CoreApi 表面：`composeCore(deps)` → `{ queries, commands }`，方法名沿用
 capabilities 各 port 的动词。后续批次若不采用某个名字，必须显式改对应断言并说明原因。

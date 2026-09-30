@@ -8,6 +8,7 @@
 |---|---|---|
 | `docs/exec-plan/active/` | 进行中的 ExecPlan（spec + plan 合一的活文档） | 已完成的历史计划 |
 | `docs/exec-plan/completed/` | 已验收完成的 ExecPlan，按原文件名保留 | 需要继续修订的计划 |
+| `docs/exec-plan/tech-debt-tracker.md` | 实施时明确接受延期的技术债及其解决/取代记录 | 未裁决的设计候选与功能路线图 |
 | `docs/architecture/` | 长期有效的架构说明：模块边界、依赖方向、数据流、集成方式 | 一次性的实施计划 |
 | `docs/adr/` | 不可回退的技术决策（ADR），一条决策一份文件 | 可以随时改的偏好设置 |
 | `docs/product/` | 产品范围、术语表、目标形态、非目标 | 工程实现细节 |
@@ -41,6 +42,7 @@
 | [2026-09-22-status-field-writer](exec-plan/completed/2026-09-22-status-field-writer.md) | 给 `Status` 一个定义、一个写入口、一个防漂移的检查：语义收敛到 `board-semantics.md` 单一事实源、写入口写进交付流程、契约测试按「行 + 子句」设防 | Completed |
 | [2026-09-21-gate-e1-write-and-events](exec-plan/active/2026-09-21-gate-e1-write-and-events.md) | Gate E1 写确认与事件可靠性：实测平台无 CAS、事件订不到、重复创建幂等 | Active |
 | [2026-09-24-local-git-worktree](exec-plan/active/2026-09-24-local-git-worktree.md) | 本地 Git provider（#137）：仓库读、分支建、工作树建，路径安全在任何 Git 命令之前；第四轮 18 条意见按根因改完，移除与 core 层验收分别拆到 #138 / #207 | Batch 1–5 已完成；四轮评审响应已记录 |
+| [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | epic #216 的控制计划：先把纵向路径与 R1 不变量的证据如实落账，再收敛读写权威、同步和 Client 重连，最后合并发布前 SQL、清理旧形状并重整测试与文档证据 | Batch 0（#217）已验收；纵向路径矩阵见 `docs/product/vertical-path.md` §2.1，R1 映射见 `docs/architecture/release-gates.md` §2.1.1；PR #239 状态以 GitHub 回读为准；Batch 1–7 待实施 |
 
 ### Completed
 
