@@ -395,6 +395,8 @@ cd "$SCRATCH/export" && node --input-type=module -e "console.log(import.meta.res
 
 ## Progress
 
+- [x] (2026-09-30) #240 关闭 #203 前更新 R1 第 8 行：旧 v9/v10 端口反例变为入口拒绝，规范时间戳在两个 Storage 上按时间序；旧库迁移、拒绝与备份恢复已验证。R1 汇总当前为部分 6、反例 4，core 乱序注入仍缺，控制计划与人工门禁继续 active。
+
 - [x] (2026-09-30) B0.7：修复 review `5360350058` 的管道退出状态建议，按文档原样执行正反对照，并在两个 shell 上复跑进程级失败；27 条聚焦测试通过。共享历史整理前保存完整树，按一个文档交付物收敛提交，再以精确 lease 推送；最终 head 的 checks、线程、issue 和 reviewer 批准均需重新回读。
 
 - [x] (2026-09-29 08:55 CST) 建立隔离工作树与 ExecPlan 骨架；调查仓库权威文档、代码、迁移、测试与开放 issue，区分真实偏移与有意分期。
@@ -453,6 +455,8 @@ cd "$SCRATCH/export" && node --input-type=module -e "console.log(import.meta.res
 - **S-18 按故障开关搜索会漏掉手工注入的同类失败**（B0.6 验收发现）。替身的 `FaultKind.Offline` 在 `gate.ts` 与 `planning.ts` 里就是返回 `ProviderErrorCode.Unavailable`；`tests/integration/start-work-retry-identity.test.js` 与 `start-work-step-recording.test.js` 不用故障开关，而是手工替换 `createWorktree` / `listBranches` 让它返回同一个错误码，并且都经 `composeCore` + `commands.startWork`。只 `grep FaultKind` 得出的"13.3 经入口的用例：无"因此偏强（原文已订正）。以后核对"某故障没有经入口的用例"时，要同时按故障开关与 `ProviderErrorCode.*` 搜索。
 
 ## Decision Log
+
+2026-09-30 / 执行者：#203 的修复由后合并的 #240 同步更新 `release-gates.md` 第 8 行和历史探针取代标注，满足本计划的同 PR 更新纪律；原 Batch 0 的部分 5 / 反例 5 是历史快照，**Superseded by** 新表当前部分 6 / 反例 4。其余用户链路反例没有因载体修复消失。
 
 2026-09-30 / 人类伙伴与执行者：人类明确要求 #239、#240 修复并 rebase merge。#239 的 Batch 0 文档是一个可回滚交付物，最终提交整合为一笔；原先保留八提交和“不合并”的记录仅描述当时阶段，**Superseded by B0.7**。先保留本地备份，核对产品代码零变化及文档差异，再精确 lease 推送；控制计划仍 active，功能批次没有因此交付。
 
@@ -541,3 +545,5 @@ B0.5 在最终提交上的验收结果：B0-1 为 13 个编号行加 1 个附行
 - 2026-09-29 19:39 CST 起：B0.5 验收收口。原因：三条子分支需要按所有者摘取，B0.4 留下 P3 与待定项。改动：按 T3 → T2 → T1 摘取并以 `comm` 核对文件集合；R1 第 5、10 条降为"部分"、矩阵第 3 行改为"反例：#199（X2）"并把两条组合期用例记旁证，第 4、6 行改为本轮复跑（X3、X1）；§2.2 过期计数加注；0.3、0.4 初值表换成指向矩阵与 R1 快照的一句话；B0-2 判据三处改为带对照的判别命令，B0-10 与 B0.5 的关闭关系只留在 PR 正文；Progress、Surprises（S-11 至 S-14）、Decision Log、Outcomes 与 `docs/README.md` 索引行随之更新。
 - 2026-09-30：B0.6 评审响应。原因：评审 5353108706（CHANGES_REQUESTED）指出第 13 行既无入口也未标"未交付"、回读判据依赖 Node 22 没有的 `--test-isolation`，并要求变基后刷新第 7 行。改动：第 13 行拆成 13.1–13.10 故障面并同步 B0-1；回读命令改为直接运行测试文件的判别命令（`vertical-path.md`、`release-gates.md` §2.1.1、0.3、0.8、B0-2、TD-003 五处同步）；第 7 行与 R1 第 9、10 行按 `main@699d715` 的新增用例改写；观察基线改为 `main@699d715` 并重跑 P1–P5、X1–X3、M1、M3、M9、M10；Progress（B0.6）、Surprises（S-15 至 S-17）、Decision Log、Outcomes 随之更新。
 - 2026-09-30 00:34 CST 起：B0.6 验收复核。原因：执行者的 `f7909e1` 要按评审原条件独立复跑。改动：13.3 补引两条经入口用例、13.7 入口格改为"无"、简称表补 `start-work-step-recording`、`vertical-path.md` 的 Node 说明补文档依据、TD-003 遗留影响列与被取代的 Decision Log 行订正；Plan of Work 补 B0.6 条目，Progress、Surprises（S-15 补注、S-18）、Decision Log、Outcomes 随之更新。
+
+- 2026-09-30：#240 合入前按同 PR 纪律刷新 #203 的端口反例与 R1 汇总，保留历史快照和探针，记录仍缺的 core 乱序注入。

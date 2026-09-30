@@ -48,6 +48,7 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-09-29-source-version-order](exec-plan/completed/2026-09-29-source-version-order.md) | #203 观察版本载体收窄为规范 UTC 纳秒时间戳；旧行迁移、拒绝与备份恢复，完整迁移交错报告阶段和已提交版本；#70 需调用统一归一函数，R1 第 8 行同步收口 | Completed |
 | [2026-09-29-start-work-resume-evidence](exec-plan/completed/2026-09-29-start-work-resume-evidence.md) | #183 剩余闭环：真实 Git 上基线前进后恢复、多页分支探测与头提交透传、失败时保留已决定分支；评审响应补上 `conflict` 后列表读失败的 `unknown` 传播。PR #237 的最终远端门禁与合并状态按实时 GitHub 回读。 | Completed |
 | [2026-09-24-merge-queue-closing-refs](exec-plan/completed/2026-09-24-merge-queue-closing-refs.md) | 订正关闭引用的普适断言，保留两次相反观测；回读 #159、#158、#160、#161 的合并结果及 #139 的关联，并登记 `feat/` 前缀偏差（issue #180） | Completed |
 | [2026-09-24-human-execution-provider](exec-plan/completed/2026-09-24-human-execution-provider.md) | 人工执行 provider（#139）：人工运行是 `running`；引用带签发者 HMAC、来源闸门 fail closed，签发者身份由宿主注入；主执行确定起不来时 core 启动声明 `execution.run.fallback` 的绑定（两个角色按能力键分开、受写门约束，#171）；`providerRef` 与降级结论落进运行记录（#172，SQLite 004），取消按运行身份在事务内原子替换（ADR-0008）。库级闭环，宿主装配见 #132，余项见 #215；#139 / #171 / #172 保持 `Refs`，关闭由人类伙伴决定 | Completed |

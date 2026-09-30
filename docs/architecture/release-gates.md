@@ -76,6 +76,8 @@ R1 本身不得由 LLM 判定（`AGENTS.md` §1.1 第 5 条）；agent 只能提
 
 对每一条仍需重跑上面的两步：找到实际断言该不变量的用例，并确认它在无凭据、无网络下通过；任何一条找不到用例，或用例不通过，第 3 条即为不满足。只有 10 条全部被找到且全部通过，第 3 条才满足。
 
+> **观察更新（2026-09-30，#203 / PR #240）**：原“部分 5、反例 5”快照由 §2.1.1 的修复后第 8 行取代；当前为部分 6、反例 4，R1 第 3 条仍有证据缺口与反例，不能判满足。
+
 #### 2.1.1 逐条核对快照（观察快照）
 
 > 观察基线：2026-09-29 起草于 `main@f6a33d2`；2026-09-30 变基到 `main@699d715` 后重新核对，现基线是 `main@699d715`，Node v26.10.0。两个提交之间的变动只涉及 Start Work 恢复与分支探测，本节引用的用例在新基线上逐条回读，复现命令 P1、P2、P4、P5 与 #203 端口探针在新基线的 `git archive` 导出目录里重跑，观察值不变；第 9、10 行的缺口按新增的真实 Git 用例改写。本节是证据，不是裁决：它逐条列出 §2.1 的十项不变量各由哪条自动化用例在哪一层断言、哪条有反例，判定者仍按 §2 表裁决。反例编号 P1、P2、P4、P5 指 `docs/exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md`「复现命令（P1–P5）」一节里的探针，期望值是同一基线上的观察；#203 的复跑写在表后。
@@ -97,13 +99,13 @@ R1 本身不得由 LLM 判定（`AGENTS.md` §1.1 第 5 条）；agent 只能提
 | 5 | `tests/e2e/status-policy.test.js`「工程事实（CI 失败 / 执行完成 / PR 合并）」「交付谱系里的 CI 失败只进 derived 块」 | 纯函数（三种事实 × 三种策略）；CI 一项经 `getDeliveryLineage` 取谱系后直接调用 `withDeliveryLineage`（旁证） | M3：`decideFromEngineeringFact` 返回 `incoming` 且 `wrote: true`，前一条用例与 `tests/mvp0/chain.test.js`「节点 7」各 1/1 变红，后一条用例不调用该函数，仍绿；还原后复绿 | `decideFromEngineeringFact` 与 `withDeliveryLineage` 在 `packages` 里没有生产调用者：规划状态"不被改写"是因为没有写者，不是被拒绝；执行完成与 PR 合并只在纯函数层。断言只落在纯函数层，没有触达生产路径。 | 部分（只在纯函数层断言；core 入口没有生产调用者，执行完成与 PR 合并没有生产摄入） |
 | 6 | `tests/e2e/write-machine.test.js`「写状态机：确认前只报告 saving」；`tests/e2e/controller-roundtrip.test.js`「命令：同键重放返回原结果」 | 纯函数（写状态机）；controller 入口 | 不要求 | 同一幂等键换工作项，第二次 `startWork` 报 `saved`，且没有为第二个工作项建执行上下文（P4，#194）：这是 `AGENTS.md` §1.1 实现级硬约束的失效形态。 | 反例（#194） |
 | 7 | `tests/integration/storage-sync-surface.test.js`「观察账本：同一观察投递 N 次与一次相同」；`tests/contract/storage-contract.test.js`「重复或乱序观察返回 false」；`tests/e2e/chain-bootstrap.test.js`「同步幂等」 | SQLite；端口（内存 + SQLite 两适配器）；core 入口（不断言修订号） | 不要求 | 相同输入的重复引导使业务修订号 2 变 3、实体数不变（P2，#220）；三条用例都不断言修订号。`duplicateEvent` 故障只在 provider 契约层使用，没有经 core 注入。 | 反例（#220） |
-| 8 | `tests/integration/storage-sync-surface.test.js`「观察定序：v1」「观察定序：更旧的版本不落账本」；`tests/contract/storage-contract.test.js`「定序取已提交版本的最大值」 | SQLite；端口（内存 + SQLite 两适配器） | 不要求 | 不等宽版本载体下新观察被判为乱序而丢弃：在 Storage 端口上先投递 `v9` 再投递 `v10`，第二次返回 `false`，两个适配器都复现（#203，探针见表后）。`packages/capabilities/src/observation.ts` 的定序约定把"码点序即目标序"的归一化列为 provider 的义务，Storage 只按码点序执行，所以这条反例现在不可达：当前没有生产路径给观察填 `sourceVersion`（种子观察不带版本，core 丢弃 `recordObservation` 的返回值）；#203 仍开放，第一个给观察填变精度或不定长版本的 provider 接入时，它会变成静默丢弃较新观察的缺口。`FaultKind.OutOfOrder` 从未被任何测试使用，乱序没有经 core 注入。 | 反例（#203） |
+| 8 | `tests/integration/storage-sync-surface.test.js`「观察定序：v1」「观察定序：更旧的版本不落账本」；`tests/contract/storage-contract.test.js`「定序取已提交版本的最大值」；`tests/contract/capabilities-observation.test.js`「sourceVersionFromTimestamp 把 RFC」；`tests/contract/storage-contract.test.js`「规范载体按时间序定序」；`tests/integration/storage-source-version-upgrade.test.js`「U1 评审反例」「U3 可归一」「U11 预检后的旧写者」 | SQLite；端口（内存 + SQLite 两适配器） | 不要求 | 不等宽版本载体下新观察被判为乱序而丢弃：在 Storage 端口上先投递 `v9` 再投递 `v10`，第二次返回 `false`，两个适配器都复现（#203，探针见表后）。`packages/capabilities/src/observation.ts` 的定序约定把"码点序即目标序"的归一化列为 provider 的义务，Storage 只按码点序执行，所以这条反例现在不可达：当前没有生产路径给观察填 `sourceVersion`（种子观察不带版本，core 丢弃 `recordObservation` 的返回值）；#203 仍开放，第一个给观察填变精度或不定长版本的 provider 接入时，它会变成静默丢弃较新观察的缺口。`FaultKind.OutOfOrder` 从未被任何测试使用，乱序没有经 core 注入。 **Superseded by #203 修复（2026-09-30，PR #240）**：v9 / v10 已在入口被拒绝；可归一时间戳统一成定宽 UTC 纳秒载体，两个 Storage 的新旧次序用例通过。SQLite 旧行可归一则迁移、不可归一则预检拒绝并提供备份修复；并发晚到旧行的事务内拒绝报告阶段和已提交版本。core 的乱序注入仍未覆盖，不能升为全链路已断言。 | 部分（端口定序已收口；core 无乱序观察注入） |
 | 9 | `tests/e2e/delivery-lineage.test.js`「只读交付方」 | core 入口 | M9：`rerunPipeline` 在交付方不支持时仍推进一次修订号，该用例 1/1 变红；还原后复绿 | 只覆盖 `rerunPipeline` 一条命令；`startWork` 缺 `worktreeCreate` 等其它写命令缺能力时没有经 `commands` 的用例。`tests/integration/local-git-start-work-resume.test.js`「R2 Development 能力不可用的失败」在真实 Git 上以 `worktreeCreate: false` 跑 core 的 `startWork` 函数（手工 `createContext`，旁证），断言 `not_supported`、已决定的分支保留、不新写 `has_worktree`；它落下的是一条 failed 上下文，不是不变量要求的"不产生任何本地写入"，也不经 `commands` 入口。 | 部分（仅 `rerunPipeline` 一条命令有 core 入口用例） |
 | 10 | `tests/e2e/start-work.test.js`「重启：同一份 Storage 内容上的新 core」；`tests/integration/human-execution-provider.test.js`「重启：同一份 Storage 上重建 core」 | core 入口（内存 Storage 导出再导入；后一条经 `composeCore` 装配真实 `execution-human` 与 `development-local-git`） | M10：内存 Storage 的 `exportFakeStorageState` 丢掉执行上下文，两条用例各 1/1 变红；还原后复绿 | core 与 SQLite 的组合没有用例（#141）：没有任何测试把 core 组合在 SQLite Storage 上，重启只在内存替身上证明，断言没有触达真实持久化。`tests/integration/local-git-start-work-resume.test.js`「R1 基线前进后换新键重试」把"中断在分支步之后、同一 storage 换一套能力重新组装、换新键重试"放在真实 Git 上跑 core 的 `startWork` 函数（手工 `createContext`，旁证）；它的存储仍是内存替身，用例头注释自己写明 SQLite 与重启归 #141。 | 部分（core 入口只在内存 Storage 上断言；core 与 SQLite 组合无用例，#141） |
 
-汇总：已断言 0、部分 5、反例 5、未验证 0，共 10 行。以上是证据，不是 R1 裁决；按 §1，存在反例或证据缺失即为不满足，"部分"与"未验证"同样不能算满足，第 3 条由 §2 表的判定者裁决。
+汇总：已断言 0、部分 6、反例 4、未验证 0，共 10 行。以上是证据，不是 R1 裁决；按 §1，存在反例或证据缺失即为不满足，"部分"与"未验证"同样不能算满足，第 3 条由 §2 表的判定者裁决。
 
-**#203 的端口复跑**（第 8 行，在装好依赖的 checkout 根目录运行）：
+**#203 的历史端口复跑**（第 8 行，原基线 main@699d715）：以下原文保留，**Superseded by** 本节下方修复后复跑；新契约拒绝 v9/v10，不能再把本历史输出当成当前结论。
 
 ```bash
 node --input-type=module -e "
@@ -119,6 +121,16 @@ for (const [name, storage] of [['fake', createFakeStorage()], ['sqlite', createS
 "
 # 观察：fake v9 true | v10 false；sqlite v9 true | v10 false（v10 是更新的观察，却被判为乱序）
 ```
+
+
+**#203 修复后复跑**（在检出 `fix/source-version-order` 的工作树根目录执行；当前 head 用 `gh pr view 240 -R SingularityKChen/harness-projects --json headRefOid` 回读）：
+
+```bash
+node --test tests/contract/capabilities-observation.test.js tests/contract/storage-contract.test.js tests/integration/storage-source-version-upgrade.test.js
+# 期望：非零用例且 fail 0；载体拒绝、归一后的新旧顺序、旧库恢复与完整迁移交错都有断言
+```
+
+本行的 #203 旧反例已收口：旧版公开端口写入 v9 后，当前版本预检拒绝且原文件不变；显式备份修复后规范新观察返回 true。预检后才出现旧写入时，已提交的早先迁移保持，005 回滚并通过错误的 phase / appliedVersions 报告真实状态。其余九行观察仍取 `main@699d715`（#239 的 `main@1cdfb23` 仅改文档，运行时代码相同）；本次只更新第 8 行及汇总，不替人类裁决 R1。
 
 ### 2.2 第 4、5 条的"稳定"与空层假绿
 
