@@ -116,7 +116,7 @@ export function storageExecutionSuite(adapter, register = test) {
     await assert.rejects(storage.putMutationAttempt(attempt({ id: 'attempt-dangling-binding', bindingId: 'binding-none' })), '写尝试必须指向存在的绑定')
     await assert.rejects(storage.putMutationAttempt(attempt({ id: 'attempt-dangling-ws', workspaceId: 'ws-none', idempotencyKey: 'key-2' })), '写尝试必须属于存在的工作区')
     await assert.rejects(storage.putRelation('ws-none', { from: 'entity-1', to: 'entity-2', type: 'relates_to', class: 'business_semantics', source: 'deterministic', state: 'candidate' }), '关系必须属于存在的工作区')
-    await assert.rejects(storage.recordObservation({ state: 'pending', observation: { bindingId: 'binding-none', dedupeKey: 'dedupe-dangling', type: 'issue.updated', eventTime: undefined, receivedTime: '2026-09-20T00:00:01Z', subject: { bindingId: 'binding-none', objectKind: 'issue', externalId: 'issue-1', url: undefined }, sourceVersion: 'v1', payloadHash: 'payload-hash', payload: {} } }), '观察必须属于存在的绑定')
+    await assert.rejects(storage.recordObservation({ state: 'pending', observation: { bindingId: 'binding-none', dedupeKey: 'dedupe-dangling', type: 'issue.updated', eventTime: undefined, receivedTime: '2026-09-20T00:00:01Z', subject: { bindingId: 'binding-none', objectKind: 'issue', externalId: 'issue-1', url: undefined }, sourceVersion: '2026-09-20T00:00:00.000000000Z', payloadHash: 'payload-hash', payload: {} } }), '观察必须属于存在的绑定')
     // 已对齐的枚举：SQLite 的 CHECK 与替身同语义。
     await assert.rejects(storage.putExecutionContext({ ...base, id: 'context-bogus-status', status: 'bogus' }), '执行上下文状态必须是已知取值')
     await assert.rejects(storage.putExecutionRun(run({ id: 'run-bogus-status', status: 'bogus' })), '执行运行状态必须是已知取值')

@@ -12,7 +12,7 @@ export const projection = {
 export const observation = (dedupeKey, state = ObservationState.Pending, overrides = {}) => ({ state, observation: {
   bindingId: 'binding-1', dedupeKey, type: 'issue.updated', eventTime: undefined, receivedTime: '2026-09-20T00:00:01Z',
   subject: { bindingId: 'binding-1', objectKind: 'issue', externalId: 'issue-1', url: undefined },
-  sourceVersion: 'v1', payloadHash: 'payload-hash', payload: {}, ...overrides } })
+  sourceVersion: '2026-09-20T00:00:00.000000000Z', payloadHash: 'payload-hash', payload: {}, ...overrides } })
 // 成员关系：定位键 (workspaceId, itemExternalId)；同一内容在两个工作区是两条（行为 1）。字段值：只存原样值，键不含可选值 id（R2）。
 export const membership = (overrides = {}) => ({ workspaceId: WORKSPACE, projectExternalId: 'project-1', itemExternalId: 'item-1', contentKind: 'issue',
   contentExternalId: 'issue-1', membershipCreatedAt: '2026-09-20T00:00:00Z', membershipUpdatedAt: '2026-09-20T00:00:00Z', ...overrides })

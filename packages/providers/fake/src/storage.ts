@@ -278,9 +278,7 @@ export class MemoryStorage implements cap.Storage {
     return this.#mutate(() => {
       const { observation } = record
       if (!this.data.providerBindings.some((binding) => binding.id === observation.bindingId)) throw new Error('observation binding does not exist')
-      if (observation.sourceVersion !== undefined && !cap.isComparableSourceVersion(observation.sourceVersion)) {
-        throw new Error(`sourceVersion 必须是可比的 ASCII 载体：${observation.sourceVersion}`)
-      }
+      cap.assertComparableSourceVersion(observation.sourceVersion)
       const key = `${observation.bindingId}|${observation.dedupeKey}`
       // 去重账本与快照槽位分开：账本按 (bindingId, dedupeKey) 只追加，永不被后来的同版本观察顶掉，
       // 否则"同一观察再投递一次"会第二次返回 true，调用方据此重放副作用。

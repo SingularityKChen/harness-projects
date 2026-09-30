@@ -27,6 +27,10 @@ export interface MigrateResult {
  * 事务外的快路径读取只用于跳过"已确认应用"的版本：版本记录只增不减，读到即可信任。
  * 它绝不作为"某版本缺失"的最终依据——并发进程可能在这次读取之后提交同一版本，
  * 因此真正决定是否执行 DDL 的判定必须发生在 BEGIN IMMEDIATE 之内。
+ *
+ * 数据步骤（`Migration.data`）与版本记录同生共死：`apply` 在迁移体之后、写 schema_migrations 之前，同在一个 BEGIN IMMEDIATE 内；
+ * 预检早于任何迁移——数据不合格的库在应用第一个待应用迁移之前就被拒绝，库文件不留任何改动。
+ * 若旧写者在预检后才写入不合格数据，apply 的事务内复判只回滚当前迁移；此前成功提交的版本不会撤销。
  */
 export function migrate(db: WorkspaceDatabase, options: MigrateOptions = {}): MigrateResult {
   const entries = options.entries ?? MIGRATIONS
@@ -37,6 +41,10 @@ export function migrate(db: WorkspaceDatabase, options: MigrateOptions = {}): Mi
   assertAppliedIsManifestPrefix(observed, entries)
 
   const settled = new Set(observed)
+  // 预检：只读、不开事务，先于任何待应用迁移（更早的待应用迁移也不得在拒绝之前执行）。权威判定在各自事务内的 apply。
+  for (const entry of entries) {
+    if (!settled.has(entry.version)) entry.data?.preflight(db)
+  }
   const newlyApplied: number[] = []
   for (const entry of entries) {
     if (settled.has(entry.version)) continue
@@ -70,6 +78,7 @@ function applyIfMissing(
       return false
     }
     db.exec(sql)
+    entry.data?.apply(db)
     db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(
       entry.version,
       new Date().toISOString(),

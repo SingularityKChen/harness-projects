@@ -170,9 +170,11 @@ export interface Storage {
 
   // ── 同步：重复或乱序观察返回 false，表示本次观察未被应用，调用方不得读成“已应用” ──
   // 主体是 `ProviderObservation.subject = (bindingId, objectKind, externalId)`，作用域是**连接**；观察**可以先于
-  // 成员关系落账**（对账先到、成员关系后到），storage 不要求成员关系存在。`sourceVersion` 必须可直接按字典序
-  // 比较且是 ASCII（比较器只有 `compareSourceVersion` 一份），非 ASCII 与空串在入口被拒绝——拒绝是裸异常，core 的同步
-  // 事务整笔回滚、游标不变 degraded（#199 承载结构化失败）。`payload` 由 provider
+  // 成员关系落账**（对账先到、成员关系后到），storage 不要求成员关系存在。`sourceVersion` 必须是规范载体（定宽 UTC
+  // 纳秒时间戳，由 provider 用 `sourceVersionFromTimestamp` 归一；比较器只有 `compareSourceVersion` 一份）。未归一的
+  // 秒级 / 变精度 / 带偏移时间戳、不定长编号、sha、非 ASCII 与空串由 `assertComparableSourceVersion` 在任何写入之前
+  // 拒绝且不留行——拒绝是裸异常，core 的同步事务整笔回滚、游标不变 degraded（#199 承载结构化失败）。
+  // 对规范载体：更新者返回 true，更旧者返回 false，同版本不同 dedupeKey 返回 true（R4 ② 整快照替换）。`payload` 由 provider
   // 负责脱敏（见 `ProviderObservation` 的契约注释），storage 原样持久化。
   recordObservation(record: ObservationRecord): Promise<boolean>
   getSyncCursor(bindingId: ProviderBindingId, scopeKey: string): Promise<SyncCursorRecord | undefined>

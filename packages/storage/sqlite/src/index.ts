@@ -12,5 +12,6 @@ export * from './db.ts'
 export * from './migrations.ts'
 export * from './migrate.ts'
 export * from './storage.ts'
+export { LegacySourceVersionError, repairLegacySourceVersions, type LegacyRepairResult } from './source-version-carrier.ts'
 
 export const packageId = '@harness-projects/storage-sqlite' as const
