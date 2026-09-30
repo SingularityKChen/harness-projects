@@ -17,7 +17,7 @@
     "noUnusedParameters": true,
 
     "verbatimModuleSyntax": true,
-    // 运行时就是 Node 的类型剥离：包内相对导入必须写 .ts 后缀，且没有构建步骤（noEmit）。
+    // 运行时就是 Node 的类型剥离：包内相对导入必须写 .ts 后缀，且没有构建步骤（noEmit）；唯一例外是 apps/harness-plugin 的安装件构建（ADR-0009）。
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "resolveJsonModule": true,

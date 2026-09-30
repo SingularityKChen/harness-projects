@@ -92,6 +92,19 @@
 | 重启后取消 fail closed | binding id 变了（不问任何 provider）、签发密钥变了、取消被设为只读时结构化失败，运行记录一字不改 |
 | 取消与组装的边界 | succeeded / failed / timed_out 拒绝取消且记录不变；`queued` 可取消；有状态 provider 对并发的第二个取消答 conflict 时以运行记录为准；binding id 重复即拒绝组装；只注入 fallback 也承接 |
 
+## 插件安装件构建（#227，ADR-0009）
+
+`harness-plugin-artifact.test.js` 在 `mkdtemp` 目录里调用 `apps/harness-plugin/scripts/build.mjs` 的 `build({ outDir })`，只读**产物**做断言（不触网、不需要宿主、不写工作树的 `dist/`）。它只证明产物的**形状**；宿主的 module loader 是否接受它，由 ExecPlan 里在真实宿主上的观测判定，CI 绿不是那条证据。预期值一律是测试自带的字面量（基线模块表、peer 范围 `~0.2.0-rc.2` / `~4.0.4`、宿主 Loader 的解包规则），不 import 构建脚本的常量。
+
+| 用例 | 保护的不变量 |
+|---|---|
+| 安装件 manifest | `exports` 四个键逐字固定（含 `./package.json`）；没有 `dependencies` / `devDependencies`，全文没有 `workspace:`；`dsh.client.inject` 非空且每项都是 peer 的键；至少一个 `@deepseek-ai/dsh-*` peer，且所有 `dsh` / `dsh-*` peer 取同一个范围（没有这类 peer 时宿主兼容闸门直接放行） |
+| patch 行 | 恰好一个 `insert` 行，`name` 等于包名（拼错时宿主静默找不到包） |
+| 宿主半边 | 拷进 `node_modules` 后包名、`/package.json`、`/client` 三个说明符都可解析；`import()` 得到的 `apply` 打出就绪行；文本里没有 `@harness-projects/`、`.ts` 说明符与 `file:` |
+| 客户端半边 | 在 `node:vm` 里执行：`__ModuleLoader__.load` 恰好调用一次、`id` 等于包名；按宿主 Loader 的解包规则得到 `apply` 与 `inject`；文本里所有 `require("…")` 的参数都在基线表内 |
+| 注册行为 | 根 Context 只暴露 `slots`（读别的属性即抛错，复刻宿主行为）；`inject` 名字恰好是 `main` 与 `sidebar.panellist`；`main` 带 `key`，入口的 `id` 等于它并带可访问名称；面板根节点是带 `aria-label` 的 `section` |
+| 构建只读本仓库 | 两份 metafile 的输入路径都是相对仓库根的相对路径；产物与 manifest 不含仓库根的绝对路径与家目录 |
+
 ## 约定
 
 - 每个用例使用独立的临时目录/临时数据库，测试之间不共享状态。

@@ -308,3 +308,32 @@ test('依赖：manifest 中声明的内部与外部依赖同样受约束', async
     }
   }
 })
+
+test('壳：apps/harness-plugin/src 只有 .ts 文件，也不直接 import react / react-dom', async () => {
+  // 插件壳只注册，组件只来自 @harness-projects/ui（#227 验收 4）；
+  // 组件一旦在壳里用 JSX 或 createElement 自写，业务界面就有了第二个落点。
+  // 列全部文件而不用 sourceFiles：安装件构建也会打入 .tsx / .jsx / .js，扫描面必须不小于构建的输入面。
+  const shellSrc = path.join(repoRoot, 'apps', 'harness-plugin', 'src')
+  const entries = await readdir(shellSrc, { recursive: true, withFileTypes: true })
+  const files = entries.filter((entry) => entry.isFile()).map((entry) => path.join(entry.parentPath, entry.name))
+  assert.ok(files.length > 0, 'apps/harness-plugin/src 至少要有 index.ts，否则本断言空转')
+
+  assert.deepEqual(
+    files.filter((file) => !file.endsWith('.ts')).map((file) => path.relative(repoRoot, file)),
+    [],
+    '插件壳只允许 .ts 文件（不得有 .tsx / .jsx / .js）：组件只来自 @harness-projects/ui',
+  )
+
+  const reactImport = /^react(-dom)?(\/|$)/
+  for (const file of files) {
+    const source = await readFile(file, 'utf8')
+    const relative = path.relative(repoRoot, file)
+    const requires = [...source.matchAll(/require\s*\(\s*['"]([^'"]+)['"]\s*\)/g)].map((m) => m[1])
+    for (const specifier of [...importSpecifiers(source), ...requires]) {
+      assert.ok(
+        !reactImport.test(specifier),
+        `${relative} 直接 import 了 ${specifier}：插件壳不得依赖 react，组件只来自 @harness-projects/ui`,
+      )
+    }
+  }
+})

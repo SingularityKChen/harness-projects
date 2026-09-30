@@ -1,0 +1,3 @@
+- insert:
+    - id: harness-projects
+      name: '@harness-projects/app-harness-plugin'

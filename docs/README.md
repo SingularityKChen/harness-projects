@@ -7,7 +7,6 @@
 | 路径 | 放什么 | 不放什么 |
 |---|---|---|
 | `docs/exec-plan/active/` | 进行中的 ExecPlan（spec + plan 合一的活文档） | 已完成的历史计划 |
-| [2026-09-29-harness-plugin-reprobe](exec-plan/completed/2026-09-29-harness-plugin-reprobe.md) | 宿主嵌入复探（#225）：仓库外插件包经 `dsh plugin add` 装进一次性 profile，在真实宿主与浏览器里重跑 #125 的问题 2–4；裁决规则、强度分级与 transport 排序先预注册，由契约测试从观测表机械推导 `embed` / `fallback-web`；探针不合并 | Completed：Batch 0–6 与评审修订完成，裁决 `embed`（typed remote）；#226 评论及新版复测归属订正已有回执；人类伙伴已授权整合，状态以 PR #238 回读为准 |
 | `docs/exec-plan/completed/` | 已验收完成的 ExecPlan，按原文件名保留 | 需要继续修订的计划 |
 | `docs/exec-plan/tech-debt-tracker.md` | 实施时明确接受延期的技术债及其解决/取代记录 | 未裁决的设计候选与功能路线图 |
 | `docs/architecture/` | 长期有效的架构说明：模块边界、依赖方向、数据流、集成方式 | 一次性的实施计划 |
@@ -49,6 +48,8 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-09-29-harness-plugin-package](exec-plan/completed/2026-09-29-harness-plugin-package.md) | 插件打包（#227）：`apps/harness-plugin` 只凭本仓库构建出宿主入口、client bundle 与生成的安装件 manifest（目标宿主线 `0.2.0-rc.2`，peer 用范围），经 `dsh plugin --profile desktop add` 装进人类伙伴本机 Desktop 的 `desktop` profile、验收后卸载并核对快照；侧栏入口加占位面板；CI 在干净检出上真跑构建并断言产物契约；宿主侧由 agent 读日志与文件，界面由人类伙伴截图确认，按预注册的 K 行执行；Completed：构建、产物契约和Desktop K验收完成；人类伙伴授权整合，ADR-0009已采纳；transport归#228 |
+| [2026-09-29-harness-plugin-reprobe](exec-plan/completed/2026-09-29-harness-plugin-reprobe.md) | 宿主嵌入复探（#225）：仓库外插件包经 `dsh plugin add` 装进一次性 profile，在真实宿主与浏览器里重跑 #125 的问题 2–4；裁决规则、强度分级与 transport 排序先预注册，由契约测试从观测表机械推导 `embed` / `fallback-web`；探针不合并；Completed：Batch 0–6 与评审修订完成，裁决 `embed`（typed remote）；#226 评论及新版复测归属订正已有回执；人类伙伴已授权整合，状态以 PR #238 回读为准 |
 | [2026-09-29-source-version-order](exec-plan/completed/2026-09-29-source-version-order.md) | #203 观察版本载体收窄为规范 UTC 纳秒时间戳；旧行迁移、拒绝与备份恢复，完整迁移交错报告阶段和已提交版本；#70 需调用统一归一函数，R1 第 8 行同步收口 | Completed |
 | [2026-09-29-e1-uncertain-create-wallclock](exec-plan/completed/2026-09-29-e1-uncertain-create-wallclock.md) | #119 验收 1 按字面补齐（PR #244）：预注册协议 v2 在私有沙箱跑了一次，六个子观测全部复现。`(a-rerun)` 换用写入前确认不存在的标签、`(c-rerun)` 复测平台 `422`，两次写入都没有建出对象；`(b-label)`、`(e2-hit)`、`(e4-hit)`、`(d-count)` 的只读回读与原块逐字节相同。原行加 Superseded，墙钟守卫 `WALLCLOCK_STRICT_DOCS` 防止回退。不能再观测的残余 ①–④ 登记在记录 §3 第 19 条；G3 于 2026-09-30 裁定为 (i)，PR 以关闭关键字关联 #119 |
 | [2026-09-29-start-work-resume-evidence](exec-plan/completed/2026-09-29-start-work-resume-evidence.md) | #183 剩余闭环：真实 Git 上基线前进后恢复、多页分支探测与头提交透传、失败时保留已决定分支；评审响应补上 `conflict` 后列表读失败的 `unknown` 传播。PR #237 的最终远端门禁与合并状态按实时 GitHub 回读。 | Completed |
