@@ -105,6 +105,17 @@
 | 注册行为 | 根 Context 只暴露 `slots`（读别的属性即抛错，复刻宿主行为）；`inject` 名字恰好是 `main` 与 `sidebar.panellist`；`main` 带 `key`，入口的 `id` 等于它并带可访问名称；面板根节点是带 `aria-label` 的 `section` |
 | 构建只读本仓库 | 两份 metafile 的输入路径都是相对仓库根的相对路径；产物与 manifest 不含仓库根的绝对路径与家目录 |
 
+## GitHub Projects 读取（#70）
+
+`github-projects-bootstrap.test.js` 把 GitHub Projects provider 接进 core，transport 回放私有沙箱 Project A 的录制夹具（`tests/contract/fixtures/github-projects/`，不触网、不需要凭据），替身与 SQLite 两种 Storage 各跑一轮：
+
+| 用例 | 保护的不变量 |
+|---|---|
+| 引导得到 8 个工作项与 1 个变更请求，重复引导幂等 | 身份 `externalId` 集合恰好是 9 个内容 node id，没有成员关系 id（R1）；本地实体 id 不等于任何 node id；PR 成员关系不产生工作项；第二次引导不新建实体（两种 Storage 都以实体 id 集合判定，替身上另读行数：实体 9、身份 9、观察 18） |
+| 故障不伪造成功（离线、部分成功、分页成环或永不收敛） | 首轮组装遇 A → B → A 时 PlanningItems 恰好 6 次、视图为空、摘要 `unavailable`；可见之后依次切到离线、部分成功、成环、永不重复的游标，引导报 `ok: false` 且 `degraded`（错误码 `unavailable`、`permission_denied`、`unavailable`、`unavailable`），成环停在第 3 页、永不收敛恰好 1500 次（扫描 500 页 + 逐页读取 1000 页），错误文案含「成环或超过页数上界」；投影与故障前逐字一致，每条带 `freshness.degraded` |
+| 内容被扣下：未见过 → 可见 → 部分 / 全部 REDACTED → 映射失效 → 恢复 | 没有映射时整次 `degraded` / `permission_denied` 且 `getPlanningSync` 与 controller 快照可查（0 条时也成立）；有映射时按成员关系找回同一实体、出剥离正文的 redacted 占位，被扣下的标题与正文不出现在列表与详情里；映射失效时不建实体；恢复后实体 id 不变；3 条无映射时其余 6 行保持 fresh（`stale` 与 `degraded` 正交，H11），wire 快照不含被扣下条目的内容 node id 与种类（H12） |
+| 回放账本 | 回放未命中的请求为空，未命中不会被伪装成「离线」 |
+
 ## 约定
 
 - 每个用例使用独立的临时目录/临时数据库，测试之间不共享状态。
