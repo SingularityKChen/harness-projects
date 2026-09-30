@@ -12,7 +12,7 @@
 
 ## 1. 命令约定
 
-记录里的命令统一用下列变量。沙箱级变量（`E1_OWNER`、`E1_REPO`、`E1_PROJECT_A`、`E1_PROJECT_A_ID`）的值在 `docs/architecture/gate-e1-sandbox.md` §2.1 定义一次；`E1_L1_RUN` 是**本批次夹具的标记**，本记录是它的唯一赋值处（沿用 E1-2 记录为自己夹具定义变量的做法，沙箱定义 §2.1 的「已知缺口」已登记这类偏离）。
+记录里的命令统一用下列变量。沙箱级变量（`E1_OWNER`、`E1_REPO`、`E1_PROJECT_A`、`E1_PROJECT_A_ID`）的值在 `docs/architecture/gate-e1-sandbox.md` §2.1 定义一次；`E1_L1_RUN` 是**本批次夹具的标记**，本记录是它的唯一赋值处（沿用 E1-2 记录为自己夹具定义变量的做法，沙箱定义 §2.1 的「已知缺口」已登记这类偏离）。`E1_L1_RERUN` 是 2026-09-29 补观测的标记（#119 验收 1），本记录同样是它的唯一赋值处；补观测协议里的 `START` 是这次运行的时间窗起点，取值见 (a-rerun) 前置行里的 `start=`。
 
 ```bash
 E1_OWNER=<沙箱 owner，值见沙箱定义 §2.1>
@@ -20,9 +20,10 @@ E1_REPO=e1-sandbox
 E1_PROJECT_A=11
 E1_PROJECT_A_ID=PVT_kwHOAY1ahM4BkJ9r
 E1_L1_RUN=20260923T0340Z
+E1_L1_RERUN=20260929T1137Z
 ```
 
-`gh` 不打印 token；下列命令均以已登录的 `gh` 会话执行，记录里不出现任何凭据。所有墙钟时间都是 UTC，取自运行命令的同一会话的 `date -u +%Y-%m-%dT%H:%M:%SZ`；平台返回的时间戳（`createdAt`）另行标注为「平台时间」。
+`gh` 不打印 token；下列命令均以已登录的 `gh` 会话执行，记录里不出现任何凭据。所有墙钟时间都是 UTC，取自运行命令的同一会话的 `date -u +%Y-%m-%dT%H:%M:%SZ`；平台返回的时间戳（`createdAt`）另行标注为「平台时间」。2026-09-23 的墙钟写成短式 `HH:MM:SSZ`，日期都是 2026-09-23；2026-09-29 的补观测一律写完整的 `YYYY-MM-DDTHH:MM:SSZ`。
 
 **本批次新建的夹具**（全部带标记 `uncertain-create`，归属 #119；在沙箱定义 §2.3 里占一行）：
 
@@ -41,6 +42,123 @@ E1_L1_RUN=20260923T0340Z
 既有夹具（issue-alpha、draft-beta、pr-gamma、issue-shared、draft-convert、issue-writable、issue-dupe）在本批次中只读，未被修改。`label-auto-created` 是实验 3(b) 的副作用——REST 接受未知标签并**自动创建**它；它是仓库级的持久对象，已按归属 #119 登记在 `docs/architecture/gate-e1-sandbox.md` §2.3，重建沙箱时**不创建**它（它的存在本身就是那条平台行为的证据）。沙箱漂移一条：`fixture shared`（sandbox issue #2）现在是 `CLOSED`，而沙箱定义 §2.3 仍按 `OPEN` 描述——本记录只登记差异，不改那份清单（它是"观测发生时对象长这样"的历史表述）。
 
 本批次的写入共产生 6 条 issue 与 2 条 draft 条目，Project A 的条目数由 `7` 变为 `9`。沙箱定义 §4.1(b) 的重建判据（`totalCount: 7`）描述的是**重建出来的**沙箱，本批次的夹具不会出现在重建结果里，因此该判据不受影响；受影响的是"当前状态回读"，本记录给出新值。
+
+**2026-09-29 补观测协议（#119 验收 1）**：`(a-rerun)` 不照抄 3(a) 的原命令，因为它的标签 `e1-label-that-does-not-exist` 已被 3(b) 建成真实标签，照抄会建出 issue，观测到的是另一个分支；协议守住的是「标签在仓库里不存在」这一性质，把标签换成写入前确认不存在的 `e1-label-absent-$E1_L1_RERUN`，其余（账号、可见性、命令形状、正文）与原命令相同。一次运行、一个标记、一份运行日志覆盖实验 2、3、4 的六个子观测：两次写入 `(a-rerun)`、`(c-rerun)`，四次只读回读 `(b-label)`、`(e2-hit)`、`(e4-hit)`、`(d-count)`；只读步骤排在写入之前，每一步都是单独一次调用，行首带完整 UTC 墙钟。`(c-rerun)` 由第 10 步的闸门把守，两次写入尝试各只发一次、合计建出的对象不超过 1 个私有 issue：闸门只在日志里没有 `c-rerun sent=`、第 1 步的 `assignee_check` 为 `404`、`baseline-c` 为 `list=[] search=[]`、第 9 步写下 `a-verdict=absent` 且 `(a-rerun)` 的封存 exit 非 0 时放行，`(a-rerun)` 已建出对象或无法证明没有建出时关闭。写入命令的输出先封存到本地运行态文件，判定写下之后才拆封；运行日志与封存文件不进仓库，本记录只摘其中的行，`(c-rerun)` 的响应头留在运行态文件。协议全文如下，各子观测按步号引用。
+
+```bash
+# e1-l1-rerun protocol v2
+# 在检出 docs/e1-uncertain-create-wallclock 的工作树根目录运行；$E1_OWNER / $E1_REPO / $E1_PROJECT_A_ID 的值见沙箱定义 §2.1
+# 第 0 步只执行一次：定标记与时间窗起点（标记写进记录 §1 的变量块，START 由第 1 步写进日志）
+E1_L1_RERUN=$(date -u +%Y%m%dT%H%MZ)
+START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# 公共前缀：此后每一次单独调用都先写回第 0 步的两个值，再执行这一段；任一变量为空时本次调用立即失败
+: "${E1_L1_RERUN:?}" "${START:?}" "${E1_OWNER:?}" "${E1_REPO:?}" "${E1_PROJECT_A_ID:?}"
+A_TITLE="fixture uncertain-create failed $E1_L1_RERUN"; A_LABEL="e1-label-absent-$E1_L1_RERUN"
+C_TITLE="fixture uncertain-create rejected $E1_L1_RERUN"
+RUNDIR=".superpowers/e1-l1-rerun"; RUNLOG="$RUNDIR/$E1_L1_RERUN.log"
+A_SEALED="$RUNDIR/$E1_L1_RERUN.a.sealed"; C_SEALED="$RUNDIR/$E1_L1_RERUN.c.sealed"
+utc_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+e1_probe() {   # $1 轮次、$2 标题、$3 时间窗起点；一轮一行，行首墙钟在本轮全部查询之前取
+  printf '%s phase=%s window=%s list=%s search=%s numbers=%s new_label_hits=%s\n' "$(utc_now)" "$1" "$3" \
+    "$(gh issue list --repo "$E1_OWNER/$E1_REPO" --state all --limit 100 --json number,title \
+       | jq -c --arg t "$2" '[.[]|select(.title==$t)|.number]|sort')" \
+    "$(gh search issues --repo "$E1_OWNER/$E1_REPO" --author "$E1_OWNER" --created ">=$3" "\"$2\" in:title" \
+       --json number | jq -c '[.[].number]|sort')" \
+    "$(gh issue list --repo "$E1_OWNER/$E1_REPO" --state all --limit 100 --json number \
+       | jq -c '[.[].number]|sort|reverse')" \
+    "$(gh label list --repo "$E1_OWNER/$E1_REPO" --limit 100 --json name \
+       | jq --arg l "$A_LABEL" '[.[]|select(.name==$l)]|length')"
+}
+
+# 第 1 步（只读前置）：账号、可见性、时间窗起点、gh 版本、平台时钟锚点、(c-rerun) 的 assignee 前提、两条新标题的基线
+mkdir -p "$RUNDIR"
+{ printf '%s login=%s visibility=%s start=%s %s\n' "$(utc_now)" "$(gh api user --jq .login)" \
+    "$(gh repo view "$E1_OWNER/$E1_REPO" --json visibility --jq .visibility)" "$START" "$(gh --version | head -1)"
+  gh api -i rate_limit | grep -i '^date:'
+  printf '%s assignee_check=%s\n' "$(utc_now)" \
+    "$(gh api -i "repos/$E1_OWNER/$E1_REPO/assignees/e1-user-that-does-not-exist" 2>/dev/null | head -1)"
+  e1_probe baseline-a "$A_TITLE" "$START"
+  e1_probe baseline-c "$C_TITLE" "$START"; } 2>&1 | tee -a "$RUNLOG"
+
+# 第 2 步（只读，(b-label)）：实验 3 §3 的标签回读命令逐字执行，末尾只追加 jq -c
+{ printf 'b-label sent=%s\n' "$(utc_now)"
+  gh label list --repo "$E1_OWNER/$E1_REPO" --json name,createdAt \
+    | jq '.[]|select(.name=="e1-label-that-does-not-exist")' | jq -c .
+  printf 'b-label returned=%s\n' "$(utc_now)"; } 2>&1 | tee -a "$RUNLOG"
+
+# 第 3 步（只读，(e2-hit)）：实验 2 §3 的两条对账命令逐字执行（变量取实验 2 的值），末尾追加与原命中原文块同字段的投影
+( E1_L1_RUN=20260923T0340Z; TITLE="fixture uncertain-create reconcile $E1_L1_RUN"
+  START=2026-09-23T03:41:14Z   # 实验 2 §4 记录的时间窗起点
+  SHAPE='[.[]|{author:{login:.author.login},createdAt,id,number,title}]'
+  printf 'e2-hit sent=%s\n' "$(utc_now)"
+  gh search issues --repo "$E1_OWNER/$E1_REPO" --author "$E1_OWNER" --created ">=$START" \
+    "\"$TITLE\" in:title" --json number,title,author,createdAt,id | jq -c "$SHAPE"
+  gh issue list --repo "$E1_OWNER/$E1_REPO" --state all --limit 100 \
+    --json number,title,author,createdAt,id | jq --arg t "$TITLE" '[.[]|select(.title==$t)]' | jq -c "$SHAPE"
+  printf 'e2-hit returned=%s\n' "$(utc_now)" ) 2>&1 | tee -a "$RUNLOG"
+
+# 第 4 步（只读，(e4-hit)）：实验 4 §3 的对账命令逐字执行，末尾只追加 jq -c；标题依次取 draft-b 与 draft-a 的实际标题
+( E1_L1_RUN=20260923T0340Z
+  printf 'e4-hit sent=%s\n' "$(utc_now)"
+  for TITLE in "fixture uncertain-create draft-b $E1_L1_RUN" "fixture uncertain-create draft $E1_L1_RUN"; do
+gh api graphql -f query='
+query($p: ID!) { node(id: $p) { ... on ProjectV2 {
+  items(first: 20) { totalCount nodes {
+    id type createdAt creator { login }
+    content { __typename ... on DraftIssue { id title } } } } } } }' -f p="$E1_PROJECT_A_ID" \
+  | jq --arg t "$TITLE" '{totalCount: .data.node.items.totalCount,
+      matches: [.data.node.items.nodes[]|select(.content.title==$t)]}' | jq -c .
+  done
+  printf 'e4-hit returned=%s\n' "$(utc_now)" ) 2>&1 | tee -a "$RUNLOG"
+
+# 第 5 步（只读，(d-count)）：原 (c)/(d) 标记的对账；时间窗起点取该标记所在分钟的起点
+e1_probe d-count "fixture uncertain-create rejected 20260923T0340Z" 2026-09-23T03:40:00Z 2>&1 | tee -a "$RUNLOG"
+
+# 第 6 步（写入尝试 1/2，(a-rerun)）：闸门通过才发出，只发一次；stdout、stderr 与 exit 全部封存，第 9 步之前不读
+if ! grep -q '^a-rerun sent=' "$RUNLOG" && grep -q " login=$E1_OWNER visibility=PRIVATE " "$RUNLOG" \
+   && grep -Eq ' phase=baseline-a window=[^ ]+ list=\[\] search=\[\] numbers=[^ ]+ new_label_hits=0$' "$RUNLOG"; then
+  { printf 'a-rerun sent=%s\n' "$(utc_now)"
+    gh issue create --repo "$E1_OWNER/$E1_REPO" --title "$A_TITLE" --label "$A_LABEL" \
+      --body "Gate E1 fixture. Uncertain-create failure probe (#119)." > "$A_SEALED" 2>&1
+    echo "exit=$?" >> "$A_SEALED"
+    printf 'a-rerun returned=%s\n' "$(utc_now)"; } | tee -a "$RUNLOG"
+else printf '%s a-rerun gate-closed\n' "$(utc_now)" | tee -a "$RUNLOG"; fi
+
+# 第 7 步（对账 a-t1）：紧接第 6 步
+e1_probe a-t1 "$A_TITLE" "$START" 2>&1 | tee -a "$RUNLOG"
+
+# 第 8 步（对账 a-t2）：距 a-rerun returned 至少 60 s；单独一次调用，不依赖前台 sleep
+e1_probe a-t2 "$A_TITLE" "$START" 2>&1 | tee -a "$RUNLOG"
+
+# 第 9 步：先按判定规则写下 A_VERDICT（absent / present / confounded），再拆封
+printf '%s a-verdict=%s\n' "$(utc_now)" "${A_VERDICT:?}" | tee -a "$RUNLOG"
+cat "$A_SEALED" | tee -a "$RUNLOG"
+
+# 第 10 步（写入尝试 2/2，(c-rerun)）：闸门见 D1「写入预算与互斥」；不放行时只记 gate-closed
+if ! grep -q '^c-rerun sent=' "$RUNLOG" \
+   && grep -q ' assignee_check=HTTP/2.0 404 Not Found$' "$RUNLOG" \
+   && grep -Eq ' phase=baseline-c window=[^ ]+ list=\[\] search=\[\] ' "$RUNLOG" \
+   && grep -q ' a-verdict=absent$' "$RUNLOG" && grep -Eq '^exit=[1-9][0-9]*$' "$A_SEALED"; then
+  { printf 'c-rerun sent=%s\n' "$(utc_now)"
+    gh api --method POST "/repos/$E1_OWNER/$E1_REPO/issues" \
+      -f title="$C_TITLE" \
+      -f body="Gate E1 fixture. Uncertain-create rejected probe (#119)." \
+      -f 'assignees[]=e1-user-that-does-not-exist' --include > "$C_SEALED" 2>&1
+    echo "exit=$?" >> "$C_SEALED"
+    printf 'c-rerun returned=%s\n' "$(utc_now)"; } | tee -a "$RUNLOG"
+else printf '%s c-rerun gate-closed\n' "$(utc_now)" | tee -a "$RUNLOG"; fi
+
+# 第 11 步（对账 c-t1）：紧接第 10 步
+e1_probe c-t1 "$C_TITLE" "$START" 2>&1 | tee -a "$RUNLOG"
+
+# 第 12 步（对账 c-t2）：距 c-rerun returned 至少 60 s；单独一次调用
+e1_probe c-t2 "$C_TITLE" "$START" 2>&1 | tee -a "$RUNLOG"
+
+# 第 13 步：先按判定规则写下 C_VERDICT，再拆封
+printf '%s c-verdict=%s\n' "$(utc_now)" "${C_VERDICT:?}" | tee -a "$RUNLOG"
+cat "$C_SEALED" | tee -a "$RUNLOG"
+```
 
 ---
 
@@ -165,7 +283,7 @@ for attempt in 1 2 3; do printf '%s attempt=%s search_hits=%s list_hits=%s\n' "$
 2026-09-23T03:41:24Z attempt=3 search_hits=1 list_hits=1
 ```
 
-两条路径的命中原文（同一条对象）：
+两条路径的命中原文（同一条对象）：**Superseded by (e2-hit)（2026-09-29）**：本块没有记取得时刻，列表路径原文也没有写出；两条路径的回读见下方 (e2-hit)。本块原文保留。
 
 ```json
 [{"author":{"login":"SingularityKChen"},"createdAt":"2026-09-23T03:41:15Z",
@@ -174,6 +292,17 @@ for attempt in 1 2 3; do printf '%s attempt=%s search_hits=%s list_hits=%s\n' "$
 ```
 
 （上面是搜索索引路径的原文，字段按本记录需要截取；仓库侧列表路径返回同一条对象的 `number`、`id`、`createdAt` 与作者。）
+
+**(e2-hit) 2026-09-29 只读回读**（命令与 §3 的两条对账命令逐字相同，末尾追加与上方原块同字段的 `jq -c` 投影，因为今天的搜索与列表输出比原块多出作者的 `id`、`is_bot`、`type`、`url` 等字段）：
+
+时间（墙钟）：发出 `2026-09-29T11:38:33Z` / 返回 `2026-09-29T11:38:36Z`（(e2-hit)，§1 协议第 3 步）。
+
+```text
+[{"author":{"login":"SingularityKChen"},"createdAt":"2026-09-23T03:41:15Z","id":"I_kwDOUjWAl88AAAABSrWjOg","number":9,"title":"fixture uncertain-create reconcile 20260923T0340Z"}]
+[{"author":{"login":"SingularityKChen"},"createdAt":"2026-09-23T03:41:15Z","id":"I_kwDOUjWAl88AAAABSrWjOg","number":9,"title":"fixture uncertain-create reconcile 20260923T0340Z"}]
+```
+
+两行（搜索路径、列表路径）都与上方原块去掉折行后逐字节相同。
 
 | 量 | 实测值 |
 |---|---|
@@ -272,7 +401,7 @@ gh issue list --repo "$E1_OWNER/$E1_REPO" --state all --limit 100 --json number 
   | jq '[.[].number]|sort|reverse'
 ```
 
-对账查询与实验 2 同形（标记 + 作者 + 时间窗），两条路径各跑一次；另用上面这条仓库侧全量编号集合作为对照。§4 里 (a) / (c) 的计数与编号集合、以及 (b) 的标签回读都出自这段命令。
+对账查询与实验 2 同形（标记 + 作者 + 时间窗），两条路径各跑一次；另用上面这条仓库侧全量编号集合作为对照。§4 里 (a) / (c) 的计数与编号集合、以及 (b) 的标签回读都出自这段命令。**Superseded by (a-rerun) / (c-rerun) / (d-count)（2026-09-29）**：「同形」没有写出 `START` 与投影，(a)、(c) 的原文投影也不同，不能事后还原；三处对账的确切命令见 §1 协议，观测见 §4 各子观测。本段原文保留。
 
 **4. 观测**
 
@@ -286,9 +415,43 @@ could not add label: 'e1-label-that-does-not-exist' not found
 
 随后同形对账：
 
-时间（墙钟）：下界 `03:41:37Z` / 上界 `03:41:55Z`；本条对账自身的墙钟未逐条记录。
+时间（墙钟）：下界 `03:41:37Z` / 上界 `03:41:55Z`；本条对账自身的墙钟未逐条记录。**Superseded by (a-rerun)（2026-09-29）**：逐条墙钟与确切命令见下方 (a-rerun)；本行原文保留，它仍是 2026-09-23 那次运行的如实记录。
 
 搜索路径 `[]`、仓库侧列表 `count: 0`；仓库全量编号为 `[9,8,7,6,4,3,2,1]`（8 条，无新增）。
+
+**(a-rerun) 2026-09-29 补观测：gh 客户端路径 + 仓库里不存在的标签**（标签 `e1-label-absent-20260929T1137Z`；不照抄 3(a) 的标签，理由见 §1；标题、正文与命令形状见 §1 协议第 6 步）：
+
+时间（墙钟）：`2026-09-29T11:38:04Z`（(a-rerun)，§1 协议第 1 步：`login` 行、平台 `Date:` 头；`baseline-a` 于 `2026-09-29T11:38:08Z`）。
+
+```text
+2026-09-29T11:38:04Z login=SingularityKChen visibility=PRIVATE start=2026-09-29T11:37:56Z gh version 2.101.0 (2026-09-15)
+Date: Tue, 29 Sep 2026 11:38:07 GMT
+2026-09-29T11:38:08Z phase=baseline-a window=2026-09-29T11:37:56Z list=[] search=[] numbers=[12,11,10,9,8,7,6,4,3,2,1] new_label_hits=0
+```
+
+时间（墙钟）：发出 `2026-09-29T11:48:35Z` / 返回 `2026-09-29T11:48:36Z`（(a-rerun)，§1 协议第 6 步）。
+
+```text
+a-rerun sent=2026-09-29T11:48:35Z
+a-rerun returned=2026-09-29T11:48:36Z
+```
+
+时间（墙钟）：a-t1 `2026-09-29T11:48:52Z`（(a-rerun)，§1 协议第 7 步，紧接第 6 步）/ a-t2 `2026-09-29T11:49:46Z`（第 8 步，距 `a-rerun returned` 70 s）。
+
+```text
+2026-09-29T11:48:52Z phase=a-t1 window=2026-09-29T11:37:56Z list=[] search=[] numbers=[12,11,10,9,8,7,6,4,3,2,1] new_label_hits=0
+2026-09-29T11:49:46Z phase=a-t2 window=2026-09-29T11:37:56Z list=[] search=[] numbers=[12,11,10,9,8,7,6,4,3,2,1] new_label_hits=0
+```
+
+时间（墙钟）：`a-verdict` 行 `2026-09-29T11:50:13Z`（(a-rerun)，§1 协议第 9 步；判定先于拆封，下面后两行是拆封的封存原文）。
+
+```text
+2026-09-29T11:50:13Z a-verdict=absent
+could not add label: 'e1-label-absent-20260929T1137Z' not found
+exit=1
+```
+
+结果：gh 报出上面的 `could not add label` 一行，exit 1。两轮对账两条路径都是 `[]`，仓库全量编号与 `baseline-a` 逐项相同，`new_label_hits=0`：没有新对象，也没有新标签。
 
 **(b) 对照探针：同一个标签走 REST，平台没有拒绝**：
 
@@ -306,13 +469,21 @@ HTTP/2.0 201 Created
 
 标签回读（`gh label list`）：
 
-时间（墙钟）：本次回读未单独记录；`createdAt = 2026-09-23T03:41:55Z` 是标签自身的创建时刻（平台时间），不是回读时刻。
+时间（墙钟）：本次回读未单独记录；`createdAt = 2026-09-23T03:41:55Z` 是标签自身的创建时刻（平台时间），不是回读时刻。**Superseded by (b-label)（2026-09-29）**：回读时刻见下方 (b-label)；本行原文保留。
 
 回读确认标签 `e1-label-that-does-not-exist` 的 `createdAt = 2026-09-23T03:41:55Z`——**平台自动创建了这个标签**。
 
+**(b-label) 2026-09-29 只读回读 (b) 自动创建的标签**（命令与 §3 的标签回读逐字相同，末尾追加 `jq -c`）：
+
+时间（墙钟）：发出 `2026-09-29T11:38:28Z` / 返回 `2026-09-29T11:38:29Z`（(b-label)，§1 协议第 2 步）。
+
+```text
+{"createdAt":"2026-09-23T03:41:55Z","name":"e1-label-that-does-not-exist"}
+```
+
 **(c) 平台显式拒绝（两次调用）**：
 
-时间（墙钟）：`03:42:28Z` / `03:42:40Z`（两次调用，均 exit 1）；下面的状态行与错误体来自带 `--include` 的那一次。
+时间（墙钟）：`03:42:28Z` / `03:42:40Z`（两次调用，均 exit 1）；下面的状态行与错误体来自带 `--include` 的那一次。**Superseded by (c-rerun)（2026-09-29）**：平台拒绝的逐条墙钟与确切命令见下方 (c-rerun)（一次带 `--include` 的调用）；原 (c) 不带 `--include` 的那一次没有写出命令，见 §3 第 19 条。本行原文保留。
 
 ```text
 HTTP/2.0 422 Unprocessable Entity
@@ -323,9 +494,43 @@ HTTP/2.0 422 Unprocessable Entity
 
 同一标记的对账：
 
-时间（墙钟）：`03:42:33Z`。
+时间（墙钟）：`03:42:33Z`。**Superseded by (c-rerun)（2026-09-29）**：对账的确切命令见下方 (c-rerun)。
 
 搜索路径 `0`、仓库侧列表 `0`；仓库全量编号仍是 `[11,10,9,8,7,6,4,3,2,1]`——**没有产生任何对象**。
+
+**(c-rerun) 2026-09-29 复测：平台显式拒绝与随后的对账**（标题 `fixture uncertain-create rejected 20260929T1137Z`；命令形状与 §3 的 (c) 相同，只有标题里的标记不同，见 §1 协议第 10 步）：
+
+时间（墙钟）：`assignee_check` `2026-09-29T11:38:07Z`；`baseline-c` `2026-09-29T11:38:15Z`（(c-rerun)，§1 协议第 1 步）。
+
+```text
+2026-09-29T11:38:07Z assignee_check=HTTP/2.0 404 Not Found
+2026-09-29T11:38:15Z phase=baseline-c window=2026-09-29T11:37:56Z list=[] search=[] numbers=[12,11,10,9,8,7,6,4,3,2,1] new_label_hits=0
+```
+
+时间（墙钟）：发出 `2026-09-29T11:50:47Z` / 返回 `2026-09-29T11:50:48Z`（(c-rerun)，§1 协议第 10 步；放行条件见 §1）。
+
+```text
+c-rerun sent=2026-09-29T11:50:47Z
+c-rerun returned=2026-09-29T11:50:48Z
+```
+
+时间（墙钟）：c-t1 `2026-09-29T11:50:56Z`（(c-rerun)，§1 协议第 11 步，紧接第 10 步）/ c-t2 `2026-09-29T11:51:53Z`（第 12 步，距 `c-rerun returned` 65 s）。
+
+```text
+2026-09-29T11:50:56Z phase=c-t1 window=2026-09-29T11:37:56Z list=[] search=[] numbers=[12,11,10,9,8,7,6,4,3,2,1] new_label_hits=0
+2026-09-29T11:51:53Z phase=c-t2 window=2026-09-29T11:37:56Z list=[] search=[] numbers=[12,11,10,9,8,7,6,4,3,2,1] new_label_hits=0
+```
+
+时间（墙钟）：`c-verdict` 行 `2026-09-29T11:52:06Z`（(c-rerun)，§1 协议第 13 步；判定先于拆封，下面后三行是拆封的封存原文，只摘状态行、错误体与 exit，响应头留在运行态文件）。
+
+```text
+2026-09-29T11:52:06Z c-verdict=absent
+HTTP/2.0 422 Unprocessable Entity
+{"message":"Validation Failed","errors":[{"value":["e1-user-that-does-not-exist"],"resource":"Issue","field":"assignees","code":"invalid"}],"documentation_url":"https://docs.github.com/rest/issues/issues#create-an-issue","status":"422"}gh: Validation Failed (HTTP 422)
+exit=1
+```
+
+结果：平台返回 `422`，错误体含 `"field":"assignees"` 与 `"code":"invalid"`，exit 1（错误体没有结尾换行，gh 写到 stderr 的 `gh: Validation Failed (HTTP 422)` 因此接在同一行，原样保留）。两轮对账两条路径都是 `[]`，仓库全量编号与 `baseline-c` 逐项相同，`new_label_hits=0`：没有新对象。
 
 **(d) 显式拒绝之后的重试**：
 
@@ -339,9 +544,19 @@ HTTP/2.0 422 Unprocessable Entity
 
 随后对账按标记计数 **1**：
 
-时间（墙钟）：`03:44:04Z`（只有 `#12`）。
+时间（墙钟）：`03:44:04Z`（只有 `#12`）。**Superseded by (d-count)（2026-09-29）**：按标记计数的确切命令见下方 (d-count)。
 
 重试没有产生第二条。
+
+**(d-count) 2026-09-29 只读回读原 (c)/(d) 标记**（时间窗起点取该标记所在分钟的起点 `2026-09-23T03:40:00Z`，写在输出行的 `window=` 里；协议见 §1 第 5 步）：
+
+时间（墙钟）：`2026-09-29T11:38:46Z`（(d-count)，§1 协议第 5 步）。
+
+```text
+2026-09-29T11:38:46Z phase=d-count window=2026-09-23T03:40:00Z list=[12] search=[12] numbers=[12,11,10,9,8,7,6,4,3,2,1] new_label_hits=0
+```
+
+按原 (c)/(d) 的标题计数：仓库侧列表与搜索路径都只有 `#12`。
 
 **5. 本地应有行**
 
@@ -374,7 +589,7 @@ HTTP/2.0 422 Unprocessable Entity
 2. 执行 §3 的 (c)，确认 `HTTP/2.0 422` 且错误体含 `"field":"assignees"`。
 3. 立刻执行实验 2 §3 的两条对账查询，期望两条路径都为 0，且仓库全量编号集合里没有新编号。
 4. 执行 §3 的 (d)，确认 `201`，再跑一次对账，期望按标记计数为 1。
-5. 复现 (a)/(b) 的对照：`--label` 走 `gh issue create` 会被客户端拒绝；同一标签走 REST 会 `201` 并自动建标签（这一步会创建对象与标签，属预期副作用）。
+5. 复现 (a)/(b) 的对照：`--label` 走 `gh issue create` 会被客户端拒绝；同一标签走 REST 会 `201` 并自动建标签（这一步会创建对象与标签，属预期副作用）。（这一步在按第 1 步重建的沙箱里成立。复用现存沙箱时，该标签已被 (b) 自动创建，照抄会建出 issue，改用 §1 补观测协议的做法。）
 
 ---
 
@@ -431,7 +646,7 @@ gh api graphql -f query='query($a: ID!, $b: ID!) { a: node(id: $a) { ... on Proj
 
 **4. 观测**
 
-创建前 Project A 的 `items.totalCount = 7`（`03:42:51Z`）。`draft-a` 的创建 `exit=0`（`03:42:53Z`），平台 `createdAt = 2026-09-23T03:42:53Z`；它的轮询在第 1 轮就因命令构造错误作废（§6 第 1 条），`03:43:16Z` 才被确认存在，因此它的延迟**没有测到**。
+创建前 Project A 的 `items.totalCount = 7`（`03:42:51Z`）。`draft-a` 的创建 `exit=0`（`03:42:53Z`），平台 `createdAt = 2026-09-23T03:42:53Z`；它的轮询在第 1 轮就因命令构造错误作废（§6 第 1 条），`03:43:16Z` 才被确认存在，因此它的延迟**没有测到**。**Superseded by (e4-hit)（2026-09-29）**：`draft-a` 的存在、实际标题与平台 `createdAt` 另见下方 (e4-hit) 的回读；创建前基线的命令归属、`draft-a` 的创建命令与作废那一轮轮询不能事后补，见 §3 第 19 条。本行原文保留。
 
 `draft-b` 的轮询（创建命令 `exit=0` 于 `03:43:40Z`）：
 
@@ -440,7 +655,7 @@ gh api graphql -f query='query($a: ID!, $b: ID!) { a: node(id: $a) { ... on Proj
 2026-09-23T03:43:43Z attempt=2 project_items_hits=1 repo_issue_list_hits=0
 ```
 
-命中原文（§3 的对账命令按标题过滤后的输出，折行按本记录惯例；`items.totalCount` 为 9）：
+命中原文（§3 的对账命令按标题过滤后的输出，折行按本记录惯例；`items.totalCount` 为 9）：**Superseded by (e4-hit)（2026-09-29）**：本块没有记取得时刻；回读见下方 (e4-hit)。本块原文保留。
 
 ```json
 {"totalCount":9,"matches":[{"id":"PVTI_lAHOAY1ahM4BkJ9rzg8P9ek","type":"DRAFT_ISSUE",
@@ -448,6 +663,17 @@ gh api graphql -f query='query($a: ID!, $b: ID!) { a: node(id: $a) { ... on Proj
  "content":{"__typename":"DraftIssue","id":"DI_lAHOAY1ahM4BkJ9rzgLLTsE",
  "title":"fixture uncertain-create draft-b 20260923T0340Z"}}]}
 ```
+
+**(e4-hit) 2026-09-29 只读回读**（命令是 §3 的对账命令，逐字执行，末尾只追加 `jq -c`；标题依次取 `draft-b` 与 `draft-a` 的实际标题，后者是 `fixture uncertain-create draft 20260923T0340Z`，不是按 `draft-b` 类推的那个）：
+
+时间（墙钟）：发出 `2026-09-29T11:38:41Z` / 返回 `2026-09-29T11:38:44Z`（(e4-hit)，§1 协议第 4 步）。
+
+```text
+{"totalCount":9,"matches":[{"id":"PVTI_lAHOAY1ahM4BkJ9rzg8P9ek","type":"DRAFT_ISSUE","createdAt":"2026-09-23T03:43:39Z","creator":{"login":"SingularityKChen"},"content":{"__typename":"DraftIssue","id":"DI_lAHOAY1ahM4BkJ9rzgLLTsE","title":"fixture uncertain-create draft-b 20260923T0340Z"}}]}
+{"totalCount":9,"matches":[{"id":"PVTI_lAHOAY1ahM4BkJ9rzg8P9K4","type":"DRAFT_ISSUE","createdAt":"2026-09-23T03:42:53Z","creator":{"login":"SingularityKChen"},"content":{"__typename":"DraftIssue","id":"DI_lAHOAY1ahM4BkJ9rzgLLTqU","title":"fixture uncertain-create draft 20260923T0340Z"}}]}
+```
+
+第一行（`draft-b`）与上方原命中原文块去掉折行后逐字节相同，`totalCount` 为 `9`；第二行是 `draft-a` 的回读，条目 id、内容 id 与 §1 夹具表 `draft-a` 行相同，平台 `createdAt` 为 `2026-09-23T03:42:53Z`。
 
 | 量 | 实测值 |
 |---|---|
@@ -527,7 +753,7 @@ R8 规定"补证据前不得冻结该表的状态机取值集合"。本层给出
 |---|---|---|---|
 | `confirmed` | `saved` | 实验 3(d)（重试的 `201` 返回体带 `node_id`）、实验 3(b)（标签探针的 `201` 返回体带 `node_id`）；实验 1 **是推导**（两次创建各返回一个**不同**的 issue URL，说明响应带对象标识；但该实验两次都拿到了响应，本身不是「响应丢失后靠它确认」的观测） | 响应里带回平台分配的对象标识，不需要对账 |
 | `reconciled` | `saved` | 实验 2（**仓库侧列表路径**恰好 1 命中）、实验 4（条目连接恰好 1 命中） | 唯一性成立时对账能认出该对象；实验 1 给出唯一性不成立的反例 |
-| `rejected` | `failed` | 实验 3(c)（`422` + 两条路径 0 命中 + 仓库编号集合无新增）、实验 3(a)（客户端拒绝 + 仓库编号集合无新增） | "拒绝"与"对账为空"两条同时成立；两类拒绝各被观测到一次。实验 3(d) **不在本行**：它支持的是「重试不重复」，不是「被拒绝」 |
+| `rejected` | `failed` | 实验 3(c)（`422` + 两条路径 0 命中 + 仓库编号集合无新增）、实验 3(a)（客户端拒绝 + 仓库编号集合无新增） | "拒绝"与"对账为空"两条同时成立；两类拒绝各被观测到一次。**Superseded by (a-rerun) / (c-rerun)（2026-09-29）**：客户端拒绝与平台拒绝各另有一次复测。实验 3(d) **不在本行**：它支持的是「重试不重复」，不是「被拒绝」 |
 | `unresolved` | `unknown` | 实验 1（计数 2，无法判定哪一条属于本写入） | **对账窗口结束后仍不唯一**。实验 4 第 1 轮（允许路径上两条路径都是 0）**不在本行**：它 3 s 后就被第 2 轮唯一命中，是 `pending` 的过渡观测，不是「窗口结束仍不唯一」 |
 
 **`pending` 与 `unresolved` 的边界（2026-09-24 评审订正）**：`unresolved` 的定义是「**对账窗口结束后**仍给不出唯一结论」，窗口值本身在本层保持开口（§3 第 1 条：只有两个上界样本，n = 1）。窗口内的空结论是 `pending` 的过渡观测，**不得**归到 `unresolved`——否则实验 4 第 1 轮那种 3 s 自愈的写入会被 ADR-0004 的可见性判据呈现为「需要人工确认」，而那正是本层要避免的情形。
@@ -567,11 +793,12 @@ R8 规定"补证据前不得冻结该表的状态机取值集合"。本层给出
 11. **`confirmed` 之后未决行的关闭时机**：本层没有实现，也没有观测平台侧的确认信号；"什么时候可以把 `pending_external_write` 的行关掉"属于实现决定。
 12. **`pending` 与 `uncertain` 的判别性缺口（2026-09-23 记录，已被第 18 条取代）**：~~本层没有观测到任何能把「写入已发起但还没对账」与「对账给了空结论」分开的事实——两者都由同一条「窗口内为空」支持……因此 §2 把两者合并为一个取值。~~ **Superseded by 第 18 条（2026-09-24）**：该结论建立在把两条轴装进一个集合的旧模型上；拆轴之后 `pending` 是本地事实，不需要平台观测。原文保留以记录取舍过程。
 13. **"平台不对内容创建去重"只来自一对 `createIssue`（n = 1）**：实验 1 的计数 2 是两次参数逐字相同的 `createIssue`；`addProjectV2DraftIssue` 的重复创建**没有测**（实验 4 的两条 draft 标题不同，不是同参数重发）。§4 第 1 行的结论因此限定在实测范围内，不能推广到 draft 分支。
-14. **"显式拒绝后可安全重试"只有一次 `422` 加一次重试**：实验 3(c) 是一次调用、3(d) 是一次重试，各 n = 1；没有重复测量，也没有观测"重试再次失败"的形态。§4 第 4 行的结论因此限定在实测范围内。
+14. **"显式拒绝后可安全重试"只有一次 `422` 加一次重试**：实验 3(c) 是一次调用、3(d) 是一次重试，各 n = 1；没有重复测量，也没有观测"重试再次失败"的形态。§4 第 4 行的结论因此限定在实测范围内。**Superseded by (c-rerun)（2026-09-29）**：平台拒绝另有一次复测；重试仍只有 3(d) 一次，本条对重试的限定不变。另：实验 3 §4 的 (c) 一节记的是两次被拒的调用，本条「一次调用」与之不符，以 §4 的原文为准。
 15. **「结果未知且对象不存在」这一分支没有观测**（2026-09-24 评审补登）：本层的"对象不存在"只在两种情形下取得——平台显式拒绝（实验 3(c)）与客户端发出前拒绝（实验 3(a)）。生产里真正需要"绝不盲重试"的分支是**响应丢失、对账跑完仍查不到、而对象最终确实不存在**；本层没有构造这一分支，因此 `failed` 与 `unknown` 在**这条**路径上的边界只有推导，没有实测。
 16. **GraphQL `createIssue` 的错误协议没有观测**（2026-09-24 评审补登）：实验 3 的失败形态全部走 REST（`gh api --method POST /repos/.../issues`），`rejected` 的判据因此绑在 REST 的 4xx + 错误体上。GraphQL 的错误是 **HTTP 200 + `errors[]`**，本层既没有构造也没有观测这一形态，不能把 `rejected` 的判据推广到 GraphQL 面。
 17. **`Status = Todo` 的创建归因没有验证**（2026-09-24 评审补登）：实验 4 回读到的 `Status = Todo` 是一次只读观测；本层没有证明它是"创建动作直接赋值"，也没有排除 project 的自动化 workflow 造成同一结果——回读实测 `Item added to project` 在该 project 上处于**启用**状态，它是一个合理替代成因。把这条写成"平台在创建时就带上 `Status`"超出了观测范围。
 18. **`pending` 是本地事实，不需要平台观测（2026-09-24 评审订正）**：第 12 条的修法是拆轴（§2 的订正说明），不是补一条观测。**仍然缺的**是结果轴上的**迁移判据与时机**（谁在什么时候把行从 `pending` 推进），它属于 L3 的写路径，本层不给。
+19. **字面口径下不能事后补的观测（2026-09-29 登记）**：#119 验收 1 要求每条观测带墙钟与确切命令。§1 的补观测协议补齐了能再观测的部分；下列四处无法再观测，按 `docs/architecture/gate-e1-sandbox.md` §6 的「不补全」只登记、不补写：① 实验 3(c) 的两次调用里，不带 `--include` 的那一次没有写出命令，两个墙钟各对应哪一次也没有记录；② 实验 4 创建前基线 `items.totalCount = 7` 没有写明出自哪条命令；③ `draft-a` 的创建命令没有写出，它的实际标题（见 (e4-hit)）并不是按 `draft-b` 类推的那个；④ `draft-a` 作废的那一轮轮询，命令在实验 4 §6 第 1 条以 `…` 省略，墙钟没有记录。②–④ 属于已声明作废、不计入结论的那次计时，或创建前的状态。重做 ① 要再发一次 3(c)，重做 ③④ 要新建 draft，都不在 2026-09-29 批准的写入范围内。
 
 ## 4. 四条实验的合并结论
 
@@ -580,7 +807,7 @@ R8 规定"补证据前不得冻结该表的状态机取值集合"。本层给出
 | 1 | 同参数两次创建内容会得到几条对象 | **2 条**（`createIssue` 的一对，n = 1）。平台不对内容创建去重，盲重试必然产生第二个对象；draft 的重复创建未测（§3 第 13 条） | 实验 1 |
 | 2 | 响应丢失后能否靠对账认出刚创建的对象 | **能，前提是标记唯一**：两条路径都唯一命中；搜索索引路径延迟 ≈9 s，仓库侧列表 ≈0 s | 实验 2 |
 | 3 | 对账查不到是否就等于"没创建" | **不等于**：窗口内搜索路径返回 0 而对象已存在 | 实验 2 |
-| 4 | 平台显式拒绝之后能否安全重试 | **能**（一次 `422` 与一次重试的实测范围内）：`422` 之后两条路径对账为 0，重试后按标记计数 1 | 实验 3 |
+| 4 | 平台显式拒绝之后能否安全重试 | **能**（一次 `422` 与一次重试的实测范围内）：`422` 之后两条路径对账为 0，重试后按标记计数 1。**Superseded by (c-rerun)（2026-09-29）**：`422` 另有一次复测；重试仍是一次。 | 实验 3 |
 | 5 | "参数看起来非法"能否当作失败判据 | **不能**：未知标签被平台静默创建（`201`），而同一标签在 gh 客户端路径上被拒 | 实验 3 |
 | 6 | draft 的对账作用域是什么 | **只有 project 条目连接**：仓库侧列表与搜索都是 0 命中；延迟 ≈4 s | 实验 4 |
 | 7 | 行为 6 的两半是否都有观测 | **是**：「先对账」（实验 2、实验 3）与「不盲目重试」（实验 1）各有直接观测 | 实验 1–4 |
