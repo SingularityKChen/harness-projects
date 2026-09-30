@@ -7,6 +7,7 @@
 | 路径 | 放什么 | 不放什么 |
 |---|---|---|
 | `docs/exec-plan/active/` | 进行中的 ExecPlan（spec + plan 合一的活文档） | 已完成的历史计划 |
+| [2026-09-29-harness-plugin-reprobe](exec-plan/completed/2026-09-29-harness-plugin-reprobe.md) | 宿主嵌入复探（#225）：仓库外插件包经 `dsh plugin add` 装进一次性 profile，在真实宿主与浏览器里重跑 #125 的问题 2–4；裁决规则、强度分级与 transport 排序先预注册，由契约测试从观测表机械推导 `embed` / `fallback-web`；探针不合并 | Completed：Batch 0–6 与评审修订完成，裁决 `embed`（typed remote）；#226 评论及新版复测归属订正已有回执；人类伙伴已授权整合，状态以 PR #238 回读为准 |
 | `docs/exec-plan/completed/` | 已验收完成的 ExecPlan，按原文件名保留 | 需要继续修订的计划 |
 | `docs/exec-plan/tech-debt-tracker.md` | 实施时明确接受延期的技术债及其解决/取代记录 | 未裁决的设计候选与功能路线图 |
 | `docs/architecture/` | 长期有效的架构说明：模块边界、依赖方向、数据流、集成方式 | 一次性的实施计划 |

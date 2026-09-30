@@ -40,6 +40,6 @@
 | [gate-e1-write-and-events.md](gate-e1-write-and-events.md) | 写确认语义、事件可用性与「结果不确定」创建的实测记录 |
 | [gate-e1-uncertain-create.md](gate-e1-uncertain-create.md) | 「结果不确定」的创建本身：重复创建、响应丢失后的对账、draft 的作用域，以及 `pending_external_write` 的结果轴（`WriteState`）与获知方式标注 |
 | [gate-e1-ruling.md](gate-e1-ruling.md) | Gate E1 的六条行为裁决与 v1 数据模型冻结建议 |
-| [harness-host-spike.md](harness-host-spike.md) | 宿主（host）能否承载 controller 与一个页面的四个承载问题观测，以及 `embed` / `fallback-web` 裁决与决定它的那一条 |
+| [harness-host-spike.md](harness-host-spike.md) | 宿主（host）能否承载 controller 与一个页面的四个承载问题观测，以及 `embed` / `fallback-web` 裁决与决定它的那一条。§1–§10 是 #125 的原记录（`fallback-web`）；§11 是 #225 的复探：仓库外插件包装进一次性 profile，在真实宿主与真实浏览器里观测，当前有效裁决是 `embed`，transport 为 typed remote |
 
 §内容范围 的其余主题仍待补齐；在补齐之前，涉及这些主题的结论必须在本目录内自包含地写明。
