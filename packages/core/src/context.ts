@@ -135,6 +135,7 @@ function unavailableCore(reason: string): CoreApi {
     listPlanningItems: async () => [],
     getItemDetail: async () => undefined,
     getExecutionContext: async () => undefined,
+    getPlanningSync: async () => ({ degraded: true, stale: true, reason }),
     getDeliveryProjection: async (scope) => ({
       workItemId: typeof scope === 'string' ? scope : scope.workItemId,
       repositoryId: typeof scope === 'string' ? undefined : scope.repositoryId,
@@ -144,7 +145,7 @@ function unavailableCore(reason: string): CoreApi {
   }
   const commands: CoreCommands = {
     bootstrapWorkspace: async () => ({
-      ok: false, entities: 0, workItems: 0, changeRequests: 0, revision: 0, degraded: true, error,
+      ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0, revision: 0, degraded: true, error,
     }),
     startWork: async () => startWorkUnavailable(error),
     cancelExecutionRun: async () => ({ status: undefined, runExternalId: undefined, error }),

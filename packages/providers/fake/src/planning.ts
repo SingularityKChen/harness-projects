@@ -96,7 +96,8 @@ export class FakePlanningProvider implements cap.PlanningProvider {
     const content: cap.ProviderWorkItemContent = { externalId: `item-new-${this.state.versionSeq}`, title, body }
     const record: FakePlanningItemRecord = {
       ref: { bindingId: this.bindingId, objectKind, externalId: content.externalId, url: undefined },
-      project, content: { kind: domain.ContentKind.WorkItem, workItem: content }, fields: emptyFields(), ...this.stamp(),
+      project, membership: { externalId: `m-${content.externalId}`, createdAt: this.observedAt, updatedAt: this.observedAt },
+      content: { kind: domain.ContentKind.WorkItem, workItem: content }, fields: emptyFields(), ...this.stamp(),
     }
     replaceItem(this.state, record)
     return record

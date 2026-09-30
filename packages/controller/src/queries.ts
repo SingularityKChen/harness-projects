@@ -24,7 +24,7 @@ export function createControllerQueries(
     async snapshot(): Promise<WireSnapshot> {
       const views = await core.queries.listPlanningItems()
       const revision = workspaceRevision === undefined ? undefined : await workspaceRevision()
-      return toWireSnapshot(views, authority, revision)
+      return toWireSnapshot(views, authority, revision, await core.queries.getPlanningSync())
     },
     async getEntity(entityId: string): Promise<WireEntity | undefined> {
       const views = await core.queries.listPlanningItems()

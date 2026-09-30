@@ -51,8 +51,10 @@ export interface PlanningItemDetail extends PlanningItemView {
   readonly identities: readonly ExternalIdentity[]
 }
 
+/** `degraded` 是读取层结论（这次读取是否完整）；`stale` 只表示行旧于最近一次成功读取，二者正交（D23）。 */
 export interface SyncSummary {
   readonly degraded: boolean
+  readonly stale: boolean
   readonly reason: string | undefined
 }
 
@@ -83,7 +85,7 @@ export function toPlanningItemView(
     planningStatus: projection.planningStatus,
     content: contentReference(projection.content, identityRef(identity)),
     engineering: engineeringBlock(facts),
-    freshness: { revision: projection.revision, degraded: sync.degraded, reason: sync.reason },
+    freshness: { revision: projection.revision, degraded: sync.stale, reason: sync.stale ? sync.reason : undefined },
   }
 }
 

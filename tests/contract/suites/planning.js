@@ -1,7 +1,7 @@
-/** Planning 契约套件：接受任意 PlanningProvider 适配器 `{ label, makeProvider(scenario), expect }`。scenario 由本套件定义，适配器负责翻译成自己的构造参数：`{}` 全能力无故障；`{ capabilities: { createIssue: false } }` 可选能力未启用；`{ faults: { permissionDenied: true } }` 权限被拒；`{ faults: { offline: true } }` 离线；`{ faults: { duplicateEvent: true } }` 重复投递。`expect`：`{ project, pageSize, items: [{ externalId, objectKind, contentKind }], redactedReason }`。看护的不变量（tests/README.md §2.4、§3）：分页遍历不重不漏；redacted 不回退到缓存内容；失败是结构化结果而不是裸错误；重复观察收敛到同一稳定去重键。 */
+/** Planning 契约套件：接受任意 PlanningProvider 适配器 `{ label, makeProvider(scenario), expect }`。scenario 由本套件定义，适配器负责翻译成自己的构造参数：`{}` 全能力无故障；`{ capabilities: { createIssue: false } }` 可选能力未启用；`{ faults: { permissionDenied: true } }` 权限被拒；`{ faults: { offline: true } }` 离线；`{ faults: { duplicateEvent: true } }` 重复投递。`expect`：`{ project, pageSize, items: [{ externalId, objectKind, contentKind }], redactedReason }`。看护的不变量（tests/README.md §2.4、§3）：分页遍历不重不漏；redacted 不回退到缓存内容；失败是结构化结果而不是裸错误；重复观察收敛到同一稳定去重键；成员关系身份与内容身份分离（裁决 R1：条目携带独立的 membership，PR 成员关系不产生工作项）；同一状态读两次逐字相同（分页与重复读取幂等）；观察的 sourceVersion 缺省或是规范载体。 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { CapabilityKey } from '@harness-projects/capabilities'
+import { CapabilityKey, isComparableSourceVersion } from '@harness-projects/capabilities'
 
 const idsOf = (items) => items.map((item) => item.ref.externalId)
 const sorted = (values) => [...values].sort()
@@ -41,6 +41,43 @@ export function planningContractSuite(adapter) {
       else if (item.contentKind === 'work_item') assert.equal(result.value.content.workItem.externalId, item.externalId)
       else assert.ok(result.value.content.changeRequest.number > 0, '变更请求必须带编号')
     }
+  })
+
+  test(`${label}：成员关系身份与内容身份分离，PR 成员关系不产生工作项（裁决 R1；E1-1 实验 3）`, async () => {
+    const provider = makeProvider({})
+    const all = await provider.listPlanningItems({ project: expect.project, cursor: undefined, limit: 100 })
+    assert.equal(all.ok, true)
+    const membershipIds = all.value.items.map((item) => item.membership?.externalId)
+    assert.ok(membershipIds.every((id) => typeof id === 'string' && id !== ''), '每个条目都必须带非空的成员关系 id')
+    assert.equal(new Set(membershipIds).size, membershipIds.length, '成员关系 id 在条目之间必须唯一')
+    for (const item of all.value.items) {
+      const { ref, membership, content } = item
+      if (['issue', 'draft', 'change_request'].includes(ref.objectKind)) {
+        assert.notEqual(ref.externalId, membership.externalId, '内容身份不得等于成员关系 id')
+      } else {
+        assert.equal(content.kind, 'redacted', '没有内容身份的条目必须是 redacted')
+        assert.equal(ref.objectKind, 'project_item')
+        assert.equal(ref.externalId, membership.externalId)
+      }
+      if (ref.objectKind === 'change_request') assert.notEqual(content.kind, 'work_item', 'PR 成员关系不产生工作项')
+      if (content.kind === 'work_item') assert.ok(['issue', 'draft'].includes(ref.objectKind), '工作项内容只能挂 issue 或 draft')
+    }
+  })
+
+  test(`${label}：同一状态读两次逐字相同（分页与重复读取幂等）`, async () => {
+    const provider = makeProvider({})
+    const readAll = async () => {
+      const pages = []
+      let cursor
+      do {
+        const page = await provider.listPlanningItems({ project: expect.project, cursor, limit: expect.pageSize })
+        assert.equal(page.ok, true)
+        pages.push(page.value)
+        cursor = page.value.nextCursor
+      } while (cursor !== undefined)
+      return pages
+    }
+    assert.deepEqual(await readAll(), await readAll())
   })
 
   test(`${label}：未启用的可选能力返回 not_supported`, async () => {
@@ -85,6 +122,7 @@ export function planningContractSuite(adapter) {
     const keys = []
     for await (const observation of provider.reconcile({ scopeKey: 'planning', cursor: undefined })) {
       keys.push(observation.dedupeKey)
+      assert.ok(observation.sourceVersion === undefined || isComparableSourceVersion(observation.sourceVersion), '观察的 sourceVersion 缺省或必须是规范载体')
     }
     assert.ok(keys.length >= 2, '重复投递场景必须有不止一条观察')
     assert.equal(keys[0], keys[1], '同一观察的两次投递必须得到同一个稳定键')

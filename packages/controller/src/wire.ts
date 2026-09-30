@@ -8,7 +8,7 @@ import type {
   ContentKind, DerivedFlag, EntityId, EntityKind, ExternalIdentityKind, NormalizedStatus, ProviderBindingId,
 } from '@harness-projects/domain'
 import { StatusPolicyMode } from '@harness-projects/core'
-import type { PlanningItemView } from '@harness-projects/core'
+import type { PlanningItemView, SyncSummary } from '@harness-projects/core'
 
 export const WireFreshness = { Fresh: 'fresh', Degraded: 'degraded' } as const
 export type WireFreshness = (typeof WireFreshness)[keyof typeof WireFreshness]
@@ -109,22 +109,22 @@ export function revisionOf(entities: readonly WireEntity[]): number {
   return entities.reduce((max, entity) => Math.max(max, entity.source.revision), 0)
 }
 
+/** 整表新鲜度取工作区级同步摘要：与逐条 freshness 同源，没有实体时也成立（不再恒为 fresh）。 */
 export function toWireSnapshot(
-  views: readonly PlanningItemView[], authority: WireAuthority, workspaceRevision?: number,
+  views: readonly PlanningItemView[], authority: WireAuthority, workspaceRevision: number | undefined, sync: SyncSummary,
 ): WireSnapshot {
   const entities = views
     .map((view) => toWireEntity(view, authority))
     .sort((left, right) => (left.entityId < right.entityId ? -1 : 1))
   const revision = workspaceRevision ?? revisionOf(entities)
-  const degraded = entities.find((entity) => entity.source.freshness === WireFreshness.Degraded)
   return {
     revision,
     entities,
     source: {
       revision,
       authority,
-      freshness: degraded === undefined ? WireFreshness.Fresh : WireFreshness.Degraded,
-      reason: degraded?.source.reason,
+      freshness: sync.degraded ? WireFreshness.Degraded : WireFreshness.Fresh,
+      reason: sync.reason,
     },
   }
 }

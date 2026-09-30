@@ -26,6 +26,8 @@ export interface CoreQueries {
   listPlanningItems(): Promise<readonly PlanningItemView[]>
   getItemDetail(entityId: EntityId): Promise<PlanningItemDetail | undefined>
   getExecutionContext(query: ExecutionContextQuery): Promise<ExecutionContextView | undefined>
+  /** 工作区级规划新鲜度：与逐条 freshness 同源；没有条目时它是表达「不完整 / 权限缺口」的唯一载体。 */
+  getPlanningSync(): Promise<SyncSummary>
   /** 交付投影：链路事实 + 能力状态 + 新鲜度；只读，不触发任何外部写入。 */
   getDeliveryProjection(scope: DeliveryScope): Promise<DeliveryProjection>
   /** 工作项 → 执行上下文 → 分支 → 提交 → 变更请求 → CI 的可查询谱系。 */
@@ -58,6 +60,7 @@ export function createQueries(context: CoreContext): CoreQueries {
     },
 
     getExecutionContext: (query) => readExecutionContext(context, query),
+    getPlanningSync: () => syncSummary(context),
     getDeliveryProjection: (scope) => getDeliveryProjection(context, scope),
 
     async getDeliveryLineage(scope: DeliveryScope): Promise<readonly DeliveryLineageHop[]> {
@@ -66,16 +69,19 @@ export function createQueries(context: CoreContext): CoreQueries {
   }
 }
 
-/** freshness 的唯一来源：能力门 + 最近一次同步游标状态；不靠猜测 provider 是否可达。 */
+/** freshness 的唯一来源：能力门 + 最近一次同步游标；degraded / failed 表示什么都没提交（行 stale），healthy 加错误码表示提交了但有缺口。 */
 async function syncSummary(context: CoreContext): Promise<SyncSummary> {
   const gate = gateCommand(context.registry, CapabilityKey.PlanningItemRead, 'read')
-  if (!gate.allowed) return { degraded: true, reason: gate.error?.message ?? '规划读取能力不可用' }
+  if (!gate.allowed) return { degraded: true, stale: true, reason: gate.error?.message ?? '规划读取能力不可用' }
   const binding = singlePlanningBinding(context.registry)
-  if (binding === undefined) return { degraded: true, reason: '没有默认 Planning 绑定' }
+  if (binding === undefined) return { degraded: true, stale: true, reason: '没有默认 Planning 绑定' }
   const cursor = await context.storage.getSyncCursor(binding.ref.bindingId, PLANNING_SYNC_SCOPE)
-  if (cursor === undefined) return { degraded: false, reason: undefined }
-  const broken = cursor.state === SyncState.Degraded || cursor.state === SyncState.Failed
-  return { degraded: broken, reason: broken ? cursor.lastErrorCode ?? cursor.state : undefined }
+  if (cursor === undefined) return { degraded: false, stale: false, reason: undefined }
+  if (cursor.state === SyncState.Degraded || cursor.state === SyncState.Failed) {
+    return { degraded: true, stale: true, reason: cursor.lastErrorCode ?? cursor.state }
+  }
+  // 提交成功但有缺口：healthy 加 lastErrorCode，读取层 degraded，本次确认的行不 stale（D23）。
+  return { degraded: cursor.lastErrorCode !== undefined, stale: false, reason: cursor.lastErrorCode }
 }
 
 async function primaryIdentity(context: CoreContext, entityId: EntityId): Promise<ExternalIdentity | undefined> {

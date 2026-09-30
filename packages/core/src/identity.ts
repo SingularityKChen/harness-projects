@@ -11,6 +11,7 @@ import {
   EntityKind,
   ExternalIdentityKind,
   IdentityRole,
+  MembershipContentKind,
   promoteDraftToIssue,
   type EntityId,
   type ProviderBindingId,
@@ -24,11 +25,11 @@ export interface ExternalObjectInput {
   readonly externalId: string
 }
 
-const KNOWN_EXTERNAL_KINDS: readonly string[] = Object.values(ExternalIdentityKind)
+const PLANNING_CONTENT_KINDS: readonly string[] = Object.values(MembershipContentKind)
 
-/** provider 的 objectKind 是自由字符串；MVP-0 只认识 issue/draft/change_request，未知一律按 issue 处理。 */
-export function asExternalKind(raw: string): ExternalIdentityKind {
-  return KNOWN_EXTERNAL_KINDS.includes(raw) ? (raw as ExternalIdentityKind) : ExternalIdentityKind.Issue
+/** 规划条目 ref 的内容种类：只认 issue / draft / change_request；其余（含成员关系 ref）返回 undefined，调用方不得登记身份（裁决 R1）。 */
+export function planningContentKind(objectKind: string): MembershipContentKind | undefined {
+  return PLANNING_CONTENT_KINDS.includes(objectKind) ? (objectKind as MembershipContentKind) : undefined
 }
 
 /** 规划内容三态 → 实体种类：change_request 态（含被 redacted 的变更请求）绝不产生第二个工作项。 */

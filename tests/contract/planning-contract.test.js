@@ -1,4 +1,4 @@
-/** 离线 Planning 替身的契约套件装配，外加两条判别性用例。判别性用例保护的不变量：(1) draft→issue 提升只改外部 id，内部实体 id 由调用方保持（不变量 1）；(2) 过期 source version 的字段写必须报 conflict 且不得改动对象（ack 前不得显示权威已保存）。 */
+/** 离线 Planning 替身的契约套件装配，外加两条判别性用例。判别性用例保护的不变量：(1) draft→issue 提升只改外部 id 与内容身份，成员关系 id 保持不变，内部实体 id 由调用方保持（不变量 1；E1-2 实验 2）；(2) 过期 source version 的字段写必须报 conflict 且不得改动对象（ack 前不得显示权威已保存）。 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { promoteDraftToIssue } from '@harness-projects/domain'
@@ -29,10 +29,14 @@ planningContractSuite({
 test('Planning 替身：draft→issue 提升只改外部 id，内部实体 id 由调用方保持', async () => {
   const provider = createFakePlanningProvider({ bindingId, fixture: 'draft-backed' })
   const draftRef = { bindingId, objectKind: 'draft', externalId: 'draft-1', url: undefined }
+  const before = await provider.getPlanningItem(draftRef)
+  assert.equal(before.ok, true)
   const promoted = provider.promoteDraft(draftRef, 'issue-100')
   assert.equal(promoted.ok, true)
   assert.equal(promoted.value.ref.externalId, 'issue-100')
   assert.equal(promoted.value.ref.objectKind, 'issue')
+  assert.equal(promoted.value.membership.externalId, before.value.membership.externalId, '提升不得重新生成成员关系')
+  assert.ok(before.value.membership.externalId, '提升前的成员关系必须存在')
   assert.equal((await provider.getPlanningItem(draftRef)).ok, false, '旧外部 id 必须查不到')
 
   // provider 只给新外部 id；内部实体 id 由 domain 的纯函数原样保持，绝不新建实体。
