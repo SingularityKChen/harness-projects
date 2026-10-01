@@ -45,7 +45,7 @@ Todo ──规划上启动──▶ In Progress ──规划所有者确认工�
 
 - 一个条目对应一个可独立验收的闭环；**不为了减少条目数量而聚合**（`AGENTS.md` §5.1）。
 - PR 描述必须给出 ExecPlan 路径与批次；用 `Closes #N` 关联使合并后自动关闭条目。
-- **工程事件不推进 `Status`。** PR 提交、评审通过、合并、CI 变绿都不改它——会写 `Status` 且由工程事件触发的内置工作流已按 `docs/product/board-semantics.md` §5 全部关闭，`Item added to project` 是 §2 的唯一机械例外、保持开启；`Board invariants` 按日核对九条的启停状态。
+- **工程事件不推进 `Status`。** PR 提交、评审通过、合并、CI 变绿都不改它——会写 `Status` 且由工程事件触发的内置工作流已按 `docs/product/board-semantics.md` §5 全部关闭，`Item added to project` 是 §2 的唯一机械例外、保持开启；`Board invariants` 按日核对全部内置工作流的启停状态。
 - 合并之后由**规划所有者**决定是否接受完成：接受置 `Done`，不接受留在 `In Review` 并写明还差什么。若条目是某个 Gate 的前置条件，先确认 Gate 的验收证据再改。
 - 写入由规划所有者本人执行（看板界面，或 §3 的 `gh project item-edit`）；agent 代写的批准要求见 `docs/development/workflow.md` §3.2——同一条断言只写一处，本表不复述。
 - 阻塞时保留在 `In Progress` 并在条目里写明阻塞原因，不新建"阻塞"状态。

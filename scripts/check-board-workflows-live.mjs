@@ -5,7 +5,7 @@
 
 import { pathToFileURL } from 'node:url'
 
-import { boardWorkflowFindings } from './board-workflow-check.mjs'
+import { boardWorkflowFindings, manualPreconditions } from './board-workflow-check.mjs'
 
 const ENDPOINT = 'https://api.github.com/graphql'
 
@@ -26,7 +26,7 @@ const QUERY = `
 `
 
 /**
- * 执行一次实时观察。所有非成功状态都返回 1，只有完整且合规的九条快照返回 0。
+ * 执行一次实时观察。所有非成功状态都返回 1，只有完整且合规的十条快照返回 0。
  * fetch 与输出函数可注入，使契约测试保持离线。
  */
 export async function runBoardWorkflowCheck({
@@ -48,6 +48,10 @@ export async function runBoardWorkflowCheck({
     }
 
     write(`已检查 ${workflows.length} 条看板内置工作流，全部符合裁决表。`)
+    // 开关符合不等于前提成立：检查器读不到的前提随通过的输出一起出现，提醒人工核对。
+    for (const { name, precondition } of manualPreconditions()) {
+      write(`::notice::[人工核对] ${name}：${precondition}`)
+    }
     return 0
   } catch (error) {
     write(`::error::看板工作流运行时观察失败：${errorMessage(error)}`)

@@ -30,7 +30,7 @@
 
 ## 3.2 交付后的 `Status`
 
-看板的 `Status` 是**规划轴**字段，回答「规划所有者是否接受这个工作项完成」，定义在 `docs/product/board-semantics.md` §1–§2。**工程事件不推进它**：PR 提交、评审通过、合并、CI 变绿都不改 `Status`——会写 `Status` 且由工程事件触发的内置工作流已按该文档 §5 全部关闭，`Item added to project` 是 §2 的唯一机械例外、保持开启；`Board invariants` 按日核对九条的启停状态。
+看板的 `Status` 是**规划轴**字段，回答「规划所有者是否接受这个工作项完成」，定义在 `docs/product/board-semantics.md` §1–§2。**工程事件不推进它**：PR 提交、评审通过、合并、CI 变绿都不改 `Status`——会写 `Status` 且由工程事件触发的内置工作流已按该文档 §5 全部关闭，`Item added to project` 是 §2 的唯一机械例外、保持开启；`Board invariants` 按日核对全部内置工作流的启停状态。
 
 因此 PR 合并之后：
 
