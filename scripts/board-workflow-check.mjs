@@ -8,9 +8,9 @@
 // 不提供 CLI 入口，因此可以进 `pnpm verify`——那是一条离线、无凭据的必需检查。
 
 /**
- * 九条内置工作流各自的期望状态。
+ * 十条内置工作流各自的期望状态。
  *
- * 唯一权威来源是 docs/product/board-semantics.md §5 的九行裁决表；本常量是那张表的
+ * 唯一权威来源是 docs/product/board-semantics.md §5 的十行裁决表；本常量是那张表的
  * 可执行形式。改这里之前先改那张表，并在同一个提交里保持两者一致——
  * `tests/contract/board-workflow.test.js` 有一条测试把条数与内容钉死，防止两边漂移。
  *
@@ -20,12 +20,25 @@
  *
  * `why` 与数据放在一起而不是只写在文档里，是为了让检查的输出自解释：看到红叉的人
  * 不需要先去翻文档才知道为什么这条必须关。
+ *
+ * 可选的 `precondition` 记录检查器读不到、只能人工核对的前提。它与 `why` 分开，是因为
+ * `why` 只在偏离时出现在输出里，而前提恰恰要在「全部符合」时提醒：开着不等于合规。
  */
 export const EXPECTED = [
   {
     name: 'Auto-add sub-issues to project',
     enabled: true,
     why: '不写任何状态字段，只把子条目挂上看板——推导规则第 1 步「不写字段」即可开启',
+  },
+  {
+    name: 'Auto-add to project',
+    enabled: true,
+    why:
+      '不写任何字段，只把新建或更新的 issue 加上看板（Status 的初始值仍由 Item added to project 写 Todo）。新建路径按推导规则第 1 步成立；' +
+      '不在看板上的 issue 被关闭或重开后加入的「更新即加入」路径，是规划所有者接受的残余（§5）。' +
+      '前提是过滤条件只含 issue、不含 PR：PR 是工程产物，自动上板就是跨轴写入规划成员关系。' +
+      'projectV2.workflows 不返回过滤条件，本检查只能核对开关，前提需在看板设置里人工核对（issue #248）',
+    precondition: '过滤条件只含 issue、不含 PR。projectV2.workflows 不返回过滤条件，开着不等于合规，需在看板设置里人工核对',
   },
   {
     name: 'Item added to project',
@@ -78,6 +91,20 @@ export const EXPECTED = [
 export const MUST_BE_DISABLED = EXPECTED.filter((rule) => !rule.enabled).map((rule) => rule.name)
 
 /**
+ * 带人工前提的裁决，由 EXPECTED 推导。运行时 adapter 在检查通过时逐条输出它们，
+ * 让「全部符合裁决表」不会被读成「前提也已核对」。
+ *
+ * @param {Array<{name: string, enabled: boolean, why: string, precondition?: string}>} [expected]
+ * @returns {Array<{name: string, precondition: string}>}
+ */
+export function manualPreconditions(expected = EXPECTED) {
+  assertRuleList(expected, 'expected')
+  return expected
+    .filter((rule) => rule.precondition !== undefined)
+    .map((rule) => ({ name: rule.name, precondition: rule.precondition }))
+}
+
+/**
  * 比对实际状态与裁决表，返回四类偏离。
  *
  * | kind | 含义 |
@@ -88,7 +115,7 @@ export const MUST_BE_DISABLED = EXPECTED.filter((rule) => !rule.enabled).map((ru
  * | `missing` | 裁决表里有，看板上已不存在 |
  *
  * `unknown` 这一类值得单独说：GitHub 新增内置工作流时不会通知任何人，而新增的工作流
- * 默认没有被裁决过。一份只查「该关的有没有开」的清单会对第十条视而不见——所以未裁决
+ * 默认没有被裁决过。一份只查「该关的有没有开」的清单会对新增的那一条视而不见——所以未裁决
  * 的工作流必须让检查变红，逼一次显式判断，而不是默认放行。
  *
  * Fail-closed 的输入校验（与 docs/development/repository-rules.md §2「解析不了的 workflow 会让检查直接失败，
@@ -169,6 +196,9 @@ function assertRuleList(value, label) {
   value.forEach((rule, index) => {
     if (typeof rule.why !== 'string' || rule.why.length === 0) {
       throw new TypeError(`boardWorkflowFindings: ${label}[${index}].why 必须是非空字符串——理由要随数据走`)
+    }
+    if (rule.precondition !== undefined && (typeof rule.precondition !== 'string' || rule.precondition.length === 0)) {
+      throw new TypeError(`boardWorkflowFindings: ${label}[${index}].precondition 存在时必须是非空字符串`)
     }
   })
 }

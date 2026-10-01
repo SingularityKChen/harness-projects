@@ -19,6 +19,7 @@ const validEnv = {
 
 const conforming = () => [
   { name: 'Auto-add sub-issues to project', enabled: true },
+  { name: 'Auto-add to project', enabled: true },
   { name: 'Item added to project', enabled: true },
   { name: 'Item closed', enabled: false },
   { name: 'Item reopened', enabled: false },
@@ -52,7 +53,7 @@ async function run({ env = validEnv, fetchImpl = async () => response(graphqlBod
   return { exitCode, output: output.join('\n') }
 }
 
-test('九条完整且合规时 exit 0，并向 GraphQL 传显式 owner / project number', async () => {
+test('十条完整且合规时 exit 0，并向 GraphQL 传显式 owner / project number', async () => {
   let request
   const result = await run({
     fetchImpl: async (url, init) => {
@@ -62,7 +63,9 @@ test('九条完整且合规时 exit 0，并向 GraphQL 传显式 owner / project
   })
 
   assert.equal(result.exitCode, 0)
-  assert.match(result.output, /9 条.*全部符合/)
+  assert.match(result.output, /10 条.*全部符合/)
+  // 开着不等于合规：检查器读不到的前提必须随通过的输出一起出现，而不是只在报错时出现。
+  assert.match(result.output, /::notice::\[人工核对\] Auto-add to project：.*不含 PR/)
   assert.equal(request.url, 'https://api.github.com/graphql')
   assert.equal(request.init.method, 'POST')
   assert.equal(request.init.headers.authorization, 'Bearer test-token')
@@ -80,6 +83,8 @@ test('任一权威判定 finding 都 exit 1，并输出可行动诊断', async (
 
   assert.equal(result.exitCode, 1)
   assert.match(result.output, /::error::\[should-be-disabled\] Pull request merged/)
+  // 人工核对提醒只属于「全部符合」：失败时输出它，会把注意力从真正的偏离上引开。
+  assert.doesNotMatch(result.output, /::notice::/)
 })
 
 test('三个必需环境变量缺失或 project number 非正整数时 fail-closed', async (t) => {
