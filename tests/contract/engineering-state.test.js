@@ -149,6 +149,12 @@ test('Engineering 字段按稳定 ID 查询并核对所属 project、名称、�
   })
 
   assert.equal(seen[0].variables.fieldId, 'PVTF_engineering')
+  assert.deepEqual([seen[0].variables.owner, seen[0].variables.number], ['SingularityKChen', 10])
+  await engineering.resolveProjectField({
+    gql: async (query, variables) => { seen.push({ query, variables }); return validProjectData() },
+    engineeringFieldId: 'PVTF_engineering', owner: 'octo', projectNumber: 7,
+  })
+  assert.deepEqual([seen[1].variables.owner, seen[1].variables.number], ['octo', 7])
   assert.match(seen[0].query, /node\(id:\$fieldId\)/)
   assert.deepEqual(resolved, {
     projectId: 'PVT_project',
@@ -323,10 +329,10 @@ const optionIdFor = (name) => OPTIONS.find((option) => option.name === name).id
 const optionNameFor = (id) => OPTIONS.find((option) => option.id === id)?.name
 
 const REF_A_MERGED = {
-  number: 150, state: 'MERGED', merged: true, isDraft: false, reviewDecision: null, createdAt: '2026-09-22T00:00:00Z',
+  id: 'PR_150', number: 150, repository: { nameWithOwner: 'o/r' }, state: 'MERGED', merged: true, isDraft: false, reviewDecision: null, createdAt: '2026-09-22T00:00:00Z',
 }
 const REF_B_OPEN = {
-  number: 200, state: 'OPEN', merged: false, isDraft: false, reviewDecision: null, createdAt: '2026-09-23T00:00:00Z',
+  id: 'PR_200', number: 200, repository: { nameWithOwner: 'o/r' }, state: 'OPEN', merged: false, isDraft: false, reviewDecision: null, createdAt: '2026-09-23T00:00:00Z',
 }
 
 const connection = (nodes) => ({ totalCount: nodes.length, pageInfo: { hasNextPage: false, endCursor: 'CURSOR-1' }, nodes })
@@ -442,7 +448,7 @@ test('一次 reconcile 里每个条目按自己的关闭引用集合取值', asy
 
 test('全部关闭且未合并的引用集合写 clear，不是写 PR open', async () => {
   const closed = {
-    number: 200, state: 'CLOSED', merged: false, isDraft: false, reviewDecision: null, createdAt: '2026-09-23T00:00:00Z',
+    id: 'PR_200', number: 200, repository: { nameWithOwner: 'o/r' }, state: 'CLOSED', merged: false, isDraft: false, reviewDecision: null, createdAt: '2026-09-23T00:00:00Z',
   }
   const { mutations, logs } = await runWriter({
     trigger: triggerWith([{ issue: 34, itemId: 'item-34' }]),
@@ -493,20 +499,39 @@ test('expectedFor 的三条规则与编号兜底', () => {
     { value: 'PR open', prNumber: 200, rule: 'open' },
   )
   const closed = {
-    number: 10, state: 'CLOSED', merged: false, isDraft: false, reviewDecision: null, createdAt: '2026-09-20T00:00:00Z',
+    id: 'PR_10', number: 10, state: 'CLOSED', merged: false, isDraft: false, reviewDecision: null, createdAt: '2026-09-20T00:00:00Z',
   }
   assert.deepEqual(engineering.expectedFor({ references: [closed] }), { value: null, prNumber: 10, rule: 'closed' })
 
   // createdAt 相同时按编号降序兜底：排序确定，不依赖输入顺序。
-  const lower = { ...REF_B_OPEN, number: 11, createdAt: '2026-09-23T00:00:00Z' }
-  const higher = { ...REF_B_OPEN, number: 12, createdAt: '2026-09-23T00:00:00Z', reviewDecision: 'APPROVED' }
+  const lower = { ...REF_B_OPEN, id: 'PR_11', number: 11, createdAt: '2026-09-23T00:00:00Z' }
+  const higher = { ...REF_B_OPEN, id: 'PR_12', number: 12, createdAt: '2026-09-23T00:00:00Z', reviewDecision: 'APPROVED' }
   assert.deepEqual(engineering.expectedFor({ references: [lower, higher] }), { value: 'Approved', prNumber: 12, rule: 'open' })
   assert.deepEqual(engineering.expectedFor({ references: [higher, lower] }), { value: 'Approved', prNumber: 12, rule: 'open' })
 })
 
-test('expectedFor 在空集合上抛错，而不是「清空」', () => {
-  assert.throws(() => engineering.expectedFor({ references: [] }), /至少一个引用 PR/)
-  assert.throws(() => engineering.expectedFor({ references: null }), /至少一个引用 PR/)
+test('expectedFor 只在完整零引用证据下清空；缺证据或畸形输入仍是错误', () => {
+  assert.deepEqual(engineering.expectedFor({ references: [], complete: true }), { value: null, prNumber: null, rule: 'unreferenced' })
+  for (const references of [[], null, undefined, 'x']) {
+    for (const complete of [false, undefined, 'yes']) {
+      assert.throws(() => engineering.expectedFor({ references, complete }), /至少一个引用 PR/)
+    }
+  }
+  for (const references of [null, undefined, {}]) {
+    assert.throws(() => engineering.expectedFor({ references, complete: true }), /至少一个引用 PR/)
+  }
+})
+
+test('跨仓同号同时间的引用与输入顺序无关，按全局 PR id 码元升序兜底；同 Issue 重复或缺 id 被拒', () => {
+  // 'PR_B' < 'PR_a' 按 UTF-16 码元成立，而 localeCompare 会反过来：判别「码元」与「区域排序」。
+  const same = { number: 7, state: 'OPEN', merged: false, isDraft: false, createdAt: '2026-09-23T00:00:00Z' }
+  const lower = { ...same, id: 'PR_a', reviewDecision: 'APPROVED' }
+  const upper = { ...same, id: 'PR_B', reviewDecision: 'CHANGES_REQUESTED' }
+  const expected = { value: 'Changes requested', prNumber: 7, rule: 'open' }
+  assert.deepEqual(engineering.expectedFor({ references: [lower, upper] }), expected)
+  assert.deepEqual(engineering.expectedFor({ references: [upper, lower] }), expected)
+  assert.throws(() => engineering.expectedFor({ references: [lower, { ...lower }] }), /重复的 PR id/)
+  assert.throws(() => engineering.expectedFor({ references: [{ ...lower, id: '' }] }), /缺少稳定的全局 id/)
 })
 
 test('expectedFor 校验每一个引用：未被选中的未知枚举同样响亮失败', () => {
@@ -578,8 +603,11 @@ test('关闭引用读取的任何不完整都 fail closed', async (t) => {
     ['pageInfo 为 null', { repository: { issue: { closedByPullRequestsReferences: issueConnection([REF_B_OPEN], { pageInfo: null }) } } }, /pageInfo 必须是对象/],
     ['hasNextPage 不是布尔值', { repository: { issue: { closedByPullRequestsReferences: issueConnection([REF_B_OPEN], { pageInfo: { hasNextPage: 'false', endCursor: null } }) } } }, /hasNextPage 必须是布尔值/],
     ['hasNextPage 但 endCursor 为空', { repository: { issue: { closedByPullRequestsReferences: issueConnection([REF_B_OPEN], { totalCount: 2, pageInfo: { hasNextPage: true, endCursor: '' } }) } } }, /endCursor 必须是非空字符串/],
+    ['引用缺全局 id', { repository: { issue: { closedByPullRequestsReferences: issueConnection([{ ...REF_B_OPEN, id: '' }]) } } }, /缺少稳定的全局 id/],
+    ['引用缺 repository', { repository: { issue: { closedByPullRequestsReferences: issueConnection([{ ...REF_B_OPEN, repository: null }]) } } }, /缺少 repository/],
     ['引用缺编号', { repository: { issue: { closedByPullRequestsReferences: issueConnection([{ ...REF_B_OPEN, number: 0 }]) } } }, /缺少正整数编号/],
     ['引用缺 createdAt', { repository: { issue: { closedByPullRequestsReferences: issueConnection([{ ...REF_B_OPEN, createdAt: 'x' }]) } } }, /缺少可解析的 createdAt/],
+    ['引用缺 reviewDecision 键（缺失不得补成 null）', { repository: { issue: { closedByPullRequestsReferences: issueConnection([{ ...REF_B_OPEN, reviewDecision: undefined }]) } } }, /reviewDecision 必须是字符串或 null/],
     ['reviewDecision 不是字符串', { repository: { issue: { closedByPullRequestsReferences: issueConnection([{ ...REF_B_OPEN, reviewDecision: 7 }]) } } }, /reviewDecision 必须是字符串或 null/],
   ]
 
@@ -593,14 +621,29 @@ test('关闭引用读取的任何不完整都 fail closed', async (t) => {
   }
 })
 
+test('多页读取中的矛盾快照 fail closed：totalCount 变化、cursor 重复、节点重复', async () => {
+  const page = (node, overrides) => issueConnection([node], { totalCount: 2, pageInfo: { hasNextPage: true, endCursor: 'C1' }, ...overrides })
+  const last = { pageInfo: { hasNextPage: false, endCursor: null } }
+  for (const [pages, pattern] of [
+    [[page(REF_A_MERGED), page(REF_B_OPEN, { ...last, totalCount: 3 })], /SourceChanged/],
+    [[page(REF_A_MERGED), page(REF_B_OPEN)], /endCursor.*重复/],
+    [[page(REF_A_MERGED), page(REF_A_MERGED, last)], /重复的 PR id/],
+  ]) {
+    let at = 0
+    await assert.rejects(engineering.loadClosingPullRequests({
+      gql: async () => ({ repository: { issue: { closedByPullRequestsReferences: pages[at++] } } }), owner: 'o', repo: 'r', issueNumber: 34,
+    }), pattern)
+  }
+})
+
 test('关闭引用分页超过上限时 fail closed，不按截断输入写入', async () => {
   let calls = 0
   await assert.rejects(
     engineering.loadClosingPullRequests({
       gql: async () => {
         calls += 1
-        return { repository: { issue: { closedByPullRequestsReferences: issueConnection([REF_B_OPEN], {
-          totalCount: 999, pageInfo: { hasNextPage: true, endCursor: 'next' },
+        return { repository: { issue: { closedByPullRequestsReferences: issueConnection([{ ...REF_B_OPEN, id: `PR_${calls}` }], {
+          totalCount: 999, pageInfo: { hasNextPage: true, endCursor: `next-${calls}` },
         }) } } }
       },
       owner: 'o', repo: 'r', issueNumber: 34,

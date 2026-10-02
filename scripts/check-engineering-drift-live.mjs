@@ -6,38 +6,33 @@
 //
 // 用法：
 //   PROJECTS_TOKEN=... PROJECT_OWNER=... PROJECT_NUMBER=... GITHUB_REPOSITORY=owner/repo \
+//   ENGINEERING_FIELD_ID=... \
 //     node scripts/check-engineering-drift-live.mjs [--json]
 
 import { pathToFileURL } from 'node:url'
 
 import { describeFinding, engineeringDriftFindings } from './engineering-drift.mjs'
-import { FIELD_NAME, MAX_PAGES, PAGE_SIZE } from './sync-engineering-state.mjs'
+import {
+  CLOSING_REFERENCES_CONNECTION, FIELD_NAME, loadClosingPullRequests, MAX_PAGES, PAGE_SIZE, parseRepository,
+  resolveProjectField,
+} from './sync-engineering-state.mjs'
 
 const ENDPOINT = 'https://api.github.com/graphql'
 
-const PULL_REQUESTS_QUERY = `
-query EngineeringDriftPullRequests($owner:String!,$repo:String!,$cursor:String){
-  repository(owner:$owner,name:$repo){
-    pullRequests(first:${PAGE_SIZE},states:[OPEN,CLOSED,MERGED],
-      orderBy:{field:CREATED_AT,direction:DESC},after:$cursor){
-      totalCount pageInfo{hasNextPage endCursor}
-      nodes{number state merged isDraft reviewDecision createdAt
-        closingIssuesReferences(first:50){totalCount nodes{number}}}
-    }
-  }
-}`
+// 每个 item 的选择集；只用 fieldValueByName 定向读 Engineering，不读 fieldValues 全列，更不读 Status。
+const ITEM_FIELDS = `id
+  content{__typename ... on Issue{id number repository{nameWithOwner}
+    closedByPullRequestsReferences(first:${PAGE_SIZE},includeClosedPrs:true){${CLOSING_REFERENCES_CONNECTION}}}}
+  fieldValueByName(name:"${FIELD_NAME}"){... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2SingleSelectField{id}}}}`
 
 const ITEMS_QUERY = `
-query EngineeringDriftItems($owner:String!,$number:Int!,$cursor:String){
+query EngineeringProjectItems($owner:String!,$number:Int!,$cursor:String){
   user(login:$owner){
     projectV2(number:$number){
-      items(first:${PAGE_SIZE},after:$cursor){
+      id
+      items(first:${PAGE_SIZE},after:$cursor,archivedStates:[ARCHIVED,NOT_ARCHIVED]){
         totalCount pageInfo{hasNextPage endCursor}
-        nodes{id
-          content{... on Issue{number repository{nameWithOwner}}}
-          fieldValues(first:50){nodes{... on ProjectV2ItemFieldSingleSelectValue{
-            name field{... on ProjectV2FieldCommon{name}}}}}
-        }
+        nodes{${ITEM_FIELDS}}
       }
     }
   }
@@ -56,12 +51,16 @@ export async function runEngineeringDriftCheck({
   const asJson = argv.includes('--json')
   try {
     const config = readConfig(env)
-    const pullRequests = await fetchPullRequests(config, fetchImpl)
-    const items = await fetchItems(config, fetchImpl)
-    const { findings, skipped, checked } = engineeringDriftFindings({ pullRequests, items })
+    const call = (query, variables) => gql({ token: config.token, query, variables }, fetchImpl)
+    const { owner, projectNumber, repository } = config
+    const field = await resolveProjectField({ gql: call, engineeringFieldId: config.fieldId, owner, projectNumber })
+    const snapshot = await loadProjectEngineeringSnapshot({
+      gql: call, owner, projectNumber, projectId: field.projectId, fieldId: field.fieldId, repository,
+    })
+    const { findings, checked } = engineeringDriftFindings(snapshot)
 
     if (asJson) {
-      write(JSON.stringify({ findings, skipped, checked, pullRequests: pullRequests.length, items: items.length }))
+      write(JSON.stringify({ findings, checked, ...snapshot.counts }))
     } else {
       for (const finding of findings) {
         write(`::error::[Engineering 漂移] ${describeFinding(finding)}`)
@@ -76,7 +75,7 @@ export async function runEngineeringDriftCheck({
     }
 
     if (!asJson) {
-      write(`已比较 ${checked} 个看板条目，全部等于 PR 真值（${skipped} 个条目没有被任何 PR 引用，跳过）。`)
+      write(`已比较 ${checked} 个看板条目，全部等于 PR 真值（排除 ${snapshot.counts.excluded} 个非本仓 Issue 条目）。`)
     }
     return 0
   } catch (error) {
@@ -90,12 +89,8 @@ function readConfig(env) {
   const owner = requiredString(env.PROJECT_OWNER, 'PROJECT_OWNER')
   const rawNumber = requiredString(env.PROJECT_NUMBER, 'PROJECT_NUMBER')
   if (!/^[1-9]\d*$/.test(rawNumber)) throw new Error('PROJECT_NUMBER 必须是正整数')
-  const repository = requiredString(env.GITHUB_REPOSITORY, 'GITHUB_REPOSITORY')
-  const parts = repository.split('/')
-  if (parts.length !== 2 || parts.some((part) => part.length === 0)) {
-    throw new Error('GITHUB_REPOSITORY 必须是非空 owner/repo')
-  }
-  return { token, owner, projectNumber: Number(rawNumber), repoOwner: parts[0], repo: parts[1] }
+  const fieldId = requiredString(env.ENGINEERING_FIELD_ID, 'ENGINEERING_FIELD_ID')
+  return { token, owner, projectNumber: Number(rawNumber), fieldId, repository: parseRepository(env.GITHUB_REPOSITORY) }
 }
 
 async function gql({ token, query, variables }, fetchImpl) {
@@ -138,95 +133,111 @@ async function gql({ token, query, variables }, fetchImpl) {
   return requiredObject(body.data, 'data')
 }
 
-/** 逐页取完为止；超过 `MAX_PAGES` 就失败，不把截断的输入当完整输入。 */
-async function paginate({ config, query, variables, extract, label, fetchImpl }) {
+/** 逐页取完；超过页数上限、totalCount 变化、cursor 重复、条数与 totalCount 不符都失败，不把截断或矛盾的输入当完整。 */
+async function paginate({ gql, query, variables, extract, label }) {
   const nodes = []
+  const cursors = new Set()
   let cursor = null
   let totalCount = null
 
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const data = await gql({ token: config.token, query, variables: { ...variables, cursor } }, fetchImpl)
-    const connection = extract(data)
+    const connection = extract(await gql(query, { ...variables, cursor }))
     if (!Array.isArray(connection.nodes)) throw new Error(`${label} 的 nodes 必须是数组`)
     if (!Number.isInteger(connection.totalCount) || connection.totalCount < 0) {
       throw new Error(`${label} 的 totalCount 必须是非负整数`)
     }
-    if (totalCount === null) totalCount = connection.totalCount
+    if (totalCount !== null && connection.totalCount !== totalCount) {
+      throw new Error(`SourceChanged：${label} 的 totalCount 在分页期间由 ${totalCount} 变为 ${connection.totalCount}`)
+    }
+    totalCount = connection.totalCount
     nodes.push(...connection.nodes)
 
     const pageInfo = requiredObject(connection.pageInfo, `${label}.pageInfo`)
-    if (pageInfo.hasNextPage !== true) {
+    if (typeof pageInfo.hasNextPage !== 'boolean') throw new Error(`${label}.pageInfo.hasNextPage 必须是布尔值`)
+    if (!pageInfo.hasNextPage) {
       if (nodes.length !== totalCount) {
         throw new Error(`${label} 响应不完整：nodes=${nodes.length}，totalCount=${totalCount}`)
       }
       return nodes
     }
     cursor = requiredString(pageInfo.endCursor, `${label}.pageInfo.endCursor`)
+    if (cursors.has(cursor)) throw new Error(`${label}.pageInfo.endCursor 重复：${cursor}`)
+    cursors.add(cursor)
   }
 
   throw new Error(`${label} 超过 ${MAX_PAGES} 页（${PAGE_SIZE} 条/页）上限，拒绝在截断的输入上判定`)
 }
 
-async function fetchPullRequests(config, fetchImpl) {
-  const nodes = await paginate({
-    config,
-    query: PULL_REQUESTS_QUERY,
-    variables: { owner: config.repoOwner, repo: config.repo },
-    extract: (data) => requiredObject(requiredObject(data.repository, 'data.repository').pullRequests, 'pullRequests'),
-    label: 'pullRequests',
-    fetchImpl,
-  })
+/**
+ * 把一个 item 读成「候选 Issue + 完整关闭引用」。PullRequest、DraftIssue 与他仓 Issue 明确排除（返回 null，
+ * 调用方计数）；content 为 null、类型未知、缺 id/仓库、引用不完整、字段值不属于目标字段一律失败。
+ * `referencesComplete` 只在引用读完整后给出——它是完整零引用的唯一证据。
+ */
+async function readItem({ gql, node, fieldId, repository }) {
+  const path = `item ${String(node?.id)}`
+  requiredString(node?.id, 'item.id')
+  const content = requiredObject(node.content, `${path}.content`)
+  if (content.__typename === 'PullRequest' || content.__typename === 'DraftIssue') return null
+  if (content.__typename !== 'Issue') throw new Error(`${path} 的 content 类型未知：${String(content.__typename)}`)
+  requiredString(content.id, `${path}.content.id`)
+  if (!Number.isInteger(content.number) || content.number <= 0) throw new Error(`${path}.content.number 必须是正整数`)
+  const name = requiredString(content.repository?.nameWithOwner, `${path}.content.repository`)
+  if (name !== `${repository.owner}/${repository.repo}`) return null
 
-  // 只做纯函数做不到的那件事：`closingIssuesReferences` 的**完整性**。映射出来的每个
-  // 字段都由 `normalizePullRequest` 校验——那是同一份契约的权威，在这里再验一遍只会
-  // 造出第二处会漂移的副本。
-  return nodes.map((node, index) => {
-    const path = `pullRequests[${index}].closingIssuesReferences`
-    const closing = requiredObject(node?.closingIssuesReferences, path)
-    if (!Array.isArray(closing.nodes) || closing.nodes.length !== closing.totalCount) {
-      throw new Error(`${path} 快照不完整`)
-    }
-    const { number, state, merged, isDraft, reviewDecision, createdAt } = node
-    return {
-      number, state, merged, isDraft, reviewDecision, createdAt,
-      closingIssues: closing.nodes.map((issue) => issue?.number),
-    }
+  const references = await loadClosingPullRequests({
+    gql, ...repository, issueNumber: content.number, initialConnection: content.closedByPullRequestsReferences ?? null,
   })
+  const value = node.fieldValueByName
+  if (value !== null && (typeof value?.name !== 'string' || value.field?.id !== fieldId)) {
+    throw new Error(`${path} 的 ${FIELD_NAME} 字段值不是目标单选字段的取值`)
+  }
+  return { item: { itemId: node.id, issue: content.number, issueId: content.id, engineering: value?.name ?? null, referencesComplete: true }, references }
 }
 
-async function fetchItems(config, fetchImpl) {
+/** 关联视图：每条 Issue 侧引用展开成一行 PR 快照（closingIssues:[issue]）；同一 Issue 来源，不查反向关系。 */
+const viewOf = (reads) => ({
+  pullRequests: reads.flatMap(({ item, references }) => references.map((reference) => ({ ...reference, closingIssues: [item.issue] }))),
+  items: reads.map(({ item }) => item),
+})
+
+const unique = (seen, key, what) => {
+  if (seen.has(key)) throw new Error(`${what} 重复：${key}`)
+  seen.add(key)
+}
+
+/** 读取目标 Project 的完整工程快照 `{ pullRequests, items, counts }`（只读）；读完全部条目与嵌套引用才返回。 */
+export async function loadProjectEngineeringSnapshot({ gql, owner, projectNumber, projectId, fieldId, repository }) {
+  let pages = 0
   const nodes = await paginate({
-    config,
-    query: ITEMS_QUERY,
-    variables: { owner: config.owner, number: config.projectNumber },
-    extract: (data) => requiredObject(requiredObject(data.user, 'data.user').projectV2, 'projectV2').items,
-    label: 'projectV2.items',
-    fetchImpl,
+    gql, query: ITEMS_QUERY, variables: { owner, number: projectNumber }, label: 'projectV2.items',
+    extract: (data) => {
+      pages += 1
+      const project = requiredObject(requiredObject(data.user, 'data.user').projectV2, 'projectV2')
+      if (project.id !== projectId) throw new Error('projectV2 与已校验的 Engineering 字段所属 project 不一致')
+      return requiredObject(project.items, 'projectV2.items')
+    },
   })
 
-  // 项目是 user 级的，可以容纳任意仓库的条目；不按来源仓库过滤的话，他仓的 issue #N
-  // 会被拿去和本仓库 close #N 的 PR 比较，既可能假红也可能掩盖真漂移。
-  // 这个过滤同时排除了非 issue 的条目（PR、draft issue 都没有 `repository`），
-  // 所以不再需要单独判一次 `content.number`。
-  const wanted = `${config.repoOwner}/${config.repo}`
-  const items = []
-  for (const [index, node] of nodes.entries()) {
-    if (node?.content?.repository?.nameWithOwner !== wanted) continue
-    const path = `items[${index}]`
-
-    const fieldValues = requiredObject(node.fieldValues, `${path}.fieldValues`)
-    if (!Array.isArray(fieldValues.nodes)) throw new Error(`${path}.fieldValues.nodes 必须是数组`)
-    const matches = fieldValues.nodes.filter((value) => value?.field?.name === FIELD_NAME)
-    if (matches.length > 1) {
-      throw new Error(`${path} 有 ${matches.length} 个 ${FIELD_NAME} 字段值，无法判定`)
+  const seen = { items: new Set(), issues: new Set() }
+  const snapshots = new Map()
+  const reads = []
+  for (const node of nodes) {
+    unique(seen.items, node?.id, 'Project item id')
+    const read = await readItem({ gql, node, fieldId, repository })
+    if (read === null) continue
+    unique(seen.issues, read.item.issueId, 'Issue id')
+    for (const { id, number, state, merged, isDraft, reviewDecision, createdAt } of read.references) {
+      const snapshot = JSON.stringify([number, state, merged, isDraft, reviewDecision, createdAt])
+      if (snapshots.has(id) && snapshots.get(id) !== snapshot) {
+        throw new Error(`SourceChanged：PR ${id} 在同一批次读到矛盾的快照`)
+      }
+      snapshots.set(id, snapshot)
     }
-    items.push({
-      itemId: requiredString(node.id, `${path}.id`),
-      issue: node.content.number,
-      engineering: matches.length === 0 ? null : (matches[0].name ?? null),
-    })
+    reads.push(read)
   }
-  return items
+
+  const view = viewOf(reads)
+  return { ...view, counts: { pages, items: reads.length, referenceEdges: view.pullRequests.length, excluded: nodes.length - reads.length } }
 }
 
 function requiredString(value, name) {

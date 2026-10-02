@@ -22,8 +22,8 @@ export { MAX_PAGES, PAGE_SIZE }
  *
  * 期望值由 `expectedFor` 给出——**任一已合并 PR 优先**（终态且单调），否则创建时间
  * 最新的 open PR，否则最新的 closed PR（即清空）；规则本身与写入口共用同一份实现，
- * 因此这里不再复述。没有被任何 PR 引用的条目**不参与比较**：`Engineering` 为空是
- * 合法状态，不是漂移。
+ * 因此这里不再复述。所有本仓 Issue 条目都参与比较：完整读取证明零引用（`referencesComplete`）
+ * 时期望为空，旧值残留就是漂移；没有该证据的空引用仍是错误。
  */
 
 function requiredString(value, path) {
@@ -55,9 +55,9 @@ function normalizePullRequest(node, index) {
   if (Number.isNaN(Date.parse(createdAt))) {
     throw new Error(`${path}.createdAt 不是可解析的时间：${createdAt}`)
   }
-  const reviewDecision = node?.reviewDecision ?? null
-  if (reviewDecision !== null && typeof reviewDecision !== 'string') {
-    throw new Error(`${path}.reviewDecision 必须是字符串或 null`)
+  const reviewDecision = node?.reviewDecision
+  if (reviewDecision === undefined || (reviewDecision !== null && typeof reviewDecision !== 'string')) {
+    throw new Error(`${path}.reviewDecision 必须是字符串或 null（缺失不会被补成 null）`)
   }
   if (!Array.isArray(node?.closingIssues)) {
     throw new Error(`${path}.closingIssues 必须是数组`)
@@ -65,7 +65,9 @@ function normalizePullRequest(node, index) {
   const closingIssues = node.closingIssues.map((issue, at) =>
     requiredNumber(issue, `${path}.closingIssues[${at}]`))
 
-  return { number, state, merged, isDraft, createdAt, reviewDecision, closingIssues }
+  const id = requiredString(node?.id, `${path}.id`)
+
+  return { id, number, state, merged, isDraft, createdAt, reviewDecision, closingIssues }
 }
 
 function normalizeItem(node, index) {
@@ -76,17 +78,16 @@ function normalizeItem(node, index) {
   if (engineering !== null && typeof engineering !== 'string') {
     throw new Error(`${path}.engineering 必须是字符串或 null`)
   }
-  return { itemId, issue, engineering }
+  return { itemId, issue, engineering, referencesComplete: node?.referencesComplete === true }
 }
 
 /**
  * 判定看板上的 `Engineering` 与 PR 真值的偏离。
  *
- * 返回 `{ findings, skipped, checked }`：
+ * 返回 `{ findings, checked }`：
  * - `findings`：`{ issue, itemId, expected, actual, prNumber, rule }`，`expected` / `actual`
- *   为 `null` 表示空值；
- * - `skipped`：没有被任何 PR 引用的条目数（`Engineering` 为空是合法状态）；
- * - `checked`：真正参与比较的条目数。
+ *   为 `null` 表示空值，完整零引用时 `prNumber` 为 `null`、`rule` 为 `unreferenced`；
+ * - `checked`：参与比较的条目数（全部本仓 Issue 条目）。
  *
  * 任何结构异常都抛错而不是跳过——把畸形输入读成「没有漂移」正是本检查要防的那种假绿。
  */
@@ -106,17 +107,9 @@ export function engineeringDriftFindings({ pullRequests, items }) {
   }
 
   const findings = []
-  let skipped = 0
-  let checked = 0
 
   for (const item of normalizedItems) {
-    const references = byIssue.get(item.issue)
-    if (references === undefined || references.length === 0) {
-      skipped += 1
-      continue
-    }
-    checked += 1
-    const expected = expectedFor({ references })
+    const expected = expectedFor({ references: byIssue.get(item.issue) ?? [], complete: item.referencesComplete })
     if (expected.value !== item.engineering) {
       findings.push({
         issue: item.issue,
@@ -129,13 +122,14 @@ export function engineeringDriftFindings({ pullRequests, items }) {
     }
   }
 
-  return { findings, skipped, checked }
+  return { findings, checked: normalizedItems.length }
 }
 
 /** 供运行时 adapter 与测试共用的诊断文案，避免两处各写一份。 */
 export function describeFinding(finding) {
   const expected = finding.expected === null ? `空（按规则 ${finding.rule}）` : finding.expected
   const actual = finding.actual === null ? '空' : finding.actual
-  return `issue #${finding.issue}（item ${finding.itemId}，依据 PR #${finding.prNumber}）`
+  const basis = finding.prNumber === null ? '无关闭引用' : `PR #${finding.prNumber}`
+  return `issue #${finding.issue}（item ${finding.itemId}，依据 ${basis}）`
     + `：${FIELD_NAME} 实际为「${actual}」，期望「${expected}」`
 }

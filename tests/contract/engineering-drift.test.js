@@ -8,6 +8,7 @@
 // 跳过」，逐条写测试会把同一件事重复十几遍，而漏掉一条就等于给假绿留一扇门。
 
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -17,15 +18,15 @@ import { parse as parseYaml } from 'yaml'
 import { describeFinding, engineeringDriftFindings } from '../../scripts/engineering-drift.mjs'
 import { runEngineeringDriftCheck } from '../../scripts/check-engineering-drift-live.mjs'
 // 投影与**选择策略**都来自投影权威：观察者没有自己的「谁说了算」实现（issue #115）。
-import { expectedFor, MAX_PAGES, PR_STATES, stateForSnapshot } from '../../scripts/sync-engineering-state.mjs'
+import { expectedFor, MAX_PAGES, PR_STATES, STATES, stateForSnapshot } from '../../scripts/sync-engineering-state.mjs'
 
 const OPEN_APPROVED = { state: 'OPEN', merged: false, isDraft: false, reviewDecision: 'APPROVED' }
 const OPEN_PLAIN = { state: 'OPEN', merged: false, isDraft: false, reviewDecision: null }
 const MERGED = { state: 'MERGED', merged: true, isDraft: false, reviewDecision: null }
 const CLOSED_UNMERGED = { state: 'CLOSED', merged: false, isDraft: false, reviewDecision: null }
 
-const REF = (number, createdAt, snapshot, closingIssues) => ({ number, createdAt, closingIssues, ...snapshot })
-const item = ({ issue, engineering, itemId = `item-${issue}` }) => ({ itemId, issue, engineering })
+const REF = (number, createdAt, snapshot, closingIssues) => ({ id: `PR_${number}`, number, createdAt, closingIssues, ...snapshot })
+const item = ({ issue, engineering, itemId = `item-${issue}` }) => ({ itemId, issue, engineering, referencesComplete: true })
 
 // ── 选择规则：唯一实现在投影权威里，本文件只从观察者的入口验证它 ──────────────
 //
@@ -35,13 +36,12 @@ const item = ({ issue, engineering, itemId = `item-${issue}` }) => ({ itemId, is
 
 test('已合并 PR 的 issue 期望 Merged —— 2026-09-22 故障的形状', () => {
   // 故障当时 reconcile 在合并事件上每次都失败，看板停在 `PR open`。本检查必须报出来。
-  const { findings, checked, skipped } = engineeringDriftFindings({
+  const { findings, checked } = engineeringDriftFindings({
     pullRequests: [REF(104, '2026-09-22T00:00:00Z', MERGED, [10])],
     items: [item({ issue: 10, engineering: 'PR open' })],
   })
 
   assert.equal(checked, 1)
-  assert.equal(skipped, 0)
   assert.deepEqual(findings, [
     { issue: 10, itemId: 'item-10', expected: 'Merged', actual: 'PR open', prNumber: 104, rule: 'merged' },
   ])
@@ -87,15 +87,26 @@ test('全部 closed 且未合并时期望为空；草稿 open PR 同样期望为
   assert.deepEqual(findings, [])
 })
 
-test('没有被任何 PR 引用的条目跳过，不算漂移', () => {
-  // `Engineering` 为空是合法状态。把未引用的条目也拿去比较，会把整块看板报成红的。
-  const { findings, skipped, checked } = engineeringDriftFindings({
+test('完整零引用：已空不是漂移，残留旧值是 finding，不再跳过；缺完整性证据时空引用仍是错误', () => {
+  const { findings, checked } = engineeringDriftFindings({
     pullRequests: [REF(104, '2026-09-22T00:00:00Z', MERGED, [10])],
-    items: [item({ issue: 10, engineering: 'Merged' }), item({ issue: 99, engineering: null }), item({ issue: 98, engineering: null })],
+    items: [item({ issue: 10, engineering: 'Merged' }), item({ issue: 99, engineering: null }), item({ issue: 98, engineering: 'Approved' })],
   })
-  assert.deepEqual(findings, [])
-  assert.equal(skipped, 2)
-  assert.equal(checked, 1)
+  assert.equal(checked, 3)
+  assert.deepEqual(findings, [{ issue: 98, itemId: 'item-98', expected: null, actual: 'Approved', prNumber: null, rule: 'unreferenced' }])
+  assert.match(describeFinding(findings[0]), /issue #98.*无关闭引用/)
+  assert.throws(
+    () => engineeringDriftFindings({ pullRequests: [], items: [{ ...item({ issue: 1, engineering: null }), referencesComplete: false }] }),
+    /至少一个引用 PR/,
+  )
+  // 完全不带 `referencesComplete` 键同样是「没有完整性证据」：只有显式 `true` 才授权清空。
+  const { referencesComplete: _omitted, ...withoutEvidence } = item({ issue: 2, engineering: 'Approved' })
+  assert.throws(() => engineeringDriftFindings({ pullRequests: [], items: [withoutEvidence] }), /至少一个引用 PR/)
+  // 非布尔的真值也不是证据：只有字面量 `true`。
+  for (const notTrue of ['true', 1]) {
+    const evidence = { ...item({ issue: 3, engineering: 'Approved' }), referencesComplete: notTrue }
+    assert.throws(() => engineeringDriftFindings({ pullRequests: [], items: [evidence] }), /至少一个引用 PR/, String(notTrue))
+  }
 })
 
 test('选择规则对每个被接受的 PR state 都与 stateForSnapshot 一致', () => {
@@ -118,7 +129,7 @@ test('选择规则对每个被接受的 PR state 都与 stateForSnapshot 一致'
 })
 
 test('畸形输入 fail closed，不读成"没有漂移"', () => {
-  assert.deepEqual(engineeringDriftFindings({ pullRequests: [], items: [] }), { findings: [], skipped: 0, checked: 0 })
+  assert.deepEqual(engineeringDriftFindings({ pullRequests: [], items: [] }), { findings: [], checked: 0 })
 
   const bad = [
     { pullRequests: null, items: [] },
@@ -127,6 +138,8 @@ test('畸形输入 fail closed，不读成"没有漂移"', () => {
     { pullRequests: [{ number: 1, createdAt: 'not-a-date', closingIssues: [], ...MERGED }], items: [] },
     { pullRequests: [{ number: 1, createdAt: '2026-09-20T00:00:00Z', closingIssues: 'x', ...MERGED }], items: [] },
     { pullRequests: [{ number: 1, createdAt: '2026-09-20T00:00:00Z', closingIssues: [1], state: 'OPEN', merged: 'no', isDraft: false }], items: [] },
+    { pullRequests: [{ number: 1, createdAt: '2026-09-20T00:00:00Z', closingIssues: [1], ...MERGED }], items: [] },
+    { pullRequests: [{ id: 'PR_1', number: 1, createdAt: '2026-09-20T00:00:00Z', closingIssues: [1], state: 'MERGED', merged: true, isDraft: false }], items: [] },
     { pullRequests: [], items: [{ itemId: '', issue: 1, engineering: null }] },
     { pullRequests: [], items: [{ itemId: 'x', issue: 0, engineering: null }] },
   ]
@@ -167,7 +180,6 @@ test('诊断文案同时给出期望、实际与依据', () => {
 
 // ── 运行时 adapter ─────────────────────────────────────────────────────────
 
-const SCRIPT_URL = new URL('../../scripts/check-engineering-drift-live.mjs', import.meta.url)
 const WORKFLOW_URL = new URL('../../.github/workflows/board-invariants.yml', import.meta.url)
 
 const validEnv = {
@@ -175,6 +187,7 @@ const validEnv = {
   PROJECT_OWNER: 'octo-user',
   PROJECT_NUMBER: '10',
   GITHUB_REPOSITORY: 'owner/repo',
+  ENGINEERING_FIELD_ID: 'PVTF_engineering',
 }
 
 const response = (body, { ok = true, status = 200, jsonError } = {}) => ({
@@ -186,40 +199,54 @@ const response = (body, { ok = true, status = 200, jsonError } = {}) => ({
   },
 })
 
-const pullRequestsBody = (nodes, { totalCount = nodes.length, hasNextPage = false, endCursor = null } = {}) => ({
-  data: { repository: { pullRequests: { totalCount, pageInfo: { hasNextPage, endCursor }, nodes } } },
-})
+const FIELD_BODY = {
+  data: {
+    user: { projectV2: { id: 'PVT_project' } },
+    node: {
+      id: 'PVTF_engineering', name: 'Engineering', dataType: 'SINGLE_SELECT', project: { id: 'PVT_project' },
+      options: STATES.map((name, index) => ({ id: `option-${index}`, name })),
+    },
+  },
+}
 
-const itemsBody = (nodes, { totalCount = nodes.length } = {}) => ({
-  data: { user: { projectV2: { items: { totalCount, pageInfo: { hasNextPage: false, endCursor: null }, nodes } } } },
+const connection = (nodes, overrides = {}) => ({
+  totalCount: nodes.length, pageInfo: { hasNextPage: false, endCursor: null }, nodes, ...overrides,
 })
+const itemsBody = (nodes, overrides) => ({ data: { user: { projectV2: { id: 'PVT_project', items: connection(nodes, overrides) } } } })
 
+/** 世界模型：一个 PR 关闭哪些 issue；`nest` 再按 GitHub 的形态把它们嵌进各 Issue 的 closedByPullRequestsReferences。 */
 const graphqlNode = ({ number = 104, closingIssues = [10], ...snapshot } = {}) => ({
+  id: `PR_${number}`,
   number,
+  repository: { nameWithOwner: 'owner/repo' },
   state: 'MERGED',
   merged: true,
   isDraft: false,
   reviewDecision: null,
   createdAt: '2026-09-22T00:00:00Z',
   ...snapshot,
-  closingIssuesReferences: { totalCount: closingIssues.length, nodes: closingIssues.map((n) => ({ number: n })) },
+  closingIssues,
 })
+const bare = ({ closingIssues, ...pullRequest }) => pullRequest
 
 const itemNode = ({ id = 'item-10', issue = 10, engineering = 'PR open', repository = 'owner/repo' } = {}) => ({
   id,
-  content: { number: issue, repository: { nameWithOwner: repository } },
-  fieldValues: {
-    nodes: engineering === null ? [] : [{ name: engineering, field: { name: 'Engineering' } }],
-  },
+  content: { __typename: 'Issue', id: `I_${issue}`, number: issue, repository: { nameWithOwner: repository } },
+  fieldValueByName: engineering === null ? null : { name: engineering, field: { id: 'PVTF_engineering' } },
 })
+const withRefs = (node, refs = [], overrides = {}) => ({
+  ...node, content: { ...node.content, closedByPullRequestsReferences: connection(refs.map(bare), overrides) },
+})
+const nest = (pullRequests) => (node) => node.content.__typename !== 'Issue' ? node
+  : withRefs(node, pullRequests.filter((pullRequest) => pullRequest.closingIssues.includes(node.content.number)))
+
+/** 字段校验查询永远答对，其余请求交给 `fn`：每个用例只需关心 Project 页的响应。 */
+const routedFetch = (fn) => fn && (async (url, options) => JSON.parse(options.body).query.includes('node(id:$fieldId)')
+  ? response(FIELD_BODY) : fn(url, options))
 
 /** 默认给一份「一条已合并 PR + 一个漂移条目」的快照，各用例按需覆盖。 */
 const okFetch = (pullRequests = [graphqlNode()], items = [itemNode()]) =>
-  async (_url, options) => response(
-    JSON.parse(options.body).query.includes('EngineeringDriftPullRequests')
-      ? pullRequestsBody(pullRequests)
-      : itemsBody(items),
-  )
+  routedFetch(async () => response(itemsBody(items.map(nest(pullRequests)))))
 
 async function run({ env = validEnv, fetchImpl = okFetch(), argv = [] } = {}) {
   const output = []
@@ -239,53 +266,96 @@ test('漂移时 exit 1 并输出可行动诊断；无漂移时 exit 0', async ()
   assert.match(clean.output, /已比较 1 个看板条目/)
 })
 
-test('--json 只输出一行结构化结果', async () => {
+test('--json 只输出一行结构化结果，用 referenceEdges 而不是 PR 数', async () => {
   const { exitCode, output } = await run({ argv: ['--json'] })
   assert.equal(exitCode, 1)
   assert.equal(output.split('\n').length, 1)
-  assert.equal(JSON.parse(output).findings[0].issue, 10)
+  const result = JSON.parse(output)
+  assert.equal(result.findings[0].issue, 10)
+  assert.deepEqual([result.checked, result.referenceEdges, result.pullRequests], [1, 1, undefined])
 })
 
-test('只比较本仓库的看板条目，他仓 issue 与非 issue 条目都不参与', async () => {
+test('完整零引用的残留值被观察者报告，不再跳过（最后一个关闭关联被移除）', async () => {
+  const { exitCode, output } = await run({ fetchImpl: okFetch([], [itemNode({ engineering: 'Merged' })]) })
+  assert.equal(exitCode, 1)
+  assert.match(output, /issue #10.*无关闭引用.*实际为「Merged」，期望「空/)
+})
+
+test('只比较本仓库的 Issue 条目，他仓 issue、PR 与 draft 条目被排除并计数', async () => {
   // 项目是 user 级的：他仓的 issue #10 若不按来源仓库过滤，会与本仓库 close #10 的
-  // PR 误配（假红），或恰好匹配上而掩盖真漂移（假绿）。非 issue 条目没有 repository。
+  // PR 误配（假红），或恰好匹配上而掩盖真漂移（假绿）。
   const { exitCode, output } = await run({
+    argv: ['--json'],
     fetchImpl: okFetch(
       [graphqlNode()],
       [
         itemNode({ engineering: 'Merged' }),
         itemNode({ id: 'foreign', engineering: null, repository: 'someone-else/other' }),
-        { id: 'pr-item', content: {}, fieldValues: { nodes: [] } },
+        { id: 'pr-item', content: { __typename: 'PullRequest' }, fieldValueByName: null },
+        { id: 'draft-item', content: { __typename: 'DraftIssue' }, fieldValueByName: null },
       ],
     ),
   })
   assert.equal(exitCode, 0)
-  assert.match(output, /已比较 1 个看板条目/)
+  assert.deepEqual([JSON.parse(output).checked, JSON.parse(output).excluded], [1, 3])
 })
 
-test('分页成功路径：cursor 逐页传递，跨页结果拼接后一起比较', async () => {
-  const cursors = []
-  let page = 0
+test('Project 页读取：归档全范围、cursor 逐页传递、嵌套关闭引用，不读 Status 与 fieldValues 全列', async () => {
+  const seen = []
+  const pullRequests = [graphqlNode({ number: 1, closingIssues: [10] }), graphqlNode({ number: 2, closingIssues: [11] })]
+  const pages = [
+    itemsBody([nest(pullRequests)(itemNode({ id: 'i10', issue: 10, engineering: 'Merged' }))], { totalCount: 2, pageInfo: { hasNextPage: true, endCursor: 'CURSOR-1' } }),
+    itemsBody([nest(pullRequests)(itemNode({ id: 'i11', issue: 11, engineering: 'Merged' }))], { totalCount: 2 }),
+  ]
   const { exitCode, output } = await run({
-    fetchImpl: async (_url, options) => {
+    fetchImpl: routedFetch(async (_url, options) => {
       const { query, variables } = JSON.parse(options.body)
-      if (!query.includes('EngineeringDriftPullRequests')) {
-        return response(itemsBody([
-          itemNode({ id: 'i10', issue: 10, engineering: 'Merged' }),
-          itemNode({ id: 'i11', issue: 11, engineering: 'Merged' }),
-        ]))
-      }
-      cursors.push(variables.cursor)
-      page += 1
-      return page === 1
-        ? response(pullRequestsBody([graphqlNode({ number: 1, closingIssues: [10] })], { totalCount: 2, hasNextPage: true, endCursor: 'CURSOR-1' }))
-        : response(pullRequestsBody([graphqlNode({ number: 2, closingIssues: [11] })], { totalCount: 2 }))
-    },
+      seen.push({ query, cursor: variables.cursor })
+      return response(pages[seen.length - 1])
+    }),
   })
 
-  assert.deepEqual(cursors, [null, 'CURSOR-1'])
+  assert.deepEqual(seen.map((call) => call.cursor), [null, 'CURSOR-1'])
   assert.equal(exitCode, 0)
   assert.match(output, /已比较 2 个看板条目/)
+  assert.match(seen[0].query, /archivedStates:\[ARCHIVED,NOT_ARCHIVED\]/)
+  assert.match(seen[0].query, /closedByPullRequestsReferences\(first:100,includeClosedPrs:true\)/)
+  assert.match(seen[0].query, /fieldValueByName\(name:"Engineering"\)/)
+  assert.doesNotMatch(seen[0].query, /Status|fieldValues\b/)
+})
+
+test('Issue 内嵌引用超过一页时从内嵌首页的 cursor 续读，合并后的完整集合参与比较', async () => {
+  const open = graphqlNode({ number: 1, state: 'OPEN', merged: false, closingIssues: [10] })
+  const merged = graphqlNode({ number: 2, closingIssues: [10] })
+  const followUps = []
+  const { exitCode, output } = await run({
+    argv: ['--json'],
+    fetchImpl: routedFetch(async (_url, options) => {
+      const { query, variables } = JSON.parse(options.body)
+      if (query.includes('archivedStates')) {
+        const first = withRefs(itemNode({ engineering: 'PR open' }), [open], { totalCount: 2, pageInfo: { hasNextPage: true, endCursor: 'REFS-1' } })
+        return response(itemsBody([first]))
+      }
+      followUps.push(variables)
+      return response({ data: { repository: { issue: { closedByPullRequestsReferences: connection([bare(merged)], { totalCount: 2 }) } } } })
+    }),
+  })
+
+  assert.deepEqual(followUps, [{ owner: 'owner', repo: 'repo', issue: 10, cursor: 'REFS-1' }])
+  assert.equal(exitCode, 1)
+  assert.deepEqual(JSON.parse(output).findings.map((finding) => [finding.expected, finding.prNumber]), [['Merged', 2]])
+})
+
+test('跨仓同号同时间的两条引用都保留，选择与数组顺序无关', async () => {
+  const same = { number: 7, state: 'OPEN', merged: false, closingIssues: [10] }
+  const lower = graphqlNode({ ...same, id: 'PR_a', reviewDecision: 'APPROVED', repository: { nameWithOwner: 'owner/other' } })
+  const upper = graphqlNode({ ...same, id: 'PR_B', reviewDecision: 'CHANGES_REQUESTED' })
+  for (const pullRequests of [[lower, upper], [upper, lower]]) {
+    const { output } = await run({ argv: ['--json'], fetchImpl: okFetch(pullRequests, [itemNode({ engineering: 'PR open' })]) })
+    const result = JSON.parse(output)
+    assert.equal(result.referenceEdges, 2)
+    assert.deepEqual(result.findings.map((finding) => [finding.expected, finding.prNumber]), [['Changes requested', 7]])
+  }
 })
 
 test('必需环境变量、仓库名与 project number 畸形时 fail closed', async (t) => {
@@ -294,6 +364,7 @@ test('必需环境变量、仓库名与 project number 畸形时 fail closed', a
     ['PROJECT_OWNER 缺失', { ...validEnv, PROJECT_OWNER: '' }],
     ['PROJECT_NUMBER 缺失', { ...validEnv, PROJECT_NUMBER: '' }],
     ['PROJECT_NUMBER 非正整数', { ...validEnv, PROJECT_NUMBER: '1.5' }],
+    ['ENGINEERING_FIELD_ID 缺失', { ...validEnv, ENGINEERING_FIELD_ID: '' }],
     ['GITHUB_REPOSITORY 缺 owner', { ...validEnv, GITHUB_REPOSITORY: 'owner' }],
     ['GITHUB_REPOSITORY 多段', { ...validEnv, GITHUB_REPOSITORY: 'a/b/c' }],
   ]) {
@@ -305,7 +376,16 @@ test('必需环境变量、仓库名与 project number 畸形时 fail closed', a
   }
 })
 
+test('观察者 CLI 入口真的执行检查，失败映射为非零退出码（无网络：缺凭据在任何请求前失败）', () => {
+  const script = fileURLToPath(new URL('../../scripts/check-engineering-drift-live.mjs', import.meta.url))
+  const { status, stdout } = spawnSync(process.execPath, [script], { env: { PATH: process.env.PATH }, encoding: 'utf8' })
+  assert.equal(status, 1)
+  assert.match(stdout, /^::error::Engineering 漂移检查失败：PROJECTS_TOKEN 未配置/)
+})
+
 test('传输与响应结构故障全部 fail closed', async (t) => {
+  const page = (...nodes) => async () => response(itemsBody(nodes))
+  const ok = withRefs(itemNode({ engineering: null }))
   const cases = [
     ['不提供 fetch', null],
     ['网络请求失败', async () => { throw new Error('socket closed') }],
@@ -315,52 +395,71 @@ test('传输与响应结构故障全部 fail closed', async (t) => {
     ['errors 字段不是数组', async () => response({ errors: 'denied' })],
     ['返回 errors', async () => response({ errors: [{ message: 'denied' }] })],
     ['data 不是对象', async () => response({ data: null })],
-    ['repository 为 null', async () => response({ data: { repository: null } })],
-    ['pullRequests 为 null', async () => response({ data: { repository: { pullRequests: null } } })],
-    ['pullRequests.nodes 不是数组', async () => response({ data: { repository: { pullRequests: { totalCount: 1, pageInfo: { hasNextPage: false }, nodes: 'x' } } } })],
-    ['totalCount 不是非负整数', async () => response(pullRequestsBody([graphqlNode()], { totalCount: -1 }))],
-    ['响应不完整', async () => response(pullRequestsBody([graphqlNode()], { totalCount: 5 }))],
-    ['pageInfo 为 null', async () => response({ data: { repository: { pullRequests: { totalCount: 1, pageInfo: null, nodes: [graphqlNode()] } } } })],
-    ['closingIssuesReferences 为 null', async () => response(pullRequestsBody([{ ...graphqlNode(), closingIssuesReferences: null }]))],
-    ['closingIssuesReferences 快照不完整', async () => response(pullRequestsBody([
-      { ...graphqlNode(), closingIssuesReferences: { totalCount: 5, nodes: [{ number: 10 }] } },
-    ]))],
     ['user 为 null', async () => response({ data: { user: null } })],
     ['projectV2 为 null', async () => response({ data: { user: { projectV2: null } } })],
-    ['items 为 null', async () => response({ data: { user: { projectV2: { items: null } } } })],
-    ['fieldValues 为 null', async () => response(itemsBody([{ ...itemNode(), fieldValues: null }]))],
-    ['fieldValues.nodes 不是数组', async () => response(itemsBody([{ ...itemNode(), fieldValues: { nodes: 'x' } }]))],
-    ['多个 Engineering 字段值', async () => response(itemsBody([{
-      ...itemNode(),
-      fieldValues: { nodes: [{ name: 'Merged', field: { name: 'Engineering' } }, { name: 'PR open', field: { name: 'Engineering' } }] },
-    }]))],
-    ['item id 为空', async () => response(itemsBody([{ ...itemNode(), id: '' }]))],
-    ['issue 号不是正整数', async () => response(itemsBody([{ ...itemNode(), content: { number: 0, repository: { nameWithOwner: 'owner/repo' } } }]))],
+    ['projectV2 与字段所属 project 不一致', async () => response({ data: { user: { projectV2: { id: 'OTHER', items: connection([]) } } } })],
+    ['items 为 null', async () => response({ data: { user: { projectV2: { id: 'PVT_project', items: null } } } })],
+    ['items.nodes 不是数组', async () => response({ data: { user: { projectV2: { id: 'PVT_project', items: { totalCount: 1, pageInfo: { hasNextPage: false }, nodes: 'x' } } } } })],
+    ['items.totalCount 不是非负整数', async () => response(itemsBody([ok], { totalCount: -1 }))],
+    ['items 响应不完整', async () => response(itemsBody([ok], { totalCount: 5 }))],
+    ['items.pageInfo 为 null', async () => response(itemsBody([ok], { pageInfo: null }))],
+    ...[undefined, null, 0].map((hasNextPage) => [`items.pageInfo.hasNextPage 为 ${hasNextPage}（不是布尔值）`,
+      async () => response(itemsBody([ok], { pageInfo: { hasNextPage, endCursor: null } }))]),
+    ['content 为 null（隐藏对象）', page({ ...ok, content: null })],
+    ['content 类型未知', page({ ...ok, content: { ...ok.content, __typename: 'Redacted' } })],
+    ['item id 为空', page({ ...ok, id: '' })],
+    ['Issue 缺 content.id', page({ ...ok, content: { ...ok.content, id: undefined } })],
+    ['Issue 缺 content.repository（不得被当成他仓条目排除）', page({ ...ok, content: { ...ok.content, repository: null } })],
+    ['issue 号不是正整数', page(withRefs(itemNode({ issue: 0, engineering: null })))],
+    ['重复 item（同一 item id、不同 Issue）', page(ok, withRefs(itemNode({ issue: 11, engineering: null })))],
+    ['重复 Issue（不同 item 指向同一 Issue）', page(ok, withRefs(itemNode({ id: 'item-b', engineering: null })))],
+    // 即便逐 issue 续读能答对，缺失的内嵌字段本身也不是完整性证据：不得被悄悄补读掩盖。
+    ['嵌套引用缺失', async (_url, options) => response(JSON.parse(options.body).query.includes('archivedStates')
+      ? itemsBody([itemNode({ engineering: null })])
+      : { data: { repository: { issue: { closedByPullRequestsReferences: connection([]) } } } })],
+    ['嵌套引用被截断', page(withRefs(itemNode({ engineering: 'Merged' }), [graphqlNode()], { totalCount: 3 }))],
+    ...[{ state: 'CLOSED', merged: false }, { reviewDecision: 'APPROVED' }, { isDraft: true }, { createdAt: '2026-09-23T00:00:00Z' }].map((change) => [
+      `同一 PR id 在同批次读到矛盾快照（${Object.keys(change)[0]}）`,
+      page(
+        withRefs(itemNode({ engineering: 'Merged' }), [graphqlNode({ number: 1 })]),
+        withRefs(itemNode({ id: 'item-b', issue: 11, engineering: null }), [graphqlNode({ number: 1, ...change })]),
+      ),
+    ]),
+    ['Engineering 字段值缺失（不是 null）', page({ ...ok, fieldValueByName: undefined })],
+    ['Engineering 字段值不属于已校验字段', page({ ...ok, fieldValueByName: { name: 'Merged', field: { id: 'OTHER' } } })],
+    ['Engineering 字段值不是单选值', page({ ...ok, fieldValueByName: {} })],
   ]
 
   for (const [name, fetchImpl] of cases) {
     await t.test(name, async () => {
-      const { exitCode, output } = await run({ fetchImpl })
+      const { exitCode, output } = await run({ fetchImpl: routedFetch(fetchImpl) })
       assert.equal(exitCode, 1, `${name} 应 exit 1，实际输出：${output}`)
-      assert.match(output, /^::error::/)
+      assert.match(output, /^::error::Engineering 漂移检查失败：/, '必须是读取/结构失败，而不是一条普通漂移 finding')
     })
   }
 })
 
-test('分页超过上限时 fail closed，不按截断输入判定', async () => {
-  const endless = pullRequestsBody([graphqlNode()], { totalCount: 999, hasNextPage: true, endCursor: 'next' })
-  let calls = 0
-  const { exitCode, output } = await run({
-    fetchImpl: async (_url, options) => {
-      if (!JSON.parse(options.body).query.includes('EngineeringDriftPullRequests')) return response(itemsBody([]))
-      calls += 1
-      return response(endless)
-    },
-  })
-
-  assert.equal(exitCode, 1)
-  assert.equal(calls, MAX_PAGES)
-  assert.match(output, /拒绝在截断的输入上判定/)
+test('Project 分页的矛盾快照与超限 fail closed，不按截断输入判定', async () => {
+  const paged = (overridesFor) => {
+    const state = { calls: 0 }
+    const fetchImpl = routedFetch(async () => {
+      state.calls += 1
+      const node = withRefs(itemNode({ id: `item-${state.calls}`, issue: state.calls }))
+      return response(itemsBody([node], { pageInfo: { hasNextPage: true, endCursor: `c${state.calls}` }, totalCount: 999, ...overridesFor(state.calls) }))
+    })
+    return { state, fetchImpl }
+  }
+  for (const [name, overridesFor, pattern, calls] of [
+    ['totalCount 变化', (n) => ({ totalCount: 900 + n }), /SourceChanged/, 2],
+    ['cursor 重复', () => ({ pageInfo: { hasNextPage: true, endCursor: 'same' } }), /endCursor.*重复/, 2],
+    ['超过页数上限', () => ({}), /拒绝在截断的输入上判定/, MAX_PAGES],
+  ]) {
+    const { state, fetchImpl } = paged(overridesFor)
+    const { exitCode, output } = await run({ fetchImpl })
+    assert.equal(exitCode, 1, name)
+    assert.match(output, pattern, name)
+    assert.equal(state.calls, calls, `${name}：读取次数`)
+  }
 })
 
 // ── CI 接线 ────────────────────────────────────────────────────────────────
@@ -390,6 +489,7 @@ test('漂移 job 挂在 Board invariants 上，且不引入手选 ref 的入口'
   // token 只经 env 进入那一步，不进 job 级 env。
   assert.equal(job.env.PROJECTS_TOKEN, undefined)
   assert.equal(job.env.GITHUB_REPOSITORY, '${{ github.repository }}')
+  assert.equal(job.env.ENGINEERING_FIELD_ID, '${{ vars.PROJECTS_ENGINEERING_FIELD_ID }}')
 })
 
 test('观察者与写入口共用同一份选择策略，自身不引入网络或子进程', () => {

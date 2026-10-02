@@ -70,6 +70,7 @@ jobs:
       PROJECT_OWNER: SingularityKChen
       PROJECT_NUMBER: 10
       GITHUB_REPOSITORY: ${{ github.repository }}
+      ENGINEERING_FIELD_ID: ${{ vars.PROJECTS_ENGINEERING_FIELD_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
