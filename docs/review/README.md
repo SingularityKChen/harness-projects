@@ -126,6 +126,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 | [2026-09-29-pr237-pr240-mvp-review](2026-09-29-pr237-pr240-mvp-review.md) | #237 与 #240 当前 head 的 Start Work 恢复及观察版本载体评审；两处故障边界独立复现 | #240 旧 SQLite 载体导致规范新观察静默丢弃（P1，暂缓）；#237 冲突后列表故障误报确定失败（P2，非阻塞） |
 | [2026-09-30-pr239-pr240-rereview](2026-09-30-pr239-pr240-rereview.md) | #239 / #240 更新到 `main@699d715` 后的全矩阵复评；独立核对旧意见修复、引用负对照与迁移竞态 | 上一轮阻塞均已消除；两条 PR 各余一个非阻塞 P2；合并时须处理 docs 索引冲突与 #203 证据矩阵刷新 |
 | [2026-09-30-pr238-pr241-pr244-pr245-mmp-review](2026-09-30-pr238-pr241-pr244-pr245-mmp-review.md) | 工作区更新后的四条当前 head 评审、跨 PR 交接、独立反例及 #239/#240 授权合并收尾 | #238/#244/#245 经授权修订、整理后 rebase merge；#241 经P3修订、按三个交付物整理后rebase merge，#70关闭 |
+| [2026-10-02-pr251-pr253-mvp-review](2026-10-02-pr251-pr253-mvp-review.md) | Start Work SQLite 栈 #251（仓库身份种类，#195）→ #253（写前登记与 ack 后诚实结算，#187/#188）的第一轮评审：两次并集预演、四条 P2 的 base / head 对照复现、25 条行级意见、TD-009 裁决 | 无 P0 / P1；#251 五条 P3，#253 四条 P2 + 十六条 P3；TD-009 随 #221 处理；合并顺序 #251 → #253，均需先更新到 main |
 
 单 PR 的记录（`pr-NN-mvp-review.md` 与 `2026-09-21-pr-NN-risk-matrix.md`）同样放在本目录，但不进上表——判据就是上面那条：**跨多个 PR、且删掉之后接手的人会缺失决策依据**的才登记。
 
