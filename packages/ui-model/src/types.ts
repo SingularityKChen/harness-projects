@@ -10,7 +10,7 @@ import type { EntityStore, StoredEntity } from '@harness-projects/client'
 export type ClientEntity = StoredEntity['entity']
 /** 权威归属（provider / host / manual）：原样透出，页面不得把 host 权威显示成平台权威。 */
 export type ClientAuthority = ClientEntity['source']['authority']
-/** 外部身份种类（issue / draft / change_request / branch / worktree）。 */
+/** 外部身份种类（issue / draft / change_request / branch / worktree / repository）。 */
 export type ClientExternalKind = NonNullable<ClientEntity['content']['externalKind']>
 
 /** capability 快照的一项：与 capabilities 包的 `EffectiveCapability` 结构兼容，宿主可直接传入。 */

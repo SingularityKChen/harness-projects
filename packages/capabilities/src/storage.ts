@@ -125,6 +125,7 @@ export interface Storage {
   // ── 身份：外部身份全局一份，实体是内在锚点 ──
   // 强制面（ADR-0006）：storage 强制「至多一个 primary」与引用完整性（身份必须指向存在的实体与连接锚点，被拒绝的写入不留行）。
   // 「恰好一个」由写入生命周期保证：`putEntity` 必须与 primary 身份在同一事务里写入（core 的 `ensureEntity` 如此），e2e 有断言。
+  // 种类（#195）：`putExternalIdentity` 对未知 `externalKind` 以 `RangeError('unsupported external identity kind')` 经 Promise 拒绝，且早于任何写入；两个实现都经 domain 的 `parseExternalIdentityKind`。
   putEntity(record: Entity): Promise<void>
   putExternalIdentity(record: ExternalIdentity): Promise<void>
   findExternalIdentity(bindingId: ProviderBindingId, externalKind: string, externalId: string): Promise<ExternalIdentity | undefined>

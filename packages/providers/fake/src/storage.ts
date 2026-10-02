@@ -123,6 +123,7 @@ export class MemoryStorage implements cap.Storage {
     return this.#mutate(() => upsert(this.data.entities, record, (e) => e.id === record.id))
   }
   async putExternalIdentity(record: domain.ExternalIdentity): Promise<void> {
+    domain.parseExternalIdentityKind(record.externalKind) // 未知种类在任何写入之前被拒绝（async 里的同步抛出即 Promise 拒绝），与 SQLite 适配器是同一个 RangeError
     return this.#mutate(() => {
       const key = domain.externalObjectKey(record.bindingId, record.externalKind, record.externalId)
       const index = this.data.identities.findIndex((identity) => domain.externalObjectKey(identity.bindingId, identity.externalKind, identity.externalId) === key)

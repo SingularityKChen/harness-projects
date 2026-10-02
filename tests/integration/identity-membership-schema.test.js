@@ -146,6 +146,20 @@ test('R7：external_identity.role 只有三个取值，且 ProjectV2Item 不是�
   })
 })
 
+// #195：下面的 repository 正控是**显式字面量**。`identity-membership-enums.test.js` 的逐值绑定只比较「CHECK 集合 == 枚举集合」，
+// 两边同时缺 repository 时它仍然是绿的，因此它不能证明 repository 可登记。
+test('#195：repository 是 002 的合法身份种类，枚举外的种类（含 ProjectV2Item）仍由 CHECK 拒绝', () => {
+  withDatabase((db) => {
+    migrate(db); seed(db)
+    db.exec("INSERT INTO entity VALUES ('entity-repo', 'repository')")
+    db.exec("INSERT INTO external_identity VALUES ('identity-repo', 'entity-repo', 'binding-1', 'repository', 'repo-1', 'primary')")
+    assert.equal(db.prepare("SELECT external_kind AS kind FROM external_identity WHERE id = 'identity-repo'").get().kind, 'repository', 'repository 种类必须原样落库，不得被归一成别的种类')
+    for (const kind of ['ProjectV2Item', 'Repository']) {
+      assert.throws(() => db.exec(`INSERT INTO external_identity VALUES ('identity-bad', 'entity-1', 'binding-1', '${kind}', 'x', 'alias')`), /CHECK constraint failed/, `${kind} 必须由 external_kind 的 CHECK 拒绝（外键或唯一约束拒绝不算）`)
+    }
+  })
+})
+
 test('每个实体至多一个 primary 身份（库层面）；恰好一个由写入生命周期保证', () => {
   withDatabase((db) => {
     migrate(db); seed(db)

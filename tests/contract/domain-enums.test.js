@@ -54,7 +54,7 @@ test('枚举：全部取值表被钉死（成员名 + 取值 + 顺序），改�
   assert.equal(golden(AccessLevel), '{"Available":"available","ReadOnly":"read_only","Unavailable":"unavailable","Degraded":"degraded"}')
   assert.equal(golden(WriteState), '{"Pending":"pending","Saved":"saved","Unknown":"unknown","Conflict":"conflict","Failed":"failed"}')
   assert.equal(golden(IdentityRole), '{"Primary":"primary","Alias":"alias","Historical":"historical"}')
-  assert.equal(golden(ExternalIdentityKind), '{"Draft":"draft","Issue":"issue","ChangeRequest":"change_request","Branch":"branch","Worktree":"worktree"}')
+  assert.equal(golden(ExternalIdentityKind), '{"Draft":"draft","Issue":"issue","ChangeRequest":"change_request","Branch":"branch","Worktree":"worktree","Repository":"repository"}')
   assert.equal(golden(RedactionReason), '{"PermissionDenied":"permission_denied","Deleted":"deleted","Unavailable":"unavailable","PolicyRestricted":"policy_restricted"}')
   assert.equal(golden(StatusPolicy), '{"ProviderAuthoritative":"provider_authoritative","HostAuthoritative":"host_authoritative","ManualOnly":"manual_only"}')
   assert.equal(golden(StatusChangeSource), '{"PlanningProvider":"planning_provider","HostUser":"host_user","EngineeringFact":"engineering_fact"}')
