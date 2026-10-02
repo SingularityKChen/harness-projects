@@ -117,7 +117,13 @@ function markerOf(ref: cap.ExternalObjectRef, facts: ManualRunFacts): cap.Provid
   }
 }
 
+/** 人工执行的静态连接实现定义：主执行与备用共用同一实现族，角色由宿主的注入槽位决定。 */
+export const HUMAN_EXECUTION_PROVIDER_DEFINITION: cap.ProviderDefinition = Object.freeze({
+  implementationKey: 'execution.human', domains: Object.freeze(['execution'] as const),
+})
+
 export class HumanExecutionProvider implements cap.ExecutionProvider {
+  readonly definition = HUMAN_EXECUTION_PROVIDER_DEFINITION
   readonly bindingId: ProviderBindingId
   readonly flags: HumanExecutionCapabilities
   readonly faults: HumanExecutionFaults

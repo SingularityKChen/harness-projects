@@ -6,19 +6,17 @@ import {
   AccessLevel, projectCodeForProviderError,
   type CapabilityKey, type ProviderError, type ProviderRegistry, type ResolvedBinding,
 } from '@harness-projects/capabilities'
-import {
-  ProjectErrorCode, projectError, type ProjectError, type ProviderBindingId,
-} from '@harness-projects/domain'
+import { ProjectErrorCode, projectError, type ProjectError } from '@harness-projects/domain'
 import { resolveCapability } from './registry.ts'
 
 export type CommandMode = 'read' | 'write'
 
-/** 命令门结论：allowed 为 false 时 error 必须能回答"为什么"和"怎么恢复"。 */
+/** 命令门结论：allowed 为 false 时 error 必须能回答"为什么"和"怎么恢复"；允许态带同一次解析命中的完整挂载，调用方不得再按 id 重找。 */
 export interface CommandGate {
   readonly allowed: boolean
   readonly access: AccessLevel
   readonly degraded: boolean
-  readonly bindingId: ProviderBindingId | undefined
+  readonly binding: ResolvedBinding | undefined
   readonly error: ProjectError | undefined
 }
 
@@ -31,22 +29,18 @@ export function effectiveAccess(registry: ProviderRegistry, key: CapabilityKey):
 /** 命令入口的拒绝检查：拒绝是结构化结果，不是异常；写命令不得在 read_only 下静默成功。 */
 export function gateCommand(registry: ProviderRegistry, key: CapabilityKey, mode: CommandMode): CommandGate {
   const resolution = resolveCapability(registry, key)
-  if (!resolution.available) return denied(AccessLevel.Unavailable, undefined, resolution.error)
-  const bindingId = resolution.binding.ref.bindingId
+  if (!resolution.available) return denied(AccessLevel.Unavailable, resolution.error)
   if (mode === 'write' && resolution.access === AccessLevel.ReadOnly) {
-    const error = projectError(ProjectErrorCode.PermissionDenied, `能力 ${key} 当前只读，写命令被拒绝`)
-    return denied(resolution.access, bindingId, error)
+    return denied(resolution.access, projectError(ProjectErrorCode.PermissionDenied, `能力 ${key} 当前只读，写命令被拒绝`))
   }
   return {
     allowed: true, access: resolution.access, degraded: resolution.access === AccessLevel.Degraded,
-    bindingId, error: undefined,
+    binding: resolution.binding, error: undefined,
   }
 }
 
-function denied(
-  access: AccessLevel, bindingId: ProviderBindingId | undefined, error: ProjectError,
-): CommandGate {
-  return { allowed: false, access, degraded: false, bindingId, error }
+function denied(access: AccessLevel, error: ProjectError): CommandGate {
+  return { allowed: false, access, degraded: false, binding: undefined, error }
 }
 
 /** 缺能力/缺绑定的统一结构化拒绝；调用方据此走降级而不是抛错。 */
@@ -67,7 +61,5 @@ export interface WriteTarget {
 
 export function resolveWriteTarget(registry: ProviderRegistry, key: CapabilityKey): WriteTarget {
   const gate = gateCommand(registry, key, 'write')
-  if (!gate.allowed) return { binding: undefined, error: gate.error ?? unsupportedCapability(key) }
-  const binding = registry.bindings.find((item) => item.ref.bindingId === gate.bindingId)
-  return binding === undefined ? { binding: undefined, error: unsupportedCapability(key) } : { binding, error: undefined }
+  return gate.allowed ? { binding: gate.binding, error: undefined } : { binding: undefined, error: gate.error ?? unsupportedCapability(key) }
 }

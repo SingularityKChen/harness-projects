@@ -7,6 +7,6 @@
 
 export const packageId = '@harness-projects/provider-planning-github-projects' as const
 
-export { createGithubProjectsPlanningProvider, type GithubProjectsPlanningProviderOptions } from './provider.ts'
+export { createGithubProjectsPlanningProvider, GITHUB_PROJECTS_PROVIDER_DEFINITION, type GithubProjectsPlanningProviderOptions } from './provider.ts'
 export type { GraphqlRequest, GraphqlResponse, GraphqlTransport } from './transport.ts'
 export { PLANNING_QUERIES } from './queries.ts'

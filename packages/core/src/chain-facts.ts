@@ -63,10 +63,8 @@ function factFor(conclusion: string | undefined): EngineeringFactKind | undefine
 async function gated<T>(context: CoreContext, key: CapabilityKey,
   run: (binding: ResolvedBinding) => Promise<ProviderResult<T>> | undefined): Promise<ReadResult<T>> {
   const gate = gateCommand(context.registry, key, 'read')
-  if (!gate.allowed) return { value: undefined, gap: { key, reason: gate.error?.message ?? '能力不可用' } }
-  const binding = context.registry.bindings.find((item) => item.ref.bindingId === gate.bindingId)
-  if (binding === undefined) return { value: undefined, gap: { key, reason: '提供该能力的绑定已失效' } }
-  const pending = run(binding)
+  if (!gate.allowed || gate.binding === undefined) return { value: undefined, gap: { key, reason: gate.error?.message ?? '能力不可用' } }
+  const pending = run(gate.binding)
   if (pending === undefined) return { value: undefined, gap: { key, reason: '绑定没有该域的 provider 实例' } }
   const result = await pending
   if (!result.ok) return { value: undefined, gap: { key, reason: result.error.message } }
@@ -84,11 +82,11 @@ function collect(gaps: CapabilityGap[], gap: CapabilityGap | undefined): void { 
 async function resolveRepository(context: CoreContext, repositoryId: string, gaps: CapabilityGap[]): Promise<ExternalObjectRef | undefined> {
   const key = CapabilityKey.DevelopmentRepositoryRead
   const gate = gateCommand(context.registry, key, 'read')
-  if (!gate.allowed || gate.bindingId === undefined) {
+  if (!gate.allowed || gate.binding === undefined) {
     collect(gaps, { key, reason: gate.error?.message ?? '不能定位仓库绑定的 capability' })
     return undefined
   }
-  return { bindingId: gate.bindingId, objectKind: 'repository', externalId: repositoryId, url: undefined }
+  return refFor(gate.binding, 'repository', repositoryId)
 }
 
 async function readHeadCommit(context: CoreContext, repository: ExternalObjectRef, branch: string, gaps: CapabilityGap[]): Promise<string | undefined> {

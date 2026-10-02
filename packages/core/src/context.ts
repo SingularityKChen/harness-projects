@@ -3,7 +3,7 @@
  */
 import {
   ProjectErrorCode, projectError, providerRegistry,
-  type AccessLevel, type CapabilityKey, type ExternalObjectRef, type ProviderRegistry, type Storage,
+  type AccessLevel, type CapabilityKey, type ExternalObjectRef, type ProviderRegistry, type Storage, type WorkspaceRecord,
 } from '@harness-projects/capabilities'
 import {
   NormalizedStatus, StatusPolicy, WriteState, newEntityId, newExternalIdentityId, newRelationId,
@@ -14,7 +14,7 @@ import { rerunPipeline, type DeliveryWriteAttempt } from './delivery.ts'
 import { startWorkUnavailable, type ExecutionContextQuery, type StartWorkRequest, type StartWorkResult } from './execution-context.ts'
 import { cancelExecutionRun, type CancelExecutionRunResult } from './execution-run.ts'
 import { createQueries, type CoreQueries } from './queries.ts'
-import { registerBindings, type CoreProviderTable } from './registry.ts'
+import { collectBindings, type CoreProviderTable } from './registry.ts'
 import { confirmRelation, type RecordedEdge, type RelationRef } from './relations.ts'
 import { startWork } from './start-work.ts'
 import {
@@ -86,20 +86,31 @@ function namespace<T extends object>(members: T): CoreNamespace<T> {
   return Object.assign(() => members, members)
 }
 
-/** storage 缺失时返回 undefined，由 composeCore 转成结构化不可用。 */
+/** 装配入口的工作区校验：先把省略的 id / statusPolicy 归一为 WorkspaceRecord，再校验闭集，任何写之前拒绝。 */
+function workspaceRecord(input: CoreWorkspaceInput): WorkspaceRecord {
+  const record = { id: input.id ?? newWorkspaceId(), name: input.name, statusPolicy: input.statusPolicy ?? StatusPolicy.ProviderAuthoritative }
+  if (typeof record.id !== 'string' || record.id.trim() === '') throw new TypeError('workspace.id 必须是非空字符串')
+  if (typeof record.name !== 'string') throw new TypeError('workspace.name 必须是字符串')
+  if (!Object.values(StatusPolicy).includes(record.statusPolicy)) throw new TypeError(`workspace.statusPolicy ${String(record.statusPolicy)} 不是合法的状态策略`)
+  return record
+}
+
+/**
+ * storage 缺失时返回 undefined，由 composeCore 转成结构化不可用。存在时：先全部校验与收集，再用**一个**事务写工作区与全部挂载，
+ * Storage ack 之后才发布 Registry——任何一步失败都整批回滚，不留新工作区、孤儿锚点或半批挂载。
+ */
 export async function createContext(deps: CoreDeps): Promise<CoreContext | undefined> {
   const storage = deps.storage ?? deps.providers.storage
   if (storage === undefined) return undefined
-  const workspaceId = deps.workspace.id ?? newWorkspaceId()
-  await storage.putWorkspace({
-    id: workspaceId,
-    name: deps.workspace.name,
-    statusPolicy: deps.workspace.statusPolicy ?? StatusPolicy.ProviderAuthoritative,
-  })
+  const workspace = workspaceRecord(deps.workspace)
   const policy = deps.policy ?? {}
-  const bindings = await registerBindings({ storage, workspaceId, providers: deps.providers, policy })
+  const prepared = await collectBindings({ workspaceId: workspace.id, providers: deps.providers, policy })
+  await storage.transaction(async (tx) => {
+    await tx.putWorkspace(workspace)
+    for (const record of prepared.records) await tx.putProviderBinding(record)
+  })
   return {
-    storage, workspaceId, registry: providerRegistry(bindings),
+    storage, workspaceId: workspace.id, registry: providerRegistry(prepared.bindings),
     clock: deps.clock ?? (() => new Date().toISOString()),
     ids: deps.ids ?? defaultIdFactory, policy,
     projectRef: deps.workspace.project,

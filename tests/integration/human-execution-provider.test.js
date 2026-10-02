@@ -265,7 +265,7 @@ test('重启后取消 fail closed（签发者配置变了、取消被设为只�
   }
 })
 
-test('取消：queued 不是终态；有状态 provider 对并发的第二个取消答 conflict 时以运行记录为准；binding id 重复即拒绝组装', async (t) => {
+test('取消：queued 不是终态；有状态 provider 对并发的第二个取消答 conflict 时以运行记录为准；同一 execution 挂载（主备共 id）重复即拒绝组装', async (t) => {
   const repository = await makeRepository(t)
   const storage = createFakeStorage()
   const { core } = await composeManualCore({ repository, storage, primary: createFakeExecutionProvider({ bindingId: 'binding-fake-primary' }) })
@@ -280,7 +280,7 @@ test('取消：queued 不是终态；有状态 provider 对并发的第二个取
   const [first, second] = await Promise.all([core.commands.cancelExecutionRun(scope), core.commands.cancelExecutionRun(scope)])
   assert.deepEqual([first.status, first.error, second], [ExecutionRunStatus.Canceled, undefined, first])
   const duplicate = createHumanExecutionProvider({ bindingId: `${HUMAN_BINDING}-fallback`, issuerKey: HUMAN_ISSUER_KEY })
-  await assert.rejects(composeManualCore({ repository, storage: createFakeStorage(), primary: duplicate, fallbackHuman: true }), /重复/)
+  await assert.rejects(composeManualCore({ repository, storage: createFakeStorage(), primary: duplicate, fallbackHuman: true }), /@execution 重复/)
   const onlyFallback = await composeManualCore({ repository, storage: createFakeStorage(), primary: false, fallbackHuman: true })
   const taken = await onlyFallback.core.commands.startWork(startRequest('wi-only-fallback', 'only-fallback-1'))
   assert.deepEqual([taken.fallback, taken.runExternalId?.startsWith('manual-run:')], ['manual_fallback', true], '只注入 fallback 时它仍被注册并承接')

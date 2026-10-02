@@ -7,6 +7,7 @@
 import type { ProviderCapabilitySnapshot } from './capability-keys.ts'
 import type { ExternalObjectRef, ProviderObservation, ProviderReconcileScope } from './observation.ts'
 import type { ProviderPage, ProviderResult } from './result.ts'
+import type { ProviderDefinition } from './registry.ts'
 
 export interface ProviderPipelineRun {
   readonly ref: ExternalObjectRef; readonly status: string; readonly commit: string; readonly conclusion: string | undefined
@@ -29,6 +30,8 @@ export interface ProviderListChecksInput { readonly changeRequest: ExternalObjec
 export interface ProviderListDeploymentsInput { readonly repository: ExternalObjectRef; readonly cursor: string | undefined; readonly limit: number }
 
 export interface DeliveryProvider {
+  /** 静态连接实现定义：由实现作者声明，Host 只注入实例与 id（见 `ProviderDefinition`）。 */
+  readonly definition: ProviderDefinition
   describeCapabilities(): Promise<ProviderCapabilitySnapshot>
   listPipelineRuns(input: ProviderListPipelineRunsInput): Promise<ProviderResult<ProviderPage<ProviderPipelineRun>>>
   listChecks(input: ProviderListChecksInput): Promise<ProviderResult<ProviderPage<ProviderCheckRun>>>

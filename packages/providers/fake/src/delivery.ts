@@ -6,6 +6,7 @@
  */
 import * as cap from '@harness-projects/capabilities'
 import { EntityKind, newProviderBindingId, type ProviderBindingId } from '@harness-projects/domain'
+import { FAKE_PROVIDER_DEFINITION } from './definition.ts'
 import { createFaultSwitch, type FaultPlan, type FaultSwitch } from './faults.ts'
 import { FakeGate } from './gate.ts'
 import { byExternalId, itemKey, paginate, refOf } from './state.ts'
@@ -53,6 +54,7 @@ export type FakeDeliveryProviderOptions = {
 }
 
 export class FakeDeliveryProvider implements cap.DeliveryProvider {
+  readonly definition = FAKE_PROVIDER_DEFINITION
   readonly state: FakeDeliveryState
   readonly faultsSwitch: FaultSwitch
   readonly flags: FakeDeliveryCapabilities

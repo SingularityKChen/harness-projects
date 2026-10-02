@@ -8,6 +8,7 @@ import { ContentKind, type RedactionReason } from '@harness-projects/domain'
 import type { ProviderCapabilitySnapshot } from './capability-keys.ts'
 import type { ExternalObjectRef, ProviderObservation, ProviderReconcileScope } from './observation.ts'
 import type { ProviderPage, ProviderResult } from './result.ts'
+import type { ProviderDefinition } from './registry.ts'
 
 export interface ProviderProject { readonly ref: ExternalObjectRef; readonly title: string; readonly sourceUpdatedAt: string | undefined }
 export interface ProviderWorkItemContent { readonly externalId: string; readonly title: string; readonly body: string }
@@ -79,6 +80,8 @@ export interface ProviderMovePlanningItemInput {
 }
 
 export interface PlanningProvider {
+  /** 静态连接实现定义：由实现作者声明，Host 只注入实例与 id（见 `ProviderDefinition`）。 */
+  readonly definition: ProviderDefinition
   describeCapabilities(): Promise<ProviderCapabilitySnapshot>
   getProject(ref: ExternalObjectRef): Promise<ProviderResult<ProviderProject>>
   listPlanningItems(input: ProviderListPlanningItemsInput): Promise<ProviderResult<ProviderPage<ProviderPlanningItem>>>

@@ -5,13 +5,12 @@
  * `ProjectError`），不是抛错。有效能力在这里由 `capability ∩ permission ∩ policy` 算出。
  */
 import {
-  AccessLevel, CapabilityKey, bindingForCapability, effectiveCapabilities, projectError,
-  type CapabilityDomain, type DeliveryProvider, type DevelopmentProvider,
-  type EffectiveCapability, type ExecutionProvider, type PlanningProvider, type ProviderRegistry,
-  type ResolvedBinding, type Storage,
+  AccessLevel, CapabilityKey, bindingForCapability, effectiveCapabilities, projectError, providerRegistry,
+  type DeliveryProvider, type DevelopmentProvider, type ExecutionProvider, type ExternalCapabilityDomain, type PlanningProvider,
+  type ProviderBindingRecord, type ProviderCapabilitySnapshot, type ProviderDefinition, type ProviderRegistry, type ResolvedBinding, type Storage,
 } from '@harness-projects/capabilities'
 import {
-  ProjectErrorCode, type ProjectError, type ProviderBindingId, type WorkspaceId,
+  ProjectErrorCode, type ProjectError, type WorkspaceId,
 } from '@harness-projects/domain'
 
 /** 注入表：四个能力域各自一个可选 provider，外加本地 storage；core 不 import 任何实现。 */
@@ -24,48 +23,122 @@ export interface CoreProviderTable {
   readonly storage?: Storage
 }
 
-const PROVIDER_DOMAINS = ['planning', 'development', 'delivery', 'execution'] as const
-
-export interface RegisterBindingsInput {
-  readonly storage: Storage
+export interface CollectBindingsInput {
   readonly workspaceId: WorkspaceId
   readonly providers: CoreProviderTable
   readonly policy: Readonly<Partial<Record<CapabilityKey, AccessLevel>>>
 }
 
-/** 一个绑定解析后的全部形态：只有它自己的域非空，避免调用方从别的域误取 provider。 */
-function resolvedBinding(
-  providers: CoreProviderTable, domain: CapabilityDomain, bindingId: ProviderBindingId,
-  workspaceId: WorkspaceId, capabilities: readonly EffectiveCapability[],
-): ResolvedBinding {
-  return {
-    ref: { workspaceId, bindingId, domain }, enabled: true, capabilities, storage: undefined,
-    planning: domain === 'planning' ? providers.planning : undefined,
-    development: domain === 'development' ? providers.development : undefined,
-    delivery: domain === 'delivery' ? providers.delivery : undefined,
-    execution: domain === 'execution' ? providers.execution : undefined,
+/** 内存中准备好的注册结果：挂载与对应的持久化记录。它还不是已发布的 Registry，Storage 确认之前不得流出。 */
+export interface PreparedBindings {
+  readonly bindings: readonly ResolvedBinding[]
+  readonly records: readonly ProviderBindingRecord[]
+}
+
+/** 注入槽位 → 挂载域与角色：主槽位 isDefault=true，执行备用 isDefault=false。 */
+const MOUNT_SLOTS = [
+  ['planning', 'planning', true], ['development', 'development', true], ['delivery', 'delivery', true],
+  ['execution', 'execution', true], ['executionFallback', 'execution', false],
+] as const
+const SLOT_NAMES: readonly string[] = [...MOUNT_SLOTS.map(([slot]) => slot), 'storage']
+/** 各外部域 port 的 [必需成员, 可选成员]：必需缺失、可选存在却不是函数，都在读快照与写 Storage 之前拒绝。 */
+const PORT_METHODS: Record<ExternalCapabilityDomain, readonly [readonly string[], readonly string[]]> = {
+  planning: [['getProject', 'listPlanningItems', 'getPlanningItem', 'listFieldDefinitions', 'listIterations'], ['createIssueWorkItem', 'createDraftItem', 'updateWorkItemContent', 'updatePlanningFields', 'movePlanningItem', 'reconcile']],
+  development: [['getRepository', 'listBranches', 'getCommit', 'getChangeRequest', 'listChangeRequests'], ['createBranch', 'createWorktree', 'getWorktree', 'createChangeRequest', 'removeWorktree', 'reconcile']],
+  delivery: [['listPipelineRuns', 'listChecks'], ['listDeployments', 'listEnvironments', 'rerunPipeline', 'cancelPipeline', 'reconcile']],
+  execution: [['startRun', 'getRun'], ['cancelRun']],
+}
+const EXTERNAL_DOMAINS: readonly unknown[] = Object.keys(PORT_METHODS)
+const CAPABILITY_KEYS: ReadonlySet<string> = new Set(Object.values(CapabilityKey))
+const ACCESS_LEVELS: ReadonlySet<unknown> = new Set(Object.values(AccessLevel))
+
+function reject(message: string): never { throw new TypeError(message) }
+
+/** capability / permission / policy 共用的闭集校验：未知 key（含值为 undefined 的）与四态以外的等级都拒绝；已知 key 的 undefined 保持“未声明”。 */
+function assertClosedLevels(what: string, levels: unknown): void {
+  if (typeof levels !== 'object' || levels === null) reject(`${what} 必须是对象`)
+  for (const [key, level] of Object.entries(levels)) {
+    if (!CAPABILITY_KEYS.has(key)) reject(`${what} 含未知 capability key ${key}`)
+    if (level !== undefined && !ACCESS_LEVELS.has(level)) reject(`${what} 的 ${key} 等级 ${String(level)} 不是四态之一`)
   }
 }
 
+interface Mount {
+  readonly domain: ExternalCapabilityDomain; readonly isDefault: boolean; readonly port: object
+  /** 准备期取下的 key 副本：之后外部再改 definition，不影响本次对同 id 实现的比较与落库。 */
+  readonly implementationKey: string
+}
+
+/** 静态校验注入表：槽位、port 成员与 definition 在读任何快照、写任何 Storage 之前全部过一遍；同 key 的域集合必须一致。 */
+function mountsOf(providers: CoreProviderTable): readonly Mount[] {
+  if (typeof providers !== 'object' || providers === null) reject('providers 必须是注入表对象')
+  for (const [slot, port] of Object.entries(providers)) if (port !== undefined && !SLOT_NAMES.includes(slot)) reject(`未知的 provider 槽位 ${slot}`)
+  const mounts: Mount[] = []
+  const domainSets = new Map<string, string>()
+  for (const [slot, domain, isDefault] of MOUNT_SLOTS) {
+    const port = providers[slot] as unknown as Record<string, unknown> | undefined
+    if (port === undefined) continue
+    const [required, optional] = PORT_METHODS[domain]
+    const callable = (name: string): boolean => typeof port[name] === 'function'
+    if (typeof port !== 'object' || port === null || !callable('describeCapabilities') || !required.every(callable)) reject(`槽位 ${slot} 的 port 缺少必需方法`)
+    const broken = optional.find((name) => port[name] !== undefined && !callable(name))
+    if (broken !== undefined) reject(`槽位 ${slot} 的可选方法 ${broken} 不是函数`)
+    const definition = port.definition as Partial<ProviderDefinition> | undefined
+    if (typeof definition !== 'object' || definition === null) reject(`槽位 ${slot} 缺少 definition`)
+    const { implementationKey: key, domains } = definition
+    if (typeof key !== 'string' || key.trim() === '') reject(`槽位 ${slot} 的 definition.implementationKey 必须是非空字符串`)
+    if (!Array.isArray(domains) || domains.length === 0 || new Set(domains).size !== domains.length) reject(`槽位 ${slot} 的 definition.domains 必须是非空且去重的数组`)
+    const foreign = domains.find((name) => !EXTERNAL_DOMAINS.includes(name))
+    if (foreign !== undefined) reject(`槽位 ${slot} 的 definition.domains 含非外部能力域 ${String(foreign)}`)
+    if (!domains.includes(domain)) reject(`槽位 ${slot} 的 definition.domains 不含它挂载的域 ${domain}`)
+    const signature = [...domains].sort().join(',')
+    const declared = domainSets.get(key) ?? signature
+    if (declared !== signature) reject(`实现 ${key} 的域集合不一致：${declared} ≠ ${signature}`)
+    domainSets.set(key, signature)
+    mounts.push({ domain, isDefault, port, implementationKey: key })
+  }
+  return mounts
+}
+
 /**
- * 登记注入的 provider。执行域两个角色按能力键分开：主执行不带 `execution.run.fallback`，fallback 绑定不带
- * `execution.run.start`——否则主执行 start 不可用时 fallback 会被当成主执行选中，降级结论随之消失。
+ * 收集 → 验证：先静态校验全部槽位与 policy，再逐个观察被挂载 port 的快照（同一对象只观察一次，不跨组合复用），按挂载域切出 capability /
+ * permission、套 policy 与角色过滤（主执行不带 `execution.run.fallback`，备用不带 `execution.run.start`，备用才不会在主写门不可用时被当成主目标），
+ * 最后用 `providerRegistry` 在写任何东西之前验证整批。不写 Storage；任何失败都以拒绝表达，不产出半份结果。
  */
-export async function registerBindings(input: RegisterBindingsInput): Promise<readonly ResolvedBinding[]> {
+export async function collectBindings(input: CollectBindingsInput): Promise<PreparedBindings> {
+  const { workspaceId, providers, policy } = input
+  const mounts = mountsOf(providers)
+  assertClosedLevels('policy', policy)
+  const observed = new Map<object, Promise<ProviderCapabilitySnapshot>>()
+  const connectionKeys = new Map<string, string>()
   const bindings: ResolvedBinding[] = []
-  const register = async (providers: CoreProviderTable, domain: typeof PROVIDER_DOMAINS[number], isDefault: boolean, withheld?: CapabilityKey) => {
-    const snapshot = await providers[domain]!.describeCapabilities()
-    if (bindings.some((item) => item.ref.bindingId === snapshot.bindingId)) throw new TypeError(`binding id ${snapshot.bindingId} 重复：两个绑定共用一个身份会让落库引用路由错`)
-    const capabilities = effectiveCapabilities(snapshot, input.policy).filter((item) => item.key !== withheld)
-    await input.storage.putProviderBinding({ id: snapshot.bindingId, workspaceId: input.workspaceId, domain, implementationKey: domain, enabled: true, isDefault })
-    bindings.push(resolvedBinding(providers, domain, snapshot.bindingId, input.workspaceId, capabilities))
+  const records: ProviderBindingRecord[] = []
+  for (const { domain, isDefault, port, implementationKey } of mounts) {
+    const pending = observed.get(port) ?? (port as { describeCapabilities(): Promise<ProviderCapabilitySnapshot> }).describeCapabilities()
+    observed.set(port, pending)
+    const snapshot = await pending
+    const { bindingId } = snapshot
+    if (typeof bindingId !== 'string' || bindingId.trim() === '') reject(`${domain} 的快照缺少非空 bindingId`)
+    assertClosedLevels(`连接 ${bindingId} 快照的 capability`, snapshot.capability)
+    assertClosedLevels(`连接 ${bindingId} 快照的 permission`, snapshot.permission)
+    const known = connectionKeys.get(bindingId) ?? implementationKey
+    if (known !== implementationKey) reject(`连接 ${bindingId} 的实现 key 不一致：${known} ≠ ${implementationKey}`)
+    connectionKeys.set(bindingId, implementationKey)
+    const slice = (levels: ProviderCapabilitySnapshot['capability']): ProviderCapabilitySnapshot['capability'] =>
+      Object.fromEntries(Object.entries(levels).filter(([name]) => name.startsWith(`${domain}.`)))
+    const withheld = domain !== 'execution' ? undefined : isDefault ? CapabilityKey.ExecutionRunFallback : CapabilityKey.ExecutionRunStart
+    const capabilities = effectiveCapabilities({ ...snapshot, capability: slice(snapshot.capability), permission: slice(snapshot.permission) }, policy)
+      .filter((item) => item.key !== withheld)
+    const own = <T>(want: ExternalCapabilityDomain): T | undefined => (domain === want ? (port as T) : undefined)
+    bindings.push({
+      ref: { workspaceId, bindingId, domain }, enabled: true, isDefault, capabilities, storage: undefined,
+      planning: own<PlanningProvider>('planning'), development: own<DevelopmentProvider>('development'),
+      delivery: own<DeliveryProvider>('delivery'), execution: own<ExecutionProvider>('execution'),
+    })
+    records.push({ id: bindingId, workspaceId, domain, implementationKey, enabled: true, isDefault })
   }
-  for (const domain of PROVIDER_DOMAINS) {
-    if (input.providers[domain] !== undefined) await register(input.providers, domain, true, domain === 'execution' ? CapabilityKey.ExecutionRunFallback : undefined)
-  }
-  const fallback = input.providers.executionFallback
-  if (fallback !== undefined) await register({ ...input.providers, execution: fallback }, 'execution', false, CapabilityKey.ExecutionRunStart)
-  return bindings
+  providerRegistry(bindings)
+  return { bindings, records }
 }
 
 export type CapabilityResolution =

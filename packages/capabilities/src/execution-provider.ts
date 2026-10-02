@@ -20,6 +20,7 @@
 import type { ProviderCapabilitySnapshot } from './capability-keys.ts'
 import type { ExternalObjectRef } from './observation.ts'
 import type { ProviderResult } from './result.ts'
+import type { ProviderDefinition } from './registry.ts'
 
 export interface ProviderExecutionRun {
   readonly ref: ExternalObjectRef; readonly status: string
@@ -32,6 +33,8 @@ export interface ProviderStartRunInput {
 }
 
 export interface ExecutionProvider {
+  /** 静态连接实现定义：由实现作者声明，Host 只注入实例与 id（见 `ProviderDefinition`）。 */
+  readonly definition: ProviderDefinition
   describeCapabilities(): Promise<ProviderCapabilitySnapshot>
   startRun(input: ProviderStartRunInput): Promise<ProviderResult<ProviderExecutionRun>>
   getRun(ref: ExternalObjectRef): Promise<ProviderResult<ProviderExecutionRun>>

@@ -5,7 +5,7 @@
  */
 import {
   AccessLevel, CapabilityKey, PLANNING_MEMBERSHIP_OBJECT_KIND, makeObservation, providerErr, providerError, providerOk,
-  type ExternalObjectRef, type PlanningProvider, type ProviderObservation, type ProviderResult,
+  type ExternalObjectRef, type PlanningProvider, type ProviderDefinition, type ProviderObservation, type ProviderResult,
 } from '@harness-projects/capabilities'
 import { MembershipContentKind, ProviderErrorCode, type ProviderBindingId } from '@harness-projects/domain'
 import { classifyResponse, failure } from './classify.ts'
@@ -38,6 +38,8 @@ function rowObservations({ item, content }: ItemRow, receivedTime: string): read
   )
   return content === undefined ? [membership] : [observe(item.ref, 'planning.content.observed', content.version, content.fields), membership]
 }
+
+export const GITHUB_PROJECTS_PROVIDER_DEFINITION: ProviderDefinition = Object.freeze({ implementationKey: 'planning.github-projects', domains: Object.freeze(['planning'] as const) })
 
 export function createGithubProjectsPlanningProvider({ bindingId, projectNodeId, transport, now = Date.now }: GithubProjectsPlanningProviderOptions): PlanningProvider {
   const project: ExternalObjectRef = { bindingId, objectKind: 'project', externalId: projectNodeId, url: undefined }
@@ -81,6 +83,7 @@ export function createGithubProjectsPlanningProvider({ bindingId, projectNodeId,
   }
 
   const provider: PlanningProvider = {
+    definition: GITHUB_PROJECTS_PROVIDER_DEFINITION,
     async describeCapabilities() {
       const probe = await provider.getProject(project)
       const code = probe.ok ? undefined : probe.error.code

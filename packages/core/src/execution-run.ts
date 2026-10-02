@@ -1,7 +1,7 @@
 /**
  * 执行运行的生命周期命令：运行身份是 Storage 里的那条记录（`runIdFor(contextId)`），不是 provider 的某个引用。
  */
-import { AccessLevel, CapabilityKey, ProjectErrorCode, projectError, type ExecutionRunRecord } from '@harness-projects/capabilities'
+import { AccessLevel, CapabilityKey, ProjectErrorCode, bindingForRef, projectError, type ExecutionRunRecord } from '@harness-projects/capabilities'
 import { ExecutionRunStatus, type ProjectError } from '@harness-projects/domain'
 import { toProjectError, unsupportedCapability } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
@@ -25,12 +25,13 @@ const ENDED: readonly ExecutionRunStatus[] = [ExecutionRunStatus.Succeeded, Exec
  */
 export async function cancelExecutionRun(context: CoreContext, query: ExecutionContextQuery): Promise<CancelExecutionRunResult> {
   const runId = runIdFor(contextIdFor(context.workspaceId, query.workItemId, query.repositoryId))
-  const run = await context.storage.getExecutionRun(runId)
-  if (run?.providerRef === undefined) return settled(run, projectError(ProjectErrorCode.NotFound, '没有可取消的运行：运行不存在，或没有 provider 签发的引用'))
+  const found = await context.storage.getExecutionRun(runId)
+  const run = found?.workspaceId === context.workspaceId ? found : undefined
+  if (run?.providerRef === undefined) return settled(run, projectError(ProjectErrorCode.NotFound, '没有可取消的运行：运行不存在、不属于当前工作区，或没有 provider 签发的引用'))
   const ref = run.providerRef
   if (run.status === ExecutionRunStatus.Canceled) return settled(run)
   if (ENDED.includes(run.status)) return settled(run, projectError(ProjectErrorCode.Conflict, `运行已结束：${run.status}`))
-  const binding = context.registry.bindings.find((item) => item.ref.bindingId === ref.bindingId)
+  const binding = bindingForRef(context.registry, { workspaceId: context.workspaceId, bindingId: ref.bindingId, domain: 'execution' })
   if (binding?.execution === undefined) {
     return settled(run, projectError(ProjectErrorCode.NotFound, `签发该运行的执行 binding ${ref.bindingId} 未注册：宿主必须注入重启前的同一 binding id`))
   }
