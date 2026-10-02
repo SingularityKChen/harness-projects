@@ -22,6 +22,7 @@
 import type { ProviderCapabilitySnapshot } from './capability-keys.ts'
 import type { ExternalObjectRef, ProviderObservation, ProviderReconcileScope } from './observation.ts'
 import type { ProviderPage, ProviderResult } from './result.ts'
+import type { ProviderDefinition } from './registry.ts'
 
 export interface ProviderRepository {
   readonly ref: ExternalObjectRef; readonly name: string
@@ -63,6 +64,8 @@ export interface ProviderListBranchesInput { readonly repository: ExternalObject
 export interface ProviderListChangeRequestsInput { readonly repository: ExternalObjectRef; readonly cursor: string | undefined; readonly limit: number }
 
 export interface DevelopmentProvider {
+  /** 静态连接实现定义：由实现作者声明，Host 只注入实例与 id（见 `ProviderDefinition`）。 */
+  readonly definition: ProviderDefinition
   describeCapabilities(): Promise<ProviderCapabilitySnapshot>
   getRepository(ref: ExternalObjectRef): Promise<ProviderResult<ProviderRepository>>
   listBranches(input: ProviderListBranchesInput): Promise<ProviderResult<ProviderPage<ProviderBranch>>>

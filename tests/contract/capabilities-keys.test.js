@@ -14,8 +14,10 @@ import {
   CapabilityDomain,
   CapabilityKey,
   bindingForCapability,
+  bindingForRef,
   effectiveCapabilities,
   intersectAccess,
+  providerRegistry,
 } from '@harness-projects/capabilities'
 
 /** 禁止片段：这些名字只允许出现在 provider 实现里，绝不能进入调用方分支依据。 */
@@ -83,6 +85,50 @@ test('effectiveCapabilities：未声明的 capability 不出现，缺 permission
 test('storage 能力键存在，且按能力解析绑定能落到 storage 域', () => {
   assert.deepEqual(Object.values(CapabilityKey).filter((key) => key.startsWith('storage.')),
     [CapabilityKey.StorageWorkspaceRead, CapabilityKey.StorageWorkspaceWrite, CapabilityKey.StorageMigrationApply])
-  const binding = { ref: { workspaceId: 'ws-1', bindingId: 'binding-1', domain: CapabilityDomain.Storage }, enabled: true, capabilities: [{ key: CapabilityKey.StorageWorkspaceRead, access: AccessLevel.Available }] }
+  const binding = { ref: { workspaceId: 'ws-1', bindingId: 'binding-1', domain: CapabilityDomain.Storage }, enabled: true, isDefault: true, capabilities: [{ key: CapabilityKey.StorageWorkspaceRead, access: AccessLevel.Available }] }
   assert.equal(bindingForCapability({ bindings: [binding] }, CapabilityKey.StorageWorkspaceRead)?.ref.domain, CapabilityDomain.Storage)
+})
+
+/** 纯 Registry 挂载：只带本域 port（占位对象），能力表按 key 声明。 */
+const mount = (domain, bindingId, isDefault, keys = {}, workspaceId = 'ws-1') => ({
+  ref: { workspaceId, bindingId, domain }, enabled: true, isDefault, capabilities: Object.entries(keys).map(([key, access]) => ({ key, access })),
+  planning: undefined, development: undefined, delivery: undefined, execution: undefined, storage: undefined, [domain]: {},
+})
+
+test('providerRegistry：同 id 跨域与主 + 备用合法；跨工作区、重复挂载、多个 Planning（默认）、多个备用与非 Execution 备用、串域 port 被拒绝而不是取第一条', () => {
+  const planning = mount('planning', 'conn-1', true)
+  assert.equal(providerRegistry([planning, mount('development', 'conn-1', true), mount('execution', 'run-1', true), mount('execution', 'run-2', false)]).bindings.length, 4)
+  for (const [bindings, message] of [
+    [[planning, mount('planning', 'conn-1', false)], /重复/],
+    [[planning, mount('planning', 'conn-2', true)], /默认/],
+    [[mount('development', 'conn-1', false)], /备用/],
+    [[mount('execution', 'run-1', true), mount('execution', 'run-2', false), mount('execution', 'run-3', false)], /多个备用/],
+    [[mount('execution', 'run-1', true), mount('execution', 'run-2', true)], /默认/],
+    [[planning, mount('development', 'conn-1', true, {}, 'ws-2')], /工作区/],
+    [[{ ...planning, development: {} }], /port/],
+  ]) assert.throws(() => providerRegistry(bindings), { name: 'TypeError', message })
+})
+
+test('bindingForCapability：按 key 的域与主 / 备用角色选目标；主目标不可用时不另找可用实例，读在主缺失时才用唯一备用', () => {
+  const { Available, Unavailable } = AccessLevel
+  const { PlanningItemRead, DevelopmentRepositoryRead, ExecutionRunStart, ExecutionRunRead, ExecutionRunFallback } = CapabilityKey
+  const fallback = mount('execution', 'run-2', false, { [ExecutionRunStart]: Available, [ExecutionRunFallback]: Available, [ExecutionRunRead]: Available })
+  const registry = providerRegistry([
+    mount('planning', 'conn-1', true, { [PlanningItemRead]: Available }), mount('development', 'conn-1', true, { [DevelopmentRepositoryRead]: Available }),
+    mount('execution', 'run-1', true, { [ExecutionRunStart]: Unavailable, [ExecutionRunRead]: Unavailable }), fallback,
+  ])
+  const target = (key, from = registry) => bindingForCapability(from, key)?.ref
+  assert.deepEqual([PlanningItemRead, DevelopmentRepositoryRead].map((key) => target(key)?.domain), ['planning', 'development'], '共享 id 下按 key 的域取挂载')
+  assert.deepEqual([ExecutionRunStart, ExecutionRunRead, ExecutionRunFallback].map((key) => target(key)?.bindingId), ['run-1', 'run-1', 'run-2'], '主 unavailable 仍选主，备用只响应 fallback key')
+  const onlyFallback = providerRegistry([fallback])
+  assert.deepEqual([target(ExecutionRunRead, onlyFallback)?.bindingId, target(ExecutionRunStart, onlyFallback)], ['run-2', undefined], '读在主缺失时用备用；备用即使声明了 start，start 也永不落到备用（拒绝而不是改道）')
+})
+
+test('bindingForRef：严格匹配工作区 + 连接 + 域并要求启用；重复输入拒绝而不是取第一条', () => {
+  const development = mount('development', 'conn-1', true)
+  const registry = { bindings: [mount('planning', 'conn-1', true), development] }
+  const find = (ref, from = registry) => bindingForRef(from, { workspaceId: 'ws-1', bindingId: 'conn-1', domain: 'development', ...ref })
+  assert.deepEqual([find({}), find({ domain: 'delivery' }), find({ workspaceId: 'ws-2' }), find({ bindingId: 'conn-2' })], [development, undefined, undefined, undefined])
+  assert.equal(find({}, { bindings: [{ ...development, enabled: false }] }), undefined, '未启用的挂载不是目标')
+  assert.throws(() => find({}, { bindings: [development, development] }), { name: 'TypeError', message: /重复/ })
 })

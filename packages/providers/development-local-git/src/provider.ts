@@ -48,7 +48,12 @@ async function occupied(target: string): Promise<boolean> {
 }
 const samePath = async (left: string, right: string): Promise<boolean> =>
   (await realpath(left).catch(() => left)) === (await realpath(right).catch(() => right))
+/** 本地 Git 的静态连接实现定义：单域实现族，key 由本实现作者声明。 */
+export const LOCAL_GIT_PROVIDER_DEFINITION: cap.ProviderDefinition = Object.freeze({
+  implementationKey: 'development.local-git', domains: Object.freeze(['development'] as const),
+})
 export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
+  readonly definition = LOCAL_GIT_PROVIDER_DEFINITION
   readonly bindingId: ProviderBindingId
   readonly repository: LocalGitRepositoryConfig
   readonly allowedRoot: string

@@ -6,6 +6,7 @@ import { createFakeExecutionProvider, type FakeExecutionProvider, type FakeExecu
 import { createFakePlanningProvider, type FakePlanningProvider, type FakePlanningProviderOptions } from './planning.ts'
 import { createFakeStorage, type FakeStorageData, type MemoryStorage } from './storage.ts'
 
+export * from './definition.ts'
 export * from './faults.ts'
 export * from './state.ts'
 export * from './fixtures.ts'

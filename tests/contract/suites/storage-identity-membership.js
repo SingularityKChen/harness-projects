@@ -46,6 +46,14 @@ export function storageIdentityFoundationSuite(adapter, register = test) {
       const bindings = await storage.listProviderBindings(WORKSPACE)
       assert.deepEqual(bindings.filter((b) => b.isDefault).map((b) => b.id), ['binding-5'], '禁用的挂载不占用默认槽，新的启用默认是唯一的默认')
       assert.equal(bindings.find((b) => b.id === 'binding-4')?.isDefault, false, '禁用挂载不得被当成默认')
+      // 同一个 id、同一个工作区跨域：用另一个实例，不污染上面的数组期望。同域重复写是覆盖同一行，所以重复挂载只能由 core 注册自己拒绝。
+      const shared = makeStorage()
+      await seedWorkspace(shared)
+      await shared.putProviderBinding(binding('binding-1'))
+      await shared.putProviderBinding(developmentBinding('binding-1'))
+      await assert.rejects(shared.putProviderBinding(developmentBinding('binding-1', { implementationKey: 'other' })), '同 id 同工作区换域时仍不能换实现')
+      await shared.putProviderBinding(developmentBinding('binding-1', { isDefault: true }))
+      assert.deepEqual((await shared.listProviderBindings(WORKSPACE)).map((b) => `${b.domain}:${b.isDefault}`).sort(), ['development:true', 'planning:false'], '同一连接跨域是两个挂载，同域重复写覆盖同一行而不是追加')
     })
 
     register(`${label}：每个实体至多一个 primary 身份，同一个身份 id 不得换对象键`, async () => {

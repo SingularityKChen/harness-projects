@@ -1,6 +1,7 @@
 /** 离线 Planning provider：实现 A2 冻结的 PlanningProvider（读能力全套 + 可选写能力）。失败一律翻译成结构化 ProviderResult，故障开关打开时不抛裸错误；provider 只改外部 id：draft→issue 提升返回新的外部 id，内部实体 id 由调用方保持（AGENTS.md §1.1 不变量 1）。命名空间导入是本包唯一风格偏差：port 类型名很长，逐个具名导入会把文件推过 200 行上限。 */
 import * as cap from '@harness-projects/capabilities'
 import * as domain from '@harness-projects/domain'
+import { FAKE_PROVIDER_DEFINITION } from './definition.ts'
 import { createFaultSwitch, FaultKind, type FaultPlan, type FaultSwitch } from './faults.ts'
 import { FakeFixtureName, seedFor } from './fixtures.ts'
 import {
@@ -35,6 +36,7 @@ export type FakePlanningProviderOptions = {
   capabilities?: Partial<FakePlanningCapabilities>; observedAt?: string
 }
 export class FakePlanningProvider implements cap.PlanningProvider {
+  readonly definition = FAKE_PROVIDER_DEFINITION
   readonly state: FakePlanningState
   readonly faultsSwitch: FaultSwitch
   readonly flags: FakePlanningCapabilities
