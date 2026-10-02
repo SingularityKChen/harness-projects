@@ -74,7 +74,7 @@ export function stateForSnapshot(snapshot) {
 /**
  * 分页上限。超过就 fail closed，不把截断的输入当完整输入。
  *
- * 写入口（读一个 issue 的关闭引用）与观察者（读仓库的 PR 列表）共用这一对上限：
+ * 观察者读 Project 条目分页、写入口与观察者读一个 issue 的关闭引用分页都受这一对上限约束：
  * 「读到一半」这件事对两者都是不可接受的输入。
  */
 export const MAX_PAGES = 5
@@ -86,7 +86,9 @@ function newestFirst(entries) {
     const right = Date.parse(b.reference.createdAt)
     if (left !== right) return right - left
     // createdAt 相同时用编号兜底，保证排序是确定的而不是依赖输入顺序。
-    return b.reference.number - a.reference.number
+    if (a.reference.number !== b.reference.number) return b.reference.number - a.reference.number
+    // 编号也相同只可能是不同仓库的两条真引用：按全局 PR id 的字符串码元升序兜底（不依赖 locale）。
+    return a.reference.id < b.reference.id ? -1 : 1
   })
 }
 
@@ -113,6 +115,9 @@ function assertReference(reference) {
   if (typeof reference.createdAt !== 'string' || Number.isNaN(Date.parse(reference.createdAt))) {
     throw new Error(`PR #${reference.number} 缺少可解析的 createdAt：${String(reference.createdAt)}`)
   }
+  if (typeof reference.id !== 'string' || reference.id.length === 0) {
+    throw new Error(`引用 PR #${reference.number} 缺少稳定的全局 id`)
+  }
 }
 
 /**
@@ -130,15 +135,16 @@ function assertReference(reference) {
  *    PR 引用同一 issue 本身可疑，但「最新」是可机械判定且确定的。
  * 3. **否则（全部 closed 且未合并）→ 取创建时间最新的那个的投影**，也就是清空。
  *
- * 没有被任何 PR 引用的条目**不参与比较**：`Engineering` 为空是合法状态，不是漂移；
- * 但**空集合传进来是错误**，不是「清空」——调用方必须保证引用集合是完整的。
+ * **空集合默认是错误**，不是「清空」；只有调用方带着完整读取的证据传 `complete: true`，
+ * 完整零引用才返回 `{ value: null, prNumber: null, rule: 'unreferenced' }`（旧值被清空，已空则无漂移）。
  *
  * 返回 `{ value, prNumber, rule }`，`value` 为 `null` 表示该 issue 应当清空。
  */
-export function expectedFor({ references }) {
-  if (!Array.isArray(references) || references.length === 0) {
+export function expectedFor({ references, complete = false }) {
+  if (!Array.isArray(references) || (references.length === 0 && complete !== true)) {
     throw new Error('expectedFor 需要至少一个引用 PR；空集合不是「清空」')
   }
+  if (references.length === 0) return { value: null, prNumber: null, rule: 'unreferenced' }
 
   // **每一个**引用都必须落在投影域内，而不只是被选中的那一个：否则一个带未知
   // state 的引用会掉进第 3 条被当成「closed 且未合并」，那是一扇假绿的门。
@@ -147,6 +153,9 @@ export function expectedFor({ references }) {
     assertReference(reference)
     return { reference, value: projectionFor(reference) }
   })
+  if (new Set(references.map((reference) => reference.id)).size !== references.length) {
+    throw new Error('同一 Issue 的引用集合含重复的 PR id')
+  }
 
   const pick = (rule, candidates) => {
     const chosen = newestFirst(candidates)[0]
@@ -209,7 +218,7 @@ export function createGraphQLClient({ token, fetchImpl = fetch, api = API }) {
   }
 }
 
-export async function resolveProjectField({ gql, engineeringFieldId }) {
+export async function resolveProjectField({ gql, engineeringFieldId, owner = OWNER, projectNumber = PROJECT_NUMBER }) {
   if (!engineeringFieldId) throw new Error('未配置 ENGINEERING_FIELD_ID')
   const data = await gql(
     `query($owner:String!,$number:Int!,$fieldId:ID!){
@@ -218,11 +227,11 @@ export async function resolveProjectField({ gql, engineeringFieldId }) {
         id name dataType project{id} options{id name}
       }}
     }`,
-    { owner: OWNER, number: PROJECT_NUMBER, fieldId: engineeringFieldId },
+    { owner, number: projectNumber, fieldId: engineeringFieldId },
   )
 
   const project = data.user?.projectV2
-  if (!project) throw new Error(`找不到 project ${OWNER}/#${PROJECT_NUMBER}`)
+  if (!project) throw new Error(`找不到 project ${owner}/#${projectNumber}`)
   const field = data.node
   if (!field) throw new Error(`找不到 Engineering 字段 ID ${engineeringFieldId}`)
   if (field.id !== engineeringFieldId) throw new Error('Engineering 字段返回了不匹配的 ID')
@@ -287,13 +296,16 @@ export async function loadTriggerPullRequest({ gql, owner, repo, prNumber, proje
   return { items }
 }
 
+/** 一个 issue 的关闭引用 connection 的选择集：Project 页内嵌读取与逐 issue 续页共用这一份。 */
+export const CLOSING_REFERENCES_CONNECTION = `totalCount pageInfo{hasNextPage endCursor}
+  nodes{id number repository{nameWithOwner} state merged isDraft reviewDecision createdAt}`
+
 const CLOSING_PULL_REQUESTS_QUERY = `
 query($owner:String!,$repo:String!,$issue:Int!,$cursor:String){
   repository(owner:$owner,name:$repo){
     issue(number:$issue){
       closedByPullRequestsReferences(first:${PAGE_SIZE},includeClosedPrs:true,after:$cursor){
-        totalCount pageInfo{hasNextPage endCursor}
-        nodes{number state merged isDraft reviewDecision createdAt}
+        ${CLOSING_REFERENCES_CONNECTION}
       }
     }
   }
@@ -311,24 +323,30 @@ query($owner:String!,$repo:String!,$issue:Int!,$cursor:String){
  * 过滤掉」留在代码里，而那正是 issue #115 的故障形态。契约测试把这个参数钉在
  * 查询文本上。
  *
- * 返回的引用节点只保留选择策略需要的字段；`state` / `reviewDecision` 的域校验
- * 交给 `expectedFor`（同一份契约只有一处权威）。
+ * `initialConnection` 是 Project 页已内嵌取得的首页：消费它再从它的 cursor 继续，不重读首页。
+ * 同一次读取内 totalCount 变化、cursor 重复、节点 id 重复都按 SourceChanged / 不完整拒绝。
+ *
+ * 返回的引用节点只保留选择策略需要的字段（含全局 PR id）；`state` / `reviewDecision`
+ * 的域校验交给 `expectedFor`（同一份契约只有一处权威）。
  */
-export async function loadClosingPullRequests({ gql, owner, repo, issueNumber }) {
+export async function loadClosingPullRequests({ gql, owner, repo, issueNumber, initialConnection }) {
   if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
     throw new Error(`issue 编号必须是正整数：${String(issueNumber)}`)
   }
 
   const references = []
+  const cursors = new Set()
   let cursor = null
   let totalCount = null
 
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const data = await gql(CLOSING_PULL_REQUESTS_QUERY, { owner, repo, issue: issueNumber, cursor })
-    if (!data.repository) throw new Error(`找不到 repository ${owner}/${repo}`)
-    if (!data.repository.issue) throw new Error(`找不到 issue ${owner}/${repo}#${issueNumber}`)
-
-    const connection = data.repository.issue.closedByPullRequestsReferences
+    let connection = page === 0 ? initialConnection : undefined
+    if (connection === undefined) {
+      const data = await gql(CLOSING_PULL_REQUESTS_QUERY, { owner, repo, issue: issueNumber, cursor })
+      if (!data.repository) throw new Error(`找不到 repository ${owner}/${repo}`)
+      if (!data.repository.issue) throw new Error(`找不到 issue ${owner}/${repo}#${issueNumber}`)
+      connection = data.repository.issue.closedByPullRequestsReferences
+    }
     if (connection === null || typeof connection !== 'object' || Array.isArray(connection)) {
       throw new Error(`issue #${issueNumber} 缺少 closedByPullRequestsReferences`)
     }
@@ -338,16 +356,28 @@ export async function loadClosingPullRequests({ gql, owner, repo, issueNumber })
     if (!Number.isInteger(connection.totalCount) || connection.totalCount < 0) {
       throw new Error(`issue #${issueNumber} 的 closedByPullRequestsReferences.totalCount 必须是非负整数`)
     }
-    if (totalCount === null) totalCount = connection.totalCount
+    if (totalCount !== null && connection.totalCount !== totalCount) {
+      throw new Error(`SourceChanged：issue #${issueNumber} 的 totalCount 在分页期间由 ${totalCount} 变为 ${connection.totalCount}`)
+    }
+    totalCount = connection.totalCount
 
     for (const node of connection.nodes) {
       assertReference(node)
-      const reviewDecision = node.reviewDecision ?? null
-      if (reviewDecision !== null && typeof reviewDecision !== 'string') {
-        throw new Error(`issue #${issueNumber} 的引用 PR #${node.number} 的 reviewDecision 必须是字符串或 null`)
+      if (typeof node.repository?.nameWithOwner !== 'string' || node.repository.nameWithOwner.length === 0) {
+        throw new Error(`引用 PR #${node.number} 缺少 repository`)
+      }
+      if (references.some((reference) => reference.id === node.id)) {
+        throw new Error(`issue #${issueNumber} 的引用含重复的 PR id：${node.id}`)
+      }
+      // 显式 null 是合法的「无评审决定」；缺失的键是 shape 漂移，不能补成 null。
+      const reviewDecision = node.reviewDecision
+      if (reviewDecision === undefined || (reviewDecision !== null && typeof reviewDecision !== 'string')) {
+        throw new Error(`issue #${issueNumber} 的引用 PR #${node.number} 的 reviewDecision 必须是字符串或 null（缺失不会被补成 null）`)
       }
       references.push({
+        id: node.id,
         number: node.number,
+        repository: node.repository.nameWithOwner,
         state: node.state,
         merged: node.merged,
         isDraft: node.isDraft,
@@ -369,9 +399,10 @@ export async function loadClosingPullRequests({ gql, owner, repo, issueNumber })
       }
       return references
     }
-    if (typeof pageInfo.endCursor !== 'string' || pageInfo.endCursor.trim().length === 0) {
-      throw new Error(`issue #${issueNumber} 的 pageInfo.endCursor 必须是非空字符串`)
+    if (typeof pageInfo.endCursor !== 'string' || pageInfo.endCursor.trim().length === 0 || cursors.has(pageInfo.endCursor)) {
+      throw new Error(`issue #${issueNumber} 的 pageInfo.endCursor 必须是非空字符串且不得重复`)
     }
+    cursors.add(pageInfo.endCursor)
     cursor = pageInfo.endCursor
   }
 

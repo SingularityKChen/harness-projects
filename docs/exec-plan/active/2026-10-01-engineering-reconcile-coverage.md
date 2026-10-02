@@ -236,7 +236,7 @@ Project或单Issue refs接近400时预警；到500边界仍完整可读，超过
 - [ ] 后续实施交接前重新回读本分支draft、#249双向关闭引用、非Status元数据及checks；发布状态以GitHub当前快照为准。
 - [x] (2026-10-02 06:54 CST) 最终小审补全跨仓PR id验重/稳定排序及置换正控，明确PR文档全集；预算/lint复核后冻结设计稿。
 - [ ] 后续门：人类设计评审，接受完整零语义、接口及预算；实施未授权开始。
-- [ ] Batch 1共享只读来源/比较与旧红新绿证据。
+- [x] (2026-10-02 22:00 CST) Batch 1共享只读来源/比较与旧红新绿证据：`loadProjectEngineeringSnapshot`/`loadIssueEngineeringSnapshot`、`expectedFor` 完整零与 id 兜底落地，工程契约 184/184（含 workflow-check 两文件）、tsc exit 0；详见 Artifacts and Notes。
 - [ ] Batch 2唯一全域writer/edited/schedule与取消/partial判别证据。
 - [ ] Batch 3当前head发布面、环境门、默认分支运行/observer验收及关闭计划。
 
