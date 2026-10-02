@@ -6,12 +6,20 @@ export const IdentityRole = {
 } as const
 export type IdentityRole = (typeof IdentityRole)[keyof typeof IdentityRole]
 
-/** 外部对象种类：决定提升规则（draft → issue）。 */
+/** 外部对象种类：决定提升规则（draft → issue）。`repository` 是仓库自身的身份（#195）；种类是自然键的分量，与 `branch` 同名的字面量是两个对象。 */
 export const ExternalIdentityKind = {
   Draft: 'draft', Issue: 'issue', ChangeRequest: 'change_request',
-  Branch: 'branch', Worktree: 'worktree',
+  Branch: 'branch', Worktree: 'worktree', Repository: 'repository',
 } as const
 export type ExternalIdentityKind = (typeof ExternalIdentityKind)[keyof typeof ExternalIdentityKind]
+
+const EXTERNAL_IDENTITY_KINDS: readonly unknown[] = Object.values(ExternalIdentityKind)
+
+/** 运行时边界：JavaScript 调用方可以绕过 TS 类型。已知种类原样返回，其余一律拒绝——不得回退成 `issue` 或任何别的种类，登记错种类比登记失败更难发现。 */
+export function parseExternalIdentityKind(value: unknown): ExternalIdentityKind {
+  if (!EXTERNAL_IDENTITY_KINDS.includes(value)) throw new RangeError('unsupported external identity kind')
+  return value as ExternalIdentityKind
+}
 
 /** 成员关系的内容种类：project 条目的内容只能是这三类。比 `ExternalIdentityKind` 窄（`branch` / `worktree` 不是 project 条目的内容），且**刻意不并入** `ExternalIdentityKind`——裁决 R1 要求 `ProjectV2Item` 不得成为身份种类，成员关系落在独立的工作区作用域表上（`docs/adr/ADR-0002-membership-identity-separate-from-content.md`）。 */
 export const MembershipContentKind = {

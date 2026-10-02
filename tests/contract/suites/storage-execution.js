@@ -30,7 +30,7 @@ export async function seedExecutionPrereqs(storage) {
   await storage.putEntity({ id: 'entity-1', kind: 'work_item' })
   await storage.putEntity({ id: 'entity-2', kind: 'work_item' })
   await storage.putEntity({ id: 'repo-entity-1', kind: 'repository' })
-  await storage.putExternalIdentity({ id: 'repo-identity-1', entityId: 'repo-entity-1', bindingId: 'binding-1', externalKind: 'branch', externalId: 'repo-1', role: 'primary' })
+  await storage.putExternalIdentity({ id: 'repo-identity-1', entityId: 'repo-entity-1', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-1', role: 'primary' })
   await storage.putRepository({ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'repo-identity-1' })
 }
 

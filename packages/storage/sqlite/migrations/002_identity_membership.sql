@@ -50,8 +50,8 @@ CREATE TABLE external_identity (
   entity_id TEXT NOT NULL REFERENCES entity (id),
   -- R1：键形状不变——binding_id 指向**连接锚点**而不是工作区挂载，因此同一对象跨工作区只有一条身份（ADR-0006）。
   binding_id TEXT NOT NULL REFERENCES provider_binding (id),
-  -- R1：ExternalIdentityKind 只有这五个取值。ProjectV2Item 不是身份种类——成员关系落在 project_item_membership。
-  external_kind TEXT NOT NULL CHECK (external_kind IN ('draft', 'issue', 'change_request', 'branch', 'worktree')),
+  -- R1：ExternalIdentityKind 只有这六个取值。ProjectV2Item 不是身份种类——成员关系落在 project_item_membership。issue #195 在发布前原位加入 repository（控制计划 D10：首发前不追加迁移；已应用旧 002 的开发库删库重建）。
+  external_kind TEXT NOT NULL CHECK (external_kind IN ('draft', 'issue', 'change_request', 'branch', 'worktree', 'repository')),
   external_id TEXT NOT NULL,
   -- R7：只有 primary external_id 可作为平台查询参数或同步游标。
   role TEXT NOT NULL CHECK (role IN ('primary', 'alias', 'historical')),

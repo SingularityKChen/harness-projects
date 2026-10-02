@@ -51,7 +51,7 @@ export function storageSyncSuite(adapter, register = test) {
 
   register(`${label}：成员关系的内容种类只有三个取值，且外部身份种类不含 ProjectV2Item`, () => {
     assert.deepEqual([...Object.values(MembershipContentKind)].sort(), ['change_request', 'draft', 'issue'])
-    assert.deepEqual([...Object.values(ExternalIdentityKind)].sort(), ['branch', 'change_request', 'draft', 'issue', 'worktree'], 'R1：不得把 ProjectV2Item 加进外部身份种类')
+    assert.deepEqual([...Object.values(ExternalIdentityKind)].sort(), ['branch', 'change_request', 'draft', 'issue', 'repository', 'worktree'], 'R1：不得把 ProjectV2Item 加进外部身份种类')
   })
 
   register(`${label}：字段值按 (工作区, 条目, 项目字段) 定位，不含可选值 id`, async () => {

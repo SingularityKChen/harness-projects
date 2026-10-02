@@ -3,7 +3,7 @@
  * 读写路径：每个方法都经过基类的唯一入口（`read` / `mutate` / `write`），因此外部读拿到**结算后**的值、看不到未提交的写入；事务在队列内从 BEGIN IMMEDIATE 持有到 COMMIT / ROLLBACK，重叠事务串行提交，在途事务期间的直接写入等到结算后才执行。多语句写入只有一个原子入口 `atomic`。代价也相同：事务的 work 里必须用 `tx.*`（队列内自等，用 AsyncLocalStorage 标记事务作用域）；嵌套事务在运行时被拒绝，抛错后 ROLLBACK、重开句柄读不到半写行（L3 计划遗留「嵌套事务在运行时静默吞写」）。快速失败文本由基类持有，这里只把它们转出包外；约定文本的整串断言在 `tests/contract/suites/storage.js`。列表顺序：端口未承诺顺序；本实现各列表的排序见各方法（地基面与同步面按 rowid / 业务键，执行面按主键序），调用方不得依赖。
  */
 import type { ProviderBindingRecord, RepositoryRecord, Storage, StorageTransaction, WorkspaceRecord } from '@harness-projects/capabilities'
-import type { Entity, EntityId, ExternalIdentity, ProviderBindingId, WorkspaceId, WorkspaceProjection } from '@harness-projects/domain'
+import { parseExternalIdentityKind, type Entity, type EntityId, type ExternalIdentity, type ProviderBindingId, type WorkspaceId, type WorkspaceProjection } from '@harness-projects/domain'
 import { openDatabase } from './db.ts'
 import { migrate } from './migrate.ts'
 import { contentColumns, optional, rowToBinding, rowToIdentity, rowToProjection, rowToRepository, rowToWorkspace, toFlag, type Row } from './storage-rows.ts'
@@ -40,8 +40,9 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   }
   listProviderBindings(workspaceId: WorkspaceId): Promise<readonly ProviderBindingRecord[]> { return this.read(() => (this.db.prepare(`SELECT ${BINDING_COLUMNS} FROM workspace_binding AS wb JOIN provider_binding AS b ON b.id = wb.binding_id WHERE wb.workspace_id = ? ORDER BY wb.rowid`).all(workspaceId) as Row[]).map(rowToBinding)) }
   putEntity(record: Entity): Promise<void> { return this.write('INSERT INTO entity (id, kind) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET kind = excluded.kind', record.id, record.kind) }
-  /** 身份全局一份：重复登记保留已分配的 id 与 entityId（否则引用会断），只更新角色。 */
-  putExternalIdentity(record: ExternalIdentity): Promise<void> {
+  /** 身份全局一份：重复登记保留已分配的 id 与 entityId（否则引用会断），只更新角色。种类先过 domain 的解析器：未知种类在任何写入之前以与替身相同的 RangeError（Promise 拒绝）失败，不依赖 002 的 CHECK 措辞；CHECK 是第二道防线。 */
+  async putExternalIdentity(record: ExternalIdentity): Promise<void> {
+    parseExternalIdentityKind(record.externalKind)
     return this.write(`INSERT INTO external_identity (${IDENTITY_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (binding_id, external_kind, external_id) DO UPDATE SET role = excluded.role`, record.id, record.entityId, record.bindingId, record.externalKind, record.externalId, record.role)
   }
   findExternalIdentity(bindingId: ProviderBindingId, externalKind: string, externalId: string): Promise<ExternalIdentity | undefined> {

@@ -98,6 +98,37 @@ export function storageIdentityFoundationSuite(adapter, register = test) {
       await rejected(() => storage.putRepository({ id: 'repo-2', workspaceId: WORKSPACE, externalIdentityId: 'identity-none' }), () => storage.listRepositories(WORKSPACE), '仓库必须指向存在的身份')
       await rejected(() => storage.advanceRevision('ws-none'), async () => (await storage.currentRevision('ws-none')) === 0 ? [] : ['revision'], '修订号必须属于存在的工作区')
     })
+
+    // #195：仓库必须能经端口登记。两个实现都要读回同一组稳定键（身份 id、实体 id、仓库记录引用的身份 id）。
+    register(`${label}：仓库身份通过端口登记并读回稳定键`, async () => {
+      const storage = makeStorage()
+      await seedWorkspace(storage)
+      await storage.putProviderBinding(binding('binding-1'))
+      await storage.putEntity({ id: 'repo-entity-1', kind: 'repository' })
+      const identity = { id: 'repo-identity-1', entityId: 'repo-entity-1', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-1', role: 'primary' }
+      await storage.putExternalIdentity(identity)
+      await storage.putRepository({ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: identity.id })
+      assert.deepEqual(await storage.findExternalIdentity('binding-1', 'repository', 'repo-1'), identity, '按 (连接, repository, 外部 id) 读回同一条身份：id 与 entityId 是稳定键')
+      assert.equal(await storage.findExternalIdentity('binding-1', 'branch', 'repo-1'), undefined, '种类是自然键的分量：同名 branch 是另一个对象')
+      assert.deepEqual(await storage.listRepositories(WORKSPACE), [{ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'repo-identity-1' }], '仓库记录引用身份行的稳定键')
+    })
+
+    // #195：未知种类必须响亮失败，不得被归一成别的种类；非字符串（undefined / null / 数字）同样是未知种类——守卫只对字符串生效时，
+    // 替身会静默接受它们。正控与反例在两个独立的库里、记录只差 kind 这一处，否则反例可能死于 id / primary 冲突而不是死于种类
+    // （两种死因在拒绝断言里分不出来）。
+    register(`${label}：未知身份种类拒绝且不得登记成 issue`, async () => {
+      const seeded = async () => { const storage = makeStorage(); await seedWorkspace(storage); await storage.putProviderBinding(binding('binding-1')); await seedEntity(storage, 'entity-1'); return storage }
+      const record = (externalKind) => ({ id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind, externalId: 'object-1', role: 'primary' })
+      const control = await seeded()
+      await control.putExternalIdentity(record('issue'))
+      assert.equal((await control.findExternalIdentity('binding-1', 'issue', 'object-1'))?.id, 'identity-1', '同形状的合法写入必须成功并能按 issue 查回：否则「一律拒绝」的实现也能通过下面的断言')
+      const storage = await seeded()
+      for (const bogus of ['bogus', 'ProjectV2Item', undefined, null, 42]) {
+        await assert.rejects(storage.putExternalIdentity(record(bogus)), { name: 'RangeError', message: 'unsupported external identity kind' }, `${String(bogus)} 必须以端口级的同一个错误被拒绝，而不是依赖驱动或库约束的措辞`)
+      }
+      assert.deepEqual(await storage.listIdentitiesForEntity('entity-1'), [], '被拒绝的写入不得留下任何行：写前写后身份总数不变')
+      assert.equal(await storage.findExternalIdentity('binding-1', 'issue', 'object-1'), undefined, '未知种类不得被静默登记成 issue')
+    })
 }
 
 /** 同步面：成员关系与字段值。 */

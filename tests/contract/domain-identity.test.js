@@ -1,5 +1,5 @@
 /**
- * 领域身份契约测试（tests/README.md §2 优先级 1）。保护的不变量：1) 内部实体 id 不透明且永久——Draft→Issue 提升后 id 不变，旧身份 historical、新身份 primary；2) 同一实体任一时刻只有一个 active primary，且 activePrimary 必须按 entity 过滤；3) 同一外部对象在两个工作区时身份一份、投影两份，提升前必须查重并在被别的实体占用时给出占用者；4) 不同实体种类的 id 在类型上不可混用（由 tsc 执行）。
+ * 领域身份契约测试（tests/README.md §2 优先级 1）。保护的不变量：1) 内部实体 id 不透明且永久——Draft→Issue 提升后 id 不变，旧身份 historical、新身份 primary；2) 同一实体任一时刻只有一个 active primary，且 activePrimary 必须按 entity 过滤；3) 同一外部对象在两个工作区时身份一份、投影两份，提升前必须查重并在被别的实体占用时给出占用者；4) 不同实体种类的 id 在类型上不可混用（由 tsc 执行）；5) 外部身份种类在运行时边界被显式拒绝（`parseExternalIdentityKind` 对未知值与非字符串抛 RangeError），repository 与 branch 的同名字面量是两个对象（种类是自然键的分量），repository 与成员关系 ref（ProjectV2Item）都不是规划内容种类（`planningContentKind`）。
  */
 
 import assert from 'node:assert/strict'
@@ -8,6 +8,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
+import { planningContentKind } from '@harness-projects/core'
 import {
   IdentityRole,
   activePrimary,
@@ -18,6 +19,7 @@ import {
   newProviderBindingId,
   newWorkspaceId,
   newWorkItemId,
+  parseExternalIdentityKind,
   projectIntoWorkspace,
   promoteDraftToIssue,
   registerIdentity,
@@ -158,4 +160,27 @@ test('身份：同一外部对象出现在两个工作区时，外部身份一�
   assert.equal(projections.length, 2, '身份只有一份，但每个工作区各有一份投影')
   assert.deepEqual(projections.map((item) => item.workspaceId), [first, second])
   assert.deepEqual(projections[1], { workspaceId: second, identityId: observed.id, entityId })
+})
+test('身份种类：六个已知值原样放行，未知值（含 ProjectV2Item）一律 RangeError，不得变成别的种类', () => {
+  // 正控写成字面量而不是 Object.values：枚举缺值时两边同时缺，动态比较看不出来。
+  for (const kind of ['draft', 'issue', 'change_request', 'branch', 'worktree', 'repository']) {
+    assert.equal(parseExternalIdentityKind(kind), kind)
+  }
+  for (const bogus of ['bogus', '', undefined, null, 42, 'ProjectV2Item', 'Repository']) {
+    assert.throws(() => parseExternalIdentityKind(bogus), { name: 'RangeError', message: 'unsupported external identity kind' }, `${String(bogus)} 不得被放行`)
+  }
+})
+test('身份：repository 与 branch 的同名字面量是两个对象，重复观察保留首个 id 与 entityId', () => {
+  const repository = identity({ externalKind: 'repository', externalId: 'main' })
+  const branch = identity({ externalKind: 'branch', externalId: 'main' })
+  assert.notEqual(externalObjectKey(bindingId, 'repository', 'main'), externalObjectKey(bindingId, 'branch', 'main'), '种类是自然键的分量')
+  const registry = registerIdentity(registerIdentity([], repository), branch)
+  assert.equal(registry.length, 2, '同 binding、同 externalId、不同种类是两个对象，不得按名称合并')
+  const again = registerIdentity(registry, { ...repository, id: newExternalIdentityId(), entityId: newEntityId() })
+  assert.deepEqual(again.map((item) => [item.id, item.entityId]), registry.map((item) => [item.id, item.entityId]), 'repository 与其他种类同一自然键语义')
+  assert.deepEqual(activePrimary(again, repository.entityId).map((item) => item.id), [repository.id], 'repository 身份遵守角色语义：primary 按实体过滤')
+})
+test('身份：repository、未知种类与成员关系 ref（ProjectV2Item）都不是规划内容种类', () => {
+  for (const kind of ['issue', 'draft', 'change_request']) assert.equal(planningContentKind(kind), kind, `${kind} 是规划内容种类（正控）`)
+  for (const kind of ['repository', 'bogus', 'ProjectV2Item']) assert.equal(planningContentKind(kind), undefined, `${kind} 不得被当成规划条目内容（裁决 R1）`)
 })
