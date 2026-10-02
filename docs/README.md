@@ -48,6 +48,7 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-10-01-repository-identity-contract](exec-plan/completed/2026-10-01-repository-identity-contract.md) | 迭代 4 的 #195：`repository` 成为合法的外部身份种类，未知种类在两个存储实现上写前以同一个 `RangeError` 拒绝；002 的 CHECK 原位扩为六值（D10，不写迁移）。Start Work SQLite 栈的栈底，经第一轮 MVP 评审修订后合并 |
 | [2026-10-01-board-auto-add-ruling](exec-plan/completed/2026-10-01-board-auto-add-ruling.md) | 看板第十条内置工作流 `Auto-add to project` 的裁决（#248）：按 §4 第 1 步开启，前提是过滤条件只含 issue、不含 PR，该前提只能人工核对；§5 表、`EXPECTED` 与契约测试同步为十条；Completed |
 | [2026-09-29-github-projects-read](exec-plan/completed/2026-09-29-github-projects-read.md) | GitHub Projects 读取投影（#70）：注入 GraphQL transport 读条目与内容三态，产出成员关系与内容观察；端口加成员关系分量，core 不登记非内容身份；故障一律结构化失败，契约套件跑在录制夹具上；Completed：R1/R2及P3修订已验收，按交付物整理并经人类授权整合；状态以PR #241回读为准 |
 | [2026-09-29-harness-plugin-package](exec-plan/completed/2026-09-29-harness-plugin-package.md) | 插件打包（#227）：`apps/harness-plugin` 只凭本仓库构建出宿主入口、client bundle 与生成的安装件 manifest（目标宿主线 `0.2.0-rc.2`，peer 用范围），经 `dsh plugin --profile desktop add` 装进人类伙伴本机 Desktop 的 `desktop` profile、验收后卸载并核对快照；侧栏入口加占位面板；CI 在干净检出上真跑构建并断言产物契约；宿主侧由 agent 读日志与文件，界面由人类伙伴截图确认，按预注册的 K 行执行；Completed：构建、产物契约和Desktop K验收完成；人类伙伴授权整合，ADR-0009已采纳；transport归#228 |
