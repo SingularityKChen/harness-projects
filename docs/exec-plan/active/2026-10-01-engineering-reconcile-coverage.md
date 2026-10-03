@@ -1,6 +1,6 @@
 # Engineering 全候选重算与独立唤醒 ExecPlan
 
-> 状态：Active；Batch 1、Batch 2 与 Batch 3 本地部分已实施并按批次切成两个堆叠 PR（下层 Batch 1，上层 Batch 2 与运行文档）；带凭据 dry-run、默认分支 event/schedule 运行与观察者回读仍是合并后门。
+> 状态：Active；Batch 1–2 与 Batch 3 本地部分已实施并合入 `main`（#259 → `63daab1`…`8cb9ef2`，#257 → `7b9499f`、`3a49ab4`，2026-10-03）；合并后门中 event 运行、观察者回读与成本读数已完成，只剩第一次 schedule 运行的回读（见 Progress）。
 > 创建：2026-10-01；关联 issue：[ #249 ](https://github.com/SingularityKChen/harness-projects/issues/249)。
 > 检出：下层 `fix/engineering-project-reader`（Batch 1）与其上的 `fix/engineering-reconcile-coverage`（Batch 2，PR #257），调查基线 `df199a59220cfc32d6cc734116c55b38eec7abd6`。
 > 本活文档遵循根 `PLANS.md`；Progress、发现、决策和结果随执行更新。
@@ -262,6 +262,16 @@ Project或单Issue refs接近400时预警；到500边界仍完整可读，超过
 - [x] (2026-10-03 11:38 CST) 第二轮修复复评（下层，见 Decision Log「第二轮修复复评裁决（下层）」）：纯比较器再补非布尔真值（`'true'`、`1`）用例，变异 D4 由存活变红；Concrete Steps 删去仓库外的结构 lint 命令，改为说明与仓库内的文档契约（从计划提交起改，栈内任何提交都不再引入该行）。
 - [x] (2026-10-03 11:40 CST) 第二轮修复复评（上层，见 Decision Log「第二轮修复复评裁决（上层）」）：「写前新鲜复读」用例让复读值与初读不同，`was=` 取初读快照的变异 L3 由存活变红；`docs/development/ci.md` 如实改写 job 级并发组没有证明什么、补上分类失败的运行，TD-017 写明条件 group key 的修复方向；workflow 不改（主控裁决）。
 
+- [x] (2026-10-03 11:45 CST) 合并前读数（Ruling 257-1 的写前门）：主控以开发账号凭据，在 #259 head 上只读运行观察者 `--json`。结果：165 个条目，`referenceEdges=73`，findings 8 条，全部为 `unreferenced`（#4、#5、#6、#27、#28、#43、#139、#205）。抽查其中 4 条的 `closedByPullRequestsReferences`，`totalCount` 均为 0。读数作为评论发到 PR #257。
+- [x] (2026-10-03 11:48 CST) 合入：#259 与 #257 用 merge-async 背靠背 rebase merge。上层被 GitHub 自动变基后，树对象与已验证的 head 相同，`range-diff` 全为 `=`。
+- [x] (2026-10-03 11:51 CST) 合并后的 event 运行回读（`gh run list -R SingularityKChen/harness-projects --workflow engineering-state.yml --limit 10`）。合并事件自身的 `closed` 运行被分类失败的 review signal 运行挤掉（#261）。第一次真实的全域重算是 #256 推送触发的 `synchronize` 运行 `37094532701`：
+  - checkout `ref: main`；
+  - `reconcile actor=37094532701-1 … queries=3 pages=2 referenceEdges=73 changed=9`，`duration=10139ms`；
+  - confirmed 9 条：8 条合并前读数中的 `unreferenced` 被清空，各自的 `was=` 与读数一一对应；另有 #249 `was=empty → Merged`；
+  - `unchanged`、`unknown`、`unread`、`remaining` 都为空。
+- [x] (2026-10-03 11:52 CST) 合并后观察者 `--json`：findings 0，exit 0。12:57 CST 再读一次，findings 仍为 0，条目 166 个。带凭据的 `--dry-run` 原本只用来测成本，这一项已被真实运行的读数取代：3 次查询，约 10 秒，远低于 240 秒的目标。
+- [ ] 第一次 schedule 运行的回读：确认 checkout 取到默认分支，`reconcile actor=` 行带 `<run_id>-<run_attempt>`。截至 2026-10-03 12:57 CST（04:57Z），04:17Z 与 04:47Z 两个时刻都没有触发，`gh run list --event schedule` 里没有 Engineering state 的运行。这一项回读完成后再归档本计划；若 schedule 长期不触发，按 TD-017 处理。
+
 ## Surprises & Discoveries
 
 基线工程契约虽96/96绿，却没有取消pending与最后hint活性的生产main反例；临时机制模型6/6只证明方案逻辑，未接入生产测试。
@@ -473,6 +483,12 @@ resolveProjectField接受可选owner/projectNumber并保持现有默认目标，
 2026-10-03 10:00 CST：上层（Batch 2 与运行文档）验收完成。唯一全域 writer `scripts/reconcile-engineering-project.mjs` 每次读取同一份完整快照、按同一个 `expectedFor` 重算全部本仓 Issue；C 的运行修复被取消的 B 的目标，最后一个 hint 被取消时独立 schedule 用同一条命令修复；写前新鲜复读、ack 匹配才 confirmed、部分失败如实报告；旧触发 PR 写入口删除。两层合并后 #249 的本地判定全部满足；仍未完成的是合并后门：带凭据的 `--dry-run`（成本与 0 mutation）、默认分支真实 event 与 schedule 运行回读、观察者 `--json` 回读。回顾：计划把删除成本算进预算是对的，但低估了旧用例的体量；fixup + autosquash 让两层切分只多一次重排；下层的事实边界需要逐行问「只合并这一层时 main 说了什么」，代码注释也在其中。
 2026-10-03 11:13 CST：第一轮 MVP 评审修复完成（两层）。下层补齐「只合并下层时 `main` 说了什么」：完整零残留只报不清及其补救；上层的三条 P2 从根因修——技术债改号到 `main` 之后、并发组移到 job 级、写入目标有判别。仍未完成的是合并前后的门：合并前只读的观察者 `--json` 读数、合并后 event/schedule 回读、带凭据 `--dry-run` 的成本与观察者 `--json` 回读；job 级并发组的平台语义也在合并后回读里确认。
 
+2026-10-03 12:57 CST：两层都已合入 `main`，#249 关闭。
+
+- **已证明**：合并后第一次真实的全域重算，在 10 秒内清空了合并前读数预测的 8 条完整零残留，并补上 #249 的 `Merged`；观察者回读为 0 findings。
+- **合并后发现**：每次合并自身的 `closed` 运行，都会被一条刚提交的 review signal 运行挤掉。这条 signal 指向已合并的 PR，分类时以 exit 1 失败。见 #261，属于 TD-017 的残余。
+- **未证明**：schedule 还没有触发过，所以「最后一个 hint 被取消时由 schedule 兜底」在生产上没有证据。job 级 group 能否挡住未准入运行，同样没有证据。
+
 ## Bottom Change Note
 
 Change Note (2026-10-01 21:25 CST)：独立审查后采用实测可行的嵌套Project读取，冻结完整零证据/唯一writer/fresh复读/公平活性；记录added+deleted预算与已有环境失败，磁盘复审修正可移植lint路径与fresh接口形状。
@@ -485,3 +501,4 @@ Change Note (2026-10-03 11:05 CST)：第一轮 MVP 评审修复（下层）—�
 Change Note (2026-10-03 11:13 CST)：第一轮 MVP 评审修复（上层）——tracker 改号与引用、Ruling 257-1 / G4 补记、合并前后门改写、§6 例外、Concrete Steps 的回读门标注 Superseded，回填 Progress、Surprises、Decision Log、Artifacts 与 Outcomes。
 Change Note (2026-10-03 11:38 CST)：第二轮修复复评（下层）——Concrete Steps 的仓库外结构 lint 命令改为说明（改在计划提交），回填 Progress、Decision Log 与 Artifacts。
 Change Note (2026-10-03 11:40 CST)：第二轮修复复评（上层）——第一轮上层裁决 (2) 就地标注 Superseded，回填 Progress、Surprises、Decision Log 与 Artifacts；运行说明的订正在 `docs/development/ci.md`，修复方向在 TD-017。
+Change Note (2026-10-03 12:57 CST)：合并后回填 Progress（合并前读数、合入回执、event 运行与观察者回读，schedule 回读未完成）、Outcomes 与状态头；计划保持 Active。
