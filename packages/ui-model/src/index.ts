@@ -10,3 +10,4 @@ export const packageId = '@harness-projects/ui-model' as const
 export * from './types.ts'
 export * from './capability-access.ts'
 export * from './derive.ts'
+export * from './work-item-list-view.ts'
