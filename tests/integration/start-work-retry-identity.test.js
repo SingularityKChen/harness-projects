@@ -36,7 +36,7 @@ function controllableClock() {
 }
 
 async function workItemIdOf(core) {
-  const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item')
+  const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item') // redacted 条目的 kind 也是 work_item（issue-3），但没有可操作的规划条目，不能当开始工作的对象
   assert.ok(item, '夹具必须提供一个工作项')
   return item.entityId
 }
@@ -293,25 +293,24 @@ test('身份不随路径变化：改工作树路径重试仍然只有一个实�
   assert.equal(relations[0].to, expectedWorktreeId(providers, workItemId))
 })
 
-test('身份的作用域是仓库而不是 binding：仓库读能力不可用时两侧仍然一致（#165）', async () => {
+test('身份的作用域是仓库而不是 binding：开始工作之后仓库读能力失效，读谱系两侧仍然一致（#165）', async () => {
   const providers = createFakeProviders()
-  // 写入侧的身份来自 `DevelopmentWorktreeCreate` 的解析，投影侧来自 `DevelopmentRepositoryRead` 的解析。
-  // 把后者置为不可用——两个 key 可以独立不可用，所以「用 binding 作作用域」在构造上就允许两侧分叉。
-  const core = await composeCore({
-    workspace: WORKSPACE, providers, clock: controllableClock().clock,
-    policy: { [CapabilityKey.DevelopmentRepositoryRead]: AccessLevel.Unavailable },
-  })
-  const workItemId = await workItemIdOf(core)
-
-  const started = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'scope-1' })
-  assert.equal(started.status, ExecutionContextStatus.Ready, '建工作树不依赖仓库读能力，必须成功')
-
+  const first = await compose(providers, controllableClock().clock)
+  const workItemId = await workItemIdOf(first)
+  const started = await first.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'scope-1' })
+  assert.equal(started.status, ExecutionContextStatus.Ready)
   const before = await worktreeRelations(providers)
   assert.equal(before.length, 1, '前置条件：一次成功供应写出一条关系')
   assert.equal(before[0].to, expectedWorktreeId(providers, workItemId), '写入侧的身份必须由仓库作用域决定')
 
+  // 写入侧的身份来自 `DevelopmentWorktreeCreate` 的解析，投影侧来自 `DevelopmentRepositoryRead` 的解析：两个 key 可以独立不可用，
+  // 所以「用 binding 作作用域」在构造上就允许两侧分叉。供应完成后让后者失效——同一份 Storage 上重组一个读能力不可用的 core。
+  const second = await composeCore({
+    workspace: WORKSPACE, providers, storage: providers.storage, clock: controllableClock().clock,
+    policy: { [CapabilityKey.DevelopmentRepositoryRead]: AccessLevel.Unavailable },
+  })
   // 投影侧一旦拿不到 binding，就会去算另一个身份——读一次谱系于是写出第二条 confirmed 关系。
-  await core.queries.getDeliveryLineage({ workItemId, repositoryId: REQUEST.repositoryId })
+  await second.queries.getDeliveryLineage({ workItemId, repositoryId: REQUEST.repositoryId })
 
   const after = await worktreeRelations(providers)
   assert.equal(after.length, 1, '仓库读能力不可用不得让投影侧算出第二个身份')

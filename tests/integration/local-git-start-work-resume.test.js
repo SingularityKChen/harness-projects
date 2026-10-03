@@ -16,7 +16,7 @@ import { contextIdFor, startWork } from '@harness-projects/core'
 
 import {
   LEASE_EXPIRED_MS, REPOSITORY_ID, advanceMain, controllableClock, coreContextFor, fixtureFor, git,
-  interruptAfterBranchStep, providerFor, recordingRunner, worktreePaths,
+  interruptAfterBranchStep, providerFor, recordingRunner, registerWorkItem, worktreePaths,
 } from './local-git-fixture.js'
 
 const request = (workItemId, idempotencyKey) => ({
@@ -31,6 +31,7 @@ async function interruptedAttempt(fixture, workItemId) {
   const recorder = recordingRunner()
   const provider = interruptAfterBranchStep(providerFor(fixture, { runGit: recorder.runGit }))
   const { storage, workspaceId, context } = await coreContextFor(fixture, { development: provider }, { clock: clock.clock })
+  await registerWorkItem(storage, workspaceId, workItemId)
   await assert.rejects(startWork(context, request(workItemId, 'k-1')), /测试注入的中断/)
   const contextId = contextIdFor(workspaceId, workItemId, REPOSITORY_ID)
   const record = await storage.getExecutionContext(contextId)

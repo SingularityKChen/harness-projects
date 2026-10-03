@@ -15,7 +15,7 @@ import { defaultGitRunner } from '@harness-projects/provider-development-local-g
 
 import {
   LEASE_EXPIRED_MS, REPOSITORY_ID, addDecoyBranches, controllableClock, coreContextFor, fixtureFor,
-  interruptAfterBranchStep, providerFor, repositoryRef, worktreePaths,
+  interruptAfterBranchStep, providerFor, registerWorkItem, repositoryRef, worktreePaths,
 } from './local-git-fixture.js'
 
 /** 目标前面有 DECOYS 个诱饵加 `main`，下标是 DECOYS + 1；`git-provisioning.ts` 的 `PROBE_PAGE_SIZE` 为 100 时
@@ -31,7 +31,8 @@ test('接管：目标分支排在第一页之外时，头提交仍被报出（P1
   await addDecoyBranches(fixture, DECOYS)
   const provider = providerFor(fixture)
   const time = controllableClock()
-  const { context } = await coreContextFor(fixture, { development: interruptAfterBranchStep(provider) }, { clock: time.clock })
+  const { context, storage, workspaceId } = await coreContextFor(fixture, { development: interruptAfterBranchStep(provider) }, { clock: time.clock })
+  await registerWorkItem(storage, workspaceId, 'wi-probe')
 
   await assert.rejects(() => startWork(context, request('wi-probe', 'k-1')), '注入的中断必须真的打断供应')
   const firstPage = await provider.listBranches({ repository: repositoryRef, cursor: undefined, limit: 100 })
@@ -56,7 +57,8 @@ test('对账：写入已落地但响应丢失、分支多于一页时，不得�
     if (args[2] === 'branch' && result.code === 0) return { code: 128, stdout: '', stderr: 'fatal: connection reset while writing' }
     return result
   }
-  const { context } = await coreContextFor(fixture, { development: providerFor(fixture, { runGit: lossy }) })
+  const { context, storage, workspaceId } = await coreContextFor(fixture, { development: providerFor(fixture, { runGit: lossy }) })
+  await registerWorkItem(storage, workspaceId, 'wi-lossy')
 
   const result = await startWork(context, request('wi-lossy', 'k-1'))
 
