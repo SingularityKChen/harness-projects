@@ -219,6 +219,8 @@ SQLite atomic原来根调用直接开transaction；为满足issue“交易前拒
 
 ## Decision Log
 
+Decision：人类已在Project将 #189/#196/#178 规划启动为In Progress，并将 #178 提前到迭代4；保留新的规划。Rationale：2026-10-03人类明确确认该调整；agent只同步PR迭代索引，不代写Status或blocking。Date/Author：2026-10-03 22:08 CST / 人类伙伴。
+
 Decision：Promise<void>保持，StorageInputError携带唯一failure结构。Rationale：异常仍让现有transaction回滚，避免Result忽略导致半提交。Date/Author：2026-10-03 21:34 CST / 独立最终reviewer。
 Decision：只验证实体存在，不加kind/workspaceProjection约束。Rationale：匹配现行FK父边，Core负责可操作项。Date/Author：2026-10-03 21:34 CST / 独立最终reviewer。
 Decision：same队列槽内preflight，复用一个私有交易体。Rationale：零BEGIN且不引入外部读→写窗口，保护令牌/关闭语义。Date/Author：2026-10-03 21:34 CST / 独立最终reviewer。
@@ -254,3 +256,5 @@ Change Note (2026-10-03 21:34 CST)：独立reviewer裁定两个设计的错误�
 Change Note (2026-10-03 21:52 CST)：补确切Batch主路径与typed字段判据，独立linter和结构/路径检查已通过；全仓文档门由主执行者继续落账。
 
 Change Note (2026-10-03 21:56 CST)：主执行者全文复核并运行文档契约与独立路径/暂存扫描，记录Batch 0文档门；后续产品批次保持pending。
+
+Change Note (2026-10-03 22:08 CST)：记录人类在Project上的规划启动与#178重排期确认；保留原调查调度快照并明确取代，产品实施仍pending。
