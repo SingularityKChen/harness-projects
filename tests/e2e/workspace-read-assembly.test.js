@@ -12,7 +12,8 @@ import { StatusPolicy, newWorkspaceId } from '@harness-projects/domain'
 import { PLANNING_SYNC_SCOPE, StatusPolicyMode, composeCore } from '@harness-projects/core'
 import { createController, toWireMetadata, watchWorkspace } from '@harness-projects/controller'
 import * as capabilities from '@harness-projects/capabilities'
-import { CapabilityKey, createEntityStore, createSync, createTransport, intersectAccess } from '@harness-projects/client'
+import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
+import { CapabilityKey, intersectAccess } from '@harness-projects/client/keys'
 import { deriveWorkItemList, deriveWorkItemListView } from '@harness-projects/ui-model'
 import {
   FaultKind, createFakeExecutionProvider, createFakeProviders, fixtureProjectRef, removeItem,
@@ -43,6 +44,7 @@ test('producer：baseline 带真实 descriptor、逐 key 能力与整表来源�
   assert.deepEqual(snapshot.workspace, { id, name: NAME })
   assert.deepEqual(capabilityOf(snapshot, 'planning.item.read'), { key: 'planning.item.read', access: 'available', reason: undefined })
   assert.equal(capabilityOf(snapshot, 'planning.item.content.write').access, 'unavailable', '没有挂载提供者的 key 明确 unavailable')
+  assert.match(capabilityOf(snapshot, 'planning.item.content.write').reason, /content\.write/, '不可用能力的原因经 wire 原样到达')
   assert.equal(snapshot.capabilities.some((entry) => entry.key.startsWith('storage.')), false, 'storage 域没有挂载，不报告它')
   assert.equal(new Set(snapshot.capabilities.map((entry) => entry.key)).size, snapshot.capabilities.length, '每个 key 恰好一条')
   for (const entry of snapshot.capabilities) assert.deepEqual(Object.keys(entry).sort(), ['access', 'key', 'reason'], '不暴露 binding / 凭据')
@@ -100,17 +102,24 @@ test('metadata：同 revision 的来源降级与恢复各发一个窄事件，�
   assert.equal(await watch.poll(), undefined)
 })
 
+const tone = (source, fresh, reason) => ({ ...source, freshness: fresh ? 'fresh' : 'degraded', ...(reason === undefined ? {} : { reason }) })
+/** 用改过的 baseline 喂 watch，返回第一次 poll 的结果。 */
+const variantOf = (base) => (change) => {
+  const next = structuredClone(base)
+  change(next)
+  return watchWorkspace({ baseline: async () => next }, { afterRevision: base.revision, seed: base }).poll()
+}
+
 test('metadata：规范化比较（能力顺序不同仍 idle）；纯能力 / descriptor 变化发 metadata；业务变化 fail closed 为 gap', async () => {
   const { controller } = await compose()
   const base = await controller.baseline()
-  const variant = (change) => {
-    const next = structuredClone(base)
-    change(next)
-    const source = { baseline: async () => next }
-    return watchWorkspace(source, { afterRevision: base.revision, seed: base }).poll()
-  }
+  const variant = variantOf(base)
 
   assert.equal(await variant((next) => next.capabilities.reverse()), undefined, '能力按 key 规范化，顺序不是变化')
+  const rowOnly = await variant((next) => { next.entities[0].source = tone(next.entities[0].source, false) })
+  assert.deepEqual([rowOnly.kind, rowOnly.metadata.entities[0].source.freshness, rowOnly.metadata.source.freshness], ['metadata', 'degraded', 'fresh'], '只有一行 source 变化也发 metadata')
+  const headOnly = await variant((next) => { next.source = { ...next.source, reason: '仅整表原因变化' } })
+  assert.deepEqual([headOnly.kind, headOnly.metadata.source.reason], ['metadata', '仅整表原因变化'], '只有整表 reason 变化也发 metadata')
   const renamed = await variant((next) => { next.workspace = { ...next.workspace, name: 'renamed' } })
   assert.deepEqual([renamed.kind, renamed.metadata.workspace.name, renamed.metadata.revision], ['metadata', 'renamed', base.revision])
   const lost = await variant((next) => { capabilityOf(next, 'planning.item.read').access = 'unavailable' })
@@ -123,8 +132,8 @@ test('metadata：规范化比较（能力顺序不同仍 idle）；纯能力 / d
 })
 
 const T = (n) => `2026-10-03T10:0${n}:00.000Z`
-/** 依次返回给定时间，用完后重复最后一个；读取次数就是 `calls`。 */
-const clockOf = (...times) => { let calls = 0; const clock = () => times[Math.min(calls++, times.length - 1)]; clock.calls = () => calls; return clock }
+/** 依次返回给定时间，用完后重复最后一个。 */
+const clockOf = (...times) => { let calls = 0; return () => times[Math.min(calls++, times.length - 1)] }
 
 async function client(controller, options = {}) {
   const store = createEntityStore()
@@ -133,7 +142,7 @@ async function client(controller, options = {}) {
 }
 /** 真实 baseline + 脚本化的后续事件：用来喂 sync 一些真实 watch 不会产出的非法载体。 */
 const scripted = (controller) => ({ events: [], closed: 0, fetchBaseline: () => controller.baseline(), poll() { return Promise.resolve(this.events.shift()) }, close() { this.closed += 1 } })
-const shapeOf = (sync) => { const { store, ...rest } = sync.read(); return { ...rest, rows: store.list().map((entry) => [entry, entry.stale, entry.entity]) } }
+const shapeOf = (sync) => { const { store, ...rest } = sync.read(); return { ...rest, rows: store.list().map((entry) => [entry, entry.entity]) } }
 
 test('assembler：六个字段全部来自真实生产者；首个已确认 descriptor 前 read 为 undefined', async () => {
   const { id, controller } = await compose()
@@ -186,14 +195,17 @@ function partialProviders() {
   return providers
 }
 
-test('partial：整表 degraded 带原因，已确认的行仍 fresh 且推进时间', async () => {
+test('partial：整表 degraded 带原因并推进时间；已确认行经 view 保持 fresh、整表仍降级；断网后全部 stale', async () => {
   const { store, sync } = await client((await compose(partialProviders())).controller)
   await sync.connect()
-  const read = sync.read()
-
-  assert.ok(read.reason, '整表缺口原因保留，不被 fresh 行洗成正常')
+  assert.ok(sync.read().reason, '整表缺口原因保留，不被 fresh 行洗成正常')
   assert.ok(store.list().length > 0 && store.list().every((entry) => !entry.stale), '本次确认的行保持 fresh')
-  assert.equal(read.lastUpdatedAt, T(1), 'partial 帧确有 fresh 行才更新时间')
+  assert.equal(sync.read().lastUpdatedAt, T(1), 'partial 帧确有 fresh 行才更新时间')
+  const shown = viewOf(sync.read())
+  assert.ok(shown.body.stale && /尚未确认/.test(shown.statusText), '整表仍显示为降级')
+  assert.ok(itemRows(sync.read()).length > 0 && itemRows(sync.read()).every((row) => row.stale === false), '已确认的行不被整表原因洗成 stale')
+  sync.disconnect()
+  assert.ok(itemRows(sync.read()).every((row) => row.stale))
 })
 
 test('断网：poll / reconnect 拒绝后 connected=false，行引用、内容与旧时间保留，reason 是安全散文', async () => {
@@ -203,7 +215,7 @@ test('断网：poll / reconnect 拒绝后 connected=false，行引用、内容�
     baseline: () => (down ? Promise.reject(new Error('SECRET-TOKEN stack at /srv')) : controller.baseline()),
     watch: (options) => (down ? { afterRevision: 0, poll: () => Promise.reject(new Error('SECRET-TOKEN stack at /srv')), close() {} } : controller.watch(options)),
   }
-  const { store, transport, sync } = await client(controller, { transport: createTransport(flaky) })
+  const { store, sync } = await client(controller, { transport: createTransport(flaky) })
   await sync.connect()
   const before = shapeOf(sync)
 
@@ -213,7 +225,7 @@ test('断网：poll / reconnect 拒绝后 connected=false，行引用、内容�
   assert.equal(lost.connection.connected, false)
   assert.ok(lost.reason && !/SECRET|stack|\/srv/.test(lost.reason), 'read.reason 不含原异常内容')
   assert.equal(lost.lastUpdatedAt, T(1), '断网不推进也不清除时间')
-  assert.ok(store.list().every((entry, i) => entry === before.rows[i][0] && entry.entity === before.rows[i][2] && entry.stale))
+  assert.ok(store.list().every((entry, i) => entry === before.rows[i][0] && entry.entity === before.rows[i][1] && entry.stale))
   await assert.rejects(sync.reconnect(), /SECRET-TOKEN/)
   assert.deepEqual([sync.read().connection.connected, sync.read().lastUpdatedAt, store.list().length], [false, T(1), before.rows.length])
 
@@ -222,7 +234,6 @@ test('断网：poll / reconnect 拒绝后 connected=false，行引用、内容�
   assert.deepEqual([sync.read().connection.connected, sync.read().reason, sync.read().lastUpdatedAt], [true, undefined, T(2)])
   sync.disconnect()
   assert.deepEqual([sync.read().connection.connected, sync.read().lastUpdatedAt, store.list().every((entry) => entry.stale)], [false, T(2), true])
-  assert.ok(transport.close, 'disconnect 走 transport.close')
 })
 
 test('metadata：同 revision 降级 / 恢复同时更新整表与每行 source，时间只在恢复确认时推进', async () => {
@@ -248,10 +259,72 @@ test('metadata：同 revision 降级 / 恢复同时更新整表与每行 source�
   assert.ok(itemRows(sync.read()).every((row) => !row.stale), '来源恢复后行回到 fresh')
 })
 
-test('时间：idle 与纯能力 / 名称 metadata 不推进时间', async () => {
+/** 同 revision 的 metadata：整表 fresh 与否、第 i 行 fresh 与否各自指定。 */
+const metaOf = (base, headFresh, rowFresh) => ({
+  ...toWireMetadata(base), source: tone(base.source, headFresh),
+  entities: base.entities.map(({ entityId, source }, i) => ({ entityId, source: tone(source, rowFresh(i)) })),
+})
+
+test('metadata：整表 fresh 而一行 degraded 时，只有这一行 stale 且 entity.source 随载体写回，时间不动', async () => {
   const { controller } = await compose()
   const transport = scripted(controller)
-  const { sync } = await client(controller, { transport, sync: { clock: clockOf(T(1), T(2)) } })
+  const { store, sync } = await client(controller, { transport })
+  await sync.connect()
+  const base = await controller.baseline()
+  assert.ok(store.list().length > 1)
+  transport.events.push({ kind: 'metadata', metadata: metaOf(base, true, (i) => i !== 0) })
+  await sync.poll()
+
+  assert.deepEqual(store.list().map((entry) => entry.stale), store.list().map((_, i) => i === 0))
+  assert.deepEqual(store.list().map((entry) => entry.entity.source.freshness), store.list().map((_, i) => (i === 0 ? 'degraded' : 'fresh')))
+  assert.equal(sync.read().lastUpdatedAt, T(1), '没有任何恢复，时间不动')
+})
+
+test('metadata：整表恢复、或仅一行恢复，各自单独推进时间（恢复判定的两半）', async () => {
+  const { controller } = await compose()
+  const base = await controller.baseline()
+  for (const [label, headFresh, rowFresh] of [['仅整表恢复', true, () => false], ['仅一行恢复', false, (i) => i === 0]]) {
+    const transport = scripted(controller)
+    const { sync } = await client(controller, { transport })
+    await sync.connect()
+    transport.events.push({ kind: 'metadata', metadata: metaOf(base, false, () => false) }, { kind: 'metadata', metadata: metaOf(base, headFresh, rowFresh) })
+    await sync.poll()
+    assert.equal(sync.read().lastUpdatedAt, T(1), `${label}：先降级，时间不动`)
+    await sync.poll()
+    assert.equal(sync.read().lastUpdatedAt, T(2), `${label}：恢复推进时间`)
+  }
+})
+
+test('连接生命周期：reconnect 在基线返回前行已 stale；reason 断网优先、degraded 无原因给中性解释；disconnect 关闭传输', async () => {
+  const { controller } = await compose()
+  const base = await controller.baseline()
+  const transport = scripted(controller)
+  const { store, sync } = await client(controller, { transport })
+  await sync.connect()
+  let release
+  transport.fetchBaseline = () => new Promise((resolve) => { release = resolve })
+  const pending = sync.reconnect()
+  assert.ok(store.list().every((entry) => entry.stale), '重连开始即标 stale，基线未到之前没有"当前值"')
+  release(base)
+  await pending
+
+  const degradedHead = (reason) => ({ ...metaOf(base, false, () => true), source: tone(base.source, false, reason) })
+  transport.events.push({ kind: 'metadata', metadata: degradedHead(undefined) }, { kind: 'metadata', metadata: degradedHead('来源说') })
+  await sync.poll()
+  const neutral = sync.read().reason
+  assert.equal(typeof neutral, 'string', '无原因的 degraded 也有解释')
+  await sync.poll()
+  assert.equal(sync.read().reason, '来源说', '连接中显示来源原因')
+  sync.disconnect()
+  assert.match(sync.read().reason, /断开/, '断网时来源原因让位')
+  assert.notEqual(sync.read().reason, neutral)
+  assert.equal(transport.closed, 1, 'disconnect 关闭 transport')
+})
+
+test('时间与头：idle 与纯能力 / 名称 metadata 不推进时间；partial 增量有 fresh 行才推进；头整帧替换', async () => {
+  const { controller } = await compose()
+  const transport = scripted(controller)
+  const { store, sync } = await client(controller, { transport, sync: { clock: clockOf(T(1), T(2)) } })
   await sync.connect()
   assert.equal((await sync.poll()).kind, 'idle')
   const base = await controller.baseline()
@@ -259,6 +332,15 @@ test('时间：idle 与纯能力 / 名称 metadata 不推进时间', async () =>
   transport.events.push({ kind: 'metadata', metadata: next })
   assert.equal((await sync.poll()).kind, 'metadata')
   assert.deepEqual([sync.read().workspace.name, sync.read().capabilities[0].access, sync.read().lastUpdatedAt], ['renamed', 'read_only', T(1)])
+
+  const revision = base.revision + 1
+  transport.events.push({ kind: 'delta', delta: { previousRevision: base.revision, revision, upserts: [base.entities[0]], removed: [], workspace: base.workspace, capabilities: base.capabilities, source: { ...tone(base.source, false, '部分缺口'), revision } } })
+  assert.equal((await sync.poll()).kind, 'delta')
+  assert.deepEqual([sync.read().lastUpdatedAt, sync.read().reason, store.isCurrent(base.entities[0].entityId)], [T(2), '部分缺口', true], '整表 degraded 但确有 fresh 行：推进时间、保留原因')
+
+  transport.events.push({ kind: 'metadata', metadata: { ...toWireMetadata({ ...base, revision, source: { ...base.source, revision } }), workspace: undefined } })
+  assert.equal((await sync.poll()).kind, 'metadata')
+  assert.equal(sync.read(), undefined, '头随接受的帧整体替换：宿主不再确认 descriptor 时不沿用旧值')
 })
 
 test('接受点：clock 非法、store 拒绝的载体都不推进头 / 能力 / 时间，也不部分更新行', async () => {
@@ -272,11 +354,18 @@ test('接受点：clock 非法、store 拒绝的载体都不推进头 / 能力 /
   const cases = [
     ['clock 非法', { kind: 'delta', delta }, clockOf(T(1), 'not-a-time')],
     ['增量含重复实体（fresh 帧，时间本会推进）', { kind: 'delta', delta: { ...delta, upserts: [row, row] } }],
+    ['增量后序实体缺 source（前序行本会先被写）', { kind: 'delta', delta: { ...delta, upserts: [row, { ...row, entityId: 'ghost', source: undefined }] } }],
+    ['增量 removed 不是数组（upserts 本会先被写）', { kind: 'delta', delta: { ...delta, upserts: [row], removed: null } }],
     ['未知实体', { kind: 'metadata', metadata: { ...valid, entities: rowsWith({ source: degraded }).concat({ entityId: 'ghost', source: degraded }) } }],
     ['重复实体', { kind: 'metadata', metadata: { ...valid, entities: rowsWith({ source: degraded }).concat(valid.entities[0]) } }],
     ['缺失实体', { kind: 'metadata', metadata: { ...valid, entities: rowsWith({ source: degraded }).slice(0, -1) } }],
     ['revision 不匹配', { kind: 'metadata', metadata: { ...valid, revision: base.revision + 1 } }],
+    ['自洽的 revision+1（头 source.revision 同步）', { kind: 'metadata', metadata: { ...valid, revision: base.revision + 1, source: { ...valid.source, revision: base.revision + 1 }, entities: rowsWith({ source: degraded }) } }],
+    ['capabilities 为 null', { kind: 'metadata', metadata: { ...valid, capabilities: null } }],
+    ['workspace id 为空', { kind: 'metadata', metadata: { ...valid, workspace: { id: '', name: 'x' } } }],
+    ['workspace 不是对象', { kind: 'metadata', metadata: { ...valid, workspace: 'x' } }],
     ['头 revision 不匹配', { kind: 'metadata', metadata: { ...valid, source: { ...valid.source, revision: base.revision - 1 } } }],
+    ['顶层额外业务字段', { kind: 'metadata', metadata: { ...valid, entities: rowsWith({ source: degraded }), entityTitles: ['x'] } }],
     ['额外业务字段', { kind: 'metadata', metadata: { ...valid, entities: rowsWith({ source: degraded, content: { title: 'x' } }) } }],
   ]
   for (const [label, event, clock] of cases) {
@@ -288,11 +377,11 @@ test('接受点：clock 非法、store 拒绝的载体都不推进头 / 能力 /
     await assert.rejects(sync.poll(), label)
     const after = sync.read()
     assert.deepEqual([after.workspace, after.capabilities, after.lastUpdatedAt], [before.workspace, before.capabilities, before.lastUpdatedAt], `${label}：头 / 能力 / 时间不变`)
-    assert.ok(after.store.list().every((entry, i) => entry === before.rows[i][0] && entry.entity === before.rows[i][2]), `${label}：行内容与来源未被半更新`)
+    assert.ok(after.store.list().every((entry, i) => entry === before.rows[i][0] && entry.entity === before.rows[i][1]), `${label}：行内容与来源未被半更新`)
   }
 })
 
-test('单真源：CapabilityKey / intersectAccess 经 controller → client 重导出 capabilities 的同一对象', () => {
+test('单真源：ui-model 所取的 client/keys 叶子与 capabilities 是同一对象（经 controller/keys 重导出）', () => {
   assert.equal(CapabilityKey, capabilities.CapabilityKey)
   assert.equal(intersectAccess, capabilities.intersectAccess)
 })
@@ -314,14 +403,4 @@ test('端到端：sync.read 直达 derive / view；断网保行并整体 stale�
 
   await sync.poll()
   assert.ok(itemRows(sync.read()).every((row) => !row.stale), '重新拉基线后回到当前值')
-})
-
-test('端到端 partial：整表缺口只降级整表，已确认行经 view 保持 fresh；断网后全部 stale', async () => {
-  const { sync } = await client((await compose(partialProviders())).controller)
-  await sync.connect()
-  const shown = viewOf(sync.read())
-  assert.ok(shown.body.stale && /尚未确认/.test(shown.statusText), '整表仍显示为降级')
-  assert.ok(itemRows(sync.read()).length > 0 && itemRows(sync.read()).every((row) => row.stale === false), '已确认的行不被整表原因洗成 stale')
-  sync.disconnect()
-  assert.ok(itemRows(sync.read()).every((row) => row.stale))
 })

@@ -9,9 +9,7 @@
  * 内容、头与时间，只把连接标成断开、行标成 stale。
  */
 import { WireFreshness } from '@harness-projects/controller'
-import type {
-  SourceMetadata, WireCapabilityEntry, WireEntity, WireGap, WireWorkspaceDescriptor, WireWorkspaceHeader,
-} from '@harness-projects/controller'
+import type { SourceMetadata, WireEntity, WireGap, WireWorkspaceHeader } from '@harness-projects/controller'
 import type { EntityStore } from './store.ts'
 import type { Transport } from './transport.ts'
 import { assertHeader, readClock, type ClientWorkspaceRead } from './workspace-read.ts'
@@ -51,23 +49,18 @@ const isFresh = (source: SourceMetadata): boolean => source.freshness === WireFr
 const confirms = (source: SourceMetadata, rows: readonly WireEntity[]): boolean => isFresh(source) || rows.some((row) => isFresh(row.source))
 const recovered = (before: SourceMetadata | undefined, after: SourceMetadata): boolean => before?.freshness === WireFreshness.Degraded && isFresh(after)
 
-interface AcceptedHead {
-  readonly workspace: WireWorkspaceDescriptor | undefined
-  readonly capabilities: readonly WireCapabilityEntry[]
-  readonly source: SourceMetadata
-}
-
 export function createSync(transport: Transport, store: EntityStore, options: SyncOptions = {}): WorkspaceSync {
   const clock = options.clock ?? ((): string => new Date().toISOString())
   let connected = false
-  let head: AcceptedHead | undefined
+  /** 最近一次被接受帧的整表头：整体替换，不跨帧拼字段（宿主不再确认 descriptor 时 read 回到 undefined）。 */
+  let head: WireWorkspaceHeader | undefined
   let lastUpdatedAt: string | undefined
 
   const accept = (frame: WireWorkspaceHeader, apply: () => void, confirmed: boolean): void => {
     assertHeader(frame)
     const at = confirmed ? readClock(clock) : undefined
     apply()
-    head = { workspace: frame.workspace ?? head?.workspace, capabilities: frame.capabilities, source: frame.source }
+    head = { workspace: frame.workspace, capabilities: frame.capabilities, source: frame.source }
     if (at !== undefined) lastUpdatedAt = at
     connected = true
   }

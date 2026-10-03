@@ -46,12 +46,11 @@ function sortedList(entries: Map<string, StoredEntity>): readonly StoredEntity[]
   return [...entries.values()].sort((left, right) => (left.entityId < right.entityId ? -1 : 1))
 }
 
-/** 帧的修订与整表来源头形状、实体 id 唯一：在任何条目变更之前拒绝。 */
-function assertFrame(frame: { readonly revision: number; readonly source: WireSnapshot['source'] }, ids: readonly string[], what: string): void {
-  if (!Number.isInteger(frame.revision) || frame.revision < 0 || !isSource(frame.source) || frame.source.revision !== frame.revision) {
-    throw new TypeError(`${what} 的修订或来源头不合契约`)
-  }
-  if (new Set(ids).size !== ids.length) throw new TypeError(`${what} 含重复实体`)
+/** 修订、整表与逐行来源、删除表形状、id 唯一：写入只读这些字段且全部先于任何条目变更校验，所以被拒绝的帧不留半更新。 */
+function assertFrame(frame: Pick<WireSnapshot, 'revision' | 'source'>, rows: readonly Pick<WireEntity, 'entityId' | 'source'>[], what: string, removed: unknown = []): void {
+  const framed = Number.isInteger(frame.revision) && frame.revision >= 0 && isSource(frame.source) && frame.source.revision === frame.revision
+  if (!framed || !rows.every((row) => isSource(row.source)) || !Array.isArray(removed)) throw new TypeError(`${what} 的修订、来源或删除表不合契约`)
+  if (new Set(rows.map((row) => row.entityId)).size !== rows.length) throw new TypeError(`${what} 含重复实体`)
 }
 
 const METADATA_KEYS = ['revision', 'workspace', 'capabilities', 'source', 'entities']
@@ -66,7 +65,7 @@ export function createEntityStore(): EntityStore {
       return revision
     },
     applyBaseline(snapshot: WireSnapshot): void {
-      assertFrame(snapshot, snapshot.entities.map((entity) => entity.entityId), 'baseline')
+      assertFrame(snapshot, snapshot.entities, 'baseline')
       const seen = new Set<string>(snapshot.entities.map((entity) => entity.entityId))
       for (const entity of snapshot.entities) upsertInto(entries, entity, snapshot.revision)
       for (const entityId of [...entries.keys()]) {
@@ -75,16 +74,15 @@ export function createEntityStore(): EntityStore {
       revision = snapshot.revision
     },
     applyDelta(delta: WireDelta): void {
-      assertFrame(delta, delta.upserts.map((entity) => entity.entityId), 'delta')
+      assertFrame(delta, delta.upserts, 'delta', delta.removed)
       for (const entity of delta.upserts) upsertInto(entries, entity, delta.revision)
       for (const entityId of delta.removed) entries.delete(entityId)
       revision = delta.revision
     },
     applyMetadata(metadata: WireWorkspaceMetadata): void {
-      const ids = metadata.entities.map((row) => row.entityId)
-      assertFrame(metadata, ids, 'metadata')
-      const covered = ids.length === entries.size && ids.every((entityId) => entries.has(entityId))
-      const narrow = onlyKeys(metadata, METADATA_KEYS) && metadata.entities.every((row) => onlyKeys(row, ROW_KEYS) && isSource(row.source))
+      assertFrame(metadata, metadata.entities, 'metadata')
+      const covered = metadata.entities.length === entries.size && metadata.entities.every((row) => entries.has(row.entityId))
+      const narrow = onlyKeys(metadata, METADATA_KEYS) && metadata.entities.every((row) => onlyKeys(row, ROW_KEYS))
       if (metadata.revision !== revision || !covered || !narrow) {
         throw new TypeError(`metadata 与本地修订 ${revision} 的实体集合不一致，或携带了来源以外的字段`)
       }

@@ -3,7 +3,8 @@
  *
  * `watchWorkspace({ afterRevision })` 从订阅者已知的修订续传：每次 poll 重读基线，只在能重建连续那一跳
  * 时产出 delta。落后超过保留窗口、订阅者游标领先于工作区（工作区被重建）、或没有订阅点处的快照时，
- * 一律发 gap 事件让订阅者重拉基线——绝不静默续传一个可能已经错位的投影。
+ * 一律发 gap 事件让订阅者重拉基线——绝不静默续传一个可能已经错位的投影。同修订上只有来源（头 / 逐行
+ * source）变化时发 metadata（#178），业务字段变化则 fail closed 为 gap，不借来源事件改业务。
  */
 import {
   businessSignature, diffSnapshots, sourceSignature, toWireMetadata, type WireEvent, type WireSnapshot,
