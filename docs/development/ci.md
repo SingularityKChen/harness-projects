@@ -27,6 +27,8 @@ Board invariants 的 `on` **刻意只有 `schedule`**，由 `tests/contract/chec
 
 判定规则在 `scripts/engineering-drift.mjs`（纯函数，进 `pnpm verify`）：只要有任一引用该 issue 的 PR 已合并就期望 `Merged`（已合并是终态且单调），否则取创建时间最新的 open PR 的投影，全 closed 未合并则期望为空；没有被任何 PR 引用的条目跳过——`Engineering` 为空是合法状态，不是漂移。
 
+> **Superseded by** 下文「Engineering 观察者：Project 页完整来源」（2026-10-03，issue #249）：观察者不再跳过没有引用的条目——读取证明完整零引用时期望为空，旧值残留即漂移；没有完整性证据的空引用仍是错误。本段其余规则不变。
+
 > **Superseded by** 下一段「投影与选择策略都是共享的」（2026-09-23，issue #115 / PR #159）：判定规则的唯一实现已搬进投影权威 `scripts/sync-engineering-state.mjs`（`expectedFor`），观察者 `scripts/engineering-drift.mjs` import 它、自身不再持有实现；规则内容（Merged 优先且单调 → 最新 open → 全 closed 为空 → 未被引用则跳过）不变。
 
 **投影与选择策略都是共享的。** 单 PR 的 `snapshot → 取值` 投影 import 自 `sync-engineering-state.mjs`（`stateForSnapshot`），所以两侧对同一个快照必然一致；「同一 issue 被多个 PR 引用时谁说了算」这条**选择策略也只有一份实现**（同文件的 `expectedFor`），写入口与观察者都调用它。写入口据此把判定改为**聚合**：取触发 PR → 解析它的 `closingIssuesReferences` → 对每个 issue 读 `Issue.closedByPullRequestsReferences` 的**全部**关闭引用 PR（只读，显式 `includeClosedPrs: true`，分页读到完）→ 用 `expectedFor` 算出该 issue 应有的取值 → 再写。引用读取不完整——分页截断、超上限、`repository` / `issue` 为 null、字段缺失、`state` / `reviewDecision` 未知、集合为空、集合里没有触发 PR——一律抛错，不退回「只按触发 PR 写」。
@@ -36,6 +38,30 @@ Board invariants 的 `on` **刻意只有 `schedule`**，由 `tests/contract/chec
 > **Superseded by** 上文「投影与选择策略都是共享的」一段（2026-09-23，issue #115 / PR #159）：写入口已改为聚合、与观察者调用同一份 `expectedFor`，本段描述的缺口已关闭。原文保留，因为它记录了缺口的形状；判定当前事实以上文为准。
 
 PR 列表与看板条目都分页读取，超过 5 页（500 条）上限就 fail closed，不把截断的输入读成「没有漂移」。看板条目按**来源仓库**过滤：项目是 user 级的，可以容纳任意仓库的条目，不过滤的话他仓的 issue #N 会与本仓库 close #N 的 PR 误配。
+
+> **Superseded by** 下文「Engineering 观察者：Project 页完整来源」（2026-10-03，issue #249）：观察者不再分页读全仓 PR 列表，而是读 Project 页内嵌的每 Issue 关闭引用；5 页（500 条）上限现在分别约束 Project 条目数与单 Issue 的引用数，来源仓库过滤与 fail closed 保持。
+
+### Engineering 观察者：Project 页完整来源
+
+**为什么换来源。** 旧观察者按全仓历史 PR→Issue 图比较：最后一个关闭关联被移除的 issue 在图里没有边，于是被当成「无引用」跳过，残留旧值永远报不出来；那张图还随历史 PR 增长，到 500 条就整体拒绝。现在的比较对象与候选范围一致——目标 Project 上的每个本仓 Issue。
+
+- **来源。** `scripts/check-engineering-drift-live.mjs` 的 `loadProjectEngineeringSnapshot` 一次读目标 Project 的全部条目（`archivedStates:[ARCHIVED,NOT_ARCHIVED]`，每页 100，最多 5 页）和每个本仓 Issue 内嵌的 `closedByPullRequestsReferences(first:100, includeClosedPrs:true)`；引用超过一页才由 `loadClosingPullRequests` 从内嵌首页的 cursor 续读。`Engineering` 只用 `fieldValueByName(name:"Engineering")` 定向读取，且字段值必须属于已校验的字段 ID；不读 `Status`，也不读 `fieldValues` 全列。比较输入是从同一个 Issue 来源展开的关联视图（每条引用一行，JSON 里叫 `referenceEdges`），不查询反向的 PR `closingIssuesReferences`。
+- **fail closed。** PullRequest、DraftIssue 与他仓 Issue 条目明确排除并计入 `excluded`；`content` 为 null、类型未知、缺 id 或仓库、重复 item 或 Issue、字段值不属于目标字段、分页截断、`totalCount` 在分页期间变化、cursor 或节点重复、同一 PR id 在同一批次读到矛盾快照（SourceChanged）都让整次读取失败。这不是源的原子快照，只保证可检测的矛盾会被拒绝。代价如实写清：一个 `content` 为 null 的条目（例如 token 无权查看的他仓私有条目）会让每一次观察整体失败，直到它被移出 Project 或 token 获得读取权限——这是「不把不可见对象读成空」的直接后果。
+- **完整零引用。** `expectedFor({ references, complete })` 的空集合默认仍是错误；只有读取证明 Issue 存在、引用节点为空、`totalCount` 为 0、没有下一页且全部候选读取完成时，reader 才给条目标 `referencesComplete: true`，期望为空（`rule: unreferenced`，诊断写「无关闭引用」）。最后一个关闭关联被移除后，残留旧值因此会被报成漂移；`checked` 覆盖全部本仓 Issue 条目，不再有 `skipped`。
+- **选择顺序。** 任一 merged 优先，否则最新 open，否则最新 closed；`createdAt` 降序、编号降序，两者都相同（不同仓库的同号 PR）时按全局 PR id 的字符串码元升序兜底，与输入顺序无关；单个 Issue 的引用按全局 PR id 验重，不按编号去重。
+
+**运行。** 观察者现在必需 `ENGINEERING_FIELD_ID`（`Board invariants` 的 job env 取仓库变量 `PROJECTS_ENGINEERING_FIELD_ID`），先核对字段所属 Project、名称、类型与选项，再读快照：
+
+    PROJECTS_TOKEN=... PROJECT_OWNER=SingularityKChen PROJECT_NUMBER=10 GITHUB_REPOSITORY=SingularityKChen/harness-projects \
+      ENGINEERING_FIELD_ID=<字段 ID> node scripts/check-engineering-drift-live.mjs --json
+
+字段 ID 用 `gh variable get PROJECTS_ENGINEERING_FIELD_ID -R SingularityKChen/harness-projects` 取。`--json` 输出一行 `{findings, checked, pages, items, referenceEdges, excluded}`，完整且无漂移时 exit 0。历史计划里不带 `ENGINEERING_FIELD_ID` 的观察者命令现在会在任何请求之前以 `ENGINEERING_FIELD_ID 未配置` 失败，复跑时按上式补上。
+
+**写入口没有随观察者改变：完整零残留只会被报出，不会被自动清除。** 写入口仍是触发 PR writer：`Engineering state` workflow 以触发 PR 号运行 `node scripts/sync-engineering-state.mjs "$PR_NUMBER"`，候选只来自该 PR 的 `closingIssuesReferences`，最后一个关闭关联被移除的 issue 不会再进入任何一次运行。因此观察者报出的完整零残留（`rule: unreferenced`、`prNumber: null`，诊断写「依据 无关闭引用」）会让每日的 `Board invariants / Engineering field drift` 一直 exit 1，并可能淹没新出现的漂移。该脚本注释里「对漂移条目所属的 PR 跑一次 writer」的补救对这类 finding 无效：条目没有所属 PR，拿旧 PR 号重跑只会得到「无事可做」。补救二选一：合并 issue #249 的全域 writer（PR #257；计划的合并方式是本节所在的 PR #259 与它背靠背 rebase merge，不让本节单独停在 `main` 上）；或由人类伙伴在 Project 里手工清空该条目的 `Engineering`——这是外部写，批准记入 `docs/exec-plan/active/2026-10-01-engineering-reconcile-coverage.md` 的 Decision Log。合并前用上式的观察者回读单独合并时预期报红的基线（期望输出一个整数，记入同一计划的 Artifacts）：
+
+    PROJECTS_TOKEN=... PROJECT_OWNER=SingularityKChen PROJECT_NUMBER=10 GITHUB_REPOSITORY=SingularityKChen/harness-projects \
+      ENGINEERING_FIELD_ID=<字段 ID> node scripts/check-engineering-drift-live.mjs --json \
+      | jq '[.findings[] | select(.rule == "unreferenced")] | length'
 
 Review session 的两条结构性质由 `tests/contract/github-review-workflow.test.js` 固定，改 workflow 必须同时改它：
 
