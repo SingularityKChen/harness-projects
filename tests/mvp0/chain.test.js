@@ -62,7 +62,7 @@ async function chainFor(idempotencyKey) {
   const providers = createFakeProviders()
   const api = await composeFor('工作项', '链路必须能被查询', providers)
   await api.commands.bootstrapWorkspace()
-  const item = (await api.queries.listPlanningItems()).find((view) => view.kind === EntityKind.WorkItem)
+  const item = (await api.queries.listPlanningItems()).find((view) => view.kind === EntityKind.WorkItem && view.content.contentKind === ContentKind.WorkItem) // redacted 条目的 kind 也是 work_item（issue-3），但没有可操作的规划条目，不能当开始工作的对象
   requireNode('工作项', '一个外部对象一个稳定内部实体', item != null, '引导后投影里必须有工作项', '规划条目')
   const request = { workItemId: item.entityId, repositoryId: REPOSITORY, actor: { kind: 'agent' }, idempotencyKey }
   const started = await api.commands.startWork(request)

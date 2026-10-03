@@ -29,7 +29,7 @@ async function composeFor(policy) {
 /** 投影按内部 entityId 排序，而 id 是随机的：必须显式挑一个未完成的工作项，否则断言会随排序抖动。 */
 async function workItemIdOf(core) {
   const items = await core.queries.listPlanningItems()
-  const item = items.find((view) => view.kind === 'work_item' && view.planningStatus !== NormalizedStatus.Done)
+  const item = items.find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item' && view.planningStatus !== NormalizedStatus.Done) // redacted 条目的 kind 也是 work_item（issue-3），但没有可操作的规划条目，不能当开始工作的对象
   assert.ok(item, 'planning 种子里必须有一个未完成的工作项')
   return item.entityId
 }

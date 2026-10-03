@@ -145,7 +145,7 @@ const PHASE_BY_WRITE_STATE: Readonly<Record<WriteState, WritePhase>> = {
   [WriteState.Failed]: WritePhase.Failed,
 }
 
-export function createWriteLedger(storage: Storage): WriteLedger {
+export function createWriteLedger(storage: Pick<Storage, 'findMutationAttempt' | 'putMutationAttempt'>): WriteLedger {
   return {
     async replay(workspaceId, idempotencyKey) {
       const attempt = await storage.findMutationAttempt(workspaceId, idempotencyKey)

@@ -5,6 +5,7 @@
  * (工作空间, 种类, binding, 外部 id) 哈希确定（`chainEntityId`）：同一外部对象每次得到同一个内部 id，谱系不漂移也不需"再识别"（不变量 6）。
  */
 import { createHash } from 'node:crypto'
+import type { Storage } from '@harness-projects/capabilities'
 import { EntityKind, RelationSource, RelationState, asBrandedId, makeRelation, type EngineeringFactKind,
   type EntityId, type Relation, type RelationType, type WorkspaceId } from '@harness-projects/domain'
 import type { CoreContext } from './context.ts'
@@ -48,8 +49,11 @@ export function sourceForProvenance(provenance: EdgeProvenance): RelationSource 
   return provenance === EdgeProvenance.Command ? RelationSource.Explicit : RelationSource.Deterministic
 }
 
+/** 记录边只用工作区与两个存储方法：事务里传 `{ workspaceId, storage: tx }`，不必有完整的 CoreContext。 */
+export interface RelationStore { readonly workspaceId: WorkspaceId; readonly storage: Pick<Storage, 'listRelations' | 'putRelation'> }
+
 /** 批量记录：一次读取现有边，只写缺失的那些，避免同一批里互相覆盖。 */
-export async function recordEdges(context: CoreContext, edges: readonly DiscoveredEdge[]): Promise<readonly RecordedEdge[]> {
+export async function recordEdges(context: RelationStore, edges: readonly DiscoveredEdge[]): Promise<readonly RecordedEdge[]> {
   const known = [...(await context.storage.listRelations(context.workspaceId))]
   const results: RecordedEdge[] = []
   for (const edge of edges) {

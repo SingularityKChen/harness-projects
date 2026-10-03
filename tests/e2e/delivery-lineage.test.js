@@ -19,7 +19,7 @@ const CHAIN_TYPES = ['tracks', 'has_worktree', 'derived_from', 'produced_by', 'r
 const compose = (providers) => composeCore({ workspace: WORKSPACE, providers })
 
 async function workItemIdOf(core) {
-  const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item')
+  const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item') // redacted 条目的 kind 也是 work_item（issue-3），但没有可操作的规划条目，不能当开始工作的对象
   assert.ok(item, 'planning 种子里必须至少有一个工作项')
   return item.entityId
 }

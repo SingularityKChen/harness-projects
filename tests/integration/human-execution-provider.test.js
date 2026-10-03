@@ -20,6 +20,8 @@ import { createLocalGitDevelopmentProvider } from '@harness-projects/provider-de
 import { createHumanExecutionProvider } from '@harness-projects/provider-execution-human'
 import { createFakeExecutionProvider, createFakeStorage, exportFakeStorageState } from '@harness-projects/provider-fake'
 
+import { registerWorkItem } from './local-git-fixture.js'
+
 const execFileAsync = promisify(execFile)
 const DEVELOPMENT_BINDING = 'binding-local-git-development'
 const HUMAN_BINDING = 'binding-human-execution'
@@ -28,6 +30,8 @@ const HUMAN_ISSUER_KEY = 'issuer-key-for-human-execution-integration'
 const REPOSITORY_ID = 'repo-alpha'
 /** 人工 provider 的时钟固定：标记里的起始时刻因此可逐字断言，与真实墙钟无关。 */
 const HUMAN_NOW = '2026-09-24T00:00:00.000Z'
+/** 本文件各用例开始工作的工作项（裸 ID）：`composeManualCore` 统一把它们登记成可操作的工作项（实体 + work_item 投影）。 */
+const WORK_ITEMS = ['wi-manual-1', 'wi-manual-degraded', 'wi-manual-fallback', 'wi-fallback-gate', 'wi-manual-restart', 'wi-manual-cancel', 'wi-manual-rebound', 'wi-fake-cancel', 'wi-only-fallback']
 
 const git = async (args, cwd) => (await execFileAsync('git', args, { cwd })).stdout
 
@@ -79,6 +83,7 @@ async function composeManualCore({
     storage, policy,
     ...(clock === undefined ? {} : { clock }),
   })
+  for (const id of WORK_ITEMS) await registerWorkItem(storage, workspaceId, id)
   return { core, development, execution, executionFallback, storage, workspaceId }
 }
 
@@ -161,7 +166,7 @@ test('fallback 只在主执行**确定**起不来时承接，只当 fallback、�
   const degraded = ['manual_fallback', 'manual_fallback']
   for (const [kind, faults, policy, expected, patchFallback, patchPrimary] of [
     ['主执行 start 无权限：fallback 绑定不得被当成主执行选中', { permissionDenied: true }, {}, ['running', `${HUMAN_BINDING}-fallback`, true, ...degraded]],
-    ['主执行结果不确定：它可能已在跑，不得再起第二个执行者', { ambiguousCreate: true }, {}, ['failed', undefined, true, ...degraded]],
+    ['主执行结果不确定：它可能已在跑，不得再起第二个执行者，也不把它记成失败 + 人工降级（记 unknown，ADR-0007）', { ambiguousCreate: true }, {}, ['unknown', undefined, undefined, undefined, undefined]],
     ['fallback 被策略设为只读：写命令不得成功', { harnessFailure: true }, { [CapabilityKey.ExecutionRunFallback]: 'read_only' }, ['failed', undefined, true, ...degraded]],
     ['fallback ack 的不是 running：不得当成人工运行落库', { harnessFailure: true }, {}, ['failed', undefined, true, ...degraded], acking('succeeded')],
     ['主执行 ack 了 failed：那是运行失败，不是降级（不从 failed 反推）', {}, {}, ['failed', 'binding-fake-primary', undefined, undefined, undefined], undefined, acking('failed')],

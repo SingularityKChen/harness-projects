@@ -2,12 +2,14 @@
  *
  */
 import { createHash } from 'node:crypto'
-import { ProjectErrorCode, projectError, type ExecutionRunRecord, type ProjectError } from '@harness-projects/capabilities'
+import { ProjectErrorCode, projectError, type ExecutionContextRecord, type ExecutionRunRecord, type ProjectError } from '@harness-projects/capabilities'
 import {
-  ExecutionContextStatus, ExecutionRunStatus, WriteState, asBrandedId,
+  ExecutionContextStatus, ExecutionRunStatus, RelationState, RelationType, WriteState, asBrandedId,
   type EntityId, type ExecutionContextId, type ExecutionRunId, type WorkspaceId,
 } from '@harness-projects/domain'
+import { worktreeEntityId } from './chain-facts.ts' // 与 chain-facts 互相引用（TD-005）：只在函数体里调用，不在模块求值时使用
 import type { CoreContext } from './context.ts'
+import { asEntityId, findRelation } from './relations.ts'
 import { emptyValues, reportFor, WritePhase, type WriteReport } from './write-machine.ts'
 
 export interface StartWorkActor { readonly kind: string }
@@ -126,6 +128,19 @@ export function runStatusFor(raw: string): ExecutionRunStatus {
   return known.includes(raw) ? (raw as ExecutionRunStatus) : ExecutionRunStatus.Unknown
 }
 
+/** Ready 的上下文必须同时有已知状态的 run 记录与 confirmed 的 tracks（工作项 → context）、has_worktree（context → 工作树实体）；返回缺口的描述，完整返回 undefined。只读本地、不问 Provider：命令的重放与 Query 共用这一处。 */
+export async function readyGap(context: CoreContext, record: ExecutionContextRecord, run: ExecutionRunRecord | undefined): Promise<string | undefined> {
+  if (run === undefined) return '没有 run 记录'
+  if (run.status === ExecutionRunStatus.Unknown) return 'run 状态未知'
+  const relations = await context.storage.listRelations(record.workspaceId)
+  const entity = asEntityId(record.id)
+  const missing = [
+    { from: record.workItemId, to: entity, type: RelationType.Tracks },
+    { from: entity, to: worktreeEntityId(record.workspaceId, record.repositoryId, record.workItemId), type: RelationType.HasWorktree },
+  ].find((edge) => findRelation(relations, edge)?.state !== RelationState.Confirmed)
+  return missing === undefined ? undefined : `缺少 confirmed 的 ${missing.type} 边`
+}
+
 export async function readExecutionContext(
   context: CoreContext, query: ExecutionContextQuery,
 ): Promise<ExecutionContextView | undefined> {
@@ -134,11 +149,12 @@ export async function readExecutionContext(
   if (record === undefined) return undefined
   const run = await context.storage.getExecutionRun(runIdFor(id))
   const fallback = fallbackOf(run)
+  const gap = record.status === ExecutionContextStatus.Ready ? await readyGap(context, record, run) : undefined
   return {
     id: record.id, workspaceId: record.workspaceId, workItemId: record.workItemId, repositoryId: record.repositoryId,
     status: record.status, branchExternalId: record.branchExternalId, worktreeExternalId: record.worktreeExternalId,
     runExternalId: run?.providerRef?.externalId,
-    runId: run?.id, fallback, degraded: fallback !== undefined,
+    runId: run?.id, fallback, degraded: fallback !== undefined || gap !== undefined,
   }
 }
 

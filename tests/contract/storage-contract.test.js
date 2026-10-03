@@ -54,13 +54,15 @@ assemble(sqliteAdapter('SQLite Storage（执行组）', 'storage-execution'), ['
  * 守卫的**独立**期望：标签 → 它必须装配的组。它是守卫自己的一份陈述，不由 `assemble` 的实参推导——
  * 从实参推导的话，删掉装配调用会连期望一起删掉，守卫就永远绿（这正是本守卫要消灭的缺陷形态）。
  */
-// 依赖 core 的三格（执行上下文 → 仓库、执行上下文 → 工作项、关系端点）在替身上被接受、在 SQLite 上被外键拒绝。
-// 仓库一格是 core 尚无登记仓库的生产调用者（#188）；工作项与关系端点两格是 core 的生产路径写入悬空引用（#196 / #187）。
-// 三格都**必须是显式且被守卫的**：能力位按适配器声明，注册数由守卫独立写成 3。
-const fakeDivergence = { label: '内存 Storage 替身（分叉格）', makeStorage: () => createFakeStorage(), acceptsDanglingCoreParents: true }
-const sqliteDivergence = { ...sqliteAdapter('SQLite Storage（分叉格）', 'storage-divergence'), acceptsDanglingCoreParents: false }
+// 依赖 core 的三格（执行上下文 → 仓库、执行上下文 → 工作项、关系端点）：仓库一格已对齐（core 的写前登记先建挂载，#187 / #188），
+// 两个适配器都拒绝，只是错误文本来源不同（SQLite 的外键、替身的存在性检查）；工作项与关系端点两格在替身上仍被接受、在 SQLite 上被外键拒绝（#196 / #221）。
+// 三格都**必须是显式且被守卫的**：能力位按适配器、按边声明，注册数由守卫独立写成 3。
+const fakeDivergence = { label: '内存 Storage 替身（分叉格）', makeStorage: () => createFakeStorage(),
+  acceptsDanglingCoreParents: { repository: false, workItem: true, relation: true }, rejection: /^rejected: execution context repository does not exist/ }
+const sqliteDivergence = { ...sqliteAdapter('SQLite Storage（分叉格）', 'storage-divergence'),
+  acceptsDanglingCoreParents: { repository: false, workItem: false, relation: false }, rejection: /^rejected: FOREIGN KEY constraint failed/ }
 const DIVERGENCE_REGISTERED = [fakeDivergence, sqliteDivergence].map((adapter) => storageExecutionDivergenceSuite(adapter))
-test('执行组守卫：依赖 core 的三格分叉用例必须在两个适配器上都注册', () => {
+test('执行组守卫：依赖 core 的三格用例（含已对齐的仓库格）必须在两个适配器上都注册', () => {
   assert.deepEqual(DIVERGENCE_REGISTERED, [3, 3], '两个适配器都必须注册全部三格：删掉一条显式分叉用例会在这里变红')
 })
 
@@ -146,6 +148,11 @@ test('storage 契约套件装配守卫：每个适配器实际注册的条数等
 test('内存 Storage 替身：Failed 与 Closed 不是 active，findActive 不返回它们', async () => {
   const storage = createFakeStorage()
   await storage.putWorkspace(workspace('ws-terminal'))
+  // 执行上下文的父行只走端口建：仓库挂在存在的身份上（SQLite 的复合外键本来就要求它先登记）。
+  await storage.putProviderBinding({ id: 'binding-terminal', workspaceId: 'ws-terminal', domain: 'development', implementationKey: 'fake', enabled: true, isDefault: true })
+  await storage.putEntity({ id: 'repo-entity-terminal', kind: 'repository' })
+  await storage.putExternalIdentity({ id: 'repo-identity-terminal', entityId: 'repo-entity-terminal', bindingId: 'binding-terminal', externalKind: 'repository', externalId: 'repo-1', role: 'primary' })
+  await storage.putRepository({ id: 'repo-1', workspaceId: 'ws-terminal', externalIdentityId: 'repo-identity-terminal' })
   const context = (status) => ({
     id: 'ctx-terminal', workspaceId: 'ws-terminal', workItemId: 'entity-terminal', repositoryId: 'repo-1',
     status, branchExternalId: 'work/entity-terminal', worktreeExternalId: undefined, provisioningStartedAt: undefined,

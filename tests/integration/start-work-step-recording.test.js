@@ -34,7 +34,7 @@ function controllableClock() {
 }
 
 async function workItemIdOf(core) {
-  const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item')
+  const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item') // redacted 条目的 kind 也是 work_item（issue-3），但没有可操作的规划条目，不能当开始工作的对象
   assert.ok(item, '离线替身必须提供一个工作项')
   return item.entityId
 }

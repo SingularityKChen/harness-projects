@@ -21,7 +21,7 @@ const REPOSITORY = 'repo-alpha'
 const compose = async (providers) => composeCore({ workspace: WORKSPACE, providers })
 
 async function workItemIdOf(core) {
-  const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item')
+  const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item') // redacted 条目的 kind 也是 work_item（issue-3），但没有可操作的规划条目，不能当开始工作的对象
   assert.ok(item, 'planning 种子里必须至少有一个工作项')
   return item.entityId
 }
@@ -90,6 +90,8 @@ test('结果不确定：reconcile 找回同值分支后继续，不把已落地�
   const before = providers.development.state.branches.length
   const result = await core.commands.startWork({ workItemId, repositoryId: REPOSITORY, actor: { kind: 'agent' }, idempotencyKey: 'ambiguous-2' })
   assert.equal(providers.development.state.branches.length, before, 'reconcile 命中后不得再创建分支')
-  assert.notEqual(result.error.code, 'not_found', '分支已落地时不得被 reconcile 判成未创建')
-  assert.equal(result.error.code, 'ambiguous_result', '失败发生在后续工作树步骤，而不是分支')
+  assert.equal(result.branchExternalId, branch, '分支已落地时 reconcile 必须认出来并带回它，而不是判成未创建')
+  // 工作树步同样不确定：替身的 ambiguous 不落地，对账读不到它，才判「创建未生效」（评审 P3：与分支步同一个对账出口）。
+  assert.deepEqual([result.status, result.worktreeExternalId, providers.development.state.worktrees.length, result.error.code], ['failed', undefined, 0, 'not_found'], '失败发生在后续工作树步骤，而不是分支')
+  assert.match(result.error.message, /reconcile 未发现写入结果/, '工作树步的失败来自对账，不是盲判')
 })

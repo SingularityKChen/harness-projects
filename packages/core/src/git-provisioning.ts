@@ -163,7 +163,8 @@ export async function provisionGit(
     contextId, report: worktree.report, ok: true, bindingId, status: ExecutionContextStatus.Ready,
     branchExternalId: branch.value, worktreeExternalId: worktree.value, branchHeadCommit: branch.headCommit,
   }
-  await recordStep(done)
+  // 工作树末步只回填句柄，状态仍是 Provisioning：Ready 要等调用方的最终事务把关系与账本一并提交；返回值的 Ready 只表示外部供应完成。
+  await recordStep({ ...done, status: ExecutionContextStatus.Provisioning })
   return done
 }
 
@@ -215,7 +216,16 @@ async function ensureWorktree(
       }
       return { report: markFailed(beginWrite(path), observed.ok ? projectError(ProjectErrorCode.Conflict, '工作树冲突但分支不匹配') : toProjectError(observed.error)), ok: false, value: undefined }
     }
-    return { report: markFailed(beginWrite(path), toProjectError(result.error)), ok: false, value: undefined }
+    if (result.error.code !== ProviderErrorCode.AmbiguousResult || provider.getWorktree === undefined) {
+      return { report: markFailed(beginWrite(path), toProjectError(result.error)), ok: false, value: undefined }
+    }
+    // 结果不确定：与分支步同一个对账出口（评审 P3）——读回同路径，检出同一分支即 reconciled，确定不存在才 failed，读失败仍是 unknown。
+    const unknown = markUnknown(markWriting(beginWrite(path)), toProjectError(result.error))
+    const observed = await provider.getWorktree({ worktree: { bindingId: repository.bindingId, objectKind: 'worktree', externalId: path, url: undefined } })
+    if (observed.ok && observed.value.branch !== branch) return { report: markFailed(beginWrite(path), projectError(ProjectErrorCode.Conflict, `创建结果不确定，对账读到的工作树检出 ${observed.value.branch}，不是 ${branch}`)), ok: false, value: undefined } // 与 conflict 路径同判 Failed
+    const probe = { found: observed.ok, value: observed.ok ? path : undefined, error: observed.ok || observed.error.code === ProviderErrorCode.NotFound ? undefined : toProjectError(observed.error) }
+    const report = reconcileWrite(unknown, probe)
+    return report.phase === WritePhase.Reconciled && observed.ok ? { report, ok: true, value: observed.value.path } : { report, ok: false, value: undefined }
   }
   return { report: confirmWrite(markWriting(beginWrite(path)), result.value.path), ok: true, value: result.value.path }
 }

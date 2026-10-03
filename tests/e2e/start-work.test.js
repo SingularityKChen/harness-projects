@@ -20,7 +20,7 @@ const compose = (providers, storage) =>
   composeCore(storage === undefined ? { workspace: WORKSPACE, providers } : { workspace: WORKSPACE, providers, storage })
 
 async function workItemIdOf(core) {
-  const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item')
+  const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item') // redacted 条目的 kind 也是 work_item（issue-3），但没有可操作的规划条目，不能当开始工作的对象
   assert.ok(item, 'planning 种子里必须至少有一个工作项')
   return item.entityId
 }
@@ -70,6 +70,7 @@ test('执行启动失败：上下文与工作树/分支保留并降级 manual_fa
   const result = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'run-fail-1' })
   assert.equal(result.fallback, 'manual_fallback')
   assert.equal(result.degraded, true)
+  assert.equal(result.error?.code, 'unavailable', '主执行启动失败的原因如实带回，不被降级吞掉')
   assert.equal(result.confirmed, true, 'git 写入已拿到 provider ack，此时 Saved 才被允许')
   assert.ok(result.worktreeExternalId !== undefined && result.branchExternalId !== undefined, '工作树与分支必须仍在')
   assert.equal(providers.execution.state.runs.length, runsBefore, '启动失败不得在 provider 侧产生运行')

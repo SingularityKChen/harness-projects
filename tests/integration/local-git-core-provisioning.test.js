@@ -15,7 +15,7 @@ import { namesFor, provisionGit, startWork, worktreeEntityId } from '@harness-pr
 import { createLocalGitDevelopmentProvider } from '@harness-projects/provider-development-local-git'
 
 import {
-  BINDING, REPOSITORY_ID, coreContextFor, fixtureFor, git, providerFor, repositoryRef, worktreePaths,
+  BINDING, REPOSITORY_ID, coreContextFor, fixtureFor, git, providerFor, registerWorkItem, repositoryRef, worktreePaths,
 } from './local-git-fixture.js'
 
 /** 句柄可能相对、可能绝对：比较前统一规范化。断言的是「指向同一份工作树」这个不变量本身，
@@ -61,6 +61,7 @@ test('core 复用：同一请求重试返回既有 worktree 与分支，不重�
 test('恢复供应：同一工作树只保留一条 has_worktree 关系（#165）', async (t) => {
   const fixture = await fixtureFor(t)
   const { storage, workspaceId, context } = await coreContextFor(fixture)
+  await registerWorkItem(storage, workspaceId, 'wi-165')
   const request = { workItemId: 'wi-165', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'k-1' }
   const first = await startWork(context, request)
   const stored = await storage.getExecutionContext(first.executionContextId)
@@ -168,7 +169,8 @@ test('非 main 且没有 origin/HEAD 的仓库上 Start Work 必须成立', asyn
 
 test('已 ready 上下文的工作树或分支消失后不得继续报 confirmed', async (t) => {
   const fixture = await fixtureFor(t)
-  const { context } = await coreContextFor(fixture)
+  const { storage, workspaceId, context } = await coreContextFor(fixture)
+  await registerWorkItem(storage, workspaceId, 'wi-stale')
   const request = { workItemId: 'wi-stale', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'stale-1' }
   const first = await startWork(context, request)
   assert.equal(first.status, ExecutionContextStatus.Ready)
