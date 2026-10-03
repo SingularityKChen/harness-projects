@@ -28,7 +28,7 @@ Batch 0 先交付最后那一半：只读仓库的人能在 `docs/product/vertic
 |---|---|---|
 | Host 权威、规划/工程正交、身份与成员分离 | 主轴仍在；当前 schema 与早期表形不同有 Gate E1 和 ADR 的后续理由，不自动算漂移 | `AGENTS.md` §1、`docs/adr/ADR-0002-membership-identity-separate-from-content.md`、`docs/adr/ADR-0006-connection-anchor-and-workspace-mount.md` |
 | 独立 Web 先落地 | 宿主探针选择的有意调整，并非放弃 Host 权威 | `docs/architecture/harness-host-spike.md` 的 `fallback-web` 裁决；宿主与 UI 尚未交付 |
-| 多 Development 来源 | core 注册表每域一个实例，`implementationKey` 取的是域名 | `packages/core/src/registry.ts`；#197、#219 |
+| 多 Development 来源 | core 注册表每域一个实例，`implementationKey` 取的是域名（Superseded by `docs/exec-plan/completed/2026-10-01-provider-binding-registration.md`（2026-10-02，#197）：`implementationKey` 改由实现作者的静态 `definition` 声明，同一连接可在一个工作区挂多个域；每域一个主实例不变） | `packages/core/src/registry.ts`；#197、#219 |
 | 同步与交付事实 | 已复现：交付 Query 发现并写关系、离线时丢最后已知 CI；重复 bootstrap 推进 revision | `packages/core/src/delivery.ts`、`chain-facts.ts`、`bootstrap.ts`；复现命令 P2、P3 |
 | 客户端连接 | 重连期间可把 revision 2 覆盖回迟到 baseline 1，旧值仍报 current | `packages/client/src/sync.ts`、`store.ts`；#218 |
 | MVP-0 / 首发 | 7 条节点测试不等于 13 步都有生产入口；第 9 步与 Draft→Issue 没有生产入口 | Batch 0 的矩阵；真实 Provider、Host、UI 未交付属于分期，不是已实现后退 |

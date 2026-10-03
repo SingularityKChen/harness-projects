@@ -44,12 +44,12 @@
 | [2026-09-21-gate-e1-write-and-events](exec-plan/active/2026-09-21-gate-e1-write-and-events.md) | Gate E1 写确认与事件可靠性：实测平台无 CAS、事件订不到、重复创建幂等 | Active |
 | [2026-09-24-local-git-worktree](exec-plan/active/2026-09-24-local-git-worktree.md) | 本地 Git provider（#137）：仓库读、分支建、工作树建，路径安全在任何 Git 命令之前；第四轮 18 条意见按根因改完，移除与 core 层验收分别拆到 #138 / #207 | Batch 1–5 已完成；四轮评审响应已记录 |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | epic #216 的控制计划：先把纵向路径与 R1 不变量的证据如实落账，再收敛读写权威、同步和 Client 重连，最后合并发布前 SQL、清理旧形状并重整测试与文档证据 | Batch 0（#217）已验收；纵向路径矩阵见 `docs/product/vertical-path.md` §2.1，R1 映射见 `docs/architecture/release-gates.md` §2.1.1；PR #239 状态以 GitHub 回读为准；Batch 1–7 待实施 |
-| [2026-10-01-provider-binding-registration](exec-plan/active/2026-10-01-provider-binding-registration.md) | 迭代 4 的 #197：静态连接实现定义、原子挂载注册与完整域路由；与 Start Work owner 明确接口交接 | Spec / Plan；待实施 |
 
 ### Completed
 
 | 计划 | 结论 |
 |---|---|
+| [2026-10-01-provider-binding-registration](exec-plan/completed/2026-10-01-provider-binding-registration.md) | 迭代 4 的 #197：四个外部 port 必需实现作者声明的静态 `definition`，同一连接可在一个工作区挂多个域；校验与快照都在写之前，工作区与全部挂载在一个事务里写入，ack 之后才发布 Registry；写目标、链读与取消按完整挂载路由，取消回到签发它的 Execution 挂载。经独立复核、验收与第一轮 MVP 评审修订（P1：与 main 组合后的夹具种类），#253 组合门已执行；Completed，待独立复评与合并决定 |
 | [2026-10-01-work-item-list-states](exec-plan/completed/2026-10-01-work-item-list-states.md) | 迭代 4 的 #129：只读工作项列表与共享读取状态组件——ui-model 唯一归约首次读取、真空快照、陈旧保行与六种不可用说明（读门未观测说尚未确认、读门已观测不可读说原因未提供，每种都写出还能做什么），redacted 行只剩占位；renderer 经真实 SSR、完整 browser bundle 与 320 / 768 / 1200 静态 fixture 验收，domain 新增纯值出口 `./values`。真实 Host 装配与动态播报归 #178 / #229，一条 redacted 新鲜度的设计取舍待人类裁决；经第一轮 MVP 评审修订后合并 |
 | [2026-10-01-start-work-sqlite-prerequisites](exec-plan/completed/2026-10-01-start-work-sqlite-prerequisites.md) | 迭代 4 的 #187 / #188 / #192：SQLite 上的开始工作首次走通——外部写入之前登记仓库挂载、canonical 身份与谱系端点；ack 之后 Ready、关系与账本同一事务，本地失败报 Unknown；残缺的 Ready 在重放、重开、接管与 Query 上都不报 Saved。003 原位改挂载键（D10）；经第一轮 MVP 评审修订后合并 |
 | [2026-10-01-repository-identity-contract](exec-plan/completed/2026-10-01-repository-identity-contract.md) | 迭代 4 的 #195：`repository` 成为合法的外部身份种类，未知种类在两个存储实现上写前以同一个 `RangeError` 拒绝；002 的 CHECK 原位扩为六值（D10，不写迁移）。Start Work SQLite 栈的栈底，经第一轮 MVP 评审修订后合并 |

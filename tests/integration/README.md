@@ -120,7 +120,26 @@
 | 重启 | 重建 core 后执行上下文、运行记录与 `providerRef` 逐字段不变，查询与重放带回同一引用（#172），不重复供应 |
 | 按运行身份取消 | 并发、重复、重启后取消收敛到同一个 canceled 事实：已取消不再调 provider，否则 ack 后事务内原子替换状态与 `providerRef` |
 | 重启后取消 fail closed | binding id 变了（不问任何 provider）、签发密钥变了、取消被设为只读时结构化失败，运行记录一字不改 |
-| 取消与组装的边界 | succeeded / failed / timed_out 拒绝取消且记录不变；`queued` 可取消；有状态 provider 对并发的第二个取消答 conflict 时以运行记录为准；binding id 重复即拒绝组装；只注入 fallback 也承接 |
+| 取消与组装的边界 | succeeded / failed / timed_out 拒绝取消且记录不变；`queued` 可取消；有状态 provider 对并发的第二个取消答 conflict 时以运行记录为准；同一 execution 挂载（主备共 id）重复即拒绝组装；只注入 fallback 也承接 |
+
+## 连接实现身份与原子注册（#197）
+
+`provider-binding-registration.test.js` 的十三个场景由同一个 runner 在内存 Storage 替身与 `:memory:` SQLite 上各跑一遍（不复制断言），另有一条逐字固定四个实现定义的用例；全部离线，不触网。路由类场景直接构造合法挂载、不经注册，避免注册先失败遮蔽错域；用到父记录的场景（链读、取消）先登记工作区、实体、`repository` 种类的仓库身份与执行上下文。
+
+| 用例 | 保护的不变量 |
+|---|---|
+| 同一连接挂 Planning、Development 与 Execution | 读回三个挂载，同配置经 `composeCore` 重复装配读回同一组；`commands.startWork` 不降级，分支与工作树各 +1 落在 Development 实例，运行 +1 落在 Execution 实例，同 id 的 Planning 实例状态逐字不变 |
+| 备用 Execution 与其他域共用连接 | 主执行换 id 且 `execution.run.start` 被 policy 置为不可用：写门报「能力 execution.run.start 当前不可用」（不是「没有绑定提供」），开始工作的运行由共享 id 的备用实例落下，主实例 0 次 |
+| 一个对象服务两个域 | 快照只观察一次；每个挂载只含本域 key，合法的域外 key 不被误拒 |
+| 同 id 异实现、同 key 异域集合、与既有锚点冲突 | 前两者写前拒绝且 0 事务；与既有锚点冲突由 Storage 裁决，整批回滚，不留新工作区与孤儿锚点，换 key 重试成功 |
+| 后序挂载写入被拒、快照在后序挂载抛错 | 整笔回滚工作区名称、先写的挂载、新锚点与旧默认的降级；快照失败时 0 事务，既有工作区不被改动 |
+| 同一 execution 挂载重复与角色过滤 | 主备共 id 拒绝且 0 事务；主挂载不带 `execution.run.fallback`，备用不带 `execution.run.start` |
+| 闭集与形状校验（16 例） | 未知 key / 等级 / 域 / 槽位、缺 `definition`、非法 policy 与工作区都在任何写之前拒绝；已知 key 的 `undefined` 是「未声明」，不拒绝也不授予 |
+| 域集合顺序、`definition` 在 await 期间被改写 | 集合相等与顺序无关；以准备期冻结的副本为准 |
+| 事务 ack 与发布时点 | ack 之前 `createContext` 不完成，ack 之后一次发布完整 Registry |
+| 写命令、读门与链读按完整挂载路由 | 共享 id 的 Planning 挂载排在前面时仍命中各域实例；`read_only` 读允许、写拒绝且没有写目标；分支、变更请求、流水线与检查都读到，没有假缺口 |
+| 取消回到签发者 | 按持久 `providerRef` 的 Execution 挂载投递一次；签发者只读或不可用时被拒且 Provider 调用 0；别的工作区的运行 `not_found` 且不调用 |
+| 实现定义逐字固定 | `harness.fake`、`development.local-git`、`planning.github-projects`、`execution.human` 的 key 与域集合冻结，实例引用同一个导出常量（key 会落进持久化锚点，改名等同于换身份） |
 
 ## 插件安装件构建（#227，ADR-0009）
 
