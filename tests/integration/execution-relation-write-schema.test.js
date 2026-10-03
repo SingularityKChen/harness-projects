@@ -198,6 +198,8 @@ test('已钉住的约束变异：每条拒绝用例只因目标约束失败，�
   rejects(db, "INSERT INTO sync_observation VALUES ('binding-none','issue','issue-1','t1','k1','v1','{}','pending')", /FOREIGN KEY constraint failed/)
   rejects(db, "INSERT INTO sync_cursor VALUES ('binding-none','scope-1','c','idle',NULL)", /FOREIGN KEY constraint failed/)
   rejects(db, "INSERT INTO webhook_subscription VALUES ('wh-4','ws-1','binding-none','scope-1','issues',1)", /FOREIGN KEY constraint failed/)
+  // work_item_id 外键：端口在它之前以 StorageInputError 拒绝（#196），端口用例碰不到它；这道最终防线只由本条钉住
+  rejects(db, "INSERT INTO execution_context VALUES ('context-8','ws-1','entity-none','repo-1','closed',NULL,NULL,NULL)", /FOREIGN KEY constraint failed/)
 }))
 
 test('关系候选分表、执行 active 唯一、修订删除实体不倒退，外键目标均存在', () => withDatabase((db) => {

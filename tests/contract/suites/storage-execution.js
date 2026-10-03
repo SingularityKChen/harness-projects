@@ -6,15 +6,17 @@
  *   父边：`repository.externalIdentityId`、`execution_context.workspaceId`、`execution_run` 的
  *   `(workspaceId, contextId)` 复合键（上下文必须在同一工作区）、`mutation_attempt.workspaceId` + `bindingId`、`relation.workspaceId`、`observation.bindingId`；
  *   枚举：执行上下文状态、执行运行状态、写尝试状态、候选关系的来源（candidate 不得 explicit）。
- * **依赖 core 的三格**见本文件末尾的 `storageExecutionDivergenceSuite`（按适配器、按边的能力位
+ * `execution_context.workItemId` 已对齐（#196）：两个实现都以同一个 `StorageInputError` 拒绝，共享用例见下方"未登记工作项以同结构拒绝"。
+ * **依赖 core 的两格**见本文件末尾的 `storageExecutionDivergenceSuite`（按适配器、按边的能力位
  * `acceptsDanglingCoreParents` 断言"这一格当前接受还是拒绝"）：
  *   - `execution_context.repositoryId`：已对齐——core 的写前登记先建仓库挂载再写上下文（#187 / #188），替身与 SQLite 都拒绝；
- *   - `execution_context.workItemId`：仍分叉，core 会把上下文写到未登记的工作项上（#196）；
  *   - relation 两端点：仍分叉，Start Work 的 tracks / has_worktree 端点已由 core 写前登记，其余谱系写者仍写未登记的实体（#221）。
- * 仍分叉的两格等 core 侧收口后把替身对齐、共享用例从"分叉"改成"拒绝"；能力位与替身注释同批改。
+ * 仍分叉的一格等 core 侧收口后把替身对齐、共享用例从"分叉"改成"拒绝"；能力位与替身注释同批改。
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
+
+import { StorageInputError } from '@harness-projects/capabilities'
 
 import { binding, seedWorkspace, WORKSPACE } from './storage-fixtures.js'
 
@@ -92,8 +94,8 @@ export function storageExecutionSuite(adapter, register = test) {
    * 引用完整性（L6 评审 F1，第四轮评审 P3 订正清单，第五轮补全）：执行面在两个实现上**已对齐**的父边与枚举
    * 逐条钉住——仓库 → 身份、执行上下文 → 工作区、执行运行 → 工作区 + 上下文、写尝试 → 工作区 + 绑定、
    * 关系 → 工作区、观察 → 绑定；枚举：执行上下文状态、执行运行状态、写尝试状态、候选关系的来源
-   * （candidate 不得 explicit）。**依赖 core** 的三格见本文件末尾的 `storageExecutionDivergenceSuite`：
-   * 仓库一格已对齐（两边都拒绝），工作项与关系端点两格仍分叉（SQLite 的外键拒绝，替身接受）。
+   * （candidate 不得 explicit）。**依赖 core** 的两格见本文件末尾的 `storageExecutionDivergenceSuite`：
+   * 仓库一格已对齐（两边都拒绝），关系端点一格仍分叉（SQLite 的外键拒绝，替身接受）；工作项父边已对齐（#196）。
    */
   register(`${label}：悬空父边与非法枚举必须被拒绝（两个实现已对齐的引用完整性）`, async () => {
     const storage = makeStorage()
@@ -130,6 +132,48 @@ export function storageExecutionSuite(adapter, register = test) {
     assert.equal(await storage.getExecutionRun('run-cross-ws'), undefined, '被拒绝的跨工作区运行不得留下行')
     assert.deepEqual(await storage.listRelations(WORKSPACE), [], '被拒绝的关系写入不得留下行')
     assert.deepEqual((await storage.listMutationAttempts(WORKSPACE)).map((item) => item.id), ['attempt-1'], '被拒绝的写尝试不得留下行')
+  })
+
+  /**
+   * 工作项父边（#196）：引用未登记工作项的执行上下文写入，两个实现以**同一个** `StorageInputError` 拒绝——不再是替身接受、
+   * SQLite 暴露驱动外键文字。工作区与仓库父行完整播种、只缺工作项（否则会先撞别的外键而掩盖本条）；`ready` / `failed` / `closed` 各试
+   * 一遍（父边不随状态而变）× 根调用 / 事务内调用（未 catch 的类型化错误令整笔回滚）。拒绝之后：新 id 没有行、同 id 的旧行逐字段不变且旧 active 仍是 active。
+   */
+  register(`${label}：执行上下文：未登记工作项以同结构拒绝`, async () => {
+    const storage = makeStorage()
+    await seedExecutionPrereqs(storage)
+    const base = { workspaceId: WORKSPACE, repositoryId: 'repo-1', branchExternalId: undefined, worktreeExternalId: undefined, provisioningStartedAt: undefined }
+    const legit = { ...base, id: 'context-legit', workItemId: 'entity-1', status: 'ready' }
+    await storage.putExecutionContext(legit)
+    assert.deepEqual(await storage.getExecutionContext('context-legit'), legit, '正控：父行登记后同形状写入成功并读回')
+    // 父边只问"实体是否登记"，不问 kind：非 work_item 种类的已登记实体同样被接受（可操作性是 Core 的策略，不进 Storage）。
+    const otherKind = { ...base, id: 'context-other-kind', workItemId: 'repo-entity-1', status: 'ready' }
+    await storage.putExecutionContext(otherKind)
+    assert.deepEqual(await storage.getExecutionContext('context-other-kind'), otherKind, '正控：父边只要求实体已登记，不限定 kind')
+    const failure = { code: 'invalid_input', message: '执行上下文引用的工作项未登记', recovery: 'none', retryable: false, confirmedValue: undefined, attemptedValue: undefined }
+    const rejection = (error) => {
+      assert.ok(error instanceof StorageInputError, `必须是 StorageInputError，实际：${error}`)
+      assert.equal(error.name, 'StorageInputError')
+      assert.equal(error.operation, 'putExecutionContext')
+      assert.equal(error.resource, 'work_item')
+      assert.deepEqual(error.failure, failure)
+      assert.doesNotMatch(String(error.message), /FOREIGN KEY|ERR_SQLITE/, '不得泄露驱动文字')
+      return true
+    }
+    for (const status of ['ready', 'failed', 'closed']) {
+      const record = { ...base, id: `context-new-${status}`, workItemId: 'work-item-unregistered', status }
+      await assert.rejects(storage.putExecutionContext(record), rejection, `${status}：根调用`)
+      await assert.rejects(storage.transaction((tx) => tx.putExecutionContext(record)), rejection, `${status}：事务内未 catch`)
+      assert.equal(await storage.getExecutionContext(record.id), undefined, `${status}：被拒绝的新 id 不得留下行`)
+    }
+    // 同 id 换成未知工作项：旧行逐字段不变，旧 active 没有被关闭。
+    await assert.rejects(storage.putExecutionContext({ ...legit, workItemId: 'work-item-unregistered', status: 'failed' }), rejection)
+    assert.deepEqual(await storage.getExecutionContext('context-legit'), legit, '同 id 被拒绝的更新不得改动旧行')
+    assert.equal((await storage.findActiveExecutionContext(WORKSPACE, 'entity-1', 'repo-1'))?.id, 'context-legit', '旧 active 仍是 active')
+    // 检查没有把正常替换一并阻断：合法工作项上的新 active 仍按原规则关闭旧 active。
+    await storage.putExecutionContext({ ...legit, id: 'context-next', status: 'planned' })
+    assert.equal((await storage.getExecutionContext('context-legit'))?.status, 'closed')
+    assert.equal((await storage.findActiveExecutionContext(WORKSPACE, 'entity-1', 'repo-1'))?.id, 'context-next')
   })
 
   // 仓库挂载以 (工作区, id) 为键（#187 / #188）。同键换外部身份会让已有执行上下文悄悄改指另一个仓库，必须响亮失败且不覆盖；
@@ -261,14 +305,14 @@ export function storageExecutionSuite(adapter, register = test) {
 }
 
 /**
- * 共享组里的**显式分叉用例**（2026-09-26 第五轮评审 R4-4）：依赖 core 的三格里，仓库一格已对齐（#187 / #188，两边都拒绝），
- * 工作项与关系端点两格仍给出相反答案——SQLite 的外键拒绝悬空引用，内存替身接受。适配器用能力位 `acceptsDanglingCoreParents` 声明自己这一侧
+ * 共享组里的**显式分叉用例**（2026-09-26 第五轮评审 R4-4）：依赖 core 的两格里，仓库一格已对齐（#187 / #188，两边都拒绝），
+ * 关系端点一格仍给出相反答案——SQLite 的外键拒绝悬空引用，内存替身接受（工作项一格 #196 已对齐，移入共享执行组）。适配器用能力位 `acceptsDanglingCoreParents` 声明自己这一侧
  * 的事实，本函数按位断言**实际行为**：对齐一侧（改替身或改 SQLite）而不改声明，对应用例立刻变红。
  *
  * 为什么独立成函数而不是注册进 `storageExecutionSuite`：切分守卫按组文件的注册条数核账，组文件的新增账在
- * `suites/storage.js`；这三条与 `storage-contract.test.js` 的其余适配器循环并列注册，不参与切分账。返回值是本
+ * `suites/storage.js`；这些用例与 `storage-contract.test.js` 的其余适配器循环并列注册，不参与切分账。返回值是本
  * 函数**实际注册**的条数，装配点的守卫按独立期望核账——删掉一条 GRIDS 会让守卫红，而不是静默缩小覆盖。
- * 能力位按边声明（`{ repository, workItem, relation }`），拒绝的错误文本按适配器各自的真实来源写（`rejection`：SQLite 是外键，替身是显式的存在性检查）。
+ * 能力位按边声明（`{ repository, relation }`），拒绝的错误文本按适配器各自的真实来源写（`rejection`：SQLite 是外键，替身是显式的存在性检查）。
  */
 export function storageExecutionDivergenceSuite(adapter, register = test) {
   const { label, makeStorage, acceptsDanglingCoreParents, rejection } = adapter
@@ -284,8 +328,6 @@ export function storageExecutionDivergenceSuite(adapter, register = test) {
         if (outcomes.some((error) => error === undefined)) throw new Error('父边检查随上下文状态而变：ready 与 failed 的结果不一致')
         throw outcomes[0]
       }],
-    ['workItem', '执行上下文 → 工作项（`execution_context.workItemId`，core 会把上下文写到未登记的工作项上 / #196）',
-      (storage) => storage.putExecutionContext({ ...base, id: 'context-dangling-item', workItemId: 'entity-none', status: 'ready' })],
     ['relation', '关系端点（`relation.from` / `relation.to`，其余谱系写者会把边写到未登记的实体上 / #221）',
       (storage) => storage.putRelation(WORKSPACE, { from: 'entity-none', to: 'entity-2', type: 'depends_on', class: 'business_semantics', source: 'deterministic', state: 'candidate' })],
   ]

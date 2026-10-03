@@ -21,7 +21,7 @@
  * 覆盖写成单语句 UPSERT，查与写之间没有窗口。DDL 的 `created_at` / `updated_at` 是 NOT NULL 而端口记录没有时间戳，
  * 插入时用同一个 ISO-8601 UTC 时刻填两列（覆盖时保留 `created_at`）；端口不读回这两列，因此它们不构成第二套事实。
  */
-import type { ExecutionContextRecord, ExecutionRunRecord, MutationAttemptRecord } from '@harness-projects/capabilities'
+import { StorageInputError, type ExecutionContextRecord, type ExecutionRunRecord, type MutationAttemptRecord } from '@harness-projects/capabilities'
 import type { EntityId, ExecutionContextId, ExecutionRunId, Relation, WorkspaceId } from '@harness-projects/domain'
 import { optional, rowToExecutionContext, rowToExecutionRun, rowToMutationAttempt, rowToRelation, type Row } from './storage-rows.ts'
 import { SqliteSyncSurface } from './storage-sync.ts'
@@ -51,6 +51,8 @@ export class SqliteExecutionSurface extends SqliteSyncSurface {
    * 关掉的旧 active 必须随事务回滚，而不是留下"旧行已关、新行没写"的半写（第五轮评审）。
    */
   putExecutionContext(record: ExecutionContextRecord): Promise<void> {
+    // 工作项父边（#196）：写前检查在同一个队列槽、早于自己的 BEGIN，缺失以 `StorageInputError` 拒绝；003 的外键仍是最终防线。
+    const preflight = () => { if (this.db.prepare('SELECT 1 FROM entity WHERE id = ?').get(record.workItemId) === undefined) throw StorageInputError.unregisteredWorkItem() }
     return this.atomic(() => {
       if (ACTIVE_CONTEXT_STATUSES.includes(record.status)) {
         this.db.prepare(`UPDATE execution_context SET status = 'closed', provisioning_started_at = NULL
@@ -63,7 +65,7 @@ export class SqliteExecutionSurface extends SqliteSyncSurface {
           worktree_external_id = excluded.worktree_external_id, provisioning_started_at = excluded.provisioning_started_at`)
         .run(record.id, record.workspaceId, record.workItemId, record.repositoryId, record.status,
           record.branchExternalId ?? null, record.worktreeExternalId ?? null, record.provisioningStartedAt ?? null)
-    })
+    }, preflight)
   }
 
   /** 读走基类的 `read`：事务在途时排到结算之后，拿到的是已提交的值。 */
