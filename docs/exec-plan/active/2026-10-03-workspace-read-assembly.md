@@ -1,6 +1,6 @@
 # Client 工作区读取生产链 ExecPlan
 
-> 状态：Active；Batch 0–3 的实现与本地验证已完成，等待人类评审；未 push、未 ready。
+> 状态：Active；实施与验收完成，待人类评审；本地已整理提交，未 push、未 ready。
 > 创建：2026-10-03；关联 issue：[178](https://github.com/SingularityKChen/harness-projects/issues/178)。
 > 分支：`feature/workspace-read-assembly`；工作树：`.worktrees/workspace-read-assembly`；PR base：`main`。
 > 调度（调查快照）：P0 / M / 迭代 5（2026-10-15–21）/ M4 · MVP Demo：Harness 内打通 GitHub 链路；Superseded by Decision Log「人类规划启动与重排期」（2026-10-03）。
@@ -135,7 +135,7 @@ source.degraded/reason表示整表有缺口；row.source只表示该行自身是
 | Client | `packages/client/src/store.ts`；`packages/client/src/sync.ts`；`packages/client/src/index.ts`；`packages/client/src/workspace-read.ts`（将新建） |
 | ui-model消费 | `packages/ui-model/src/types.ts`；`packages/ui-model/src/capability-access.ts`；`packages/ui-model/src/work-item-list-view.ts` |
 | 测试 / fixture | `tests/e2e/workspace-read-assembly.test.js`（将新建）；`tests/e2e/client-sync.test.js`；`tests/e2e/controller-roundtrip.test.js`；`tests/contract/ui-model-presentation.test.js`；`tests/contract/ui-work-item-list-view.test.js`；`tests/contract/ui-work-item-list.test.js`；`tests/contract/ui-work-item-list-browser.test.js` |
-| 文档 | 本计划；`docs/README.md` |
+| 文档 | 本计划；`docs/README.md`；`docs/exec-plan/tech-debt-tracker.md`（验收追加 TD-026） |
 | 能力 key 纯值叶子链（Batch 3 增补，见 Decision Log） | `packages/capabilities/package.json`；`packages/capabilities/src/capability-keys.ts`（仅 AccessLevel 改从 domain 的 values 出口取）；`packages/controller/package.json`；`packages/controller/src/keys.ts`（新建）；`packages/client/package.json`；`packages/client/src/keys.ts`（新建） |
 
 每PR code实际增删≤800、docs≤1300，含tests/fixtures，排除锁文件/生成目录。
@@ -149,7 +149,7 @@ source.degraded/reason表示整表有缺口；row.source只表示该行自身是
 
 ## Plan of Work
 
-### Batch 0 · 两独立方案与最终协议（本轮）
+### Batch 0 · 两独立方案与最终协议（已完成）
 
 最小闭环：六字段所有权、same-revision事件、时间与partial边界可审阅；主文件是本计划与 `docs/README.md`。
 reviewer独立确认watch吞source变化、store缺整表source、view的blanket-stale，选择row-source-only完整carrier和唯一接受点。
@@ -165,7 +165,7 @@ reviewer独立确认watch吞source变化、store缺整表source、view的blanket
 期望文档/披露/规模门通过；另运行已安装技能 `lint_execplan.py` 与实际docs路径扫描；不存在rule-checks doclinks，不伪造工具面。
 回滚点是Batch0干净工作树，仅本轮两文档文件可撤销，不触碰其他会话内容。
 
-### Batch 1 · 真实producer与完整来源事件（pending）
+### Batch 1 · 真实producer与完整来源事件（已完成）
 
 最小闭环：controller真实基线包含全部头，same-revision metadata能观察降级/恢复；主文件为 `packages/core/src/queries.ts`、`packages/controller/src/queries.ts`、`packages/controller/src/wire.ts`、`packages/controller/src/watch.ts`。
 先以actual composeCore/controller写红例：基线fresh revision N，Provider Offline后baseline仍N/degraded而watch不得idle；恢复source时仍能传播。
@@ -181,7 +181,7 @@ reviewer独立确认watch吞source变化、store缺整表source、view的blanket
 期望真实descriptor/能力/source全到Wire，same-revision发metadata且revision未advance；完全相同poll idle，备用能力不覆盖主目标。
 回滚点Batch0文档提交；publicWire与对应fixture一起回退，不留两种DTO兼容路径。
 
-### Batch 2 · Client唯一接受点、assembler与断网（pending）
+### Batch 2 · Client唯一接受点、assembler与断网（已完成）
 
 最小闭环：Wire头与每行source原子成为WorkspaceRead，断网保值保time；主文件为 `packages/client/src/sync.ts`、`packages/client/src/store.ts`、`packages/client/src/workspace-read.ts`（将新建）、`tests/e2e/workspace-read-assembly.test.js`（将新建）。
 测试注入固定clock，先写首次fresh/真实空表/degraded空表/partial、poll拒绝/reconnect拒绝、idle与纯能力metadata时间不推进的红例。
@@ -197,7 +197,7 @@ clock合法性/store拒绝测试断言头和time完全不先推进；metadata未
 期望六字段全部真实生产；断网connected=false、旧store/time保持；same-revision行和整表来源同时更新，fresh→degraded→fresh可达。
 回滚点Batch1 verified提交；Client新accept/read与相关store改动整体回退，不只回退头而留下time推进。
 
-### Batch 3 · ui-model单真源与partial验收（pending）
+### Batch 3 · ui-model单真源与partial验收（已完成）
 
 最小闭环：assembler可直接交展示，partial行不被整表原因洗成stale；主文件为 `packages/ui-model/src/types.ts`、`packages/ui-model/src/capability-access.ts`、`packages/ui-model/src/work-item-list-view.ts`、`tests/contract/ui-work-item-list-view.test.js`。
 WorkspaceRead alias为client类型；key与intersect经两层显式出口传递，reduce每步用 `intersectAccess(acc, level, AccessLevel.Available)`（初值Available）复用现有三参数函数，保留read_only读门转换/64格差分。
@@ -254,6 +254,30 @@ realpath核目标工作树；Git用argv/library；实施前盘点WireSnapshot/Wi
 
 期望唯一draft/base main、最终head匹配，PR与issue双向关闭引用可证，issue开放；解析失败先修PR正文回读，不以关键字自己宣布权威关联。
 
+验收证据（Opus 验收者，观察时刻 2026-10-03 23:05 CST，`.worktrees/workspace-read-assembly`；代码树为提交 `0f8b0cc`，其后只有文档提交）：
+
+    pnpm install --frozen-lockfile        # 已是最新
+    pnpm verify                           # 1106 + 7 通过，exit 0
+    node --test <Batch 3 命令的 7 个测试文件>  # 74/74；新 e2e 17 例（两条 partial 用例合一）
+    pnpm run boundaries                   # 8/8
+    rg -n "<Batch 3 的 key 字面量扫描>" packages/ui-model/src   # 无命中，exit 1
+    node scripts/workflow-check.mjs       # no findings
+    node scripts/rule-checks.mjs disclosure origin/main         # 无命中；人工五类目复核无命中
+    node scripts/rule-checks.mjs size origin/main               # 观察时刻：code 791、docs 418（用户上限 800 / 1300）
+    git diff --check origin/main...HEAD   # 无输出
+
+负对照在一次性克隆（`git clone --no-checkout` 后检出最终代码树并离线安装）上整表复跑：Batch 1 的 4 处、Batch 2 的 7 处、
+Batch 3 的 3 处非重复项（另 3 处与 Batch 2 同变异）、fix round 1 的 15 处外加签名忽略 workspace / 能力两处、验收新增 5 处，
+共 36 处；每处先打印变异后的行证明已生效，36/36 红且各命中预期用例，恢复后 `git status` 干净。验收新增的 5 处：
+
+| 变异 | 命中的测试 | 结果 |
+|---|---|---|
+| `assertFrame` 不校验逐行 source | 接受点（增量后序实体缺 source） | 红 |
+| `assertFrame` 不校验 `removed` 形状 | 接受点（增量 removed 不是数组） | 红 |
+| 恢复 `frame.workspace ?? head?.workspace` | 时间与头（头整帧替换） | 红 |
+| `client/keys` 导出 `CapabilityKey` 副本 | 单真源 | 红 |
+| Core 报告 `storage.*` key | producer（storage 域不伪造挂载） | 红 |
+
 ## Progress
 
 - [x] (2026-10-03 21:34 CST) Batch0：两独立方案、第三方关键路径审查、最终protocol/预算/恢复收敛。
@@ -292,6 +316,8 @@ realpath核目标工作树；Git用argv/library；实施前盘点WireSnapshot/Wi
   | 丢整表 source 降级 | 空表；partial；同revision降级/恢复；端到端 partial | 红 |
   | 先写 time 后 apply | 接受点 | 红 |
   | 传输失败不清 connected | 断网；端到端断网 | 红 |
+- [x] (2026-10-03 22:44 CST) Fix round 1（对抗验证 353ce3a：0 P0 / 0 P1 / 5 P2）：P2-1…P2-5 全部属实，生产行为正确但无测试锁定。复现：旧测试文件下 15 处变异（B1 B2 B5 C9 C8 A4 A7 A2 C6 C7 B9 B10 C1 C2 C4）全部存活；绿：新增/收紧用例后 `tests/e2e/workspace-read-assembly.test.js` 18/18，同批 7 个测试文件 75/75，`pnpm run typecheck`、`pnpm run boundaries` 8/8 退出0，15 处变异全部红且各命中预期用例；code 799/800（为入预算把新旧用例合并，不删判别用例）、docs 见 size 门。
+- [x] (2026-10-03 23:05 CST) 验收（Opus）：独立复核 `origin/main...HEAD` 与 12 行验收表，处置 P3-1…P3-4。红：新增两条接受点载体（增量后序实体缺 source、removed 非数组）与“头整帧替换”断言在旧代码上红（前序行已被写、read 仍返回旧 descriptor）；绿：`assertFrame` 预检逐行来源与删除表、头整帧替换后同批 7 个测试文件 74/74，`pnpm verify`（1106+7）、`pnpm run boundaries` 8/8、key 扫描 exit 1、workflow-check、disclosure、`git diff --check` 全过；最终代码树 36 处负对照 36/36 红；code 791/800、docs 418/1300。提交整理为 5 个（3 个 feature 原样保留，fix round 测试 + 验收修复 1 个，文档 1 个），`comm` 比对整理前后的文件集合：多出 `docs/exec-plan/tech-debt-tracker.md`（TD-026），少了 `packages/controller/src/index.ts`（删去根出口重导出后相对 main 零改动），两处都是验收的有意改动。
 
 ## Surprises & Discoveries
 
@@ -307,6 +333,10 @@ Batch 3 发现：浏览器完整路径契约（`ui-work-item-list-browser`）只
 view 里“`read.reason` 存在就把所有行 stale”还被一例旧契约钉着（宿主降级 → `[[true]]`）；该断言按本计划的 partial 规则改为“只降级整表”，断网另行用 `connected:false` 钉住行 stale。
 #199仍可能错误生产healthy，本项忠实传输而不catchStorage producer；#218迟到baseline竞争仍开放，不悄悄加generation算法。
 无Storage时descriptor尚未确认；最终read undefined表达冷启动，不制造看似可用workspace。
+Fix round 1 发现：全部 5 项 P2 都是“行为对、测试没锁”——旧用例总让整表头与逐行 source 同动、整表与各行同时恢复，任何一半退化都不会变红；`revision 不匹配` 例被 `assertFrame` 先拒绝，从没走到 store 自己的 `metadata.revision` 守卫，需要“自洽的 revision+1”载体才触达；`assert.ok(transport.close)` 只证明函数存在。
+验收发现：P3-1 的根因比报告宽——store 写入阶段读的是逐行 `source` 与 delta 的 `removed`，二者任一畸形时前序行都已被写；预检这两处即可让写入阶段不可能中途抛错，metadata 的逐行来源检查也随之并入同一处。
+验收发现：controller / client 根出口对能力 key 叶子的 `export *` 没有任何 importer（ui-model 只走 `client/keys`），`AcceptedHead` 与 `WireWorkspaceHeader` 同形，测试辅助里 `clock.calls` 与 `shapeOf` 的 stale 列未被使用，两条 partial 用例共享同一组装前缀。
+验收发现：`docs/README.md` 索引行仍写“迭代5”，与本计划人类重排期后的“当前调度：迭代 4”矛盾；本计划 Batch 0 标题仍写“（本轮）”。
 
 ## Decision Log
 
@@ -329,6 +359,17 @@ Decision：能力 key 与求交走“纯值叶子链”：`capabilities/keys`（
 Decision：list view 的 `degradedPage` 去掉 `read.reason`；整表来源缺口只降级整表（`body.stale`/statusText），行 stale 只来自行自身新鲜度（含断网、从未读到）、refreshing、读门 degraded、failed 保行。Rationale：#70 交接要求已确认行保持 fresh；断网时 `connected:false` 已让 `isStale` 为真，不依赖 reason。Date/Author：2026-10-03 22:30 CST / Sonnet implementer。
 Decision：`ClientWorkspaceRead` 保持 `capabilities?`/`lastUpdatedAt?`/`reason?` 可选，`WorkspaceRead` 为其别名；assembler 恒填。Rationale：与既有展示契约语义（省略=未观测/从未读到）一致，不制造第二种“未知”表示。Date/Author：2026-10-03 22:30 CST / Sonnet implementer。
 
+Decision：fix round 1 的 P2-1…P2-5 全部采纳，只补/收紧测试，不改生产代码（探针与变异证明行为正确）；为守住 code ≤800 把“只有一行/整表变化”并入既有 watch 变体用例、把 reconnect 预 stale/reason 优先级/disconnect 关闭传输并成一个生命周期用例。Rationale：保留每处判别，少一份 compose/client 样板。Date/Author：2026-10-03 22:44 CST / Sonnet 实施者。
+Decision：P3-1（baseline/delta 中途畸形实体留下已改前序行）暂不改：规格只要求 head/revision 预校验，传输失败路径会把行全标 stale 且下一次基线整体覆盖；若要“全有或全无”需给 store 加事务写入，超出本项规模，留待验收者或后续 issue 裁决。P3-2（`frame.workspace ?? head.workspace`）保留：已确认的 descriptor 不因后续无 descriptor 的帧而退回“未确认”，行为未被规格约束也未加测试（预算已满），记为已知未锁定点。P3-4 的 ISO 正则重复已在上文裁决；提交 trailer 按调度指令保持原写法。Date/Author：2026-10-03 22:44 CST / Sonnet 实施者。
+
+Decision：（取代 22:44 对 P3-1 的“暂不改”）P3-1 按根因修复——`assertFrame` 在任何条目变更前同时校验逐行 `source` 与 delta 的 `removed` 形状，写入阶段只读已校验字段，被拒绝的帧不再留下已写的前序行；两条新载体进接受点用例。Rationale：规格“拒绝帧不推进…失败不留半更新”“同一接受单元”对 baseline/delta 同样成立；同类惯例是 Redux 式 reducer 抛错时不提交新状态，本 store 为保稳定引用而就地写，只能靠写前全量预检达到同等原子性；净增约 0 行（metadata 的逐行 `isSource` 并入同一处）。Cost if wrong：若将来写入阶段新增读取未校验的字段，原子性会无声退化；负对照 A-1/A-2 只锁住现有两处。Date/Author：2026-10-03 23:05 CST / Opus acceptor。
+Decision：（取代 22:44 对 P3-2 的“保留”）P3-2 去掉 `frame.workspace ?? head?.workspace`，头随被接受的帧整体替换；宿主在已接受的帧里不再确认 descriptor 时 `read()` 回到 undefined，并加判别断言。Rationale：规格“公开读取只在同步方法完成后可见同一接受单元”，跨帧拼头会让旧 descriptor 与新能力/来源混成一个从未被宿主同时确认的头（不变量 7）；调研 TanStack Query、Apollo Client、RTK Query：成功响应整体替换数据，last-known 只在失败时保留——本实现的 `lose` 正是失败保值；现生产者在同一 controller 内不会从有 descriptor 退回无 descriptor（`unavailableCore` 在组装时即固定），所以无已知用户可见变化。Cost if wrong：若将来宿主会短暂丢失 descriptor，页面在下一帧之前回到冷启动形态而不是显示旧名字；下一帧带回 descriptor 即恢复。Date/Author：2026-10-03 23:05 CST / Opus acceptor。
+Decision：P3-3 全部刷新——状态行、Batch 0 标题、Artifacts 验收证据、Outcomes、Next gate 与 `docs/README.md` 索引行（同时把“迭代5”改为人类重排期后的“迭代4”）。Rationale：同一事实只能有一个当前答案。Cost if wrong：读者按旧状态判断进度。Date/Author：2026-10-03 23:05 CST / Opus acceptor。
+Decision：P3-4 的 ISO 8601 正则重复保留并登记 TD-026；提交 trailer 不追改 feature 提交。Rationale：两处各守自己的边界且逐字相同，抽共享出口需改不在文件集的 `derive.ts` 并新增叶子出口；trailer 是本会话 harness 规定的归属行，整理后的 fix/docs 提交由 Opus 验收者写成，实施者身份以本计划 Progress 与 Decision Log 的 Author 为准。Cost if wrong：只改一处口径时两层对同一时间给出不同结论（响亮失败而非静默），见 TD-026。Date/Author：2026-10-03 23:05 CST / Opus acceptor。
+Decision：取代 22:30 叶子链裁决中“controller/client 根出口同时 `export *` 该叶子”一句：根出口重导出无 importer，删去；单真源用例改为直接断言 ui-model 实际所走的 `client/keys` 叶子与 capabilities 是同一对象。Rationale：少一份公开面，测试对象与生产路径一致；叶子链本身不变。Cost if wrong：将来 client 根的消费者需要 key 时改从 `client/keys` 取，一行 import。Date/Author：2026-10-03 23:05 CST / Opus acceptor。
+Decision：简化只删不加——删 `AcceptedHead`（与 `WireWorkspaceHeader` 同形）、测试里未用的 `clock.calls` 与 `shapeOf` stale 列，把两条 partial 用例合一。Rationale：无判别力损失（B2-6、B3-1、B3-3 仍命中合并后的 partial 用例）；code 从 799 降到 791（另有 watch 头注释补 metadata 语义 +3）。Cost if wrong：无行为影响。Date/Author：2026-10-03 23:05 CST / Opus acceptor。
+Decision：提交整理保留 `b2f3a9d`、`e2ad13f`、`353ce3a` 三个 feature 提交原样（各自批次已验证、内容按能力分层），把 fix round 1 的测试提交与验收修复合成一个 `fix(client)` 提交，把 fix round 1 的文档提交与验收文档合成一个 `docs(exec-plan)` 提交；不改写 `8b194a1` 及更早。Rationale：fix round 测试横跨三层且与验收修复改同一文件，拆回各 feature 提交需逐 hunk 改写且冲突风险高，收益只是历史外观。Cost if wrong：评审者在第 3 与第 4 个提交间看到根出口重导出先加后删。Date/Author：2026-10-03 23:05 CST / Opus acceptor。
+
 ## Idempotence and Recovery
 
 metadata重复内容为idle；重复baseline按现有稳定身份覆盖；时间只在确认接受点更新，不以poll次数增长。
@@ -344,13 +385,16 @@ Core只读metadata→controllerWire→clientread→ui-model alias，能力key/in
 Transport现有baseline/watch消费面保留，WireEvent新增metadata；sync报告kind加metadata，assembler通过sync.read固定store归属。
 #189是共享binding健康隔离，#178是六字段生产通道，两者联合验收但无编译前置；不把合并顺序写成blocked-by。
 #218未来竞争修复须在唯一接受点拒整帧metadata/time；本项不宣称其旧红例通过。#199/真实Host服务/页面挂载由各自issue承担。
-Next gate：Batch0文档门→draft；实施前完整fixture盘点和红例非零，产品验收及精确远端head后才ready，合并由人决定。
+Next gate：人类评审本 PR（本地已整理为 5 个提交，未 push）；评审通过后按 AGENTS.md §6 先建 backup ref、精确 force-with-lease push，回读远端 head、checks 与 issue 关联，再 ready；合并由人决定。
 
 ## Outcomes & Retrospective
 
-当前产物是独立审查通过的最终spec，六字段生产链仍未实现；issue开放、计划Active、PR保持draft。
-技术债tracker无新增实现债；#199/#218不关闭，外部类比不替代本地证据。
-完成后记录实际协议/断网/partial/负对照、偏差和债务，再按PLANS归档并更新索引；当前不填写未来成功结果。
+结果：六字段（workspace / store / connection / lastUpdatedAt / capabilities / reason）都有真实生产者，最小成功证据 `composeCore → createController → createTransport → createSync → sync.read → deriveWorkItemList` 在 e2e 里跑通，最终展示输入无手写。
+同 revision 的来源降级与恢复经窄 metadata 事件可达（业务变化 fail closed 为 gap）；断网保行、保头、保时间；真实空集推进时间、degraded 空表不推进；partial 表降级而已确认行保持 fresh；接受点对非法时钟与畸形载体整体拒绝。
+验证：`pnpm verify` 1106+7 通过；Batch 3 命令 74/74；boundaries 8/8；最终代码树 36 处负对照全红；code 791/800、docs 418/1300（观察时刻值）。
+偏差：文件集增补能力 key 纯值叶子链 6 个文件（浏览器 bundle 契约强制）与技术债 tracker；Batch 1 为保持可编译在 `client/src/sync.ts` 暂把 metadata 当缺口；`controller/src/index.ts` 最终相对 main 零改动。
+债务：TD-026（ISO 8601 校验两份同口径正则）。#218（迟到帧 / 并发 poll 仲裁）与 #199（错误 healthy producer）仍开放，本项不宣称修复；真实 Host transport、React 页面挂载与凭据由后续闭环承担。
+复盘：对抗验证第 1 轮的 5 项 P2 都是“行为对、测试没锁”，验收又在单一接受点的边界上找到两处语义缺口（畸形帧中途抛错、跨帧拼头）。教训：原子性的预检要按写入阶段实际读取的字段清点，而不是只按规格点名的字段；“整体发布”要连同回退表达式一起审。
 
 ## Bottom Change Note
 
@@ -366,3 +410,7 @@ Change Note (2026-10-03 22:23 CST)：Batch 1 完成：Core 元数据查询、Wir
 Change Note (2026-10-03 22:26 CST)：Batch 2 完成：workspace-read.ts、store.applyMetadata 与 sync 唯一接受点/read/disconnect 落地，7项负对照落账；文件集无新增。
 
 Change Note (2026-10-03 22:30 CST)：Batch 3 完成：WorkspaceRead 别名、纯值叶子链单真源、view 去掉整页 stale 规则与端到端 partial 验收落地；文件集增补叶子链 6 个文件（浏览器 bundle 契约强制）；6 项负对照落账。
+
+Change Note (2026-10-03 22:44 CST)：Fix round 1：对抗验证 5 项 P2 全部以判别性测试落实（15 处存活变异全红），生产代码零改动；P3-3 同步修正本计划的 Batch 状态、Next gate、Outcomes 与索引行；P3-1/P3-2 记录为未改的裁决。
+
+Change Note (2026-10-03 23:05 CST)：Opus 验收：独立复核 diff 与验收表，按根因修 P3-1/P3-2 并补判别断言，删无用出口、同形类型与测试辅助，最终代码树 36 处负对照全红；刷新状态、Artifacts、Outcomes、Next gate 与索引行，登记 TD-026，提交整理为 5 个。
