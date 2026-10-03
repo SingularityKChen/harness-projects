@@ -51,6 +51,8 @@
 
 **写入口与观察者对「谁说了算」共用同一份策略。** 一个 issue 被多个 PR 引用时，取值不由「触发事件的那一个 PR」单独决定：`scripts/sync-engineering-state.mjs` 的 `expectedFor` 是这条**选择策略**的唯一实现——**任一已合并 PR 优先**（已合并是终态且单调），否则创建时间最新的 open PR，否则最新的 closed PR；空集合是错误而不是「清空」。写入口按它**聚合**（触发 PR → 它的 `closingIssuesReferences` → 每个 issue 的全部关闭引用 PR），观察者 import 同一个函数，因此两侧由构造一致（issue #115）。引用读取不完整时写入口一律失败，不退回「只按触发 PR 写」。
 
+> **Superseded by** `docs/development/ci.md`「Engineering 观察者：Project 页完整来源」（2026-10-03，issue #249）：「空集合是错误」现在只是 `expectedFor` 的默认。读取证明完整零引用（Issue 存在、引用为空、`totalCount` 为 0、没有下一页，且全部候选读取完成，即 `complete: true`）时期望为空：观察者从 Project 页读取全部本仓 Issue 条目及其内嵌的完整关闭引用，最后一个关闭关联被移除后残留的旧值因此会被报成漂移；没有完整性证据的空引用仍是错误。单个 Issue 的引用按全局 PR id 验重，`createdAt` 与编号都相同时按 id 的字符串码元升序兜底，选择与输入顺序无关。
+
 **这条轴与 `Status` 无关。** 合并 PR 只写 `Engineering`，不写 `Status`——`Item closed → Status = Done` 因此被裁决为关闭（见 §5）。一个已合并的工作项停在 `Status = Todo` 是**正常**的：它表示规划所有者还没有接受这项工作完成。
 
 ## 3. 不变量 3 在看板上如何被满足
