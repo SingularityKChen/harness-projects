@@ -54,16 +54,17 @@ assemble(sqliteAdapter('SQLite Storage（执行组）', 'storage-execution'), ['
  * 守卫的**独立**期望：标签 → 它必须装配的组。它是守卫自己的一份陈述，不由 `assemble` 的实参推导——
  * 从实参推导的话，删掉装配调用会连期望一起删掉，守卫就永远绿（这正是本守卫要消灭的缺陷形态）。
  */
-// 依赖 core 的三格（执行上下文 → 仓库、执行上下文 → 工作项、关系端点）：仓库一格已对齐（core 的写前登记先建挂载，#187 / #188），
-// 两个适配器都拒绝，只是错误文本来源不同（SQLite 的外键、替身的存在性检查）；工作项与关系端点两格在替身上仍被接受、在 SQLite 上被外键拒绝（#196 / #221）。
-// 三格都**必须是显式且被守卫的**：能力位按适配器、按边声明，注册数由守卫独立写成 3。
+// 依赖 core 的两格（执行上下文 → 仓库、关系端点）：仓库一格已对齐（core 的写前登记先建挂载，#187 / #188），
+// 两个适配器都拒绝，只是错误文本来源不同（SQLite 的外键、替身的存在性检查）；关系端点一格在替身上仍被接受、在 SQLite 上被外键拒绝（#221）。
+// 工作项一格已对齐（#196）：两个实现以同一个 `StorageInputError` 拒绝，用例在共享执行组里，不再是声明式分叉。
+// 两格都**必须是显式且被守卫的**：能力位按适配器、按边声明，注册数由守卫独立写成 2。
 const fakeDivergence = { label: '内存 Storage 替身（分叉格）', makeStorage: () => createFakeStorage(),
-  acceptsDanglingCoreParents: { repository: false, workItem: true, relation: true }, rejection: /^rejected: execution context repository does not exist/ }
+  acceptsDanglingCoreParents: { repository: false, relation: true }, rejection: /^rejected: execution context repository does not exist/ }
 const sqliteDivergence = { ...sqliteAdapter('SQLite Storage（分叉格）', 'storage-divergence'),
-  acceptsDanglingCoreParents: { repository: false, workItem: false, relation: false }, rejection: /^rejected: FOREIGN KEY constraint failed/ }
+  acceptsDanglingCoreParents: { repository: false, relation: false }, rejection: /^rejected: FOREIGN KEY constraint failed/ }
 const DIVERGENCE_REGISTERED = [fakeDivergence, sqliteDivergence].map((adapter) => storageExecutionDivergenceSuite(adapter))
-test('执行组守卫：依赖 core 的三格用例（含已对齐的仓库格）必须在两个适配器上都注册', () => {
-  assert.deepEqual(DIVERGENCE_REGISTERED, [3, 3], '两个适配器都必须注册全部三格：删掉一条显式分叉用例会在这里变红')
+test('执行组守卫：依赖 core 的两格用例（含已对齐的仓库格）必须在两个适配器上都注册', () => {
+  assert.deepEqual(DIVERGENCE_REGISTERED, [2, 2], '两个适配器都必须注册全部两格：删掉一条显式分叉用例会在这里变红')
 })
 
 const EXPECTED_ASSEMBLY = {
@@ -107,7 +108,7 @@ test('身份面守卫：两组用例条数与台账一致，断言集合不低�
 // `assert.deepEqual(a, b)` 改成 `assert.deepEqual(a, a)` 同样全绿。断言层因此比对三组文件里 `assert.` 语句的
 // **多重集**（去掉空白后的整行文本）：基线里任何一条文本在当前文件里少出现一次即失败。新增断言不受影响；
 // 要放宽必须**有意**从基线里删掉对应文本，并在提交信息里写明放宽了哪一条。
-const CASE_LEDGER = { foundation: { inherited: INHERITED_CASE_COUNTS.foundation, added: 6 }, sync: { inherited: INHERITED_CASE_COUNTS.sync, added: 1 }, execution: { inherited: INHERITED_CASE_COUNTS.execution, added: 12 } }
+const CASE_LEDGER = { foundation: { inherited: INHERITED_CASE_COUNTS.foundation, added: 6 }, sync: { inherited: INHERITED_CASE_COUNTS.sync, added: 1 }, execution: { inherited: INHERITED_CASE_COUNTS.execution, added: 13 } }
 const SUITE_FILES = { foundation: 'storage.js', sync: 'storage-sync.js', execution: 'storage-execution.js' }
 /** 切分完成时三组 `assert.` 语句的多重集基线（2026-09-24 实测）：元素是语句**去掉空白后的整行文本**，同一文本出现几次就写几项。 */
 const ASSERTION_BASELINE = {
@@ -153,6 +154,7 @@ test('内存 Storage 替身：Failed 与 Closed 不是 active，findActive 不�
   await storage.putEntity({ id: 'repo-entity-terminal', kind: 'repository' })
   await storage.putExternalIdentity({ id: 'repo-identity-terminal', entityId: 'repo-entity-terminal', bindingId: 'binding-terminal', externalKind: 'repository', externalId: 'repo-1', role: 'primary' })
   await storage.putRepository({ id: 'repo-1', workspaceId: 'ws-terminal', externalIdentityId: 'repo-identity-terminal' })
+  await storage.putEntity({ id: 'entity-terminal', kind: 'work_item' }) // 工作项父边（#196）：被引用的工作项必须已登记
   const context = (status) => ({
     id: 'ctx-terminal', workspaceId: 'ws-terminal', workItemId: 'entity-terminal', repositoryId: 'repo-1',
     status, branchExternalId: 'work/entity-terminal', worktreeExternalId: undefined, provisioningStartedAt: undefined,
