@@ -30,8 +30,9 @@ async function compose(providers = createFakeProviders(), { project, ...extra } 
   return { id, providers, core, controller: createController(core, { authority: StatusPolicyMode.HarnessManaged, workspaceRevision }) }
 }
 
-const cursor = (providers, state, lastErrorCode) => providers.storage.putSyncCursor({
-  bindingId: providers.planning.bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined, state, lastErrorCode,
+/** 不经 bootstrap、同修订地改写本工作区的规划游标（游标按工作区归属，#189）。 */
+const cursor = ({ id, providers }, state, lastErrorCode) => providers.storage.putSyncCursor({
+  workspaceId: id, bindingId: providers.planning.bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined, state, lastErrorCode,
 })
 const capabilityOf = (header, key) => header.capabilities.find((entry) => entry.key === key)
 const viewOf = (read) => deriveWorkItemListView({ read, metadata: { sourceNames: {} }, phase: 'received', refreshing: false })
@@ -73,7 +74,7 @@ test('producer：没有 Storage 的 core 不伪造 descriptor，来源是 degrad
 })
 
 test('metadata：同 revision 的来源降级与恢复各发一个窄事件，业务 revision 与内容不变，重复 poll idle', async () => {
-  const { providers, core, controller } = await compose()
+  const { id, providers, core, controller } = await compose()
   const base = await controller.baseline()
   const watch = controller.watch({ afterRevision: base.revision, seed: base })
   assert.equal(await watch.poll(), undefined, '什么都没变是 idle')
@@ -94,7 +95,7 @@ test('metadata：同 revision 的来源降级与恢复各发一个窄事件，�
   assert.equal(await watch.poll(), undefined, '完全相同内容 idle')
 
   providers.planning.faultsSwitch.set(FaultKind.Offline, false)
-  await cursor(providers, 'healthy', undefined)
+  await cursor({ id, providers }, 'healthy', undefined)
   const up = await watch.poll()
   assert.equal(up.kind, 'metadata')
   assert.deepEqual([up.metadata.revision, up.metadata.source.freshness], [base.revision, 'fresh'])
@@ -237,7 +238,7 @@ test('断网：poll / reconnect 拒绝后 connected=false，行引用、内容�
 })
 
 test('metadata：同 revision 降级 / 恢复同时更新整表与每行 source，时间只在恢复确认时推进', async () => {
-  const { providers, core, controller } = await compose()
+  const { id, providers, core, controller } = await compose()
   const { store, sync } = await client(controller)
   await sync.connect()
   const rows = store.list()
@@ -253,7 +254,7 @@ test('metadata：同 revision 降级 / 恢复同时更新整表与每行 source�
   assert.equal((await sync.poll()).kind, 'idle')
 
   providers.planning.faultsSwitch.set(FaultKind.Offline, false)
-  await cursor(providers, 'healthy', undefined)
+  await cursor({ id, providers }, 'healthy', undefined)
   assert.equal((await sync.poll()).kind, 'metadata')
   assert.deepEqual([sync.read().reason, store.list().some((entry) => entry.stale), sync.read().lastUpdatedAt], [undefined, false, T(2)])
   assert.ok(itemRows(sync.read()).every((row) => !row.stale), '来源恢复后行回到 fresh')

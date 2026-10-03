@@ -369,6 +369,7 @@ Decision：P3-4 的 ISO 8601 正则重复保留并登记 TD-026；提交 trailer
 Decision：取代 22:30 叶子链裁决中“controller/client 根出口同时 `export *` 该叶子”一句：根出口重导出无 importer，删去；单真源用例改为直接断言 ui-model 实际所走的 `client/keys` 叶子与 capabilities 是同一对象。Rationale：少一份公开面，测试对象与生产路径一致；叶子链本身不变。Cost if wrong：将来 client 根的消费者需要 key 时改从 `client/keys` 取，一行 import。Date/Author：2026-10-03 23:05 CST / Opus acceptor。
 Decision：简化只删不加——删 `AcceptedHead`（与 `WireWorkspaceHeader` 同形）、测试里未用的 `clock.calls` 与 `shapeOf` stale 列，把两条 partial 用例合一。Rationale：无判别力损失（B2-6、B3-1、B3-3 仍命中合并后的 partial 用例）；code 从 799 降到 791（另有 watch 头注释补 metadata 语义 +3）。Cost if wrong：无行为影响。Date/Author：2026-10-03 23:05 CST / Opus acceptor。
 Decision：提交整理保留 `b2f3a9d`、`e2ad13f`、`353ce3a` 三个 feature 提交原样（各自批次已验证、内容按能力分层），把 fix round 1 的测试提交与验收修复合成一个 `fix(client)` 提交，把 fix round 1 的文档提交与验收文档合成一个 `docs(exec-plan)` 提交；不改写 `8b194a1` 及更早。Rationale：fix round 测试横跨三层且与验收修复改同一文件，拆回各 feature 提交需逐 hunk 改写且冲突风险高，收益只是历史外观。Cost if wrong：评审者在第 3 与第 4 个提交间看到根出口重导出先加后删。Date/Author：2026-10-03 23:05 CST / Opus acceptor。
+Decision：同修订恢复用例的游标改写带上 `workspaceId`。Rationale：集成主控在临时克隆按 #264→#265→#266 合并三分支，代码文件全部自动合并，但并集 `pnpm verify` 1126/1129：#264 把游标改为工作区三元键后，本 PR 的 JS 测试辅助缺 `workspaceId`，typecheck 看不到，Fake 在运行时拒绝。现在就带上该键，在 main 上 Fake 原样忽略多余字段（本 PR 单独 17/17），在并集上定位到同一条游标，两种合并顺序都不需要再改本文件。Cost if wrong：#264 被放弃时测试里留一个无用字段。Date/Author：2026-10-03 23:09 CST / Opus 集成主控。
 
 ## Idempotence and Recovery
 
@@ -414,3 +415,5 @@ Change Note (2026-10-03 22:30 CST)：Batch 3 完成：WorkspaceRead 别名、纯
 Change Note (2026-10-03 22:44 CST)：Fix round 1：对抗验证 5 项 P2 全部以判别性测试落实（15 处存活变异全红），生产代码零改动；P3-3 同步修正本计划的 Batch 状态、Next gate、Outcomes 与索引行；P3-1/P3-2 记录为未改的裁决。
 
 Change Note (2026-10-03 23:05 CST)：Opus 验收：独立复核 diff 与验收表，按根因修 P3-1/P3-2 并补判别断言，删无用出口、同形类型与测试辅助，最终代码树 36 处负对照全红；刷新状态、Artifacts、Outcomes、Next gate 与索引行，登记 TD-026，提交整理为 5 个。
+
+Change Note (2026-10-03 23:09 CST)：集成预演发现与 #264 的语义冲突（测试辅助缺工作区键），本 PR 测试辅助对齐后单独与三分支并集均通过；见 Decision Log 同时刻条目。
