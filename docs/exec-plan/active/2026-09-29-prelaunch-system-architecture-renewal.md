@@ -326,7 +326,7 @@ import { composeCore } from '@harness-projects/core'
 import { FaultKind, createFakeProviders, refOf } from '@harness-projects/provider-fake'
 const providers = createFakeProviders()
 const api = await composeCore({ workspace: { name: 'probe' }, providers })
-const workItemId = (await api.queries.listPlanningItems()).find((v) => v.kind === 'work_item').entityId
+const workItemId = (await api.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item').entityId
 const started = await api.commands.startWork({ workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' }, idempotencyKey: 'p3' })
 await providers.development.createChangeRequest({ repository: refOf(providers.development.gate.bindingId, 'repository', 'repo-alpha'), head: started.branchExternalId, base: 'main', title: 'p3', body: 'p3' })
 const scope = { workItemId, repositoryId: 'repo-alpha' }
@@ -345,7 +345,7 @@ node --input-type=module -e "
 import { composeCore } from '@harness-projects/core'
 import { createFakeProviders } from '@harness-projects/provider-fake'
 const api = await composeCore({ workspace: { name: 'probe' }, providers: createFakeProviders() })
-const [a, b] = (await api.queries.listPlanningItems()).filter((v) => v.kind === 'work_item')
+const [a, b] = (await api.queries.listPlanningItems()).filter((v) => v.content.contentKind === 'work_item')
 const req = (workItemId) => ({ workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' }, idempotencyKey: 'same-key' })
 await api.commands.startWork(req(a.entityId))
 const second = await api.commands.startWork(req(b.entityId))
