@@ -304,12 +304,15 @@ export class MemoryStorage implements cap.Storage {
       return true
     })
   }
-  async getSyncCursor(bindingId: domain.ProviderBindingId, scopeKey: string): Promise<cap.SyncCursorRecord | undefined> { return this.data.cursors.find((c) => c.bindingId === bindingId && c.scopeKey === scopeKey) }
+  async getSyncCursor(workspaceId: domain.WorkspaceId, bindingId: domain.ProviderBindingId, scopeKey: string): Promise<cap.SyncCursorRecord | undefined> {
+    return this.data.cursors.find((c) => c.workspaceId === workspaceId && c.bindingId === bindingId && c.scopeKey === scopeKey)
+  }
   async putSyncCursor(record: cap.SyncCursorRecord): Promise<void> {
     return this.#mutate(() => {
-      // 游标必须挂在存在的连接锚点上（与 SQLite 的 sync_cursor.binding_id 外键同语义，第四轮评审 R4-4）。
+      // 游标的两条父边各自独立（与 SQLite 的 sync_cursor 两条外键同语义，第四轮评审 R4-4；#189 补工作区）；它们不证明该工作区已挂载该连接。
+      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('sync cursor workspace does not exist')
       if (!this.data.providerBindings.some((anchor) => anchor.id === record.bindingId)) throw new Error('sync cursor binding does not exist')
-      upsert(this.data.cursors, record, (c) => c.bindingId === record.bindingId && c.scopeKey === record.scopeKey)
+      upsert(this.data.cursors, record, (c) => c.workspaceId === record.workspaceId && c.bindingId === record.bindingId && c.scopeKey === record.scopeKey)
     })
   }
   async getReconcileCursor(workspaceId: domain.WorkspaceId): Promise<cap.ReconcileCursorRecord | undefined> {

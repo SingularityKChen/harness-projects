@@ -14,15 +14,19 @@ import { isComparableSourceVersion, sourceVersionFromTimestamp } from '@harness-
 import { openDatabase, type WorkspaceDatabase } from './db.ts'
 import type { MigrationDataStep } from './migrations.ts'
 
-/** 重写前的 003 缺端口主体列与 `dedupe_key`，或仓库挂载键仍是单列 `id`（#187 / #188 之前）：显式报错，把「旧库」变成一句可执行的处置，而不是第一次写观察或第二个工作区挂载时的驱动级报错。 */
-export const REWRITTEN_003_MESSAGE = '本地库是重写前的 003（sync_observation 缺端口主体列或 dedupe_key，或 repository 的主键不是 (workspace_id, id)）：请删除库文件重建'
+/** 重写前的 003 缺端口主体列与 `dedupe_key`，或仓库挂载键仍是单列 `id`（#187 / #188 之前），或同步游标主键不是 `(workspace_id, binding_id, scope_key)`（#189 之前）：显式报错，把「旧库」变成一句可执行的处置，而不是第一次写观察或第二个工作区挂载时的驱动级报错。 */
+export const REWRITTEN_003_MESSAGE = '本地库是重写前的 003（sync_observation 缺端口主体列或 dedupe_key，repository 的主键不是 (workspace_id, id)，或 sync_cursor 的主键不是 (workspace_id, binding_id, scope_key)）：请显式决定并删除库文件重建（程序不会升级也不会删库）'
 
-/** `sync_observation` 存在且缺 `object_kind` 或 `dedupe_key` 时抛错；返回表是否存在（尚未迁移时不判定）。 */
+/**
+ * `sync_observation` 存在而 003 不是重写后的形状（判据见 `REWRITTEN_003_MESSAGE`）时抛错；返回表是否存在（尚未迁移时不判定）。
+ * 游标按 pk 序比较完整主键列名串：只看有无 workspace 列判不出「列在而主键仍两元」，只数列数判不出顺序错。
+ */
 export function assertRewritten003Shape(db: WorkspaceDatabase): boolean {
   if (db.prepare(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'sync_observation'`).get() === undefined) return false
   const shape = db.prepare(`SELECT count(*) AS subject_columns FROM pragma_table_info('sync_observation') WHERE name IN ('object_kind','dedupe_key')`).get() as { subject_columns: number }
   const mount = db.prepare(`SELECT count(*) AS key_columns FROM pragma_table_info('repository') WHERE pk > 0`).get() as { key_columns: number }
-  if (shape.subject_columns < 2 || mount.key_columns !== 2) throw new Error(REWRITTEN_003_MESSAGE)
+  const cursorKey = (db.prepare(`SELECT name FROM pragma_table_info('sync_cursor') WHERE pk > 0 ORDER BY pk`).all() as { name: string }[]).map((row) => row.name).join(',')
+  if (shape.subject_columns < 2 || mount.key_columns !== 2 || cursorKey !== 'workspace_id,binding_id,scope_key') throw new Error(REWRITTEN_003_MESSAGE)
   return true
 }
 

@@ -112,14 +112,15 @@ WHERE NOT EXISTS (
       OR (newer.updated_at = ledger.updated_at AND newer.observed_at = ledger.observed_at AND newer.rowid > ledger.rowid))
 );
 
--- sync_cursor：增量游标属于 provider binding 与调用方 scope（既有端口 SyncCursorRecord 的形状；本层计划 Batch L3-A）。作用域语义上是工作区级（ADR-0006），但键只含 binding：两个工作区共用一条连接时会串台，收口见 #189。
+-- sync_cursor：增量游标属于工作区、provider binding 与调用方 scope（ADR-0006：同步健康度是工作区级事实，#189）。两条外键各自独立，只证明父行存在，不证明该工作区已挂载该连接（本层计划 Batch L3-A）。
 CREATE TABLE sync_cursor (
+  workspace_id TEXT NOT NULL REFERENCES workspace (id),
   binding_id TEXT NOT NULL REFERENCES provider_binding (id),
   scope_key TEXT NOT NULL,
   cursor_value TEXT,
   state TEXT NOT NULL CHECK (state IN ('idle','syncing','healthy','degraded','failed')),
   last_error_code TEXT,
-  PRIMARY KEY (binding_id, scope_key)
+  PRIMARY KEY (workspace_id, binding_id, scope_key)
 );
 
 -- reconcile_cursor：R5 只记录工作区上次全量对账时刻；不含平台 updated_at 增量游标列。

@@ -18,7 +18,7 @@ import { gateCommand } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
 import { ensureEntity, entityKindFor, planningContentKind } from './identity.ts'
 
-/** 一个工作空间只有一个 Planning 事实源（不变量 1），因此一个绑定只需要一条同步游标。 */
+/** 一个工作空间只有一个 Planning 事实源（不变量 1），因此每个（工作区，绑定）只需要一条同步游标。 */
 export const PLANNING_SYNC_SCOPE = 'planning.project'
 const PAGE_LIMIT = 50
 /** 单次引导的页数上界（50 × 1000 = 5 万条）；与成环判定各自独立，任一命中都按不完整读取处理、不提交。 */
@@ -123,7 +123,7 @@ async function commitSync(
     // 提交成功即 healthy；有缺口只带错误码，不写 degraded（degraded / failed 留给什么都没提交的读取，D23）。
     const incomplete = synced.counts.unanchored > 0
     await tx.putSyncCursor({
-      bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined,
+      workspaceId: context.workspaceId, bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined,
       state: SyncState.Healthy, lastErrorCode: incomplete ? ProjectErrorCode.PermissionDenied : undefined,
     })
     return { revision, counts: synced.counts }
@@ -217,7 +217,7 @@ async function fail(
 ): Promise<BootstrapResult> {
   if (bindingId !== undefined) {
     await context.storage.putSyncCursor({
-      bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined,
+      workspaceId: context.workspaceId, bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined,
       state: SyncState.Degraded, lastErrorCode: error.code,
     })
   }
