@@ -56,8 +56,8 @@ ACCEPTED  B 下再登记同一个 I_shared（只能挂 B 自己的绑定）
 
   | 端口记录 | 作用域 | 结论 |
   |---|---|---|
-  | `SyncCursorRecord`（`getSyncCursor(workspaceId, bindingId, scopeKey)`） | **工作区级** | 连接级键会串台：ws-1 同步失败写 `degraded`，ws-2 随后成功写 `healthy`，ws-1 就显示 `healthy`（core 的 freshness 只读这一处，`packages/core/src/queries.ts` 的 `syncSummary`）。**已收口（2026-10-03，#189，`docs/exec-plan/active/2026-10-03-workspace-sync-scope.md`）**：记录带必需 `workspaceId`，SQLite 主键 `(workspace_id, binding_id, scope_key)`，工作区与连接两条外键各自独立、只证明父行存在，不证明已挂载（游标无 domain，连不到带 domain 的挂载键）；Core 成功事务、失败结算与 `syncSummary` 都显式传 `context.workspaceId`。旧两元主键的实验库在打开时由 `assertRewritten003Shape` 拒绝并关闭句柄，不升级也不删库。证据：经 `composeCore` 的生产链用例在 Fake 与 SQLite 上，两种失败时序与并发结算下 A 都保持 degraded，B 的结算不恢复 A |
-  | 观察账本（`recordObservation`） | **连接级** | 端口的去重键 `(bindingId, dedupeKey)` 与定序主体 `subject` 都是连接级的，账本因此按连接记账。代价是两个工作区共用一条连接时共享处理状态，收口条件同上 |
+  | `SyncCursorRecord`（`getSyncCursor(workspaceId, bindingId, scopeKey)`） | **工作区级** | 连接级键会串台：ws-1 同步失败写 `degraded`，ws-2 随后成功写 `healthy`，ws-1 就显示 `healthy`（core 的 freshness 只读这一处，`packages/core/src/queries.ts` 的 `syncSummary`）。**已收口（2026-10-03，#189，`docs/exec-plan/active/2026-10-03-workspace-sync-scope.md`）**：记录带必需 `workspaceId`，SQLite 主键 `(workspace_id, binding_id, scope_key)`，工作区与连接两条外键各自独立、只证明父行存在，不证明已挂载（游标无 domain，连不到带 domain 的挂载键）；Core 成功事务、失败结算与 `syncSummary` 都显式传 `context.workspaceId`。旧两元主键的实验库在打开时由 `assertRewritten003Shape` 拒绝并关闭句柄，不升级也不删库。证据：`tests/integration/workspace-sync-scope.test.js` 经 `composeCore` 在 Fake 与 SQLite 上跑两种失败时序与并发结算，A 都保持 degraded、B 的结算不恢复 A，并覆盖文件库重开与事务回滚；共享契约「同步游标：同连接同scope跨workspace隔离」与旧形状拒绝用例（`tests/integration/storage-sync-surface.test.js`）各自钉住键与守卫；终树负对照逐项变红，见该计划 Progress |
+  | 观察账本（`recordObservation`） | **连接级** | 端口的去重键 `(bindingId, dedupeKey)` 与定序主体 `subject` 都是连接级的，账本因此按连接记账。代价是两个工作区共用一条连接时共享处理状态，收口条件＝第一个多工作区宿主路径出现之前（#189 之前写作「同上」，指游标行的同一条件；没有承接 issue，登记为 `docs/exec-plan/tech-debt-tracker.md` 的 TD-022） |
   | `MutationAttemptRecord` | 工作区级 | 端口的键含 `workspaceId`，作用域一致 |
 
 - **未收口**：连接锚点的 `implementation_key` 之外没有账号级元数据（账号名、权限范围）；真实 provider 切片需要时再加列，发布前可整份重写（控制计划 D10）。
