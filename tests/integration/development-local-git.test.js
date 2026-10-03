@@ -2,7 +2,7 @@
  * 由 tests/contract/development-local-git-source.test.js 的源码扫描保证；夹具见 local-git-fixture.js。
  * 接进 core 供应序列的系统验收不在本层（#209 交付）。 */
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { after, test } from 'node:test'
@@ -282,6 +282,16 @@ test('拒绝：占用路径、被别处检出的分支与不可访问的目录�
   const denied = await provider.createWorktree({ repository: repositoryRef, path: path.join(blocked, 'wt'), branch: 'work/taken' })
   await chmod(blocked, 0o755)
   assert.equal(denied.error?.code, 'invalid_input', '不可访问的目标必须结构化拒绝，不能抛裸异常')
+})
+
+test('读取：仓库目录一时不可达报 unavailable，不是确定不存在的 not_found；目录回来后照常读回', async (t) => {
+  const fixture = await fixtureFor(t); const provider = providerFor(fixture)
+  await provider.createBranch({ repository: repositoryRef, name: 'work/away', fromRef: 'main' })
+  const created = await provider.createWorktree({ repository: repositoryRef, path: path.join(fixture.root, 'wt-away'), branch: 'work/away' })
+  const worktree = { bindingId: BINDING, objectKind: 'worktree', externalId: created.value.path, url: undefined }
+  await rename(fixture.repositoryPath, `${fixture.repositoryPath}-away`)
+  const away = await provider.getWorktree({ worktree }); await rename(`${fixture.repositoryPath}-away`, fixture.repositoryPath)
+  assert.deepEqual([away.ok, away.error?.code, (await provider.getWorktree({ worktree })).value?.branch], [false, 'unavailable', 'work/away'])
 })
 
 test('默认分支：无 origin/HEAD 时按本地事实推断，不用当前检出分支冒充', async (t) => {
