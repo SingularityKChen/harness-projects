@@ -34,6 +34,7 @@ interface BranchRecord {
   readonly name: string; readonly sha: string; readonly symbolic: boolean
 }
 const REFUSALS: readonly (readonly [RegExp, ProviderErrorCode, string])[] = [
+  [/cannot change to /i, ProviderErrorCode.Unavailable, 'Git 仓库目录暂时不可达'], // 先于 not_found：`git -C` 进不去仓库根是「此刻读不到」，不是「对象不存在」
   [/not a git repository|unknown revision|bad revision|needed a single revision|not a valid object name|could not get object info|does not exist|no such (file|branch|ref|remote)|ambiguous argument|invalid refspec|is not a working tree|is not a symbolic ref/i, ProviderErrorCode.NotFound, 'Git 找不到目标'],
   [/cannot lock ref .*cannot create|a branch named .* already exists|not a valid branch name|invalid branch name|not a valid ref/i, ProviderErrorCode.InvalidInput, 'Git 拒绝的引用名'],
   [/already exists|already used by worktree|is already checked out|could not create leading directories|not a directory/i, ProviderErrorCode.InvalidInput, 'Git 拒绝了工作树操作'],
