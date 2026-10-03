@@ -15,7 +15,7 @@
 
 ## Start Work 恢复（#183 / #184 / #165）
 
-四个文件组装 core，跑完整的 `startWork` 补偿序列（不触网）：前两个用离线 Development 替身，后两个（`local-git-*`）用 `mkdtemp` 临时仓库上的真实本地 Git provider：
+四个文件组装 core，跑完整的 `startWork` 补偿序列（不触网）：前两个用离线 Development 替身，后两个（`local-git-*`）用 `mkdtemp` 临时仓库上的真实本地 Git provider。用裸 ID（`wi-*`）开始工作的用例先经 `local-git-fixture.js` 的 `registerWorkItem` 登记成可操作的工作项（实体 + 当前工作区的 `work_item` 投影）；从规划种子取工作项的用例要再按 `content.contentKind === 'work_item'` 过滤（redacted 条目的 `kind` 也是 `work_item`）：
 
 | 文件 | 用例 | 保护的不变量 |
 |---|---|---|
@@ -35,7 +35,7 @@
 | | 一条 `has_worktree` | 恢复路径只写一条关系，且 `to` **精确等于**按 `(workspaceId, repositoryId, workItemId)` 算出的身份 |
 | | 身份只有一处派生 | 写入与投影必须派生出**同一个**身份：复刻真实 provider 的「句柄是规范化路径」形态后，读一次谱系不得多一条 confirmed 关系 |
 | | 身份不随路径变化 | 路径是属性不是身份：改 `worktreePath` 重试仍然只有一个工作树实体 |
-| | 身份的作用域是仓库 | 作用域是 `(workspaceId, repositoryId, workItemId)` 而**不是 binding**：把仓库读能力置为不可用，两侧仍然一致（binding 的解析有多个来源，两个 key 可以独立不可用） |
+| | 身份的作用域是仓库 | 作用域是 `(workspaceId, repositoryId, workItemId)` 而**不是 binding**：供应完成后把仓库读能力置为不可用（同一 Storage 上重组 core）再读谱系，两侧仍然一致（binding 的解析有多个来源，两个 key 可以独立不可用） |
 | | 两个仓库上的两份工作树 | 同一工作项在同一 binding 的两个仓库上各有一份工作树，是两个实体而不是一个 |
 | `local-git-start-work-resume.test.js` | 基线前进后换新键重试（R1） | 真实仓库：接管中断前建的分支、头提交不变；重试期间的 Git argv 里没有 `branch`、`main^{commit}`、`symbolic-ref`——「基线是否前进」不进入判定 |
 | | 能力不可用不抹掉分支（R2） | 已决定的分支身份写一次：记录与结果面都仍是 `work/<id>`，那一次不新写 `has_worktree`；恢复能力后在基线前进下仍 `ready` |
@@ -44,6 +44,35 @@
 | | 写入已落地但响应丢失（P2） | 分支多于一页时对账读完全部页，不把磁盘上已有的分支判成 `not_found`「创建未生效」 |
 
 **替身边界的如实说明**：`start-work-*` 两个文件用的是离线 Development 替身（外加一处最小的 `createBranch` 覆写，用来复刻真实 provider「同名分支指向别处」的拒绝语义），**不是**真实临时仓库。真实本地 Git 上的恢复与分页证据在 `local-git-start-work-resume.test.js` 与 `local-git-branch-probe.test.js`；四个文件都用离线 storage，SQLite 与进程重启仍归 #141（被 #137 / #120 阻塞）。「重启」在 R2 / R3 里只是「同一 storage、同一 workspace 换一套能力重新组装」。
+
+## Start Work 的前置登记（#187 / #188）
+
+`start-work-sqlite-registration.test.js` 经 `composeCore` + `commands.startWork`，在替身 Storage 与真实 SQLite 文件上各跑一遍（离线 Development / Execution 替身，不触网）。断言业务结果（外部增量、context 对应的 run、边与 attempt），SQLite 的外键完整只是必要条件。失败注入走测试侧的 Storage 包装（同时包根方法与事务里的 tx 代理，共用命中计数；除写后失败外还有「写不进去」与「事务里的关系写入被静默丢掉」两种形态），每个注入点都有命中计数与无故障正控：
+
+| 用例 | 保护的不变量 |
+|---|---|
+| 空仓库集合上开始工作 | 从未登记仓库的库上一次到位：挂载与 canonical 身份（角色 primary）、三个实体的种类、两条 confirmed 关系、`saved` 的 attempt、context 对应的 run；外部分支 / 工作树 / 运行各 +1；并且在同一次开始工作里，分支创建被调用的瞬间挂载与 Provisioning 上下文（带租约）已经提交、关系端点的实体已登记 |
+| 工作项守卫 | 未知、别的工作区、变更请求、被扣下的条目在任何写入之前被结构化拒绝（`not_found` / `not_found` / `invalid_input` / `unavailable`），零外部写入、零本地新增；有效工作项仍可开始 |
+| 只读的读能力 | 仓库读、工作树读为 `read_only` 时仍可开始工作：门表把读门误写成写门会误拒它们 |
+| ack 与能力门 | `getRepository` 失败、回显的 binding / 种类 / id 不符（`conflict`）、仓库读与工作树读不可用、工作树与分支创建只读、分支创建不可用，都在任何写入之前失败，新请求不落 Failed 上下文；能力门先于 ack |
+| 挂载冲突预检 | 同工作区同 id 已挂在别的外部身份上时 `conflict`，原挂载不变，零外部写入 |
+| 写前事务中途失败 | 注入 `putRepository`、或认领自己的写 `putExecutionContext` 写后失败：结构化 `unavailable`，整笔回滚（canonical 实体、身份、挂载、context 都不留），零外部写入；同一场景无故障时成功 |
+| 同一工作区的第二个工作项 | 在已登记的仓库上依次开始两个不同的工作项：都 `ready`，外部分支 / 工作树 / 运行各 +2，挂载与 canonical 仓库实体仍只有一个（预检的身份查找种类写错会把已挂载的仓库当成冲突） |
+| 两个工作区同一个仓库 | 一个 canonical 实体与身份、两个挂载，ws1 的上下文引用不被搬走 |
+| ack 之后本地写失败（五个注入点） | 注入 `putMutationAttempt` 第 1 次、`putRelation` 第 2 次（`has_worktree`，`tracks` 一并回滚）、`putExecutionContext` 第 2 次（分支步回填）、第 3 次（工作树步回填，写已生效、调用失败）与第 4 次（最终事务自己的 context 写，事务里第一写）：结构化 `unknown / result_unknown`（`confirmed=false`、`degraded=true`），context 停在 Provisioning 并保留已 ack 的句柄与租约，没有关系、attempt、run，`startRun` 0 次；Ready、两条关系与 attempt 同一个事务，最后一写失败则其余全部回滚，事务提交之后才发生的写（例如 Ready 挪到提交后）也抓得住；外部调用没有失败过，文案不带「原始失败」后缀；同场景无故障时 Ready（租约已清空）、两条 confirmed 关系、一条 `saved` 的 attempt |
+| 工作树步失败 | `Failed`、分支保留、只有 `tracks`（`has_worktree` 只由真实的工作树 ack 产生，不借分支句柄，#192）、失败也记 `failed` 的 attempt；结算的写失败时同样 Unknown 且整笔回滚 |
+| 失败结算的 Unknown 文案 | 工作树步、分支步被 provider 拒绝，再叠加结算的写失败：Unknown；有已 ack 的分支时文案说已 ack，没有任何 ack（分支步被拒，外部增量 `[0, 0, 0]`）时不称已 ack，两种情况都带上 provider 的原始失败（错误码与文案）；注入有命中计数与无故障正控 |
+| Ready 之后的重放与读取（run 记录缺失、run 状态未知、`has_worktree` / `tracks` 缺失或只是候选；另有完整与主执行 ack 为 `failed` 两个正控） | 同 key、新 key、关库重开后的新 key 与 `queries.getExecutionContext` 给出同一个答案：Unknown（`confirmed=false`、`degraded=true`，保留 Ready 与句柄），不起第二个 run、不补边、本地事实一字不改；Query 是本地纯读（包装全部 provider，零调用）。正控：完整的 Ready 在同样三条路径上稳定为 Saved，外部与本地快照逐字不变；主执行 ack 的是 `failed` 仍是已确认的运行（不从 `failed` 反推）；缺口文案都以「已 ready 的上下文（缺口描述）：」开头，缺口描述放进全角括号 |
+| run 的 ack 之后本地 run 记录写失败 / ack 的状态不是已知取值 | 首次即 Unknown，保留 Ready 与已 ack 的 run 句柄（供对账）；ack 的状态不是已知取值时文案陈述运行状态未知，不称本地写失败；之后三条路径都不起第二个 run；`putExecutionRun` 的注入有命中计数与无故障正控（恰好写一次） |
+| 同 key 重放先于预检 | 命中的 Failed / Unknown 首次报告原样返回，Ready 不提升它，完整性守卫也不改写它；工作项之后被扣下，同 key 重放仍走重放而不是 `unavailable` |
+| 租约内的在途 | 未过期的 Provisioning 不被完整性守卫改判（命令与 Query 都不判），没有再写外部；租约过期（可控时钟）后接管把序列做完，分支与工作树不重复，run 只起一次 |
+| 同 key 的 saved attempt 遇到 `failed` / `provisioning` 的记录 | 记录已不是 Ready（工作树消失后被判 Failed、被新 key 接管成在途）时，同 key 重放不再原样返回 Saved：Failed 报 `failed`，Provisioning 报在途（`pending`），连续两次重放一致 |
+| 接管时已有 run（主执行 ack 的状态未知，另一行接管时主执行不可用；主执行 ack 的是 `failed`；首次只落了人工降级） | 换新 key 接管 Failed 的上下文时，主执行可用（`startExecution`）与不可用（`manualFallback`）两条分支都不起第二个 run，接管的答案与它自己的重放、Query 一致：已有的 run 为 `unknown` 报 Unknown（带已有 run 的句柄，文案陈述运行状态未知）；主执行 ack 的 `failed` 是已确认的运行，报 Saved 并带回 run 句柄；人工降级如实带回 `fallback` 与 `degraded`；接管的结果面还比对分支与工作树句柄，两条 Unknown 的文案各钉住原因（首次路径「ack 的状态不是已知取值」、接管路径「已有的 run 记录是 unknown」） |
+| 主执行 `startRun` 失败时并发的写者刚落了 run 记录 | 并发的写者在主执行 `startRun` 里先落一条 run 记录再失败（替身与 SQLite 各一遍）：`manualFallback` 在降级之前再读一次已有的 run，保留并如实带回它——`saved`、不带 `fallback`、run 句柄是那条记录的，不起降级、也不用 failed 的降级记录覆盖它（把检查提到开头而删掉这一处的设计备选会覆盖它） |
+| Ready 的工作树读回（七行，#253 评审 P2 与复评） | 缺 run 记录的 Ready 遇到 `not_found` 也不读回、不改判（local Git 把仓库不可达也报成 `not_found`）；完整的 Ready 遇到读失败、权限被拒、没有读方法、读能力被策略关掉时保留 Ready、报 Unknown，命中的 Failed 首次报告原样返回；确定不存在或检出别的分支才判 Failed；每一行换新 key 接管都不起第二个 run |
+| 主执行 `startRun` 结果不确定（#253 评审 P2，ADR-0007） | 本地 run 记 `unknown`、不转人工降级，顶层 Unknown；同 key、新 key、重开与 Query 同一个答案；unknown 的 run 记录写不进去时仍是 Unknown 而不是拒绝 |
+| 工作树步结果不确定（#253 评审 P3 与复评） | 与分支步同一个对账出口：读回同路径、检出同一分支即照常 Ready，两条 confirmed 关系，不重建；读回失败报 Unknown；检出别的分支与 conflict 路径同判 Failed |
+| Development 绑定 id 变了（#253 评审 P2） | 规划绑定沿用、Development 换实例后，已挂载仓库上的新工作项在任何外部写入之前 `conflict`，文案点名「绑定 id 变了」（装配固定 bindingId 归 #228，TD-015） |
 
 ## 本地 Git provider（#137）
 
@@ -64,6 +93,7 @@
 | 默认允许根 | 允许根在**仓库检出内**的分量是符号链接时一律零调用被拒——指向被跟踪目录、`.git`、仓库之外都一样（判的是写法，不是解析结果）；`/.worktrees/` 幂等写进 `info/exclude`、不动 `.gitignore`、主检出 `status` 保持干净 |
 | 拒绝分类 | 占用路径、被别处检出的分支（前置判定必须自己点名原因）、不可访问（mode 000）目标都结构化拒绝，不伪造成功 |
 | 读取 | 默认分支注入优先、短 sha 读回规范提交、rev 形态被拒、外来 binding 冷拒 |
+| 仓库目录一时不可达（#253 第二轮复评） | `git -C` 进不去仓库根（「cannot change to」）报 `unavailable` 而不是 `not_found`：这是「此刻读不到」，不能让 core 把完整的 Ready 当成工作树确定丢失；目录回来后照常读回 |
 
 ## 本地 Git provider 接进 core（#207）
 

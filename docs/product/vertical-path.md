@@ -62,6 +62,8 @@ node --test tests/mvp0
 
 > 观察基线：2026-09-29 起草于 `main@f6a33d2`；2026-09-30 变基到 `main@699d715` 后重新核对，现基线是 `main@699d715`。两个提交之间的变动只涉及 Start Work 恢复与分支探测（core 的 `start-work.ts`、`git-provisioning.ts`，controller 的 `StartWorkView`，及相关集成用例），核对方法是：本节引用的用例在新基线上逐条回读，复现命令 P1、P3、P4、X1–X3 在新基线的 `git archive` 导出目录里重跑，观察值与原文一致；第 7 行与第 13 行按新增证据改写。本节只记录这个基线上的代码与用例事实，不随代码自动更新；关闭本节引用的 issue 的 PR，必须在同一 PR 里更新对应行与这个基线。
 
+**第 6、7 行与探针 P3、P4、X1 更新于 2026-10-01**，最后一次回读在 #253（#187 / #188：SQLite 开始工作的前置与谱系闭环，叠在 #251 仓库身份契约之上）合入前的最终树上（2026-10-02，第一轮 MVP 评审修订之后；rebase merge 会改写提交 SHA，所以不写分支提交，合入后在包含 #253 的 main 上按同样的命令重跑）：这两行引用的每个用例按下面的回读命令重跑（都能解析、全部通过，伪造前缀读回 `ℹ tests 0`），P3、P4、X1 在该检出上重跑，选取器改成按 `content.contentKind` 过滤（默认种子里 `kind` 为 `work_item` 的条目还包括内容被扣下的 `issue-3`，旧选取器随机命中它，观察值随之随机）。其余各行（第 1–5、8–13 行、附行、第 13 行的故障面表、探针 P1、X2、X3）**没有**在该检出上逐条回读，仍是上文 `main@699d715` 的基线，所以本节目前是混合快照，不是整体重新核对。已知过期但未改写：第 1 行 Provider 格的「没有任何用例把 core 组合在 SQLite Storage 上」与第 13.3 行的「`PermissionDenied` 经 core 只出现在执行域」在该检出上不再成立（`start-work-sqlite-registration` 经 `composeCore` 组合在 SQLite 上，并对 Development 的仓库读注入 `PermissionDenied`）。
+
 本节回答：§2 的每一步在产品里有没有**生产入口**、有没有经这个入口的成功与失败用例、外部那一端是替身还是真实 provider。它是证据，不是裁决：MVP-0 的判定条件与"断言落在哪一层才算数"由人类伙伴判定（§1、§3），本表只用下面的封闭词表，不使用裁决性措辞。
 
 **规则**
@@ -95,7 +97,7 @@ Node 版本：`package.json` 声明 Node ≥ 22，所以这条命令只用 `--te
 |---|---|
 | `mvp0` | `tests/mvp0/chain.test.js` |
 | `chain-bootstrap`、`controller-roundtrip`、`client-sync`、`delivery-lineage`、`status-policy`、`start-work`、`start-work-recovery`、`write-machine` | `tests/e2e/<简称>.test.js` |
-| `start-work-retry-identity`、`start-work-step-recording`、`human-execution-provider`、`local-git-core-provisioning`、`local-git-start-work-resume`、`local-git-branch-probe`、`execution-relation-write-schema` | `tests/integration/<简称>.test.js` |
+| `start-work-retry-identity`、`start-work-step-recording`、`start-work-sqlite-registration`、`human-execution-provider`、`local-git-core-provisioning`、`local-git-start-work-resume`、`local-git-branch-probe`、`execution-relation-write-schema` | `tests/integration/<简称>.test.js` |
 | `domain-identity`、`planning-contract`、`development-contract`、`ui-model-presentation` | `tests/contract/<简称>.test.js` |
 
 | # | 用户动作 | 生产入口 | 成功形态用例 | 失败形态用例 | Provider | 当前结论 | 承接 |
@@ -106,8 +108,8 @@ Node 版本：`package.json` 声明 Node ≥ 22，所以这条命令只用 `--te
 | 附 | Draft→Issue 提升（不是第 14 步，见表后说明） | 无；提升只发生在替身侧，`promoteEntityIdentity` 是 core 内部导出，只被测试调用 | domain-identity「身份：Draft→Issue 提升保持内部实体 id 不变」（旁证：纯函数）；chain-bootstrap「身份：Draft→Issue 提升只换外部 id」（旁证：直接调用 `promoteEntityIdentity`） | P1：替身侧提升之后，`bootstrapWorkspace` 新建了一个实体（entities 6 → 7，不是同一实体） | Planning 替身 | 未交付（附 P1 反例） | 无专门承接 issue，归属待人类伙伴决定 |
 | 4 | 查看工作项列表或 Board | `queries.listPlanningItems` → controller `baseline()`（即 `queries.snapshot`）→ client `sync.connect` / `sync.poll` | chain-bootstrap「引导：一个条目一个成员」「内容三态：redacted 条目」；controller-roundtrip「wire：快照只承载内部对象」；client-sync「client：基线 N」 | client-sync「client：降级来源的值只能是最后已知」；"缺能力显示为不可用"只有 ui-model-presentation「不变量：四态映射」（旁证：fixture）；重连期间迟到的基线把 client 从修订 2 退回修订 1，旧的规划状态仍报 current（#218，X3） | Planning 替身 + Storage 替身；Board 视图未交付 | 反例：#218（X3） | #218 #178 #145 |
 | 5 | 打开统一工作项详情 | `queries.getItemDetail`（core）；controller 只有从列表取的 `getEntity`，没有用例 | mvp0「节点 3 · 工作项」前半：详情回指同一 `entityId` 且恰好一个 primary 身份；status-policy「显式命令是唯一允许的联动」经 `getItemDetail` 读回规划状态 | 详情级陈旧标记没有经入口的用例（chain-bootstrap「降级：规划 provider 离线时」只经 `listPlanningItems`）；ui-model-presentation「展示：统一详情给出规划段」（旁证：fixture） | Planning 替身 | 部分：陈旧标记、controller 入口 | #178 #229 |
-| 6 | 对一个工作项执行"开始工作" | `commands.startWork`（core 与 controller） | start-work「重复开始：同一工作项」；controller-roundtrip「命令：同键重放返回原结果」；mvp0「节点 5 · 执行上下文」。mvp0「节点 4 · 开始工作」用占位 id、实际走失败分支，只断言未确认时不报 saved，不算成功用例 | start-work「开始工作：工作项或仓库形状不合法」只覆盖空白的工作项 id；X1：不存在的工作项报 `saved` 并落一条 ready 上下文（#196），不存在的仓库报 `failed` 但仍落一条 failed 上下文 | Execution 替身 + Development 替身 | 反例：#194（P4）；#196（X1） | #194 #196 |
-| 7 | 等待本地工作树与分支就绪 | `commands.startWork` 的供应序列（core 与 controller） | 经入口：start-work「重复开始：同一工作项」「工作树冲突：按幂等已存在资源复用」；start-work-recovery「中断后：Provisioning 上下文接管供应」；human-execution-provider「开始工作：工作树与分支真的落盘」（真实 Git，`composeCore` + `commands.startWork`）。旁证（core 的 `startWork` 函数 + 手工 `createContext` + 真实 Git，没有经 `composeCore` 与 `commands`，也没有 Planning 绑定）：local-git-start-work-resume「R1 基线前进后换新键重试」；local-git-branch-probe「接管：目标分支排在第一页之外时」；local-git-core-provisioning「core 复用：同一请求重试返回既有」只覆盖 `provisionGit`（旁证） | 工作树步失败落成 Failed 上下文：start-work-retry-identity「重试：可清除的失败之后」（经入口，替身）；结果不确定时不启动执行：write-machine「结果不确定：git 创建返回 ambiguous」（分支步，经入口）。旁证（同上，真实 Git 上跑 `startWork` 函数）：local-git-start-work-resume「R2 Development 能力不可用的失败」「R3 失败的尝试只保留已决定的分支」；local-git-branch-probe「对账：写入已落地但响应丢失」；local-git-core-provisioning「已 ready 上下文的工作树或分支消失后」；旁证（`provisionGit`）：local-git-core-provisioning「core 不得报成功：分支已被别处检出时」。脏工作树被拒绝没有用例（「工作树冲突」只断言复用、不覆盖），工作树步失败时不启动执行没有断言 | Development 替身；真实 `development-local-git` 只在 human-execution-provider 的集成用例里经 `composeCore` + `commands.startWork` 出现，其余真实 Git 用例分两档，都是旁证：`startWork` 函数上的完整供应序列（local-git-start-work-resume、local-git-branch-probe 与 local-git-core-provisioning 的 `startWork` 用例，手工 `createContext`，不是 `composeCore`），和只覆盖供应函数的 `provisionGit` 用例 | 部分：脏工作树拒绝；真实 Git 上的恢复与失败只有旁证 | #138 #183 #211 #213 #214 |
+| 6 | 对一个工作项执行"开始工作" | `commands.startWork`（core 与 controller） | start-work「重复开始：同一工作项」；controller-roundtrip「命令：同键重放返回原结果」；mvp0「节点 5 · 执行上下文」；start-work-sqlite-registration「空仓库集合上开始工作」（替身 Storage 与真实 SQLite 文件各一遍，经 `composeCore` + `commands.startWork`：从未登记仓库的库上一次到位，外部分支 / 工作树 / 运行各 +1，Ready、两条 confirmed 关系、`saved` 的 attempt 与 context 对应的 run）。mvp0「节点 4 · 开始工作」用占位 id、实际走失败分支，只断言未确认时不报 saved，不算成功用例 | start-work「开始工作：工作项或仓库形状不合法」（只覆盖空白的工作项 id）；start-work-sqlite-registration「工作项守卫」（未知 / 别的工作区 / 变更请求 / 被扣下的条目 → `not_found` / `not_found` / `invalid_input` / `unavailable`，零外部写入、零本地新增）与「ack 与能力门」（仓库不存在、ack 回显不符、能力缺失 → 结构化失败，不落执行上下文，同样零外部写入）；X1 在该检出上不再复现（不存在的工作项与仓库都 `failed / not_found`，没有执行上下文）。残余：同幂等键换请求仍报 `saved`（#194，P4）；Storage 端口层面悬空工作项的分歧仍在（直接 `putExecutionContext`：替身接受、SQLite 报裸外键错误，#196） | Execution 替身 + Development 替身；Storage 在替身与真实 SQLite 上各跑一遍 | 反例：#194（P4） | #194 #196 |
+| 7 | 等待本地工作树与分支就绪 | `commands.startWork` 的供应序列（core 与 controller） | 经入口：start-work「重复开始：同一工作项」「工作树冲突：按幂等已存在资源复用」；start-work-recovery「中断后：Provisioning 上下文接管供应」；human-execution-provider「开始工作：工作树与分支真的落盘」（真实 Git，`composeCore` + `commands.startWork`）；start-work-sqlite-registration「空仓库集合上开始工作」（替身与 SQLite：外部工作树与分支各 +1，`has_worktree` 关系由真实的工作树 ack 产生）与「租约内的在途」（租约过期后接管续跑，分支与工作树不重复）。旁证（core 的 `startWork` 函数 + 手工 `createContext` + 真实 Git，没有经 `composeCore` 与 `commands`，也没有 Planning 绑定）：local-git-start-work-resume「R1 基线前进后换新键重试」；local-git-branch-probe「接管：目标分支排在第一页之外时」；local-git-core-provisioning「core 复用：同一请求重试返回既有」只覆盖 `provisionGit`（旁证） | 工作树步失败落成 Failed 上下文：start-work-retry-identity「重试：可清除的失败之后」（经入口，替身）；结果不确定时不启动执行：write-machine「结果不确定：git 创建返回 ambiguous」（分支步，经入口）；start-work-sqlite-registration「工作树步失败」（替身与 SQLite：Failed、分支保留、只有 `tracks`、失败也记 attempt）、「ack 之后本地写失败」（Unknown、保留已 ack 的句柄、不起 run，Ready / 关系 / attempt 同一个事务）与「Ready 之后的重放与读取」（run 缺失或状态未知、必需边缺失或只是候选的 Ready，在同 key、新 key、关库重开与 Query 上都是 Unknown / `degraded`，不报健康 Saved，不起第二个 run）。旁证（同上，真实 Git 上跑 `startWork` 函数）：local-git-start-work-resume「R2 Development 能力不可用的失败」「R3 失败的尝试只保留已决定的分支」；local-git-branch-probe「对账：写入已落地但响应丢失」；local-git-core-provisioning「已 ready 上下文的工作树或分支消失后」；旁证（`provisionGit`）：local-git-core-provisioning「core 不得报成功：分支已被别处检出时」。脏工作树被拒绝没有用例（「工作树冲突」只断言复用、不覆盖），工作树步失败时不启动执行没有断言 | Development 替身；真实 `development-local-git` 只在 human-execution-provider 的集成用例里经 `composeCore` + `commands.startWork` 出现，其余真实 Git 用例分两档，都是旁证：`startWork` 函数上的完整供应序列（local-git-start-work-resume、local-git-branch-probe 与 local-git-core-provisioning 的 `startWork` 用例，手工 `createContext`，不是 `composeCore`），和只覆盖供应函数的 `provisionGit` 用例 | 部分：脏工作树拒绝；真实 Git 上的恢复与失败只有旁证 | #138 #183 #211 #213 #214 |
 | 8 | 启动或关联执行会话 | `startWork` 的执行段；`commands.cancelExecutionRun` 只在 core，controller 未暴露 | human-execution-provider「开始工作：工作树与分支真的落盘」：`composeCore` + 真实 `execution-human`，经 `queries.getExecutionContext` 读回 `runExternalId`；运行状态（running）由 `storage.getExecutionRun` 与 `provider.getRun` 读取（旁证） | start-work「执行启动失败：上下文」；human-execution-provider「执行起不来且没有 fallback 绑定」 | 替身 + 真实 `execution-human`、`development-local-git`（经 `composeCore`，临时仓库）；`execution-harness` 是占位包 | 部分：会话状态没有经查询的可见面（`ExecutionContextView` 没有运行状态字段） | #140 #215 |
 | 9 | 创建变更请求 | 无；core、controller、client 源码里没有创建变更请求的调用 | 无；mvp0 的 `chainFor` 与 delivery-lineage 的 `startChain` 直接调用 `providers.development.createChangeRequest` 种下变更请求，不计 | 无经入口的用例；development-contract「离线 Development 替身：创建结果不确定返回 ambiguous_result」是 provider 契约层（旁证），write-machine 的"结果不确定"用例注入的是分支创建 | 只有 provider 契约套件 | 未交付 | #235（被 #231 #204 阻塞） |
 | 10 | 查看 CI 状态 | `queries.getDeliveryProjection`（core）；controller 只转发 `getDeliveryLineage`，不转发投影的 `degraded` 与 `optional` | delivery-lineage「正向：真实链路走完后 CI 跳出现」；mvp0「节点 7 · CI」（两者的变更请求都由直接调用替身种下，TD-002）；controller 层没有用例 | P3：交付方离线后 CI 跳 5 → 0，只在投影级 `degraded`；没有经入口的失败用例 | Delivery 替身；`delivery-github-actions` 是占位包 | 反例：#221（P3） | #221 #222 #232 |
@@ -138,7 +140,7 @@ Node 版本：`package.json` 声明 Node ≥ 22，所以这条命令只用 `--te
 
 **与 `tests/mvp0` 七个节点的对应**：节点 1 → 第 1、2 行；节点 2 → 第 3、4 行；节点 3 → 第 3、5 行，且不执行提升（用例标题写"Draft→Issue 提升不换 id"，用例体没有提升；见 `docs/exec-plan/tech-debt-tracker.md` TD-001）；节点 4 → 第 6 行；节点 5 → 第 6、7 行；节点 6 → 第 11 行，变更请求由直接调用替身种下（TD-002）；节点 7 → 第 10、12 行。第 8、9、13 行与附行没有节点。结论：7 条全绿是 MVP-0 的必要条件，不是充分条件。
 
-**复现命令**：在装好依赖的 checkout 根目录运行；在 `.worktrees/<slug>` 下先确认 `import.meta.resolve('@harness-projects/core')` 落在本工作树。观察值在 `main@f6a33d2` 取得、`main@699d715` 上重跑相同，对应批次修复后应改变，改变时同 PR 更新本节。
+**复现命令**：在装好依赖的 checkout 根目录运行；在 `.worktrees/<slug>` 下先确认 `import.meta.resolve('@harness-projects/core')` 落在本工作树。观察值在 `main@f6a33d2` 取得、`main@699d715` 上重跑相同，对应批次修复后应改变，改变时同 PR 更新本节。P3、P4、X1 另在 #253 合入前的最终树上用新选取器重跑（2026-10-02，各 3 次，输出一致；更早一次在 B-3 的首个代码提交上各 6 次，输出相同）：P3、P4 的观察值不变，X1 的随开始工作的预检改变。
 
 ```bash
 # P1 Draft→Issue：替身侧提升后，生产同步路径新建实体（附行）
@@ -163,7 +165,7 @@ import { composeCore } from '@harness-projects/core'
 import { FaultKind, createFakeProviders, refOf } from '@harness-projects/provider-fake'
 const providers = createFakeProviders()
 const api = await composeCore({ workspace: { name: 'probe' }, providers })
-const workItemId = (await api.queries.listPlanningItems()).find((v) => v.kind === 'work_item').entityId
+const workItemId = (await api.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item').entityId
 const started = await api.commands.startWork({ workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' }, idempotencyKey: 'p3' })
 await providers.development.createChangeRequest({ repository: refOf(providers.development.gate.bindingId, 'repository', 'repo-alpha'), head: started.branchExternalId, base: 'main', title: 'p3', body: 'p3' })
 const scope = { workItemId, repositoryId: 'repo-alpha' }
@@ -182,7 +184,7 @@ node --input-type=module -e "
 import { composeCore } from '@harness-projects/core'
 import { createFakeProviders } from '@harness-projects/provider-fake'
 const api = await composeCore({ workspace: { name: 'probe' }, providers: createFakeProviders() })
-const [a, b] = (await api.queries.listPlanningItems()).filter((v) => v.kind === 'work_item')
+const [a, b] = (await api.queries.listPlanningItems()).filter((v) => v.content.contentKind === 'work_item')
 const req = (workItemId) => ({ workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' }, idempotencyKey: 'same-key' })
 await api.commands.startWork(req(a.entityId))
 const second = await api.commands.startWork(req(b.entityId))
@@ -191,19 +193,19 @@ console.log('second', second.writeState, '| context for b?', ctx !== undefined)
 "
 # 观察：second saved | context for b? false
 
-# X1 开始工作接受不存在的仓库与工作项（第 6 行失败列；不存在的工作项是 #196，不存在的仓库尚无 issue）
+# X1 开始工作对不存在的仓库与工作项的回答（第 6 行失败列；#253（#187 / #188）合入之前两者都落一条执行上下文，不存在的工作项还报 saved；Storage 端口层面的悬空工作项分歧仍是 #196）
 node --input-type=module -e "
 import { composeCore } from '@harness-projects/core'
 import { createFakeProviders } from '@harness-projects/provider-fake'
 const providers = createFakeProviders()
 const api = await composeCore({ workspace: { name: 'probe' }, providers })
-const item = (await api.queries.listPlanningItems()).find((v) => v.kind === 'work_item')
+const item = (await api.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item')
 const start = (workItemId, repositoryId, k) => api.commands.startWork({ workItemId, repositoryId, actor: { kind: 'agent' }, idempotencyKey: k })
 const noRepo = await start(item.entityId, 'no-such-repo', 'x1-a')
 const noItem = await start('no-such-item', 'repo-alpha', 'x1-b')
-console.log('no repo', noRepo.writeState, noRepo.error?.code, '| no item', noItem.writeState, noItem.status, '| contexts', providers.storage.data.contexts.length)
+console.log('no repo', noRepo.writeState, noRepo.error?.code, '| no item', noItem.writeState, noItem.error?.code, '| contexts', providers.storage.data.contexts.length)
 "
-# 观察：no repo failed not_found | no item saved ready | contexts 2（两次都落了执行上下文）
+# 观察：no repo failed not_found | no item failed not_found | contexts 0（两次都没有落执行上下文；#253 合入之前是 no item saved ready | contexts 2）
 
 # X2 存储拒绝观察时同步失败对读侧不可见（第 3 行失败列；#199）
 node --input-type=module -e "
