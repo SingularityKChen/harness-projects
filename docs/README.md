@@ -38,7 +38,6 @@
 | [2026-09-21-rule-checks-api-base](exec-plan/active/2026-09-21-rule-checks-api-base.md) | 判定输入改用 PR API 的对象对：判定固定到 `(base_sha, head_sha)` 两个不可变提交，含解析器失败策略与检查 job 的一致性 | Active |
 | [2026-09-21-merge-gate-layers](exec-plan/active/2026-09-21-merge-gate-layers.md) | Merge Gate 车道：integration / 包边界 / MVP-0 / E2E 四层各自成为一条 lane，空层与零用例层响亮失败 | Active |
 | [2026-09-22-engineering-merged-state](exec-plan/active/2026-09-22-engineering-merged-state.md) | 让合并事件真正写进 `Engineering`：修正 GraphQL 枚举误用导致的合并投影不可达，并补上按日的字段漂移观察 | Active |
-| [2026-10-01-engineering-reconcile-coverage](exec-plan/active/2026-10-01-engineering-reconcile-coverage.md) | 迭代 4 的 #249：幸存信号全候选重算、唯一串行写者与独立唤醒；Planning 状态保持人拥有 | Active；#259 / #257 已合入，合并后 event 运行与观察者回读完成，只剩第一次 schedule 运行的回读 |
 | [2026-09-22-content-placement](exec-plan/completed/2026-09-22-content-placement.md) | 流程知识的四桶归属（机械 / 技法 / 约定 / 一次性）与判定规则：给 §0 路由表的每个入口一个可机械核对的桶 | Completed |
 | [2026-09-22-status-field-writer](exec-plan/completed/2026-09-22-status-field-writer.md) | 给 `Status` 一个定义、一个写入口、一个防漂移的检查：语义收敛到 `board-semantics.md` 单一事实源、写入口写进交付流程、契约测试按「行 + 子句」设防 | Completed |
 | [2026-09-21-gate-e1-write-and-events](exec-plan/active/2026-09-21-gate-e1-write-and-events.md) | Gate E1 写确认与事件可靠性：实测平台无 CAS、事件订不到、重复创建幂等 | Active |
@@ -49,8 +48,9 @@
 
 | 计划 | 结论 |
 |---|---|
-| [2026-10-01-provider-binding-registration](exec-plan/completed/2026-10-01-provider-binding-registration.md) | 迭代 4 的 #197：四个外部 port 必需实现作者声明的静态 `definition`，同一连接可在一个工作区挂多个域；校验与快照都在写之前，工作区与全部挂载在一个事务里写入，ack 之后才发布 Registry；写目标、链读与取消按完整挂载路由，取消回到签发它的 Execution 挂载。经独立复核、验收与第一轮 MVP 评审修订（P1：与 main 组合后的夹具种类），#253 组合门已执行；Completed，待独立复评与合并决定 |
-| [2026-10-01-work-item-list-states](exec-plan/completed/2026-10-01-work-item-list-states.md) | 迭代 4 的 #129：只读工作项列表与共享读取状态组件——ui-model 唯一归约首次读取、真空快照、陈旧保行与六种不可用说明（读门未观测说尚未确认、读门已观测不可读说原因未提供，每种都写出还能做什么），redacted 行只剩占位；renderer 经真实 SSR、完整 browser bundle 与 320 / 768 / 1200 静态 fixture 验收，domain 新增纯值出口 `./values`。真实 Host 装配与动态播报归 #178 / #229，一条 redacted 新鲜度的设计取舍待人类裁决；经第一轮 MVP 评审修订后合并 |
+| [2026-10-01-engineering-reconcile-coverage](exec-plan/completed/2026-10-01-engineering-reconcile-coverage.md) | 迭代 4 的 #249：幸存信号全候选重算、唯一串行写者与独立唤醒——共享 reader 读 Project 页内嵌的完整关闭引用，观察者报出完整零残留；唯一全域 writer 写前算完全部期望、逐项新鲜复读、ack 匹配才算 confirmed，接入 `edited` 与独立 schedule，Planning 状态保持人拥有。两层栈 #259 → #257 经两轮修复复评后合并；合并后首次全域重算清空 8 条完整零残留，schedule 回读通过（频率远低于配置，TD-017），跟进 #261 |
+| [2026-10-01-provider-binding-registration](exec-plan/completed/2026-10-01-provider-binding-registration.md) | 迭代 4 的 #197：四个外部 port 必需实现作者声明的静态 `definition`，同一连接可在一个工作区挂多个域；校验与快照都在写之前，工作区与全部挂载在一个事务里写入，ack 之后才发布 Registry；写目标、链读与取消按完整挂载路由，取消回到签发它的 Execution 挂载。经独立复核、验收与第一轮 MVP 评审修订（P1：与 main 组合后的夹具种类），#253 组合门已执行；经两轮修复复评后合并 |
+| [2026-10-01-work-item-list-states](exec-plan/completed/2026-10-01-work-item-list-states.md) | 迭代 4 的 #129：只读工作项列表与共享读取状态组件——ui-model 唯一归约首次读取、真空快照、陈旧保行与六种不可用说明（读门未观测说尚未确认、读门已观测不可读说原因未提供，每种都写出还能做什么），redacted 行只剩占位；renderer 经真实 SSR、完整 browser bundle 与 320 / 768 / 1200 静态 fixture 验收，domain 新增纯值出口 `./values`。真实 Host 装配与动态播报归 #178 / #229，一条 redacted 新鲜度的设计取舍已裁决（D 为 UI 层规则、E 写进 #229 验收，见 #129 的决策评论）；经第一轮 MVP 评审修订后合并 |
 | [2026-10-01-start-work-sqlite-prerequisites](exec-plan/completed/2026-10-01-start-work-sqlite-prerequisites.md) | 迭代 4 的 #187 / #188 / #192：SQLite 上的开始工作首次走通——外部写入之前登记仓库挂载、canonical 身份与谱系端点；ack 之后 Ready、关系与账本同一事务，本地失败报 Unknown；残缺的 Ready 在重放、重开、接管与 Query 上都不报 Saved。003 原位改挂载键（D10）；经第一轮 MVP 评审修订后合并 |
 | [2026-10-01-repository-identity-contract](exec-plan/completed/2026-10-01-repository-identity-contract.md) | 迭代 4 的 #195：`repository` 成为合法的外部身份种类，未知种类在两个存储实现上写前以同一个 `RangeError` 拒绝；002 的 CHECK 原位扩为六值（D10，不写迁移）。Start Work SQLite 栈的栈底，经第一轮 MVP 评审修订后合并 |
 | [2026-10-01-board-auto-add-ruling](exec-plan/completed/2026-10-01-board-auto-add-ruling.md) | 看板第十条内置工作流 `Auto-add to project` 的裁决（#248）：按 §4 第 1 步开启，前提是过滤条件只含 issue、不含 PR，该前提只能人工核对；§5 表、`EXPECTED` 与契约测试同步为十条；Completed |
