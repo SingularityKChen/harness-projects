@@ -1,11 +1,9 @@
-#!/usr/bin/env node
 // 事件只负责唤醒 reconcile；GitHub 当前的 PR 真值才是 `Engineering` 的真值来源。
 //
 // 本文件是工程轴的**投影权威**：单快照投影 `stateForSnapshot` 与「同一 issue 被多个
-// PR 引用时谁说了算」的选择策略 `expectedFor` 都住在这里。写入口（本文件的 `main`）
-// 与漂移观察者（`engineering-drift.mjs`）共用这两者，因此两侧由构造一致（issue #115）。
-
-import { pathToFileURL } from 'node:url'
+// PR 引用时谁说了算」的选择策略 `expectedFor` 都住在这里。唯一写入口
+// （`reconcile-engineering-project.mjs` 的 `main`）与漂移观察者（`engineering-drift.mjs`）
+// 共用这两者，因此两侧由构造一致（issue #115）。
 
 export const OWNER = 'SingularityKChen'
 export const PROJECT_NUMBER = 10
@@ -38,7 +36,7 @@ export function setEngineeringState(value) {
   return Object.freeze(decision)
 }
 
-const CLEAR = Object.freeze({ kind: 'clear' })
+export const CLEAR = Object.freeze({ kind: 'clear' })
 
 export function stateForSnapshot(snapshot) {
   if (!snapshot || !PR_STATES.includes(snapshot.state)) {
@@ -74,7 +72,7 @@ export function stateForSnapshot(snapshot) {
 /**
  * 分页上限。超过就 fail closed，不把截断的输入当完整输入。
  *
- * 观察者读 Project 条目分页、写入口与观察者读一个 issue 的关闭引用分页都受这一对上限约束：
+ * 写入口与观察者读 Project 条目分页、读一个 issue 的关闭引用分页都受这一对上限约束：
  * 「读到一半」这件事对两者都是不可接受的输入。
  */
 export const MAX_PAGES = 5
@@ -253,49 +251,6 @@ export async function resolveProjectField({ gql, engineeringFieldId, owner = OWN
   return { projectId: project.id, fieldId: field.id, options: field.options }
 }
 
-/**
- * 读**触发事件的那个 PR** 的 `closingIssuesReferences`，解析出目标 project 上
- * 需要重算的条目。
- *
- * 它**不**读触发 PR 自己的快照：判定输入只有「该 issue 的完整关闭引用集合」
- * （见 `loadClosingPullRequests`），触发 PR 的快照在那份集合里同样会被读到并被
- * `expectedFor` 校验。留一个读取但从不参与判定的第二份快照，会让人误以为它仍然
- * 决定取值——那正是 issue #115 的成因。
- */
-export async function loadTriggerPullRequest({ gql, owner, repo, prNumber, projectId }) {
-  const data = await gql(
-    `query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){
-      pullRequest(number:$pr){
-        closingIssuesReferences(first:100){totalCount nodes{
-          number projectItems(first:100){totalCount nodes{id project{id}}}
-        }}
-      }
-    }}`,
-    { owner, repo, pr: prNumber },
-  )
-  if (!data.repository) throw new Error(`找不到 repository ${owner}/${repo}`)
-  const pullRequest = data.repository.pullRequest
-  if (!pullRequest) throw new Error(`找不到 pull request ${owner}/${repo}#${prNumber}`)
-
-  const issues = pullRequest.closingIssuesReferences?.nodes
-  if (!Array.isArray(issues)) throw new Error('PR snapshot 缺少 closingIssuesReferences')
-  if (pullRequest.closingIssuesReferences.totalCount !== issues.length) {
-    throw new Error('closingIssuesReferences snapshot 不完整')
-  }
-  const items = []
-  for (const issue of issues) {
-    if (!Array.isArray(issue?.projectItems?.nodes)) throw new Error('closing issue 缺少 projectItems')
-    if (issue.projectItems.totalCount !== issue.projectItems.nodes.length) {
-      throw new Error(`issue #${String(issue.number)} 的 projectItems snapshot 不完整`)
-    }
-    for (const item of issue.projectItems.nodes) {
-      if (item?.project?.id === projectId) items.push({ issue: issue.number, itemId: item.id })
-    }
-  }
-
-  return { items }
-}
-
 /** 一个 issue 的关闭引用 connection 的选择集：Project 页内嵌读取与逐 issue 续页共用这一份。 */
 export const CLOSING_REFERENCES_CONNECTION = `totalCount pageInfo{hasNextPage endCursor}
   nodes{id number repository{nameWithOwner} state merged isDraft reviewDecision createdAt}`
@@ -452,65 +407,4 @@ export async function writeEngineeringState({
     { projectId, itemId, fieldId, optionId: option.id, clientMutationId },
   )
   assertMutationAck(data.updateProjectV2ItemFieldValue, itemId, clientMutationId)
-}
-
-export async function main({ env = process.env, argv = process.argv, fetchImpl = fetch, log = console.log } = {}) {
-  if (!env.PROJECTS_TOKEN) throw new Error('未配置 PROJECTS_TOKEN')
-  if (!env.ENGINEERING_FIELD_ID) throw new Error('未配置 ENGINEERING_FIELD_ID（仓库变量 PROJECTS_ENGINEERING_FIELD_ID）')
-  if (!env.RECONCILE_ID) throw new Error('未配置 RECONCILE_ID')
-  const repository = parseRepository(env.GITHUB_REPOSITORY)
-  const prNumber = Number(argv[2])
-  if (!Number.isInteger(prNumber) || prNumber <= 0) {
-    throw new Error('用法：node scripts/sync-engineering-state.mjs <pr-number>')
-  }
-
-  const gql = createGraphQLClient({ token: env.PROJECTS_TOKEN, fetchImpl })
-  const field = await resolveProjectField({ gql, engineeringFieldId: env.ENGINEERING_FIELD_ID })
-  const trigger = await loadTriggerPullRequest({ gql, ...repository, prNumber, projectId: field.projectId })
-
-  if (trigger.items.length === 0) {
-    log(`PR #${prNumber} 没有通过 closing keyword 关联到目标 project item，无事可做。`)
-    return 0
-  }
-
-  // 每个条目按**它自己的**关闭引用集合取值：同一份策略、同一份输入形态，与漂移
-  // 观察者逐条一致。触发 PR 只是唤醒信号，不再是判定对象（issue #115）。
-  for (const item of trigger.items) {
-    const references = await loadClosingPullRequests({ gql, ...repository, issueNumber: item.issue })
-    const expected = expectedFor({ references })
-
-    // 触发 PR 必须出现在这份集合里。缺了它，剩下的引用仍可能给出一个看起来合法的
-    // 取值（例如清空），而那是「退回只按触发 PR 写」的镜像错误。
-    //
-    // 代价如实写清：**「下一次 PR 事件会重试」这个前提已被实测证伪**。
-    // `engineering-state.yml` 的 `concurrency: group: engineering-state-reconcile`
-    // （`cancel-in-progress: false`）只保留同组最新的一次待运行；2026-09-23 三个
-    // `ready_for_review` 在 8 秒内到达（09:24:25/27/30Z），三个 run（35842748362 /
-    // 35842751381 / 35842756820）全部 `cancelled`，字段停在它们还是 draft 时写下的
-    // `cleared`。事件本身会被丢掉，一次失败可能无限期停在错误取值上——与 issue #115
-    // 同形，只是机制换成了「事件被并发组丢掉」。补救入口是生产路径本身（幂等）：
-    // 对漂移条目所属的 PR 跑一次 `node scripts/sync-engineering-state.mjs <pr>`，
-    // 再跑观察者确认它不再出现在 `findings` 里。命令与回读期望见 ExecPlan
-    // 「评审响应（2026-09-23，根因修复）」一节。
-    if (!references.some((reference) => reference.number === prNumber)) {
-      throw new Error(
-        `issue #${item.issue} 的关闭引用里没有触发 PR #${prNumber}：引用读取可能不完整，拒绝在可能不完整的集合上写入`,
-      )
-    }
-
-    const decision = expected.value === null ? CLEAR : setEngineeringState(expected.value)
-    const clientMutationId = `${env.RECONCILE_ID}:${item.itemId}`
-    await writeEngineeringState({ gql, ...field, itemId: item.itemId, decision, clientMutationId })
-    const value = decision.kind === 'clear' ? 'cleared' : decision.value
-    log(`::notice::confirmed #${item.issue}: ${FIELD_NAME}=${value}; 依据 PR #${expected.prNumber}（规则 ${expected.rule}）; item=${item.itemId}; mutation=${clientMutationId}`)
-  }
-  log('Status 未被改动——规划状态与工程执行状态保持正交。')
-  return 0
-}
-
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  main().then((code) => process.exit(code)).catch((error) => {
-    console.log(`::error::${error.message}`)
-    process.exit(1)
-  })
 }

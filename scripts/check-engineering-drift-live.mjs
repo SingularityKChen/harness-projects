@@ -38,6 +38,11 @@ query EngineeringProjectItems($owner:String!,$number:Int!,$cursor:String){
   }
 }`
 
+const ITEM_QUERY = `
+query EngineeringProjectItem($itemId:ID!){
+  node(id:$itemId){... on ProjectV2Item{project{id} ${ITEM_FIELDS}}}
+}`
+
 /**
  * 执行一次实时观察。漂移存在、取数失败或快照不完整都返回 1；完整且无漂移返回 0。
  * fetch 与输出函数可注入，使契约测试保持离线。
@@ -238,6 +243,16 @@ export async function loadProjectEngineeringSnapshot({ gql, owner, projectNumber
 
   const view = viewOf(reads)
   return { ...view, counts: { pages, items: reads.length, referenceEdges: view.pullRequests.length, excluded: nodes.length - reads.length } }
+}
+
+/** 写前新鲜复读：用稳定 item id 重读 Project/Issue 身份、Engineering 与完整引用；item 移出、换 Issue 或来源不完整都失败。 */
+export async function loadIssueEngineeringSnapshot({ gql, projectId, fieldId, repository, itemId, issueId }) {
+  const { node } = await gql(ITEM_QUERY, { itemId })
+  if (node?.id !== itemId || node.project?.id !== projectId) throw new Error(`item ${itemId} 已不在目标 project，停止本轮`)
+  const read = await readItem({ gql, node, fieldId, repository })
+  if (read === null || read.item.issueId !== issueId) throw new Error(`item ${itemId} 的 Issue 已变化，停止本轮`)
+  const view = viewOf([read])
+  return { ...view, counts: { items: 1, referenceEdges: view.pullRequests.length } }
 }
 
 function requiredString(value, name) {
