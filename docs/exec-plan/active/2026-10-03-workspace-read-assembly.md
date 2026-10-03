@@ -1,6 +1,6 @@
 # Client 工作区读取生产链 ExecPlan
 
-> 状态：Active；本轮只完成 Batch 0，产品实施全部 pending。
+> 状态：Active；Batch 0–1 已完成，Batch 2–3 pending。
 > 创建：2026-10-03；关联 issue：[178](https://github.com/SingularityKChen/harness-projects/issues/178)。
 > 分支：`feature/workspace-read-assembly`；工作树：`.worktrees/workspace-read-assembly`；PR base：`main`。
 > 调度（调查快照）：P0 / M / 迭代 5（2026-10-15–21）/ M4 · MVP Demo：Harness 内打通 GitHub 链路；Superseded by Decision Log「人类规划启动与重排期」（2026-10-03）。
@@ -259,7 +259,15 @@ realpath核目标工作树；Git用argv/library；实施前盘点WireSnapshot/Wi
 - [x] (2026-10-03 21:34 CST) 独立spec审查pass：补row.source完整carrier、同接受点、时间边界、partial view纠正与#218隔离。
 - [x] (2026-10-03 21:52 CST) reviewer实跑 lint_execplan.py：OK；另核13章固定顺序、docs引用/索引存在性及相对路径，均pass。
 - [x] (2026-10-03 21:56 CST) Batch 0 文档门：linter通过，文档契约9/9、计划与索引路径、暂存区披露/体量和空白检查通过；产品验收未执行。
-- [ ] (2026-10-03 21:34 CST) Batch1：真实producer、Wire头与metadata红绿证据。
+- [x] (2026-10-03 22:23 CST) Batch1：真实producer、Wire头与metadata。红：`node --test tests/e2e/workspace-read-assembly.test.js` 5例全红（`snapshot.workspace` 为 undefined、same-revision poll 返回 undefined 而非 metadata）；绿：该文件5/5、`controller-roundtrip` 与 `ui-model-presentation` 通过，`pnpm run typecheck` 与 `pnpm verify`（1094+7）退出0；负对照4/4（见下表）；code 227/800。
+  负对照（WIP提交后逐个应用，`grep -n` 回读已生效，恢复后复绿）：
+
+  | 变异 | 命中的测试 | 结果 |
+  |---|---|---|
+  | watch 同revision恒返回 undefined（不发 metadata） | 来源降级与恢复；规范化比较 | 红 |
+  | 能力改为 flatMap 全部挂载后取最后一个 | 唯一挂载不被备用覆盖 | 红 |
+  | 去掉业务签名比较 | 业务变化 fail closed 为 gap | 红 |
+  | 签名不按 key 排序能力 | 能力顺序不同仍 idle | 红 |
 - [ ] (2026-10-03 21:34 CST) Batch2：client接受点、assembler、断网/time用例。
 - [ ] (2026-10-03 21:34 CST) Batch3：ui-model真源/partial/view与远端产品门。
 
@@ -267,6 +275,10 @@ realpath核目标工作树；Git用argv/library；实施前盘点WireSnapshot/Wi
 
 watch的same-revision分支吞掉source变化；只补assembler仍会把持续连接旧行显示current，必须有metadata通道。
 纯header metadata仍漏行freshness；完整row-source清单和view的read.reason规则一起调整，才能保留partial已确认行。
+Batch 1 发现：`registry` 只挂外部四域，storage 域没有挂载目标；按“无目标即unavailable”会对本地Storage说错，故 `getWorkspaceMetadata` 不报告 storage.* key（消费者对缺失 key 本就按 unavailable）。
+离线替身的执行备用不声明 `execution.run.fallback`，唯一挂载用例改以 `execution.run.cancel`（主不声明、备用声明）判别。
+`ui-model-presentation` 的字段面机械同形测试按 `interface X {` 解析，遇到 `extends WireWorkspaceHeader` 会找不到；解析器已跟随 extends 递归（测试侧改动）。
+Batch 1 为让 client 在同一提交内编译，sync 暂把 metadata 事件当缺口重拉基线（保守且正确）；Batch 2 换成精确的 metadata 接受点。
 #199仍可能错误生产healthy，本项忠实传输而不catchStorage producer；#218迟到baseline竞争仍开放，不悄悄加generation算法。
 无Storage时descriptor尚未确认；最终read undefined表达冷启动，不制造看似可用workspace。
 
@@ -279,6 +291,9 @@ Decision：time表示client最后成功接受当前值，connection另存；degr
 Decision：partial表降级不等于所有行stale，修view小范围消费者。Rationale：#70交接要求仍fresh行，不能只改client留下展示反例。Date/Author：2026-10-03 21:34 CST / 独立最终reviewer。
 Decision：不实现#218仲裁，未来拒迟到帧必须整帧拒头/time。Rationale：接口协作保留，同轮不暗中关闭独立竞争缺陷。Date/Author：2026-10-03 21:34 CST / 独立最终reviewer。
 Decision：本轮draft/标签/milestone/Project分类/ExecPlan/Batch复制现有Priority/Size/Iteration已授权，Status/blocking未授权。Rationale：工程索引不代替人规划。Date/Author：2026-10-03 21:34 CST / 用户明确范围。
+
+Decision：`getWorkspaceMetadata` 跳过 storage.* key，不报 unavailable。Rationale：registry 只有外部四域挂载，本地 Storage 能力不经路由；报 unavailable 会对正在读取的 Storage 说错，缺失 key 对消费者同为 unavailable。Date/Author：2026-10-03 22:23 CST / Sonnet implementer。
+Decision：watch 用“业务签名（实体去 source 后按 id 排序）+ 来源签名（头、能力按 key、逐行 source）”两个规范化签名判定同revision：业务变化→gap，仅来源变化→metadata，全同→idle。Rationale：把“不得借 metadata 改业务”落在比较函数上，而不是靠 store 兜底；签名不含时钟，不会永不 idle。Date/Author：2026-10-03 22:23 CST / Sonnet implementer。
 
 ## Idempotence and Recovery
 
@@ -311,3 +326,5 @@ Change Note (2026-10-03 21:52 CST)：补canonical三参数intersect调用，独�
 Change Note (2026-10-03 21:56 CST)：主执行者全文复核并运行文档契约与独立路径/暂存扫描，记录Batch 0文档门；后续产品批次保持pending。
 
 Change Note (2026-10-03 22:08 CST)：记录人类在Project上的规划启动与#178重排期确认；保留原调查调度快照并明确取代，产品实施仍pending。
+
+Change Note (2026-10-03 22:23 CST)：Batch 1 完成：Core 元数据查询、Wire 头/metadata 事件、watch 同revision判定与4项负对照落账；文件集无新增（client/sync.ts 的编译补丁在集合内）。

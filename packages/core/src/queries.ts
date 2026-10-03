@@ -1,12 +1,16 @@
 /**
  */
 import {
+  AccessLevel,
+  CapabilityDomain,
   CapabilityKey,
   SyncState,
+  bindingForCapability,
   singlePlanningBinding,
+  type EffectiveCapability,
   type ProviderBindingRecord,
 } from '@harness-projects/capabilities'
-import { IdentityRole, type EntityId, type ExternalIdentity } from '@harness-projects/domain'
+import { IdentityRole, type EntityId, type ExternalIdentity, type WorkspaceId } from '@harness-projects/domain'
 import { gateCommand } from './capabilities.ts'
 import { PLANNING_SYNC_SCOPE } from './bootstrap.ts'
 import type { CoreContext } from './context.ts'
@@ -21,6 +25,12 @@ import {
   type SyncSummary,
 } from './projection.ts'
 
+/** 工作区读取的元数据：descriptor 来自已确认的 Storage 记录，能力来自本 Core 已确认的 registry；不含实例或凭据。 */
+export interface WorkspaceMetadata {
+  readonly workspace: { readonly id: WorkspaceId; readonly name: string } | undefined
+  readonly capabilities: readonly EffectiveCapability[]
+}
+
 export interface CoreQueries {
   listProviderBindings(): Promise<readonly ProviderBindingRecord[]>
   listPlanningItems(): Promise<readonly PlanningItemView[]>
@@ -28,6 +38,7 @@ export interface CoreQueries {
   getExecutionContext(query: ExecutionContextQuery): Promise<ExecutionContextView | undefined>
   /** 工作区级规划新鲜度：与逐条 freshness 同源；没有条目时它是表达「不完整 / 权限缺口」的唯一载体。 */
   getPlanningSync(): Promise<SyncSummary>
+  getWorkspaceMetadata(): Promise<WorkspaceMetadata>
   /** 交付投影：链路事实 + 能力状态 + 新鲜度；只读，不触发任何外部写入。 */
   getDeliveryProjection(scope: DeliveryScope): Promise<DeliveryProjection>
   /** 工作项 → 执行上下文 → 分支 → 提交 → 变更请求 → CI 的可查询谱系。 */
@@ -61,6 +72,7 @@ export function createQueries(context: CoreContext): CoreQueries {
 
     getExecutionContext: (query) => readExecutionContext(context, query),
     getPlanningSync: () => syncSummary(context),
+    getWorkspaceMetadata: () => workspaceMetadata(context),
     getDeliveryProjection: (scope) => getDeliveryProjection(context, scope),
 
     async getDeliveryLineage(scope: DeliveryScope): Promise<readonly DeliveryLineageHop[]> {
@@ -82,6 +94,20 @@ async function syncSummary(context: CoreContext): Promise<SyncSummary> {
   }
   // 提交成功但有缺口：healthy 加 lastErrorCode，读取层 degraded，本次确认的行不 stale（D23）。
   return { degraded: cursor.lastErrorCode !== undefined, stale: false, reason: cursor.lastErrorCode }
+}
+
+/**
+ * 逐个已知 key 按 `bindingForCapability` 路由到唯一挂载并读取其已求交的 access；没有目标的 key 明确 unavailable，不让备用覆盖主目标。
+ * storage 域不经外部挂载，registry 里没有它的目标，因此不在此报告（报 unavailable 会说错）。
+ */
+async function workspaceMetadata(context: CoreContext): Promise<WorkspaceMetadata> {
+  const record = await context.storage.getWorkspace(context.workspaceId)
+  const keys = Object.values(CapabilityKey).filter((key) => !key.startsWith(`${CapabilityDomain.Storage}.`))
+  return {
+    workspace: record === undefined ? undefined : { id: record.id, name: record.name },
+    capabilities: keys.map((key) => bindingForCapability(context.registry, key)?.capabilities.find((entry) => entry.key === key)
+      ?? { key, access: AccessLevel.Unavailable, reason: `没有挂载提供能力 ${key}`, bindingId: undefined, externalActionUrl: undefined }),
+  }
 }
 
 async function primaryIdentity(context: CoreContext, entityId: EntityId): Promise<ExternalIdentity | undefined> {

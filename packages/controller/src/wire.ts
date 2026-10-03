@@ -6,10 +6,11 @@
  */
 import { ContentKind } from '@harness-projects/domain'
 import type {
-  DerivedFlag, EntityId, EntityKind, ExternalIdentityKind, NormalizedStatus, ProviderBindingId,
+  AccessLevel, DerivedFlag, EntityId, EntityKind, ExternalIdentityKind, NormalizedStatus, ProviderBindingId, WorkspaceId,
 } from '@harness-projects/domain'
+import type { CapabilityKey } from '@harness-projects/capabilities'
 import { StatusPolicyMode } from '@harness-projects/core'
-import type { PlanningItemView, SyncSummary } from '@harness-projects/core'
+import type { PlanningItemView, SyncSummary, WorkspaceMetadata } from '@harness-projects/core'
 
 export const WireFreshness = { Fresh: 'fresh', Degraded: 'degraded' } as const
 export type WireFreshness = (typeof WireFreshness)[keyof typeof WireFreshness]
@@ -55,17 +56,34 @@ export interface WireEntity {
   readonly source: SourceMetadata
 }
 
-export interface WireSnapshot {
-  readonly revision: number
-  readonly entities: readonly WireEntity[]
+export interface WireWorkspaceDescriptor { readonly id: WorkspaceId; readonly name: string }
+
+/** 能力项只传 key / 最终 access / 原因：不带绑定、实例或凭据。 */
+export interface WireCapabilityEntry { readonly key: CapabilityKey; readonly access: AccessLevel; readonly reason: string | undefined }
+
+/** 每个可接受帧都带的整表头；`workspace` 为 undefined = 尚无已确认的 descriptor（没有 Storage），不是"没有工作区名"。 */
+export interface WireWorkspaceHeader {
+  readonly workspace: WireWorkspaceDescriptor | undefined
+  readonly capabilities: readonly WireCapabilityEntry[]
   readonly source: SourceMetadata
 }
 
-export interface WireDelta {
+export interface WireSnapshot extends WireWorkspaceHeader {
+  readonly revision: number
+  readonly entities: readonly WireEntity[]
+}
+
+export interface WireDelta extends WireWorkspaceHeader {
   readonly previousRevision: number
   readonly revision: number
   readonly upserts: readonly WireEntity[]
   readonly removed: readonly EntityId[]
+}
+
+/** 同 revision 的来源变化载体：只带头与逐行 source，不带 content / status / derived，也不能增删行。 */
+export interface WireWorkspaceMetadata extends WireWorkspaceHeader {
+  readonly revision: number
+  readonly entities: readonly { readonly entityId: EntityId; readonly source: SourceMetadata }[]
 }
 
 export interface WireGap {
@@ -76,6 +94,7 @@ export interface WireGap {
 
 export type WireEvent =
   | { readonly kind: 'delta'; readonly delta: WireDelta }
+  | { readonly kind: 'metadata'; readonly metadata: WireWorkspaceMetadata }
   | { readonly kind: 'gap'; readonly gap: WireGap }
 
 function metadataOf(view: PlanningItemView, authority: WireAuthority): SourceMetadata {
@@ -115,6 +134,7 @@ export function revisionOf(entities: readonly WireEntity[]): number {
 /** 整表新鲜度取工作区级同步摘要：与逐条 freshness 同源，没有实体时也成立（不再恒为 fresh）。 */
 export function toWireSnapshot(
   views: readonly PlanningItemView[], authority: WireAuthority, workspaceRevision: number | undefined, sync: SyncSummary,
+  metadata: WorkspaceMetadata,
 ): WireSnapshot {
   const entities = views
     .map((view) => toWireEntity(view, authority))
@@ -123,6 +143,8 @@ export function toWireSnapshot(
   return {
     revision,
     entities,
+    workspace: metadata.workspace,
+    capabilities: metadata.capabilities.map(({ key, access, reason }) => ({ key, access, reason })),
     source: {
       revision,
       authority,
@@ -140,5 +162,24 @@ export function diffSnapshots(previous: WireSnapshot, next: WireSnapshot): WireD
   const upserts = next.entities.filter((entity) => before.get(entity.entityId) !== signature(entity))
   const after = new Set(next.entities.map((entity) => entity.entityId))
   const removed = previous.entities.filter((entity) => !after.has(entity.entityId)).map((entity) => entity.entityId)
-  return { previousRevision: previous.revision, revision: next.revision, upserts, removed }
+  const { workspace, capabilities, source } = next
+  return { previousRevision: previous.revision, revision: next.revision, upserts, removed, workspace, capabilities, source }
+}
+
+export function toWireMetadata(snapshot: WireSnapshot): WireWorkspaceMetadata {
+  const { revision, workspace, capabilities, source } = snapshot
+  return { revision, workspace, capabilities, source, entities: snapshot.entities.map(({ entityId, source }) => ({ entityId, source })) }
+}
+
+const byId = (left: WireEntity, right: WireEntity): number => (left.entityId < right.entityId ? -1 : 1)
+
+/** 同 revision 下"业务内容"的规范化签名：实体按 id 排序、去掉逐行 source；它变化就不是来源更新。 */
+export function businessSignature(snapshot: WireSnapshot): string {
+  return JSON.stringify([...snapshot.entities].sort(byId).map(({ source: _source, ...business }) => business))
+}
+
+/** 整表头与逐行 source 的规范化签名（能力按 key 排序）；不含当前时钟，完全相同才 idle。 */
+export function sourceSignature(snapshot: WireSnapshot): string {
+  const capabilities = [...snapshot.capabilities].sort((left, right) => (left.key < right.key ? -1 : 1))
+  return JSON.stringify([snapshot.workspace, capabilities, snapshot.source, [...snapshot.entities].sort(byId).map((entity) => [entity.entityId, entity.source])])
 }

@@ -59,6 +59,9 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       const event = await transport.poll(store.revision)
       if (event === undefined) return { kind: 'idle', revision: store.revision, reason: undefined }
       if (event.kind === 'gap') return recover(event.gap)
+      if (event.kind === 'metadata') {
+        return recover({ requestedAfter: store.revision, currentRevision: event.metadata.revision, reason: '同修订的来源变化：重拉基线' })
+      }
       if (event.delta.previousRevision !== store.revision) {
         return recover({
           requestedAfter: store.revision,
