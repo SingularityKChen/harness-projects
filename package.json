@@ -11,9 +11,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/contract tests/integration tests/e2e",
+    "test": "node --test --test-timeout=120000 tests/contract tests/integration tests/e2e",
     "test:contract": "node --test tests/contract",
-    "test:mvp0": "node --test tests/mvp0",
+    "test:mvp0": "node --test --test-timeout=120000 tests/mvp0",
     "boundaries": "node --test tests/contract/package-boundaries.test.js",
     "check:policy": "node scripts/policy-check.mjs",
     "verify": "pnpm run typecheck && pnpm run test && pnpm run test:mvp0"
