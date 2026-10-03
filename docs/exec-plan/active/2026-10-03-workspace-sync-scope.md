@@ -1,6 +1,6 @@
 # 工作区同步游标作用域 ExecPlan
 
-> 状态：Active；Batch 0 与 Batch 1 已完成，Batch 2 待实施。
+> 状态：Active；Batch 0、Batch 1、Batch 2 实施已完成，待指定验收者验收与人类评审。
 > 创建：2026-10-03；关联 issue：[189](https://github.com/SingularityKChen/harness-projects/issues/189)。
 > 分支：`fix/workspace-sync-scope`；工作树：`.worktrees/workspace-sync-scope`；PR base：`main`。
 > 调度：P0 / M / 迭代 4（2026-10-08–14）/ M2.1 · 发布前事实所有权收敛。
@@ -133,7 +133,7 @@ reviewer 独立读关键路径，核对 webhook 现状，拒绝字符串编码�
 没有 `rule-checks doclinks` 命令；契约覆盖范围有限，另逐条核本计划 `docs/` 引用和索引链接的存在性。
 回滚点：Batch 0 开始时的干净工作树；仅撤销本轮两个文档文件，保留其他会话内容。
 
-### Batch 1 · 三元键贯通与判别测试（pending）
+### Batch 1 · 三元键贯通与判别测试（已实施）
 
 最小闭环：同连接不同工作区健康度独立；主文件为 `packages/capabilities/src/storage.ts`、`packages/providers/fake/src/storage.ts`、`packages/storage/sqlite/src/storage-sync.ts`、`packages/core/src/bootstrap.ts`、`packages/core/src/queries.ts`。
 先在共享同步套件加 ws-a / ws-b 同 binding 同 scope 用例，在旧实现上记录错误覆盖导致红。
@@ -151,7 +151,7 @@ reviewer 独立读关键路径，核对 webhook 现状，拒绝字符串编码�
 期望：共享套件两实现全绿，跨工作区新增测试非零且 A 状态/原因不随 B 改变；边界检查全绿。
 回滚点：Batch 0 文档提交；回退整批端口/schema/Core/test单元，不单独回退列或 mapper，不删除实验库。
 
-### Batch 2 · 重启、回滚与发布面收口（pending）
+### Batch 2 · 重启、回滚与发布面收口（已实施，待验收）
 
 最小闭环：三元键持久化与事务恢复可复现；主文件为 `packages/storage/sqlite/src/source-version-carrier.ts`、`tests/integration/storage-sync-surface.test.js`、`tests/integration/execution-relation-write-schema.test.js`、`tests/integration/workspace-sync-scope.test.js`（将新建）、`docs/adr/ADR-0006-connection-anchor-and-workspace-mount.md`。
 写两个工作区不同状态到临时 SQLite 文件，关闭后重开，逐字读回；事务内写 A 后主动抛错，A/B旧值均保持。
@@ -228,13 +228,29 @@ reviewer 独立读关键路径，核对 webhook 现状，拒绝字符串编码�
     | Fake 删除工作区父行检查 | 契约悬空父行 | 1 红 |
     | SQLite 去掉 workspace 外键 | 契约悬空父行 + schema 外键用例 | 2 红 |
 
-- [ ] (2026-10-03 21:34 CST) Batch 2：重启/事务/负对照与远端产品验收。
+- [x] (2026-10-03 22:45 CST) Batch 2：重启、回滚、旧形状拒绝与 ADR 收口（实施侧；远端产品验收尚未执行）。基于 Batch 1 提交，`.worktrees/workspace-sync-scope`。
+  - RED：新增旧形状用例后，`node --test tests/integration/storage-sync-surface.test.js` 该用例因 `createSqliteStorage` 未抛错而红（`actual: undefined`，`expected: /sync_cursor 的主键不是 \(workspace_id, binding_id, scope_key\)/`）；重启与回滚用例是对 Batch 1 实现的验收，当时即绿，其判别力由下表变异证明。
+  - GREEN：`assertRewritten003Shape` 增加 `sync_cursor` 主键按 `pk` 顺序等于 `workspace_id,binding_id,scope_key` 的判定，错误文案补充处置（程序不升级、不删库）；`execution-relation-write-schema.test.js` 增加三元主键两工作区各一行、同三元键重复被拒的对照，保留 webhook 四元键两工作区用例；ADR-0006 游标行原地改为已收口并附证据，其他未收口行未动。
+  - 验证：`node --test tests/integration/storage-source-version-upgrade.test.js tests/integration/execution-relation-write-schema.test.js tests/integration/storage-sync-surface.test.js tests/integration/workspace-sync-scope.test.js tests/e2e/chain-bootstrap.test.js` 全部通过；`pnpm run typecheck`、`pnpm run boundaries` 通过；扩大到 `pnpm run test` 1107 通过 / 0 失败、`pnpm run test:mvp0` 7 通过；`node scripts/rule-checks.mjs size origin/main` 代码 286 / 文档约 305（上限 800 / 1300），`disclosure` 与 `git diff --check origin/main...HEAD` 通过。
+  - 负对照（先 WIP 提交，`git diff --quiet` 为空，`grep -n` 打印变异行，红后 `git checkout -- <file>` 并复核干净）：
+
+    | 变异 | 判别测试 | 结果 |
+    |---|---|---|
+    | 形状守卫整体去掉游标主键判定 | 旧形状用例 | 1 红 |
+    | 守卫只看主键含 workspace_id | 旧形状用例（顺序错变体） | 1 红 |
+    | 守卫只看主键列数为 3 | 旧形状用例（顺序错变体） | 1 红 |
+    | 打开自检失败时不关闭句柄 | 旧形状用例与既有 fd 用例 | 2 红 |
+    | Fake 事务抛错仍提交草稿 | 回滚用例（Fake） | 1 红 |
+    | SQLite 事务抛错改为 COMMIT | 回滚用例（SQLite） | 1 红 |
+    | SQLite 主键、冲突目标去 workspace 并放宽守卫 | 重启读回、生产链、并发 | 重启用例读回 A 为 B 的值而红 |
+
 
 ## Surprises & Discoveries
 
 webhook 已含 workspace 四元键，历史 issue描述不能变成重复工作；证据是003 DDL与 execution-relation-write-schema 的两工作区用例。
 (2026-10-03 22:25 CST) 切分守卫的用例总数 `ADDED_CASE_COUNT` 在 `tests/contract/suites/storage.js`，不在文件集；因此隔离用例没有放进 `storage-sync.js`，而是放进 `storage-contract.test.js` 内已装配到 Fake 与 SQLite 同步组的 `sharedSyncSuite`，同样在两个适配器各注册一次，且不扩大文件集。
 (2026-10-03 22:25 CST) 003 列白名单审计的标题写 63 列、断言写 65 列，已是陈旧不一致；新增 `sync_cursor.workspace_id` 后实测 66 列，标题与断言一并订正为 66。
+(2026-10-03 22:45 CST) 守卫只比较 `sync_cursor` 主键列名串，而不是只数列或只看有无 workspace 列：只看有无列判不出「有列但主键仍两元」，只数列判不出「三元但顺序错」。
 (2026-10-03 22:25 CST) 并发用例证明 SQLite 与 Fake 在两个工作区各自结算、后结算方不同的四个组合下都留两条游标；旧实现下它们表现为后写覆盖先写。
 #199 的 sourceVersion Storage拒绝会留下旧 healthy，是独立 producer问题；这里不能通过加工作区键冒充修复。
 主分支在调查后推进的是文档与工程reconcile归档，产品代码未动；实施仍须重新锁当前refs。
@@ -247,7 +263,7 @@ Decision：选择三元游标键，拒绝新增健康表和scope字符串编码�
 Decision：三个本轮 PR 独立 main；共享Storage文件单owner串行整合。Rationale：存在编辑冲突而无能力发布前置，不建立伪blocked-by。Date/Author：2026-10-03 21:34 CST / 用户范围与独立reviewer。
 Decision：本轮仅文档与draft交付。Rationale：用户要求先多设计者及独立修订，实施待下一道门。Date/Author：2026-10-03 21:34 CST / 用户授权。
 Decision：隔离契约用例放入 `sharedSyncSuite`，故障注入用 Proxy 包住共享 planning provider 的 `getProject`、按工作区开关与闸门，而不是改 Fake provider。Rationale：不扩大文件集、不改 Fake provider 公共面，且闸门能决定并发时两个结算的先后。Date/Author：2026-10-03 22:25 CST / Sonnet implementer。
-Decision：形状守卫等 Batch 2 再扩，Batch 1 仅让合法新 schema 打开；003 在 Batch 1 已原位重写。Rationale：计划把守卫放在 Batch 2；Batch 1 之后旧形状实验库的游标写入会以驱动级缺列失败，Batch 2 把它换成打开时的显式拒绝；该库未发布，不写兼容（D10）。Date/Author：2026-10-03 22:25 CST / Sonnet implementer。
+Decision：形状守卫在 Batch 2 扩展，003 在 Batch 1 已原位重写。Rationale：计划把守卫放在 Batch 2；Batch 1 之后旧形状实验库的游标写入会以驱动级缺列失败，Batch 2 把它换成打开时的显式拒绝；该库未发布，不写兼容（D10）。Date/Author：2026-10-03 22:25 CST / Sonnet implementer。
 Decision：允许 draft PR、标签/milestone与Project分类/ExecPlan/Batch复制已有Priority/Size/Iteration；未授权Status/blocking。Rationale：机械分类与人拥有规划状态分开。Date/Author：2026-10-03 21:34 CST / 用户明确范围。
 
 ## Idempotence and Recovery
@@ -268,7 +284,7 @@ Next gate：Batch 0 文档门后可交付draft；实施门是精确主线回读�
 
 ## Outcomes & Retrospective
 
-当前结果是通过独立设计审查的实施规格，尚无游标修复代码；issue保持开放、计划Active、PR保持draft。
+三元键实现、判别测试与旧形状守卫已在分支落地并通过实施侧验证；尚未经指定验收者验收与人类评审，issue保持开放、计划Active、PR保持draft。
 现有技术债tracker未修改；#198/#199/#221及Gate E1/R1裁定均不在本轮关闭范围。
 产品实施完成后用实际证据替换本节，核对技术债与验收表，再按PLANS移至completed并更新索引。
 
@@ -282,3 +298,5 @@ Change Note (2026-10-03 21:56 CST)：主执行者全文复核并运行文档契�
 Change Note (2026-10-03 22:08 CST)：记录人类在Project上的规划启动与#178重排期确认；保留原调查调度快照并明确取代，产品实施仍pending。
 
 Change Note (2026-10-03 22:25 CST)：Batch 1 完成并落账，含 RED/GREEN、八项负对照与扩大验证；Batch 2 保持 pending。
+
+Change Note (2026-10-03 22:45 CST)：Batch 2 完成并落账（旧形状守卫、重启与回滚用例、schema 对照、ADR-0006 游标行收口、六项负对照）；远端回读与验收未执行。

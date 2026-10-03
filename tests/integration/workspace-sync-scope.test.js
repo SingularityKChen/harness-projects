@@ -4,6 +4,9 @@
  * 在内存替身与 `:memory:` SQLite 上同形运行；用例名说明它保护哪条不变量，不重复共享契约套件已证明的键语义。
  */
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { providerErr, providerError } from '@harness-projects/capabilities'
@@ -94,4 +97,42 @@ for (const [label, makeStorage] of STORAGES) {
       })
     }
   }
+}
+
+// 持久化与事务面：游标记录直接走 Storage 端口，不经 Core；父行只走端口建。
+const cursor = (workspaceId, overrides = {}) => ({ workspaceId, bindingId: 'binding-1', scopeKey: PLANNING_SYNC_SCOPE, cursorValue: `cursor-${workspaceId}`,
+  state: 'healthy', lastErrorCode: undefined, ...overrides })
+const A = cursor('ws-a', { state: 'degraded', lastErrorCode: 'unavailable', cursorValue: undefined }); const B = cursor('ws-b')
+async function seedCursors(storage) {
+  for (const id of ['ws-a', 'ws-b']) await storage.putWorkspace({ id, name: id, statusPolicy: 'provider_authoritative' })
+  await storage.putProviderBinding({ id: 'binding-1', workspaceId: 'ws-a', domain: 'planning', implementationKey: 'fake', enabled: true, isDefault: true })
+  await storage.putSyncCursor(A); await storage.putSyncCursor(B)
+}
+
+test('工作区健康：SQLite 关闭并重开同一文件后两条三元游标逐字读回', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'workspace-sync-scope-'))
+  try {
+    const location = join(dir, 'workspace.sqlite')
+    const first = createSqliteStorage(location)
+    try { await seedCursors(first) } finally { first.close() }
+    const reopened = createSqliteStorage(location)
+    try {
+      assert.deepEqual(await reopened.getSyncCursor('ws-a', 'binding-1', PLANNING_SYNC_SCOPE), A, '重开后 A 的 degraded 与原因保持')
+      assert.deepEqual(await reopened.getSyncCursor('ws-b', 'binding-1', PLANNING_SYNC_SCOPE), B)
+    } finally { reopened.close() }
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+for (const [label, makeStorage] of STORAGES) {
+  test(`工作区健康：事务内写 A 后抛错，A、B 游标与修订号都回到事务前（${label}）`, async () => {
+    const storage = makeStorage(); await seedCursors(storage)
+    const revision = await storage.currentRevision('ws-a')
+    await assert.rejects(storage.transaction(async (tx) => {
+      await tx.advanceRevision('ws-a')
+      await tx.putSyncCursor({ ...A, state: 'healthy', lastErrorCode: undefined })
+      throw new Error('测试注入：事务中断')
+    }), /测试注入/)
+    assert.deepEqual([await storage.getSyncCursor('ws-a', 'binding-1', PLANNING_SYNC_SCOPE), await storage.getSyncCursor('ws-b', 'binding-1', PLANNING_SYNC_SCOPE)], [A, B])
+    assert.equal(await storage.currentRevision('ws-a'), revision, '修订号随事务回滚')
+  })
 }

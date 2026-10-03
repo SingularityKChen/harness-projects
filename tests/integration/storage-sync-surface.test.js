@@ -310,6 +310,29 @@ test('003 重写后的库自检：旧库必须显式报错，且自检失败必�
   })
 })
 
+test('003 重写后的库自检：旧的游标主键（两元，或有 workspace 列但主键不含它）必须在打开时拒绝并关闭句柄，不升级也不删库（#189）', async () => {
+  await withTempDir(async (dir) => {
+    const legacy = (workspaceColumn, key) => `CREATE TABLE sync_cursor (${workspaceColumn}binding_id TEXT NOT NULL REFERENCES provider_binding (id), scope_key TEXT NOT NULL, cursor_value TEXT,
+      state TEXT NOT NULL CHECK (state IN ('idle','syncing','healthy','degraded','failed')), last_error_code TEXT, PRIMARY KEY (${key}))`
+    const column = 'workspace_id TEXT NOT NULL REFERENCES workspace (id), '
+    // 判别性：只看"有没有 workspace 列"判不出后两种——列在而主键仍两元，或三元但顺序不是 (工作区, 连接, scope)。
+    for (const [name, ddl] of [['两元主键', legacy('', 'binding_id, scope_key')], ['有列但主键仍两元', legacy(column, 'binding_id, scope_key')], ['三元但顺序错', legacy(column, 'binding_id, workspace_id, scope_key')]]) {
+      const location = join(dir, `${name}.sqlite`)
+      createSqliteStorage(location).close()
+      const db = openDatabase(location)
+      try { db.exec(`PRAGMA foreign_keys = OFF; DROP TABLE sync_cursor; ${ddl}; PRAGMA foreign_keys = ON`) } finally { db.close() }
+      assert.throws(() => createSqliteStorage(location), /sync_cursor 的主键不是 \(workspace_id, binding_id, scope_key\)/, `${name}：必须在业务写入前拒绝`)
+      const before = readdirSync('/dev/fd').length
+      for (let attempt = 1; attempt <= 3; attempt += 1) assert.throws(() => createSqliteStorage(location), /重写前的 003/)
+      assert.equal(readdirSync('/dev/fd').length, before, `${name}：拒绝必须关掉句柄`)
+      const after = openDatabase(location)
+      try { assert.equal(after.prepare(`SELECT sql FROM sqlite_master WHERE name = 'sync_cursor'`).get().sql.replace(/\s+/g, ' '), ddl.replace(/\s+/g, ' '), `${name}：库被拒绝而不是被升级或删除`) } finally { after.close() }
+    }
+    const current = createSqliteStorage(join(dir, 'current.sqlite'))
+    try { assert.equal(await current.getSyncCursor(WORKSPACE, BINDING, 'scope-1'), undefined, '正方向：合法的新 schema 照常打开') } finally { current.close() }
+  })
+})
+
 test('游标按作用域隔离：绑定的 scopeKey 与工作区的对账游标互不覆盖', async () => {
   await withTempDir(async (dir) => {
     const location = join(dir, 'workspace.sqlite')
