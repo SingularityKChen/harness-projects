@@ -183,7 +183,7 @@ test('已钉住的约束变异：每条拒绝用例只因目标约束失败，�
   // state CHECK：候选表恒为 candidate；观察账本、同步游标、执行上下文的词表都按 domain 完整列出
   rejects(db, "INSERT INTO candidate_relation VALUES ('ws-1','entity-1','entity-2','depends_on','business_semantics','deterministic','confirmed')", /CHECK constraint failed: state = 'candidate'/)
   rejects(db, "INSERT INTO sync_observation VALUES ('binding-1','issue','issue-9','t9','k9','v9','{}','bogus')", /CHECK constraint failed: state IN \('pending','processed','ignored','failed'\)/)
-  rejects(db, "INSERT INTO sync_cursor VALUES ('binding-1','scope-9','c','bogus',NULL)", /CHECK constraint failed: state IN \('idle','syncing','healthy','degraded','failed'\)/)
+  rejects(db, "INSERT INTO sync_cursor VALUES ('ws-1','binding-1','scope-9','c','bogus',NULL)", /CHECK constraint failed: state IN \('idle','syncing','healthy','degraded','failed'\)/)
   rejects(db, "INSERT INTO execution_context VALUES ('context-9','ws-1','entity-1','repo-1','bogus',NULL,NULL,NULL)", /CHECK constraint failed: status IN \('planned','provisioning','ready','closed','failed'\)/)
   // 部分索引 execution_context_active 的 WHERE：active 状态被覆盖，closed 不被覆盖（去掉 WHERE 会让下面这条变红）
   rejects(db, "INSERT INTO execution_context VALUES ('context-2','ws-1','entity-1','repo-1','provisioning',NULL,NULL,NULL)", /UNIQUE constraint failed: execution_context\.workspace_id, execution_context\.work_item_id, execution_context\.repository_id/)
@@ -196,7 +196,8 @@ test('已钉住的约束变异：每条拒绝用例只因目标约束失败，�
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM webhook_subscription").get().n, 2, '同一连接在两个工作区各自订阅（旧的三列唯一键会让先写的工作区占位）')
   // binding_id 外键：观察账本、同步游标、订阅都必须挂在存在的连接锚点上
   rejects(db, "INSERT INTO sync_observation VALUES ('binding-none','issue','issue-1','t1','k1','v1','{}','pending')", /FOREIGN KEY constraint failed/)
-  rejects(db, "INSERT INTO sync_cursor VALUES ('binding-none','scope-1','c','idle',NULL)", /FOREIGN KEY constraint failed/)
+  rejects(db, "INSERT INTO sync_cursor VALUES ('ws-1','binding-none','scope-1','c','idle',NULL)", /FOREIGN KEY constraint failed/)
+  rejects(db, "INSERT INTO sync_cursor VALUES ('ws-none','binding-1','scope-1','c','idle',NULL)", /FOREIGN KEY constraint failed/)
   rejects(db, "INSERT INTO webhook_subscription VALUES ('wh-4','ws-1','binding-none','scope-1','issues',1)", /FOREIGN KEY constraint failed/)
 }))
 
@@ -238,7 +239,7 @@ test('关系候选分表、执行 active 唯一、修订删除实体不倒退，
   // 单调增长是端口职责（见迁移注释与契约套件的修订号用例）；库层只保证非负，这里断言的就是这一条。
 }))
 
-test('003 显式 schema 审查：十一张表的 63 列全部在白名单内，没有列能存凭据材料', () => withDatabase((db) => {
+test('003 显式 schema 审查：十一张表的 66 列全部在白名单内，没有列能存凭据材料', () => withDatabase((db) => {
   migrate(db)
   // 逐列白名单（与 L2 的 `identity-membership-schema.test.js` 同形）：与 `pragma_table_info` **互相覆盖**，
   // 多一列、少一列都失败——新增列必须同步写进这里，否则这份审查只是声明。
@@ -259,7 +260,7 @@ test('003 显式 schema 审查：十一张表的 63 列全部在白名单内，�
     'sync_observation.object_external_id': '平台原样值', 'sync_observation.object_kind': '平台原样值',
     'sync_observation.observed_at': '时间戳', 'sync_observation.snapshot_json': 'provider 控制的 payload（脱敏责任在 provider）',
     'sync_observation.state': '枚举：观察处理态', 'sync_observation.updated_at': '平台版本载体',
-    'sync_cursor.binding_id': '标识', 'sync_cursor.cursor_value': 'provider 游标值', 'sync_cursor.last_error_code': '错误码',
+    'sync_cursor.binding_id': '标识', 'sync_cursor.workspace_id': '标识', 'sync_cursor.cursor_value': 'provider 游标值', 'sync_cursor.last_error_code': '错误码',
     'sync_cursor.scope_key': '调用方 scope 键', 'sync_cursor.state': '枚举：同步态',
     'reconcile_cursor.last_reconciled_at': '时间戳', 'reconcile_cursor.workspace_id': '标识',
     'webhook_subscription.binding_id': '标识', 'webhook_subscription.enabled': '标志', 'webhook_subscription.event_name': '平台事件名',
@@ -276,7 +277,7 @@ test('003 显式 schema 审查：十一张表的 63 列全部在白名单内，�
     .flatMap((table) => columns(db, table).map((column) => `${table}.${column}`)).sort()
   assert.deepEqual(actual, Object.keys(AUDITED).sort(),
     '每一条列都必须被显式审计：新增列要同步写进 AUDITED，否则这份审查只是声明')
-  assert.equal(actual.length, 65, '003/004 建出的执行面表共 65 列')
+  assert.equal(actual.length, 66, '003/004 建出的执行面表共 66 列')
   const credentialLike = /token|password|passwd|secret|credential|private_?key|access_?key|api_?key/i
   assert.deepEqual(actual.filter((qualified) => credentialLike.test(qualified)), [],
     '没有任何列能存凭据材料；凭据只保存 secret 服务句柄')

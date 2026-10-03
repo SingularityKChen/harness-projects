@@ -319,17 +319,17 @@ test('游标按作用域隔离：绑定的 scopeKey 与工作区的对账游标�
       await storage.putWorkspace(workspace('ws-2', '另一个工作区'))
       await storage.putProviderBinding(binding('binding-2', 'ws-2'))
       const cursors = [
-        { bindingId: BINDING, scopeKey: 'scope-1', cursorValue: 'cursor-1', state: 'healthy', lastErrorCode: undefined },
-        { bindingId: BINDING, scopeKey: 'scope-2', cursorValue: 'cursor-2', state: 'idle', lastErrorCode: undefined },
-        { bindingId: 'binding-2', scopeKey: 'scope-1', cursorValue: 'cursor-3', state: 'degraded', lastErrorCode: 'provider_unavailable' },
+        { workspaceId: WORKSPACE, bindingId: BINDING, scopeKey: 'scope-1', cursorValue: 'cursor-1', state: 'healthy', lastErrorCode: undefined },
+        { workspaceId: WORKSPACE, bindingId: BINDING, scopeKey: 'scope-2', cursorValue: 'cursor-2', state: 'idle', lastErrorCode: undefined },
+        { workspaceId: 'ws-2', bindingId: 'binding-2', scopeKey: 'scope-1', cursorValue: 'cursor-3', state: 'degraded', lastErrorCode: 'provider_unavailable' },
       ]
       for (const cursor of cursors) await storage.putSyncCursor(cursor)
-      for (const cursor of cursors) assert.deepEqual(await storage.getSyncCursor(cursor.bindingId, cursor.scopeKey), cursor,
+      for (const cursor of cursors) assert.deepEqual(await storage.getSyncCursor(cursor.workspaceId, cursor.bindingId, cursor.scopeKey), cursor,
         '同一个 scopeKey 在不同绑定下是两条游标，不同 scopeKey 互不覆盖')
-      assert.equal(await storage.getSyncCursor(BINDING, 'scope-none'), undefined)
+      assert.equal(await storage.getSyncCursor(WORKSPACE, BINDING, 'scope-none'), undefined)
       await storage.putSyncCursor({ ...cursors[0], cursorValue: 'cursor-1b', state: 'failed', lastErrorCode: 'rate_limited' })
-      assert.equal((await storage.getSyncCursor(BINDING, 'scope-1'))?.cursorValue, 'cursor-1b', '同键重写覆盖自身')
-      assert.equal((await storage.getSyncCursor(BINDING, 'scope-2'))?.cursorValue, 'cursor-2', '重写一个 scope 不得动到另一个')
+      assert.equal((await storage.getSyncCursor(WORKSPACE, BINDING, 'scope-1'))?.cursorValue, 'cursor-1b', '同键重写覆盖自身')
+      assert.equal((await storage.getSyncCursor(WORKSPACE, BINDING, 'scope-2'))?.cursorValue, 'cursor-2', '重写一个 scope 不得动到另一个')
       await storage.putReconcileCursor({ workspaceId: WORKSPACE, lastReconciledAt: '2026-09-20T00:00:00Z' })
       await storage.putReconcileCursor({ workspaceId: 'ws-2', lastReconciledAt: '2026-09-21T00:00:00Z' })
       assert.equal((await storage.getReconcileCursor(WORKSPACE))?.lastReconciledAt, '2026-09-20T00:00:00Z', '对账游标按工作区隔离')
