@@ -40,6 +40,12 @@ const bareContext = { id: 'context-2', workspaceId: WORKSPACE, workItemId: 'enti
 const bareAttempt = { id: 'attempt-2', workspaceId: WORKSPACE, bindingId: 'binding-1', commandName: 'updatePlanningFields',
   idempotencyKey: 'key-2', state: 'failed', expectedSourceVersion: undefined, errorCode: undefined }
 
+/** 仓库挂载必须引用 repository 种类的身份（TD-004）：仓库自己的实体与 primary 身份。 */
+async function seedRepositoryIdentity(storage) {
+  await storage.putEntity({ id: 'repo-entity-1', kind: 'repository' })
+  await storage.putExternalIdentity({ id: 'repo-identity-1', entityId: 'repo-entity-1', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-1', role: 'primary' })
+}
+
 /** 执行面用例的公共前置行：执行上下文以外键指向工作区、实体与仓库，关系两端指向实体，写尝试指向工作区与绑定。 */
 async function seedExecutionFacts(storage) {
   await storage.putWorkspace(workspace)
@@ -47,7 +53,8 @@ async function seedExecutionFacts(storage) {
   await storage.putEntity({ id: 'entity-1', kind: 'work_item' })
   await storage.putEntity({ id: 'entity-2', kind: 'work_item' })
   await storage.putExternalIdentity(identity)
-  await storage.putRepository({ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'identity-1' })
+  await seedRepositoryIdentity(storage)
+  await storage.putRepository({ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'repo-identity-1' })
 }
 
 test('重启：端口写入的工作区/绑定/实体/身份/投影/仓库/修订号在关句柄重开后逐字段不变', async () => {
@@ -59,7 +66,8 @@ test('重启：端口写入的工作区/绑定/实体/身份/投影/仓库/修�
     await storage.putEntity({ id: 'entity-1', kind: 'work_item' })
     await storage.putExternalIdentity(identity)
     await storage.putPlanningProjection(WORKSPACE, projection)
-    await storage.putRepository({ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'identity-1' })
+    await seedRepositoryIdentity(storage)
+    await storage.putRepository({ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'repo-identity-1' })
     await storage.advanceRevision(WORKSPACE)
     await storage.advanceRevision(WORKSPACE)
     storage.close()
@@ -72,7 +80,7 @@ test('重启：端口写入的工作区/绑定/实体/身份/投影/仓库/修�
       assert.deepEqual(await revived.findExternalIdentity('binding-1', 'issue', 'issue-1'), identity, '身份按对象键仍可查到')
       assert.deepEqual(await revived.getPlanningProjection(WORKSPACE, 'entity-1'), projection, '投影（含内容三态）逐字段不变')
       assert.deepEqual(await revived.listPlanningProjections(WORKSPACE), [projection], '投影集合不变')
-      assert.deepEqual(await revived.listRepositories(WORKSPACE), [{ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'identity-1' }], '仓库逐字段不变')
+      assert.deepEqual(await revived.listRepositories(WORKSPACE), [{ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'repo-identity-1' }], '仓库逐字段不变')
       assert.equal(await revived.currentRevision(WORKSPACE), 2, '修订号不倒退也不归零')
     } finally {
       revived.close()
@@ -314,7 +322,7 @@ test('重启：putExecutionContext 因外键失败时旧 active 上下文不得�
     // 另一个工作区里的同 id 上下文挂着一个运行：把它挪进 ws-1 会让运行的复合外键 (workspace_id, context_id) 悬空。
     await storage.putWorkspace({ id: 'ws-other', name: '另一个工作区', statusPolicy: 'provider_authoritative' })
     await storage.putEntity({ id: 'repo-entity-other', kind: 'repository' })
-    await storage.putExternalIdentity({ id: 'repo-identity-other', entityId: 'repo-entity-other', bindingId: 'binding-1', externalKind: 'branch', externalId: 'repo-other', role: 'primary' })
+    await storage.putExternalIdentity({ id: 'repo-identity-other', entityId: 'repo-entity-other', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-other', role: 'primary' })
     await storage.putRepository({ id: 'repo-other', workspaceId: 'ws-other', externalIdentityId: 'repo-identity-other' })
     await storage.putExecutionContext({ ...context, id: 'ctx-shared', workspaceId: 'ws-other', repositoryId: 'repo-other' })
     await storage.putExecutionRun({ id: 'run-o', workspaceId: 'ws-other', contextId: 'ctx-shared', status: 'running', updatedAt: '2026-09-20T00:00:02Z' })

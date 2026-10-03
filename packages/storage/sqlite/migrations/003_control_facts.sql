@@ -3,11 +3,11 @@
 
 -- repository：执行事实必须有可追溯的工作区仓库（AGENTS.md §1.1 不变量 5：关键关联显式优先；本层计划 Batch L3-A）。
 CREATE TABLE repository (
-  id TEXT PRIMARY KEY, -- 执行表主键（D6）
+  id TEXT NOT NULL, -- 仓库 id（请求定位字符串）：工作区挂载键的一半，同一个 id 可以挂在多个工作区上；复合主键允许 NULL，所以显式 NOT NULL
   workspace_id TEXT NOT NULL REFERENCES workspace (id), -- AGENTS.md §1.1 不变量 1
   external_identity_id TEXT NOT NULL REFERENCES external_identity (id), -- R7 身份锚点
-  UNIQUE (workspace_id, external_identity_id), -- 一个工作区不重复登记同一仓库
-  UNIQUE (workspace_id, id) -- 供执行上下文的复合外键引用，让"仓库属于同一工作区"由库保证（不变量 5）
+  PRIMARY KEY (workspace_id, id), -- 执行表主键（D6）；也供执行上下文的复合外键引用，让"仓库属于同一工作区"由库保证（不变量 5）
+  UNIQUE (workspace_id, external_identity_id) -- 一个工作区不重复登记同一仓库
 );
 
 -- execution_context：执行上下文属于工作项、仓库和工作区（AGENTS.md §1.1 不变量 5；本层计划 Batch L3-A）。

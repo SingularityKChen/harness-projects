@@ -224,6 +224,8 @@ test('关系候选分表、执行 active 唯一、修订删除实体不倒退，
   db.exec("INSERT INTO execution_context VALUES ('context-2c','ws-1','entity-1','repo-1','closed',NULL,NULL,NULL)")
   // 工作区作用域经复合外键传递：仓库属于另一个工作区时必须被拒绝（不变量 5）。
   db.exec("INSERT INTO repository VALUES ('repo-2','ws-2','identity-1')")
+  // 挂载键是 (workspace_id, id)（#187 / #188）：SQLite 的复合主键允许 NULL，所以 id 必须显式 NOT NULL，否则「没有 id 的挂载」能被裸 SQL 写进库。
+  rejects(db, "INSERT INTO repository VALUES (NULL,'ws-1','identity-1')", /NOT NULL constraint failed: repository\.id/)
   rejects(db, "INSERT INTO execution_context VALUES ('context-3','ws-1','entity-1','repo-2','planned',NULL,NULL,NULL)", /FOREIGN KEY constraint failed/)
   rejects(db, "INSERT INTO execution_run (id,workspace_id,context_id,status,updated_at) VALUES ('run-2','ws-2','context-1','running','now')", /FOREIGN KEY constraint failed/)
   const run = (ref, fallback) => `INSERT INTO execution_run VALUES ('run-4','ws-1','context-1','running','now',${ref},${fallback})`

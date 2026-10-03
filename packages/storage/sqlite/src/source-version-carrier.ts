@@ -14,14 +14,15 @@ import { isComparableSourceVersion, sourceVersionFromTimestamp } from '@harness-
 import { openDatabase, type WorkspaceDatabase } from './db.ts'
 import type { MigrationDataStep } from './migrations.ts'
 
-/** 重写前的 003 缺端口主体列与 `dedupe_key`：显式报错，把「旧库」变成一句可执行的处置，而不是第一次写观察时的驱动级报错。 */
-export const REWRITTEN_003_MESSAGE = '本地库是重写前的 003（sync_observation 缺端口主体列或 dedupe_key）：请删除库文件重建'
+/** 重写前的 003 缺端口主体列与 `dedupe_key`，或仓库挂载键仍是单列 `id`（#187 / #188 之前）：显式报错，把「旧库」变成一句可执行的处置，而不是第一次写观察或第二个工作区挂载时的驱动级报错。 */
+export const REWRITTEN_003_MESSAGE = '本地库是重写前的 003（sync_observation 缺端口主体列或 dedupe_key，或 repository 的主键不是 (workspace_id, id)）：请删除库文件重建'
 
 /** `sync_observation` 存在且缺 `object_kind` 或 `dedupe_key` 时抛错；返回表是否存在（尚未迁移时不判定）。 */
 export function assertRewritten003Shape(db: WorkspaceDatabase): boolean {
   if (db.prepare(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'sync_observation'`).get() === undefined) return false
   const shape = db.prepare(`SELECT count(*) AS subject_columns FROM pragma_table_info('sync_observation') WHERE name IN ('object_kind','dedupe_key')`).get() as { subject_columns: number }
-  if (shape.subject_columns < 2) throw new Error(REWRITTEN_003_MESSAGE)
+  const mount = db.prepare(`SELECT count(*) AS key_columns FROM pragma_table_info('repository') WHERE pk > 0`).get() as { key_columns: number }
+  if (shape.subject_columns < 2 || mount.key_columns !== 2) throw new Error(REWRITTEN_003_MESSAGE)
   return true
 }
 

@@ -68,8 +68,15 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
       for (const item of items) this.upsertProjection(scope.workspaceId, item)
     })
   }
+  /** 挂载键是 `(工作区, id)`（#187 / #188）：同值重复登记是 no-op；同键换外部身份响亮失败而不覆盖——`ON CONFLICT … DO NOTHING` 对它是静默忽略，所以先比对；同工作区同身份换 id 由 `UNIQUE (workspace_id, external_identity_id)` 拒绝。 */
   putRepository(record: RepositoryRecord): Promise<void> {
-    return this.write(`INSERT INTO repository (${REPOSITORY_COLUMNS}) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET workspace_id = excluded.workspace_id, external_identity_id = excluded.external_identity_id`, record.id, record.workspaceId, record.externalIdentityId)
+    return this.atomic(() => {
+      const kind = this.db.prepare('SELECT external_kind FROM external_identity WHERE id = ?').get(record.externalIdentityId) as { external_kind: string } | undefined
+      if (kind !== undefined && kind.external_kind !== 'repository') throw new Error('repository external identity is not a repository identity') // TD-004；不存在由外键拒绝
+      const mounted = this.db.prepare('SELECT external_identity_id FROM repository WHERE workspace_id = ? AND id = ?').get(record.workspaceId, record.id) as { external_identity_id: string } | undefined
+      if (mounted !== undefined && mounted.external_identity_id !== record.externalIdentityId) throw new Error('repository mount already points at another external identity')
+      this.db.prepare(`INSERT INTO repository (${REPOSITORY_COLUMNS}) VALUES (?, ?, ?) ON CONFLICT (workspace_id, id) DO NOTHING`).run(record.id, record.workspaceId, record.externalIdentityId)
+    })
   }
   listRepositories(workspaceId: WorkspaceId): Promise<readonly RepositoryRecord[]> { return this.read(() => (this.db.prepare(`SELECT ${REPOSITORY_COLUMNS} FROM repository WHERE workspace_id = ? ORDER BY rowid`).all(workspaceId) as Row[]).map(rowToRepository)) }
   currentRevision(workspaceId: WorkspaceId): Promise<number> { return this.read(() => (this.db.prepare('SELECT revision FROM workspace_revision WHERE workspace_id = ?').get(workspaceId) as { revision: number } | undefined)?.revision ?? 0) }
