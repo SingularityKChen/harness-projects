@@ -38,7 +38,7 @@
 | [2026-09-21-rule-checks-api-base](exec-plan/active/2026-09-21-rule-checks-api-base.md) | 判定输入改用 PR API 的对象对：判定固定到 `(base_sha, head_sha)` 两个不可变提交，含解析器失败策略与检查 job 的一致性 | Active |
 | [2026-09-21-merge-gate-layers](exec-plan/active/2026-09-21-merge-gate-layers.md) | Merge Gate 车道：integration / 包边界 / MVP-0 / E2E 四层各自成为一条 lane，空层与零用例层响亮失败 | Active |
 | [2026-09-22-engineering-merged-state](exec-plan/active/2026-09-22-engineering-merged-state.md) | 让合并事件真正写进 `Engineering`：修正 GraphQL 枚举误用导致的合并投影不可达，并补上按日的字段漂移观察 | Active |
-| [2026-10-01-engineering-reconcile-coverage](exec-plan/active/2026-10-01-engineering-reconcile-coverage.md) | 迭代 4 的 #249：幸存信号全候选重算、唯一串行写者与独立唤醒；Planning 状态保持人拥有 | Active；Batch 1–2 已实施（完整来源、观察者与唯一全域 writer），合并后门待回读 |
+| [2026-10-01-engineering-reconcile-coverage](exec-plan/active/2026-10-01-engineering-reconcile-coverage.md) | 迭代 4 的 #249：幸存信号全候选重算、唯一串行写者与独立唤醒；Planning 状态保持人拥有 | Active；#259 / #257 已合入，合并后 event 运行与观察者回读完成，只剩第一次 schedule 运行的回读 |
 | [2026-09-22-content-placement](exec-plan/completed/2026-09-22-content-placement.md) | 流程知识的四桶归属（机械 / 技法 / 约定 / 一次性）与判定规则：给 §0 路由表的每个入口一个可机械核对的桶 | Completed |
 | [2026-09-22-status-field-writer](exec-plan/completed/2026-09-22-status-field-writer.md) | 给 `Status` 一个定义、一个写入口、一个防漂移的检查：语义收敛到 `board-semantics.md` 单一事实源、写入口写进交付流程、契约测试按「行 + 子句」设防 | Completed |
 | [2026-09-21-gate-e1-write-and-events](exec-plan/active/2026-09-21-gate-e1-write-and-events.md) | Gate E1 写确认与事件可靠性：实测平台无 CAS、事件订不到、重复创建幂等 | Active |
