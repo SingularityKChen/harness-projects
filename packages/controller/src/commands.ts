@@ -71,6 +71,8 @@ export interface StartWorkView {
   readonly branchHeadCommit: string | undefined
   readonly fallback: string | undefined
   readonly degraded: boolean
+  /** 已 ack 的 run 句柄：Unknown 结果面靠它对账（TD-013）。 */
+  readonly runExternalId: string | undefined
 }
 
 export interface StartWorkCommandInput extends CommandEnvelope {
@@ -104,6 +106,7 @@ function toStartWorkView(result: StartWorkResult): StartWorkView {
     branchHeadCommit: result.branchHeadCommit,
     fallback: result.fallback,
     degraded: result.degraded,
+    runExternalId: result.runExternalId,
   }
 }
 

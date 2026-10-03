@@ -63,6 +63,8 @@ test('命令：同键重放返回原结果，且取不到乐观 saved（ExecPlan
   assert.equal(replay.writeState, first.writeState, '同键重放必须返回首次尝试的写状态')
   assert.equal(replay.value.executionContextId, first.value.executionContextId, '重放不得产生第二份执行上下文')
   assert.equal(first.value.branchHeadCommit, 'sha-1', '视图必须带出 core 结果面的分支头提交（只做报告，D5）')
+  assert.ok(first.value.runExternalId !== undefined, '视图带出已 ack 的 run 句柄：Unknown 时客户端靠它对账（TD-013）')
+  assert.equal(replay.value.runExternalId, first.value.runExternalId, '重放带回同一个 run 句柄')
   assert.ok(!Object.values(CommandWriteState).includes('saved'), 'wire 写状态里不得有乐观的 saved')
 })
 
