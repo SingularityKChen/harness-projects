@@ -1,6 +1,6 @@
 # Client 工作区读取生产链 ExecPlan
 
-> 状态：Active；Batch 0–1 已完成，Batch 2–3 pending。
+> 状态：Active；Batch 0–2 已完成，Batch 3 pending。
 > 创建：2026-10-03；关联 issue：[178](https://github.com/SingularityKChen/harness-projects/issues/178)。
 > 分支：`feature/workspace-read-assembly`；工作树：`.worktrees/workspace-read-assembly`；PR base：`main`。
 > 调度（调查快照）：P0 / M / 迭代 5（2026-10-15–21）/ M4 · MVP Demo：Harness 内打通 GitHub 链路；Superseded by Decision Log「人类规划启动与重排期」（2026-10-03）。
@@ -268,7 +268,18 @@ realpath核目标工作树；Git用argv/library；实施前盘点WireSnapshot/Wi
   | 能力改为 flatMap 全部挂载后取最后一个 | 唯一挂载不被备用覆盖 | 红 |
   | 去掉业务签名比较 | 业务变化 fail closed 为 gap | 红 |
   | 签名不按 key 排序能力 | 能力顺序不同仍 idle | 红 |
-- [ ] (2026-10-03 21:34 CST) Batch2：client接受点、assembler、断网/time用例。
+- [x] (2026-10-03 22:26 CST) Batch2：client接受点、assembler、断网/time。红：新增7例中6例报 `sync.read is not a function`、metadata 两例报 `gap`≠`metadata`（旧行为：重拉基线）；绿：`node --test tests/e2e/client-sync.test.js tests/e2e/workspace-read-assembly.test.js` 17/17、`pnpm run typecheck`、`pnpm verify`（1101+7）退出0；负对照7/7；code 572/800。
+  负对照（WIP提交后逐个应用，`grep -n` 回读已生效，恢复后复绿）：
+
+  | 变异 | 命中的测试 | 结果 |
+  |---|---|---|
+  | metadata 事件不被接受（抛错） | 同revision降级/恢复；idle与纯能力不推进时间 | 红 |
+  | store.applyMetadata 不校验实体覆盖（缺失/未知/重复） | 接受点 | 红 |
+  | 先写 lastUpdatedAt 再 apply | 接受点（fresh 重复增量） | 红 |
+  | 传输失败不清 connected | 断网 | 红 |
+  | metadata 恒推进时间 | 同revision降级/恢复；idle与纯能力不推进时间 | 红 |
+  | read 忽略整表 source.degraded | 空表；partial；同revision降级/恢复 | 红 |
+  | 先发布头后 apply | 接受点（头不被半发布） | 红 |
 - [ ] (2026-10-03 21:34 CST) Batch3：ui-model真源/partial/view与远端产品门。
 
 ## Surprises & Discoveries
@@ -279,6 +290,8 @@ Batch 1 发现：`registry` 只挂外部四域，storage 域没有挂载目标�
 离线替身的执行备用不声明 `execution.run.fallback`，唯一挂载用例改以 `execution.run.cancel`（主不声明、备用声明）判别。
 `ui-model-presentation` 的字段面机械同形测试按 `interface X {` 解析，遇到 `extends WireWorkspaceHeader` 会找不到；解析器已跟随 extends 递归（测试侧改动）。
 Batch 1 为让 client 在同一提交内编译，sync 暂把 metadata 事件当缺口重拉基线（保守且正确）；Batch 2 换成精确的 metadata 接受点。
+Batch 2 发现：真实空项目必须显式传 `workspace.project`（bootstrap 靠条目观察发现项目，零条目时 `not_found`）；空表用例据此构造。
+store 的修订/来源头校验会拒绝 `source.revision !== revision` 的帧；既有 fixture 本就满足，无需改。
 #199仍可能错误生产healthy，本项忠实传输而不catchStorage producer；#218迟到baseline竞争仍开放，不悄悄加generation算法。
 无Storage时descriptor尚未确认；最终read undefined表达冷启动，不制造看似可用workspace。
 
@@ -294,6 +307,10 @@ Decision：本轮draft/标签/milestone/Project分类/ExecPlan/Batch复制现有
 
 Decision：`getWorkspaceMetadata` 跳过 storage.* key，不报 unavailable。Rationale：registry 只有外部四域挂载，本地 Storage 能力不经路由；报 unavailable 会对正在读取的 Storage 说错，缺失 key 对消费者同为 unavailable。Date/Author：2026-10-03 22:23 CST / Sonnet implementer。
 Decision：watch 用“业务签名（实体去 source 后按 id 排序）+ 来源签名（头、能力按 key、逐行 source）”两个规范化签名判定同revision：业务变化→gap，仅来源变化→metadata，全同→idle。Rationale：把“不得借 metadata 改业务”落在比较函数上，而不是靠 store 兜底；签名不含时钟，不会永不 idle。Date/Author：2026-10-03 22:23 CST / Sonnet implementer。
+Decision：传输失败与被拒绝的帧（clock 非法、store 拒绝）走同一条 `lose`：connected=false、行 stale，头/能力/时间/内容原样保留，原异常继续抛出。Rationale：被拒绝的帧意味着本地无法确认当前值，保持 connected=true 会让旧行继续显示 current；fail closed。Date/Author：2026-10-03 22:26 CST / Sonnet implementer。
+Decision：lastUpdatedAt 的推进规则——baseline/delta：整表 fresh 或帧内有 fresh 行；metadata：仅整表或某行由 degraded 恢复为 fresh。纯能力/名称 metadata 与 idle 不读时钟。Rationale：时间只表示“确认了当前值”，且 clock 只在会推进时读取，非法 clock 不会影响不推进的帧。Date/Author：2026-10-03 22:26 CST / Sonnet implementer。
+Decision：`read().reason` 不单独存传输原因：connected=false 即安全散文，connected=true 时取整表 source 降级原因（无原因给中性句）。Rationale：少一份可与 connected 漂移的状态。Date/Author：2026-10-03 22:26 CST / Sonnet implementer。
+Decision：ISO 8601 校验在 client 与 ui-model 各一份同口径正则。Rationale：ui-model 不得依赖 client 的运行时校验内部，且 derive.ts 不在本 PR 文件集；记为小重复，不引第二个权威源（口径相同、各自校验自己的边界）。Date/Author：2026-10-03 22:26 CST / Sonnet implementer。
 
 ## Idempotence and Recovery
 
@@ -328,3 +345,5 @@ Change Note (2026-10-03 21:56 CST)：主执行者全文复核并运行文档契�
 Change Note (2026-10-03 22:08 CST)：记录人类在Project上的规划启动与#178重排期确认；保留原调查调度快照并明确取代，产品实施仍pending。
 
 Change Note (2026-10-03 22:23 CST)：Batch 1 完成：Core 元数据查询、Wire 头/metadata 事件、watch 同revision判定与4项负对照落账；文件集无新增（client/sync.ts 的编译补丁在集合内）。
+
+Change Note (2026-10-03 22:26 CST)：Batch 2 完成：workspace-read.ts、store.applyMetadata 与 sync 唯一接受点/read/disconnect 落地，7项负对照落账；文件集无新增。
