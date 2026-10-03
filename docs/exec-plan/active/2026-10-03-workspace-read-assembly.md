@@ -3,7 +3,8 @@
 > 状态：Active；本轮只完成 Batch 0，产品实施全部 pending。
 > 创建：2026-10-03；关联 issue：[178](https://github.com/SingularityKChen/harness-projects/issues/178)。
 > 分支：`feature/workspace-read-assembly`；工作树：`.worktrees/workspace-read-assembly`；PR base：`main`。
-> 调度：P0 / M / 迭代 5（2026-10-15–21）/ M4 · MVP Demo：Harness 内打通 GitHub 链路。
+> 调度（调查快照）：P0 / M / 迭代 5（2026-10-15–21）/ M4 · MVP Demo：Harness 内打通 GitHub 链路；Superseded by Decision Log「人类规划启动与重排期」（2026-10-03）。
+> 当前调度：P0 / M / 迭代 4（2026-10-08–14）/ M4 · MVP Demo：Harness 内打通 GitHub 链路。
 > 本计划依根 `PLANS.md` 维护，设计与实施合一；审查pass只表示spec可实施。
 
 ## Purpose / Big Picture
@@ -271,6 +272,8 @@ watch的same-revision分支吞掉source变化；只补assembler仍会把持续�
 
 ## Decision Log
 
+Decision：人类已在Project将 #189/#196/#178 规划启动为In Progress，并将 #178 提前到迭代4；保留新的规划。Rationale：2026-10-03人类明确确认该调整；agent只同步PR迭代索引，不代写Status或blocking。Date/Author：2026-10-03 22:08 CST / 人类伙伴。
+
 Decision：选独立metadata事件并带现有row-source完整清单。Rationale：业务revision与来源变化正交，机制上限制业务越权。Date/Author：2026-10-03 21:34 CST / 独立最终reviewer。
 Decision：time表示client最后成功接受当前值，connection另存；degraded/失败不推进。Rationale：失败读取缓存不能冒充新确认。Date/Author：2026-10-03 21:34 CST / 独立最终reviewer。
 Decision：partial表降级不等于所有行stale，修view小范围消费者。Rationale：#70交接要求仍fresh行，不能只改client留下展示反例。Date/Author：2026-10-03 21:34 CST / 独立最终reviewer。
@@ -306,3 +309,5 @@ Change Note (2026-10-03 21:34 CST)：独立reviewer收敛两设计，采用窄me
 Change Note (2026-10-03 21:52 CST)：补canonical三参数intersect调用，独立linter和结构/路径检查已通过；全仓文档门由主执行者继续落账。
 
 Change Note (2026-10-03 21:56 CST)：主执行者全文复核并运行文档契约与独立路径/暂存扫描，记录Batch 0文档门；后续产品批次保持pending。
+
+Change Note (2026-10-03 22:08 CST)：记录人类在Project上的规划启动与#178重排期确认；保留原调查调度快照并明确取代，产品实施仍pending。
