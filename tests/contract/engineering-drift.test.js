@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { parse as parseYaml } from 'yaml'
 
 import { describeFinding, engineeringDriftFindings } from '../../scripts/engineering-drift.mjs'
-import { runEngineeringDriftCheck } from '../../scripts/check-engineering-drift-live.mjs'
+import { loadIssueEngineeringSnapshot, runEngineeringDriftCheck } from '../../scripts/check-engineering-drift-live.mjs'
 // 投影与**选择策略**都来自投影权威：观察者没有自己的「谁说了算」实现（issue #115）。
 import { expectedFor, MAX_PAGES, PR_STATES, STATES, stateForSnapshot } from '../../scripts/sync-engineering-state.mjs'
 
@@ -439,6 +439,26 @@ test('传输与响应结构故障全部 fail closed', async (t) => {
   }
 })
 
+test('写前复读的身份核对：item 已换 project、Issue 被替换、字段值属于别的字段或引用不完整都失败', async () => {
+  const fresh = (mutate) => {
+    const node = { ...withRefs(itemNode({ engineering: null })), project: { id: 'PVT_project' } }
+    mutate(node)
+    return loadIssueEngineeringSnapshot({
+      gql: async () => ({ node }), projectId: 'PVT_project', fieldId: 'PVTF_engineering',
+      repository: { owner: 'owner', repo: 'repo' }, itemId: 'item-10', issueId: 'I_10',
+    })
+  }
+  assert.deepEqual((await fresh(() => {})).items, [{ itemId: 'item-10', issue: 10, issueId: 'I_10', engineering: null, referencesComplete: true }])
+  for (const [name, mutate, pattern] of [
+    ['item 已换 project', (node) => { node.project.id = 'OTHER' }, /已不在目标 project/],
+    ['Issue 被替换', (node) => { node.content.id = 'I_99' }, /Issue 已变化/],
+    ['字段值属于别的字段', (node) => { node.fieldValueByName = { name: 'Merged', field: { id: 'OTHER' } } }, /不是目标单选字段/],
+    ['引用不完整', (node) => { node.content.closedByPullRequestsReferences.totalCount = 3 }, /关闭引用不完整/],
+  ]) {
+    await assert.rejects(fresh(mutate), pattern, name)
+  }
+})
+
 test('Project 分页的矛盾快照与超限 fail closed，不按截断输入判定', async () => {
   const paged = (overridesFor) => {
     const state = { calls: 0 }
@@ -544,6 +564,11 @@ test('守卫覆盖 import 闭包，而不只是观察者自己的源码文本', 
   // 上面那条重复的弱断言，而它本来要防的正是这个。
   assert.equal(closure.size, 2, `观察者的 import 闭包应恰好是它与投影权威两个模块，实际：${paths.join(', ')}`)
   assert.ok(paths.some((path) => path.endsWith('/sync-engineering-state.mjs')), '闭包必须含投影权威')
+
+  // 依赖方向：drift→sync；live→drift+sync；writer→live+drift+sync；sync 不得反向 import writer/live（否则下列闭包会变大）。
+  for (const [script, size] of [['check-engineering-drift-live', 3], ['reconcile-engineering-project', 4]]) {
+    assert.equal(relativeImportClosure(new URL(`../../scripts/${script}.mjs`, import.meta.url)).size, size, script)
+  }
 
   for (const [href, module] of closure) {
     assert.deepEqual(importSpecifiers(module.source).filter((specifier) => NETWORK_OR_PROCESS.test(specifier)), [],
