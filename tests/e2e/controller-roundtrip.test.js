@@ -37,6 +37,8 @@ test('wire：快照只承载内部对象，并说明新鲜度与权威归属（i
   assert.ok(snapshot.revision > 0, '引导后修订号必须前进')
   assert.equal(snapshot.source.authority, 'host', '宿主权威工作区的归属必须是 host')
   assert.equal(snapshot.source.freshness, 'fresh')
+  assert.equal(snapshot.workspace.name, 'MVP-0', '整表头带已确认的工作区 descriptor')
+  assert.ok(snapshot.capabilities.length > 0, '整表头带逐 key 能力')
   assert.ok(snapshot.entities.length > 0, '引导后必须有可消费的实体')
   for (const entity of snapshot.entities) {
     assert.equal(entity.source.revision, snapshot.revision, '首次引导把所有投影落在同一修订上')
@@ -93,6 +95,7 @@ test('watch：按修订增量；落后超出保留窗口发 gap 而不是静默�
   assert.equal(delta.delta.revision, snapshot.revision + 1)
   assert.equal(delta.delta.upserts.length, 1, '只有被写的那条投影发生变化')
   assert.equal(delta.delta.upserts[0].planningStatus, 'blocked')
+  assert.deepEqual([delta.delta.workspace, delta.delta.source.revision], [snapshot.workspace, delta.delta.revision], 'delta 携带最新整表头')
 
   await writeStatus(controller, target, 'in_progress', 'watch-2')
   await writeStatus(controller, target, 'todo', 'watch-3')

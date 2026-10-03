@@ -1,10 +1,10 @@
 /**
  * 展示结构（issue #128）：页面消费的唯一结构面。wire 对象与 provider 原生形状不出现在这一层之外，
- * 平台名不参与任何分支。工作区身份与时间都由宿主注入（wire 与 client 都不带时间戳），展示层不读时钟，
+ * 平台名不参与任何分支。工作区身份、能力与时间都由客户端同步会话生产（`sync.read()`），展示层不读时钟，
  * 因此同一输入必然得到同一输出（不变量 7）。跨层约定的理由写在各自字段上，不外包给已归档的计划。
  */
 import type { AccessLevel, ContentKind, DerivedFlag, EntityId, NormalizedStatus } from '@harness-projects/domain'
-import type { EntityStore, StoredEntity } from '@harness-projects/client'
+import type { ClientWorkspaceRead, StoredEntity } from '@harness-projects/client'
 
 /** 客户端模型里一个条目的字段面；类型经 client 的 `StoredEntity` 取得，不新增依赖边。 */
 export type ClientEntity = StoredEntity['entity']
@@ -13,9 +13,9 @@ export type ClientAuthority = ClientEntity['source']['authority']
 /** 外部身份种类（issue / draft / change_request / branch / worktree / repository）。 */
 export type ClientExternalKind = NonNullable<ClientEntity['content']['externalKind']>
 
-/** capability 快照的一项：与 capabilities 包的 `EffectiveCapability` 结构兼容，宿主可直接传入。 */
+/** capability 快照的一项：与客户端读取里的能力项结构兼容。 */
 export interface CapabilitySnapshotEntry {
-  /** capability key（跨层契约取值）；本层用到的取值由契约测试与 `CapabilityKey` 表逐字比对。 */
+  /** capability key（跨层契约取值）；本层用到的取值全部来自 client 重导出的 `CapabilityKey` 表。 */
   readonly key: string
   readonly access: AccessLevel
   readonly reason?: string | undefined
@@ -23,24 +23,8 @@ export interface CapabilitySnapshotEntry {
 
 export interface WorkspaceDescriptor { readonly id: string; readonly name: string }
 
-/**
- * 一次"工作区读取"：客户端模型 + 宿主才知道的事实。
- *
- * `capabilities` 省略 = 未观测到任何能力（动作与谱系入口都不可用；权限未知不得当成可用）。
- * `lastUpdatedAt` 省略 = 宿主**从未成功读取到当前值**：合法的降级形态，不是错误；给了值但不合契约
- * 才是宿主接线缺陷（响亮失败）。展示层不读时钟，"没有最后更新时间"只能由宿主表达。
- * `reason` 与下游同名字段**全线是 display-ready 散文**，降级必有解释；**怎么显示**归页面。
- */
-export interface WorkspaceRead {
-  readonly workspace: WorkspaceDescriptor
-  readonly store: EntityStore
-  readonly connection: { readonly connected: boolean }
-  /** 最后一次读到当前值的时刻（ISO 8601）；`undefined` = 从未读到。 */
-  readonly lastUpdatedAt?: string | undefined
-  readonly capabilities?: readonly CapabilitySnapshotEntry[] | undefined
-  /** 宿主已知的连接降级原因；缺失时退回条目自身的原因，再退回本层的中性短语。 */
-  readonly reason?: string | undefined
-}
+/** 一次"工作区读取"：类型与字段语义由 client 的 `ClientWorkspaceRead` 定义，这里是同一个真源的别名。 */
+export type WorkspaceRead = ClientWorkspaceRead
 
 /** 连接状态是派生的，不是新的事实源：未连接 / 已连接但有降级 / 正常。 */
 export const WorkspaceConnectionState = {

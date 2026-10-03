@@ -82,7 +82,7 @@ function fixtureSnapshot({ freshness = 'fresh', bindingId = 'binding-planning' }
     }),
   ]
   const source = { revision: 8, freshness, authority: 'provider', reason: freshness === 'degraded' ? '规划来源离线' : undefined }
-  return { revision: 8, entities, source }
+  return { revision: 8, entities, source, workspace: { id: 'ws-1', name: 'MVP-0' }, capabilities: [] }
 }
 
 /** 一次工作区读取：客户端模型 + 宿主才知道的事实。`lastUpdatedAt: undefined` 用 `in` 判定。 */
@@ -431,9 +431,10 @@ test('结构：fixture 快照与 wire 的字段面机械同形（wire 增删字�
   // fixture 是 .js 且 tsconfig 不检查 tests/**，"同形"必须机械钉住，否则 wire.ts 增删字段时静默漂移。
   const wireSource = readFileSync(path.join(repoRoot, 'packages', 'controller', 'src', 'wire.ts'), 'utf8')
   const interfaceFields = (name) => {
-    const body = new RegExp(`export interface ${name} \\{([\\s\\S]*?)\\n\\}`).exec(wireSource)
+    const body = new RegExp(`export interface ${name}(?: extends (\\w+))? \\{([\\s\\S]*?)\\n\\}`).exec(wireSource)
     assert.ok(body !== null, `wire.ts 里找不到 export interface ${name}`)
-    return [...body[1].matchAll(/readonly\s+([A-Za-z0-9_]+)\s*[?:]/g)].map((match) => match[1]).sort()
+    const own = [...body[2].matchAll(/readonly\s+([A-Za-z0-9_]+)\s*[?:]/g)].map((match) => match[1])
+    return [...own, ...(body[1] === undefined ? [] : interfaceFields(body[1]))].sort()
   }
   const fixture = wireEntity({
     entityId: 'entity-x', kind: 'work_item', planningStatus: 'todo', contentKind: 'work_item',
