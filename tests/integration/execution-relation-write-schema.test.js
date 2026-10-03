@@ -194,6 +194,11 @@ test('已钉住的约束变异：每条拒绝用例只因目标约束失败，�
   rejects(db, "INSERT INTO webhook_subscription VALUES ('wh-2','ws-1','binding-1','scope-1','issues',1)", /UNIQUE constraint failed: webhook_subscription\.workspace_id, webhook_subscription\.binding_id, webhook_subscription\.scope_key, webhook_subscription\.event_name/)
   db.exec("INSERT INTO webhook_subscription VALUES ('wh-3','ws-2','binding-1','scope-1','issues',1)")
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM webhook_subscription").get().n, 2, '同一连接在两个工作区各自订阅（旧的三列唯一键会让先写的工作区占位）')
+  // sync_cursor 的主键含 workspace_id（#189）：同一连接同一 scope 在两个工作区各一行，同三元键重复被拒
+  db.exec("INSERT INTO sync_cursor VALUES ('ws-1','binding-1','scope-1','c','healthy',NULL)")
+  rejects(db, "INSERT INTO sync_cursor VALUES ('ws-1','binding-1','scope-1','c','degraded','x')", /UNIQUE constraint failed: sync_cursor\.workspace_id, sync_cursor\.binding_id, sync_cursor\.scope_key/)
+  db.exec("INSERT INTO sync_cursor VALUES ('ws-2','binding-1','scope-1','c','degraded','x')")
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sync_cursor").get().n, 2, '两个工作区各自一行')
   // binding_id 外键：观察账本、同步游标、订阅都必须挂在存在的连接锚点上
   rejects(db, "INSERT INTO sync_observation VALUES ('binding-none','issue','issue-1','t1','k1','v1','{}','pending')", /FOREIGN KEY constraint failed/)
   rejects(db, "INSERT INTO sync_cursor VALUES ('ws-1','binding-none','scope-1','c','idle',NULL)", /FOREIGN KEY constraint failed/)
