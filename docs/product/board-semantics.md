@@ -53,6 +53,10 @@
 
 > **Superseded by** `docs/development/ci.md`「Engineering 观察者：Project 页完整来源」（2026-10-03，issue #249）：「空集合是错误」现在只是 `expectedFor` 的默认。读取证明完整零引用（Issue 存在、引用为空、`totalCount` 为 0、没有下一页，且全部候选读取完成，即 `complete: true`）时期望为空：观察者从 Project 页读取全部本仓 Issue 条目及其内嵌的完整关闭引用，最后一个关闭关联被移除后残留的旧值因此会被报成漂移；没有完整性证据的空引用仍是错误。单个 Issue 的引用按全局 PR id 验重，`createdAt` 与编号都相同时按 id 的字符串码元升序兜底，选择与输入顺序无关。
 
+> **Superseded by** 下一段（2026-10-02，issue #249）：写入口不再从触发 PR 聚合，候选范围是整个 Project 的本仓 Issue；完整零引用对写入口同样意味着清空。选择顺序与「读取不完整一律失败」不变。
+
+**候选范围是整个 Project。** PR/review 事件与 schedule 都只是「值得再读一次」的 hint：唯一 writer `scripts/reconcile-engineering-project.mjs` 每次运行读取与观察者相同的完整快照（目标 Project 的全部本仓 Issue 条目及其内嵌的完整关闭引用），对全部条目按同一个 `expectedFor` 重算，所以一个被取消的事件不会让它的 issue 永久停在旧值，最后一个关闭关联被移除后的残留旧值也会被清空。写入前逐项新鲜复读，以复读结果为准；报告如实区分 confirmed、unknown（已发送但 ack 不明）与 remaining。运行机制与恢复见 `docs/development/ci.md`「Engineering state：全域重算与独立唤醒」。
+
 **这条轴与 `Status` 无关。** 合并 PR 只写 `Engineering`，不写 `Status`——`Item closed → Status = Done` 因此被裁决为关闭（见 §5）。一个已合并的工作项停在 `Status = Todo` 是**正常**的：它表示规划所有者还没有接受这项工作完成。
 
 ## 3. 不变量 3 在看板上如何被满足

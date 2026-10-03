@@ -77,6 +77,7 @@ node scripts/rule-checks.mjs size origin/main            # 期望在上限内
 
 - 只改 `.github/workflows/engineering-state-signal.yml`、`.github/workflows/engineering-state.yml`、`scripts/engineering-state-signal.mjs`（新增）、`tests/contract/engineering-state.test.js`、本文件。
 - 不改 `scripts/sync-engineering-state.mjs` 的写入语义（首轮六条修复已验收）。
+  > **Superseded by** `docs/development/ci.md`「Engineering state：全域重算与独立唤醒」（2026-10-02，issue #249）：写入口已搬到唯一全域 writer `scripts/reconcile-engineering-project.mjs`，`sync-engineering-state.mjs` 只保留投影、选择策略、字段 schema 与带 ack 的 mutation 边界；本计划的信任边界裁决（默认分支定义、signal 准入、PROJECTS_TOKEN 只进 writer step）不变。
 - workflow 必须继续通过 `scripts/workflow-check.mjs` 的 W1–W7；所有外部 action 保持 40 位 SHA pin。
 - 公开面自查：不得出现凭据、本机路径、内部系统名。
 - 只允许 rebase merge；不自行合并 PR。

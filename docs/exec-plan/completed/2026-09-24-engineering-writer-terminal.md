@@ -6,6 +6,8 @@
 > 上游输入：`docs/exec-plan/active/2026-09-22-engineering-merged-state.md`（其「遗留问题」第 1 条把本层登记为 follow-up，评审 [1] 的处置就是本计划）、`docs/product/board-semantics.md` §2.1、`docs/development/ci.md`、`docs/project-management/merge-queue.md` §4.4 与 §7
 > 载体 issue：<https://github.com/SingularityKChen/harness-projects/issues/115>
 
+> **Superseded by** `docs/development/ci.md`「Engineering state：全域重算与独立唤醒」（2026-10-02，issue #249）：本计划中 `loadTriggerPullRequest`、「触发 PR 必须在引用集合里」的断言与逐 PR 补救入口都已随唯一全域 writer `scripts/reconcile-engineering-project.mjs` 删除；`expectedFor` 的选择策略与「写入口、观察者共用一份策略」保留。下文按原样保留当时的设计与证据。
+
 ## Purpose / Big Picture
 
 `Engineering` 字段有**两个**消费同一份 PR 真值的地方：写入口（`scripts/sync-engineering-state.mjs`，由 PR 生命周期事件唤醒）和观察者（`scripts/engineering-drift.mjs`，由每日 `Board invariants` 运行）。今天它们对「同一 issue 被多个 PR 引用时，哪个 PR 说了算」给出不同答案：
@@ -507,6 +509,7 @@ $ gh issue view 115 --json number,state,closedByPullRequestsReferences
   **回读期望**：该命令打印 `::notice::confirmed #<issue>: Engineering=<值>; 依据 PR #<n>（规则 <rule>）; item=<itemId>; mutation=<id>`，并以 `Status 未被改动——规划状态与工程执行状态保持正交。` 收尾；再跑
   `PROJECTS_TOKEN="$(gh auth token)" PROJECT_OWNER=SingularityKChen PROJECT_NUMBER=10 GITHUB_REPOSITORY=SingularityKChen/harness-projects node scripts/check-engineering-drift-live.mjs --json`
   期望该 issue 不再出现在 `findings` 里。这条路径与 `2026-09-22-engineering-merged-state.md` D4 的既有决定一致（回填走生产代码路径，不写一次性脚本）。
+  > **Superseded by** `docs/development/ci.md`「Engineering state：全域重算与独立唤醒」（2026-10-02，issue #249）：该「对漂移条目所属 PR 跑一次」的 per-PR 补救入口已删除；现在不需要找 PR，直接运行 `node scripts/reconcile-engineering-project.mjs`（先 `--dry-run`），再用观察者 `--json` 回读。上文的取消事实与「触发 PR 必须在集合里」的断言是 2026-09-24 当时的裁决，保留；该断言随触发 PR 路径一并删除。
 - **实测证据（现场状态）**：评审时受检 head 上有 3 条漂移（#125 / #137 / #139，`rule=open`）；**2026-09-23T10:12Z 复跑观察者，现场已被主控修回真值**：`{"findings":[],"skipped":43,"checked":39,"pullRequests":58,"items":82}`，exit 0。也就是说这条意见指出的失败面真实发生过、也真实被这次补救入口修掉了。
   > **Superseded by**（2026-09-23，第二轮 MMP 评审）：后半句不成立。CI 日志显示三条漂移在 09:38:57Z–09:41:19Z 已被 `workflow_run` 事件的 reconcile 修正（run `35844174428` / `35844271716` / `35844405970`），早于第一轮评审意见（09:43:18Z）；补救入口**未经实地验证**。首次实际使用时按 `AGENTS.md` §7 记录 actor、目标 item、`RECONCILE_ID`（幂等键）与输出；`ENGINEERING_FIELD_ID` 取自 `gh variable get PROJECTS_ENGINEERING_FIELD_ID -R SingularityKChen/harness-projects`。
 

@@ -152,6 +152,8 @@ if (snapshot.merged) throw new Error('OPEN PR 不得同时标记为 merged')
 
 25 个漂移条目里，12 个停在 `PR open`、13 个为空。两者都满足"存在已合并的引用 PR"，因此都可以由 `node scripts/sync-engineering-state.mjs <pr-number>` 修复——那就是**生产路径本身**，且是幂等的（同一个 `updateProjectV2ItemValue` 重放只是把值写成同一个值）。
 
+> **Superseded by** `docs/development/ci.md`「Engineering state：全域重算与独立唤醒」（2026-10-02，issue #249）：该入口已删除，回填与恢复改走唯一全域 writer `node scripts/reconcile-engineering-project.mjs`（不接受 PR 号）；本节的「回填走生产路径、不写一次性脚本」决定不变。
+
 **为什么不用一次性回填脚本**：一次性脚本是第二份写路径，它不会随投影函数演进而更新；用它回填等于让本次修复的核心逻辑在验收时不被执行。用生产路径回填，同时就是一次端到端验收。
 
 **`Status` 一律不碰**：`AGENTS.md` §7 允许 agent 做机械推导的看板字段回填，`Status` 明确需要人类批准。本批次只写 `Engineering`。
@@ -262,6 +264,7 @@ PROJECTS_TOKEN="$(gh auth token)" PROJECT_OWNER=SingularityKChen PROJECT_NUMBER=
 
 1. 用 `scripts/check-engineering-drift-live.mjs` 取回填前的 25 条漂移清单并记录（`--json` 输出里含每条 `(itemId, issue, 旧值)`，作为回滚依据）。
 2. 对每个漂移条目所属的已合并 PR 执行 `PROJECTS_TOKEN="$(gh auth token)" ENGINEERING_FIELD_ID=<字段 ID> GITHUB_REPOSITORY=SingularityKChen/harness-projects RECONCILE_ID=<唯一值> node scripts/sync-engineering-state.mjs <pr-number>`。
+   > **Superseded by** `docs/development/ci.md`「Engineering state：全域重算与独立唤醒」（2026-10-02，issue #249）：本步骤的命令已改为不带 PR 号的 `node scripts/reconcile-engineering-project.mjs`；下方 23 次逐 PR 回填是当时的历史记录，保留。
 3. 重跑监测，期望 0 条。
 4. 回读 `Status`，确认与回填前逐条相同。
 
