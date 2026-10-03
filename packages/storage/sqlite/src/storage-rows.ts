@@ -40,7 +40,7 @@ export const rowToFieldValue = (row: Row): FieldValueRecord => ({ workspaceId: t
   itemExternalId: text(row, 'item_external_id'), projectFieldId: text(row, 'project_field_id'), value: text(row, 'value'),
   observedAt: text(row, 'observed_at') })
 
-export const rowToSyncCursor = (row: Row): SyncCursorRecord => ({ bindingId: text(row, 'binding_id') as ProviderBindingId,
+export const rowToSyncCursor = (row: Row): SyncCursorRecord => ({ workspaceId: text(row, 'workspace_id') as WorkspaceId, bindingId: text(row, 'binding_id') as ProviderBindingId,
   scopeKey: text(row, 'scope_key'), cursorValue: optionalText(row, 'cursor_value'), state: text(row, 'state') as SyncState,
   lastErrorCode: optionalText(row, 'last_error_code') })
 

@@ -75,7 +75,7 @@ async function syncSummary(context: CoreContext): Promise<SyncSummary> {
   if (!gate.allowed) return { degraded: true, stale: true, reason: gate.error?.message ?? '规划读取能力不可用' }
   const binding = singlePlanningBinding(context.registry)
   if (binding === undefined) return { degraded: true, stale: true, reason: '没有默认 Planning 绑定' }
-  const cursor = await context.storage.getSyncCursor(binding.ref.bindingId, PLANNING_SYNC_SCOPE)
+  const cursor = await context.storage.getSyncCursor(context.workspaceId, binding.ref.bindingId, PLANNING_SYNC_SCOPE)
   if (cursor === undefined) return { degraded: false, stale: false, reason: undefined }
   if (cursor.state === SyncState.Degraded || cursor.state === SyncState.Failed) {
     return { degraded: true, stale: true, reason: cursor.lastErrorCode ?? cursor.state }

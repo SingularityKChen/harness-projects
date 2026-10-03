@@ -23,13 +23,13 @@ export function storageSyncSuite(adapter, register = test) {
     assert.equal(await storage.recordObservation(makeObservation('key-old', 'v1', { value: 'old' })), false)
     assert.equal(await storage.recordObservation(makeObservation('key-1', 'v2', { value: 'replacement' })), false)
     assert.equal(await storage.recordObservation(makeObservation('key-2', 'v3', { value: 'latest' })), true)
-    assert.equal((await storage.getSyncCursor('binding-1', 'scope-1')), undefined)
-    await storage.putSyncCursor({ bindingId: 'binding-1', scopeKey: 'scope-1', cursorValue: 'cursor-1', state: 'healthy', lastErrorCode: undefined })
+    assert.equal((await storage.getSyncCursor(WORKSPACE, 'binding-1', 'scope-1')), undefined)
+    await storage.putSyncCursor({ workspaceId: WORKSPACE, bindingId: 'binding-1', scopeKey: 'scope-1', cursorValue: 'cursor-1', state: 'healthy', lastErrorCode: undefined })
     await storage.putReconcileCursor({ workspaceId: WORKSPACE, lastReconciledAt: '2026-09-20T00:00:00Z' })
     await storage.putReconcileCursor({ workspaceId: 'ws-other', lastReconciledAt: '2026-09-21T00:00:00Z' })
     assert.equal((await storage.getReconcileCursor(WORKSPACE))?.lastReconciledAt, '2026-09-20T00:00:00Z')
     assert.equal((await storage.getReconcileCursor('ws-other'))?.lastReconciledAt, '2026-09-21T00:00:00Z')
-    assert.equal((await storage.getSyncCursor('binding-1', 'scope-1'))?.cursorValue, 'cursor-1')
+    assert.equal((await storage.getSyncCursor(WORKSPACE, 'binding-1', 'scope-1'))?.cursorValue, 'cursor-1')
   })
 
   register(`${label}：同一内容在两个工作区是两条成员关系，互不覆盖且同内容只有一条`, async () => {

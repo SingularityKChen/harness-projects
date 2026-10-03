@@ -68,9 +68,10 @@ export interface MutationAttemptRecord {
 export const SyncState = { Idle: 'idle', Syncing: 'syncing', Healthy: 'healthy', Degraded: 'degraded', Failed: 'failed' } as const
 export type SyncState = (typeof SyncState)[keyof typeof SyncState]
 
+/** 同步游标按 `(工作区, 连接, scopeKey)` 定位（#189）：同一条连接挂在两个工作区时，各自的同步健康度互不覆盖。 */
 export interface SyncCursorRecord {
-  readonly bindingId: ProviderBindingId; readonly scopeKey: string; readonly cursorValue: string | undefined
-  readonly state: SyncState; readonly lastErrorCode: string | undefined
+  readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId; readonly scopeKey: string
+  readonly cursorValue: string | undefined; readonly state: SyncState; readonly lastErrorCode: string | undefined
 }
 
 /** 观察的处理状态：ignored 表示已按去重规则丢弃，不再进入投影。 */
@@ -179,7 +180,8 @@ export interface Storage {
   // 对规范载体：更新者返回 true，更旧者返回 false，同版本不同 dedupeKey 返回 true（R4 ② 整快照替换）。`payload` 由 provider
   // 负责脱敏（见 `ProviderObservation` 的契约注释），storage 原样持久化。
   recordObservation(record: ObservationRecord): Promise<boolean>
-  getSyncCursor(bindingId: ProviderBindingId, scopeKey: string): Promise<SyncCursorRecord | undefined>
+  // 游标的两条父边（工作区、连接锚点）各自独立：只证明父行存在，不证明该工作区已挂载该连接；缺任一父行的写入被拒绝且不留行。
+  getSyncCursor(workspaceId: WorkspaceId, bindingId: ProviderBindingId, scopeKey: string): Promise<SyncCursorRecord | undefined>
   putSyncCursor(record: SyncCursorRecord): Promise<void>
   getReconcileCursor(workspaceId: WorkspaceId): Promise<ReconcileCursorRecord | undefined>
   putReconcileCursor(record: ReconcileCursorRecord): Promise<void>

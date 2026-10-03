@@ -40,7 +40,7 @@ import { optional, rowToFieldValue, rowToMembership, rowToReconcileCursor, rowTo
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。
 const MEMBERSHIP_COLUMNS = 'workspace_id, project_external_id, item_external_id, content_external_kind, content_external_id, membership_created_at, membership_updated_at'
 const FIELD_VALUE_COLUMNS = 'workspace_id, item_external_id, project_field_id, value, observed_at'
-const SYNC_CURSOR_COLUMNS = 'binding_id, scope_key, cursor_value, state, last_error_code'
+const SYNC_CURSOR_COLUMNS = 'workspace_id, binding_id, scope_key, cursor_value, state, last_error_code'
 /** 观察账本列（与 003 的 DDL 同序）：主体是端口主体 `(binding_id, object_kind, object_external_id)`，`observed_at` 是本地接收时刻（同版本的 tie-breaker），`updated_at` 是平台版本载体（R4），`dedupe_key` 是端口去重键的落点。 */
 const OBSERVATION_COLUMNS = 'binding_id, object_kind, object_external_id, observed_at, dedupe_key, updated_at, snapshot_json, state'
 
@@ -245,21 +245,15 @@ export class SqliteSyncSurface {
     return row === undefined ? undefined : columnToVersion(row.updated_at)
   }
 
-  getSyncCursor(bindingId: ProviderBindingId, scopeKey: string): Promise<SyncCursorRecord | undefined> {
-    return this.read(() => optional(this.db.prepare(`SELECT ${SYNC_CURSOR_COLUMNS} FROM sync_cursor WHERE binding_id = ? AND scope_key = ?`).get(bindingId, scopeKey), rowToSyncCursor))
+  getSyncCursor(workspaceId: WorkspaceId, bindingId: ProviderBindingId, scopeKey: string): Promise<SyncCursorRecord | undefined> {
+    return this.read(() => optional(this.db.prepare(`SELECT ${SYNC_CURSOR_COLUMNS} FROM sync_cursor WHERE workspace_id = ? AND binding_id = ? AND scope_key = ?`).get(workspaceId, bindingId, scopeKey), rowToSyncCursor))
   }
 
-  /**
-   * 增量游标按 `(绑定, scopeKey)` 定位：同一个 scopeKey 在不同绑定下是两条游标，scope 由调用方定义（R5）。
-   * **工作区维度缺失**（#189 / ADR-0006 的逐记录作用域表把 `SyncCursorRecord` 判为工作区级）：绑定是跨工作区
-   * 共享的连接锚点，同一绑定被多个工作区挂载时，ws-1 同步失败写 `degraded`、ws-2 随后成功写 `healthy`，ws-1
-   * 就显示 `healthy`（core 的 freshness 只读这一处）。收口条件在**端口层**——键里补 `workspaceId` 是签名变更、
-   * 会波及 core，所以本层不改 DDL、也不在 SQLite 侧单方面加列；本行只记录结论并指向 #189。
-   */
+  /** 增量游标按 `(工作区, 绑定, scopeKey)` 定位（#189）：绑定是跨工作区共享的连接锚点，同步健康度却是工作区级事实，键里少了工作区，ws-2 的成功会把 ws-1 的 degraded 写成 healthy。 */
   putSyncCursor(record: SyncCursorRecord): Promise<void> {
-    return this.write(`INSERT INTO sync_cursor (${SYNC_CURSOR_COLUMNS}) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT (binding_id, scope_key) DO UPDATE SET cursor_value = excluded.cursor_value, state = excluded.state, last_error_code = excluded.last_error_code`,
-      record.bindingId, record.scopeKey, record.cursorValue ?? null, record.state, record.lastErrorCode ?? null)
+    return this.write(`INSERT INTO sync_cursor (${SYNC_CURSOR_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (workspace_id, binding_id, scope_key) DO UPDATE SET cursor_value = excluded.cursor_value, state = excluded.state, last_error_code = excluded.last_error_code`,
+      record.workspaceId, record.bindingId, record.scopeKey, record.cursorValue ?? null, record.state, record.lastErrorCode ?? null)
   }
 
   /** 对账游标（R5）：只记工作区上次全量对账时刻，**没有**平台 `updated_at` 增量游标列。 */
