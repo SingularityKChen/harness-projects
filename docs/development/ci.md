@@ -11,7 +11,7 @@
 | Issue policy | issue / PR 事件；检查标题、标签和 issue 关联 | advisory |
 | Rule checks | PR 事件；发布面和 PR 体量 | advisory |
 | Board invariants | 每日 schedule；两个 job：读取 Project 工作流启停并与裁决表比较，以及核对 `Engineering` 字段与 PR 真值 | advisory；需要 PROJECTS_TOKEN |
-| Engineering state | pull_request_target（opened / reopened / ready_for_review / converted_to_draft / synchronize / closed）与 Engineering state signal 的 workflow_run；把 PR 生命周期写进看板的 `Engineering` 字段 | advisory；**不写 `Status`**（不变量 3） |
+| Engineering state | pull_request_target（opened / edited / reopened / ready_for_review / converted_to_draft / synchronize / closed）、Engineering state signal 的 workflow_run 与每小时 17、47 分的 schedule；唯一 writer `scripts/reconcile-engineering-project.mjs` 每次读取目标 Project 的完整快照并重算全部本仓 Issue 的 `Engineering` | advisory；**不写 `Status`**（不变量 3）；job 级全局串行，不取消进行中的运行 |
 | Engineering state signal | pull_request_review（submitted / dismissed）；只上报一个信号，由 Engineering state 消费 | advisory；`permissions: {}` |
 | GitHub review session | ready_for_review 的 pull_request_target；只转发 payload，不 checkout PR 代码；按 head 提交去重 | 不属于合并门禁 |
 
@@ -32,6 +32,8 @@ Board invariants 的 `on` **刻意只有 `schedule`**，由 `tests/contract/chec
 > **Superseded by** 下一段「投影与选择策略都是共享的」（2026-09-23，issue #115 / PR #159）：判定规则的唯一实现已搬进投影权威 `scripts/sync-engineering-state.mjs`（`expectedFor`），观察者 `scripts/engineering-drift.mjs` import 它、自身不再持有实现；规则内容（Merged 优先且单调 → 最新 open → 全 closed 为空 → 未被引用则跳过）不变。
 
 **投影与选择策略都是共享的。** 单 PR 的 `snapshot → 取值` 投影 import 自 `sync-engineering-state.mjs`（`stateForSnapshot`），所以两侧对同一个快照必然一致；「同一 issue 被多个 PR 引用时谁说了算」这条**选择策略也只有一份实现**（同文件的 `expectedFor`），写入口与观察者都调用它。写入口据此把判定改为**聚合**：取触发 PR → 解析它的 `closingIssuesReferences` → 对每个 issue 读 `Issue.closedByPullRequestsReferences` 的**全部**关闭引用 PR（只读，显式 `includeClosedPrs: true`，分页读到完）→ 用 `expectedFor` 算出该 issue 应有的取值 → 再写。引用读取不完整——分页截断、超上限、`repository` / `issue` 为 null、字段缺失、`state` / `reviewDecision` 未知、集合为空、集合里没有触发 PR——一律抛错，不退回「只按触发 PR 写」。
+
+> **Superseded by** 下文「Engineering state：全域重算与独立唤醒」（2026-10-02，issue #249）：写入口不再从触发 PR 出发，没有「触发 PR 必须在集合里」这条检查；「集合为空」在完整读取证明零引用时也不再抛错而是清空。选择策略与「读取不完整一律失败」不变。
 
 **投影是共享的，选择策略不是。** 单 PR 的 `snapshot → 取值` 投影 import 自 `sync-engineering-state.mjs`（`stateForSnapshot`），所以两侧对同一个快照必然一致；但「同一 issue 被多个 PR 引用时谁说了算」这条**选择策略是观察者独有的**——写入者 `sync-engineering-state.mjs` 只投影触发事件的那一个 PR，没有任何跨 PR 聚合。两者因此可能在多 PR 引用同一 issue 时给出不同取值，这是 issue #115 记录在案的已知缺口，不要把它读成「两侧必然一致」。
 
@@ -62,6 +64,43 @@ PR 列表与看板条目都分页读取，超过 5 页（500 条）上限就 fai
     PROJECTS_TOKEN=... PROJECT_OWNER=SingularityKChen PROJECT_NUMBER=10 GITHUB_REPOSITORY=SingularityKChen/harness-projects \
       ENGINEERING_FIELD_ID=<字段 ID> node scripts/check-engineering-drift-live.mjs --json \
       | jq '[.findings[] | select(.rule == "unreferenced")] | length'
+
+> **Superseded by** 下文「Engineering state：全域重算与独立唤醒」（2026-10-03，issue #249 / PR #257）：触发 PR writer 已删除，唯一全域 writer 每次读取同一份完整快照并重算全部本仓 Issue，完整零残留会在下一次通过准入的事件或 schedule 运行中被清空，不再需要手工清空；上面的 `unreferenced` 计数命令仍可在首次全域写之前估算它会清空多少条目。
+
+### Engineering state：全域重算与独立唤醒
+
+**问题。** `Engineering state` 的并发组（`cancel-in-progress: false`）只保留同组一个 pending，被替换的运行不会执行；旧写入口的候选只来自触发 PR 的关闭引用，于是幸存的运行看不见被取消的那个事件所属的 issue。2026-09-30 的 PR #241 就是这样：signal 成功、reconcile 因被取代而没有 job，issue #70 的 `Changes requested` 直到后来的事件才被修正。
+
+**当前机制（唯一 writer）。** PR/review 事件与 schedule 都只是「值得再读一次」的 hint，不携带范围；每个通过准入的运行执行同一条命令，不接受 PR 号：
+
+    PROJECTS_TOKEN=... ENGINEERING_FIELD_ID=<字段 ID> GITHUB_REPOSITORY=SingularityKChen/harness-projects RECONCILE_ID=<唯一值> \
+      node scripts/reconcile-engineering-project.mjs [--dry-run]
+
+- **来源与判定。** 与观察者是同一个 `loadProjectEngineeringSnapshot` 与同一个 `expectedFor`（见上文「Engineering 观察者：Project 页完整来源」）：完整零引用在这里意味着清空残留旧值；fail closed 的条件也相同，所以一个 `content` 为 null 的条目会让每次运行在任何 mutation 之前整体失败。首个 mutation 之前算完全部条目的期望值，后项的未知枚举不会让前项先写。数据域不按作者或来源过滤（不跟随事件准入）：任何账号从 fork 开一个正文含 `Closes #N` 的 PR，它都会进入 #N 的关闭引用；#N 还没有已合并 PR 时，按「最新 open PR」规则它会覆盖同仓 PR 的取值（draft 时清空，否则为 `PR open`）。旧写入口只在同仓可信事件触及 #N 时才会写出这个结果，schedule 让它在下一次全域运行（最多约 30 分钟）里无条件落地。边界：只影响还没有已合并 PR 的 Issue，`Merged` 终态不受影响，也不碰 `Status`；是否只采纳同仓或有写权限作者的 open PR 是独立的产品决策，不在本节。
+- **复读与结果协议。** 初读后对每个有差异的 item 用稳定 item id 写前新鲜复读（`loadIssueEngineeringSnapshot`），以复读的 expected/current 为准；item 移出 Project、换了 Issue 或来源不完整就停止本轮。`clientMutationId` 是 `runId-runAttempt:itemId`，只用于关联请求与 ack，不是幂等事务保证。失败时非零退出，并如实报告 confirmed / unchanged / unknown（已发送但 ack 不明）/ unread（复读失败）/ remaining（未处理）；`--dry-run` 只读，零 mutation。每条 `confirmed` 日志带写前复读到的旧值（`was=<旧值>`，空值写 `empty`）：`Engineering` 没有别的历史，首次全域写改掉了什么只记在运行日志里。
+
+**活性边界。** job 级的全局 group（`jobs.sync.concurrency`：`engineering-state-reconcile`，`cancel-in-progress: false`）保证 query/write 串行；单个 hint 被取消由幸存 hint 覆盖，最后一个 hint 被取消靠独立 schedule（`'17,47 * * * *'`，不携 PR、不走 signal）。GitHub 的计划任务可能被延迟或丢弃，公开仓库 60 日无活动会被禁用，所以保证只是：源稳定后、API 与凭据可用、有一次公平的全域运行成功时，字段最终收敛；没有 30 分钟 SLA，也没有跨读取与 mutation 的 CAS，瞬时 stale 窗口是存在的。持续的 API 或前缀项故障会让后面的项一直 remaining，需要红色告警与人工恢复。
+
+**并发组为什么在 job 级，以及它没有证明什么。** 同一个 group 只保留一个 pending，新来者取代旧的 pending。workflow 级 group 在 run 创建时就排队，早于 job `if` 求值：fork PR 的 `pull_request_target`（包括任何账号都能触发的 `edited`）、fork head 的 `workflow_run` 会先挤掉排队中的已准入运行或 schedule，自己再在 `if` 处被跳过，结果没有任何运行重算。放在 job 级是为了让被 `if` 拒绝的 job 不入组，但这一点没有证据：GitHub 的 concurrency 文档只说明同组单 pending 的替换语义和 `jobs.<id>.concurrency` 是合法键，没有说明 job `if` 与 job 级入组谁先谁后，公开报告互相矛盾（有的说被跳过的运行不会入组，有的说 job 创建时就已占组）。平台语义待合并后用 `gh run list -R SingularityKChen/harness-projects --workflow engineering-state.yml --limit 50 --json event,conclusion,createdAt` 对照同时段的 `cancelled` 与 `skipped` 运行确认（命令与期望见下文「合并后回读」）；在那之前，本节不声称 job 级 group 能挡住未准入运行。即使 `if` 先于入组，仍有两类运行会入组并可能替换一个排队中的已准入运行或 schedule：被准入、再由分类步骤判为 noop 的 signal 运行（例如平台把只含被跳过 job 的 signal run 报成 success 时），以及被准入但分类步骤失败的运行（jobs API 出错、关联 PR 数不是 1，它们以红色结束）。挤掉别人的前提是同时有一个运行中和一个排队中的运行，被挤掉的工作由下一次已准入运行或 schedule 补上；不论平台是哪种语义，job 级 group 都不比 workflow 级差。修复方向（条件 group key）登记在 `docs/exec-plan/tech-debt-tracker.md` 的 TD-017。
+
+**恢复。** 观察者报漂移或某次运行部分失败时，不需要找 PR：先 `--dry-run` 看差异数与读取成本，再不带参数运行同一条命令（幂等，只修仍有差异的项），最后用上文的观察者 `--json` 回读，期望 `findings` 为空。旧的「对漂移条目所属 PR 跑 `node scripts/sync-engineering-state.mjs <pr>`」入口已删除。
+
+**合并后回读。** `pull_request_target` 与 schedule 的 workflow 定义取自默认分支，合并前的本地排练不能当作线上运行证据。合并本节所在 PR 的 `pull_request_target: closed` 事件会立刻用默认分支上的新 writer 做第一次全域写（包括按完整零引用清空残留旧值），所以合并后的 `--dry-run` 只能测成本，不是写前门；首次写会改多少条目，要在合并前用上文只读的观察者 `--json` 看 `findings` 的条数（同一份快照、同一个 `expectedFor`）。合并后依次回读：
+
+    gh run list -R SingularityKChen/harness-projects --workflow engineering-state.yml --limit 50 \
+      --json databaseId,event,status,conclusion,createdAt
+
+期望：合并事件的 `pull_request_target` 运行与之后至少一次 `schedule` 运行 `conclusion` 为 `success`；同一时段 fork 事件的运行是 `skipped`，同仓事件与 schedule 的运行不因它们变成 `cancelled`（job 级 group 的平台语义只能在这里确认）。取一次 schedule 运行的 `databaseId`：
+
+    gh run view <databaseId> -R SingularityKChen/harness-projects --log \
+      | grep -E 'reconcile actor=[0-9]+-[0-9]+ .*pages=[0-9]+ referenceEdges=[0-9]+'
+
+期望恰好一行。`gh run view --log` 把 `::notice::` 渲染成 `##[notice]`，所以按 `reconcile actor=` 匹配，不按 `::notice::` 的字面量（`docs/project-management/merge-queue.md` 记过同一个坑）。同一份日志里核对 checkout 取到的是默认分支：
+
+    gh run view <databaseId> -R SingularityKChen/harness-projects --log \
+      | grep -E -A1 'checkout --progress --force|git log -1 --format'
+
+期望 checkout 指向 `refs/remotes/origin/main`，紧随 `git log -1 --format` 打印的提交等于运行开始时 `main` 的 tip。`ref: ${{ github.event.repository.default_branch }}` 在 schedule 负载里若为空，checkout 回退到触发 ref，对 schedule 仍是默认分支，这一行就是证据。最后用上文的观察者 `--json` 回读，期望 `findings` 为空。
 
 Review session 的两条结构性质由 `tests/contract/github-review-workflow.test.js` 固定，改 workflow 必须同时改它：
 
