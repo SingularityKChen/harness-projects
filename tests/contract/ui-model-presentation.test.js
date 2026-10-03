@@ -39,9 +39,12 @@ const KEY = {
   runStart: 'execution.run.start', runRead: 'execution.run.read',
   changeRequestRead: 'development.change_request.read', pipelineRead: 'delivery.pipeline.read',
   checkRead: 'delivery.check.read',
+  repositoryRead: 'development.repository.read', worktreeRead: 'development.worktree.read',
 }
 
 const START_WORK_KEYS = [KEY.branchCreate, KEY.worktreeCreate, KEY.runStart]
+/** core 写前预检的两个读门：只按读判定，下面的写动作差分里固定为可用。 */
+const START_WORK_READS = [{ key: KEY.repositoryRead, access: 'available' }, { key: KEY.worktreeRead, access: 'available' }]
 
 const allAvailable = () => Object.values(KEY).map((key) => ({ key, access: 'available' }))
 
@@ -529,7 +532,7 @@ test('不变量：四态求交与 capabilities 的 intersectAccess 逐格一致�
   for (const a of LEVELS) for (const b of LEVELS) for (const c of LEVELS) {
     const levels = [a, b, c]
     const action = deriveWorkItemList(readFor({
-      capabilities: START_WORK_KEYS.map((key, index) => ({ key, access: levels[index] })),
+      capabilities: [...START_WORK_KEYS.map((key, index) => ({ key, access: levels[index] })), ...START_WORK_READS],
     })).rows.find((row) => row.entityId === 'entity-work-item').actions[0]
     assert.equal(action.access, intersectAccess(a, b, c), `求交(${levels.join(', ')})`)
     assert.equal(action.available, levels.every((level) => level !== 'read_only' && level !== 'unavailable'),
@@ -544,7 +547,7 @@ test('不变量：不可用说明逐 key 给出它自己的级别，不是合成
   const action = deriveWorkItemList(readFor({
     capabilities: [
       { key: KEY.branchCreate, access: 'read_only' }, { key: KEY.worktreeCreate, access: 'degraded' },
-      { key: KEY.runStart, access: 'available' },
+      { key: KEY.runStart, access: 'available' }, ...START_WORK_READS,
     ],
   })).rows.find((row) => row.entityId === 'entity-work-item').actions[0]
 
@@ -552,4 +555,17 @@ test('不变量：不可用说明逐 key 给出它自己的级别，不是合成
   assert.match(action.reason, /development\.branch\.create = read_only/)
   assert.match(action.reason, /development\.worktree\.create = degraded/, 'degraded 的 key 不得被写成合成级别')
   assert.equal(action.reason.includes(KEY.runStart), false, '可用的 key 不进不可用说明')
+})
+
+/** #253 评审 P3：开始工作的两个读门与 core 的 `gateCommand(..., 'read')` 一致——`read_only` 不挡，`unavailable` 挡且点名。 */
+test('不变量：开始工作的读门只按读判定，与 core 的写前预检一致', () => {
+  const actionWith = (key, access) => rowFor(deriveWorkItemList(readFor({
+    capabilities: allAvailable().map((entry) => (entry.key === key ? { key, access } : entry)),
+  })), 'entity-work-item').actions[0]
+  for (const key of [KEY.repositoryRead, KEY.worktreeRead]) {
+    assert.deepEqual([actionWith(key, 'read_only').available, actionWith(key, 'read_only').access], [true, 'available'], `${key} 只读：读门照常可用`)
+    const blocked = actionWith(key, 'unavailable')
+    assert.deepEqual([blocked.available, blocked.access, blocked.reason], [false, 'unavailable', `capability ${key} = unavailable`], `${key} 不可用：开始工作不可用，并点名这个读门`)
+  }
+  assert.deepEqual(actionWith(KEY.branchCreate, 'read_only').available, false, '写门的 read_only 仍然挡住写动作')
 })

@@ -10,12 +10,16 @@ import {
   type ActionAvailability, type CapabilityDecision, type CapabilitySnapshotEntry, type LineageEntryPoint,
 } from './types.ts'
 
-/** 开始工作的必需 key：建分支、建工作树、启动执行，缺一不可。 */
+/** 开始工作的必需 key：建分支、建工作树、启动执行，以及 core 写前预检经过的仓库读、工作树读两个读门，缺一不可。 */
 const START_WORK_KEYS = [
   'development.branch.create',
   'development.worktree.create',
   'execution.run.start',
+  'development.repository.read',
+  'development.worktree.read',
 ] as const
+/** 读门只按读判定（与 core 的 `gateCommand(..., 'read')` 一致）：`read_only` 对读来说就是可用，只有 `unavailable` 挡住开始工作。 */
+const START_WORK_READ_KEYS: ReadonlySet<string> = new Set(['development.repository.read', 'development.worktree.read'])
 
 /**
  * 谱系入口的必需 key **必须等于 core 读该事实时真正经过的门**（`packages/core/src/chain-facts.ts`）。
@@ -63,9 +67,12 @@ type CapabilityUse = (typeof CapabilityUse)[keyof typeof CapabilityUse]
  * 任何单个 key 的级别），顺序沿用必需 key 的声明顺序，便于机器读取。必需 key 为空时恒可用。
  */
 function decide(
-  requiredKeys: readonly string[], access: ReadonlyMap<string, AccessLevel>, use: CapabilityUse,
+  requiredKeys: readonly string[], access: ReadonlyMap<string, AccessLevel>, use: CapabilityUse, readKeys: ReadonlySet<string> = new Set(),
 ): CapabilityDecision {
-  const levelOf = (key: string): AccessLevel => access.get(key) ?? AccessLevel.Unavailable
+  const levelOf = (key: string): AccessLevel => {
+    const level = access.get(key) ?? AccessLevel.Unavailable
+    return readKeys.has(key) && level === AccessLevel.ReadOnly ? AccessLevel.Available : level
+  }
   const combined = intersect(requiredKeys.map(levelOf))
   const available = use === CapabilityUse.Read
     ? combined !== AccessLevel.Unavailable
@@ -79,7 +86,7 @@ function decide(
 
 /** 开始工作的动作可用性（写动作）；是否提供这个动作由调用方按内容种类决定。 */
 export function startWorkAvailability(access: ReadonlyMap<string, AccessLevel>): ActionAvailability {
-  return { id: ActionId.StartWork, ...decide(START_WORK_KEYS, access, CapabilityUse.Write) }
+  return { id: ActionId.StartWork, ...decide(START_WORK_KEYS, access, CapabilityUse.Write, START_WORK_READ_KEYS) }
 }
 
 /** 全部谱系入口（含不可用的）；可用性只来自 capability key，按只读导航判定。 */
