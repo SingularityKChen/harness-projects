@@ -226,12 +226,13 @@ export class MemoryStorage implements cap.Storage {
    * 同一 (工作项, 仓库) 最多一个 active 上下文：写入新的 active 会把旧的置为 closed，并把旧行的
    * `provisioningStartedAt` 清成 `undefined`——端口契约写明该列"终态为 undefined"（L6 评审 F3）。
    * 工作区父边、仓库父边（`(工作区, repositoryId)` 必须是已登记的挂载，与 SQLite 的复合外键同语义；core 的写前登记先建挂载，
-   * #187 / #188）与状态枚举按 SQLite 的同语义检查（`execution_context.workspace_id` 外键与 `status` 的 CHECK）；
-   * **依赖 core 的父边只剩一条仍然分叉**：`workItemId`（core 会把上下文写到未登记的工作项上，承载 issue #196）——
-   * SQLite 的外键拒绝，替身接受；分叉由执行组的显式用例按能力位断言。
+   * #187 / #188）与状态枚举按 SQLite 的同语义检查（`execution_context.workspace_id` 外键与 `status` 的 CHECK）。
+   * 工作项父边（#196）：`workItemId` 必须是已登记实体，缺失以 `StorageInputError` 拒绝——与 SQLite 的写前检查同一个错误、同一个先后
+   * （最先检查，早于其余外键与枚举），不论状态 active 或终态；只验证实体存在，种类与规划投影归 core 的可操作项策略。
    */
   async putExecutionContext(record: cap.ExecutionContextRecord): Promise<void> {
     return this.#mutate(() => {
+      if (!this.data.entities.some((entity) => entity.id === record.workItemId)) throw cap.StorageInputError.unregisteredWorkItem()
       if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('execution context workspace does not exist')
       if (!this.data.repositories.some((r) => r.workspaceId === record.workspaceId && r.id === record.repositoryId)) throw new Error('execution context repository does not exist in the context workspace')
       if (!CONTEXT_STATUSES.includes(record.status)) throw new Error(`execution context status is not a known value: ${record.status}`)

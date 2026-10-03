@@ -11,7 +11,6 @@ import type {
   ExternalIdentity,
   ExternalIdentityId,
   MembershipContentKind,
-  ProjectErrorCode,
   ProviderBindingId,
   Relation,
   StatusPolicy,
@@ -21,6 +20,29 @@ import type {
 } from '@harness-projects/domain'
 import type { CapabilityDomain } from './capability-keys.ts'
 import type { ExternalObjectRef, ProviderObservation } from './observation.ts'
+import { ProjectErrorCode, projectError, type ProjectError } from './result.ts'
+
+/**
+ * 本地 Storage 对**已知输入缺陷**的类型化拒绝（#196）。以 Promise 拒绝（异常）传递，而不是结果值：
+ * 异常令外层 `transaction` 整笔回滚，而返回值可以被忽略、让先前暂存的写入随提交生效。目前只承诺一种：
+ * `putExecutionContext` 引用未登记的工作项；closed / busy / 磁盘 / 编程错误保持原来的响亮失败，不统一映射成 invalid_input。
+ * `failure` 是 Storage 端口调用方可见的结构化错误（恢复动作 none：外部平台补不了本地父行）；message 不含驱动文字、SQL 与父行细节。
+ * core 的 `startWork` 认领目前不透传它，而是压平成 `unavailable / retry`（守卫先返回 not_found，该路径不可达；TD-023）。
+ */
+export class StorageInputError extends Error {
+  readonly operation: 'putExecutionContext'
+  readonly resource: 'work_item'
+  readonly failure: ProjectError
+  private constructor(failure: ProjectError) {
+    super(failure.message)
+    this.name = 'StorageInputError'
+    this.operation = 'putExecutionContext'; this.resource = 'work_item'; this.failure = failure
+  }
+  /** 唯一已知情形：两个实现共用同一个构造点，字段与文案因此不会漂移。 */
+  static unregisteredWorkItem(): StorageInputError {
+    return new StorageInputError(projectError(ProjectErrorCode.InvalidInput, '执行上下文引用的工作项未登记'))
+  }
+}
 
 export interface WorkspaceRecord {
   readonly id: WorkspaceId; readonly name: string; readonly statusPolicy: StatusPolicy
@@ -158,6 +180,7 @@ export interface Storage {
   // `active` 的判据是**状态不是终态**：`Closed` 与 `Failed` 都不是 active，因此它们不挡下一次开始
   // （`startWork` 的 `claimContext` 会接管它们并覆写**同一条**记录——`contextIdFor` 是确定性的，
   // 所以「不得产生第二份」比删除重建更强地成立）。`findActiveExecutionContext` 回答的就是这个问题。
+  // 工作项父边（#196）：`workItemId` 不是已登记实体时以 `StorageInputError.unregisteredWorkItem()` 经 Promise 拒绝，早于任何写入（SQLite 早于自己的 BEGIN），不论状态；只问实体是否登记，不问种类。
   putExecutionContext(record: ExecutionContextRecord): Promise<void>
   getExecutionContext(id: ExecutionContextId): Promise<ExecutionContextRecord | undefined>
   findActiveExecutionContext(workspaceId: WorkspaceId, workItemId: EntityId, repositoryId: EntityId): Promise<ExecutionContextRecord | undefined>

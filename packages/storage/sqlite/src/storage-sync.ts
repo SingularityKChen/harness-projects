@@ -5,7 +5,7 @@
  * 因此三组在同一个实例上排**同一条**队列，而不是各有一条。四件机制各自只有一处声明：
  *   - `#queue`：实例级串行点。`mutate` 是唯一入口，`read` 复用同一条队列——外部读因此拿到**结算后**的值，
  *     永远看不到未提交的写入；`write` 是单语句变更的便捷入口，`atomic` 是多语句变更的**唯一原子入口**
- *     （作用域内直接执行，根实例上包一层 `transaction`），方法体不再各自决定要不要开事务。
+ *     （作用域内直接执行，根实例上与 `transaction` 共用同一个私有事务体；可选 `preflight` 在同一队列槽内、`BEGIN` 之前同步检查，#196），方法体不再各自决定要不要开事务。
  *   - `TX_SCOPE`（`AsyncLocalStorage<TransactionToken>`）：事务作用域标记。令牌是**可变对象**（2026-09-24 评审）：
  *     `active` 在结算的 `finally` 里置假，因此 work 里派生的定时器或回调在提交之后调外层实例不再被误判成
  *     "队列内自等"；作用域实例自己也检查 `active`，泄漏出 work 的 `tx` 在结算后以 `SETTLED_TRANSACTION_MESSAGE`
@@ -128,11 +128,13 @@ export class SqliteSyncSurface {
   }
   /**
    * 多语句写入的**唯一原子入口**（2026-09-24 评审）：作用域实例已在事务内，直接执行；根实例上包一层
-   * `transaction`。写者路径因此只有"单语句"与"一个原子作用域"两种，方法体不再各自决定要不要开事务。
+   * 事务。写者路径因此只有"单语句"与"一个原子作用域"两种，方法体不再各自决定要不要开事务。
+   * 可选 `preflight`（#196）与 `fn` 在**同一个队列槽**里连续执行：根实例上它先于 `BEGIN`，失败时本方法不开事务；
+   * 作用域实例上先于 `fn`、不开嵌套事务。它同步读、不写，也不是第二个排队点——外部先读再排写会有检查与写入之间的窗口。
    */
-  protected atomic<T>(fn: () => T): Promise<T> {
-    if (this.scoped) return this.mutate(fn)
-    return this.transaction(async () => fn())
+  protected atomic<T>(fn: () => T, preflight?: () => void): Promise<T> {
+    if (this.scoped) return this.mutate(() => { preflight?.(); return fn() })
+    return this.#transact(async () => fn(), preflight)
   }
 
   /**
@@ -148,7 +150,12 @@ export class SqliteSyncSurface {
   /** 事务在队列内持有 BEGIN IMMEDIATE 到提交/回滚：重叠事务按调用顺序串行，不会撞上"事务里再开事务"的驱动级错误。失败一律 ROLLBACK——半写行重开句柄就再也读不到（集成用例的判别点）；关闭时未提交的事务以 CLOSED_MESSAGE 失败，而不是驱动文案。 */
   async transaction<T>(work: (tx: StorageTransaction) => Promise<T>): Promise<T> {
     if (this.scoped) throw new Error(NESTED_TRANSACTION_MESSAGE)
+    return this.#transact(work)
+  }
+  /** `transaction` 与根实例的 `atomic` **共用**的唯一事务体（令牌、队列、提交 / 回滚只此一份）；`preflight` 在槽内、`BEGIN` 之前，抛错即不开事务。 */
+  #transact<T>(work: (tx: StorageTransaction) => Promise<T>, preflight?: () => void): Promise<T> {
     return this.mutate(async () => {
+      preflight?.()
       this.db.exec('BEGIN IMMEDIATE')
       const token: TransactionToken = { owner: this, active: true }
       this.#token = token
