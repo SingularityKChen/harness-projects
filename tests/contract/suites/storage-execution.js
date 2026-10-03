@@ -132,6 +132,38 @@ export function storageExecutionSuite(adapter, register = test) {
     assert.deepEqual((await storage.listMutationAttempts(WORKSPACE)).map((item) => item.id), ['attempt-1'], '被拒绝的写尝试不得留下行')
   })
 
+  // 仓库挂载以 (工作区, id) 为键（#187 / #188）。同键换外部身份会让已有执行上下文悄悄改指另一个仓库，必须响亮失败且不覆盖；
+  // 反例的新身份必须是**已存在、未挂载**的，否则拒绝可能只是死于悬空身份或唯一约束，分不清是不是这条规则；同值重复登记是 no-op（core 的写前登记依赖它可重复）。
+  register(`${label}：仓库挂载以 (工作区, id) 为键，换身份与换 id 都被拒绝且不覆盖，同值重复登记是 no-op`, async () => {
+    const storage = makeStorage()
+    await seedExecutionPrereqs(storage)
+    for (const n of [2, 3]) {
+      await storage.putEntity({ id: `repo-entity-${n}`, kind: 'repository' })
+      await storage.putExternalIdentity({ id: `repo-identity-${n}`, entityId: `repo-entity-${n}`, bindingId: 'binding-1', externalKind: 'repository', externalId: `repo-${n}`, role: 'primary' })
+    }
+    const mount = { id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'repo-identity-1' }
+    const second = { id: 'repo-2', workspaceId: WORKSPACE, externalIdentityId: 'repo-identity-2' }
+    await storage.putRepository(mount)
+    await storage.putRepository(second)
+    await assert.rejects(storage.putRepository({ ...mount, externalIdentityId: 'repo-identity-3' }), '同 (工作区, id) 换外部身份必须被拒绝')
+    await assert.rejects(storage.putRepository({ ...mount, id: 'repo-9' }), '同工作区同外部身份换 id 必须被拒绝')
+    await storage.putExternalIdentity({ id: 'branch-identity-4', entityId: 'entity-2', bindingId: 'binding-1', externalKind: 'branch', externalId: 'repo-4', role: 'primary' })
+    await assert.rejects(storage.putRepository({ id: 'repo-4', workspaceId: WORKSPACE, externalIdentityId: 'branch-identity-4' }), /not a repository identity/, '挂载必须引用 repository 种类的身份（TD-004）')
+    assert.deepEqual(await storage.listRepositories(WORKSPACE), [mount, second], '被拒绝的写入不得覆盖或追加挂载，同值重复登记不得产生第二行')
+  })
+
+  register(`${label}：同一个仓库 id 可以挂在两个工作区上，互不影响（含已有执行上下文引用时）`, async () => {
+    const storage = makeStorage()
+    await seedExecutionPrereqs(storage)
+    await storage.putExecutionContext({ id: 'context-1', workspaceId: WORKSPACE, workItemId: 'entity-1', repositoryId: 'repo-1', status: 'ready', branchExternalId: undefined, worktreeExternalId: undefined, provisioningStartedAt: undefined })
+    await storage.putEntity({ id: 'repo-entity-9', kind: 'repository' })
+    await storage.putExternalIdentity({ id: 'repo-identity-9', entityId: 'repo-entity-9', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-9', role: 'primary' })
+    await storage.putRepository({ id: 'repo-1', workspaceId: 'ws-other', externalIdentityId: 'repo-identity-9' })
+    assert.deepEqual((await storage.listRepositories(WORKSPACE)).map((r) => [r.id, r.workspaceId]), [['repo-1', WORKSPACE]], '第二个工作区的挂载不得搬走第一个')
+    assert.deepEqual((await storage.listRepositories('ws-other')).map((r) => [r.id, r.workspaceId]), [['repo-1', 'ws-other']])
+    assert.equal((await storage.getExecutionContext('context-1'))?.repositoryId, 'repo-1', '已有执行上下文仍引用自己工作区的挂载')
+  })
+
   /**
    * F2（L6 评审）：执行组原有的第 2 条对"只写候选即可读到候选"判别性为零——实测把 `putRelation` 的候选分支改成
    * 整笔 no-op 后契约仍全绿（候选写入被后面的确认写入覆盖）。本用例只写候选、只读候选，把路由的候选方向

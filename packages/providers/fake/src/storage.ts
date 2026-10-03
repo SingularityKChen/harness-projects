@@ -207,12 +207,18 @@ export class MemoryStorage implements cap.Storage {
   }
   async getPlanningProjection(workspaceId: domain.WorkspaceId, entityId: domain.EntityId): Promise<domain.WorkspaceProjection | undefined> { return this.data.projections.find((p) => p.workspaceId === workspaceId && p.entityId === entityId) }
   async listPlanningProjections(workspaceId: domain.WorkspaceId): Promise<readonly domain.WorkspaceProjection[]> { return this.data.projections.filter((p) => p.workspaceId === workspaceId) }
-  /** 仓库以外键指向工作区与身份：两者任一不存在即拒绝（与 SQLite 的 `repository` 两条外键同语义，L6 评审 F1）。 */
+  /** 仓库以外键指向工作区与身份：两者任一不存在即拒绝（与 SQLite 的 `repository` 两条外键同语义，L6 评审 F1）。挂载键是 `(工作区, id)`：同键换外部身份、同工作区同身份换 id 都拒绝且不覆盖，同值重复登记是 no-op（与 SQLite 的复合主键加 `UNIQUE (workspace_id, external_identity_id)` 同语义，#187 / #188）。 */
   async putRepository(record: cap.RepositoryRecord): Promise<void> {
     return this.#mutate(() => {
       if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('repository workspace does not exist')
-      if (!this.data.identities.some((identity) => identity.id === record.externalIdentityId)) throw new Error('repository external identity does not exist')
-      upsert(this.data.repositories, record, (r) => r.id === record.id)
+      const identity = this.data.identities.find((candidate) => candidate.id === record.externalIdentityId)
+      if (identity === undefined) throw new Error('repository external identity does not exist')
+      if (identity.externalKind !== domain.ExternalIdentityKind.Repository) throw new Error('repository external identity is not a repository identity') // TD-004
+      const mounts = this.data.repositories.filter((r) => r.workspaceId === record.workspaceId)
+      const sameKey = mounts.find((r) => r.id === record.id)
+      if (sameKey !== undefined && sameKey.externalIdentityId !== record.externalIdentityId) throw new Error('repository mount already points at another external identity')
+      if (mounts.some((r) => r.externalIdentityId === record.externalIdentityId && r.id !== record.id)) throw new Error('repository external identity is already mounted under another id')
+      upsert(this.data.repositories, record, (r) => r.workspaceId === record.workspaceId && r.id === record.id)
     })
   }
   async listRepositories(workspaceId: domain.WorkspaceId): Promise<readonly cap.RepositoryRecord[]> { return this.data.repositories.filter((r) => r.workspaceId === workspaceId) }

@@ -105,7 +105,7 @@ test('身份面守卫：两组用例条数与台账一致，断言集合不低�
 // `assert.deepEqual(a, b)` 改成 `assert.deepEqual(a, a)` 同样全绿。断言层因此比对三组文件里 `assert.` 语句的
 // **多重集**（去掉空白后的整行文本）：基线里任何一条文本在当前文件里少出现一次即失败。新增断言不受影响；
 // 要放宽必须**有意**从基线里删掉对应文本，并在提交信息里写明放宽了哪一条。
-const CASE_LEDGER = { foundation: { inherited: INHERITED_CASE_COUNTS.foundation, added: 6 }, sync: { inherited: INHERITED_CASE_COUNTS.sync, added: 1 }, execution: { inherited: INHERITED_CASE_COUNTS.execution, added: 10 } }
+const CASE_LEDGER = { foundation: { inherited: INHERITED_CASE_COUNTS.foundation, added: 6 }, sync: { inherited: INHERITED_CASE_COUNTS.sync, added: 1 }, execution: { inherited: INHERITED_CASE_COUNTS.execution, added: 12 } }
 const SUITE_FILES = { foundation: 'storage.js', sync: 'storage-sync.js', execution: 'storage-execution.js' }
 /** 切分完成时三组 `assert.` 语句的多重集基线（2026-09-24 实测）：元素是语句**去掉空白后的整行文本**，同一文本出现几次就写几项。 */
 const ASSERTION_BASELINE = {

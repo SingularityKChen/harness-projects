@@ -301,6 +301,12 @@ test('003 重写后的库自检：旧库必须显式报错，且自检失败必�
     assert.throws(() => createSqliteStorage(intermediate), /重写前的 003/, '只有 dedupe_key、没有端口主体列的旧库同样必须在打开时报错')
     const current = createSqliteStorage(join(dir, 'current.sqlite'))
     try { assert.deepEqual(await current.listMemberships(WORKSPACE, PROJECT), [], '正方向：当前形状的库照常打开，自检不得挡住新库') } finally { current.close() }
+    // #187 / #188 原位把 repository 的主键改成 (workspace_id, id)：单列主键的旧库同样在打开时报错，而不是等到第二个工作区挂载时才以 UNIQUE 失败。
+    const singleKey = join(dir, 'single-key.sqlite')
+    createSqliteStorage(singleKey).close()
+    const old = openDatabase(singleKey)
+    try { old.exec('PRAGMA foreign_keys = OFF; DROP TABLE repository; CREATE TABLE repository (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspace (id), external_identity_id TEXT NOT NULL REFERENCES external_identity (id), UNIQUE (workspace_id, external_identity_id), UNIQUE (workspace_id, id)); PRAGMA foreign_keys = ON') } finally { old.close() }
+    assert.throws(() => createSqliteStorage(singleKey), /repository 的主键不是 \(workspace_id, id\)/, '仓库挂载键仍是单列 id 的旧库必须在打开时报错')
   })
 })
 

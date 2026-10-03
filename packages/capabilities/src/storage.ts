@@ -148,6 +148,7 @@ export interface Storage {
   listPlanningProjections(workspaceId: WorkspaceId): Promise<readonly WorkspaceProjection[]>
 
   // ── 工程：仓库是可开始工作的前置 ──
+  // 挂载键是 (工作区, id)：同一个 id 可以挂在多个工作区上、互不影响；同键换外部身份、同工作区同身份换 id 都被拒绝（不覆盖、不留行），同值重复登记是 no-op；工作区与外部身份必须已存在，且身份必须是 `repository` 种类（TD-004）。
   putRepository(record: RepositoryRecord): Promise<void>
   listRepositories(workspaceId: WorkspaceId): Promise<readonly RepositoryRecord[]>
 
