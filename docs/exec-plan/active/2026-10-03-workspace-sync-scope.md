@@ -222,6 +222,8 @@ webhook 已含 workspace 四元键，历史 issue描述不能变成重复工作�
 
 ## Decision Log
 
+Decision：人类已在Project将 #189/#196/#178 规划启动为In Progress，并将 #178 提前到迭代4；保留新的规划。Rationale：2026-10-03人类明确确认该调整；agent只同步PR迭代索引，不代写Status或blocking。Date/Author：2026-10-03 22:08 CST / 人类伙伴。
+
 Decision：选择三元游标键，拒绝新增健康表和scope字符串编码。Rationale：恢复工作区权威最直接，当前无共享ingest消费者。Date/Author：2026-10-03 21:34 CST / 独立最终reviewer。
 Decision：三个本轮 PR 独立 main；共享Storage文件单owner串行整合。Rationale：存在编辑冲突而无能力发布前置，不建立伪blocked-by。Date/Author：2026-10-03 21:34 CST / 用户范围与独立reviewer。
 Decision：本轮仅文档与draft交付。Rationale：用户要求先多设计者及独立修订，实施待下一道门。Date/Author：2026-10-03 21:34 CST / 用户授权。
@@ -255,3 +257,5 @@ Change Note (2026-10-03 21:34 CST)：第三方独立审查合并两设计，补�
 Change Note (2026-10-03 21:52 CST)：补确切Batch主路径与判别输入，独立linter和结构/路径检查已通过；全仓文档门由主执行者继续落账。
 
 Change Note (2026-10-03 21:56 CST)：主执行者全文复核并运行文档契约与独立路径/暂存扫描，记录Batch 0文档门；后续产品批次保持pending。
+
+Change Note (2026-10-03 22:08 CST)：记录人类在Project上的规划启动与#178重排期确认；保留原调查调度快照并明确取代，产品实施仍pending。
