@@ -68,7 +68,9 @@
 - **`apps/harness-plugin` 不得依赖 controller / core / storage。** 宿主半边今天只有一行就绪行；#228 让宿主入口依赖它们时，必须先写 ADR 并修改
   `tests/contract/package-boundaries.test.js`，本 ADR 不预先放行。宿主 API 用本地最小结构类型而不是宿主的类型包，二者之间没有编译期绑定，#228 决定是否引入并收紧。
 - **`packages/domain` 的 `ids.ts` 值导入 `node:crypto`**，client bundle 因此无法导入 domain / ui-model / client 的运行时值；#229 引入业务页面之前要拆出浏览器安全入口
-  或改用平台无关的随机源。
+  或改用平台无关的随机源。**订正（2026-10-03，#129）**：ui-model 的运行时值已改经纯值出口 `@harness-projects/domain/values`（只 re-export 既有词表），
+  ui-model 与 ui 因此可按 platform=browser 打包（`tests/contract/ui-work-item-list-browser.test.js`）；domain 根出口仍不能打包，client 根出口经 controller 的值导入
+  触达 capabilities 与 core，二者也值导入 `node:crypto`，client 一侧仍待 #229。
 - **安装件的三项暂缓项**：不带 source map、`private: true`、占位面板文案未本地化，分别留给发布批次与页面批次。
 - **pnpm 打包会额外放进仓库根的 `LICENSE`。** 安装件 tarball 因此是五个条目而不是四个，`license` 字段取仓库根 manifest 的值，与随包分发的许可证一致；这是接受 pnpm 的行为，而不是绕开它。
 - **验收在真实宿主上进行，需要人类伙伴参与**（退出并重启自己的桌面应用、截图）。因此本 ADR 在宿主观测完成之前不应被改成 Accepted；观测判据一旦变化，
