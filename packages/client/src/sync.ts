@@ -67,7 +67,7 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
     assertHeader(frame)
     const at = confirmed ? readClock(clock) : undefined
     apply()
-    head = { ...frame, workspace: frame.workspace ?? head?.workspace }
+    head = { workspace: frame.workspace ?? head?.workspace, capabilities: frame.capabilities, source: frame.source }
     if (at !== undefined) lastUpdatedAt = at
     connected = true
   }

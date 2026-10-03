@@ -15,6 +15,7 @@ export * from './wire.ts'
 export * from './queries.ts'
 export * from './commands.ts'
 export * from './watch.ts'
+export * from './keys.ts'
 
 export interface ControllerOptions {
   /** 工作区的状态策略；wire 层的权威归属由它决定（source_managed / harness_managed / manual）。 */

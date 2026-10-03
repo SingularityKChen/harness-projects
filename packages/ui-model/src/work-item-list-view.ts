@@ -3,13 +3,14 @@
  * 这是页面状态的**唯一**归约点：renderer 只消费 `WorkItemListView`，不推导读取过程、能力或 redaction，也不
  * 持有 loading 布尔或 last-good 缓存。纯函数：不读时钟、不改入参、不返回原 `WorkItemRow`（它带着 redacted 字段）。
  */
+import { CapabilityKey } from '@harness-projects/client/keys'
 import { AccessLevel, ContentKind, DerivedFlag, NormalizedStatus } from '@harness-projects/domain/values'
 import { accessIndex } from './capability-access.ts'
 import { deriveWorkItemList } from './derive.ts'
 import type { WorkItemRow, WorkspaceRead } from './types.ts'
 
-/** 列表读取经过的唯一读门（core 读规划条目的门）；契约测试与 `CapabilityKey` 逐字比对。 */
-const READ_KEY = 'planning.item.read'
+/** 列表读取经过的唯一读门（core 读规划条目的门）。 */
+const READ_KEY = CapabilityKey.PlanningItemRead
 
 export type ListReadFailure = {
   readonly kind: 'permission_denied' | 'not_supported' | 'unknown' | 'offline' | 'error'
@@ -35,7 +36,7 @@ export type WorkItemListReadInput = {
     }
 )
 
-/** 安全行：redacted 只剩占位；`key` 是内部条目键，只供框架做列表 key，不得进入任何属性或文字。`stale` = 行自身新鲜度 或 页面级保守降级（刷新 / Host 降级 / degraded / 失败保行），没有行能冒充当前值。 */
+/** 安全行：redacted 只剩占位；`key` 是内部条目键，只供框架做列表 key，不得进入任何属性或文字。`stale` = 行自身新鲜度（含断网与从未读到）或 页面级保守降级（刷新 / 读门 degraded / 失败保行）；整表来源缺口只降级整表，已确认的行保持 fresh。 */
 export type VisibleListRow =
   | { readonly kind: 'redacted'; readonly key: string }
   | {
@@ -143,7 +144,7 @@ export function deriveWorkItemListView(input: WorkItemListReadInput): WorkItemLi
   if (input.phase === 'failed' && !(input.hasReceivedSnapshot && input.cacheVisibility === 'authorized')) {
     return unavailable(input.failure.kind)
   }
-  const degradedPage = read.reason !== undefined || input.phase === 'failed' || flags.degraded
+  const degradedPage = input.phase === 'failed' || flags.degraded
   const stale = list.stale || degradedPage
   const refreshing = input.phase === 'received' && input.refreshing
   const rows = list.rows.map((row) => rowView(row, metadata.sourceNames, row.freshness.stale || degradedPage || refreshing))

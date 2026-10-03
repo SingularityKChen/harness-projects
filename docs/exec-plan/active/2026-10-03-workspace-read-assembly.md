@@ -1,6 +1,6 @@
 # Client 工作区读取生产链 ExecPlan
 
-> 状态：Active；Batch 0–2 已完成，Batch 3 pending。
+> 状态：Active；Batch 0–3 的实现与本地验证已完成，等待人类评审；未 push、未 ready。
 > 创建：2026-10-03；关联 issue：[178](https://github.com/SingularityKChen/harness-projects/issues/178)。
 > 分支：`feature/workspace-read-assembly`；工作树：`.worktrees/workspace-read-assembly`；PR base：`main`。
 > 调度（调查快照）：P0 / M / 迭代 5（2026-10-15–21）/ M4 · MVP Demo：Harness 内打通 GitHub 链路；Superseded by Decision Log「人类规划启动与重排期」（2026-10-03）。
@@ -136,6 +136,7 @@ source.degraded/reason表示整表有缺口；row.source只表示该行自身是
 | ui-model消费 | `packages/ui-model/src/types.ts`；`packages/ui-model/src/capability-access.ts`；`packages/ui-model/src/work-item-list-view.ts` |
 | 测试 / fixture | `tests/e2e/workspace-read-assembly.test.js`（将新建）；`tests/e2e/client-sync.test.js`；`tests/e2e/controller-roundtrip.test.js`；`tests/contract/ui-model-presentation.test.js`；`tests/contract/ui-work-item-list-view.test.js`；`tests/contract/ui-work-item-list.test.js`；`tests/contract/ui-work-item-list-browser.test.js` |
 | 文档 | 本计划；`docs/README.md` |
+| 能力 key 纯值叶子链（Batch 3 增补，见 Decision Log） | `packages/capabilities/package.json`；`packages/capabilities/src/capability-keys.ts`（仅 AccessLevel 改从 domain 的 values 出口取）；`packages/controller/package.json`；`packages/controller/src/keys.ts`（新建）；`packages/client/package.json`；`packages/client/src/keys.ts`（新建） |
 
 每PR code实际增删≤800、docs≤1300，含tests/fixtures，排除锁文件/生成目录。
 预算区间：Core约55–85；controller约110–150；client约120–165；ui-model约45–70；测试/fixture约180–250；代码总计约510–720。文档约330–420行。
@@ -280,7 +281,17 @@ realpath核目标工作树；Git用argv/library；实施前盘点WireSnapshot/Wi
   | metadata 恒推进时间 | 同revision降级/恢复；idle与纯能力不推进时间 | 红 |
   | read 忽略整表 source.degraded | 空表；partial；同revision降级/恢复 | 红 |
   | 先发布头后 apply | 接受点（头不被半发布） | 红 |
-- [ ] (2026-10-03 21:34 CST) Batch3：ui-model真源/partial/view与远端产品门。
+- [x] (2026-10-03 22:30 CST) Batch3：ui-model单真源与partial验收（本地部分；远端产品门/ready 属后续整合与评审）。红：partial 端到端与 view 契约 2 例因 `read.reason` 洗成整页 stale 而红（`已确认的行不被整表原因洗成 stale`）；绿：计划命令 7 个测试文件 72/72、`pnpm run typecheck`、`pnpm run boundaries` 8/8、`rg` key 扫描 exit 1、`pnpm verify`（1104+7）与 `node scripts/workflow-check.mjs` 退出0；code 720/800、docs 见 size 门。
+  负对照（WIP提交后逐个应用，`grep -n` 回读已生效，恢复后复绿）：
+
+  | 变异 | 命中的测试 | 结果 |
+  |---|---|---|
+  | view 恢复 `read.reason` 整页 stale | 端到端 partial；view 行新鲜度契约 | 红 |
+  | 四态求交折叠成恒返回 level | 4×4×4 差分等 5 例 | 红 |
+  | 禁 metadata | 同revision降级/恢复；idle与纯能力；经 view 的降级 | 红 |
+  | 丢整表 source 降级 | 空表；partial；同revision降级/恢复；端到端 partial | 红 |
+  | 先写 time 后 apply | 接受点 | 红 |
+  | 传输失败不清 connected | 断网；端到端断网 | 红 |
 
 ## Surprises & Discoveries
 
@@ -292,6 +303,8 @@ Batch 1 发现：`registry` 只挂外部四域，storage 域没有挂载目标�
 Batch 1 为让 client 在同一提交内编译，sync 暂把 metadata 事件当缺口重拉基线（保守且正确）；Batch 2 换成精确的 metadata 接受点。
 Batch 2 发现：真实空项目必须显式传 `workspace.project`（bootstrap 靠条目观察发现项目，零条目时 `not_found`）；空表用例据此构造。
 store 的修订/来源头校验会拒绝 `source.revision !== revision` 的帧；既有 fixture 本就满足，无需改。
+Batch 3 发现：浏览器完整路径契约（`ui-work-item-list-browser`）只允许 domain/ui-model/ui 三个包进 bundle；ui-model 从 client 根出口取 `CapabilityKey`（运行时值）会把 controller → core 一路拖进来（`node:crypto` 不可解析）。计划里“经 client re-export”的方向对，但出口必须是纯值叶子，与 `domain/values` 同模式。
+view 里“`read.reason` 存在就把所有行 stale”还被一例旧契约钉着（宿主降级 → `[[true]]`）；该断言按本计划的 partial 规则改为“只降级整表”，断网另行用 `connected:false` 钉住行 stale。
 #199仍可能错误生产healthy，本项忠实传输而不catchStorage producer；#218迟到baseline竞争仍开放，不悄悄加generation算法。
 无Storage时descriptor尚未确认；最终read undefined表达冷启动，不制造看似可用workspace。
 
@@ -312,6 +325,10 @@ Decision：lastUpdatedAt 的推进规则——baseline/delta：整表 fresh 或�
 Decision：`read().reason` 不单独存传输原因：connected=false 即安全散文，connected=true 时取整表 source 降级原因（无原因给中性句）。Rationale：少一份可与 connected 漂移的状态。Date/Author：2026-10-03 22:26 CST / Sonnet implementer。
 Decision：ISO 8601 校验在 client 与 ui-model 各一份同口径正则。Rationale：ui-model 不得依赖 client 的运行时校验内部，且 derive.ts 不在本 PR 文件集；记为小重复，不引第二个权威源（口径相同、各自校验自己的边界）。Date/Author：2026-10-03 22:26 CST / Sonnet implementer。
 
+Decision：能力 key 与求交走“纯值叶子链”：`capabilities/keys`（即 `capability-keys.ts`）→ `controller/keys` → `client/keys`，ui-model 只 import `@harness-projects/client/keys`；controller/client 根出口同时 `export *` 该叶子。Rationale：调研同仓先例 `@harness-projects/domain/values`（根出口经 ids.ts 依赖 node:crypto，故浏览器只走 values 叶子）；备选 (a) 保留字面量加 `satisfies`——违背单一真源与 rg 零命中验收，(b) 把 key 表挪进 domain——capabilities 才是 key 的所有者，(c) ui-model 从 client 根取值——浏览器 bundle 契约失败。采用 (d) 叶子链：每一跳显式、边界测试不变，代价是 6 个文件（4 个 manifest/出口 + 2 个新建 2 行文件）增补进文件集。Date/Author：2026-10-03 22:30 CST / Sonnet implementer。
+Decision：list view 的 `degradedPage` 去掉 `read.reason`；整表来源缺口只降级整表（`body.stale`/statusText），行 stale 只来自行自身新鲜度（含断网、从未读到）、refreshing、读门 degraded、failed 保行。Rationale：#70 交接要求已确认行保持 fresh；断网时 `connected:false` 已让 `isStale` 为真，不依赖 reason。Date/Author：2026-10-03 22:30 CST / Sonnet implementer。
+Decision：`ClientWorkspaceRead` 保持 `capabilities?`/`lastUpdatedAt?`/`reason?` 可选，`WorkspaceRead` 为其别名；assembler 恒填。Rationale：与既有展示契约语义（省略=未观测/从未读到）一致，不制造第二种“未知”表示。Date/Author：2026-10-03 22:30 CST / Sonnet implementer。
+
 ## Idempotence and Recovery
 
 metadata重复内容为idle；重复baseline按现有稳定身份覆盖；时间只在确认接受点更新，不以poll次数增长。
@@ -323,7 +340,7 @@ disconnect/异常保留last-known并标stale；后续成功重连从controller b
 
 ## Interfaces and Dependencies
 
-Core只读metadata→controllerWire→clientread→ui-model alias，能力key/intersect沿允许依赖出口传递；不新增跨层反向边。
+Core只读metadata→controllerWire→clientread→ui-model alias，能力key/intersect沿允许依赖出口传递（`capabilities/keys` → `controller/keys` → `client/keys` 三个纯值叶子，ui-model 只取 `client/keys`）；不新增跨层反向边。
 Transport现有baseline/watch消费面保留，WireEvent新增metadata；sync报告kind加metadata，assembler通过sync.read固定store归属。
 #189是共享binding健康隔离，#178是六字段生产通道，两者联合验收但无编译前置；不把合并顺序写成blocked-by。
 #218未来竞争修复须在唯一接受点拒整帧metadata/time；本项不宣称其旧红例通过。#199/真实Host服务/页面挂载由各自issue承担。
@@ -347,3 +364,5 @@ Change Note (2026-10-03 22:08 CST)：记录人类在Project上的规划启动与
 Change Note (2026-10-03 22:23 CST)：Batch 1 完成：Core 元数据查询、Wire 头/metadata 事件、watch 同revision判定与4项负对照落账；文件集无新增（client/sync.ts 的编译补丁在集合内）。
 
 Change Note (2026-10-03 22:26 CST)：Batch 2 完成：workspace-read.ts、store.applyMetadata 与 sync 唯一接受点/read/disconnect 落地，7项负对照落账；文件集无新增。
+
+Change Note (2026-10-03 22:30 CST)：Batch 3 完成：WorkspaceRead 别名、纯值叶子链单真源、view 去掉整页 stale 规则与端到端 partial 验收落地；文件集增补叶子链 6 个文件（浏览器 bundle 契约强制）；6 项负对照落账。

@@ -11,7 +11,9 @@ import { test } from 'node:test'
 import { StatusPolicy, newWorkspaceId } from '@harness-projects/domain'
 import { PLANNING_SYNC_SCOPE, StatusPolicyMode, composeCore } from '@harness-projects/core'
 import { createController, toWireMetadata, watchWorkspace } from '@harness-projects/controller'
-import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
+import * as capabilities from '@harness-projects/capabilities'
+import { CapabilityKey, createEntityStore, createSync, createTransport, intersectAccess } from '@harness-projects/client'
+import { deriveWorkItemList, deriveWorkItemListView } from '@harness-projects/ui-model'
 import {
   FaultKind, createFakeExecutionProvider, createFakeProviders, fixtureProjectRef, removeItem,
 } from '@harness-projects/provider-fake'
@@ -31,6 +33,8 @@ const cursor = (providers, state, lastErrorCode) => providers.storage.putSyncCur
   bindingId: providers.planning.bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined, state, lastErrorCode,
 })
 const capabilityOf = (header, key) => header.capabilities.find((entry) => entry.key === key)
+const viewOf = (read) => deriveWorkItemListView({ read, metadata: { sourceNames: {} }, phase: 'received', refreshing: false })
+const itemRows = (read) => viewOf(read).body.rows.filter((row) => row.kind === 'item')
 
 test('producer：baseline 带真实 descriptor、逐 key 能力与整表来源，storage 域不伪造挂载', async () => {
   const { id, controller } = await compose()
@@ -164,9 +168,12 @@ test('空表：真实空集是确认成功并更新时间；degraded 空表保�
   assert.deepEqual([down.store.list().length, read.connection.connected], [0, true])
   assert.equal(read.lastUpdatedAt, undefined, '冷启动 degraded 空表没有成功时间')
   assert.ok(read.reason, '空表的权限 / 来源缺口不能显示成正常空态')
+  const shown = deriveWorkItemList(read)
+  assert.deepEqual([shown.rows, shown.stale, shown.connection, shown.lastUpdatedAt], [[], true, 'degraded', undefined])
 })
 
-test('partial：整表 degraded 带原因，已确认的行仍 fresh 且推进时间', async () => {
+/** 一条既无内容身份也无成员映射的条目：bootstrap 提交可锚定的行，但整表带 permission_denied 缺口（partial）。 */
+function partialProviders() {
   const providers = createFakeProviders()
   const { planning } = providers
   planning.state.items.push({
@@ -176,7 +183,11 @@ test('partial：整表 degraded 带原因，已确认的行仍 fresh 且推进�
     fields: { statusKey: undefined, priority: undefined, assigneeRefs: [], iterationId: undefined, startDate: undefined, targetDate: undefined, customFields: {} },
     sourceVersion: 'v-orphan', sourceUpdatedAt: '2026-09-20T00:00:00Z',
   })
-  const { store, sync } = await client((await compose(providers)).controller)
+  return providers
+}
+
+test('partial：整表 degraded 带原因，已确认的行仍 fresh 且推进时间', async () => {
+  const { store, sync } = await client((await compose(partialProviders())).controller)
   await sync.connect()
   const read = sync.read()
 
@@ -226,6 +237,7 @@ test('metadata：同 revision 降级 / 恢复同时更新整表与每行 source�
   assert.deepEqual([down.kind, down.revision], ['metadata', rows[0].revision])
   assert.ok(sync.read().reason, '降级原因来自来源')
   assert.ok(store.list().every((entry, i) => entry === rows[i] && entry.stale), '行对象不变、就地 stale')
+  assert.ok(itemRows(sync.read()).length > 0 && itemRows(sync.read()).every((row) => row.stale), '同 revision 降级经 view 让所有行 stale')
   assert.equal(sync.read().lastUpdatedAt, T(1), '降级 metadata 不推进时间')
   assert.equal((await sync.poll()).kind, 'idle')
 
@@ -233,6 +245,7 @@ test('metadata：同 revision 降级 / 恢复同时更新整表与每行 source�
   await cursor(providers, 'healthy', undefined)
   assert.equal((await sync.poll()).kind, 'metadata')
   assert.deepEqual([sync.read().reason, store.list().some((entry) => entry.stale), sync.read().lastUpdatedAt], [undefined, false, T(2)])
+  assert.ok(itemRows(sync.read()).every((row) => !row.stale), '来源恢复后行回到 fresh')
 })
 
 test('时间：idle 与纯能力 / 名称 metadata 不推进时间', async () => {
@@ -277,4 +290,38 @@ test('接受点：clock 非法、store 拒绝的载体都不推进头 / 能力 /
     assert.deepEqual([after.workspace, after.capabilities, after.lastUpdatedAt], [before.workspace, before.capabilities, before.lastUpdatedAt], `${label}：头 / 能力 / 时间不变`)
     assert.ok(after.store.list().every((entry, i) => entry === before.rows[i][0] && entry.entity === before.rows[i][2]), `${label}：行内容与来源未被半更新`)
   }
+})
+
+test('单真源：CapabilityKey / intersectAccess 经 controller → client 重导出 capabilities 的同一对象', () => {
+  assert.equal(CapabilityKey, capabilities.CapabilityKey)
+  assert.equal(intersectAccess, capabilities.intersectAccess)
+})
+
+test('端到端：sync.read 直达 derive / view；断网保行并整体 stale，恢复后回到当前', async () => {
+  const { controller } = await compose()
+  const { sync } = await client(controller)
+  await sync.connect()
+  const live = deriveWorkItemList(sync.read())
+  assert.deepEqual([live.connection, live.stale, live.lastUpdatedAt], ['connected', false, T(1)])
+  assert.ok(live.rows.length > 0 && live.rows.every((row) => !row.freshness.stale))
+  assert.ok(live.rows.some((row) => row.actions.some((action) => action.available)), '真实 key 经 intersectAccess 求得可用动作')
+  assert.ok(itemRows(sync.read()).every((row) => !row.stale))
+
+  sync.disconnect()
+  const lost = deriveWorkItemList(sync.read())
+  assert.deepEqual([lost.connection, lost.rows.length, lost.lastUpdatedAt], ['disconnected', live.rows.length, T(1)])
+  assert.ok(lost.rows.every((row) => row.freshness.stale) && itemRows(sync.read()).every((row) => row.stale))
+
+  await sync.poll()
+  assert.ok(itemRows(sync.read()).every((row) => !row.stale), '重新拉基线后回到当前值')
+})
+
+test('端到端 partial：整表缺口只降级整表，已确认行经 view 保持 fresh；断网后全部 stale', async () => {
+  const { sync } = await client((await compose(partialProviders())).controller)
+  await sync.connect()
+  const shown = viewOf(sync.read())
+  assert.ok(shown.body.stale && /尚未确认/.test(shown.statusText), '整表仍显示为降级')
+  assert.ok(itemRows(sync.read()).length > 0 && itemRows(sync.read()).every((row) => row.stale === false), '已确认的行不被整表原因洗成 stale')
+  sync.disconnect()
+  assert.ok(itemRows(sync.read()).every((row) => row.stale))
 })
