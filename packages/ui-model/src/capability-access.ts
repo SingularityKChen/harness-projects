@@ -4,7 +4,7 @@
  * `ui-model -> capabilities`），但不是第二个权威源——契约测试把 `requiredKeys` 与 `CapabilityKey` 表
  * 逐字比对、把四态求交与 `intersectAccess` 做 4×4×4 差分。
  */
-import { AccessLevel } from '@harness-projects/domain'
+import { AccessLevel } from '@harness-projects/domain/values'
 import {
   ActionId, LineageTarget,
   type ActionAvailability, type CapabilityDecision, type CapabilitySnapshotEntry, type LineageEntryPoint,

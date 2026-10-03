@@ -3,7 +3,7 @@
  * 入参、无内部状态。陈旧是如实展示的状态，不是过滤条件——陈旧快照绝不返回空列表。降级只算一次
  * （`degradationOf`），首页 / 列表 / 详情共用，同一份读取不可能在两处给出相反结论。
  */
-import { AccessLevel, ContentKind } from '@harness-projects/domain'
+import { AccessLevel, ContentKind } from '@harness-projects/domain/values'
 import type { StoredEntity } from '@harness-projects/client'
 import { accessIndex, lineageEntryPoints, startWorkAvailability } from './capability-access.ts'
 import {
