@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { providerErr, providerError } from '@harness-projects/capabilities'
+import { ObservationState, providerErr, providerError } from '@harness-projects/capabilities'
 import { ProviderErrorCode } from '@harness-projects/domain'
 import { PLANNING_SYNC_SCOPE, composeCore } from '@harness-projects/core'
 import { createController } from '@harness-projects/controller'
@@ -97,6 +97,29 @@ for (const [label, makeStorage] of STORAGES) {
       })
     }
   }
+}
+
+// TD-022：观察账本按连接记账（ADR-0006），ws-a 组合期记下的观察对同一连接再记账返回 false。ws-b 的水合不得因此缺行或降级。
+// 当前 bootstrap 不消费 recordObservation 的返回值（投影来自全量读取），本用例今天为绿，是回归护栏；判别对象是将来按观察增量刷新的路径。
+for (const [label, makeStorage] of STORAGES) {
+  test(`工作区健康：ws1 已接受的事件不阻止 ws2 刷新（${label}）`, async () => {
+    const storage = makeStorage(); const providers = createFakeProviders()
+    const a = await mount(providers, storage, 'ws-a')
+    const rows = await a.core.queries.listPlanningItems()
+    const observations = []
+    for await (const observation of providers.planning.reconcile({ scopeKey: PLANNING_SYNC_SCOPE, cursor: undefined })) observations.push(observation)
+    assert.ok(rows.length > 0 && observations.length > 0, '前置：ws-a 已水合，替身有观察流')
+    for (const observation of observations) {
+      assert.equal(await storage.recordObservation({ observation, state: ObservationState.Processed }), false, '前置：ws-a 已记账，同一观察再记不被应用')
+    }
+    const b = await mount(providers, storage, 'ws-b')
+    assert.deepEqual(facts(await b.core.queries.listPlanningItems()), facts(rows), 'ws-b 组合期水合出与 ws-a 相同的全部行')
+    const refreshed = await b.core.commands.bootstrapWorkspace()
+    assert.deepEqual([refreshed.ok, refreshed.entities, refreshed.degraded], [true, rows.length, false], 'ws-b 再次刷新完整且不降级')
+    assert.deepEqual(facts(await b.core.queries.listPlanningItems()), facts(rows))
+    assert.deepEqual(await b.core.queries.getPlanningSync(), { degraded: false, stale: false, reason: undefined })
+    assert.equal((await b.controller.baseline()).source.freshness, 'fresh')
+  })
 }
 
 // 持久化与事务面：游标记录直接走 Storage 端口，不经 Core；父行只走端口建。
