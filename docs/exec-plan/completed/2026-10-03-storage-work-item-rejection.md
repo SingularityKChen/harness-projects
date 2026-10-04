@@ -1,6 +1,6 @@
 # 未登记工作项的 Storage 结构化拒绝 ExecPlan
 
-> 状态：实施与验收完成，待人类评审。
+> 状态：Completed（2026-10-04）：Batch 0–2 与验收批完成，第一轮 MVP 评审（APPROVE，5 条 P3）已修订并归档；合并与 #196 的关闭由人类决定，以 `gh pr view 265 -R SingularityKChen/harness-projects --json state,mergedAt,headRefOid` 回读为准。
 > 创建：2026-10-03；关联 issue：[196](https://github.com/SingularityKChen/harness-projects/issues/196)。
 > 分支：`fix/storage-work-item-rejection`；工作树：`.worktrees/storage-work-item-rejection`；PR base：`main`。
 > 调度：P0 / S / 迭代 4（2026-10-08–14）/ M2 · 契约与存储骨架 / gate:E1。
@@ -109,7 +109,7 @@ closed/storage驱动故障负对照要保原错误身份，保证typed错误没�
 
 最小闭环：一致错误结构、零写入/零BEGIN判据和明确队列适配；主文件为本计划与 `docs/README.md`。
 独立reviewer统一两个设计的错误码，拒绝外部read→atomic两槽检查，采用已有机制的最小preflight复用。
-索引仅紧跟storage-identity-membership条目新增本项，不移动Completed既有条目；状态写Active。
+索引仅紧跟storage-identity-membership条目新增本项，不移动Completed既有条目；状态写Active。Superseded by Decision Log「第一轮评审修订：索引行」（2026-10-04）：该锚点落在 `docs/README.md` 的 `### Completed` 表里；归档时删去原行，在 Completed 表顶部新增指向 `exec-plan/completed/` 的行。
 本轮不改产品代码，不将已有Core通过用例算成本项新实现。
 
 在本分支工作树根目录运行：
@@ -144,7 +144,7 @@ closed/storage驱动故障负对照要保原错误身份，保证typed错误没�
 
 ### Batch 2 · 零BEGIN、回滚和现有Core外部闸门（已完成）
 
-最小闭环：拒绝早于本方法写交易，且交易机制/既有Core有效路径保持；主文件为 `tests/integration/storage-work-item-rejection.test.js`（将新建）、`tests/integration/storage-restart.test.js`、`tests/contract/storage-contract.test.js`。
+最小闭环：拒绝早于本方法写交易，且交易机制/既有Core有效路径保持；主文件为 `tests/integration/storage-work-item-rejection.test.js`（将新建）、`tests/integration/storage-restart.test.js`、`tests/contract/storage-contract.test.js`。Superseded by Decision Log（2026-10-03 22:22）（2026-10-04）：`tests/integration/storage-restart.test.js` 未改；集成文件已在 Batch 1 新建（Decision Log 2026-10-03 22:20），本批只往里加用例。
 通过已有 `WorkspaceDatabase` exec/prepare包装计数，root未知父行检查零BEGIN、零mutating SQL；真实父存在正控至少一个BEGIN并成功。
 scoped用例外层BEGIN只计一次，putExecutionContext无嵌套BEGIN；在tx先写可观测临时workspace再让typed拒绝逃出，重开时暂存行/ctx均不存在。
 tx内部catch用例确认错误方法零mutation，随后独立合法写能按现有契约提交，不改变事务通用语义。
@@ -236,7 +236,7 @@ tx内部catch用例确认错误方法零mutation，随后独立合法写能按�
 | N2 | preflight 移到 BEGIN 之后 | 241 / 3 | SQLite 共享拒绝、零 BEGIN、拒绝后队列仍可用 |
 | N3 | 删去替身的工作项检查 | 243 / 1 | 替身共享拒绝 |
 | N4 | 作用域路径忽略 preflight | 241 / 3 | SQLite 共享拒绝、事务内未 catch、事务内 catch |
-| N5 | 根 `atomic` 在队列槽外预检 | 243 / 1 | 其他失败保持原身份（关闭文案） |
+| N5 | 根 `atomic` 在队列槽外预检：`storage-sync.ts` 的根分支改为 `try { preflight?.() } catch (error) { return Promise.reject(error) }` 后再 `return this.#transact(async () => fn())`，即在调用时同步执行、在 `mutate` 之外 | 243 / 1 | 其他失败保持原身份（关闭文案）：变红靠的是关闭之后 `db.prepare` 打到已关闭的句柄，抛出驱动的 `database is not open` 而不是关闭文案，不是「同槽」被判别（2026-10-04 第一轮评审复跑） |
 | N6 | 替身只对 active 状态检查 | 243 / 1 | 替身共享拒绝（终态旁路） |
 | N7 | SQLite 把一切失败映射成 `StorageInputError` | 241 / 3 | 其他失败保持原身份、SQLite 仓库分叉格、重启「外键失败时旧 active 不得被关闭」 |
 | N8 | 替身要求 `kind === 'work_item'` | 243 / 1 | 替身共享拒绝（非 work_item 正控） |
@@ -244,6 +244,8 @@ tx内部catch用例确认错误方法零mutation，随后独立合法写能按�
 | N10 | 删去 003 里 `work_item_id` 的 `REFERENCES entity (id)` | 243 / 1 | execution-relation-write-schema「已钉住的约束变异」（验收补入；补入前该变异全量 1094 全绿） |
 | N11 | 错误码改为 `not_found` | 242 / 2 | 两个实现的共享拒绝 |
 | N12 | `#transact` 失败时不 ROLLBACK | 221 / 23 | 地基、同步、执行组的事务回滚用例，重启用例与 SQLite StartWork 的回滚用例 |
+
+「同槽」没有被测试钉住（2026-10-04 第一轮评审复跑，检出 `fix/storage-work-item-rejection` 的工作树根目录，head `fb7c1f7`）：被拒绝的两槽方案 D 写成 `storage-execution.ts` 的 `return this.read(preflight).then(() => this.atomic(() => { … }))`（preflight 一个队列槽、写体另一个槽，先打印变异行再跑），验收批第一条命令 244 pass / 0 fail，全部存活。原因是端口没有删除实体的方法，两槽之间的检查—写入窗口经端口观察不到。所以 N5 证明的只是「预检在关闭检查之后」，「同槽」只由 Design / Spec 的设计论证支撑，没有被测试钉住。还原后 `git diff --quiet`，基线回到 244 / 0。
 
 ## Progress
 
@@ -272,6 +274,12 @@ tx内部catch用例确认错误方法零mutation，随后独立合法写能按�
   纵向路径：§2.1 第 6 行九条引用按回读命令逐条回读（各 ✔、`ℹ fail 0`，伪造前缀 `ℹ tests 0`），X1 重跑 3 次观察值不变。
   负对照：12 条在一次性克隆的最终代码树上全部变红（表见 Artifacts and Notes），还原后 244 / 0。
   整理：`a924850` 之后整理为三个提交；`comm -3` 比对整理前锚点与整理后的文件集合，只多出验收补入的三个文件（`docs/exec-plan/tech-debt-tracker.md`、`docs/product/vertical-path.md`、`tests/integration/execution-relation-write-schema.test.js`）；两个代码提交各自全量绿（1091 / 1094）。
+- [x] (2026-10-04) 第一轮 MVP 评审修订（评审在 `fb7c1f7` 上 APPROVE，5 条 P3 全部属实）：`StorageInputError` 注释收窄、TD-023 补 core 压平；「当前位置」「未做」与 Batch 2 主文件原处 Superseded；N5 写明变异形态；暴露面论据改写；索引行随归档移到 Completed 表。处置见 Decision Log 2026-10-04 各条。
+  复跑（检出 `fix/storage-work-item-rejection` 的工作树根目录，head `fb7c1f7`，每次先打印变异行、跑完 `git checkout --` 还原并确认 `git diff --quiet`）：N5（`storage-sync.ts` 根分支 `try { preflight?.() } catch (error) { return Promise.reject(error) }` 后 `return this.#transact(async () => fn())`）→ 验收批第一条命令 243 pass / 1 fail，唯一红的是「其他失败保持原身份」，实际报错 `database is not open`；两槽方案 D（`storage-execution.ts` 的 `return this.read(preflight).then(() => this.atomic(() => { … }))`）→ 244 pass / 0 fail，存活；基线 244 / 0。
+  本轮只改注释与文档，没有新增或加强测试，因此没有新的「有牙」变异要求。
+- [x] (2026-10-04) 归档：计划移入 `docs/exec-plan/completed/`；`docs/README.md` 删去原行、在 `### Completed` 表顶部新增一行；TD-023 的 ExecPlan 列改指 `completed/`。
+  最终验证（检出 `fix/storage-work-item-rejection` 的工作树根目录，观察时刻 2026-10-04，最终 head 用 `git rev-parse fix/storage-work-item-rejection` 回读）：`pnpm verify` 退出 0（typecheck 通过，`tests/contract tests/integration tests/e2e` 1094 pass / 0 fail，`tests/mvp0` 7 / 7）；验收批第一条命令 244 / 0；`pnpm run boundaries` 8 / 8；`node scripts/workflow-check.mjs` 无发现（8 个文件）；文档契约 9 / 9；disclosure、size 与 `git diff --check origin/main...HEAD` 的读数见 Outcomes「规模」。
+- [ ] 合并后回读（人类合并之后）：`gh pr view 265 -R SingularityKChen/harness-projects --json state,mergedAt` 期望 `state=MERGED`；`gh issue view 196 -R SingularityKChen/harness-projects --json state,closedByPullRequestsReferences` 期望 `CLOSED` 且引用 #265；拉取后 `git ls-tree --name-only origin/main docs/exec-plan/completed/2026-10-03-storage-work-item-rejection.md` 期望输出该路径，`git grep -n 'exec-plan/active/2026-10-03-storage-work-item-rejection' origin/main -- docs/README.md docs/exec-plan/tech-debt-tracker.md` 期望无输出。
 
 ## Surprises & Discoveries
 
@@ -284,6 +292,8 @@ SQLite atomic原来根调用直接开transaction；为满足issue“交易前拒
 修复轮1：此前“只验证实体存在、不限定 kind”只写在 Decision Log，所有夹具工作项都是 work_item，把检查收紧到 kind 的三个变异（M10/M11/M17）在共享套件下全部存活；决策必须有判别测试才算被钉住。
 验收复核：把 SQLite 分叉格“执行上下文 → 工作项”移入共享拒绝后，`execution_context.work_item_id` 外键失去了唯一的判别用例。在实现者最终提交上删去 003 的 `REFERENCES entity (id)`，`node --test tests/contract tests/integration tests/e2e` 仍 1094 pass / 0 fail；同一变异在 `main@68524a0` 上被该分叉格抓红（1088 pass / 1 fail）。preflight 先于外键拒绝，端口层的任何用例都碰不到外键，所以 Design / Spec 的“保留FK作最终防线”此前只是声明。
 验收复核：`docs/product/vertical-path.md` §2.1 规定“关闭本节引用的 issue 的 PR，必须在同一 PR 里更新对应行与这个基线”，第 6 行与 X1 都写着 #196 的分歧仍在；计划文件集没有列这个文件，verify 轮把它当作可推迟的 P3。
+第一轮评审：负对照 N5 变红靠的是关闭之后打到已关闭句柄的驱动报错，不是「同槽」；被拒绝的两槽方案 D 在验收批第一条命令下 244 / 0 全部存活（复跑见 Artifacts and Notes 负对照表后的段落）。端口没有删除实体的方法，检查—写入窗口经端口观察不到，「同槽」只能由设计论证支撑。
+第一轮评审：`StorageInputError.failure` 没有任何生产调用方消费。`packages/core/src/start-work.ts` 的认领 catch 把新请求的任何认领失败改写成 `unavailable / retry`；该路径目前被 `prepareRegistration` 的 `not_found` 守卫挡住，评审在去掉守卫后复现了这次压平（替身与 SQLite 都是 `unavailable / retry / true`，外部写入 `[0,0,0]`）。
 
 ## Decision Log
 
@@ -308,9 +318,15 @@ Decision：在 `tests/integration/execution-relation-write-schema.test.js`「已
 Decision：本 PR 同步 `docs/product/vertical-path.md`：§2.1 第 6 行失败列的 Storage 残余改写为已对齐并附旁证引用，承接列去掉 #196，简称表补 `storage-contract`，X1 标题与观察基线句随之更新；文件集在 Global Constraints 就地补入。Rationale：该节的同 PR 更新规则适用，`gh pr view 265 -R SingularityKChen/harness-projects --json closingIssuesReferences` 在 2026-10-03 22:44 回读为 `[196]`；不改就是在 main 上留下与代码相反的产品事实（verify-r1 F4 定为 P3，验收者上调为本 PR 必做）。直接调用 Storage 按该节规则只算旁证，第 6 行结论“反例：#194（P4）”不变。判错的代价：文档多改 4 处。Date/Author：2026-10-03 22:44 CST / Opus acceptor。
 Decision：登记 TD-023（执行上下文的其余已知输入缺陷仍是裸异常，两个实现的文案不同），本项不泛化 `StorageInputError`。Rationale：issue 验收只要求未登记工作项一条；按“出现第二种时再泛化”的既有决策延期，但延期要进 `docs/exec-plan/tech-debt-tracker.md`，不能只留在 Decision Log。判错的代价：tracker 多一行。Date/Author：2026-10-03 22:44 CST / Opus acceptor。
 Decision：端口 `putExecutionContext` 声明处补一行拒绝契约（与 #195 在 `putExternalIdentity` 处写 `RangeError` 同一写法）；`StorageInputError` 注释去掉仓库里不存在的类型名 `StorageResult`；`storage-sync.ts` 两处“交易”改成全仓统一的“事务”。Rationale：调用方读的是端口声明；注释不引用不存在的类型。行为不变。Date/Author：2026-10-03 22:44 CST / Opus acceptor。
-Decision：实现形态原样接受，不做结构重构。Rationale：复核未发现死代码或重复。`#transact` 是 `transaction` 与根 `atomic` 唯一共用的事务体；`preflight` 只有一个调用点，但它正是零 BEGIN 判据需要的最小表面；类的字段写法与 `LegacySourceVersionError` 是同一惯用法。verify-r1 的两条观察不改：根 `atomic` 不再经过公有 `transaction()`，但全仓没有子类覆写 `transaction`；替身“事务内未 catch 回滚”没进共享套件，由替身既有事务用例与 verify-r1 探针兜底。Date/Author：2026-10-03 22:44 CST / Opus acceptor。
+Decision：实现形态原样接受，不做结构重构。Rationale：复核未发现死代码或重复。`#transact` 是 `transaction` 与根 `atomic` 唯一共用的事务体；`preflight` 只有一个调用点，但它正是零 BEGIN 判据需要的最小表面；类的字段写法与 `LegacySourceVersionError` 是同一惯用法。verify-r1 的两条观察不改：根 `atomic` 不再经过公有 `transaction()`，但全仓没有子类覆写 `transaction`（Superseded by Decision Log「第一轮评审修订：根 `atomic` 绕开公有 `transaction()` 的真实暴露面」（2026-10-04）：论据换成实例属性替换的暴露面）；替身“事务内未 catch 回滚”没进共享套件，由替身既有事务用例与 verify-r1 探针兜底。Date/Author：2026-10-03 22:44 CST / Opus acceptor。
 Decision：verify 轮余项的处置：F2（`{T}` 占位）已在修复轮1补成实际时间，验收时 `grep -n '{T}'` 只命中 Change Note 里的叙述字样，不再改；F3 索引行状态改为“Active；实施与验收完成，待人类评审”，摘要改写成实现后的事实；F5 整理后的提交由验收者重建，尾注按宿主会话要求统一为 `Co-Authored-By: Claude Opus 5.5`，实现者（Sonnet）与验收者（Opus）的分工以本 Decision Log 的 Author 字段为准。Rationale：提交尾注表示产出提交的会话，整理后的每个提交都由验收会话写成；模型分工的权威记录在计划。Date/Author：2026-10-03 22:44 CST / Opus acceptor。
 Decision：`a924850` 之后的三个提交（Batch 1、Batch 2、修复轮1）与验收改动整理为三个提交：能力与共享契约（含 kind 正控与端口注释）；零 BEGIN、回滚与外键钉住的判别用例；文档（本计划、索引、纵向路径、TD-023）。`a924850` 及更早的已推送提交不改写。Rationale：每个提交可独立审阅与回滚；修复轮1的正控属于共享拒绝用例本身，不单列 fixup。恢复锚点为本地分支 `backup/storage-work-item-rejection-pre-curate`（实现者最终提交）。Date/Author：2026-10-03 22:44 CST / Opus acceptor。
+
+Decision：第一轮评审修订：`StorageInputError` 的类注释收窄为「Storage 端口调用方可见」，并写明 core 认领目前压平它（TD-023）；TD-023 的简述补上 core 压平的现状，下一步补「泛化 `resource` 时让 core 认领 catch 透传 `error.failure`」；本 PR 不改 Core。Rationale：意见属实，证据见 Surprises「第一轮评审」第二条；该路径目前不可达，改 Core 超出 #196 范围（Global Constraints：不修改 Core 身份 / 登记 / ack 行为），但下一个泛化 `resource` 的人必须知道 core 侧还差一处透传。判错的代价：注释与 tracker 各多一句。Date/Author：2026-10-04 / 第一轮评审修订（主控授权）。
+Decision：第一轮评审修订：Interfaces and Dependencies「当前位置」与 Outcomes「未做」两句原处标注 Superseded，远端状态改成回读规则 `gh pr view 265 -R SingularityKChen/harness-projects --json headRefOid,isDraft,body`；Batch 2 的主文件句原处标注 Superseded。Rationale：意见属实，2026-10-04 回读时远端 head 已是 `fb7c1f7`、PR 描述已含验收证据，与「尚未 push」相反；`PLANS.md` §4 要求易失状态写成回读命令加期望，被推翻的结论就地标注。判错的代价：无，只改文档。Date/Author：2026-10-04 / 第一轮评审修订（主控授权）。
+Decision：第一轮评审修订：负对照 N5 写明确切变异形态与变红原因，并补上「两槽方案 D 经端口不可判别」，不为「同槽」新增测试。Rationale：意见属实，复跑见 Artifacts and Notes 负对照表后的段落。要判别两槽，只能加测试专用钩子，或在检查与写入之间用另一个连接裸 SQL 删行；Design / Spec 已把跨连接裸 SQL 删除排除在本项之外。判错的代价：将来有人把预检改回两槽，测试不会报警；`work_item_id` 外键仍是最终防线（N10 钉住）。Date/Author：2026-10-04 / 第一轮评审修订（主控授权）。
+Decision：第一轮评审修订：根 `atomic` 绕开公有 `transaction()` 的真实暴露面。2026-10-03 22:44「实现形态原样接受」的结论不变，论据换成实例属性替换。Rationale：会受影响的是在实例上替换 `storage.transaction` 的包装器，不是子类覆写。仓库里这样的替换共三处，回读命令为 `git grep -n -E '\.transaction[[:space:]]*=[^=]' -- tests packages apps scripts`。`tests/integration/start-work-sqlite-registration.test.js` 的 `injectAfterWrite` 与 `dropRelation` 作用在 SQLite 实例上，但只给 `tx` 套 Proxy，拦截的是 `tx.*` 方法；根 `atomic` 的写体只用 `this.db`，从不使用 `tx`。所以 base 上经过包装的那几次根 `atomic` 本来也没被它们观察到，现有断言没有静默失效。评审实测：同一实例上一次成功的 `startWork`，base 经过包装 5 次，head 2 次。`tests/e2e/start-work.test.js` 的 `pauseFirstTransaction` 作用于替身，不受影响。`tests/integration/provider-binding-registration.test.js` 的 `probe` 用 `wrap` 包的是外层对象，内部的 `this.transaction` 本来就不经过它。生产代码（`packages/`、`apps/`）里没有替换 `transaction` 的地方。判错的代价：将来新增的实例级 `transaction` 包装器看不到根 `atomic` 写入，需要改为包 `tx` 或直接计数 `WorkspaceDatabase`。Date/Author：2026-10-04 / 第一轮评审修订（主控授权）。
+Decision：第一轮评审修订：索引行。本计划随第一轮评审修订在本 PR 内归档，不再等合并后由单独的 docs PR 归档：`docs/README.md` 删去本 PR 原先插在 `### Completed` 表里、指向 `active/` 的那一行，在 Completed 表顶部（该表按日期新到旧）新增一行指向 `exec-plan/completed/`；Batch 0 的锚点句原处标注 Superseded。Rationale：意见属实，原行链接 `active/`、状态写 Active，却放在 Completed 分区，按分区读索引的人会把评审中的计划当成已完成；评审已 APPROVE、只剩 P3，修完即满足 `PLANS.md` §2 的归档条件，归档同时消掉了「合并后再挪一次」。合并后才能观察的事项留在 Progress 的未勾选项里。判错的代价：若合并前又出现阻塞性意见，需要把计划移回 `active/` 并恢复索引行。Date/Author：2026-10-04 / 第一轮评审修订（主控授权）。
 
 ## Idempotence and Recovery
 
@@ -327,7 +343,7 @@ Git共享历史改写须backup ref与专家流程；此文档阶段不合并、�
 公开新增仅窄错误类，Storage方法签名不变；SQLite内部atomic可选preflight不是新publicStorage端口。
 Node/pnpm/Git/gh足够；产品测试使用Fake/临时SQLite，不需要真实Provider授权。
 #189/#196共享区串行集成是编辑安全规则，不是blocking关系或发布依赖。临时组合检出可验证两种整合顺序，不能推成伪stack。
-Next gate：Batch0文档门→draft交付；实施从共享红例与队列观察开始；真实产品验收后才考虑ready，合并由人决定。当前位置（2026-10-03 22:50 验收后）：等待人类评审；整理后的提交尚未 push，PR 描述更新与远端回读在评审批准后进行。
+Next gate：Batch0文档门→draft交付；实施从共享红例与队列观察开始；真实产品验收后才考虑ready，合并由人决定。当前位置（2026-10-03 22:50 验收后）：等待人类评审；整理后的提交尚未 push，PR 描述更新与远端回读在评审批准后进行。Superseded by 本行回读规则（2026-10-04）：上句只是 2026-10-03 22:50 的本地观察，远端状态不写成正文事实，一律回读 `gh pr view 265 -R SingularityKChen/harness-projects --json headRefOid,isDraft,body`，期望 `headRefOid` 等于 `git rev-parse fix/storage-work-item-rejection`、`body` 含本计划的验收证据与 `Closes #196`；是否 draft、是否合并以同一回读为准（2026-10-04 第一轮评审时远端 head 已是 `fb7c1f7`，PR 描述已含验收证据）。
 有关#199 producer失败、#218客户端竞争与既有tracker债务均独立，不能以本项失败类复用为由关闭它们。
 
 ## Outcomes & Retrospective
@@ -336,8 +352,11 @@ Next gate：Batch0文档门→draft交付；实施从共享红例与队列观察
 与计划的偏差：`packages/capabilities/src/index.ts` 与 `tests/integration/storage-restart.test.js` 未改；验收补入 `tests/integration/execution-relation-write-schema.test.js`、`docs/product/vertical-path.md` 与 `docs/exec-plan/tech-debt-tracker.md`（Global Constraints 已就地标注）；Batch 2 的三条集成用例写在实现之后，判别力由负对照 N1、N2、N4 证明。
 规模：代码 268 / 800、文档 367 / 1300（观察时刻 2026-10-03 22:50）。
 债务：新增 TD-023（执行上下文的其余已知输入缺陷仍是裸异常）；关系端点的分叉仍由 #221 承载。
-未做：push、PR 描述更新、远端回读与 ready，等人类评审；本项不批准 Gate E1；合并后由单独的 docs PR 把本计划移入 `docs/exec-plan/completed/`。
+未做：push、PR 描述更新、远端回读与 ready，等人类评审；本项不批准 Gate E1；合并后由单独的 docs PR 把本计划移入 `docs/exec-plan/completed/`。Superseded by Interfaces and Dependencies「当前位置」的回读规则（2026-10-04）：push 与 PR 描述状态以 `gh pr view 265 -R SingularityKChen/harness-projects --json headRefOid,isDraft,body` 回读为准；归档已随第一轮评审修订在本 PR 内完成（Decision Log「第一轮评审修订：索引行」）。
 复盘：把分叉格移入共享拒绝时，只看了它“证明分歧”的作用，没看它同时是 `work_item_id` 外键唯一的判别用例；预检先于外键之后，这道“最终防线”在端口层就再也碰不到。两轮对抗验证的变异表都只围着新代码，没有变异被移走的旧约束。以后删除或移动用例前，先对它覆盖的约束做一次“删约束、看谁变红”。
+第一轮评审修订（2026-10-04）：5 条 P3 全部属实，都是注释与文档的自述问题，产品行为与测试零改动。`StorageInputError.failure` 目前只对 Storage 端口的直接调用方可见，core 认领会把它压平（不可达，TD-023）；「同槽」预检由设计论证支撑，两槽方案 D 经端口不可判别，N5 只证明预检在关闭检查之后。
+规模（归档后）：代码 269 / 800、文档 390 / 1300（观察时刻 2026-10-04，base `main@68524a0`，归档提交后的树；重算 `node scripts/rule-checks.mjs size origin/main`）；disclosure 通过，`git diff --check origin/main...HEAD` 无输出。
+复盘（第一轮评审）：负对照表只记了「红了几条」，没有记「为什么红」，于是 N5 被读成「同槽已被钉住」。变异表每一行都应写清确切形态与变红的机制，对不可判别的被拒绝方案也跑一次并如实记为存活。
 
 ## Bottom Change Note
 
@@ -355,3 +374,7 @@ Change Note (2026-10-03 22:22 CST)：Batch 2 实现者验证完成：计数包�
 Change Note (2026-10-03 22:41 CST)：修复轮1：verify-r1 F1 属实，共享拒绝用例补“已登记非 work_item 实体被接受”正控，kind 收紧的三个变异由存活转为变红；顺带把 Decision Log 两处 `{T}` 占位时间戳补成实际时间；实现代码零改动。
 
 Change Note (2026-10-03 22:50 CST)：Opus 验收：补 `work_item_id` 外键的 DDL 钉住、端口 `putExecutionContext` 的拒绝注释与“事务”用词统一；按 `docs/product/vertical-path.md` §2.1 规则同步第 6 行、X1 与基线；登记 TD-023；Global Constraints 就地补文件集；记录 issue 验收对照、负对照表与提交整理；状态改为实施与验收完成，待人类评审。
+
+Change Note (2026-10-04)：第一轮 MVP 评审修订（5 条 P3）：`StorageInputError` 注释收窄并在 TD-023 记下 core 压平；「当前位置」「未做」与 Batch 2 主文件原处标注 Superseded，远端状态改成回读规则；N5 写明变异形态，补两槽方案 D 244 / 0 存活的复跑；根 `atomic` 绕开 `transaction()` 的论据换成实例属性替换的暴露面。
+
+Change Note (2026-10-04)：归档：状态改为 Completed，计划移入 `docs/exec-plan/completed/`，索引行移到 Completed 表，TD-023 链接同步；Progress 补第一轮评审修订、归档与最终验证，合并后回读留作未勾选项；Decision Log 补索引行处置；Outcomes 补第一轮评审结果与复盘。
