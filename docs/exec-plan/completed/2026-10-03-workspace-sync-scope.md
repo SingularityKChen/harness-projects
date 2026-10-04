@@ -325,9 +325,9 @@ reviewer 独立读关键路径，核对 webhook 现状，拒绝字符串编码�
     判别范围如实写：N23 不是今天的生产缺陷，它把「按连接共享处理状态」接到一条消费返回值的路径上；账本作用域本身没有在本 PR 改变，TD-022 保持 Open。
   - P3-4（`docs/product/vertical-path.md` X2）：属实。在本分支实测意见给出的现成触发：SQLite 文件库组合后用裸 SQL 写入同一主体的旧载体已提交观察（`updated_at` 为 `v9`），重开再组合，发一条 `sourceVersionFromTimestamp('2026-10-04T00:00:00Z')` 的观察后 `bootstrapWorkspace()` 读回 `bootstrap threw Error: 已提交版本不是规范载体（账本里有旧版本写入的观察版本载体）： | sync {"degraded":false,"stale":false} | any view degraded false`。按 §2.1 规则，第 3 行与 13.4 行的结论改为「反例：#199（issue 记录的复现）」，X2 观察行原处加 Superseded，TD-020「下一步」写入该触发；本 PR 不重写 X2。
 - [x] (2026-10-04 20:55 CST) 归档：本计划从 `docs/exec-plan/active/` 移到 `docs/exec-plan/completed/`；`docs/README.md` 的索引行移到 Completed 表；TD-020–TD-022 的 ExecPlan 列与 ADR-0006 游标行改指 `completed/`。最终验证见 Artifacts and Notes 的「第一轮评审修订后的终树验证」。
-- [ ] 人类评审 PR #264（draft）。之后由主控整合本轮提交并推送，回读远端 head、checks、`closingIssuesReferences` 与 review threads（命令见 Artifacts and Notes；期望：唯一开放 PR、base `main`、远端 head 等于整合后的本地提交、checks 全部 pass、`closingIssuesReferences` 含 189、4 条第一轮评审线程均已回复并 resolve），再由人类决定 ready 与合并。
-- [ ] 合并后回读 issue 关闭：`gh issue view 189 -R SingularityKChen/harness-projects --json state,closedByPullRequestsReferences --jq '{state, prs: [.closedByPullRequestsReferences[].number]}'`（期望：`state` 为 `CLOSED`，`prs` 含 264）。
-- [ ] 合并后在包含本 PR 的 `main` 检出的工作树根目录回读用例：`node --test tests/integration/workspace-sync-scope.test.js`（期望：`ℹ tests 17`、`ℹ fail 0`），以及 `docs/product/vertical-path.md` §2.1 回读命令对第 3 行引用的 workspace-sync-scope「工作区健康：另一个工作区成功不恢复当前失败」前缀（期望：4 个 ✔、`ℹ fail 0`，伪造前缀读回 `ℹ tests 0`）。
+- [x] (2026-10-04) 人类评审 PR #264（draft）。之后由主控整合本轮提交并推送，回读远端 head、checks、`closingIssuesReferences` 与 review threads（命令见 Artifacts and Notes；期望：唯一开放 PR、base `main`、远端 head 等于整合后的本地提交、checks 全部 pass、`closingIssuesReferences` 含 189、4 条第一轮评审线程均已回复并 resolve），再由人类决定 ready 与合并。实际：第一轮 MVP 评审 APPROVE（4 条 P3），修订经独立复评后第二轮 APPROVE @ `23107f8`；推送后回读 base `main`、checks 全部 pass、`closingIssuesReferences` 含 189、4 条线程均已回复并 resolve；按人类伙伴「只有 P2 / P3 时批准后修复并合并」的常设规则 rebase merge（2026-10-04T13:15:53Z，`main@6d99873`，树与 `23107f8` 相同）。偏差：合并前只把评审修订压成一个提交，规划与回填等过程提交没有整合成交付物级（7 个提交进 `main`），见 `docs/review/2026-10-04-pr264-pr266-mvp-review.md`。
+- [x] (2026-10-04) 合并后回读 issue 关闭：`gh issue view 189 -R SingularityKChen/harness-projects --json state,closedByPullRequestsReferences --jq '{state, prs: [.closedByPullRequestsReferences[].number]}'`（期望：`state` 为 `CLOSED`，`prs` 含 264）。实际：`CLOSED`，`prs` 为 `[264]`。
+- [x] (2026-10-04) 合并后在包含本 PR 的 `main` 检出的工作树根目录回读用例：`node --test tests/integration/workspace-sync-scope.test.js`（期望：`ℹ tests 17`、`ℹ fail 0`），以及 `docs/product/vertical-path.md` §2.1 回读命令对第 3 行引用的 workspace-sync-scope「工作区健康：另一个工作区成功不恢复当前失败」前缀（期望：4 个 ✔、`ℹ fail 0`，伪造前缀读回 `ℹ tests 0`）。实际（检出 `main@c38b0b5`，三条 PR 均已合入）：用例 17 / 17；前缀 4 个 ✔、`ℹ tests 4`、`ℹ fail 0`；伪造前缀 `ℹ tests 0`。
 
 
 ## Surprises & Discoveries
@@ -421,3 +421,5 @@ Change Note (2026-10-03 23:01 CST)：指定验收者（Opus）验收与重构：
 Change Note (2026-10-04 20:40 CST)：第一轮 MVP 评审修订（主控授权）：4 条 P3 全部属实；补两 Storage 回归用例「工作区健康：ws1 已接受的事件不阻止 ws2 刷新」与 N23 有牙证明，订正负对照命令、Batch 1 回滚点、TD-020 / TD-022、ADR-0006 账本行、控制计划 2C 一处覆盖事实与 vertical-path 第 3 行、13.4 行和 X2 观察行。
 
 Change Note (2026-10-04 20:55 CST)：归档到 `docs/exec-plan/completed/`，同步 `docs/README.md` 索引与 TD-020–TD-022、ADR-0006 游标行的路径；补第一轮评审修订后的终树验证与合并后回读项；状态改为 Completed。
+
+Change Note (2026-10-04)：回填合并后回读（评审与合并、#189 关闭、`main` 上的用例与前缀回读），并如实记下合并前未整合提交的偏差（详见 `docs/review/2026-10-04-pr264-pr266-mvp-review.md`）。
