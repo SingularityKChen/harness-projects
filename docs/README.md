@@ -43,12 +43,12 @@
 | [2026-09-21-gate-e1-write-and-events](exec-plan/active/2026-09-21-gate-e1-write-and-events.md) | Gate E1 写确认与事件可靠性：实测平台无 CAS、事件订不到、重复创建幂等 | Active |
 | [2026-09-24-local-git-worktree](exec-plan/active/2026-09-24-local-git-worktree.md) | 本地 Git provider（#137）：仓库读、分支建、工作树建，路径安全在任何 Git 命令之前；第四轮 18 条意见按根因改完，移除与 core 层验收分别拆到 #138 / #207 | Batch 1–5 已完成；四轮评审响应已记录 |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | epic #216 的控制计划：先把纵向路径与 R1 不变量的证据如实落账，再收敛读写权威、同步和 Client 重连，最后合并发布前 SQL、清理旧形状并重整测试与文档证据 | Batch 0（#217）已验收；纵向路径矩阵见 `docs/product/vertical-path.md` §2.1，R1 映射见 `docs/architecture/release-gates.md` §2.1.1；PR #239 状态以 GitHub 回读为准；Batch 1–7 待实施 |
-| [2026-10-03-workspace-sync-scope](exec-plan/active/2026-10-03-workspace-sync-scope.md) | 工作区同步游标三元键（#189）：同连接多工作区健康隔离、schema形状拒绝与重启/事务判别；独立main，P0 / 迭代4 / M2.1 | Active；Batch 0–2 实施与验收完成，待人类评审 |
 
 ### Completed
 
 | 计划 | 结论 |
 |---|---|
+| [2026-10-03-workspace-sync-scope](exec-plan/completed/2026-10-03-workspace-sync-scope.md) | 迭代 4 的 #189：同一连接挂在两个工作区时，同步游标按（工作区，连接，scope）三元键存取——端口记录带必需 `workspaceId`，Fake 与 SQLite 按三字段定位并各查两条父边，003 原位改三元主键（D10），Core 的成功事务、失败结算与 freshness 都显式传工作区，旧两元主键的库在打开时被拒并关闭句柄；工作区 A 的 degraded 与原因不再被 B 的成功洗成 healthy，经 `composeCore` 与 controller 在两个 Storage 上验收，22 项负对照除裁定存活的 N22 外全部变红。第一轮 MVP 评审修订补入「ws1 已接受的事件不阻止 ws2 刷新」两 Storage 回归用例（N23 证明有牙，TD-022 保持 Open）、写明 revert 后需删除重建本地库、把 vertical-path 的 X2 结论改为 issue 记录的复现；遗留 TD-020–TD-022，合并状态以 PR #264 回读为准；Completed |
 | [2026-10-01-engineering-reconcile-coverage](exec-plan/completed/2026-10-01-engineering-reconcile-coverage.md) | 迭代 4 的 #249：幸存信号全候选重算、唯一串行写者与独立唤醒——共享 reader 读 Project 页内嵌的完整关闭引用，观察者报出完整零残留；唯一全域 writer 写前算完全部期望、逐项新鲜复读、ack 匹配才算 confirmed，接入 `edited` 与独立 schedule，Planning 状态保持人拥有。两层栈 #259 → #257 经两轮修复复评后合并；合并后首次全域重算清空 8 条完整零残留，schedule 回读通过（频率远低于配置，TD-017），跟进 #261 |
 | [2026-10-01-provider-binding-registration](exec-plan/completed/2026-10-01-provider-binding-registration.md) | 迭代 4 的 #197：四个外部 port 必需实现作者声明的静态 `definition`，同一连接可在一个工作区挂多个域；校验与快照都在写之前，工作区与全部挂载在一个事务里写入，ack 之后才发布 Registry；写目标、链读与取消按完整挂载路由，取消回到签发它的 Execution 挂载。经独立复核、验收与第一轮 MVP 评审修订（P1：与 main 组合后的夹具种类），#253 组合门已执行；经两轮修复复评后合并 |
 | [2026-10-01-work-item-list-states](exec-plan/completed/2026-10-01-work-item-list-states.md) | 迭代 4 的 #129：只读工作项列表与共享读取状态组件——ui-model 唯一归约首次读取、真空快照、陈旧保行与六种不可用说明（读门未观测说尚未确认、读门已观测不可读说原因未提供，每种都写出还能做什么），redacted 行只剩占位；renderer 经真实 SSR、完整 browser bundle 与 320 / 768 / 1200 静态 fixture 验收，domain 新增纯值出口 `./values`。真实 Host 装配与动态播报归 #178 / #229，一条 redacted 新鲜度的设计取舍已裁决（D 为 UI 层规则、E 写进 #229 验收，见 #129 的决策评论）；经第一轮 MVP 评审修订后合并 |
