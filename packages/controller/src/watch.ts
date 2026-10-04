@@ -3,9 +3,12 @@
  *
  * `watchWorkspace({ afterRevision })` 从订阅者已知的修订续传：每次 poll 重读基线，只在能重建连续那一跳
  * 时产出 delta。落后超过保留窗口、订阅者游标领先于工作区（工作区被重建）、或没有订阅点处的快照时，
- * 一律发 gap 事件让订阅者重拉基线——绝不静默续传一个可能已经错位的投影。
+ * 一律发 gap 事件让订阅者重拉基线——绝不静默续传一个可能已经错位的投影。同修订上只有来源（头 / 逐行
+ * source）变化时发 metadata（#178），业务字段变化则 fail closed 为 gap，不借来源事件改业务。
  */
-import { diffSnapshots, type WireEvent, type WireSnapshot } from './wire.ts'
+import {
+  businessSignature, diffSnapshots, sourceSignature, toWireMetadata, type WireEvent, type WireSnapshot,
+} from './wire.ts'
 
 /** watch 的读取面：一次基线读 = 一个修订上的完整投影。 */
 export interface WatchSource {
@@ -43,8 +46,13 @@ async function pollSource(source: WatchSource, state: WatchState): Promise<WireE
   if (state.closed) return undefined
   const next = await source.baseline()
   if (next.revision === state.cursor) {
+    const previous = state.previous
+    if (previous !== undefined && businessSignature(previous) !== businessSignature(next)) {
+      return gapEvent(state, next.revision, `修订 ${next.revision} 上的业务字段变化了，不能当作来源更新`)
+    }
     state.previous = next
-    return undefined
+    if (previous === undefined || sourceSignature(previous) === sourceSignature(next)) return undefined
+    return { kind: 'metadata', metadata: toWireMetadata(next) }
   }
   if (next.revision < state.cursor) {
     return gapEvent(state, next.revision, `订阅者修订 ${state.cursor} 领先于工作区修订 ${next.revision}`)

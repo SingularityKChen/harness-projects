@@ -147,6 +147,7 @@ function unavailableCore(reason: string): CoreApi {
     getItemDetail: async () => undefined,
     getExecutionContext: async () => undefined,
     getPlanningSync: async () => ({ degraded: true, stale: true, reason }),
+    getWorkspaceMetadata: async () => ({ workspace: undefined, capabilities: [] }),
     getDeliveryProjection: async (scope) => ({
       workItemId: typeof scope === 'string' ? scope : scope.workItemId,
       repositoryId: typeof scope === 'string' ? undefined : scope.repositoryId,
