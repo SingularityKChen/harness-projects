@@ -70,7 +70,12 @@
 - **`packages/domain` 的 `ids.ts` 值导入 `node:crypto`**，client bundle 因此无法导入 domain / ui-model / client 的运行时值；#229 引入业务页面之前要拆出浏览器安全入口
   或改用平台无关的随机源。**订正（2026-10-03，#129）**：ui-model 的运行时值已改经纯值出口 `@harness-projects/domain/values`（只 re-export 既有词表），
   ui-model 与 ui 因此可按 platform=browser 打包（`tests/contract/ui-work-item-list-browser.test.js`）；domain 根出口仍不能打包，client 根出口经 controller 的值导入
-  触达 capabilities 与 core，二者也值导入 `node:crypto`，client 一侧仍待 #229。
+  触达 capabilities 与 core，二者也值导入 `node:crypto`，client 一侧仍待 #229。**订正（2026-10-04，#178）**：client 已有第一个浏览器安全出口
+  `@harness-projects/client/keys`，叶子链是 `capabilities/keys`（`packages/capabilities/src/capability-keys.ts`）→ `controller/keys` → `client/keys`，ui-model
+  只经它取 `CapabilityKey` 与 `intersectAccess`。透传规则：只允许纯值叶子（运行时值只取 `domain/values` 或上一跳叶子，不值导入任何包根出口），
+  每跳一个文件，`tests/contract/ui-work-item-list-browser.test.js` 里的 `allowed` 正则是唯一放行处。它与 `domain/values` 不同构：后者是 ui-model
+  直接依赖的叶子、re-export 自己的词表；`controller/keys` 与 `client/keys` 把上游包的值透传成本包的公开面，每加一跳都要同时改 manifest 的
+  `exports` 与该正则，依赖边仍由 `tests/contract/package-boundaries.test.js` 逐跳核对。client 根出口仍不能按浏览器打包，页面接线仍待 #229。
 - **安装件的三项暂缓项**：不带 source map、`private: true`、占位面板文案未本地化，分别留给发布批次与页面批次。
 - **pnpm 打包会额外放进仓库根的 `LICENSE`。** 安装件 tarball 因此是五个条目而不是四个，`license` 字段取仓库根 manifest 的值，与随包分发的许可证一致；这是接受 pnpm 的行为，而不是绕开它。
 - **验收在真实宿主上进行，需要人类伙伴参与**（退出并重启自己的桌面应用、截图）。因此本 ADR 在宿主观测完成之前不应被改成 Accepted；观测判据一旦变化，
