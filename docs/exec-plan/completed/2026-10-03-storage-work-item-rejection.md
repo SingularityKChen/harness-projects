@@ -279,7 +279,7 @@ tx内部catch用例确认错误方法零mutation，随后独立合法写能按�
   本轮只改注释与文档，没有新增或加强测试，因此没有新的「有牙」变异要求。
 - [x] (2026-10-04) 归档：计划移入 `docs/exec-plan/completed/`；`docs/README.md` 删去原行、在 `### Completed` 表顶部新增一行；TD-023 的 ExecPlan 列改指 `completed/`。
   最终验证（检出 `fix/storage-work-item-rejection` 的工作树根目录，观察时刻 2026-10-04，最终 head 用 `git rev-parse fix/storage-work-item-rejection` 回读）：`pnpm verify` 退出 0（typecheck 通过，`tests/contract tests/integration tests/e2e` 1094 pass / 0 fail，`tests/mvp0` 7 / 7）；验收批第一条命令 244 / 0；`pnpm run boundaries` 8 / 8；`node scripts/workflow-check.mjs` 无发现（8 个文件）；文档契约 9 / 9；disclosure、size 与 `git diff --check origin/main...HEAD` 的读数见 Outcomes「规模」。
-- [ ] 合并后回读（人类合并之后）：`gh pr view 265 -R SingularityKChen/harness-projects --json state,mergedAt` 期望 `state=MERGED`；`gh issue view 196 -R SingularityKChen/harness-projects --json state,closedByPullRequestsReferences` 期望 `CLOSED` 且引用 #265；拉取后 `git ls-tree --name-only origin/main docs/exec-plan/completed/2026-10-03-storage-work-item-rejection.md` 期望输出该路径，`git grep -n 'exec-plan/active/2026-10-03-storage-work-item-rejection' origin/main -- docs/README.md docs/exec-plan/tech-debt-tracker.md` 期望无输出。
+- [x] (2026-10-04) 合并后回读（人类合并之后）：`gh pr view 265 -R SingularityKChen/harness-projects --json state,mergedAt` 期望 `state=MERGED`；`gh issue view 196 -R SingularityKChen/harness-projects --json state,closedByPullRequestsReferences` 期望 `CLOSED` 且引用 #265；拉取后 `git ls-tree --name-only origin/main docs/exec-plan/completed/2026-10-03-storage-work-item-rejection.md` 期望输出该路径，`git grep -n 'exec-plan/active/2026-10-03-storage-work-item-rejection' origin/main -- docs/README.md docs/exec-plan/tech-debt-tracker.md` 期望无输出。实际：`MERGED`（2026-10-04T13:19:46Z，#264 合并后变基到 `main@6d99873`，合入后 `main@0b1c5dd`，树与验证过的 head `4398f5b` 相同）；#196 `CLOSED`，引用 `[265]`；在 `main@c38b0b5` 上 `ls-tree` 输出该路径、`git grep` 无输出。偏差：合并前没有把规划、加固与回填等过程提交整合成交付物级（6 个提交进 `main`），见 `docs/review/2026-10-04-pr264-pr266-mvp-review.md`。
 
 ## Surprises & Discoveries
 
@@ -378,3 +378,5 @@ Change Note (2026-10-03 22:50 CST)：Opus 验收：补 `work_item_id` 外键的 
 Change Note (2026-10-04)：第一轮 MVP 评审修订（5 条 P3）：`StorageInputError` 注释收窄并在 TD-023 记下 core 压平；「当前位置」「未做」与 Batch 2 主文件原处标注 Superseded，远端状态改成回读规则；N5 写明变异形态，补两槽方案 D 244 / 0 存活的复跑；根 `atomic` 绕开 `transaction()` 的论据换成实例属性替换的暴露面。
 
 Change Note (2026-10-04)：归档：状态改为 Completed，计划移入 `docs/exec-plan/completed/`，索引行移到 Completed 表，TD-023 链接同步；Progress 补第一轮评审修订、归档与最终验证，合并后回读留作未勾选项；Decision Log 补索引行处置；Outcomes 补第一轮评审结果与复盘。
+
+Change Note (2026-10-04)：回填合并后回读（合并、#196 关闭、`main` 上的路径核对），并记下合并前未整合提交的偏差（详见 `docs/review/2026-10-04-pr264-pr266-mvp-review.md`）。
