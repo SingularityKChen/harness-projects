@@ -46,8 +46,9 @@ test('完整路径：meta 触达 derive → page view → renderer → 纯值 le
   const [output] = Object.values(result.metafile.outputs)
   assert.deepEqual([...new Set(output.imports.filter((entry) => entry.external).map((entry) => entry.path))], ['react'])
   const inputs = Object.keys(result.metafile.inputs).filter((file) => file !== '<stdin>')
-  assert.ok(inputs.every((file) => /^packages\/(domain|ui-model|ui)\/src\/(?!ids\.ts|identity\.ts)/.test(file)), `输入必须落在当前工作树的这三个包内：${inputs}`)
-  for (const file of ['ui-model/src/derive.ts', 'ui-model/src/work-item-list-view.ts', 'ui/src/work-item-list.ts', 'domain/src/browser-values.ts']) {
+  const allowed = /^packages\/(domain|ui-model|ui)\/src\/(?!ids\.ts|identity\.ts)|^packages\/(capabilities\/src\/capability-keys|controller\/src\/keys|client\/src\/keys)\.ts$/
+  assert.ok(inputs.every((file) => allowed.test(file)), `输入必须落在这三个包内，外加能力 key 的三个纯值叶子（capabilities → controller → client）：${inputs}`)
+  for (const file of ['ui-model/src/derive.ts', 'ui-model/src/work-item-list-view.ts', 'ui/src/work-item-list.ts', 'domain/src/browser-values.ts', 'capabilities/src/capability-keys.ts', 'client/src/keys.ts']) {
     assert.ok(inputs.includes(`packages/${file}`), file)
   }
   const sandbox = { module: { exports: {} }, require: (id) => (id === 'react' ? React : assert.fail(`意外的 require：${id}`)) }

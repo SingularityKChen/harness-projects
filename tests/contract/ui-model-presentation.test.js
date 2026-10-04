@@ -26,8 +26,8 @@ const WORKSPACE = { id: 'ws-mvp1', name: 'MVP-1' }
 /** 宿主注入的"最后一次读到当前值"的时刻；展示层不得自己读时钟。 */
 const LAST_UPDATED_AT = '2026-09-24T09:30:00.000Z'
 /**
- * `reason` 是 display-ready 散文，降级必有解释。这三条是本层在两个输入都没给原因时补的中性短语，
- * 逐字冻结：provider 与宿主的原因优先，本层的只在缺位时出现。
+ * 降级必有解释；宿主给的 `reason` 可能是机器错误码（TD-025，翻译归页面层 #229）。这三条是本层在两个输入都没给原因时补的
+ * display-ready 中性短语，逐字冻结：provider 与宿主的原因优先，本层的只在缺位时出现。
  */
 const DISCONNECTED_REASON = '连接已断开，显示的是最后已知值'
 const NEVER_READ_REASON = '尚未读到当前值'
@@ -82,7 +82,7 @@ function fixtureSnapshot({ freshness = 'fresh', bindingId = 'binding-planning' }
     }),
   ]
   const source = { revision: 8, freshness, authority: 'provider', reason: freshness === 'degraded' ? '规划来源离线' : undefined }
-  return { revision: 8, entities, source }
+  return { revision: 8, entities, source, workspace: { id: 'ws-1', name: 'MVP-0' }, capabilities: [] }
 }
 
 /** 一次工作区读取：客户端模型 + 宿主才知道的事实。`lastUpdatedAt: undefined` 用 `in` 判定。 */
@@ -431,9 +431,10 @@ test('结构：fixture 快照与 wire 的字段面机械同形（wire 增删字�
   // fixture 是 .js 且 tsconfig 不检查 tests/**，"同形"必须机械钉住，否则 wire.ts 增删字段时静默漂移。
   const wireSource = readFileSync(path.join(repoRoot, 'packages', 'controller', 'src', 'wire.ts'), 'utf8')
   const interfaceFields = (name) => {
-    const body = new RegExp(`export interface ${name} \\{([\\s\\S]*?)\\n\\}`).exec(wireSource)
+    const body = new RegExp(`export interface ${name}(?: extends (\\w+))? \\{([\\s\\S]*?)\\n\\}`).exec(wireSource)
     assert.ok(body !== null, `wire.ts 里找不到 export interface ${name}`)
-    return [...body[1].matchAll(/readonly\s+([A-Za-z0-9_]+)\s*[?:]/g)].map((match) => match[1]).sort()
+    const own = [...body[2].matchAll(/readonly\s+([A-Za-z0-9_]+)\s*[?:]/g)].map((match) => match[1])
+    return [...own, ...(body[1] === undefined ? [] : interfaceFields(body[1]))].sort()
   }
   const fixture = wireEntity({
     entityId: 'entity-x', kind: 'work_item', planningStatus: 'todo', contentKind: 'work_item',

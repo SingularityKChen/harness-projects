@@ -1,9 +1,10 @@
 /**
  * 能力驱动的动作可用性（issue #128）。调用方唯一的按能力分支依据是 capability key：本文件里没有
- * provider / 平台名的分支，绑定标识也不参与判定。key 以字面量落在本层（依赖矩阵不允许
- * `ui-model -> capabilities`），但不是第二个权威源——契约测试把 `requiredKeys` 与 `CapabilityKey` 表
- * 逐字比对、把四态求交与 `intersectAccess` 做 4×4×4 差分。
+ * provider / 平台名的分支，绑定标识也不参与判定。key 与四态求交都取自 client 重导出的 capabilities
+ * 真源（依赖矩阵不允许 `ui-model -> capabilities`，也不再在本层复制字面量）；契约测试把 `requiredKeys`
+ * 与 `CapabilityKey` 表逐字比对、把四态求交与 `intersectAccess` 做 4×4×4 差分。
  */
+import { CapabilityKey, intersectAccess } from '@harness-projects/client/keys'
 import { AccessLevel } from '@harness-projects/domain/values'
 import {
   ActionId, LineageTarget,
@@ -12,14 +13,11 @@ import {
 
 /** 开始工作的必需 key：建分支、建工作树、启动执行，以及 core 写前预检经过的仓库读、工作树读两个读门，缺一不可。 */
 const START_WORK_KEYS = [
-  'development.branch.create',
-  'development.worktree.create',
-  'execution.run.start',
-  'development.repository.read',
-  'development.worktree.read',
+  CapabilityKey.DevelopmentBranchCreate, CapabilityKey.DevelopmentWorktreeCreate, CapabilityKey.ExecutionRunStart,
+  CapabilityKey.DevelopmentRepositoryRead, CapabilityKey.DevelopmentWorktreeRead,
 ] as const
 /** 读门只按读判定（与 core 的 `gateCommand(..., 'read')` 一致）：`read_only` 对读来说就是可用，只有 `unavailable` 挡住开始工作。 */
-const START_WORK_READ_KEYS: ReadonlySet<string> = new Set(['development.repository.read', 'development.worktree.read'])
+const START_WORK_READ_KEYS: ReadonlySet<string> = new Set([CapabilityKey.DevelopmentRepositoryRead, CapabilityKey.DevelopmentWorktreeRead])
 
 /**
  * 谱系入口的必需 key **必须等于 core 读该事实时真正经过的门**（`packages/core/src/chain-facts.ts`）。
@@ -28,9 +26,9 @@ const START_WORK_READ_KEYS: ReadonlySet<string> = new Set(['development.reposito
  */
 const LINEAGE_KEYS: Readonly<Record<LineageTarget, readonly string[]>> = {
   [LineageTarget.ExecutionContext]: [],
-  [LineageTarget.ChangeRequest]: ['development.change_request.read'],
-  [LineageTarget.PipelineRun]: ['delivery.pipeline.read'],
-  [LineageTarget.CheckRun]: ['delivery.check.read'],
+  [LineageTarget.ChangeRequest]: [CapabilityKey.DevelopmentChangeRequestRead],
+  [LineageTarget.PipelineRun]: [CapabilityKey.DeliveryPipelineRead],
+  [LineageTarget.CheckRun]: [CapabilityKey.DeliveryCheckRead],
 }
 
 /** 入口顺序固定：页面稳定渲染与快照比较依赖它，不是实现细节。 */
@@ -39,13 +37,9 @@ const LINEAGE_ORDER: readonly LineageTarget[] = [
   LineageTarget.PipelineRun, LineageTarget.CheckRun,
 ]
 
-/** 四态求交，与 capabilities 层逐条一致：unavailable > read_only > degraded > available。 */
-function intersect(levels: readonly AccessLevel[]): AccessLevel {
-  if (levels.includes(AccessLevel.Unavailable)) return AccessLevel.Unavailable
-  if (levels.includes(AccessLevel.ReadOnly)) return AccessLevel.ReadOnly
-  if (levels.includes(AccessLevel.Degraded)) return AccessLevel.Degraded
-  return AccessLevel.Available
-}
+/** 四态求交：逐个折进 capabilities 的 `intersectAccess`（unavailable > read_only > degraded > available），初值为上界 available。 */
+const intersect = (levels: readonly AccessLevel[]): AccessLevel =>
+  levels.reduce((acc, level) => intersectAccess(acc, level, AccessLevel.Available), AccessLevel.Available)
 
 /** 快照 → key 索引（后出现的同名 key 覆盖先出现的）；一次读取建一次，不按行重建。 */
 export function accessIndex(capabilities: readonly CapabilitySnapshotEntry[]): ReadonlyMap<string, AccessLevel> {

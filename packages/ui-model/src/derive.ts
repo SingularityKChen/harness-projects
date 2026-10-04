@@ -36,7 +36,7 @@ function sourceOf(entity: ClientEntity): SourcePresentation {
   return { primary, authority: entity.source.authority, identities: primary === undefined ? [] : [primary] }
 }
 
-/** 两个输入都没给原因时补一条中性短语：`reason` 是 display-ready 散文，降级必有解释。 */
+/** 两个输入都没给原因时补一条中性短语，降级必有解释；`reason` 可能原样是宿主的错误码（如 `unavailable`），翻译成展示文字归页面层（#229，TD-025）。 */
 const FALLBACK_REASON = {
   disconnected: '连接已断开，显示的是最后已知值', neverRead: '尚未读到当前值',
   staleEntry: '本地模型已把该条目标记为陈旧',

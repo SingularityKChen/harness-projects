@@ -3,9 +3,11 @@
  *
  * 调用方只按 key 分支，任何 provider / 平台名字都不得出现在本表或调用方分支里（ExecPlan D2）；
  * tests/contract/capabilities-keys.test.js 用平台名片段把这条性质钉死。`AccessLevel` 与
- * `ProviderBindingId` 复用 `@harness-projects/domain`，不在此重新定义。
+ * `ProviderBindingId` 复用 `@harness-projects/domain`，不在此重新定义。本文件经 `@harness-projects/capabilities/keys`
+ * 作为浏览器安全的纯值叶子被展示层取用，所以运行时值只从 domain 的 values 出口取，不触达 ids.ts。
  */
-import { AccessLevel, type ProviderBindingId } from '@harness-projects/domain'
+import { AccessLevel } from '@harness-projects/domain/values'
+import type { ProviderBindingId } from '@harness-projects/domain'
 
 /** 五个能力域：与 provider binding 的 domain 取值一一对应；storage 的 key 描述本地持久化能力，不经外部平台。 */
 export const CapabilityDomain = {

@@ -121,10 +121,12 @@ test('行新鲜度 = 行自身新鲜度 或 页面级保守降级：刷新 / Hos
   assert.deepEqual([stales(mixed), mixed.body.stale], [[false, true], true])
   const entities = [wire('e1')]
   const pageLevel = [
-    view('received', { refreshing: true, entities }), received({ entities, read: { reason: '宿主降级' } }),
-    received({ entities, access: 'degraded' }), failed('offline', { entities }),
+    view('received', { refreshing: true, entities }), received({ entities, access: 'degraded' }),
+    failed('offline', { entities }), received({ entities, connected: false, read: { reason: '连接已断开' } }),
   ]
   assert.deepEqual(pageLevel.map(stales), [[true], [true], [true], [true]])
+  const partial = received({ entities: [wire('e1'), wire('e2', { source: { freshness: 'degraded' } })], read: { reason: '来源读取不完整' } })
+  assert.deepEqual([partial.body.stale, stales(partial)], [true, [false, true]], '整表原因只降级整表，已确认行保持 fresh')
   assert.deepEqual([pageLevel[0].body.stale, stales(received({ entities }))], [false, [false]])
   assert.match(pageLevel[0].statusText, /刷新/)
   assert.match(mixed.statusText, /尚未确认/)
