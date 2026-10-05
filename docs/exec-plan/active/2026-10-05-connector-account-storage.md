@@ -13,6 +13,8 @@
 
 ## Context and Orientation
 
+本项紧急在于账号模型是 #132 宿主装配的前置，并与 E1 冻结目标存在日期冲突；重要性来自凭据隔离、全局身份和工作区配置的基础边界。本轮先形成可审阅模型，不据此冻结数据模型。 选题按 Project 10 的近期时间盒、P0、前置就绪和闭环贡献判断，不用虚构评分；#221 的交付事实修复、#228 的宿主服务及 #140 的会话适配保留为后续独立精化，不与本项聚合。
+
 **已核事实**：2026-10-05 CST 在本分支观察到 `ed6b9ae`，产品内容与 `c38b0b5` 一致；实现前用 `git log -3 --oneline`、`git diff c38b0b5 HEAD -- packages tests` 重算。`packages/storage/sqlite/migrations/002_identity_membership.sql` 已按 `docs/adr/ADR-0006-connection-anchor-and-workspace-mount.md` 分成全局 `provider_binding(id, implementation_key)` 连接锚点和 `workspace_binding(workspace_id,binding_id,domain,enabled,is_default)` 挂载。外部对象自然键仍是 `(binding_id,external_kind,external_id)`。
 
 `packages/core/src/context.ts#createContext` 每次装配都调用 `putProviderBinding`；`packages/core/src/queries.ts` 直接提供原 `ProviderBindingRecord`。因此向现有登记形状追加账号、句柄或配置既可能被重登记清空，也会扩大客户端发布面。`packages/capabilities/src/registry.ts#StorageSurface` 精确锁定 Storage 成员，新增方法必须同步。
@@ -109,7 +111,7 @@ canary、错误输入及行为期望独立于实现 parser 构造。临时删除
 
 - [x] (2026-10-05 CST) 完成两套独立方案裁决、源码复核及自包含规格；文件边界见 Global Constraints。
 - [x] (2026-10-05 CST) Batch 0 文档自查：13 节顺序、Progress、可移植性、预算与本地链接通过；`git diff --check` 退出 0；独立语义评审 Pass。
-- [ ] (2026-10-05 CST) Batch 0 登记：由主控登记 draft PR / issue 回链回执，并完成提交后的发布面检查。
+- [x] (2026-10-05 CST) 管理登记回执：已创建 [draft PR #270](https://github.com/SingularityKChen/harness-projects/pull/270)，核对双向 issue 引用及 Project 计划字段；产品实施仍 pending。
 - [ ] (2026-10-05 CST) Batch 1：完成产品闭环、预算实测、共享契约与重启证据；目前未实施。
 - [ ] (2026-10-05 CST) 最终远端回读、独立验收与人类合并决定；通过后归档计划。
 
@@ -134,6 +136,8 @@ canary、错误输入及行为期望独立于实现 parser 构造。临时删除
 | 同日 / 独立最终评审者 | native blockedBy #197/#120 已关闭是协调回读来源，正文 #27/#120 是旧来源。保留来源差异与回读门，不改 Status、Priority、Size、Iteration 或关系。 |
 | 同日 / 独立最终评审者 | 按人类本轮要求，draft 阶段即登记 Closes 与双向关闭关联，表示预期交付；实施和验收 pending，不能据此合并或关闭 issue。Iteration 5 晚于 E1 目标，模型裁决或明确排除前 #4 继续 hold，不擅改排期。 |
 | 同日 / 独立最终评审者 | 采用 First Principles 的结果/约束拆分和 Qian 的状态拥有/全链失败分析；Superpowers 的先设计后实现、判别性验证用于本计划，按用户只设计范围不进入产品实现。 |
+
+2026-10-05 CST / 主控：Actor 为 SingularityKChen；管理目标是 GitHub 仓库 SingularityKChen/harness-projects 与 Project 10，不虚构产品内 ProviderBinding。幂等标识为 `plan/issue-126/feature/connector-account-storage`，字段赋值以 issue/字段名去重；创建结果为 PR #270。观察时刻 @ 2374dbdf0497：base=main、draft=true，PR closingIssuesReferences 包含 #126、issue closedByPullRequestsReferences 包含 #270，无评审线程，标题/标签/issue policy 检查通过。Project ExecPlan/Batch 已回读匹配，Kind/Area/M4 已具备；Status=Todo、Priority=P0、Size=M、Iteration 5 及依赖关系保持原值。易失结果用 `gh pr view 270 -R SingularityKChen/harness-projects --json headRefOid,baseRefName,isDraft,closingIssuesReferences,statusCheckRollup` 和 `gh issue view 126 -R SingularityKChen/harness-projects --json closedByPullRequestsReferences,projectItems` 复读；最终文档 push 后再次回读当前 head/checks。
 
 ## Idempotence and Recovery
 
@@ -184,3 +188,5 @@ createFakeStorage(data?: FakeStorageData, policy?: StorageValidationPolicy): Mem
 - 2026-10-05 CST：首次独立综合两方案并复核源码；修正平台实例、宿主句柄、初次补绑身份、重登记保留、策略传递与迁移前拒绝边界；采用单 PR 优先并将规模设为执行门。
 - 2026-10-05 CST：落盘后二次语义自查通过；补入队前输入副本、展开文件精确路径并记录实际文档验证，外部登记仍保持未完成。
 - 2026-10-05 CST：根据主控转达人类本轮要求，draft 即登记 Closes 双向关联；补 E1 与 Iteration 5 日期冲突及 #4 冻结保持条件，保留产品验收 pending。
+
+2026-10-05 CST：主控补选题依据、实际 draft PR/双向引用与 Project 回读结果，完成本轮管理登记；所有产品验收保留 pending，未改规划状态或依赖边。
