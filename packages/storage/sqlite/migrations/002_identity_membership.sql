@@ -8,11 +8,32 @@ CREATE TABLE workspace (
   status_policy TEXT NOT NULL CHECK (status_policy IN ('provider_authoritative', 'host_authoritative', 'manual_only'))
 );
 
+-- connector_account：连接账号的**全局身份**（issue #126）。自然键 (platform_family, platform_origin, identity_kind, external_id) 由唯一索引拒绝重复；
+-- 不变量 5（关键关联显式优先）：账号对上层可见，凭据值不进库——`secret_handle` 只保存受信策略 allowlist 里的引用名。
+CREATE TABLE connector_account (
+  id TEXT PRIMARY KEY,
+  platform_family TEXT NOT NULL,
+  -- 规范 HTTPS origin（无 userinfo / 路径 / query / fragment）；显式区分 github.com 与 Enterprise。
+  platform_origin TEXT NOT NULL,
+  -- 取值集合来自 packages/capabilities/src/connector-account.ts 的 ConnectorIdentityKind（不变量 5：身份种类是显式关联语义）。
+  identity_kind TEXT NOT NULL CHECK (identity_kind IN ('account', 'installation')),
+  external_id TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  -- 可空：NULL 表示无认证账号；allowlist 的权威在受信策略，不由 SQL 内容反推（issue #126）。
+  secret_handle TEXT,
+  -- 取值集合来自 ConnectorConnectionState（不变量 3：观察状态不承诺句柄可 resolve 或 Provider 权限仍有效）。
+  connection_state TEXT NOT NULL CHECK (connection_state IN ('connected', 'disconnected', 'reauth_required')),
+  -- 不变量 6：账号自然键唯一，重复登记不产生第二行。
+  UNIQUE (platform_family, platform_origin, identity_kind, external_id)
+);
+
 -- provider_binding：**连接锚点**（issue #27 Scope 的 connector accounts；ADR-0006）。
 CREATE TABLE provider_binding (
   id TEXT PRIMARY KEY,
   -- 连接通向哪个 provider 实现；同一个 id 换实现即冲突（由写入端口拒绝，不是库级约束，见 ADR-0006）。
-  implementation_key TEXT NOT NULL
+  implementation_key TEXT NOT NULL,
+  -- 可空 FK（issue #126）：账号是连接锚点级的身份，挂载级配置与外部身份都留在原表；初次关联的事实检查在写入端口（不变量 5）。
+  connector_account_id TEXT REFERENCES connector_account (id)
 );
 
 -- workspace_binding：**工作区挂载**（不变量 2；ADR-0006）。
@@ -27,7 +48,9 @@ CREATE TABLE workspace_binding (
   enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
   -- 取值 0 / 1（不变量 1：默认绑定必然是启用的）。
   is_default INTEGER NOT NULL CHECK (is_default IN (0, 1)),
-  -- 不变量 1：禁止 enabled = 0 且 is_default = 1（否则「默认」无法被读取方解释）。
+  -- 挂载级配置（issue #126）：可空；非空时必须是 JSON 对象（值仍由受信 schema 在写入端口逐字段校验，不变量 5）。
+  configuration_json TEXT CHECK (configuration_json IS NULL OR (json_valid(configuration_json) AND json_type(configuration_json) = 'object')),
+  -- 不变量 1：禁止 enabled = 0 且 is_default = 1（否则「默认」无法被读取方解释）。（表级约束必须排在全部列定义之后。）
   CHECK (is_default = 0 OR enabled = 1),
   -- 不变量 5：同一条连接在同一工作区的同一 domain 只挂载一次。
   PRIMARY KEY (workspace_id, binding_id, domain)

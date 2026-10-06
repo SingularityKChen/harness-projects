@@ -1,6 +1,6 @@
 /** SQLite 行 → 端口记录的映射：列名是 snake_case，端口字段是 camelCase，本模块是两者之间唯一的翻译层（换列名只改这里，改一处）。 */
-import type { CapabilityDomain, ExecutionContextRecord, ExecutionRunRecord, ExternalObjectRef, FieldValueRecord, MembershipRecord, MutationAttemptRecord, ProviderBindingRecord, ReconcileCursorRecord, RepositoryRecord, SyncCursorRecord, SyncState, WorkspaceRecord } from '@harness-projects/capabilities'
-import type { EntityId, ExecutionContextId, ExecutionContextStatus, ExecutionRunId, ExecutionRunStatus, ExternalIdentity, ExternalIdentityId, IdentityRole, MembershipContentKind,
+import type { BindingConfigurationRecord, CapabilityDomain, ConnectorAccountRecord, ExecutionContextRecord, ExecutionRunRecord, ExternalObjectRef, FieldValueRecord, MembershipRecord, MutationAttemptRecord, ProviderBindingRecord, ReconcileCursorRecord, RepositoryRecord, SecretHandle, SyncCursorRecord, SyncState, WorkspaceRecord } from '@harness-projects/capabilities'
+import type { ConnectorAccountId, EntityId, ExecutionContextId, ExecutionContextStatus, ExecutionRunId, ExecutionRunStatus, ExternalIdentity, ExternalIdentityId, IdentityRole, MembershipContentKind,
   NormalizedStatus, PlanningContent, ProjectErrorCode, ProviderBindingId, RedactionReason, Relation, RelationClass, RelationSource, RelationState, RelationType, StatusPolicy,
   WorkspaceId, WorkspaceProjection, WriteState } from '@harness-projects/domain'
 
@@ -29,6 +29,19 @@ export const rowToIdentity = (row: Row): ExternalIdentity => ({ id: text(row, 'i
 
 export const rowToRepository = (row: Row): RepositoryRecord => ({ id: text(row, 'id') as EntityId,
   workspaceId: text(row, 'workspace_id') as WorkspaceId, externalIdentityId: text(row, 'external_identity_id') as ExternalIdentityId })
+
+// #126 的两张映射：账号的可空句柄用 `undefined` 表达（与端口一致），配置 JSON 的往返在这里收口。
+export const rowToConnectorAccount = (row: Row): ConnectorAccountRecord => ({ id: text(row, 'id') as ConnectorAccountId,
+  platformFamily: text(row, 'platform_family'), platformOrigin: text(row, 'platform_origin'),
+  identityKind: text(row, 'identity_kind') as ConnectorAccountRecord['identityKind'], externalId: text(row, 'external_id'),
+  displayName: text(row, 'display_name'), secretHandle: optionalText(row, 'secret_handle') as SecretHandle | undefined,
+  connectionState: text(row, 'connection_state') as ConnectorAccountRecord['connectionState'] })
+
+/** 配置 JSON 解析：DDL 已保证非空时是 object（CHECK），这里只把它解码成独立副本。 */
+export const rowToBindingConfiguration = (row: Row): BindingConfigurationRecord => ({
+  ref: { workspaceId: text(row, 'workspace_id') as WorkspaceId, bindingId: text(row, 'binding_id') as ProviderBindingId,
+    domain: text(row, 'domain') },
+  configuration: JSON.parse(text(row, 'configuration_json')) as Record<string, string | boolean> })
 
 // 同步面（Batch L5）的四张映射表。成员关系的两个时间戳可空；游标的 cursor_value / last_error_code 可空（端口用 undefined）。
 export const rowToMembership = (row: Row): MembershipRecord => ({ workspaceId: text(row, 'workspace_id') as WorkspaceId,

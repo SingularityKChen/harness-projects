@@ -9,6 +9,7 @@ export type WorkItemId = BrandedId<'WorkItemId'>
 export type ChangeRequestId = BrandedId<'ChangeRequestId'>
 export type ExternalIdentityId = BrandedId<'ExternalIdentityId'>
 export type ProviderBindingId = BrandedId<'ProviderBindingId'>
+export type ConnectorAccountId = BrandedId<'ConnectorAccountId'>
 export type ExecutionContextId = BrandedId<'ExecutionContextId'>
 export type ExecutionRunId = BrandedId<'ExecutionRunId'>
 export type RelationId = BrandedId<'RelationId'>
@@ -25,6 +26,7 @@ export const newWorkItemId = (): WorkItemId => asBrandedId<WorkItemId>(randomUUI
 export const newChangeRequestId = (): ChangeRequestId => asBrandedId<ChangeRequestId>(randomUUID())
 export const newExternalIdentityId = (): ExternalIdentityId => asBrandedId<ExternalIdentityId>(randomUUID())
 export const newProviderBindingId = (): ProviderBindingId => asBrandedId<ProviderBindingId>(randomUUID())
+export const newConnectorAccountId = (): ConnectorAccountId => asBrandedId<ConnectorAccountId>(randomUUID())
 export const newExecutionContextId = (): ExecutionContextId => asBrandedId<ExecutionContextId>(randomUUID())
 export const newExecutionRunId = (): ExecutionRunId => asBrandedId<ExecutionRunId>(randomUUID())
 export const newRelationId = (): RelationId => asBrandedId<RelationId>(randomUUID())

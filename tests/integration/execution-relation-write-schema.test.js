@@ -40,11 +40,11 @@ function withDatabase(run) {
 function seed(db) {
   db.exec(`INSERT INTO workspace VALUES ('ws-1','工作区','provider_authoritative');
     INSERT INTO workspace VALUES ('ws-2','工作区 2','provider_authoritative');
-    INSERT INTO provider_binding VALUES ('binding-1','fake');
-    INSERT INTO provider_binding VALUES ('binding-2','fake');
-    INSERT INTO provider_binding VALUES ('binding-3','fake');
-    INSERT INTO workspace_binding VALUES ('ws-1','binding-1','planning',1,1);
-    INSERT INTO workspace_binding VALUES ('ws-1','binding-2','development',1,1);
+    INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-1','fake');
+    INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-2','fake');
+    INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-3','fake');
+    INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1','binding-1','planning',1,1);
+    INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1','binding-2','development',1,1);
     INSERT INTO entity VALUES ('entity-1','work_item'); INSERT INTO entity VALUES ('entity-2','repository');
     INSERT INTO external_identity VALUES ('identity-1','entity-2','binding-1','issue','repo-1','primary');
     INSERT INTO repository VALUES ('repo-1','ws-1','identity-1');
@@ -54,7 +54,7 @@ function seed(db) {
 
 test('空库建出 L3 十一张表，二次运行是 no-op', () => withDatabase((db) => {
   assert.deepEqual(migrate(db).applied, MIGRATIONS.map((entry) => entry.version))
-  assert.deepEqual(allTables(db), [...Object.keys(TABLE_PROVENANCE), 'entity', 'external_identity', 'planning_field_value', 'project_item_membership', 'provider_binding', 'schema_migrations', 'workspace', 'workspace_binding', 'workspace_projection'].sort())
+  assert.deepEqual(allTables(db), [...Object.keys(TABLE_PROVENANCE), 'connector_account', 'entity', 'external_identity', 'planning_field_value', 'project_item_membership', 'provider_binding', 'schema_migrations', 'workspace', 'workspace_binding', 'workspace_projection'].sort())
   const before = JSON.stringify(db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all())
   assert.deepEqual(migrate(db).applied, []); assert.equal(JSON.stringify(db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all()), before)
 }))
@@ -77,7 +77,7 @@ test('D8：每张表的出处注释带该表期望的 token，且全文 token �
   }
   assert.deepEqual(allTables(db), [])
   migrate(db)
-  const actual = allTables(db).filter((name) => !['schema_migrations','workspace','provider_binding','workspace_binding','entity','external_identity','project_item_membership','planning_field_value','workspace_projection'].includes(name))
+  const actual = allTables(db).filter((name) => !['schema_migrations','workspace','connector_account','provider_binding','workspace_binding','entity','external_identity','project_item_membership','planning_field_value','workspace_projection'].includes(name))
   assert.deepEqual(actual, Object.keys(TABLE_PROVENANCE).sort())
 }))
 

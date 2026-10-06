@@ -16,6 +16,9 @@ export interface FakeStorageData {
   workspaces: cap.WorkspaceRecord[]
   providerBindings: FakeProviderBindingAnchor[]
   workspaceBindings: FakeWorkspaceBindingMount[]
+  accounts: cap.ConnectorAccountRecord[]
+  bindingAccounts: { bindingId: domain.ProviderBindingId; accountId: domain.ConnectorAccountId }[]
+  bindingConfigurations: cap.BindingConfigurationRecord[]
   entities: domain.Entity[]
   identities: domain.ExternalIdentity[]
   projections: domain.WorkspaceProjection[]
@@ -32,7 +35,8 @@ export interface FakeStorageData {
   fieldValues: cap.FieldValueRecord[]
 }
 export function emptyStorageData(): FakeStorageData {
-  return { workspaces: [], providerBindings: [], workspaceBindings: [], entities: [], identities: [], projections: [], repositories: [],
+  return { workspaces: [], providerBindings: [], workspaceBindings: [], accounts: [], bindingAccounts: [], bindingConfigurations: [],
+    entities: [], identities: [], projections: [], repositories: [],
     contexts: [], runs: [], relations: [], observations: [], cursors: [], reconcileCursors: [], attempts: [], revisions: [], memberships: [], fieldValues: [] }
 }
 /** 版本定序的唯一判据来自 capabilities（与 SQLite 的 BINARY 同判据）；本文件不再自写一份比较器。 */
@@ -49,6 +53,11 @@ function toBindingRecord(mount: FakeWorkspaceBindingMount, anchors: readonly Fak
 }
 function toBindingMount(record: cap.ProviderBindingRecord): FakeWorkspaceBindingMount {
   return { workspaceId: record.workspaceId, bindingId: record.id, domain: record.domain, enabled: record.enabled, isDefault: record.isDefault }
+}
+/** 工作区挂载引用（#126）：挂载行与配置行用同一判据定位，避免两处各写一份三元相等。 */
+function sameMount(mount: { workspaceId: domain.WorkspaceId; bindingId: domain.ProviderBindingId; domain: string },
+  ref: { workspaceId: domain.WorkspaceId; bindingId: domain.ProviderBindingId; domain: string }): boolean {
+  return mount.workspaceId === ref.workspaceId && mount.bindingId === ref.bindingId && mount.domain === ref.domain
 }
 /** 成员关系升序：按码点序比较（SQLite 的 TEXT 排序是 BINARY/UTF-8 字节序，等价于码点序；JS 的 `<` 比 UTF-16 码元，增补平面字符上会分叉）。 */
 function byItemExternalId(left: cap.MembershipRecord, right: cap.MembershipRecord): number {
@@ -72,9 +81,19 @@ export class MemoryStorage implements cap.Storage {
   #queue: Promise<unknown> = Promise.resolve()
   /** 事务作用域标记：类型层的 `StorageTransaction = Omit<Storage, 'transaction'>` 不会在运行时移除方法，嵌套事务必须在这里被显式拒绝（L3 计划遗留「嵌套事务在运行时静默吞写」的收口条件）。 */
   #transactionScope: boolean
-  constructor(data: FakeStorageData = emptyStorageData(), transactionScope = false) {
+  /** 受信校验策略的**独立副本**：构造时快照，此后调用方再改自己的策略对象不能扩权（#126）。 */
+  #policy: cap.StorageValidationPolicy
+  constructor(data: FakeStorageData = emptyStorageData(), transactionScope = false, policy: cap.StorageValidationPolicy = cap.EMPTY_POLICY) {
+    this.#policy = cap.snapshotPolicy(policy)
     this.data = data
     this.#transactionScope = transactionScope
+    // 导入内部状态时校验已存元数据：漏策略的空库合法，但有句柄或配置的库必须与策略一致（#126）。
+    for (const record of this.data.accounts) cap.parseConnectorAccount(record, this.#policy)
+    for (const record of this.data.bindingConfigurations) {
+      const anchor = this.data.providerBindings.find((candidate) => candidate.id === record.ref.bindingId)
+      if (anchor === undefined) throw new RangeError('binding configuration references an unknown connection anchor')
+      cap.parseBindingConfiguration(record, this.#policy, anchor.implementationKey)
+    }
   }
   #mutate<T>(fn: () => T | PromiseLike<T>): Promise<T> {
     const run = this.#queue.then(fn)
@@ -85,7 +104,7 @@ export class MemoryStorage implements cap.Storage {
     if (this.#transactionScope) throw new Error('嵌套事务不被支持：一个事务内不得再开事务')
     return this.#mutate(async () => {
       const draft = structuredClone(this.data)
-      const result = await work(new MemoryStorage(draft, true))
+      const result = await work(new MemoryStorage(draft, true, this.#policy))
       this.data = draft
       return result
     })
@@ -118,6 +137,67 @@ export class MemoryStorage implements cap.Storage {
   async listProviderBindings(workspaceId: domain.WorkspaceId): Promise<readonly cap.ProviderBindingRecord[]> {
     return this.data.workspaceBindings.filter((mount) => mount.workspaceId === workspaceId)
       .map((mount) => toBindingRecord(mount, this.data.providerBindings))
+  }
+  /** 卸载只删该挂载及其配置：账号、连接锚点、外部身份与同步历史保留；缺失挂载重复移除是 no-op（#126）。 */
+  async removeProviderBinding(ref: { readonly workspaceId: domain.WorkspaceId; readonly bindingId: domain.ProviderBindingId; readonly domain: string }): Promise<void> {
+    return this.#mutate(() => {
+      if (!this.data.workspaceBindings.some((mount) => sameMount(mount, ref))) return
+      this.data.workspaceBindings = this.data.workspaceBindings.filter((mount) => !sameMount(mount, ref))
+      this.data.bindingConfigurations = this.data.bindingConfigurations.filter((record) => !sameMount(record.ref, ref))
+    })
+  }
+  /** 账号自然键：数组序列化，避免分隔符碰撞；显示名不参与去重。 */
+  #accountNaturalKey(record: cap.ConnectorAccountIdentity): string { return JSON.stringify([record.platformFamily, record.platformOrigin, record.identityKind, record.externalId]) }
+  /** 闭集解析 + 独立副本（解析器与 SQLite 共用）；写入只经此入口，内部状态永不别名调用方对象。 */
+  async putConnectorAccount(record: cap.ConnectorAccountRecord): Promise<void> {
+    const parsed = cap.parseConnectorAccount(record, this.#policy); const key = this.#accountNaturalKey(parsed)
+    return this.#mutate(() => {
+      const sameId = this.data.accounts.find((candidate) => candidate.id === parsed.id)
+      const sameKey = this.data.accounts.find((candidate) => this.#accountNaturalKey(candidate) === key)
+      if (sameId !== undefined && this.#accountNaturalKey(sameId) !== key) throw new RangeError('connector account id already points at another identity')
+      if (sameKey !== undefined && sameKey.id !== parsed.id) throw new RangeError('connector account identity is already registered under another id')
+      upsert(this.data.accounts, structuredClone(parsed), (candidate) => candidate.id === parsed.id)
+    })
+  }
+  async getConnectorAccount(id: domain.ConnectorAccountId): Promise<cap.ConnectorAccountRecord | undefined> {
+    const found = this.data.accounts.find((candidate) => candidate.id === id)
+    return found === undefined ? undefined : structuredClone(found)
+  }
+  async listConnectorAccounts(): Promise<readonly cap.ConnectorAccountRecord[]> { return this.data.accounts.map((record) => structuredClone(record)) }
+  /** 初次关联：账号与锚点必须存在且锚点尚无外部身份/观察/游标/写尝试事实；同账号重复是 no-op，换账号或有事实时补账号必须拒绝（#126）。 */
+  async setProviderBindingAccount(bindingId: domain.ProviderBindingId, accountId: domain.ConnectorAccountId): Promise<void> {
+    return this.#mutate(() => {
+      if (this.data.providerBindings.every((candidate) => candidate.id !== bindingId)) throw new RangeError('connection anchor does not exist')
+      if (this.data.accounts.every((candidate) => candidate.id !== accountId)) throw new RangeError('connector account does not exist')
+      const current = this.data.bindingAccounts.find((candidate) => candidate.bindingId === bindingId)
+      if (current !== undefined) {
+        if (current.accountId === accountId) return
+        throw new RangeError('connection anchor is already associated with another connector account')
+      }
+      // 事实检查只覆盖替身真正持有的四类（SQLite 侧把 webhook 订阅也算事实，替身没有 webhook port）；检查与写入在同一个队列槽里。
+      const bound = (item: { bindingId: domain.ProviderBindingId }): boolean => item.bindingId === bindingId
+      if ([this.data.identities, this.data.cursors, this.data.attempts].some((list) => list.some(bound)) || this.data.observations.some((item) => item.observation.bindingId === bindingId)) {
+        throw new RangeError('connection anchor already has external facts: create a new binding id instead')
+      }
+      this.data.bindingAccounts.push({ bindingId, accountId })
+    })
+  }
+  async getProviderBindingAccount(bindingId: domain.ProviderBindingId): Promise<domain.ConnectorAccountId | undefined> {
+    return this.data.bindingAccounts.find((candidate) => candidate.bindingId === bindingId)?.accountId
+  }
+  /** 配置写入：先查真实挂载与锚点的 implementationKey，再查受信 schema；不接收调用者声称的实现键。 */
+  async putBindingConfiguration(record: cap.BindingConfigurationRecord): Promise<void> {
+    return this.#mutate(() => {
+      if (this.data.workspaceBindings.every((mount) => !sameMount(mount, record.ref))) throw new RangeError('binding configuration references an unknown workspace mount')
+      const anchor = this.data.providerBindings.find((candidate) => candidate.id === record.ref.bindingId)
+      if (anchor === undefined) throw new RangeError('binding configuration references an unknown connection anchor')
+      const parsed = cap.parseBindingConfiguration(record, this.#policy, anchor.implementationKey)
+      upsert(this.data.bindingConfigurations, structuredClone(parsed), (candidate) => sameMount(candidate.ref, parsed.ref))
+    })
+  }
+  async getBindingConfiguration(ref: { readonly workspaceId: domain.WorkspaceId; readonly bindingId: domain.ProviderBindingId; readonly domain: string }): Promise<cap.BindingConfigurationRecord | undefined> {
+    const found = this.data.bindingConfigurations.find((candidate) => sameMount(candidate.ref, ref))
+    return found === undefined ? undefined : structuredClone(found)
   }
   async putEntity(record: domain.Entity): Promise<void> {
     return this.#mutate(() => upsert(this.data.entities, record, (e) => e.id === record.id))
@@ -352,8 +432,8 @@ export class MemoryStorage implements cap.Storage {
     })
   }
 }
-export function createFakeStorage(data: FakeStorageData = emptyStorageData()): MemoryStorage {
-  return new MemoryStorage(structuredClone(data))
+export function createFakeStorage(data: FakeStorageData = emptyStorageData(), policy: cap.StorageValidationPolicy = cap.EMPTY_POLICY): MemoryStorage {
+  return new MemoryStorage(structuredClone(data), false, policy)
 }
 /** 导出内部状态：换一个实例导入同一份快照即可模拟重启后读同一份内容。 */
 export function exportFakeStorageState(storage: cap.Storage): FakeStorageData {
