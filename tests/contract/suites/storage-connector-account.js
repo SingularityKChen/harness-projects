@@ -50,7 +50,7 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     await storage.putProviderBinding(binding('conn-4', 'planning', { workspaceId: 'ws-2' }))
     await storage.putSyncCursor({ workspaceId: 'ws-2', bindingId: 'conn-4', scopeKey: 'scope-1', cursorValue: 'c', state: 'healthy', lastErrorCode: undefined })
     const before = await storage.listConnectorAccounts()
-    await assert.rejects(storage.putConnectorAccount(account({ id: 'account-2' })), '同自然键换 id 必须拒绝')
+    await assert.rejects(storage.putConnectorAccount(account({ id: 'account-2' })), (error) => error instanceof RangeError && !/UNIQUE|constraint/i.test(error.message), '同自然键换 id 必须拒绝，且不暴露驱动文本')
     await assert.rejects(storage.putConnectorAccount(account({ externalId: 'octo-other' })), '同 id 换自然键必须拒绝')
     assert.deepEqual(await storage.listConnectorAccounts(), before, '拒绝后快照必须逐字段相等')
     await storage.setProviderBindingAccount('conn-0', 'account-1')
@@ -180,8 +180,9 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     // 坏正则/负长度必须在构造点以 RangeError 失败，不能等首次写入才抛 SyntaxError（P3-R2）。
     assert.throws(() => makeStorage({ allowedSecretHandles: new Set(), configurations: new Map([['harness.fake', { scope: { kind: 'string', required: true, pattern: '(', maxLength: 8 } }]]) }), RangeError, '坏正则必须构造失败')
     assert.throws(() => makeStorage({ allowedSecretHandles: new Set(), configurations: new Map([['harness.fake', { scope: { kind: 'string', required: true, pattern: '[a-z]+', maxLength: -1 } }]]) }), RangeError, '负 maxLength 必须构造失败')
-    // 快照幂等：传入已快照对象必须返回同一份（P3-R3）。
-    const snapshot = snapshotPolicy(policy())
-    assert.equal(snapshotPolicy(snapshot), snapshot, 'snapshotPolicy 对已快照对象必须幂等')
+    // 幂等只指「不重读 getter」：返回容器仍须是新副本（P1 / P3-R3）。
+    let reads = 0; const snapshot = snapshotPolicy({ get allowedSecretHandles() { reads += 1; return new Set() }, get configurations() { reads += 1; return new Map() } })
+    const cached = makeStorage(snapshot); assert.equal(reads, 2, '传入快照不得重读其 getter')
+    snapshot.allowedSecretHandles.add('ESCALATED'); await assert.rejects(cached.putConnectorAccount(account({ id: 'account-snap', secretHandle: 'ESCALATED' })), RangeError, '改快照读到的容器不得扩权')
   })
 }

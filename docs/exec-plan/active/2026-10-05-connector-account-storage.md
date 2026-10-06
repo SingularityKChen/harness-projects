@@ -57,7 +57,7 @@ SQL 原位重写 002，增加账号表的自然键唯一、状态/identity kind 
 
 单 PR 预算为代码 add+delete ≤800 行、文档 ≤1300 行，测试/fixture 算代码；这是执行门，不是已测结果。估算分配：类型/端口/导出 90、校验策略 105、SQL/映射/表形检测 90、SQLite 方法 100、Fake 80、契约 200、集成与旧 fixture 110，共 775，余量 25。文档目标 500；实施前逐文件复核预算，超过门限必须重新切片或去掉重复表达，不删判别性测试。
 
-2026-10-05 CST 实测修订（对抗验证三轮）：实测代码累计 **994 行**，超出本计划 800 行执行门 194 行；仓库硬门代码 ≤1000 行**仍通过但余量只剩 6 行**（第二轮末为 955/余 45）。超门来源可逐项归因：第一轮 P1-1 / P1-2 / P2-2 与 P2-1 / P2-3 / P3-1–P3-3 约 120 行，第二轮 P2-R1 / P2-R2 / P2-R3 / P3-R1 / P3-R2 约 66 行，第三轮 P3-R3（策略快照单次化）与 P3-R4（列名大小写不敏感）约 39 行（其中含把三个损坏库夹具收成一个 helper 的净省）。其中 P1-1、P1-2、P2-2、P2-R1、P2-R2、P3-R3 是 Design / Spec 明文要求的信任边界（构造期策略快照、默认策略不可被进程内导入者污染、已记账损坏库不得先落后续迁移、失败构造不得泄漏句柄或留下半迁移、形状判据须覆盖残缺列集、策略失败必须先于 IO），按本节规则「不删判别性测试」，三轮只做注释与同形逻辑收敛（累计净省约 30 行）后仍超门。裁定：保留全部修复与判别用例，把超门记为事实；**仓库硬门余量 6 行意味着后续任何净增都会破门**，人类合并裁决时按后备切片（账号身份/保留/两存储一层，配置/重登记/重启/两存储一层；第一层仅 Refs、第二层 Closes）重新分发。此修订不改仓库硬门，也不构成对超门或贴近硬门的放行。
+2026-10-05 CST 实测修订（对抗验证三轮 + 最终验收轮）：实测代码累计 **994 行**，超出本计划 800 行执行门 194 行；仓库硬门代码 ≤1000 行**仍通过但余量只剩 6 行**（第二轮末为 955/余 45）。超门来源可逐项归因：第一轮 P1-1 / P1-2 / P2-2 与 P2-1 / P2-3 / P3-1–P3-3 约 120 行，第二轮 P2-R1 / P2-R2 / P2-R3 / P3-R1 / P3-R2 约 66 行，第三轮 P3-R3（策略快照单次化）与 P3-R4（列名大小写不敏感）约 39 行（其中含把三个损坏库夹具收成一个 helper 的净省），最终验收轮 P1 回归修正与 M7 断言收紧为**净增 0 行**（等量改写）。其中 P1-1、P1-2、P2-2、P2-R1、P2-R2、P3-R3 是 Design / Spec 明文要求的信任边界（构造期策略快照、默认策略不可被进程内导入者污染、已记账损坏库不得先落后续迁移、失败构造不得泄漏句柄或留下半迁移、形状判据须覆盖残缺列集、策略失败必须先于 IO），按本节规则「不删判别性测试」，四轮只做注释与同形逻辑收敛（累计净省约 35 行）后仍超门。裁定：保留全部修复与判别用例，把超门记为事实；**仓库硬门余量 6 行意味着后续任何净增都会破门**，人类合并裁决时按后备切片（账号身份/保留/两存储一层，配置/重登记/重启/两存储一层；第一层仅 Refs、第二层 Closes）重新分发。此修订不改仓库硬门，也不构成对超门或贴近硬门的放行。
 
 保持 Node/pnpm 与锁文件既有配置，domain 不反向依赖 capabilities；无新增依赖。只重写现有实验 schema，不新增兼容迁移。元数据不加入 `ProviderBindingRecord`、CoreQueries 或 client snapshot。保留现有唯一写者队列、事务令牌与关闭机制。
 
@@ -120,6 +120,7 @@ canary、错误输入及行为期望独立于实现 parser 构造。临时删除
 - [x] (2026-10-05 CST) 对抗验证修复轮：P1-1 策略快照深拷贝、P1-2 默认策略改为每访存新建空集合、P2-2 迁移前判据扩为「已应用版本 2 且形状缺失」；P2-1 显式 undefined、P2-3 读口复验、P3-1/P3-2/P3-3 一并修复并补判别用例。verify-270 的 6/8 证实结论保持，两处 P1 证伪项已转绿。
 - [x] (2026-10-05 CST) 第二轮收尾修复：P2-R1 非法策略改为任何 IO 之前失败（不迁移、不留句柄，直接构造失败也关执行侧句柄）；P2-R2 形状判据补齐 `connector_account` 必需列集；P2-R3 `EMPTY_POLICY` 属性描述符冻结；顺带修 P3-R1 读口时序与 P3-R2 坏正则/负长度在构造点拒绝。第二轮复验判定「无 P0、无第一轮 P1、#126 五条验收全部证实」。
 - [x] (2026-10-05 CST) 第三轮收尾修复：P3-R3 策略签名改为「每个属性只读一次 + 快照幂等（WeakSet）」并把同一份快照交给构造函数，有状态 getter 不再把失败推到 migrate 之后；P3-R4 形状判据的列名比对改大小写不敏感。第三轮复验判定 P2-R1/R2/R3 与 P3-R1/R2 全部闭合、无回归、无过度拒绝。
+- [x] (2026-10-05 CST) 最终验收轮修复：P1（回归）`snapshotPolicy` 命中 WeakSet 时改为「不重读 getter、但仍重新拷容器」，修掉「拿快照结果构造后再改该结果的 Set 可扩权」；P3（判别力）`immutable-account-and-anchor-identity` 的同自然键换 id 断言收紧为 `RangeError` 且不含驱动文本。净增 0 行（代码 994 不变）。
 - [ ] (2026-10-05 CST) 最终远端回读、独立验收与人类合并决定；通过后归档计划。
 
 Batch 1 实测证据（均在 `.worktrees/connector-account-plan` 工作树根）：
@@ -149,9 +150,16 @@ Batch 1 实测证据（均在 `.worktrees/connector-account-plan` 工作树根�
 
 第三轮收尾修复实测（2026-10-05 CST，针对 verify-270 第三轮在 `a114ee6` 上的 P3-R3 与 P3-R4；仍为临时改后逐字节恢复）：
 
-- P3-R3：`snapshotPolicy` 改为「每个属性只读一次 + WeakSet 记录本模块产出过的快照，命中即原样返回」，工厂把该快照交给构造函数；构造函数只在收到非快照对象时才自行快照（直接构造的调用方语义不变）。`node .superpowers/adv/r3-toctou2.mjs`：有状态 getter 策略由「reads=4、file=CREATED、migrations=[1,2,3,4,5]」变为「reads=1、正常打开」；首次读即脏的策略在 `r3-before-io.mjs` 仍是 `RangeError` 且 `file-created=false`。新增用例 `policy-snapshot-is-read-once-and-precedes-io`（`reads === 1`、脏首次读不得创建库文件）、契约用例里的 `snapshotPolicy(snapshot) === snapshot`，以及 `metadata-transaction-and-copy-isolation` 的嵌套扩权断言。
+- P3-R3：`snapshotPolicy` 改为「每个属性只读一次 + WeakSet 记录本模块产出过的快照」；工厂把快照交给构造函数，构造函数只在收到非快照对象时才自行快照（直接构造的调用方语义不变）。`node .superpowers/adv/r3-toctou2.mjs`：有状态 getter 策略由「reads=4、file=CREATED、migrations=[1,2,3,4,5]」变为「reads=1、正常打开」；首次读即脏的策略在 `r3-before-io.mjs` 仍是 `RangeError` 且 `file-created=false`。新增用例 `policy-snapshot-is-read-once-and-precedes-io`（`reads === 1`、脏首次读不得创建库文件）与 `metadata-transaction-and-copy-isolation` 的嵌套扩权断言。**注**：该轮曾把命中判据实现为「原样返回同一引用」，被最终验收轮判定为 P1 回归，已在本页下方第四轮修正为「不重读 getter、但仍重拷容器」。
 - P3-R4：形状判据的列名比对改 `toLowerCase()`。`r3-case-and-types.mjs` 的 `uppercase-columns` 由 `REJECT:Error`（误拒合法大写声明库）变为 `OPEN`；`r3-shape-columns.mjs` 的 `case-different-column` 由 `REJECT` 变 `OPEN`，同时 `missing-one-column` / `missing-three-columns` / `id-only` 仍全部 `REJECT` + 零写入，`extra-column` 与完整库仍 `OPEN`（无过度拒绝）。列类型错（`datatype mismatch`）仍穿过形状判据——SQLite 动态类型所致，形状判据只保证列存在性，已随本轮记入 `TD-029`。
-- 第三轮变异：把工厂改回「两次快照 + 传调用方原对象」→ `policy-snapshot-is-read-once-and-precedes-io` 红；删掉 `snapshotPolicy` 的 WeakSet 幂等分支 → 两个 adapter 的 `metadata-transaction-and-copy-isolation` 红（契约里的幂等断言触发）；列名比对退回大小写敏感 → `restart-and-empty-schema-repeatability` 红（大写变体）。恢复后 18/18 绿。
+- 第三轮变异：把工厂改回「两次快照 + 传调用方原对象」→ `policy-snapshot-is-read-once-and-precedes-io` 红；列名比对退回大小写敏感 → `restart-and-empty-schema-repeatability` 红（大写变体）。恢复后 18/18 绿。**诚实标注**：当轮记录的第三条变异「删掉 WeakSet 幂等分支 → 两个 adapter 的 `metadata-transaction-and-copy-isolation` 红」依赖的是当轮契约里 `snapshotPolicy(snapshot) === snapshot` 这条断言；该断言在第四轮已被替换为更强的「改快照不得扩权」断言，因此该条变异在当前代码上不再可复现（删幂等分支不再变红）——不是判别力丢失，而是旧断言所钉的正是后来被证伪的语义。
+
+第四轮（最终验收轮）修复实测（2026-10-05 CST，针对独立验收者在 `b6f66de` 上的 P1 回归与 M7 判别力缺口；仍为临时改后逐字节恢复）：
+
+- P1（回归，由第三轮修法引入）：`snapshotPolicy` 命中 `POLICY_SNAPSHOTS` 时**原样返回同一引用**，而快照内的 `allowedSecretHandles`（Set）、`configurations`（Map）与嵌套 `values` 仍可变；工厂把该引用交给构造函数后，改这份结果就等价于改实例的授权集合。复现（两适配器）：`snapshotPolicy` 结果 → 构造 → `add('ESCALATED')` → 写入 `ACCEPTED`（应为 `RangeError`）；对照 `a114ee6` 同一路径 `rejected`。修法：命中 WeakSet 只表示「已验证、无需重读调用方 getter」，`source = cached ?? policy` 之后仍走原有深拷逻辑，每次返回新的冻结容器；契约断言由「返回同一份」改为「`reads` 不增且改快照不得扩权」。
+- P3（判别力，M7）：`immutable-account-and-anchor-identity` 里「同自然键换 id」原先只写 `assert.rejects(..., '消息')`，删掉实现里的显式守卫后由 SQLite 的 `UNIQUE` 以裸驱动 `Error: UNIQUE constraint failed…` 兜底，用例仍绿。断言收紧为 `error instanceof RangeError && !/UNIQUE|constraint/i.test(error.message)`（两适配器同语义，Fake 侧本就抛 `RangeError`）。
+- 第四轮变异：把 `snapshotPolicy` 退回「命中即原样返回」→ 两个 adapter 的 `metadata-transaction-and-copy-isolation` 红；删 SQLite 的同自然键守卫（保留收紧断言）→ `immutable-account-and-anchor-identity`（sqlite）红；**同时**删守卫并把断言退回旧写法 → 重新变绿（M7 复现，证明缺口真实存在且已被收紧断言关闭）。恢复后 18/18 绿。
+- 规模：本轮净增 **0 行**——代码仍为 **994 / 1000**（写侧 +4/−5、测试 +5/−4），仓库硬门余量仍 6 行；文档同步更新。
 - 补充脚本 `.superpowers/adv/fix-verify-r2.mjs` 作为修复后期望值的自包含断言集：P2-R1 fd delta 0 且无记账、P2-R2 拒绝且版本不变、P2-R3 frozen、P3-R1 双适配器异步拒绝、P3-R2 双适配器构造点 RangeError，全部通过。
 
 ## Surprises & Discoveries
@@ -174,7 +182,9 @@ Batch 1 实测证据（均在 `.worktrees/connector-account-plan` 工作树根�
 
 2026-10-05 CST（第二轮收尾）：**修复本身也会引入新的失败面**。第一轮给 `snapshotPolicy` 加了规则级校验后，「非法策略」从罕见类型错误变成常见输入错误，于是暴露出工厂把构造放在 `try` 之外、由此每次失败泄漏句柄并留下半迁移的路径（P2-R1）——这不是新引入的分支，而是被扩大的抛错面照出来的旧缺口。同类还有 P2-R2：第一轮把判据从「`provider_binding` 存在」推进到「版本 2 已记账」，但没有同时把判据从「表/列存在性」推进到「列集完整性」，于是 `connector_account(id)` 这种残缺库仍能穿过。教训：**收紧判据时要连它检查的维度一起收紧（存在性 → 完整性），并检查新抛错点的清理路径是否覆盖全部入口**。另外，JS 的 `Object.freeze` 只冻结属性描述符，对 getter 型的 `EMPTY_POLICY` 恰好够用（内容每次新建），但对第一轮的 Set/Map 单例不够——同一个 API 在两种实现下语义不同，必须分别判别。
 
-2026-10-05 CST（第三轮收尾）：**「先于 IO 校验」与「快照」是两件事，中间夹着调用方代码**。第二轮把 `snapshotPolicy` 提到 `openDatabase` 之前，但工厂与构造函数各自快照一次；对普通对象无差别，对有状态 getter 就等于把「同一次校验」读成两个不同的值：第一次干净（IO 通过）、第二次脏（migrate 之后抛错），于是留下一个已迁移到 [1,2,3,4,5] 的空库。修法不是再加一层预检，而是让**快照只发生一次、结果被复用**（每个属性只读一次 + WeakSet 幂等标记）——判据统计次数本身也成了断言（`reads === 1`）。教训：任何「校验 A、稍后使用 A'」的两段式设计，只要 A 的读取有副作用或非确定性，就必须显式传递结果而不是重新求值。同轮的 P3-R4 是反向教训：判据按 `pragma_table_info` 的声明拼写比对列名，比 SQLite 自身的标识符语义**更严**，于是误拒了大写声明的合法库——判据的严格度不能超过它所校验的系统语义。
+2026-10-05 CST（第三轮收尾）：**「先于 IO 校验」与「快照」是两件事，中间夹着调用方代码**。第二轮把 `snapshotPolicy` 提到 `openDatabase` 之前，但工厂与构造函数各自快照一次；对普通对象无差别，对有状态 getter 就等于把「同一次校验」读成两个不同的值：第一次干净（IO 通过）、第二次脏（migrate 之后抛错），于是留下一个已迁移到 [1,2,3,4,5] 的空库。修法不是再加一层预检，而是让**快照只发生一次、结果被复用**（每个属性只读一次 + WeakSet 标记）——判据统计次数本身也成了断言（`reads === 1`）。教训：任何「校验 A、稍后使用 A'」的两段式设计，只要 A 的读取有副作用或非确定性，就必须显式传递结果而不是重新求值。同轮的 P3-R4 是反向教训：判据按 `pragma_table_info` 的声明拼写比对列名，比 SQLite 自身的标识符语义**更严**，于是误拒了大写声明的合法库——判据的严格度不能超过它所校验的系统语义。
+
+2026-10-05 CST（最终验收轮）：**第三轮的修法本身引入了新 P1——「复用快照」被实现成「复用同一个可变对象」**。命中 WeakSet 时 `snapshotPolicy` 原样返回同一引用，而它内部仍是 `Set` / `Map` / 数组；于是「构造时复制策略、之后改调用方对象不得扩权」这条 Design 明文承诺，在调用方自己先调 `snapshotPolicy`、再构造、再改这份结果的路径上失守（两适配器同结论，改 `allowedSecretHandles` 后 `ESCALATED` 被接受）。根因是把两种「幂等」混为一谈：**读取幂等**（不必重读 getter）与**所有权幂等**（返回同一个可变对象）是不同承诺，前者是性能/时序优化，后者直接取消隔离。修法是命中只跳过 getter 读取（`source = cached ?? policy`），容器仍走原有深拷，因此第四轮的契约断言也从「返回同一份」改为「`reads` 不增且改快照不得扩权」——**旧断言恰恰钉住了后来被证伪的语义**，这提示判别性断言要钉"外部可观察的安全性质"，而不是钉实现选定的等价性。同轮另一个教训来自 M7：只写 `assert.rejects(..., 消息)` 时，删掉实现里的显式守卫仍会绿，因为数据库 UNIQUE 约束以裸驱动错误兜底——**断言必须钉住承诺的错误类型与「不回显驱动文本」，否则守卫的判别力会被下层兜底掩盖**。
 
 ## Decision Log
 
@@ -198,6 +208,10 @@ Batch 1 实测证据（均在 `.worktrees/connector-account-plan` 工作树根�
 | 2026-10-05 CST / 实现者（第三轮收尾） | P3-R3 的修法是「让快照只发生一次」而不是「在构造函数里也提前校验」：`snapshotPolicy` 两个属性各读一次、结果记入模块级 `WeakSet`，命中即原样返回；工厂把这份快照交给构造函数，构造函数只在收到未标记对象（直接构造路径）时才自行快照。这样「先于 IO 失败」对小对象与有状态 getter 策略都成立，且不改变直接构造语义。判据统计次数（`reads === 1`）成为断言的一部分，防止将来有人在两处重新求值。 |
 | 2026-10-05 CST / 实现者（第三轮收尾） | P3-R4（列名大小写）判定为**修**：把列名 `toLowerCase()` 后比对，只多一个方法调用；不修会让判据比 SQLite 的标识符语义更严、误拒大写声明的合法库。列类型错（动态类型导致 `datatype mismatch`）不在形状判据范围内，登记 `TD-029`（手工损坏库的类型审计），写明下一步与承接条件。 |
 | 2026-10-05 CST / 实现者（第三轮收尾） | 规模：第三轮净增代码约 39 行（含把三个损坏库夹具收成一个 `seedVersion2` helper 的净省），实测 **994 行**；仓库硬门 1000 行余量只剩 6 行。这使「再增行」成为硬约束：后续任何净增都必须先减行或走切片，已在 Global Constraints 与 `TD-028` 写明。 |
+| 2026-10-05 CST / 实现者（最终验收轮） | 接受最终验收者的 P1 判定：第三轮把 `WeakSet` 命中实现为「原样返回同一引用」是把**读取幂等**当成了**所有权幂等**——前者只是「已验证、无需重读 getter」，后者取消了构造后隔离。改为命中时 `source = cached ?? policy`、容器仍走原有深拷，`snapshotPolicy` 的公开语义回到「每次返回独立冻结副本，且对已快照输入不重读 getter」。契约断言同步从「返回同一份」改为「`reads` 不增 + 改快照不得扩权」；旧断言被删除，因为它钉住的正是被证伪的语义。 |
+| 2026-10-05 CST / 实现者（最终验收轮） | 接受 M7 判别力缺口判定：`immutable-account-and-anchor-identity` 的「同自然键换 id」只写 `assert.rejects(..., 消息)`，删掉显式守卫后 SQLite 的 `UNIQUE` 以裸驱动 `Error: UNIQUE constraint failed…` 兜底而用例仍绿。断言收紧为 `error instanceof RangeError && !/UNIQUE\|constraint/i.test(error.message)`（两适配器同语义，Fake 侧本就抛 `RangeError`）；已复现「删守卫（收紧断言下）红 / 删守卫 + 退回旧断言又绿」两种状态，证明缺口真实且已关闭。 |
+| 2026-10-05 CST / 实现者（最终验收轮） | 规模：本轮**净增 0 行**（写侧 +4/−5、测试侧 +5/−4，等价改写），代码仍 **994/1000**、余量 6 行；文档按本页增量更新。没有为压行删任何判别性测试。 |
+| 2026-10-05 CST / 实现者（最终验收轮） | 已知缺项（不自行修改外部面）：issue #126 要求 PR 描述包含「schema review 明示受信输入前提」段，当前 PR #270 正文缺失；实现者未被授权写 PR，故只在此登记，交由主控在 push 时补入。 |
 
 2026-10-05 CST / 主控：Actor 为 SingularityKChen；管理目标是 GitHub 仓库 SingularityKChen/harness-projects 与 Project 10，不虚构产品内 ProviderBinding。幂等标识为 `plan/issue-126/feature/connector-account-storage`，字段赋值以 issue/字段名去重；创建结果为 PR #270。观察时刻 @ 2374dbdf0497：base=main、draft=true，PR closingIssuesReferences 包含 #126、issue closedByPullRequestsReferences 包含 #270，无评审线程，标题/标签/issue policy 检查通过。Project ExecPlan/Batch 已回读匹配，Kind/Area/M4 已具备；Status=Todo、Priority=P0、Size=M、Iteration 5 及依赖关系保持原值。易失结果用 `gh pr view 270 -R SingularityKChen/harness-projects --json headRefOid,baseRefName,isDraft,closingIssuesReferences,statusCheckRollup` 和 `gh issue view 126 -R SingularityKChen/harness-projects --json closedByPullRequestsReferences,projectItems` 复读；最终文档 push 后再次回读当前 head/checks。
 
@@ -251,7 +265,9 @@ createFakeStorage(data?: FakeStorageData, policy?: StorageValidationPolicy): Mem
 
 2026-10-05 CST（第二轮复验 + 收尾）：verify-270 第二轮独立复跑判定「无 P0、无第一轮意义上的 P1、#126 五条验收全部证实」，顺序效应判定与实现者一致；同时新增 P2-R1（构造期失败泄漏句柄且库已被迁移）、P2-R2（形状只查存在性不查列集）、P2-R3（`EMPTY_POLICY` 未冻结）、P3-R1（读口同步抛）、P3-R2（坏正则到写入才 `SyntaxError`）。全部逐条修复并补判别用例：策略快照提到任何 IO 之前 + 构造入 `try` + 关闭幂等、形状判据逐列比对、默认策略属性描述符冻结、SQLite 读口改 `async`、`copyRule` 构造点试编译正则并要求 `maxLength >= 0`。验收：窄命令 46/46、`tests/contract tests/integration` 1091/1091、`tests/e2e tests/mvp0` 64/64、`typecheck` 与 `boundaries` exit 0；六个收尾变异各自 old-red→恢复后 new-green。规模实测代码 **955 行**（计划执行门 800 **超出 155 行**；仓库硬门 1000 通过、余量 45 行）、文档随本段更新；`TD-028` 数字同步为 955。未决：远端回读、独立验收、人类合并决定与是否按后备切片拆分仍 pending。
 
-2026-10-05 CST（第三轮复验 + 收尾）：verify-270 第三轮判定 P2-R1/R2/R3 与 P3-R1/R2 全部闭合、无回归、无过度拒绝，fd 数字被精确化为「首次打开 SQLite 的一次性惰性 fd，之后 200 次坏策略 delta 0」；新增 P3-R3（策略快照做两次，有状态 getter 下库先被创建并迁移）、P3-R4（列名按声明拼写比对，大写声明的合法库被误拒）。逐条修复：`snapshotPolicy` 每个属性只读一次 + `WeakSet` 幂等，工厂把快照交给构造函数（直接构造路径仍自行快照）；形状判据列名比对改大小写不敏感。验收：窄命令 47/47、`tests/contract tests/integration` 1092/1092、`tests/e2e tests/mvp0` 64/64、`typecheck` 与 `boundaries` exit 0；三个第三轮变异各自 old-red→恢复后 new-green。规模实测代码 **994 行**（计划执行门 800 **超出 194 行**；仓库硬门 1000 通过但**余量只剩 6 行**）；`TD-028` 同步为 994 并写明「后续任何净增都必须先减行或切片」，新增 `TD-029`（形状判据不审列类型）。未决：远端回读、独立验收、人类合并决定与是否切片仍 pending。
+2026-10-05 CST（第三轮复验 + 收尾）：verify-270 第三轮判定 P2-R1/R2/R3 与 P3-R1/R2 全部闭合、无回归、无过度拒绝，fd 数字被精确化为「首次打开 SQLite 的一次性惰性 fd，之后 200 次坏策略 delta 0」；新增 P3-R3（策略快照做两次，有状态 getter 下库先被创建并迁移）、P3-R4（列名按声明拼写比对，大写声明的合法库被误拒）。逐条修复：`snapshotPolicy` 每个属性只读一次 + `WeakSet` 标记，工厂把快照交给构造函数（直接构造路径仍自行快照）；形状判据列名比对改大小写不敏感。验收：窄命令 47/47、`tests/contract tests/integration` 1092/1092、`tests/e2e tests/mvp0` 64/64、`typecheck` 与 `boundaries` exit 0。规模实测代码 **994 行**（计划执行门 800 **超出 194 行**；仓库硬门 1000 通过但**余量只剩 6 行**）；`TD-028` 同步为 994 并写明「后续任何净增都必须先减行或切片」，新增 `TD-029`（形状判据不审列类型）。未决：远端回读、独立验收、人类合并决定与是否切片仍 pending。**该轮埋下一个回归**：WeakSet 命中被实现为原样返回同一引用（见下）。
+
+2026-10-05 CST（最终验收轮）：独立验收者在 `b6f66de` 上判定新 **P1 回归**与一项 **P3 判别力缺口**。P1：`snapshotPolicy` 命中 WeakSet 时返回同一可变引用，调用方先取快照、再用它构造、再修改该快照的 `allowedSecretHandles`，实例即被扩权（两适配器同结论；`a114ee6` 上同一路径 `rejected`）——违反设计与规格明文的「构造时复制、之后改调用方对象不得扩权」，命名用例 `metadata-transaction-and-copy-isolation` 失守。P3（M7）：`immutable-account-and-anchor-identity` 的「同自然键换 id」只断言 `assert.rejects(...,消息)`，删守卫后由 SQLite `UNIQUE` 裸驱动错误兜底而用例仍绿。修复：快照命中只跳过 getter 读取（`source = cached ?? policy`），容器仍走原有深拷，公开语义回到「每次返回独立冻结副本」；断言收紧为 `RangeError` 且不含 `UNIQUE`/`constraint` 文本，并删除那条钉住被证伪语义的 `snapshotPolicy(snapshot) === snapshot` 旧断言。**净增 0 行**，代码仍 **994/1000**（余量 6 行）。验收：窄命令 47/47、`tests/contract tests/integration` 1092/1092、`tests/e2e tests/mvp0` 64/64、`typecheck` exit 0、`boundaries` 8/8。变异：退回「命中即原样返回」→ 两个适配器的 `metadata-transaction-and-copy-isolation` 红；删 SQLite 同自然键守卫（收紧断言下）→ `immutable-account-and-anchor-identity` 红；删守卫并退回旧断言 → 重新变绿（M7 复现，证明缺口真实且已关闭）。**已知缺项**：issue #126 要求 PR 描述含「schema review 明示受信输入前提」段，当前 PR #270 正文缺失，实现者未获授权改 PR，交主控在 push 时补。未决：远端回读（远端 head 仍为 `ea4edcab`）、独立验收与人类合并决定仍 pending。
 
 ## Bottom Change Note
 
@@ -267,6 +283,6 @@ createFakeStorage(data?: FakeStorageData, policy?: StorageValidationPolicy): Mem
 
 2026-10-05 CST：第二轮收尾落地——非法策略在任何 IO 之前失败（不迁移、不留句柄，直接构造失败也关句柄）、形状判据补齐账号必需列集、默认策略属性描述符冻结，并修 P3-R1/P3-R2 与补判别用例。
 
-2026-10-05 CST：第三轮收尾落地——策略快照单次化（每属性只读一次 + WeakSet 幂等，工厂把快照交给构造函数），形状判据列名比对改大小写不敏感，并修 P3-R3/P3-R4 与补判别用例；代码 **994 行**贴到仓库硬门（余量 6 行）、计划执行门 800 超出 194 行，超门与贴门事实、`TD-028`/`TD-029` 与交人类裁决的两种路径均已入档。
+2026-10-05 CST：第三轮收尾落地——策略快照单次化（每属性只读一次 + WeakSet 标记，工厂把快照交给构造函数），形状判据列名比对改大小写不敏感，并修 P3-R3/P3-R4 与补判别用例；代码 **994 行**贴到仓库硬门（余量 6 行）、计划执行门 800 超出 194 行，超门与贴门事实、`TD-028`/`TD-029` 与交人类裁决的两种路径均已入档。同轮第二轮数字为 955 行（超执行门 155、余量 45）。
 
-2026-10-05 CST：第二轮收尾落地——非法策略在任何 IO 之前失败（不迁移、不留句柄，直接构造失败也关句柄）、形状判据补齐账号必需列集、默认策略属性描述符冻结，并修 P3-R1/P3-R2 与补判别用例；代码 **955 行**超出本计划 800 行执行门 155 行（仓库硬门 1000 通过、余量 45 行），超门事实与取舍记入 Global Constraints / Decision Log / Outcomes，`TD-028` 数字同步，交由人类合并裁决。
+2026-10-05 CST：最终验收轮落地——修正第三轮引入的 P1 回归：`snapshotPolicy` 命中 WeakSet 时不再复用同一可变容器（只跳过 getter 重读，容器仍深拷）；`immutable-account-and-anchor-identity` 的「同自然键换 id」断言收紧为 `RangeError` 且不含驱动文本，关闭 M7 判别力缺口。净增 0 行，代码仍 **994/1000**。PR #270 描述缺 issue #126 要求的「schema review 明示受信输入前提」段已登记，待主控 push 时补。
