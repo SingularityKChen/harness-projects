@@ -1,6 +1,7 @@
-/** 连接账号与工作区配置的共享 Storage 契约套件（#126）：Fake 与 SQLite 跑同一组命名用例，不复制断言。判别性集中在三处：账号自然键不可重绑、配置按真实锚点的 implementationKey 分派、重登记/卸载只改挂载。 */
+/** 连接账号与工作区配置的共享 Storage 契约套件（#126）：Fake 与 SQLite 同形跑 6 条命名用例；判别性集中在账号自然键不可重绑、配置按真实 implementationKey 分派、重登记/卸载只改挂载。 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { EMPTY_POLICY } from '@harness-projects/capabilities'
 import { createContext } from '@harness-projects/core'
 import { createFakePlanningProvider } from '@harness-projects/provider-fake'
 
@@ -10,11 +11,9 @@ export const binding = (id, domain, overrides = {}) => ({ id, workspaceId: WORKS
 export const account = (overrides = {}) => ({ id: 'account-1', platformFamily: 'github', platformOrigin: 'https://github.com', identityKind: 'account', externalId: 'octo-1', displayName: '账号', secretHandle: 'HARNESS_FAKE_TOKEN', connectionState: 'connected', ...overrides })
 /** 受信策略的字段规则：字符串（pattern + maxLength）、枚举与布尔三种规则都用上。 */
 export const policy = () => ({ allowedSecretHandles: new Set(['HARNESS_FAKE_TOKEN', 'LOCAL_GIT_DEPLOY_KEY']), configurations: new Map([
-  ['harness.fake', { scope: { kind: 'enum', required: true, values: ['workspace', 'project'] } }],
+  ['harness.fake', { scope: { kind: 'enum', required: true, values: ['workspace', 'project'] }, label: { kind: 'string', required: false, pattern: '[a-z]+', maxLength: 8 } }],
   ['development.local-git', { repositoryPath: { kind: 'string', required: true, pattern: '/[^\\s]+', maxLength: 512 } }],
 ]) })
-/** 空策略：无 allowlist、无 schema。既有无元数据合法，有句柄或配置的库必须拒绝。 */
-export const EMPTY_POLICY = { allowedSecretHandles: new Set(), configurations: new Map() }
 /** 计划 Validation and Acceptance 的 8 个命名用例：6 条共享（本文件）+ 2 条集成专属。 */
 export const CONNECTOR_ACCOUNT_INTEGRATION_CASES = ['restart-and-empty-schema-repeatability', 'secret-canary-never-published']
 export const CONNECTOR_ACCOUNT_SHARED_CASES = ['one-account-three-domains', 'immutable-account-and-anchor-identity', 'configuration-is-workspace-scoped', 'trusted-handle-only', 'registration-and-removal-preserve-account', 'metadata-transaction-and-copy-isolation']
@@ -36,7 +35,7 @@ async function seedAccount(storage, domains) {
 const attached = (storage, index) => storage.getProviderBindingAccount(`conn-${index}`)
 
 export function storageConnectorAccountSuite(adapter, register = test) {
-  const { label, makeStorage, restart } = adapter
+  const { label, makeStorage, restart, tamper } = adapter
 
   register(`${label}：one-account-three-domains`, async () => {
     const storage = makeStorage(); await seedAccount(storage, ['planning', 'development', 'execution'])
@@ -80,7 +79,16 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     await assert.rejects(storage.putBindingConfiguration({ ref: a, configuration: { scope: 'workspace', extra: true } }), '未知字段必须拒绝')
     await assert.rejects(storage.putBindingConfiguration({ ref: a, configuration: {} }), '缺必填字段必须拒绝')
     await assert.rejects(storage.putBindingConfiguration({ ref: a, configuration: { scope: 'bogus' } }), '枚举外的值必须拒绝')
+    await assert.rejects(storage.putBindingConfiguration({ ref: a, configuration: { scope: undefined } }), RangeError, '显式 undefined 不是字段缺省：必填字段必须拒绝')
+    await assert.rejects(storage.putBindingConfiguration({ ref: a, configuration: { scope: 'workspace', label: undefined } }), RangeError, '显式 undefined 不是字段缺省：可选字段同样必须拒绝')
+    // 畸形 ref / record 必须在解引用之前以 RangeError 拒绝（对抗验证 P3-1/P3-3），且在两个适配器上同形。
+    for (const bad of [null, 5, 'x', [], { ref: null, configuration: { scope: 'workspace' } }, { ref: { workspaceId: WORKSPACE, bindingId: 'conn-0' }, configuration: { scope: 'workspace' } }]) {
+      await assert.rejects(storage.putBindingConfiguration(bad), RangeError, `畸形配置输入必须 RangeError：${JSON.stringify(bad)}`)
+    }
+    await assert.rejects(async () => storage.getBindingConfiguration(null), RangeError, '读口同样在解引用之前拒绝畸形 ref')
     assert.deepEqual(await storage.getBindingConfiguration(a), stored, '被拒绝的写入不得改动旧值')
+    tamper(storage) // 裸写未知字段的配置：读口必须按真实锚点的 implementationKey 复验（对抗验证 P2-3）
+    await assert.rejects(async () => storage.getBindingConfiguration(a), RangeError, '读口复验被裸写改坏的配置')
   })
   register(`${label}：trusted-handle-only`, async () => {
     const storage = makeStorage(); await storage.putConnectorAccount(account())
@@ -94,6 +102,9 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     assert.equal(await storage.getConnectorAccount('account-forged'), undefined, '被拒绝的句柄不得留下账号行')
     await storage.putConnectorAccount(account({ id: 'account-anon', externalId: 'octo-anon', secretHandle: undefined }))
     assert.equal((await storage.getConnectorAccount('account-anon')).secretHandle, undefined, 'undefined 表示无认证账号，合法')
+    tamper(storage) // 裸写不允许的句柄：读口必须复验（对抗验证 P2-3），不能把非法行原样返回
+    await assert.rejects(async () => storage.getConnectorAccount('account-1'), RangeError, '读口复验被裸写改坏的句柄')
+    await assert.rejects(async () => storage.listConnectorAccounts(), RangeError, '列表读口同样复验')
     assert.throws(() => restart(storage, EMPTY_POLICY), RangeError, '缺策略重开：已存句柄必须被拒绝')
     assert.equal((await makeStorage(EMPTY_POLICY).listConnectorAccounts()).length, 0, '无元数据的空库在空策略下照常打开（对照）')
   })
@@ -145,5 +156,21 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     const isolated = makeStorage({ allowedSecretHandles: handles, configurations: new Map() })
     handles.add('LATER_HANDLE')
     await assert.rejects(isolated.putConnectorAccount(account({ id: 'account-later', secretHandle: 'LATER_HANDLE' })), RangeError, '构造后修改调用方策略对象不得扩权')
+    // 嵌套声明同样必须是快照：构造后 push 枚举值 / 追加剧则字段都不得改变该实例的授权（对抗验证 P1-1）。
+    const values = ['workspace']; const schema = { scope: { kind: 'enum', required: true, values } }
+    const nested = makeStorage({ allowedSecretHandles: new Set(), configurations: new Map([['harness.fake', schema]]) })
+    await nested.putWorkspace(workspace()); await nested.putProviderBinding(binding('conn-conf', 'planning'))
+    values.push('EVIL'); schema.injected = { kind: 'boolean', required: false }; schema.scope.pattern = '.*'
+    const nestedRef = ref(WORKSPACE, 'conn-conf', 'planning')
+    await assert.rejects(nested.putBindingConfiguration({ ref: nestedRef, configuration: { scope: 'EVIL' } }), RangeError, '构造后 push 枚举值不得扩权')
+    await assert.rejects(nested.putBindingConfiguration({ ref: nestedRef, configuration: { scope: 'workspace', injected: true } }), RangeError, '构造后追加剧则字段不得扩权')
+    await nested.putBindingConfiguration({ ref: nestedRef, configuration: { scope: 'workspace' } })
+    assert.deepEqual((await nested.getBindingConfiguration(nestedRef)).configuration, { scope: 'workspace' }, '原声明仍可用且只落已声明字段')
+    // 默认策略不得是进程内共享可变单例：改自己读到的空集合不能加宽别的默认实例（对抗验证 P1-2）。
+    const shared = EMPTY_POLICY.allowedSecretHandles
+    shared.add('ESCALATED')
+    assert.equal((await makeStorage().listConnectorAccounts()).length, 0, '默认策略访问到的空集合不可被写入')
+    assert.equal(EMPTY_POLICY.allowedSecretHandles.has('ESCALATED'), false, '改一份读到的空集合不得污染后续读取')
+    await assert.rejects(makeStorage().putConnectorAccount(account({ id: 'account-esc', secretHandle: 'ESCALATED' })), RangeError, '默认空策略仍拒绝任意句柄')
   })
 }

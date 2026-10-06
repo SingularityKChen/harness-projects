@@ -3,7 +3,7 @@
  * 读写路径：每个方法都经过基类的唯一入口（`read` / `mutate` / `write`），因此外部读拿到**结算后**的值、看不到未提交的写入；事务在队列内从 BEGIN IMMEDIATE 持有到 COMMIT / ROLLBACK，重叠事务串行提交，在途事务期间的直接写入等到结算后才执行。多语句写入只有一个原子入口 `atomic`。代价也相同：事务的 work 里必须用 `tx.*`（队列内自等，用 AsyncLocalStorage 标记事务作用域）；嵌套事务在运行时被拒绝，抛错后 ROLLBACK、重开句柄读不到半写行（L3 计划遗留「嵌套事务在运行时静默吞写」）。快速失败文本由基类持有，这里只把它们转出包外；约定文本的整串断言在 `tests/contract/suites/storage.js`。列表顺序：端口未承诺顺序；本实现各列表的排序见各方法（地基面与同步面按 rowid / 业务键，执行面按主键序），调用方不得依赖。
  */
 import type { BindingConfigurationRecord, ConnectorAccountRecord, ProviderBindingRecord, RepositoryRecord, Storage, StorageTransaction, StorageValidationPolicy, WorkspaceRecord } from '@harness-projects/capabilities'
-import { EMPTY_POLICY, parseBindingConfiguration, parseConnectorAccount } from '@harness-projects/capabilities'
+import { EMPTY_POLICY, bindingRefOf, parseBindingConfiguration, parseBindingRef, parseConnectorAccount } from '@harness-projects/capabilities'
 import { parseExternalIdentityKind, type ConnectorAccountId, type Entity, type EntityId, type ExternalIdentity, type ProviderBindingId, type WorkspaceId, type WorkspaceProjection } from '@harness-projects/domain'
 import { openDatabase } from './db.ts'
 import { migrate } from './migrate.ts'
@@ -18,7 +18,7 @@ const BINDING_COLUMNS = 'b.id AS id, wb.workspace_id AS workspace_id, wb.domain 
 const IDENTITY_COLUMNS = 'id, entity_id, binding_id, external_kind, external_id, role'
 const PROJECTION_COLUMNS = 'workspace_id, entity_id, planning_status, content_kind, content_title, content_body, content_number, redaction_reason, revision'
 const REPOSITORY_COLUMNS = 'id, workspace_id, external_identity_id'
-/** #126：账号列清单只写一次；配置按列读取（`configuration_json IS NOT NULL` 才算存在配置）。 */
+/** #126：账号列清单只写一次。 */
 const ACCOUNT_COLUMNS = 'id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state'
 
 /** 地基面。事务作用域与存储实例共用同一连接与同一条队列，因此同一个类同时充当 Storage 与 StorageTransaction；作用域实例（`scoped`）已持有队列，它的读写直接执行。 */
@@ -42,16 +42,13 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
     return this.atomic(write)
   }
   listProviderBindings(workspaceId: WorkspaceId): Promise<readonly ProviderBindingRecord[]> { return this.read(() => (this.db.prepare(`SELECT ${BINDING_COLUMNS} FROM workspace_binding AS wb JOIN provider_binding AS b ON b.id = wb.binding_id WHERE wb.workspace_id = ? ORDER BY wb.rowid`).all(workspaceId) as Row[]).map(rowToBinding)) }
-  /** 卸载一个挂载：配置是同一行的列，随行删除；账号 FK、连接锚点、外部身份与同步历史都在别的表上，故意不动（#126）。缺失挂载重复移除是 no-op（DELETE 命中 0 行）。 */
-  removeProviderBinding(ref: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId; readonly domain: string }): Promise<void> {
-    return this.write('DELETE FROM workspace_binding WHERE workspace_id = ? AND binding_id = ? AND domain = ?', ref.workspaceId, ref.bindingId, ref.domain)
+  /** 卸载一个挂载：配置是同一行的列，随行删除；账号 FK、连接锚点、外部身份与同步历史都在别的表上，故意不动（#126）。畸形 ref 先以 `RangeError` 拒绝（对抗验证 P3-3），缺失挂载重复移除仍是 no-op（DELETE 命中 0 行）。 */
+  async removeProviderBinding(ref: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId; readonly domain: string }): Promise<void> {
+    const parsed = parseBindingRef(ref)
+    return this.write('DELETE FROM workspace_binding WHERE workspace_id = ? AND binding_id = ? AND domain = ?', parsed.workspaceId, parsed.bindingId, parsed.domain)
   }
 
-  /**
-   * 账号写入（#126）：闭集解析与独立副本走 capabilities 的共用解析器；自然键唯一由 002 的 UNIQUE 兜底。
-   * 同 id 换自然键、同自然键换 id 必须在**任何写入之前**以固定文本拒绝——`ON CONFLICT … DO UPDATE` 只更新可变的
-   * 显示名/句柄/观察状态，自然键列不参与 UPDATE，因此身份不会被默默改写。
-   */
+  /** 账号写入（#126）：闭集解析走 capabilities 共用解析器；同 id 换自然键、同自然键换 id 在任何写入之前拒绝（`ON CONFLICT … DO UPDATE` 只更新可变列）。 */
   async putConnectorAccount(record: ConnectorAccountRecord): Promise<void> {
     const parsed = parseConnectorAccount(record, this.policy)
     const key = [parsed.platformFamily, parsed.platformOrigin, parsed.identityKind, parsed.externalId]
@@ -68,16 +65,16 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
         .run(parsed.id, ...key, parsed.displayName, parsed.secretHandle ?? null, parsed.connectionState)
     })
   }
+  /** 账号读口：读回**独立副本**并复验闭集（对抗验证 P2-3）：裸 SQL / 旧进程写进不允许的句柄时不静默返回它，而是与写口同文本拒绝。 */
   getConnectorAccount(id: ConnectorAccountId): Promise<ConnectorAccountRecord | undefined> {
     return this.read(() => optional(this.db.prepare(`SELECT ${ACCOUNT_COLUMNS} FROM connector_account WHERE id = ?`).get(id), rowToConnectorAccount))
+      .then((record) => (record === undefined ? undefined : parseConnectorAccount(record, this.policy)))
   }
   listConnectorAccounts(): Promise<readonly ConnectorAccountRecord[]> {
     return this.read(() => (this.db.prepare(`SELECT ${ACCOUNT_COLUMNS} FROM connector_account ORDER BY rowid`).all() as Row[]).map(rowToConnectorAccount))
+      .then((records) => records.map((record) => parseConnectorAccount(record, this.policy)))
   }
-  /**
-   * 初次关联（#126）：账号与锚点必须存在；锚点已有任何外部身份 / 观察 / 同步游标 / webhook 订阅 / 写尝试事实时拒绝。
-   * 事实检查与写 FK 在同一个 `atomic` 内（同一个 BEGIN IMMEDIATE），中间态不被别的写入看见；同账号重复关联是 no-op。
-   */
+  /** 初次关联（#126）：账号与锚点必须存在；锚点已有外部身份 / 观察 / 游标 / webhook / 写尝试事实时拒绝。事实检查与写 FK 同在 `atomic` 内；同账号重复是 no-op。 */
   async setProviderBindingAccount(bindingId: ProviderBindingId, accountId: ConnectorAccountId): Promise<void> {
     return this.atomic(() => {
       if (this.db.prepare('SELECT 1 AS present FROM provider_binding WHERE id = ?').get(bindingId) === undefined) throw new RangeError('connection anchor does not exist')
@@ -106,20 +103,24 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
       return row?.connector_account_id == null ? undefined : row.connector_account_id as ConnectorAccountId
     })
   }
-  /** 配置写入（#126）：先查真实挂载与它的 implementationKey，再按受信 schema 逐字段校验；不接收调用者声称的实现键。 */
+  /** 配置写入（#126）：先校验 record / ref 外形（畸形 ref 在解引用之前以 `RangeError` 拒绝），再查真实挂载与它的 implementationKey，按受信 schema 逐字段校验；不接收调用者声称的实现键。 */
   async putBindingConfiguration(record: BindingConfigurationRecord): Promise<void> {
+    const ref = bindingRefOf(record)
     return this.atomic(() => {
       const mount = this.db.prepare('SELECT b.implementation_key AS implementation_key FROM workspace_binding AS wb JOIN provider_binding AS b ON b.id = wb.binding_id WHERE wb.workspace_id = ? AND wb.binding_id = ? AND wb.domain = ?')
-        .get(record.ref.workspaceId, record.ref.bindingId, record.ref.domain) as { implementation_key: string } | undefined
+        .get(ref.workspaceId, ref.bindingId, ref.domain) as { implementation_key: string } | undefined
       if (mount === undefined) throw new RangeError('binding configuration references an unknown workspace mount')
       const parsed = parseBindingConfiguration(record, this.policy, mount.implementation_key)
       this.db.prepare('UPDATE workspace_binding SET configuration_json = ? WHERE workspace_id = ? AND binding_id = ? AND domain = ?')
-        .run(JSON.stringify(parsed.configuration), parsed.ref.workspaceId, parsed.ref.bindingId, parsed.ref.domain)
+        .run(JSON.stringify(parsed.configuration), ref.workspaceId, ref.bindingId, ref.domain)
     })
   }
+  /** 配置读口：按真实锚点的 implementationKey 复验闭集并返回独立副本；`configuration_json IS NULL` 仍表示无配置。 */
   getBindingConfiguration(ref: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId; readonly domain: string }): Promise<BindingConfigurationRecord | undefined> {
-    return this.read(() => optional(this.db.prepare('SELECT workspace_id, binding_id, domain, configuration_json FROM workspace_binding WHERE workspace_id = ? AND binding_id = ? AND domain = ? AND configuration_json IS NOT NULL')
-      .get(ref.workspaceId, ref.bindingId, ref.domain), rowToBindingConfiguration))
+    const parsed = parseBindingRef(ref)
+    return this.read(() => optional(this.db.prepare('SELECT wb.workspace_id, wb.binding_id, wb.domain, wb.configuration_json, b.implementation_key FROM workspace_binding AS wb JOIN provider_binding AS b ON b.id = wb.binding_id WHERE wb.workspace_id = ? AND wb.binding_id = ? AND wb.domain = ? AND wb.configuration_json IS NOT NULL')
+      .get(parsed.workspaceId, parsed.bindingId, parsed.domain), (row) => ({ record: rowToBindingConfiguration(row), implementationKey: row.implementation_key as string })))
+      .then((found) => (found === undefined ? undefined : parseBindingConfiguration(found.record, this.policy, found.implementationKey)))
   }
   putEntity(record: Entity): Promise<void> { return this.write('INSERT INTO entity (id, kind) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET kind = excluded.kind', record.id, record.kind) }
   /** 身份全局一份：重复登记保留已分配的 id 与 entityId（否则引用会断），只更新角色。种类先过 domain 的解析器：未知种类在任何写入之前以与替身相同的 RangeError（Promise 拒绝）失败，不依赖 002 的 CHECK 措辞；CHECK 是第二道防线。 */
@@ -169,9 +170,8 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
 }
 
 /**
- * 打开（必要时创建）库、应用缺失迁移并返回端口实现。迁移幂等：对已迁移的文件重复调用是 no-op。迁移失败（含旧库里无法归一的观察版本载体的 `LegacySourceVersionError`，库文件未被修改）时关掉句柄并原样抛出；构造函数自检失败时已关掉句柄（P3），因此这里不重复关闭。
- *
- * `preflight`（#126）：旧 002 形状（版本 2 已记账但没有连接账号表/列）必须在**任何待应用迁移之前**被只读拒绝——`migrate` 只按版本号跳过，否则这个库会看起来是新的、直到第一次写账号才炸在驱动层。拒绝时原目录、文件与已提交版本都保持原样；构造函数自检把同一判据再查一遍（直接构造的调用方同样受保护）。
+ * 打开（必要时创建）库、应用缺失迁移并返回端口实现；迁移幂等，失败关句柄后原样抛出。
+ * `preflight`（#126）：旧 002 形状（版本 2 已记账但没有连接账号表/列）必须在任何待应用迁移之前只读拒绝（`migrate` 只按版本号跳过）；拒绝零写入，构造函数自检再查同一判据。
  */
 export function createSqliteStorage(location: string | ':memory:', policy: StorageValidationPolicy = EMPTY_POLICY): SqliteStorage {
   const db = openDatabase(location)

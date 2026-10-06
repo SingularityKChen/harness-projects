@@ -37,8 +37,8 @@ export interface StorageValidationPolicy {
   /** 连接实现键 → 配置字段规则；配置读写只按**真实锚点**的 implementationKey 分派。 */
   readonly configurations: ReadonlyMap<string, BindingConfigurationSchema>
 }
-/** 空策略：无 allowlist、无 schema。既有无元数据合法；有句柄或配置的读写/重开一律拒绝。 */
-export const EMPTY_POLICY: StorageValidationPolicy = Object.freeze({ allowedSecretHandles: new Set<string>(), configurations: new Map() })
+/** 空策略：每次属性访问返回新的空集合，导入者改自己读到的对象不能加宽默认授权（对抗验证 P1-2）。 */
+export const EMPTY_POLICY: StorageValidationPolicy = { get allowedSecretHandles(): Set<string> { return new Set() }, get configurations(): Map<string, BindingConfigurationSchema> { return new Map() } }
 
 const DEVICE_HANDLE = /^[A-Za-z_][A-Za-z0-9_]*$/
 const ACCOUNT_FIELDS = ['id', 'platformFamily', 'platformOrigin', 'identityKind', 'externalId', 'displayName', 'secretHandle', 'connectionState'] as const
@@ -48,12 +48,31 @@ const IDENTITY_KINDS: readonly unknown[] = Object.values(ConnectorIdentityKind)
 const CONNECTION_STATES: readonly unknown[] = Object.values(ConnectorConnectionState)
 
 function reject(message: string): never { throw new RangeError(message) }
-/** 策略快照：新 Set / Map；构造后调用方再改自己的策略对象，已构造的实例不受影响。 */
+/** 策略快照：Set / Map 换新，每条规则与 enum 的 `values` 也换冻结副本——只拷顶层会让构造后的 `values.push('EVIL')` 经共享引用扩权（对抗验证 P1-1）。 */
 export function snapshotPolicy(policy: StorageValidationPolicy): StorageValidationPolicy {
-  if (policy === null || typeof policy !== 'object') reject('storage validation policy must be an object')
-  const { allowedSecretHandles: handles, configurations: schemas } = policy
-  if (!(handles instanceof Set) || !(schemas instanceof Map)) reject('storage validation policy must provide an allowedSecretHandles Set and a configurations Map')
-  return Object.freeze({ allowedSecretHandles: new Set(handles), configurations: new Map(schemas) })
+  if (policy === null || typeof policy !== 'object' || !(policy.allowedSecretHandles instanceof Set) || !(policy.configurations instanceof Map)) reject('storage validation policy must provide an allowedSecretHandles Set and a configurations Map')
+  const copied = new Map<string, BindingConfigurationSchema>()
+  for (const [key, schema] of policy.configurations) {
+    if (typeof key !== 'string' || key.trim() === '' || schema === null || typeof schema !== 'object') reject('configuration schema key must be a non-empty string')
+    const fields: Record<string, BindingConfigurationRule> = {}
+    for (const [name, rule] of Object.entries(schema)) fields[name] = copyRule(rule)
+    copied.set(key, Object.freeze(fields))
+  }
+  return Object.freeze({ allowedSecretHandles: new Set(policy.allowedSecretHandles), configurations: copied })
+}
+/** 规则副本：三种 kind 各自深拷（enum 的 `values` 必换新数组）；未知外形在写入之前拒绝。 */
+function copyRule(rule: unknown): BindingConfigurationRule {
+  const candidate = rule as BindingConfigurationRule
+  if (rule !== null && typeof rule === 'object') {
+    if (candidate.kind === 'enum' && typeof candidate.required === 'boolean' && Array.isArray(candidate.values)) {
+      return Object.freeze({ kind: 'enum', required: candidate.required, values: Object.freeze(candidate.values.map((value) => assertText(value, 'binding configuration enum value must be a non-empty string'))) })
+    }
+    if (candidate.kind === 'string' && typeof candidate.required === 'boolean' && typeof candidate.pattern === 'string' && Number.isInteger(candidate.maxLength)) {
+      return Object.freeze({ kind: 'string', required: candidate.required, pattern: candidate.pattern, maxLength: candidate.maxLength })
+    }
+    if (candidate.kind === 'boolean' && typeof candidate.required === 'boolean') return Object.freeze({ kind: 'boolean', required: candidate.required })
+  }
+  return reject('binding configuration schema rule is not a declared kind')
 }
 const assertClosedFields = (value: object, allowed: readonly string[], message: string): void => {
   for (const key of Object.keys(value)) if (!allowed.includes(key)) reject(message)
@@ -97,18 +116,32 @@ export function parseConnectorAccount(value: unknown, policy: StorageValidationP
     displayName: record.displayName, secretHandle, connectionState: record.connectionState as ConnectorConnectionState }
 }
 
+/** 配置 `ref` 闭集解析：畸形 `ref` 在任何解引用之前以 `RangeError` 拒绝。 */
+export function parseBindingRef(value: unknown): BindingConfigurationRecord['ref'] {
+  const ref = assertPlainObject(value, 'binding configuration ref must be a plain object')
+  assertClosedFields(ref, REF_FIELDS, 'binding configuration ref contains an unknown field')
+  return {
+    workspaceId: assertText(ref.workspaceId, 'binding configuration workspace id must be a non-empty string') as WorkspaceId,
+    bindingId: assertText(ref.bindingId, 'binding configuration binding id must be a non-empty string') as ProviderBindingId,
+    domain: assertText(ref.domain, 'binding configuration domain must be a non-empty string'),
+  }
+}
+/** 定位阶段：先校验 record / ref 外形，返回 `ref` 让适配器查**真实锚点**的 implementationKey（不接收调用者声称的键）。 */
+export function bindingRefOf(value: unknown): BindingConfigurationRecord['ref'] {
+  const record = assertPlainObject(value, 'binding configuration record must be a plain object')
+  assertClosedFields(record, RECORD_FIELDS, 'binding configuration record contains an unknown field')
+  return parseBindingRef(record.ref)
+}
+
 /** 配置闭集解析：未知字段、原型对象、数组、嵌套对象、undefined 与符号一律拒绝，返回独立副本。 */
 export function parseBindingConfiguration(value: unknown, policy: StorageValidationPolicy, implementationKey: string): BindingConfigurationRecord {
   const record = assertPlainObject(value, 'binding configuration record must be a plain object')
   assertClosedFields(record, RECORD_FIELDS, 'binding configuration record contains an unknown field')
-  const ref = assertPlainObject(record.ref, 'binding configuration ref must be a plain object')
-  assertClosedFields(ref, REF_FIELDS, 'binding configuration ref contains an unknown field')
-  const workspaceId = assertText(ref.workspaceId, 'binding configuration workspace id must be a non-empty string') as WorkspaceId
-  const bindingId = assertText(ref.bindingId, 'binding configuration binding id must be a non-empty string') as ProviderBindingId
-  const domain = assertText(ref.domain, 'binding configuration domain must be a non-empty string')
+  const ref = parseBindingRef(record.ref)
   const schema = policy.configurations.get(implementationKey)
   if (schema === undefined) reject('binding configuration is not declared for this implementation key')
   const configuration = assertPlainObject(record.configuration, 'binding configuration must be a plain object')
+  for (const name of Object.keys(configuration)) if (configuration[name] === undefined) reject('binding configuration must not contain an undefined value')
   for (const name of Object.keys(configuration)) if (!Object.hasOwn(schema, name)) reject('binding configuration field is not declared')
   const copied: Record<string, string | boolean> = {}
   for (const [name, rule] of Object.entries(schema)) {
@@ -123,5 +156,5 @@ export function parseBindingConfiguration(value: unknown, policy: StorageValidat
     }
     copied[name] = raw as string | boolean
   }
-  return { ref: { workspaceId, bindingId, domain }, configuration: copied }
+  return { ref, configuration: copied }
 }

@@ -68,11 +68,15 @@ export const LEGACY_COMMITTED_VERSION_MESSAGE = '已提交版本不是规范载�
 /** #126：已应用版本 2 但缺连接账号表/列的旧库必须在迁移之前被只读拒绝；目录、文件与已提交版本保持原样，调用方显式重建。 */
 export const CONNECTOR_ACCOUNT_SCHEMA_MESSAGE = '本地库是加入连接账号之前的 002（缺 connector_account 表，或 provider_binding.connector_account_id / workspace_binding.configuration_json 列）：请显式决定并删除库文件重建（程序不会升级也不会删库）'
 
-/** #126 的连接账号形状判据（唯一一份）：库已建（`provider_binding` 存在）却缺 `connector_account` 表或两个新列时为真。工厂在 `migrate` 之前用它只读拒绝，构造函数再兜底直接构造的调用方。 */
+/**
+ * #126 的连接账号形状判据（唯一一份）：已应用版本 2 却缺连接账号表或两个新列时为真。
+ * 只看 `provider_binding` 是否存在不够：版本 2 已记账但表缺失的损坏库会先被 003–005 部分迁移（对抗验证 P2-2）。工厂在 `migrate` 之前只读拒绝，构造函数兜底；空库返回 false。
+ */
 export function isConnectorAccountShapeMissing(db: WorkspaceDatabase): boolean {
-  if (db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'provider_binding'").get() === undefined) return false
+  const hasTable = (name: string): boolean => db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined
+  if (!hasTable('schema_migrations') || !(db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]).some((row) => row.version === 2)) return false
   const columns = (table: string): readonly string[] => (db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as { name: string }[]).map((row) => row.name)
-  return columns('connector_account').length === 0 || !columns('provider_binding').includes('connector_account_id')
+  return !hasTable('connector_account') || !columns('provider_binding').includes('connector_account_id')
     || !columns('workspace_binding').includes('configuration_json')
 }
 
@@ -117,12 +121,12 @@ export class SqliteSyncSurface {
    */
   #assertRewrittenSchema(): void { assertRewritten003Shape(this.db) }
 
-  /** #126 的 schema 自检：已应用版本 2 但缺连接账号形状的旧库，把驱动级报错换成一句可执行的处置。只在根实例上跑，未迁移时不判定。 */
+  /** #126 的 schema 自检：缺连接账号形状的旧库换一句可执行处置，替代驱动级报错。只在根实例上跑。 */
   #assertConnectorAccountSchema(): void {
     if (isConnectorAccountShapeMissing(this.db)) throw new Error(CONNECTOR_ACCOUNT_SCHEMA_MESSAGE)
   }
 
-  /** #126 的已存元数据自检：用当前受信策略重放账号与配置的闭集校验（漏策略的空库合法；有不匹配行的库在打开时拒绝）。只在根实例上跑，配置按真实锚点的 implementationKey 分派。 */
+  /** #126 的已存元数据自检：用当前策略重放账号与配置的闭集校验（漏策略的空库合法，有不匹配行的库在打开时拒绝）；配置按真实锚点的 implementationKey 分派。 */
   #assertStoredMetadata(): void {
     const rows = (sql: string): Row[] => this.db.prepare(sql).all() as Row[]
     for (const row of rows('SELECT id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state FROM connector_account ORDER BY rowid')) parseConnectorAccount(rowToConnectorAccount(row), this.policy)
