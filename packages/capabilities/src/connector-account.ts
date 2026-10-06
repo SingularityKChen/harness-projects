@@ -48,23 +48,23 @@ const IDENTITY_KINDS: readonly unknown[] = Object.values(ConnectorIdentityKind)
 const CONNECTION_STATES: readonly unknown[] = Object.values(ConnectorConnectionState)
 
 function reject(message: string): never { throw new RangeError(message) }
-const POLICY_SNAPSHOTS = new WeakSet<StorageValidationPolicy>()
-/** 策略快照：Set / Map 与每条规则、enum `values` 都换冻结副本（浅拷会让 `values.push('EVIL')` 经共享引用扩权，P1-1）。命中 `POLICY_SNAPSHOTS` 只表示「已验证、无需重读调用方 getter」（P3-R3），容器仍要重拷。 */
+/** 只读容器（外部评审 P1）：用 Proxy 而不是覆盖同名方法——`Set.prototype.add.call(视图, …)` 在覆盖法下仍能绕过，Proxy 没有内部槽会直接抛 TypeError。读方法改以 target 为 this 调用，否则 `Set.prototype.has` 抛 Illegal invocation。 */
+const readOnlyCollection = <T extends Set<unknown> | Map<unknown, unknown>>(c: T): T => new Proxy(c, { get: (target, key) => { if (key === 'add' || key === 'set' || key === 'delete' || key === 'clear') throw new TypeError('storage validation policy is read-only'); const value = Reflect.get(target, key, target); return typeof value === 'function' ? (...args: unknown[]) => Reflect.apply(value, target, args) : value } })
+/** 策略快照：Set / Map 与每条规则、enum `values` 都换只读副本（P1-1）；缓存是**永不外泄**的 pristine 副本（外部评审 P1），命中只跳过重读调用方 getter（P3-R3）。 */
+const POLICY_SNAPSHOTS = new WeakMap<StorageValidationPolicy, StorageValidationPolicy>()
 export function snapshotPolicy(policy: StorageValidationPolicy): StorageValidationPolicy {
-  const cached = policy !== null && typeof policy === 'object' && POLICY_SNAPSHOTS.has(policy) ? policy : undefined
-  const source = cached ?? policy
+  const source = (policy !== null && typeof policy === 'object' ? POLICY_SNAPSHOTS.get(policy) : undefined) ?? policy
   const handles: unknown = source?.allowedSecretHandles, schemas: unknown = source?.configurations
   if (!(handles instanceof Set) || !(schemas instanceof Map)) reject('storage validation policy must provide an allowedSecretHandles Set and a configurations Map')
   const copied = new Map<string, BindingConfigurationSchema>()
   for (const [key, schema] of schemas as Map<string, BindingConfigurationSchema>) {
     if (typeof key !== 'string' || key.trim() === '' || schema === null || typeof schema !== 'object') reject('configuration schema key must be a non-empty string')
-    const fields: Record<string, BindingConfigurationRule> = {}
+    const fields: Record<string, BindingConfigurationRule> = Object.create(null) // `__proto__` 走原型赋值会被静默丢弃（外部评审 P2）
     for (const [name, rule] of Object.entries(schema)) fields[name] = copyRule(rule)
     copied.set(key, Object.freeze(fields))
   }
-  const snapshot = Object.freeze({ allowedSecretHandles: new Set(handles as Set<string>), configurations: copied })
-  POLICY_SNAPSHOTS.add(snapshot)
-  return snapshot
+  if (policy !== null && typeof policy === 'object') POLICY_SNAPSHOTS.set(policy, Object.freeze({ allowedSecretHandles: new Set(handles as Set<string>), configurations: copied }))
+  return Object.freeze({ allowedSecretHandles: readOnlyCollection(new Set(handles as Set<string>)), configurations: readOnlyCollection(copied) })
 }
 /** 规则副本：三种 kind 各自深拷（enum 的 `values` 必换新数组）；未知外形在写入之前拒绝。 */
 function copyRule(rule: unknown): BindingConfigurationRule {

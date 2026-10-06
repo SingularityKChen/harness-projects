@@ -111,17 +111,17 @@ export class SqliteSyncSurface {
   #state: { closed: boolean }
   /** 本实例作为作用域实例时所持的令牌；根实例上写入它没有读者（根实例认 `TX_SCOPE` 里的令牌）。 */
   #token: TransactionToken | undefined
-  /** 受信校验策略的**独立副本**：根实例与事务作用域实例共用同一份，不在 scope 内退回空策略（#126）。 */
-  protected readonly policy: StorageValidationPolicy
+  /** 受信校验策略的独立只读副本（外部评审 P1）：原型上的 getter 让 `instance.policy = …` 抛 TypeError 且不进 `Object.keys`。 */
+  #policy!: StorageValidationPolicy
+  protected get policy(): StorageValidationPolicy { return this.#policy }
   constructor(location: string, db: WorkspaceDatabase, scoped = false, state?: { closed: boolean }, token?: TransactionToken, policy: StorageValidationPolicy = EMPTY_POLICY) {
     this.location = location; this.db = db; this.scoped = scoped
     this.#state = state ?? { closed: false }; this.#token = token
-    // 策略快照与自检失败都关句柄（P3 / P2-R1）：直接构造的调用方也不会拿到泄漏句柄。
-    // 工厂已快照过一次（P3-R3）：复用副本，二次读有状态 getter 会把失败推到 migrate 之后。
+    // 失败一律关句柄（P2-R1）；工厂已快照过一次（P3-R3），复用副本以免二次读有状态 getter。
     if (!scoped) {
-      try { this.policy = snapshotPolicy(policy); this.#assertRewrittenSchema(); this.#assertConnectorAccountSchema(); this.#assertStoredMetadata() } catch (error) { closeQuietly(this.db); throw error }
+      try { this.#policy = snapshotPolicy(policy); this.#assertRewrittenSchema(); this.#assertConnectorAccountSchema(); this.#assertStoredMetadata() } catch (error) { closeQuietly(this.db); throw error }
     } else {
-      this.policy = policy
+      this.#policy = policy
     }
   }
 

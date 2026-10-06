@@ -71,11 +71,14 @@ test('restart-and-empty-schema-repeatability', async () => {
     return JSON.stringify(db.prepare('SELECT name, sql FROM sqlite_master ORDER BY name').all())
       + JSON.stringify(tables.map((name) => db.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all()))
   } finally { db.close() } }
-  const legacyBefore = fingerprint(legacyPath)
+  const legacyBefore = fingerprint(legacyPath); const fdBefore = readdirSync('/dev/fd').length
   for (let attempt = 0; attempt < 2; attempt += 1) assert.throws(() => createSqliteStorage(legacyPath, policy()), /连接账号/, '旧 002 形状必须在 migrate 之前被只读拒绝并关闭句柄')
+  assert.ok(readdirSync('/dev/fd').length - fdBefore <= 0, '迁移前拒绝必须关闭句柄，不得逐次泄漏 fd（删除工厂 catch 的 db.close() 必红）')
   assert.equal(fingerprint(legacyPath), legacyBefore, '拒绝必须零写入：schema 与既有行逐字节不变')
   const after = openDatabase(legacyPath)
   try { assert.deepEqual(after.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '拒绝必须零写入：不落 003/004/005 的迁移版本') } finally { after.close() }
+  const direct = openDatabase(legacyPath)
+  try { assert.throws(() => migrate(direct), /连接账号/, '直接 migrate 也必须在任何待应用迁移之前拒绝'); assert.deepEqual(direct.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '直接 migrate 不得先落 003–005') } finally { direct.close() }
   // 版本 2 已记账但**表整体缺失**的损坏库（对抗验证 P2-2）：判据不能只在 `provider_binding` 存在时生效，否则 003–005 会被部分应用。
   const truncatedPath = join(tempDir('connector-account-legacy-truncated-'), 'truncated.sqlite')
   const truncated = openDatabase(truncatedPath)
@@ -85,7 +88,6 @@ test('restart-and-empty-schema-repeatability', async () => {
   assert.equal(fingerprint(truncatedPath), truncatedBefore, '表缺失变体的拒绝也必须零写入')
   const truncatedAfter = openDatabase(truncatedPath)
   try { assert.deepEqual(truncatedAfter.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '表缺失变体不得先落 003–005') } finally { truncatedAfter.close() }
-  // 版本 2 但账号表只有一个 id 的残缺库（P2-R2）：只查表存在性会放过它。
   const partialPath = join(tempDir('connector-account-legacy-partial-'), 'partial.sqlite')
   seedVersion2(partialPath, 'id TEXT PRIMARY KEY')
   const partialBefore = fingerprint(partialPath)
@@ -93,7 +95,6 @@ test('restart-and-empty-schema-repeatability', async () => {
   assert.equal(fingerprint(partialPath), partialBefore, '残缺列集的拒绝必须零写入（含零新增表）')
   const partialAfter = openDatabase(partialPath)
   try { assert.deepEqual(partialAfter.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '残缺列集不得先落 003–005') } finally { partialAfter.close() }
-  // 大写列名的完整库不得被误拒（SQLite 标识符大小写不敏感，P3-R4）。
   const upperPath = join(tempDir('connector-account-uppercase-'), 'upper.sqlite')
   seedVersion2(upperPath, 'ID TEXT PRIMARY KEY, PLATFORM_FAMILY TEXT NOT NULL, PLATFORM_ORIGIN TEXT NOT NULL, IDENTITY_KIND TEXT NOT NULL, EXTERNAL_ID TEXT NOT NULL, DISPLAY_NAME TEXT NOT NULL, SECRET_HANDLE TEXT, CONNECTION_STATE TEXT NOT NULL')
   const uppercase = createSqliteStorage(upperPath, policy())
@@ -109,25 +110,21 @@ test('constructor-failure-releases-handle-and-policy-is-frozen', () => {
   ]
   for (const [index, bad] of badPolicies.entries()) {
     const path = join(tempDir(`connector-account-bad-policy-${index}-`), 'bad.sqlite')
-    const before = readdirSync('/dev/fd').length
     for (let attempt = 0; attempt < 3; attempt += 1) assert.throws(() => createSqliteStorage(path, bad), RangeError, '非法策略必须构造失败')
-    assert.ok(readdirSync('/dev/fd').length - before <= 0, '失败构造不得逐次泄漏句柄')
     const db = openDatabase(path)
     try { assert.equal(db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").get(), undefined, '非法策略必须先于 migrate 失败：不得落迁移记账') } finally { db.close() }
   }
-  // 直接构造的调用方同样受保护。
   const directPath = join(tempDir('connector-account-direct-ctor-'), 'direct.sqlite')
   const raw = openDatabase(directPath)
   assert.throws(() => new SqliteStorage(directPath, raw, false, undefined, undefined, badPolicies[0]), RangeError, '直接构造非法策略必须拒绝')
   assert.throws(() => raw.prepare('SELECT 1 AS ok').get(), '直接构造失败后调用方句柄必须已关闭')
-  // 默认策略不可被重定义属性扩权（P2-R3）。
+  // 默认策略描述符不可被重定义（P2-R3）。
   assert.ok(Object.isFrozen(EMPTY_POLICY), '默认策略必须冻结属性描述符')
   assert.throws(() => Object.defineProperty(EMPTY_POLICY, 'allowedSecretHandles', { value: new Set(['ESCALATED']) }), '默认策略的 getter 不得被重定义')
   createSqliteStorage(join(tempDir('connector-account-frozen-policy-'), 'frozen.sqlite')).close()
 })
 
 test('policy-snapshot-is-read-once-and-precedes-io', async () => {
-  // 有状态 getter 策略（第二次读就脏）不得把失败推到 migrate 之后（P3-R3）：属性只读一次、快照复用。
   const clean = new Map([['harness.fake', { scope: { kind: 'enum', required: true, values: ['workspace'] } }]])
   const dirty = new Map([['harness.fake', { scope: { kind: 'nope', required: true } }]])
   let reads = 0

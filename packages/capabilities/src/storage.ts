@@ -149,7 +149,7 @@ export interface Storage {
   /** 卸载一个挂载（工作区 + 连接锚点 + 域）：只删该挂载及其配置；账号、连接锚点、外部身份与同步历史保留；缺失挂载重复移除是 no-op。 */
   removeProviderBinding(ref: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId; readonly domain: string }): Promise<void>
 
-  // ── 连接账号与工作区配置（#126）：账号是连接锚点级的全局身份，配置是工作区挂载级的事实 ──
+  // ── 连接账号与工作区配置（#126）：账号是连接锚点级身份，配置是挂载级事实 ──
   // 自然键 = (platformFamily, platformOrigin, identityKind, externalId)：同 id 换自然键、同自然键换 id 都拒绝（快照不得改动）；
   // 显示名、句柄与连接观察状态可更新。句柄与配置写入必须满足受信策略：句柄是 allowlist 精确成员（POSIX 名称形状只是必要条件），
   // 配置按**真实锚点的 implementationKey** 分派 schema，不接收调用者声称的实现键。所有新校验失败使用 `RangeError` 与固定无输入文本。
