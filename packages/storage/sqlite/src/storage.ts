@@ -3,7 +3,7 @@
  * 读写路径：每个方法都经过基类的唯一入口（`read` / `mutate` / `write`），因此外部读拿到**结算后**的值、看不到未提交的写入；事务在队列内从 BEGIN IMMEDIATE 持有到 COMMIT / ROLLBACK，重叠事务串行提交，在途事务期间的直接写入等到结算后才执行。多语句写入只有一个原子入口 `atomic`。代价也相同：事务的 work 里必须用 `tx.*`（队列内自等，用 AsyncLocalStorage 标记事务作用域）；嵌套事务在运行时被拒绝，抛错后 ROLLBACK、重开句柄读不到半写行（L3 计划遗留「嵌套事务在运行时静默吞写」）。快速失败文本由基类持有，这里只把它们转出包外；约定文本的整串断言在 `tests/contract/suites/storage.js`。列表顺序：端口未承诺顺序；本实现各列表的排序见各方法（地基面与同步面按 rowid / 业务键，执行面按主键序），调用方不得依赖。
  */
 import type { BindingConfigurationRecord, ConnectorAccountRecord, ProviderBindingRecord, RepositoryRecord, Storage, StorageTransaction, StorageValidationPolicy, WorkspaceRecord } from '@harness-projects/capabilities'
-import { EMPTY_POLICY, bindingRefOf, parseBindingConfiguration, parseBindingRef, parseConnectorAccount } from '@harness-projects/capabilities'
+import { EMPTY_POLICY, bindingRefOf, parseBindingConfiguration, parseBindingRef, parseConnectorAccount, snapshotPolicy } from '@harness-projects/capabilities'
 import { parseExternalIdentityKind, type ConnectorAccountId, type Entity, type EntityId, type ExternalIdentity, type ProviderBindingId, type WorkspaceId, type WorkspaceProjection } from '@harness-projects/domain'
 import { openDatabase } from './db.ts'
 import { migrate } from './migrate.ts'
@@ -115,8 +115,8 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
         .run(JSON.stringify(parsed.configuration), ref.workspaceId, ref.bindingId, ref.domain)
     })
   }
-  /** 配置读口：按真实锚点的 implementationKey 复验闭集并返回独立副本；`configuration_json IS NULL` 仍表示无配置。 */
-  getBindingConfiguration(ref: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId; readonly domain: string }): Promise<BindingConfigurationRecord | undefined> {
+  /** 配置读口：按真实锚点的 implementationKey 复验闭集并返回独立副本；`async` 让畸形 ref 与其它端口方法一样异步拒绝（P3-R1）。 */
+  async getBindingConfiguration(ref: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId; readonly domain: string }): Promise<BindingConfigurationRecord | undefined> {
     const parsed = parseBindingRef(ref)
     return this.read(() => optional(this.db.prepare('SELECT wb.workspace_id, wb.binding_id, wb.domain, wb.configuration_json, b.implementation_key FROM workspace_binding AS wb JOIN provider_binding AS b ON b.id = wb.binding_id WHERE wb.workspace_id = ? AND wb.binding_id = ? AND wb.domain = ? AND wb.configuration_json IS NOT NULL')
       .get(parsed.workspaceId, parsed.bindingId, parsed.domain), (row) => ({ record: rowToBindingConfiguration(row), implementationKey: row.implementation_key as string })))
@@ -172,12 +172,14 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
 /**
  * 打开（必要时创建）库、应用缺失迁移并返回端口实现；迁移幂等，失败关句柄后原样抛出。
  * `preflight`（#126）：旧 002 形状（版本 2 已记账但没有连接账号表/列）必须在任何待应用迁移之前只读拒绝（`migrate` 只按版本号跳过）；拒绝零写入，构造函数自检再查同一判据。
+ * 受信策略先在任何 IO 之前快照（P2-R1）：非法策略既不留迁移写入，也不打开句柄；构造函数也在 `try` 内。
  */
 export function createSqliteStorage(location: string | ':memory:', policy: StorageValidationPolicy = EMPTY_POLICY): SqliteStorage {
+  snapshotPolicy(policy)
   const db = openDatabase(location)
   try {
     if (isConnectorAccountShapeMissing(db)) throw new Error(CONNECTOR_ACCOUNT_SCHEMA_MESSAGE)
     migrate(db)
-  } catch (error) { db.close(); throw error }
-  return new SqliteStorage(location, db, false, undefined, undefined, policy)
+    return new SqliteStorage(location, db, false, undefined, undefined, policy)
+  } catch (error) { try { db.close() } catch { /* 构造函数已关：幂等 */ } throw error }
 }

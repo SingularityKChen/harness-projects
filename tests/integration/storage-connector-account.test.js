@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { createContext } from '@harness-projects/core'
 import { createFakeStorage, createFakePlanningProvider, exportFakeStorageState } from '@harness-projects/provider-fake'
-import { MIGRATIONS, createSqliteStorage, migrate, openDatabase } from '@harness-projects/storage-sqlite'
+import { EMPTY_POLICY } from '@harness-projects/capabilities'
+import { MIGRATIONS, SqliteStorage, createSqliteStorage, migrate, openDatabase } from '@harness-projects/storage-sqlite'
 import { CONNECTOR_ACCOUNT_NAMED_CASES, CONNECTOR_ACCOUNT_SHARED_CASES, WORKSPACE, account, binding, policy, workspace } from '../contract/suites/storage-connector-account.js'
 
 const dirs = []
@@ -75,6 +76,48 @@ test('restart-and-empty-schema-repeatability', async () => {
   assert.equal(fingerprint(truncatedPath), truncatedBefore, '表缺失变体的拒绝也必须零写入')
   const truncatedAfter = openDatabase(truncatedPath)
   try { assert.deepEqual(truncatedAfter.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '表缺失变体不得先落 003–005') } finally { truncatedAfter.close() }
+  // 版本 2 且表和两个新列都在、但 `connector_account` 只有一个 id 的残缺库（对抗验证 P2-R2）：只查表存在性会放过它。
+  const partialPath = join(tempDir('connector-account-legacy-partial-'), 'partial.sqlite')
+  const partial = openDatabase(partialPath)
+  try {
+    partial.exec('CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);'
+      + "INSERT INTO schema_migrations VALUES (1, 'x'); INSERT INTO schema_migrations VALUES (2, 'y');"
+      + 'CREATE TABLE workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, status_policy TEXT NOT NULL);'
+      + 'CREATE TABLE connector_account (id TEXT PRIMARY KEY);'
+      + 'CREATE TABLE provider_binding (id TEXT PRIMARY KEY, implementation_key TEXT NOT NULL, connector_account_id TEXT);'
+      + 'CREATE TABLE workspace_binding (workspace_id TEXT NOT NULL, binding_id TEXT NOT NULL, domain TEXT NOT NULL, enabled INTEGER NOT NULL, is_default INTEGER NOT NULL, configuration_json TEXT, PRIMARY KEY (workspace_id, binding_id, domain));')
+  } finally { partial.close() }
+  const partialBefore = fingerprint(partialPath)
+  assert.throws(() => createSqliteStorage(partialPath, policy()), /连接账号/, '残缺列集的 connector_account 必须在 migrate 之前拒绝')
+  assert.equal(fingerprint(partialPath), partialBefore, '残缺列集的拒绝必须零写入（含零新增表）')
+  const partialAfter = openDatabase(partialPath)
+  try { assert.deepEqual(partialAfter.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '残缺列集不得先落 003–005') } finally { partialAfter.close() }
+})
+
+test('constructor-failure-releases-handle-and-policy-is-frozen', () => {
+  // 非法策略必须在任何 IO 之前失败：不迁移、不留记账、不泄漏句柄（P2-R1 / P2-R3）。
+  const badPolicies = [
+    { allowedSecretHandles: new Set(), configurations: new Map([['impl.x', { scope: { kind: 'nope', required: true } }]]) },
+    { allowedSecretHandles: new Set(), configurations: new Map([['impl.x', { scope: null }]]) },
+    null,
+  ]
+  for (const [index, bad] of badPolicies.entries()) {
+    const path = join(tempDir(`connector-account-bad-policy-${index}-`), 'bad.sqlite')
+    const before = readdirSync('/dev/fd').length
+    for (let attempt = 0; attempt < 3; attempt += 1) assert.throws(() => createSqliteStorage(path, bad), RangeError, '非法策略必须构造失败')
+    assert.ok(readdirSync('/dev/fd').length - before <= 0, '失败构造不得逐次泄漏句柄')
+    const db = openDatabase(path)
+    try { assert.equal(db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").get(), undefined, '非法策略必须先于 migrate 失败：不得落迁移记账') } finally { db.close() }
+  }
+  // 直接构造的调用方同样受保护。
+  const directPath = join(tempDir('connector-account-direct-ctor-'), 'direct.sqlite')
+  const raw = openDatabase(directPath)
+  assert.throws(() => new SqliteStorage(directPath, raw, false, undefined, undefined, badPolicies[0]), RangeError, '直接构造非法策略必须拒绝')
+  assert.throws(() => raw.prepare('SELECT 1 AS ok').get(), '直接构造失败后调用方句柄必须已关闭')
+  // 默认策略不可被重定义属性扩权（P2-R3）。
+  assert.ok(Object.isFrozen(EMPTY_POLICY), '默认策略必须冻结属性描述符')
+  assert.throws(() => Object.defineProperty(EMPTY_POLICY, 'allowedSecretHandles', { value: new Set(['ESCALATED']) }), '默认策略的 getter 不得被重定义')
+  createSqliteStorage(join(tempDir('connector-account-frozen-policy-'), 'frozen.sqlite')).close()
 })
 
 test('secret-canary-never-published', async () => {

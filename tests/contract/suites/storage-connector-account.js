@@ -85,7 +85,9 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     for (const bad of [null, 5, 'x', [], { ref: null, configuration: { scope: 'workspace' } }, { ref: { workspaceId: WORKSPACE, bindingId: 'conn-0' }, configuration: { scope: 'workspace' } }]) {
       await assert.rejects(storage.putBindingConfiguration(bad), RangeError, `畸形配置输入必须 RangeError：${JSON.stringify(bad)}`)
     }
-    await assert.rejects(async () => storage.getBindingConfiguration(null), RangeError, '读口同样在解引用之前拒绝畸形 ref')
+    const pending = storage.getBindingConfiguration(null) // 不 await：两适配器都必须返回被拒 Promise，而不是同步抛出（对抗验证 P3-R1）
+    assert.ok(pending instanceof Promise, '畸形 ref 必须异步拒绝：同调用在两个适配器上都返回 Promise')
+    await assert.rejects(pending, RangeError, '读口同样在解引用之前拒绝畸形 ref')
     assert.deepEqual(await storage.getBindingConfiguration(a), stored, '被拒绝的写入不得改动旧值')
     tamper(storage) // 裸写未知字段的配置：读口必须按真实锚点的 implementationKey 复验（对抗验证 P2-3）
     await assert.rejects(async () => storage.getBindingConfiguration(a), RangeError, '读口复验被裸写改坏的配置')
@@ -171,6 +173,12 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     shared.add('ESCALATED')
     assert.equal((await makeStorage().listConnectorAccounts()).length, 0, '默认策略访问到的空集合不可被写入')
     assert.equal(EMPTY_POLICY.allowedSecretHandles.has('ESCALATED'), false, '改一份读到的空集合不得污染后续读取')
+    // 属性描述符也要冻：重定义 getter 不得扩权（P2-R3）。
+    assert.ok(Object.isFrozen(EMPTY_POLICY), '默认策略必须冻结属性描述符')
+    assert.throws(() => Object.defineProperty(EMPTY_POLICY, 'allowedSecretHandles', { value: new Set(['ESCALATED']) }), TypeError, '默认策略 getter 不得被重定义')
     await assert.rejects(makeStorage().putConnectorAccount(account({ id: 'account-esc', secretHandle: 'ESCALATED' })), RangeError, '默认空策略仍拒绝任意句柄')
+    // 坏正则/负长度必须在构造点以 RangeError 失败，不能等首次写入才抛 SyntaxError（P3-R2）。
+    assert.throws(() => makeStorage({ allowedSecretHandles: new Set(), configurations: new Map([['harness.fake', { scope: { kind: 'string', required: true, pattern: '(', maxLength: 8 } }]]) }), RangeError, '坏正则必须构造失败')
+    assert.throws(() => makeStorage({ allowedSecretHandles: new Set(), configurations: new Map([['harness.fake', { scope: { kind: 'string', required: true, pattern: '[a-z]+', maxLength: -1 } }]]) }), RangeError, '负 maxLength 必须构造失败')
   })
 }

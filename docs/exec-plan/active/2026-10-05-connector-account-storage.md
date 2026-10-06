@@ -57,7 +57,7 @@ SQL 原位重写 002，增加账号表的自然键唯一、状态/identity kind 
 
 单 PR 预算为代码 add+delete ≤800 行、文档 ≤1300 行，测试/fixture 算代码；这是执行门，不是已测结果。估算分配：类型/端口/导出 90、校验策略 105、SQL/映射/表形检测 90、SQLite 方法 100、Fake 80、契约 200、集成与旧 fixture 110，共 775，余量 25。文档目标 500；实施前逐文件复核预算，超过门限必须重新切片或去掉重复表达，不删判别性测试。
 
-2026-10-05 CST 实测修订（对抗验证修复轮）：实测代码累计 **889 行**，超出本计划 800 行执行门 89 行（仓库硬门代码 ≤1000 行仍通过）。超门来源可逐项归因：verify-270 的 P1-1 / P1-2 / P2-2 与 P2-1 / P2-3 / P3-1–P3-3 修复与对应判别用例净增约 120 行；其中三条 P1/P2 是 Design / Spec 明文要求的信任边界（构造期策略快照、默认策略不可被进程内导入者污染、已记账损坏库不得先落后续迁移），按本节规则「不删判别性测试」，本轮只做注释与同形逻辑收敛（净省约 11 行）后仍超门。裁定：保留全部修复与判别用例，把超门记为事实；若人类在合并裁决时要求回到 800 行以内，按本节后备切片（账号身份/保留/两存储一层，配置/重登记/重启/两存储一层；第一层仅 Refs、第二层 Closes）重新分发。此修订不改仓库硬门，也不构成对超门本身的放行。
+2026-10-05 CST 实测修订（对抗验证修复轮 + 第二轮收尾）：实测代码累计 **955 行**，超出本计划 800 行执行门 155 行（仓库硬门代码 ≤1000 行仍通过，余量 45 行）。超门来源可逐项归因：第一轮 P1-1 / P1-2 / P2-2 与 P2-1 / P2-3 / P3-1–P3-3 修复与判别用例净增约 120 行，第二轮 P2-R1 / P2-R2 / P2-R3 / P3-R1 / P3-R2 的五处口径闭合与判别用例净增约 66 行；其中 P1-1、P1-2、P2-2、P2-R1、P2-R2 是 Design / Spec 明文要求的信任边界（构造期策略快照、默认策略不可被进程内导入者污染、已记账损坏库不得先落后续迁移、失败构造不得泄漏句柄或留下半迁移、形状判据须覆盖残缺列集），按本节规则「不删判别性测试」，两轮只做注释与同形逻辑收敛（累计净省约 18 行）后仍超门。裁定：保留全部修复与判别用例，把超门记为事实；若人类在合并裁决时要求回到 800 行以内，按本节后备切片（账号身份/保留/两存储一层，配置/重登记/重启/两存储一层；第一层仅 Refs、第二层 Closes）重新分发。此修订不改仓库硬门，也不构成对超门本身的放行。
 
 保持 Node/pnpm 与锁文件既有配置，domain 不反向依赖 capabilities；无新增依赖。只重写现有实验 schema，不新增兼容迁移。元数据不加入 `ProviderBindingRecord`、CoreQueries 或 client snapshot。保留现有唯一写者队列、事务令牌与关闭机制。
 
@@ -118,12 +118,13 @@ canary、错误输入及行为期望独立于实现 parser 构造。临时删除
 - [x] (2026-10-05 CST) 管理登记回执：已创建 [draft PR #270](https://github.com/SingularityKChen/harness-projects/pull/270)，核对双向 issue 引用及 Project 计划字段；产品实施仍 pending。
 - [x] (2026-10-05 CST) Batch 1：完成产品闭环、预算实测、共享契约与重启证据。
 - [x] (2026-10-05 CST) 对抗验证修复轮：P1-1 策略快照深拷贝、P1-2 默认策略改为每访存新建空集合、P2-2 迁移前判据扩为「已应用版本 2 且形状缺失」；P2-1 显式 undefined、P2-3 读口复验、P3-1/P3-2/P3-3 一并修复并补判别用例。verify-270 的 6/8 证实结论保持，两处 P1 证伪项已转绿。
+- [x] (2026-10-05 CST) 第二轮收尾修复：P2-R1 非法策略改为任何 IO 之前失败（不迁移、不留句柄，直接构造失败也关执行侧句柄）；P2-R2 形状判据补齐 `connector_account` 必需列集；P2-R3 `EMPTY_POLICY` 属性描述符冻结；顺带修 P3-R1 读口时序与 P3-R2 坏正则/负长度在构造点拒绝。第二轮复验判定「无 P0、无第一轮 P1、#126 五条验收全部证实」。
 - [ ] (2026-10-05 CST) 最终远端回读、独立验收与人类合并决定；通过后归档计划。
 
 Batch 1 实测证据（均在 `.worktrees/connector-account-plan` 工作树根）：
 
-- `node --test tests/contract/storage-connector-account.test.js tests/integration/storage-connector-account.test.js tests/integration/provider-binding-registration.test.js`：45 tests / 45 pass / 0 fail，exit 0。
-- `node --test --test-timeout=120000 tests/contract tests/integration`：1090 tests / 1090 pass / 0 fail，exit 0（基线 1074，新增 16）。
+- `node --test tests/contract/storage-connector-account.test.js tests/integration/storage-connector-account.test.js tests/integration/provider-binding-registration.test.js`：46 tests / 46 pass / 0 fail，exit 0。
+- `node --test --test-timeout=120000 tests/contract tests/integration`：1091 tests / 1091 pass / 0 fail，exit 0（基线 1074，新增 17）。
 - `node --test --test-timeout=120000 tests/e2e tests/mvp0`：64 / 64 pass，exit 0。
 - `pnpm run typecheck`、`pnpm run boundaries`：exit 0（boundaries 8/8 pass）。
 - 变异（临时改后恢复，不提交）：删 allowlist 成员检查 → 两个 adapter 的 `trusted-handle-only` 均红；跳过 implementationKey 分派 → 两个 adapter 的 `configuration-is-workspace-scoped` 均红；重登记清空配置 → 两个 adapter 的 `registration-and-removal-preserve-account` 均红；删工厂 `migrate` 前预检 → `restart-and-empty-schema-repeatability` 红。恢复后 45/45 绿。
@@ -135,6 +136,16 @@ Batch 1 实测证据（均在 `.worktrees/connector-account-plan` 工作树根�
 - 补充脚本 `.superpowers/adv/fix-verify.mjs`（构造之后才改嵌套声明）：sqlite 与 fake 的 `values-push` / `add-field` / `explicit-undefined` 三问全部 `rejected:RangeError`。
 - 本轮变异：规则不做深拷贝（`fields[name] = rule`）→ 两个 adapter 的 `metadata-transaction-and-copy-isolation` 红；`EMPTY_POLICY` 改回共享单例 → 同用例红；形状判据退回「只看 `provider_binding`」→ `restart-and-empty-schema-repeatability` 红；删 `bindingRefOf` 前置校验 → `configuration-is-workspace-scoped`（sqlite）红；删读口复验 → 两个 adapter 的 `trusted-handle-only` 红；删显式 undefined 拒绝 → 两个 adapter 的 `configuration-is-workspace-scoped` 红；恢复后全部绿。
 - 其余对抗 fixture 复跑：`t8-canary`（含 `fake-import-orphan-config` / `fake-import-orphan-account-link` / `empty-policy-mutation` 三探针）、`t11-malformed`、`t9-cross`、`t15-read-validate` 均为修复后预期值；`t14-update` 以非零退出报告 `RangeError: binding configuration must not contain an undefined value`，即 P2-1 修复后的预期拒绝（脚本原断言该输入被接受）。
+
+第二轮收尾修复实测（2026-10-05 CST，针对 verify-270 在 `4bef6f2` 上的 P2-R1 / P2-R2 / P2-R3 与 P3-R1 / P3-R2；仍为临时改后逐字节恢复）：
+
+- P2-R1：`createSqliteStorage` 在任何 IO 之前 `snapshotPolicy(policy)`，非法策略直接失败（`snapshotPolicy` 本身不碰库）；工厂构造挪回 `try`，构造函数内策略快照与自检共用同一 catch，`closeQuietly` 让工厂与构造函数各自关闭是幂等 no-op。实测：`.superpowers/adv/r2-ctor-leak.mjs` 六种坏策略全部 `fds 13 → 13 (delta 0)`、`migrated-in-failed-ctor=[]`、直接构造 `db closed:Error`；`r2-fd-leak-repro.mjs` 的 30 次坏策略构造 `fds 12 → 12 (delta 0)`，被拒构造库连 `schema_migrations` 都不存在（旧行为：迁移到 [1,2,3,4,5] 且 fds +29）。
+- P2-R2：形状判据新增 `CONNECTOR_ACCOUNT_COLUMNS` 逐列比对。`r2-partial-table.mjs`：`connector_account(id)` 残缺库由 `Error:no such column: platform_family` + 版本 `[1,2]→[1,2,3,4,5]` 变为「连接账号形状」拒绝 + 版本 `[1,2]→[1,2]`；集成用例新增该变体并断言全表 fingerprint 不变。
+- P2-R3：`EMPTY_POLICY` 外层加 `Object.freeze`。`r2-empty-redefine.mjs` 的 `Object.defineProperty(...)` 由静默生效变为 `TypeError: Cannot redefine property`。
+- P3-R1：SQLite `getBindingConfiguration` 改为 `async`。`r2-sync-throw.mjs` 六个调用全部 `async-reject:RangeError`（修复前 sqlite 读口为 `SYNC-THROW`）。
+- P3-R2：`copyRule` 在构造点试编译 `pattern` 并要求 `maxLength >= 0`。`r2-new-edges.mjs` 的 `pattern-invalid-regex` / `maxLength-negative` / `maxLength-float` / `maxLength-NaN` 在两个适配器上全部由「constructed + 写入时才炸」变为 `ctor-throw:RangeError`。
+- 收尾变异（同样只改一处、恢复后复跑）：把工厂构造挪回 `try` 之外且删掉 IO 前的策略快照 → 新增 `constructor-failure-releases-handle-and-policy-is-frozen` 红；形状判据退回「只看存在性」→ `restart-and-empty-schema-repeatability` 红；`EMPTY_POLICY` 去冻结 → 该新增用例 + 两个 adapter 的 `metadata-transaction-and-copy-isolation` 红（3 fail）；坏正则/负长度不校验 → 同 3 条红；SQLite 读口去掉 `async` → `configuration-is-workspace-scoped`（sqlite）红。恢复后 17/17 绿。
+- 补充脚本 `.superpowers/adv/fix-verify-r2.mjs` 作为修复后期望值的自包含断言集：P2-R1 fd delta 0 且无记账、P2-R2 拒绝且版本不变、P2-R3 frozen、P3-R1 双适配器异步拒绝、P3-R2 双适配器构造点 RangeError，全部通过。
 
 ## Surprises & Discoveries
 
@@ -154,6 +165,8 @@ Batch 1 实测证据（均在 `.worktrees/connector-account-plan` 工作树根�
 
 2026-10-05 CST（对抗验证修复轮）：verify-270 证伪的三条都属「规格已写明、实现只做了顶层」的信任边界，而不是新需求：`snapshotPolicy` 只 `new Map(schemas)` 时，Map 值（schema 对象）与规则里的 `values` 数组仍与调用方共享；`EMPTY_POLICY` 的 `Object.freeze` 不冻结 `Set`/`Map` 内容；形状判据以「`provider_binding` 存在」为前提，会放过「版本 2 已记账但表整体缺失」的损坏库，让它先被 003–005 半升级。三处修复都不改变数据模型，代价是构造与读路径各多一层拷贝/复验。教训：**冻结外壳不等于冻结内容**，以及「判据的前提条件」本身就是判据的一部分——`if (provider_binding 存在)` 这种早退会把更坏的输入排除在检查之外。
 
+2026-10-05 CST（第二轮收尾）：**修复本身也会引入新的失败面**。第一轮给 `snapshotPolicy` 加了规则级校验后，「非法策略」从罕见类型错误变成常见输入错误，于是暴露出工厂把构造放在 `try` 之外、由此每次失败泄漏句柄并留下半迁移的路径（P2-R1）——这不是新引入的分支，而是被扩大的抛错面照出来的旧缺口。同类还有 P2-R2：第一轮把判据从「`provider_binding` 存在」推进到「版本 2 已记账」，但没有同时把判据从「表/列存在性」推进到「列集完整性」，于是 `connector_account(id)` 这种残缺库仍能穿过。教训：**收紧判据时要连它检查的维度一起收紧（存在性 → 完整性），并检查新抛错点的清理路径是否覆盖全部入口**。另外，JS 的 `Object.freeze` 只冻结属性描述符，对 getter 型的 `EMPTY_POLICY` 恰好够用（内容每次新建），但对第一轮的 Set/Map 单例不够——同一个 API 在两种实现下语义不同，必须分别判别。
+
 ## Decision Log
 
 | 日期 / 作者 | 决策与理由 |
@@ -169,6 +182,10 @@ Batch 1 实测证据（均在 `.worktrees/connector-account-plan` 工作树根�
 | 2026-10-05 CST / 实现者 | 已存元数据的策略自检放在根实例构造函数：打开时重放账号与配置的闭集校验（漏策略的空库合法）。这让 `trusted-handle-only` 的「缺策略重开拒绝」在两个适配器上同形，而不是只在写入路径有效。 |
 | 2026-10-05 CST / 实现者（对抗验证修复轮） | 接受 verify-270 的 P1-1 / P1-2 / P2-2 判定并逐条修复：快照从「顶层 Set/Map 拷贝」升级为「规则与 `values` 的冻结深拷贝」；`EMPTY_POLICY` 从共享可变单例改为每访存新建空集合的 getter；迁移前形状判据从「`provider_binding` 存在」改为「`schema_migrations` 已有版本 2」。次要点一并修 P2-1（显式 `undefined` 拒绝）、P2-3（读口复验）、P3-1/P3-2/P3-3（畸形 ref 统一 `RangeError`、Fake 导入引用完整性、remove 畸形 ref 拒绝）。规模代价：修复净增代码约 95 行，实测 **889 行**，超出本计划 Global Constraints 的单 PR 执行门 800 行（仓库硬门 1000 行仍满足）。取舍：三条 P1/P2 均为规格明文要求的信任边界（策略快照隔离、默认策略不可污染、已记账损坏库不得半升级），且判别用例不可回退；按计划「超过门限必须重新切片或去掉重复表达，不删判别性测试」的规则，本轮先做注释与同形逻辑收敛（净省约 11 行），仍实测超门 89 行。裁定：保留修复与全部判别用例，把 800 行执行门记为**本轮超门事实**，由人类在合并裁决时决定是否按计划后备切分为两层 PR；仓库硬门（代码 ≤1000）通过。 |
 | 2026-10-05 CST / 实现者（对抗验证修复轮） | 读口复验（P2-3）的判据是「Storage 是唯一受信写者」之外的纵深：SQLite 走 `parseConnectorAccount` / `parseBindingConfiguration`（配置按真实锚点 `implementationKey`），Fake 走同一解析器（`data` 是公开字段，测试与宿主可直接改写）。代价是每次读多一次闭集解析；不做缓存，避免又引入可被绕过的快路径。 |
+| 2026-10-05 CST / 实现者（第二轮收尾） | P2-R1 的修法选择「把策略快照提到任何 IO 之前」而不是「打开后再关句柄」：`snapshotPolicy` 是纯校验、不碰库，先跑就能同时消除句柄、迁移写入和「文件被创建」三种副作用；工厂构造挪回 `try` 与构造函数内共用 catch 作为第二道保险，覆盖直接构造的调用方。让关闭幂等（`closeQuietly`）是因为两条清理路径会对同一句柄各关一次，驱动第二次 `close()` 会以 `database is not open` 覆盖真正的错误原因。 |
+| 2026-10-05 CST / 实现者（第二轮收尾） | P2-R2 把判据从「表/列存在性」收紧为「`connector_account` 必需列集逐项比对」：与 003 的 `assertRewritten003Shape` 同法，列清单只写一次。判定为**修**而不是登记债务，因为「版本 2 已记账但形状不完整」与第一轮 P2-2 是同一类「看起来已迁移、实则半升级」的库，登记会留下同类第二个洞。 |
+| 2026-10-05 CST / 实现者（第二轮收尾） | 次要点 P3-R1（SQLite 读口同步抛）与 P3-R2（坏正则到写入才 `SyntaxError`）本轮一并修：前者加 `async`（零成本对齐两个适配器的时序），后者在 `copyRule` 试编译正则并要求 `maxLength >= 0`（构造点 `RangeError`，符合「所有新校验失败使用 RangeError」）。两者都有判别用例；不登记债务。 |
+| 2026-10-05 CST / 实现者（第二轮收尾） | 规模：收尾修复净增代码约 66 行，实测 **955 行**，超出本计划 800 行执行门 155 行（仓库硬门 1000 行通过，余量 45 行）。`TD-028` 的数字与裁决路径随本轮更新；维持「不删判别性测试」并保留超门事实，由人类合并裁决决定是否切片。 |
 
 2026-10-05 CST / 主控：Actor 为 SingularityKChen；管理目标是 GitHub 仓库 SingularityKChen/harness-projects 与 Project 10，不虚构产品内 ProviderBinding。幂等标识为 `plan/issue-126/feature/connector-account-storage`，字段赋值以 issue/字段名去重；创建结果为 PR #270。观察时刻 @ 2374dbdf0497：base=main、draft=true，PR closingIssuesReferences 包含 #126、issue closedByPullRequestsReferences 包含 #270，无评审线程，标题/标签/issue policy 检查通过。Project ExecPlan/Batch 已回读匹配，Kind/Area/M4 已具备；Status=Todo、Priority=P0、Size=M、Iteration 5 及依赖关系保持原值。易失结果用 `gh pr view 270 -R SingularityKChen/harness-projects --json headRefOid,baseRefName,isDraft,closingIssuesReferences,statusCheckRollup` 和 `gh issue view 126 -R SingularityKChen/harness-projects --json closedByPullRequestsReferences,projectItems` 复读；最终文档 push 后再次回读当前 head/checks。
 
@@ -218,7 +235,9 @@ createFakeStorage(data?: FakeStorageData, policy?: StorageValidationPolicy): Mem
 
 2026-10-05 CST（Batch 1 收口）：产品闭环落地。文件集与 Global Constraints 一致，仅新增 `packages/storage/sqlite/src/storage-sync.ts` 一处已声明扩面。验收：新窄命令 45/45 pass、`tests/contract tests/integration` 1090/1090 pass、`tests/e2e tests/mvp0` 64/64 pass、`typecheck` 与 `boundaries` exit 0；四个变异均 old-red→恢复后 new-green。首轮实测 818 行超门 18 行，收敛方式是压注释与把重复的吊挂/列构造收成单点，未删任何判别性测试。未决：`packages/storage/sqlite/src/storage-sync.ts` 的扩面已记入 Global Constraints 与 Decision Log；远端回读、独立验收与人类合并决定仍 pending。
 
-2026-10-05 CST（对抗验证修复轮）：verify-270 报告 6/8 命名用例完全证实、无 P0，证伪 P1-1（策略快照浅拷贝）、P1-2（`EMPTY_POLICY` 共享可变单例）、P2-2（迁移前判据只在 `provider_binding` 存在时生效），并列出 P2-1/P2-3/P3-1/P3-2/P3-3。全部逐条修复并补判别用例；`.superpowers/adv/p1-policy.mjs`、`adv-v2.mjs` 从「ACCEPTED / 部分迁移」变为「RangeError / 零写入」，新增 `.superpowers/adv/fix-verify.mjs` 证明「构造之后」的嵌套扩权在两个适配器上都被拒绝。规模实测代码 **889 行**（本计划执行门 800 **超出 89 行**；仓库硬门 1000 通过）、文档 237 行；本项修复净增约 120 行，其中三条属规格明文信任边界，不删判别测试的前提下无法回到 800 以内，已按 `Global Constraints` 的规则记入 Decision Log 并保留超门事实，由人类在合并裁决时决定是否按计划后备切分为两层 PR。新增债务：`TD-027`（Fake `data` 公开可变字段与读口复验的残余写入面）、`TD-028`（889 行超执行门与两种裁决路径），均写入 `docs/exec-plan/tech-debt-tracker.md`。变异证据：规则不深拷 / `EMPTY_POLICY` 回退单例 → `metadata-transaction-and-copy-isolation` 双适配器红；判据退回旧形 → `restart-and-empty-schema-repeatability` 红；删 `bindingRefOf`/读口复验/显式 undefined 拒绝 → 对应用例红；恢复后全绿。
+2026-10-05 CST（对抗验证修复轮）：verify-270 报告 6/8 命名用例完全证实、无 P0，证伪 P1-1（策略快照浅拷贝）、P1-2（`EMPTY_POLICY` 共享可变单例）、P2-2（迁移前判据只在 `provider_binding` 存在时生效），并列出 P2-1/P2-3/P3-1/P3-2/P3-3。全部逐条修复并补判别用例；`.superpowers/adv/p1-policy.mjs`、`adv-v2.mjs` 从「ACCEPTED / 部分迁移」变为「RangeError / 零写入」，新增 `.superpowers/adv/fix-verify.mjs` 证明「构造之后」的嵌套扩权在两个适配器上都被拒绝。新增债务：`TD-027`（Fake `data` 公开可变字段与读口复验的残余写入面）。变异证据：规则不深拷 / `EMPTY_POLICY` 回退单例 → `metadata-transaction-and-copy-isolation` 双适配器红；判据退回旧形 → `restart-and-empty-schema-repeatability` 红；删 `bindingRefOf`/读口复验/显式 undefined 拒绝 → 对应用例红；恢复后全绿。
+
+2026-10-05 CST（第二轮复验 + 收尾）：verify-270 第二轮独立复跑判定「无 P0、无第一轮意义上的 P1、#126 五条验收全部证实」，顺序效应判定与实现者一致；同时新增 P2-R1（构造期失败泄漏句柄且库已被迁移）、P2-R2（形状只查存在性不查列集）、P2-R3（`EMPTY_POLICY` 未冻结）、P3-R1（读口同步抛）、P3-R2（坏正则到写入才 `SyntaxError`）。全部逐条修复并补判别用例：策略快照提到任何 IO 之前 + 构造入 `try` + 关闭幂等、形状判据逐列比对、默认策略属性描述符冻结、SQLite 读口改 `async`、`copyRule` 构造点试编译正则并要求 `maxLength >= 0`。验收：窄命令 46/46、`tests/contract tests/integration` 1091/1091、`tests/e2e tests/mvp0` 64/64、`typecheck` 与 `boundaries` exit 0；六个收尾变异各自 old-red→恢复后 new-green。规模实测代码 **955 行**（计划执行门 800 **超出 155 行**；仓库硬门 1000 通过、余量 45 行）、文档随本段更新；`TD-028` 数字同步为 955。未决：远端回读、独立验收、人类合并决定与是否按后备切片拆分仍 pending。
 
 ## Bottom Change Note
 
@@ -230,4 +249,6 @@ createFakeStorage(data?: FakeStorageData, policy?: StorageValidationPolicy): Mem
 
 2026-10-05 CST：Batch 1 实施完成并回填证据；按计划规则把 `packages/storage/sqlite/src/storage-sync.ts` 加进 Global Constraints（迁移前预检与直接构造必须共用同一判据），记录四个变异的 old-red/new-green、规模实测与两处偏差；代码 794 行未超 800 门，文档 214 行未超 1300 门。
 
-2026-10-05 CST：对抗验证修复轮落地——深拷贝策略快照、默认策略改 getter、迁移前判据扩为「已应用版本 2 且形状缺失」，并修 P2-1/P2-3/P3-1/P3-2/P3-3 与补对应判别用例；代码 889 行超出本计划 800 行执行门（仓库硬门 1000 通过），超门事实与取舍记入 Decision Log 与 Outcomes，交由人类合并裁决。
+2026-10-05 CST：对抗验证修复轮落地——深拷贝策略快照、默认策略改 getter、迁移前判据扩为「已应用版本 2 且形状缺失」，并修 P2-1/P2-3/P3-1/P3-2/P3-3 与补对应判别用例。
+
+2026-10-05 CST：第二轮收尾落地——非法策略在任何 IO 之前失败（不迁移、不留句柄，直接构造失败也关句柄）、形状判据补齐账号必需列集、默认策略属性描述符冻结，并修 P3-R1/P3-R2 与补判别用例；代码 **955 行**超出本计划 800 行执行门 155 行（仓库硬门 1000 通过、余量 45 行），超门事实与取舍记入 Global Constraints / Decision Log / Outcomes，`TD-028` 数字同步，交由人类合并裁决。

@@ -65,19 +65,23 @@ const TX_SCOPE = new AsyncLocalStorage<TransactionToken>()
  */
 export const LEGACY_COMMITTED_VERSION_MESSAGE = '已提交版本不是规范载体（账本里有旧版本写入的观察版本载体）：请停掉旧版本进程，调用 repairLegacySourceVersions(<库文件>, { backupPath }) 先备份再修复，然后重试'
 
-/** #126：已应用版本 2 但缺连接账号表/列的旧库必须在迁移之前被只读拒绝；目录、文件与已提交版本保持原样，调用方显式重建。 */
-export const CONNECTOR_ACCOUNT_SCHEMA_MESSAGE = '本地库是加入连接账号之前的 002（缺 connector_account 表，或 provider_binding.connector_account_id / workspace_binding.configuration_json 列）：请显式决定并删除库文件重建（程序不会升级也不会删库）'
+/** #126：已应用版本 2 但缺连接账号表/列（含残缺列集）的旧库必须在迁移之前只读拒绝；目录、文件与版本保持原样。 */
+export const CONNECTOR_ACCOUNT_SCHEMA_MESSAGE = '本地库是加入连接账号之前的 002（缺 connector_account 表/列，或 provider_binding.connector_account_id / workspace_binding.configuration_json 列）：请显式决定并删除库文件重建（程序不会升级也不会删库）'
+
+/** 版本 2 的账号必需列：逐项比对列集，不只看表存在（对抗验证 P2-R2 的 `connector_account(id)` 残缺库）。 */
+const CONNECTOR_ACCOUNT_COLUMNS = ['id', 'platform_family', 'platform_origin', 'identity_kind', 'external_id', 'display_name', 'secret_handle', 'connection_state'] as const
 
 /**
- * #126 的连接账号形状判据（唯一一份）：已应用版本 2 却缺连接账号表或两个新列时为真。
- * 只看 `provider_binding` 是否存在不够：版本 2 已记账但表缺失的损坏库会先被 003–005 部分迁移（对抗验证 P2-2）。工厂在 `migrate` 之前只读拒绝，构造函数兜底；空库返回 false。
+ * #126 的形状判据（唯一一份）：已应用版本 2 却缺账号表或必需列时为真——表整体缺失或只有部分列的损坏库都会先被 003–005 部分迁移（对抗验证 P2-2/P2-R2）。工厂在 `migrate` 前只读拒绝，构造函数兜底；空库返回 false。
  */
 export function isConnectorAccountShapeMissing(db: WorkspaceDatabase): boolean {
   const hasTable = (name: string): boolean => db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined
   if (!hasTable('schema_migrations') || !(db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]).some((row) => row.version === 2)) return false
   const columns = (table: string): readonly string[] => (db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as { name: string }[]).map((row) => row.name)
-  return !hasTable('connector_account') || !columns('provider_binding').includes('connector_account_id')
-    || !columns('workspace_binding').includes('configuration_json')
+  if (!hasTable('connector_account')) return true
+  const accountColumns = columns('connector_account')
+  return CONNECTOR_ACCOUNT_COLUMNS.some((name) => !accountColumns.includes(name))
+    || !columns('provider_binding').includes('connector_account_id') || !columns('workspace_binding').includes('configuration_json')
 }
 
 /** 列值 → 端口版本：`undefined` 的 `sourceVersion` 落库时空串（列 NOT NULL），读回必须还原，否则两条都没有 `sourceVersion` 的合法观察里第二条会被判成乱序。 */
@@ -85,6 +89,8 @@ const columnToVersion = (value: string | undefined): string | undefined => (valu
 
 /** SQLite 可能已经自动回滚；不要用回滚错误覆盖真正的失败原因。 */
 const rollbackQuietly = (db: WorkspaceDatabase): void => { try { db.exec('ROLLBACK') } catch { /* 已回滚 */ } }
+/** 关闭也幂等：工厂 catch 与构造函数自检都会关（P2-R1），第二次必须是 no-op 而不是 `database is not open`。 */
+const closeQuietly = (db: WorkspaceDatabase): void => { try { db.close() } catch { /* 已关闭 */ } }
 
 /**
  * 写者 / 读者路径机制 + 同步面。机制只在这里声明一次：子类（执行面、地基面）不再各写一份队列。
@@ -109,9 +115,12 @@ export class SqliteSyncSurface {
   constructor(location: string, db: WorkspaceDatabase, scoped = false, state?: { closed: boolean }, token?: TransactionToken, policy: StorageValidationPolicy = EMPTY_POLICY) {
     this.location = location; this.db = db; this.scoped = scoped
     this.#state = state ?? { closed: false }; this.#token = token
-    this.policy = snapshotPolicy(policy)
-    // 自检失败必须把句柄关掉（P3）：`createSqliteStorage` 拿不到实例，它那条 catch 也就无从关闭，句柄会一直泄漏。
-    if (!scoped) { try { this.#assertRewrittenSchema(); this.#assertConnectorAccountSchema(); this.#assertStoredMetadata() } catch (error) { this.db.close(); throw error } }
+    // 策略快照与自检失败都关句柄（P3 / P2-R1）：直接构造的调用方也不会拿到泄漏句柄。
+    if (!scoped) {
+      try { this.policy = snapshotPolicy(policy); this.#assertRewrittenSchema(); this.#assertConnectorAccountSchema(); this.#assertStoredMetadata() } catch (error) { closeQuietly(this.db); throw error }
+    } else {
+      this.policy = snapshotPolicy(policy)
+    }
   }
 
   /**
