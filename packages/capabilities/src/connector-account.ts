@@ -48,13 +48,12 @@ const IDENTITY_KINDS: readonly unknown[] = Object.values(ConnectorIdentityKind)
 const CONNECTION_STATES: readonly unknown[] = Object.values(ConnectorConnectionState)
 
 function reject(message: string): never { throw new RangeError(message) }
-/** 本模块产出过的快照：幂等判据（P3-R3）。用 WeakSet 而非 `Object.isFrozen`——调用方自冻的外壳仍可能含可变嵌套规则。 */
 const POLICY_SNAPSHOTS = new WeakSet<StorageValidationPolicy>()
-/** 策略快照：Set / Map 换新，每条规则与 enum 的 `values` 也换冻结副本（浅拷会让构造后的 `values.push('EVIL')` 经共享引用扩权，P1-1）。每个属性只读一次（P3-R3），已快照对象直接返回。 */
+/** 策略快照：Set / Map 与每条规则、enum `values` 都换冻结副本（浅拷会让 `values.push('EVIL')` 经共享引用扩权，P1-1）。命中 `POLICY_SNAPSHOTS` 只表示「已验证、无需重读调用方 getter」（P3-R3），容器仍要重拷。 */
 export function snapshotPolicy(policy: StorageValidationPolicy): StorageValidationPolicy {
-  if (policy !== null && typeof policy === 'object' && POLICY_SNAPSHOTS.has(policy)) return policy
-  const handles: unknown = policy?.allowedSecretHandles
-  const schemas: unknown = policy?.configurations
+  const cached = policy !== null && typeof policy === 'object' && POLICY_SNAPSHOTS.has(policy) ? policy : undefined
+  const source = cached ?? policy
+  const handles: unknown = source?.allowedSecretHandles, schemas: unknown = source?.configurations
   if (!(handles instanceof Set) || !(schemas instanceof Map)) reject('storage validation policy must provide an allowedSecretHandles Set and a configurations Map')
   const copied = new Map<string, BindingConfigurationSchema>()
   for (const [key, schema] of schemas as Map<string, BindingConfigurationSchema>) {
