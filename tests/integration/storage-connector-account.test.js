@@ -56,12 +56,25 @@ test('restart-and-empty-schema-repeatability', async () => {
       + 'CREATE TABLE workspace_binding (workspace_id TEXT NOT NULL, binding_id TEXT NOT NULL, domain TEXT NOT NULL, enabled INTEGER NOT NULL, is_default INTEGER NOT NULL, PRIMARY KEY (workspace_id, binding_id, domain));'
       + "INSERT INTO workspace_binding VALUES ('ws-legacy', 'binding-legacy', 'planning', 1, 1);")
   } finally { legacy.close() }
-  const fingerprint = () => { const db = openDatabase(legacyPath); try { return JSON.stringify(db.prepare('SELECT name, sql FROM sqlite_master ORDER BY name').all()) + JSON.stringify(db.prepare('SELECT * FROM workspace_binding ORDER BY rowid').all()) } finally { db.close() } }
-  const legacyBefore = fingerprint()
+  const fingerprint = (location) => { const db = openDatabase(location); try {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((row) => row.name)
+    return JSON.stringify(db.prepare('SELECT name, sql FROM sqlite_master ORDER BY name').all())
+      + JSON.stringify(tables.map((name) => db.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all()))
+  } finally { db.close() } }
+  const legacyBefore = fingerprint(legacyPath)
   for (let attempt = 0; attempt < 2; attempt += 1) assert.throws(() => createSqliteStorage(legacyPath, policy()), /连接账号/, '旧 002 形状必须在 migrate 之前被只读拒绝并关闭句柄')
-  assert.equal(fingerprint(), legacyBefore, '拒绝必须零写入：schema 与既有行逐字节不变')
+  assert.equal(fingerprint(legacyPath), legacyBefore, '拒绝必须零写入：schema 与既有行逐字节不变')
   const after = openDatabase(legacyPath)
   try { assert.deepEqual(after.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '拒绝必须零写入：不落 003/004/005 的迁移版本') } finally { after.close() }
+  // 版本 2 已记账但**表整体缺失**的损坏库（对抗验证 P2-2）：判据不能只在 `provider_binding` 存在时生效，否则 003–005 会被部分应用。
+  const truncatedPath = join(tempDir('connector-account-legacy-truncated-'), 'truncated.sqlite')
+  const truncated = openDatabase(truncatedPath)
+  try { truncated.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (1, 'x'); INSERT INTO schema_migrations VALUES (2, 'y');") } finally { truncated.close() }
+  const truncatedBefore = fingerprint(truncatedPath)
+  assert.throws(() => createSqliteStorage(truncatedPath, policy()), /连接账号/, '版本 2 但表缺失必须在 migrate 之前拒绝')
+  assert.equal(fingerprint(truncatedPath), truncatedBefore, '表缺失变体的拒绝也必须零写入')
+  const truncatedAfter = openDatabase(truncatedPath)
+  try { assert.deepEqual(truncatedAfter.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '表缺失变体不得先落 003–005') } finally { truncatedAfter.close() }
 })
 
 test('secret-canary-never-published', async () => {

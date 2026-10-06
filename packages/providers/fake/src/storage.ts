@@ -87,12 +87,17 @@ export class MemoryStorage implements cap.Storage {
     this.#policy = cap.snapshotPolicy(policy)
     this.data = data
     this.#transactionScope = transactionScope
-    // 导入内部状态时校验已存元数据：漏策略的空库合法，但有句柄或配置的库必须与策略一致（#126）。
+    // 导入时校验已存元数据与引用完整性（对抗验证 P3-2）：配置必须有挂载、账号关联必须指向存在的账号，否则孤儿状态会被导入。
     for (const record of this.data.accounts) cap.parseConnectorAccount(record, this.#policy)
     for (const record of this.data.bindingConfigurations) {
+      if (!this.data.workspaceBindings.some((mount) => sameMount(mount, record.ref))) throw new RangeError('binding configuration references an unknown workspace mount')
       const anchor = this.data.providerBindings.find((candidate) => candidate.id === record.ref.bindingId)
       if (anchor === undefined) throw new RangeError('binding configuration references an unknown connection anchor')
       cap.parseBindingConfiguration(record, this.#policy, anchor.implementationKey)
+    }
+    for (const link of this.data.bindingAccounts) {
+      if (!this.data.providerBindings.some((candidate) => candidate.id === link.bindingId)) throw new RangeError('connection anchor does not exist')
+      if (!this.data.accounts.some((candidate) => candidate.id === link.accountId)) throw new RangeError('connector account does not exist')
     }
   }
   #mutate<T>(fn: () => T | PromiseLike<T>): Promise<T> {
@@ -138,12 +143,13 @@ export class MemoryStorage implements cap.Storage {
     return this.data.workspaceBindings.filter((mount) => mount.workspaceId === workspaceId)
       .map((mount) => toBindingRecord(mount, this.data.providerBindings))
   }
-  /** 卸载只删该挂载及其配置：账号、连接锚点、外部身份与同步历史保留；缺失挂载重复移除是 no-op（#126）。 */
+  /** 卸载只删该挂载及其配置；畸形 ref 先以 `RangeError` 拒绝（对抗验证 P3-3），缺失挂载重复移除是 no-op（#126）。 */
   async removeProviderBinding(ref: { readonly workspaceId: domain.WorkspaceId; readonly bindingId: domain.ProviderBindingId; readonly domain: string }): Promise<void> {
+    const parsed = cap.parseBindingRef(ref)
     return this.#mutate(() => {
-      if (!this.data.workspaceBindings.some((mount) => sameMount(mount, ref))) return
-      this.data.workspaceBindings = this.data.workspaceBindings.filter((mount) => !sameMount(mount, ref))
-      this.data.bindingConfigurations = this.data.bindingConfigurations.filter((record) => !sameMount(record.ref, ref))
+      if (!this.data.workspaceBindings.some((mount) => sameMount(mount, parsed))) return
+      this.data.workspaceBindings = this.data.workspaceBindings.filter((mount) => !sameMount(mount, parsed))
+      this.data.bindingConfigurations = this.data.bindingConfigurations.filter((record) => !sameMount(record.ref, parsed))
     })
   }
   /** 账号自然键：数组序列化，避免分隔符碰撞；显示名不参与去重。 */
@@ -159,12 +165,15 @@ export class MemoryStorage implements cap.Storage {
       upsert(this.data.accounts, structuredClone(parsed), (candidate) => candidate.id === parsed.id)
     })
   }
+  /** 账号读口与 SQLite 同判据：复验闭集再返回独立副本（`data` 是公开字段，可能被直接改写）。 */
   async getConnectorAccount(id: domain.ConnectorAccountId): Promise<cap.ConnectorAccountRecord | undefined> {
     const found = this.data.accounts.find((candidate) => candidate.id === id)
-    return found === undefined ? undefined : structuredClone(found)
+    return found === undefined ? undefined : cap.parseConnectorAccount(structuredClone(found), this.#policy)
   }
-  async listConnectorAccounts(): Promise<readonly cap.ConnectorAccountRecord[]> { return this.data.accounts.map((record) => structuredClone(record)) }
-  /** 初次关联：账号与锚点必须存在且锚点尚无外部身份/观察/游标/写尝试事实；同账号重复是 no-op，换账号或有事实时补账号必须拒绝（#126）。 */
+  async listConnectorAccounts(): Promise<readonly cap.ConnectorAccountRecord[]> {
+    return this.data.accounts.map((record) => cap.parseConnectorAccount(structuredClone(record), this.#policy))
+  }
+  /** 初次关联：账号与锚点必须存在且锚点尚无事实；同账号重复是 no-op，换账号或有事实时补账号拒绝（#126）。 */
   async setProviderBindingAccount(bindingId: domain.ProviderBindingId, accountId: domain.ConnectorAccountId): Promise<void> {
     return this.#mutate(() => {
       if (this.data.providerBindings.every((candidate) => candidate.id !== bindingId)) throw new RangeError('connection anchor does not exist')
@@ -185,19 +194,25 @@ export class MemoryStorage implements cap.Storage {
   async getProviderBindingAccount(bindingId: domain.ProviderBindingId): Promise<domain.ConnectorAccountId | undefined> {
     return this.data.bindingAccounts.find((candidate) => candidate.bindingId === bindingId)?.accountId
   }
-  /** 配置写入：先查真实挂载与锚点的 implementationKey，再查受信 schema；不接收调用者声称的实现键。 */
+  /** 配置写入：先校验 record / ref 外形（畸形 ref 在解引用前以 `RangeError` 拒绝），再查真实挂载与锚点的 implementationKey；不接收调用者声称的实现键。 */
   async putBindingConfiguration(record: cap.BindingConfigurationRecord): Promise<void> {
+    const ref = cap.bindingRefOf(record)
     return this.#mutate(() => {
-      if (this.data.workspaceBindings.every((mount) => !sameMount(mount, record.ref))) throw new RangeError('binding configuration references an unknown workspace mount')
-      const anchor = this.data.providerBindings.find((candidate) => candidate.id === record.ref.bindingId)
+      if (this.data.workspaceBindings.every((mount) => !sameMount(mount, ref))) throw new RangeError('binding configuration references an unknown workspace mount')
+      const anchor = this.data.providerBindings.find((candidate) => candidate.id === ref.bindingId)
       if (anchor === undefined) throw new RangeError('binding configuration references an unknown connection anchor')
       const parsed = cap.parseBindingConfiguration(record, this.#policy, anchor.implementationKey)
       upsert(this.data.bindingConfigurations, structuredClone(parsed), (candidate) => sameMount(candidate.ref, parsed.ref))
     })
   }
+  /** 配置读口与 SQLite 同判据：按真实锚点 implementationKey 复验后再返回独立副本。 */
   async getBindingConfiguration(ref: { readonly workspaceId: domain.WorkspaceId; readonly bindingId: domain.ProviderBindingId; readonly domain: string }): Promise<cap.BindingConfigurationRecord | undefined> {
-    const found = this.data.bindingConfigurations.find((candidate) => sameMount(candidate.ref, ref))
-    return found === undefined ? undefined : structuredClone(found)
+    const parsed = cap.parseBindingRef(ref)
+    const found = this.data.bindingConfigurations.find((candidate) => sameMount(candidate.ref, parsed))
+    if (found === undefined) return undefined
+    const anchor = this.data.providerBindings.find((candidate) => candidate.id === parsed.bindingId)
+    if (anchor === undefined) throw new RangeError('binding configuration references an unknown connection anchor')
+    return cap.parseBindingConfiguration(structuredClone(found), this.#policy, anchor.implementationKey)
   }
   async putEntity(record: domain.Entity): Promise<void> {
     return this.#mutate(() => upsert(this.data.entities, record, (e) => e.id === record.id))

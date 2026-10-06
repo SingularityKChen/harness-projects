@@ -18,12 +18,15 @@ const sqliteAdapter = (suffix = '') => {
     label: `SQLite Storage${suffix}`,
     makeStorage: (p = policy()) => { const location = join(sqliteDir, `connector-account${suffix}-${files++}.sqlite`); const storage = createSqliteStorage(location, p); locations.set(storage, location); return storage },
     restart: (storage, p = policy()) => { const location = locations.get(storage); storage.close(); return createSqliteStorage(location, p) },
+    // 裸写通道（等价于旧版本进程 / 运维 SQL）：读口必须复验而不是原样返回（对抗验证 P2-3）。
+    tamper: (storage) => storage.db.exec("UPDATE connector_account SET secret_handle = 'DISALLOWED_HANDLE'; UPDATE workspace_binding SET configuration_json = '{\"bogus\":true}'"),
   }
 }
 const fakeAdapter = (suffix = '') => ({
   label: `内存 Storage 替身${suffix}`,
   makeStorage: (p = policy()) => createFakeStorage(undefined, p),
   restart: (storage, p = policy()) => createFakeStorage(exportFakeStorageState(storage), p),
+  tamper: (storage) => { if (storage.data.accounts[0]) storage.data.accounts[0].secretHandle = 'DISALLOWED_HANDLE'; if (storage.data.bindingConfigurations[0]) storage.data.bindingConfigurations[0].configuration = { bogus: true } },
 })
 storageConnectorAccountSuite(sqliteAdapter())
 storageConnectorAccountSuite(fakeAdapter())
