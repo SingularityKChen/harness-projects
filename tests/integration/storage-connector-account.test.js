@@ -1,6 +1,6 @@
 /** 连接账号与工作区配置的集成验收（#126）：重启/重开逐字段相等、空库迁移可重复、旧 002 形状在 migrate 之前被拒绝，以及 canary 不出现在任何发布面。共享 6 条用例由 `tests/contract/storage-connector-account.test.js` 在两个适配器上执行。 */
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -23,6 +23,15 @@ const seed = async (storage) => {
 }
 const snapshot = async (storage) => ({ accounts: await storage.listConnectorAccounts(),
   linked: await storage.getProviderBindingAccount('conn-restart'), configuration: await storage.getBindingConfiguration(ref) })
+/** 版本 2 已记账的损坏库夹具：`accountColumns` 是账号表的列声明（形状判据的判别输入）。 */
+const seedVersion2 = (path, accountColumns) => {
+  const db = openDatabase(path)
+  try {
+    db.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (1, 'x'), (2, 'y'); "
+      + `CREATE TABLE connector_account (${accountColumns}); `
+      + 'CREATE TABLE workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, status_policy TEXT NOT NULL); CREATE TABLE provider_binding (id TEXT PRIMARY KEY, implementation_key TEXT NOT NULL, connector_account_id TEXT); CREATE TABLE workspace_binding (workspace_id TEXT NOT NULL, binding_id TEXT NOT NULL, domain TEXT NOT NULL, enabled INTEGER NOT NULL, is_default INTEGER NOT NULL, configuration_json TEXT, PRIMARY KEY (workspace_id, binding_id, domain));')
+  } finally { db.close() }
+}
 
 test('连接账号命名用例守卫：8 个具名用例覆盖共享组与集成专属', () => {
   assert.deepEqual(CONNECTOR_ACCOUNT_NAMED_CASES, [...CONNECTOR_ACCOUNT_SHARED_CASES, 'restart-and-empty-schema-repeatability', 'secret-canary-never-published'])
@@ -76,22 +85,19 @@ test('restart-and-empty-schema-repeatability', async () => {
   assert.equal(fingerprint(truncatedPath), truncatedBefore, '表缺失变体的拒绝也必须零写入')
   const truncatedAfter = openDatabase(truncatedPath)
   try { assert.deepEqual(truncatedAfter.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '表缺失变体不得先落 003–005') } finally { truncatedAfter.close() }
-  // 版本 2 且表和两个新列都在、但 `connector_account` 只有一个 id 的残缺库（对抗验证 P2-R2）：只查表存在性会放过它。
+  // 版本 2 但账号表只有一个 id 的残缺库（P2-R2）：只查表存在性会放过它。
   const partialPath = join(tempDir('connector-account-legacy-partial-'), 'partial.sqlite')
-  const partial = openDatabase(partialPath)
-  try {
-    partial.exec('CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);'
-      + "INSERT INTO schema_migrations VALUES (1, 'x'); INSERT INTO schema_migrations VALUES (2, 'y');"
-      + 'CREATE TABLE workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, status_policy TEXT NOT NULL);'
-      + 'CREATE TABLE connector_account (id TEXT PRIMARY KEY);'
-      + 'CREATE TABLE provider_binding (id TEXT PRIMARY KEY, implementation_key TEXT NOT NULL, connector_account_id TEXT);'
-      + 'CREATE TABLE workspace_binding (workspace_id TEXT NOT NULL, binding_id TEXT NOT NULL, domain TEXT NOT NULL, enabled INTEGER NOT NULL, is_default INTEGER NOT NULL, configuration_json TEXT, PRIMARY KEY (workspace_id, binding_id, domain));')
-  } finally { partial.close() }
+  seedVersion2(partialPath, 'id TEXT PRIMARY KEY')
   const partialBefore = fingerprint(partialPath)
   assert.throws(() => createSqliteStorage(partialPath, policy()), /连接账号/, '残缺列集的 connector_account 必须在 migrate 之前拒绝')
   assert.equal(fingerprint(partialPath), partialBefore, '残缺列集的拒绝必须零写入（含零新增表）')
   const partialAfter = openDatabase(partialPath)
   try { assert.deepEqual(partialAfter.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '残缺列集不得先落 003–005') } finally { partialAfter.close() }
+  // 大写列名的完整库不得被误拒（SQLite 标识符大小写不敏感，P3-R4）。
+  const upperPath = join(tempDir('connector-account-uppercase-'), 'upper.sqlite')
+  seedVersion2(upperPath, 'ID TEXT PRIMARY KEY, PLATFORM_FAMILY TEXT NOT NULL, PLATFORM_ORIGIN TEXT NOT NULL, IDENTITY_KIND TEXT NOT NULL, EXTERNAL_ID TEXT NOT NULL, DISPLAY_NAME TEXT NOT NULL, SECRET_HANDLE TEXT, CONNECTION_STATE TEXT NOT NULL')
+  const uppercase = createSqliteStorage(upperPath, policy())
+  try { await uppercase.listConnectorAccounts() } finally { uppercase.close() } // 打开成功即证明未被误拒
 })
 
 test('constructor-failure-releases-handle-and-policy-is-frozen', () => {
@@ -118,6 +124,27 @@ test('constructor-failure-releases-handle-and-policy-is-frozen', () => {
   assert.ok(Object.isFrozen(EMPTY_POLICY), '默认策略必须冻结属性描述符')
   assert.throws(() => Object.defineProperty(EMPTY_POLICY, 'allowedSecretHandles', { value: new Set(['ESCALATED']) }), '默认策略的 getter 不得被重定义')
   createSqliteStorage(join(tempDir('connector-account-frozen-policy-'), 'frozen.sqlite')).close()
+})
+
+test('policy-snapshot-is-read-once-and-precedes-io', async () => {
+  // 有状态 getter 策略（第二次读就脏）不得把失败推到 migrate 之后（P3-R3）：属性只读一次、快照复用。
+  const clean = new Map([['harness.fake', { scope: { kind: 'enum', required: true, values: ['workspace'] } }]])
+  const dirty = new Map([['harness.fake', { scope: { kind: 'nope', required: true } }]])
+  let reads = 0
+  const stateful = { allowedSecretHandles: new Set(), get configurations() { reads += 1; return reads >= 2 ? dirty : clean } }
+  const path = join(tempDir('connector-account-stateful-policy-'), 'stateful.sqlite')
+  const storage = createSqliteStorage(path, stateful)
+  assert.equal(reads, 1, '策略属性只能读一次：工厂与构造函数不得各自快照')
+  await storage.putWorkspace(workspace()); await storage.putProviderBinding(binding('conn-stateful', 'planning'))
+  await storage.putBindingConfiguration({ ref: { workspaceId: WORKSPACE, bindingId: 'conn-stateful', domain: 'planning' }, configuration: { scope: 'workspace' } })
+  assert.equal((await storage.getBindingConfiguration({ workspaceId: WORKSPACE, bindingId: 'conn-stateful', domain: 'planning' })).configuration.scope, 'workspace', '落库使用的是第一次读到的干净快照')
+  storage.close()
+  const db = openDatabase(path)
+  try { assert.ok(db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'connector_account'").get(), '合法策略照常迁移') } finally { db.close() }
+  // 首次读就脏：必须在任何 IO 之前以 RangeError 失败且不创建文件。
+  const rejectedPath = join(tempDir('connector-account-dirty-first-read-'), 'dirty.sqlite')
+  assert.throws(() => createSqliteStorage(rejectedPath, { allowedSecretHandles: new Set(), get configurations() { return dirty } }), RangeError, '脏策略必须拒绝')
+  assert.equal(existsSync(rejectedPath), false, '策略失败必须先于 IO：库文件不得被创建')
 })
 
 test('secret-canary-never-published', async () => {

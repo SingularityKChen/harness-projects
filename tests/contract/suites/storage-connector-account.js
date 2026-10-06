@@ -1,7 +1,7 @@
 /** 连接账号与工作区配置的共享 Storage 契约套件（#126）：Fake 与 SQLite 同形跑 6 条命名用例；判别性集中在账号自然键不可重绑、配置按真实 implementationKey 分派、重登记/卸载只改挂载。 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { EMPTY_POLICY } from '@harness-projects/capabilities'
+import { EMPTY_POLICY, snapshotPolicy } from '@harness-projects/capabilities'
 import { createContext } from '@harness-projects/core'
 import { createFakePlanningProvider } from '@harness-projects/provider-fake'
 
@@ -180,5 +180,8 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     // 坏正则/负长度必须在构造点以 RangeError 失败，不能等首次写入才抛 SyntaxError（P3-R2）。
     assert.throws(() => makeStorage({ allowedSecretHandles: new Set(), configurations: new Map([['harness.fake', { scope: { kind: 'string', required: true, pattern: '(', maxLength: 8 } }]]) }), RangeError, '坏正则必须构造失败')
     assert.throws(() => makeStorage({ allowedSecretHandles: new Set(), configurations: new Map([['harness.fake', { scope: { kind: 'string', required: true, pattern: '[a-z]+', maxLength: -1 } }]]) }), RangeError, '负 maxLength 必须构造失败')
+    // 快照幂等：传入已快照对象必须返回同一份（P3-R3）。
+    const snapshot = snapshotPolicy(policy())
+    assert.equal(snapshotPolicy(snapshot), snapshot, 'snapshotPolicy 对已快照对象必须幂等')
   })
 }

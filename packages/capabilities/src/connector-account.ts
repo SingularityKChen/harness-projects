@@ -48,17 +48,24 @@ const IDENTITY_KINDS: readonly unknown[] = Object.values(ConnectorIdentityKind)
 const CONNECTION_STATES: readonly unknown[] = Object.values(ConnectorConnectionState)
 
 function reject(message: string): never { throw new RangeError(message) }
-/** 策略快照：Set / Map 换新，每条规则与 enum 的 `values` 也换冻结副本——只拷顶层会让构造后的 `values.push('EVIL')` 经共享引用扩权（对抗验证 P1-1）。 */
+/** 本模块产出过的快照：幂等判据（P3-R3）。用 WeakSet 而非 `Object.isFrozen`——调用方自冻的外壳仍可能含可变嵌套规则。 */
+const POLICY_SNAPSHOTS = new WeakSet<StorageValidationPolicy>()
+/** 策略快照：Set / Map 换新，每条规则与 enum 的 `values` 也换冻结副本（浅拷会让构造后的 `values.push('EVIL')` 经共享引用扩权，P1-1）。每个属性只读一次（P3-R3），已快照对象直接返回。 */
 export function snapshotPolicy(policy: StorageValidationPolicy): StorageValidationPolicy {
-  if (policy === null || typeof policy !== 'object' || !(policy.allowedSecretHandles instanceof Set) || !(policy.configurations instanceof Map)) reject('storage validation policy must provide an allowedSecretHandles Set and a configurations Map')
+  if (policy !== null && typeof policy === 'object' && POLICY_SNAPSHOTS.has(policy)) return policy
+  const handles: unknown = policy?.allowedSecretHandles
+  const schemas: unknown = policy?.configurations
+  if (!(handles instanceof Set) || !(schemas instanceof Map)) reject('storage validation policy must provide an allowedSecretHandles Set and a configurations Map')
   const copied = new Map<string, BindingConfigurationSchema>()
-  for (const [key, schema] of policy.configurations) {
+  for (const [key, schema] of schemas as Map<string, BindingConfigurationSchema>) {
     if (typeof key !== 'string' || key.trim() === '' || schema === null || typeof schema !== 'object') reject('configuration schema key must be a non-empty string')
     const fields: Record<string, BindingConfigurationRule> = {}
     for (const [name, rule] of Object.entries(schema)) fields[name] = copyRule(rule)
     copied.set(key, Object.freeze(fields))
   }
-  return Object.freeze({ allowedSecretHandles: new Set(policy.allowedSecretHandles), configurations: copied })
+  const snapshot = Object.freeze({ allowedSecretHandles: new Set(handles as Set<string>), configurations: copied })
+  POLICY_SNAPSHOTS.add(snapshot)
+  return snapshot
 }
 /** 规则副本：三种 kind 各自深拷（enum 的 `values` 必换新数组）；未知外形在写入之前拒绝。 */
 function copyRule(rule: unknown): BindingConfigurationRule {
