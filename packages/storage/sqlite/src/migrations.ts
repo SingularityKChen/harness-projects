@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { WorkspaceDatabase } from './db.ts'
+import { CONNECTOR_ACCOUNT_SCHEMA_MESSAGE, isConnectorAccountShapeMissing } from './storage-sync.ts'
 import { SOURCE_VERSION_CARRIER_STEP } from './source-version-carrier.ts'
 
 /**
@@ -31,7 +32,7 @@ export interface Migration {
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, file: '001_init.sql' },
   { version: 2, file: '002_identity_membership.sql' },
-  { version: 3, file: '003_control_facts.sql' },
+  { version: 3, file: '003_control_facts.sql', data: { preflight: (db) => { if (isConnectorAccountShapeMissing(db)) throw new Error(CONNECTOR_ACCOUNT_SCHEMA_MESSAGE) }, apply: () => {} } },
   { version: 4, file: '004_execution_run_identity.sql' },
   // 005 不含 DDL：载体世代步骤（#203），`schema_migrations` 里的 5 是世代标记。
   { version: 5, file: '005_source_version_carrier.sql', data: SOURCE_VERSION_CARRIER_STEP },

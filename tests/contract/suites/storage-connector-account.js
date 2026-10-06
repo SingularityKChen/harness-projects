@@ -168,21 +168,27 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     await assert.rejects(nested.putBindingConfiguration({ ref: nestedRef, configuration: { scope: 'workspace', injected: true } }), RangeError, '构造后追加剧则字段不得扩权')
     await nested.putBindingConfiguration({ ref: nestedRef, configuration: { scope: 'workspace' } })
     assert.deepEqual((await nested.getBindingConfiguration(nestedRef)).configuration, { scope: 'workspace' }, '原声明仍可用且只落已声明字段')
-    // 默认策略不得是进程内共享可变单例：改自己读到的空集合不能加宽别的默认实例（对抗验证 P1-2）。
+    // 默认策略不得是共享可变单例：改读到的空集合不能加宽别的实例（P1-2）。
     const shared = EMPTY_POLICY.allowedSecretHandles
     shared.add('ESCALATED')
     assert.equal((await makeStorage().listConnectorAccounts()).length, 0, '默认策略访问到的空集合不可被写入')
     assert.equal(EMPTY_POLICY.allowedSecretHandles.has('ESCALATED'), false, '改一份读到的空集合不得污染后续读取')
-    // 属性描述符也要冻：重定义 getter 不得扩权（P2-R3）。
+    // 重定义 getter 也不得扩权（P2-R3）。
     assert.ok(Object.isFrozen(EMPTY_POLICY), '默认策略必须冻结属性描述符')
     assert.throws(() => Object.defineProperty(EMPTY_POLICY, 'allowedSecretHandles', { value: new Set(['ESCALATED']) }), TypeError, '默认策略 getter 不得被重定义')
     await assert.rejects(makeStorage().putConnectorAccount(account({ id: 'account-esc', secretHandle: 'ESCALATED' })), RangeError, '默认空策略仍拒绝任意句柄')
-    // 坏正则/负长度必须在构造点以 RangeError 失败，不能等首次写入才抛 SyntaxError（P3-R2）。
+    // 坏正则/负长度必须在构造点以 RangeError 失败，而不是写到一半抛 SyntaxError（P3-R2）。
     assert.throws(() => makeStorage({ allowedSecretHandles: new Set(), configurations: new Map([['harness.fake', { scope: { kind: 'string', required: true, pattern: '(', maxLength: 8 } }]]) }), RangeError, '坏正则必须构造失败')
     assert.throws(() => makeStorage({ allowedSecretHandles: new Set(), configurations: new Map([['harness.fake', { scope: { kind: 'string', required: true, pattern: '[a-z]+', maxLength: -1 } }]]) }), RangeError, '负 maxLength 必须构造失败')
-    // 幂等只指「不重读 getter」：返回容器仍须是新副本（P1 / P3-R3）。
-    let reads = 0; const snapshot = snapshotPolicy({ get allowedSecretHandles() { reads += 1; return new Set() }, get configurations() { reads += 1; return new Map() } })
-    const cached = makeStorage(snapshot); assert.equal(reads, 2, '传入快照不得重读其 getter')
-    snapshot.allowedSecretHandles.add('ESCALATED'); await assert.rejects(cached.putConnectorAccount(account({ id: 'account-snap', secretHandle: 'ESCALATED' })), RangeError, '改快照读到的容器不得扩权')
+    // 受信 schema 声明 `__proto__` 字段时必须与其它字段同形落账，不得被静默丢弃（外部评审 P2）。
+    const protoSchema = snapshotPolicy({ allowedSecretHandles: new Set(), configurations: new Map([['harness.fake', JSON.parse('{"__proto__":{"kind":"boolean","required":true},"ok":{"kind":"boolean","required":false}}')]]) })
+    assert.deepEqual(Object.keys(protoSchema.configurations.get('harness.fake')), ['__proto__', 'ok'], '声明字段必须逐项落账（含 __proto__）')
+    const snapshot = snapshotPolicy(policy()); for (const [view, write, arg] of [[snapshot.allowedSecretHandles, 'add', 'ESCALATED'], [snapshot.configurations, 'set', 'impl.esc']]) assert.throws(() => view[write](arg, {}), TypeError, '快照容器必须只读')
+    assert.equal(snapshot.allowedSecretHandles.has('HARNESS_FAKE_TOKEN') && snapshot.configurations.has('harness.fake'), true, '只读视图照常可读')
+    let reads = 0; const live = snapshotPolicy({ get allowedSecretHandles() { reads += 1; return new Set() }, get configurations() { reads += 1; return new Map() } })
+    const switchPolicy = snapshotPolicy({ allowedSecretHandles: new Set(['ESCALATED']), configurations: new Map() }); const instance = makeStorage(snapshot); try { instance.policy = switchPolicy } catch { /* 拒绝替换即可 */ }
+    const cached = makeStorage(live); assert.equal(reads, 2, '传入快照不得重读其 getter'); const again = snapshotPolicy(live), twice = snapshotPolicy(live)
+    assert.ok(again !== live && again !== twice && again.allowedSecretHandles !== twice.allowedSecretHandles, '每次快照都必须返回新对象（幂等缓存不得外泄）')
+    for (const [store, id] of [[instance, 'account-replace'], [cached, 'account-snap']]) await assert.rejects(store.putConnectorAccount(account({ id, secretHandle: 'ESCALATED' })), RangeError, '改/替换策略不得扩权')
   })
 }
