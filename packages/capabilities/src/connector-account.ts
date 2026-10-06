@@ -37,8 +37,8 @@ export interface StorageValidationPolicy {
   /** 连接实现键 → 配置字段规则；配置读写只按**真实锚点**的 implementationKey 分派。 */
   readonly configurations: ReadonlyMap<string, BindingConfigurationSchema>
 }
-/** 空策略：每次属性访问返回新的空集合，导入者改自己读到的对象不能加宽默认授权（对抗验证 P1-2）。 */
-export const EMPTY_POLICY: StorageValidationPolicy = { get allowedSecretHandles(): Set<string> { return new Set() }, get configurations(): Map<string, BindingConfigurationSchema> { return new Map() } }
+/** 空策略：每访存返回新空集合，且属性描述符冻结（getter 不可被 `defineProperty` 重定义）——对抗验证 P1-2 / P2-R3。 */
+export const EMPTY_POLICY: StorageValidationPolicy = Object.freeze({ get allowedSecretHandles(): Set<string> { return new Set() }, get configurations(): Map<string, BindingConfigurationSchema> { return new Map() } })
 
 const DEVICE_HANDLE = /^[A-Za-z_][A-Za-z0-9_]*$/
 const ACCOUNT_FIELDS = ['id', 'platformFamily', 'platformOrigin', 'identityKind', 'externalId', 'displayName', 'secretHandle', 'connectionState'] as const
@@ -67,7 +67,9 @@ function copyRule(rule: unknown): BindingConfigurationRule {
     if (candidate.kind === 'enum' && typeof candidate.required === 'boolean' && Array.isArray(candidate.values)) {
       return Object.freeze({ kind: 'enum', required: candidate.required, values: Object.freeze(candidate.values.map((value) => assertText(value, 'binding configuration enum value must be a non-empty string'))) })
     }
-    if (candidate.kind === 'string' && typeof candidate.required === 'boolean' && typeof candidate.pattern === 'string' && Number.isInteger(candidate.maxLength)) {
+    if (candidate.kind === 'string' && typeof candidate.required === 'boolean' && typeof candidate.pattern === 'string' && Number.isInteger(candidate.maxLength) && candidate.maxLength >= 0) {
+      // 坏正则/负长度必须在构造点以 `RangeError` 失败，而不是等首次写入才抛 `SyntaxError`（对抗验证 P3-R2）。
+      try { new RegExp(`^(?:${candidate.pattern})$`) } catch { reject('binding configuration schema rule pattern must be a valid regular expression') }
       return Object.freeze({ kind: 'string', required: candidate.required, pattern: candidate.pattern, maxLength: candidate.maxLength })
     }
     if (candidate.kind === 'boolean' && typeof candidate.required === 'boolean') return Object.freeze({ kind: 'boolean', required: candidate.required })
