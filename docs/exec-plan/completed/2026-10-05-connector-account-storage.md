@@ -1,6 +1,6 @@
 # 连接账号与工作区配置存储 ExecPlan
 
-> 状态：Active；设计已收敛，产品实现未开始。
+> 状态：Completed；Batch 1 已实施并通过评审，按人类裁定归档。
 > 创建：2026-10-05 CST；规范：`PLANS.md`。
 > 关联：[issue #126](https://github.com/SingularityKChen/harness-projects/issues/126)；M4，Iteration 5（2026-10-15 至 2026-10-21）的候选闭环。
 > 执行上下文：检出 `feature/connector-account-storage` 的工作树根目录；隔离目录为 `.worktrees/connector-account-plan`。
@@ -125,6 +125,7 @@ canary、错误输入及行为期望独立于实现 parser 构造。临时删除
 - [x] (2026-10-05 CST) 最终验收轮修复：P1（回归）`snapshotPolicy` 命中 WeakSet 时改为「不重读 getter、但仍重新拷容器」，修掉「拿快照结果构造后再改该结果的 Set 可扩权」；P3（判别力）`immutable-account-and-anchor-identity` 的同自然键换 id 断言收紧为 `RangeError` 且不含驱动文本。净增 0 行（代码 994 不变）。
 - [x] (2026-10-06 CST) 主控最终发布：分支 `feature/connector-account-storage` 在精确 old-head lease（`ea4edca`）下 force-with-lease 推送，远端 head 更新为 `7d76cc8`；PR #270 描述补入 issue #126 验收 2 要求的 **schema review 受信输入前提**段并改写全部验证证据，执行 `gh pr ready 270`。回读：`headRefOid = 7d76cc8`、base = main、draft = false、mergeStateStatus = CLEAN、closingIssuesReferences = #126、issue #126 的 closedByPullRequestsReferences = #270、review threads = 0；13 项检查全部 pass（含 Reconcile engineering state、Disclosure scan、PR size、Claim route fast gate）。
 - [x] (2026-10-06 CST) 外部评审答复（PR#270）：P1 策略构造后仍可扩权（快照幂等命中后从被污染容器再拷、实例 `policy` 为可写可枚举字段）、P2 `__proto__` 字段被静默丢弃、P2 旧 002 形状拒绝晚于迁移、P3 `/dev/fd` 断言无判别力，逐条修复并给出「注入缺陷必红」变异；`docs/README.md` 的 #270 索引行更新为已实施待评审。
+- [x] (2026-10-06 CST) 人类评审决定：#270 当前 head `e34529c5c06c722be1ba9ed75c80367dd6471aca` 已重锁；Fake webhook parity 与公开 `MemoryStorage.data` 均定为非阻塞 P2。前者不在本 PR 扩大 Fake webhook port，按已登记债务保留；后者因涉及既有测试注入面与 1000 行硬门余量不足，不在本 PR 改代码。#268 的规模例外是本轮人类授权，不作为 #270 的阻塞条件。当前 checks 全绿，待执行归档、issue/checks/review 回读与 rebase merge。
 - [ ] (2026-10-05 CST) 人类合并决定；通过后归档计划（评审意见回来后按 `docs/review/responding.md` 处理）。
 
 Batch 1 实测证据（均在 `.worktrees/connector-account-plan` 工作树根）：
