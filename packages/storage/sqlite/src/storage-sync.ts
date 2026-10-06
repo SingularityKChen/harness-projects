@@ -73,11 +73,12 @@ const CONNECTOR_ACCOUNT_COLUMNS = ['id', 'platform_family', 'platform_origin', '
 
 /**
  * #126 的形状判据（唯一一份）：已应用版本 2 却缺账号表或必需列时为真——表整体缺失或只有部分列的损坏库都会先被 003–005 部分迁移（对抗验证 P2-2/P2-R2）。工厂在 `migrate` 前只读拒绝，构造函数兜底；空库返回 false。
+ * 列名比对按 SQLite 语义大小写不敏感（P3-R4）：`pragma_table_info` 返回声明拼写，逐字比对会误拒大写声明的合法库。
  */
 export function isConnectorAccountShapeMissing(db: WorkspaceDatabase): boolean {
   const hasTable = (name: string): boolean => db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined
   if (!hasTable('schema_migrations') || !(db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]).some((row) => row.version === 2)) return false
-  const columns = (table: string): readonly string[] => (db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as { name: string }[]).map((row) => row.name)
+  const columns = (table: string): readonly string[] => (db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as { name: string }[]).map((row) => row.name.toLowerCase())
   if (!hasTable('connector_account')) return true
   const accountColumns = columns('connector_account')
   return CONNECTOR_ACCOUNT_COLUMNS.some((name) => !accountColumns.includes(name))
@@ -116,10 +117,11 @@ export class SqliteSyncSurface {
     this.location = location; this.db = db; this.scoped = scoped
     this.#state = state ?? { closed: false }; this.#token = token
     // 策略快照与自检失败都关句柄（P3 / P2-R1）：直接构造的调用方也不会拿到泄漏句柄。
+    // 工厂已快照过一次（P3-R3）：复用副本，二次读有状态 getter 会把失败推到 migrate 之后。
     if (!scoped) {
       try { this.policy = snapshotPolicy(policy); this.#assertRewrittenSchema(); this.#assertConnectorAccountSchema(); this.#assertStoredMetadata() } catch (error) { closeQuietly(this.db); throw error }
     } else {
-      this.policy = snapshotPolicy(policy)
+      this.policy = policy
     }
   }
 

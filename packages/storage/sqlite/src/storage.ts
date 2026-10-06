@@ -172,14 +172,14 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
 /**
  * 打开（必要时创建）库、应用缺失迁移并返回端口实现；迁移幂等，失败关句柄后原样抛出。
  * `preflight`（#126）：旧 002 形状（版本 2 已记账但没有连接账号表/列）必须在任何待应用迁移之前只读拒绝（`migrate` 只按版本号跳过）；拒绝零写入，构造函数自检再查同一判据。
- * 受信策略先在任何 IO 之前快照（P2-R1）：非法策略既不留迁移写入，也不打开句柄；构造函数也在 `try` 内。
+ * 受信策略先在任何 IO 之前快照（P2-R1）并把同一份交给构造函数（P3-R3）：非法策略不留迁移写入、不打开句柄；二次读有状态 getter 会把失败推到 migrate 之后。构造函数也在 `try` 内。
  */
 export function createSqliteStorage(location: string | ':memory:', policy: StorageValidationPolicy = EMPTY_POLICY): SqliteStorage {
-  snapshotPolicy(policy)
+  const snapshot = snapshotPolicy(policy)
   const db = openDatabase(location)
   try {
     if (isConnectorAccountShapeMissing(db)) throw new Error(CONNECTOR_ACCOUNT_SCHEMA_MESSAGE)
     migrate(db)
-    return new SqliteStorage(location, db, false, undefined, undefined, policy)
+    return new SqliteStorage(location, db, false, undefined, undefined, snapshot)
   } catch (error) { try { db.close() } catch { /* 构造函数已关：幂等 */ } throw error }
 }
