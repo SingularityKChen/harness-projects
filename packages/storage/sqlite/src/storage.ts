@@ -2,26 +2,29 @@
  * @harness-projects/storage-sqlite —— Storage 端口的 SQLite 实现：地基面（Batch L4 / #163）、同步面（Batch L5 / #164）与执行面（Batch L6 / #120、#5）。本文件是地基面：工作区 / 绑定 / 实体 / 身份 / 规划投影 / 仓库 / 投影修订号；同步面（成员关系 / 字段值 / 观察 / 游标）与**写者 / 读者路径机制**在 `storage-sync.ts`，执行面（执行上下文与运行 / 关系 / 写尝试）在 `storage-execution.ts`，本类按面逐层继承——机制只有那一份，本文件不再有队列、作用域标记、关闭标记、`mutate`、`transaction` 或 `close()`。端口三组的方法已全部落地（L6），因此没有 `UnimplementedPort` 桩。
  * 读写路径：每个方法都经过基类的唯一入口（`read` / `mutate` / `write`），因此外部读拿到**结算后**的值、看不到未提交的写入；事务在队列内从 BEGIN IMMEDIATE 持有到 COMMIT / ROLLBACK，重叠事务串行提交，在途事务期间的直接写入等到结算后才执行。多语句写入只有一个原子入口 `atomic`。代价也相同：事务的 work 里必须用 `tx.*`（队列内自等，用 AsyncLocalStorage 标记事务作用域）；嵌套事务在运行时被拒绝，抛错后 ROLLBACK、重开句柄读不到半写行（L3 计划遗留「嵌套事务在运行时静默吞写」）。快速失败文本由基类持有，这里只把它们转出包外；约定文本的整串断言在 `tests/contract/suites/storage.js`。列表顺序：端口未承诺顺序；本实现各列表的排序见各方法（地基面与同步面按 rowid / 业务键，执行面按主键序），调用方不得依赖。
  */
-import type { ProviderBindingRecord, RepositoryRecord, Storage, StorageTransaction, WorkspaceRecord } from '@harness-projects/capabilities'
-import { parseExternalIdentityKind, type Entity, type EntityId, type ExternalIdentity, type ProviderBindingId, type WorkspaceId, type WorkspaceProjection } from '@harness-projects/domain'
+import type { BindingConfigurationRecord, ConnectorAccountRecord, ProviderBindingRecord, RepositoryRecord, Storage, StorageTransaction, StorageValidationPolicy, WorkspaceRecord } from '@harness-projects/capabilities'
+import { EMPTY_POLICY, parseBindingConfiguration, parseConnectorAccount } from '@harness-projects/capabilities'
+import { parseExternalIdentityKind, type ConnectorAccountId, type Entity, type EntityId, type ExternalIdentity, type ProviderBindingId, type WorkspaceId, type WorkspaceProjection } from '@harness-projects/domain'
 import { openDatabase } from './db.ts'
 import { migrate } from './migrate.ts'
-import { contentColumns, optional, rowToBinding, rowToIdentity, rowToProjection, rowToRepository, rowToWorkspace, toFlag, type Row } from './storage-rows.ts'
+import { contentColumns, optional, rowToBinding, rowToBindingConfiguration, rowToConnectorAccount, rowToIdentity, rowToProjection, rowToRepository, rowToWorkspace, toFlag, type Row } from './storage-rows.ts'
 import { SqliteExecutionSurface } from './storage-execution.ts'
-import { type TransactionToken } from './storage-sync.ts'
+import { CONNECTOR_ACCOUNT_SCHEMA_MESSAGE, isConnectorAccountShapeMissing, type TransactionToken } from './storage-sync.ts'
 
-export { CLOSED_MESSAGE, LEGACY_COMMITTED_VERSION_MESSAGE, NESTED_TRANSACTION_MESSAGE, OUTER_INSTANCE_MESSAGE, SETTLED_TRANSACTION_MESSAGE } from './storage-sync.ts'
+export { CLOSED_MESSAGE, CONNECTOR_ACCOUNT_SCHEMA_MESSAGE, LEGACY_COMMITTED_VERSION_MESSAGE, NESTED_TRANSACTION_MESSAGE, OUTER_INSTANCE_MESSAGE, SETTLED_TRANSACTION_MESSAGE } from './storage-sync.ts'
 
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。绑定列名与拆表前一致（工作区作用域三列来自挂载、实现键来自连接锚点），`rowToBinding` 因此不用改。
 const BINDING_COLUMNS = 'b.id AS id, wb.workspace_id AS workspace_id, wb.domain AS domain, b.implementation_key AS implementation_key, wb.enabled AS enabled, wb.is_default AS is_default'
 const IDENTITY_COLUMNS = 'id, entity_id, binding_id, external_kind, external_id, role'
 const PROJECTION_COLUMNS = 'workspace_id, entity_id, planning_status, content_kind, content_title, content_body, content_number, redaction_reason, revision'
 const REPOSITORY_COLUMNS = 'id, workspace_id, external_identity_id'
+/** #126：账号列清单只写一次；配置按列读取（`configuration_json IS NOT NULL` 才算存在配置）。 */
+const ACCOUNT_COLUMNS = 'id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state'
 
 /** 地基面。事务作用域与存储实例共用同一连接与同一条队列，因此同一个类同时充当 Storage 与 StorageTransaction；作用域实例（`scoped`）已持有队列，它的读写直接执行。 */
 export class SqliteStorage extends SqliteExecutionSurface implements Storage {
-  /** 作用域实例就是本类的一个 `scoped` 副本：同一个连接、同一条队列、**共用**的关闭标记与本事务的令牌（见基类的 `transaction()`）。 */
-  protected override scopedInstance(state: { closed: boolean }, token: TransactionToken): StorageTransaction { return new SqliteStorage(this.location, this.db, true, state, token) }
+  /** 作用域实例就是本类的一个 `scoped` 副本：同一个连接、同一条队列、**共用**的关闭标记与本事务的令牌（见基类的 `transaction()`），并传同一份受信策略。 */
+  protected override scopedInstance(state: { closed: boolean }, token: TransactionToken): StorageTransaction { return new SqliteStorage(this.location, this.db, true, state, token, this.policy) }
 
   putWorkspace(record: WorkspaceRecord): Promise<void> {
     return this.write('INSERT INTO workspace (id, name, status_policy) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET name = excluded.name, status_policy = excluded.status_policy', record.id, record.name, record.statusPolicy)
@@ -39,6 +42,85 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
     return this.atomic(write)
   }
   listProviderBindings(workspaceId: WorkspaceId): Promise<readonly ProviderBindingRecord[]> { return this.read(() => (this.db.prepare(`SELECT ${BINDING_COLUMNS} FROM workspace_binding AS wb JOIN provider_binding AS b ON b.id = wb.binding_id WHERE wb.workspace_id = ? ORDER BY wb.rowid`).all(workspaceId) as Row[]).map(rowToBinding)) }
+  /** 卸载一个挂载：配置是同一行的列，随行删除；账号 FK、连接锚点、外部身份与同步历史都在别的表上，故意不动（#126）。缺失挂载重复移除是 no-op（DELETE 命中 0 行）。 */
+  removeProviderBinding(ref: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId; readonly domain: string }): Promise<void> {
+    return this.write('DELETE FROM workspace_binding WHERE workspace_id = ? AND binding_id = ? AND domain = ?', ref.workspaceId, ref.bindingId, ref.domain)
+  }
+
+  /**
+   * 账号写入（#126）：闭集解析与独立副本走 capabilities 的共用解析器；自然键唯一由 002 的 UNIQUE 兜底。
+   * 同 id 换自然键、同自然键换 id 必须在**任何写入之前**以固定文本拒绝——`ON CONFLICT … DO UPDATE` 只更新可变的
+   * 显示名/句柄/观察状态，自然键列不参与 UPDATE，因此身份不会被默默改写。
+   */
+  async putConnectorAccount(record: ConnectorAccountRecord): Promise<void> {
+    const parsed = parseConnectorAccount(record, this.policy)
+    const key = [parsed.platformFamily, parsed.platformOrigin, parsed.identityKind, parsed.externalId]
+    return this.atomic(() => {
+      const sameId = this.db.prepare('SELECT platform_family, platform_origin, identity_kind, external_id FROM connector_account WHERE id = ?').get(parsed.id) as Row | undefined
+      if (sameId !== undefined && [sameId.platform_family, sameId.platform_origin, sameId.identity_kind, sameId.external_id].some((value, index) => value !== key[index])) {
+        throw new RangeError('connector account id already points at another identity')
+      }
+      const owner = this.db.prepare('SELECT id FROM connector_account WHERE platform_family = ? AND platform_origin = ? AND identity_kind = ? AND external_id = ?').get(...key) as { id: string } | undefined
+      if (owner !== undefined && owner.id !== parsed.id) throw new RangeError('connector account identity is already registered under another id')
+      this.db.prepare(`INSERT INTO connector_account (id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (id) DO UPDATE SET display_name = excluded.display_name, secret_handle = excluded.secret_handle, connection_state = excluded.connection_state`)
+        .run(parsed.id, ...key, parsed.displayName, parsed.secretHandle ?? null, parsed.connectionState)
+    })
+  }
+  getConnectorAccount(id: ConnectorAccountId): Promise<ConnectorAccountRecord | undefined> {
+    return this.read(() => optional(this.db.prepare(`SELECT ${ACCOUNT_COLUMNS} FROM connector_account WHERE id = ?`).get(id), rowToConnectorAccount))
+  }
+  listConnectorAccounts(): Promise<readonly ConnectorAccountRecord[]> {
+    return this.read(() => (this.db.prepare(`SELECT ${ACCOUNT_COLUMNS} FROM connector_account ORDER BY rowid`).all() as Row[]).map(rowToConnectorAccount))
+  }
+  /**
+   * 初次关联（#126）：账号与锚点必须存在；锚点已有任何外部身份 / 观察 / 同步游标 / webhook 订阅 / 写尝试事实时拒绝。
+   * 事实检查与写 FK 在同一个 `atomic` 内（同一个 BEGIN IMMEDIATE），中间态不被别的写入看见；同账号重复关联是 no-op。
+   */
+  async setProviderBindingAccount(bindingId: ProviderBindingId, accountId: ConnectorAccountId): Promise<void> {
+    return this.atomic(() => {
+      if (this.db.prepare('SELECT 1 AS present FROM provider_binding WHERE id = ?').get(bindingId) === undefined) throw new RangeError('connection anchor does not exist')
+      if (this.db.prepare('SELECT 1 AS present FROM connector_account WHERE id = ?').get(accountId) === undefined) throw new RangeError('connector account does not exist')
+      const current = this.db.prepare('SELECT connector_account_id FROM provider_binding WHERE id = ?').get(bindingId) as { connector_account_id: string | null }
+      if (current.connector_account_id !== null) {
+        if (current.connector_account_id === accountId) return
+        throw new RangeError('connection anchor is already associated with another connector account')
+      }
+      const facts = [
+        'SELECT 1 FROM external_identity WHERE binding_id = ? LIMIT 1',
+        'SELECT 1 FROM sync_observation WHERE binding_id = ? LIMIT 1',
+        'SELECT 1 FROM sync_cursor WHERE binding_id = ? LIMIT 1',
+        'SELECT 1 FROM webhook_subscription WHERE binding_id = ? LIMIT 1',
+        'SELECT 1 FROM mutation_attempt WHERE binding_id = ? LIMIT 1',
+      ]
+      if (facts.some((sql) => this.db.prepare(sql).get(bindingId) !== undefined)) {
+        throw new RangeError('connection anchor already has external facts: create a new binding id instead')
+      }
+      this.db.prepare('UPDATE provider_binding SET connector_account_id = ? WHERE id = ?').run(accountId, bindingId)
+    })
+  }
+  getProviderBindingAccount(bindingId: ProviderBindingId): Promise<ConnectorAccountId | undefined> {
+    return this.read(() => {
+      const row = this.db.prepare('SELECT connector_account_id FROM provider_binding WHERE id = ?').get(bindingId) as { connector_account_id: string | null } | undefined
+      return row?.connector_account_id == null ? undefined : row.connector_account_id as ConnectorAccountId
+    })
+  }
+  /** 配置写入（#126）：先查真实挂载与它的 implementationKey，再按受信 schema 逐字段校验；不接收调用者声称的实现键。 */
+  async putBindingConfiguration(record: BindingConfigurationRecord): Promise<void> {
+    return this.atomic(() => {
+      const mount = this.db.prepare('SELECT b.implementation_key AS implementation_key FROM workspace_binding AS wb JOIN provider_binding AS b ON b.id = wb.binding_id WHERE wb.workspace_id = ? AND wb.binding_id = ? AND wb.domain = ?')
+        .get(record.ref.workspaceId, record.ref.bindingId, record.ref.domain) as { implementation_key: string } | undefined
+      if (mount === undefined) throw new RangeError('binding configuration references an unknown workspace mount')
+      const parsed = parseBindingConfiguration(record, this.policy, mount.implementation_key)
+      this.db.prepare('UPDATE workspace_binding SET configuration_json = ? WHERE workspace_id = ? AND binding_id = ? AND domain = ?')
+        .run(JSON.stringify(parsed.configuration), parsed.ref.workspaceId, parsed.ref.bindingId, parsed.ref.domain)
+    })
+  }
+  getBindingConfiguration(ref: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId; readonly domain: string }): Promise<BindingConfigurationRecord | undefined> {
+    return this.read(() => optional(this.db.prepare('SELECT workspace_id, binding_id, domain, configuration_json FROM workspace_binding WHERE workspace_id = ? AND binding_id = ? AND domain = ? AND configuration_json IS NOT NULL')
+      .get(ref.workspaceId, ref.bindingId, ref.domain), rowToBindingConfiguration))
+  }
   putEntity(record: Entity): Promise<void> { return this.write('INSERT INTO entity (id, kind) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET kind = excluded.kind', record.id, record.kind) }
   /** 身份全局一份：重复登记保留已分配的 id 与 entityId（否则引用会断），只更新角色。种类先过 domain 的解析器：未知种类在任何写入之前以与替身相同的 RangeError（Promise 拒绝）失败，不依赖 002 的 CHECK 措辞；CHECK 是第二道防线。 */
   async putExternalIdentity(record: ExternalIdentity): Promise<void> {
@@ -86,9 +168,16 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   }
 }
 
-/** 打开（必要时创建）库、应用缺失迁移并返回端口实现。迁移幂等：对已迁移的文件重复调用是 no-op。迁移失败（含旧库里无法归一的观察版本载体的 `LegacySourceVersionError`，库文件未被修改）时关掉句柄并原样抛出；构造函数自检失败时已关掉句柄（P3），因此这里不重复关闭。 */
-export function createSqliteStorage(location: string | ':memory:'): SqliteStorage {
+/**
+ * 打开（必要时创建）库、应用缺失迁移并返回端口实现。迁移幂等：对已迁移的文件重复调用是 no-op。迁移失败（含旧库里无法归一的观察版本载体的 `LegacySourceVersionError`，库文件未被修改）时关掉句柄并原样抛出；构造函数自检失败时已关掉句柄（P3），因此这里不重复关闭。
+ *
+ * `preflight`（#126）：旧 002 形状（版本 2 已记账但没有连接账号表/列）必须在**任何待应用迁移之前**被只读拒绝——`migrate` 只按版本号跳过，否则这个库会看起来是新的、直到第一次写账号才炸在驱动层。拒绝时原目录、文件与已提交版本都保持原样；构造函数自检把同一判据再查一遍（直接构造的调用方同样受保护）。
+ */
+export function createSqliteStorage(location: string | ':memory:', policy: StorageValidationPolicy = EMPTY_POLICY): SqliteStorage {
   const db = openDatabase(location)
-  try { migrate(db) } catch (error) { db.close(); throw error }
-  return new SqliteStorage(location, db)
+  try {
+    if (isConnectorAccountShapeMissing(db)) throw new Error(CONNECTOR_ACCOUNT_SCHEMA_MESSAGE)
+    migrate(db)
+  } catch (error) { db.close(); throw error }
+  return new SqliteStorage(location, db, false, undefined, undefined, policy)
 }

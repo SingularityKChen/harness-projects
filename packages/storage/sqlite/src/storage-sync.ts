@@ -31,11 +31,11 @@
  * 落库形态（安全，本层决定）：`snapshot_json` **原样**持久化整条 `ProviderObservation`——`payload` 由 provider 负责脱敏，storage 不裁剪、不改写、不丢弃（见 `ProviderObservation` 的契约注释；本层计划遗留「`payload` 由 provider 先脱敏」已收口）。
  */
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { assertComparableSourceVersion, compareSourceVersion, isComparableSourceVersion, type FieldValueRecord, type MembershipRecord, type ObservationRecord, type ReconcileCursorRecord, type StorageTransaction, type SyncCursorRecord } from '@harness-projects/capabilities'
+import { assertComparableSourceVersion, compareSourceVersion, isComparableSourceVersion, parseBindingConfiguration, parseConnectorAccount, snapshotPolicy, EMPTY_POLICY, type FieldValueRecord, type MembershipRecord, type ObservationRecord, type ReconcileCursorRecord, type StorageTransaction, type StorageValidationPolicy, type SyncCursorRecord } from '@harness-projects/capabilities'
 import type { ProviderBindingId, WorkspaceId } from '@harness-projects/domain'
 import type { WorkspaceDatabase } from './db.ts'
 import { assertRewritten003Shape } from './source-version-carrier.ts'
-import { optional, rowToFieldValue, rowToMembership, rowToReconcileCursor, rowToSyncCursor, type Row } from './storage-rows.ts'
+import { optional, rowToBindingConfiguration, rowToConnectorAccount, rowToFieldValue, rowToMembership, rowToReconcileCursor, rowToSyncCursor, type Row } from './storage-rows.ts'
 
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。
 const MEMBERSHIP_COLUMNS = 'workspace_id, project_external_id, item_external_id, content_external_kind, content_external_id, membership_created_at, membership_updated_at'
@@ -65,6 +65,17 @@ const TX_SCOPE = new AsyncLocalStorage<TransactionToken>()
  */
 export const LEGACY_COMMITTED_VERSION_MESSAGE = '已提交版本不是规范载体（账本里有旧版本写入的观察版本载体）：请停掉旧版本进程，调用 repairLegacySourceVersions(<库文件>, { backupPath }) 先备份再修复，然后重试'
 
+/** #126：已应用版本 2 但缺连接账号表/列的旧库必须在迁移之前被只读拒绝；目录、文件与已提交版本保持原样，调用方显式重建。 */
+export const CONNECTOR_ACCOUNT_SCHEMA_MESSAGE = '本地库是加入连接账号之前的 002（缺 connector_account 表，或 provider_binding.connector_account_id / workspace_binding.configuration_json 列）：请显式决定并删除库文件重建（程序不会升级也不会删库）'
+
+/** #126 的连接账号形状判据（唯一一份）：库已建（`provider_binding` 存在）却缺 `connector_account` 表或两个新列时为真。工厂在 `migrate` 之前用它只读拒绝，构造函数再兜底直接构造的调用方。 */
+export function isConnectorAccountShapeMissing(db: WorkspaceDatabase): boolean {
+  if (db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'provider_binding'").get() === undefined) return false
+  const columns = (table: string): readonly string[] => (db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as { name: string }[]).map((row) => row.name)
+  return columns('connector_account').length === 0 || !columns('provider_binding').includes('connector_account_id')
+    || !columns('workspace_binding').includes('configuration_json')
+}
+
 /** 列值 → 端口版本：`undefined` 的 `sourceVersion` 落库时空串（列 NOT NULL），读回必须还原，否则两条都没有 `sourceVersion` 的合法观察里第二条会被判成乱序。 */
 const columnToVersion = (value: string | undefined): string | undefined => (value === '' ? undefined : value)
 
@@ -89,11 +100,14 @@ export class SqliteSyncSurface {
   #state: { closed: boolean }
   /** 本实例作为作用域实例时所持的令牌；根实例上写入它没有读者（根实例认 `TX_SCOPE` 里的令牌）。 */
   #token: TransactionToken | undefined
-  constructor(location: string, db: WorkspaceDatabase, scoped = false, state?: { closed: boolean }, token?: TransactionToken) {
+  /** 受信校验策略的**独立副本**：根实例与事务作用域实例共用同一份，不在 scope 内退回空策略（#126）。 */
+  protected readonly policy: StorageValidationPolicy
+  constructor(location: string, db: WorkspaceDatabase, scoped = false, state?: { closed: boolean }, token?: TransactionToken, policy: StorageValidationPolicy = EMPTY_POLICY) {
     this.location = location; this.db = db; this.scoped = scoped
     this.#state = state ?? { closed: false }; this.#token = token
+    this.policy = snapshotPolicy(policy)
     // 自检失败必须把句柄关掉（P3）：`createSqliteStorage` 拿不到实例，它那条 catch 也就无从关闭，句柄会一直泄漏。
-    if (!scoped) { try { this.#assertRewrittenSchema() } catch (error) { this.db.close(); throw error } }
+    if (!scoped) { try { this.#assertRewrittenSchema(); this.#assertConnectorAccountSchema(); this.#assertStoredMetadata() } catch (error) { this.db.close(); throw error } }
   }
 
   /**
@@ -102,6 +116,20 @@ export class SqliteSyncSurface {
    * 驱动级报错换成一句可执行的处置。只在根实例上跑（作用域实例共用同一个刚查过的句柄）；未迁移时不判定。
    */
   #assertRewrittenSchema(): void { assertRewritten003Shape(this.db) }
+
+  /** #126 的 schema 自检：已应用版本 2 但缺连接账号形状的旧库，把驱动级报错换成一句可执行的处置。只在根实例上跑，未迁移时不判定。 */
+  #assertConnectorAccountSchema(): void {
+    if (isConnectorAccountShapeMissing(this.db)) throw new Error(CONNECTOR_ACCOUNT_SCHEMA_MESSAGE)
+  }
+
+  /** #126 的已存元数据自检：用当前受信策略重放账号与配置的闭集校验（漏策略的空库合法；有不匹配行的库在打开时拒绝）。只在根实例上跑，配置按真实锚点的 implementationKey 分派。 */
+  #assertStoredMetadata(): void {
+    const rows = (sql: string): Row[] => this.db.prepare(sql).all() as Row[]
+    for (const row of rows('SELECT id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state FROM connector_account ORDER BY rowid')) parseConnectorAccount(rowToConnectorAccount(row), this.policy)
+    for (const row of rows(`SELECT wb.workspace_id, wb.binding_id, wb.domain, wb.configuration_json, b.implementation_key FROM workspace_binding AS wb JOIN provider_binding AS b ON b.id = wb.binding_id WHERE wb.configuration_json IS NOT NULL ORDER BY wb.rowid`)) {
+      parseBindingConfiguration(rowToBindingConfiguration(row), this.policy, row.implementation_key as string)
+    }
+  }
 
   /**
    * **唯一读写入口**。轮到自己之前不碰连接：事务在途时的直接写入与外部读都等到结算（提交或回滚）后再执行，

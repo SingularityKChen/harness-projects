@@ -10,8 +10,9 @@ import { MIGRATIONS, migrate, openDatabase } from '@harness-projects/storage-sql
 /** 表 → 出处：与实际表集合互相覆盖（D8）。 */
 const TABLE_PROVENANCE = {
   workspace: 'AGENTS.md §1.1 不变量 1：工作区是"一个 Planning 事实源"的作用域',
-  provider_binding: 'issue #27 Scope 的 connector accounts 与 ADR-0006：跨工作区的连接锚点，R1 的身份键挂在它上面',
-  workspace_binding: 'AGENTS.md §1.1 不变量 1 与 2：工作区作用域的挂载，一个启用的 planning 挂载、一个启用的默认挂载',
+  connector_account: 'issue #126：连接账号的全局身份，自然键 (platform_family, platform_origin, identity_kind, external_id) 唯一；凭据值不进库',
+  provider_binding: 'issue #27 Scope 的 connector accounts 与 ADR-0006：跨工作区的连接锚点，R1 的身份键挂在它上面；#126 加可空账号 FK',
+  workspace_binding: 'AGENTS.md §1.1 不变量 1 与 2：工作区作用域的挂载，一个启用的 planning 挂载、一个启用的默认挂载；#126 加挂载级配置',
   entity: 'AGENTS.md §1.1 不变量 6：内部实体锚点，外部身份变化不改变它（E1-2 实验 2）',
   external_identity: 'R1 / R7 与 ADR-0001：身份键 (binding, 对象种类, 平台全局 id)，故意不含工作区',
   project_item_membership: 'R1：成员关系是工作区作用域的挂载点，键 (workspace, item) 与 (workspace, project, 内容)',
@@ -40,19 +41,22 @@ const L2_TABLES = [...Object.keys(TABLE_PROVENANCE), 'schema_migrations'].sort()
 const columns = (db, table) => db.prepare('SELECT name FROM pragma_table_info(?) ORDER BY name').all(table).map((row) => row.name)
 const rejects = (db, sql, message) => assert.throws(() => db.exec(sql), message)
 
-/** 满足全部外键的最小库。 */
+/** 满足全部外键的最小库。列清单显式写出：#126 给 provider_binding / workspace_binding 加了列，位置插入会静默错位。 */
 function seed(db) {
   db.exec(`
     INSERT INTO workspace VALUES ('ws-1', '工作区', 'provider_authoritative'); INSERT INTO workspace VALUES ('ws-2', '工作区 2', 'provider_authoritative');
-    INSERT INTO provider_binding VALUES ('binding-1', 'fake'); INSERT INTO workspace_binding VALUES ('ws-1', 'binding-1', 'planning', 1, 1);
-    INSERT INTO workspace_binding VALUES ('ws-2', 'binding-1', 'planning', 1, 1); INSERT INTO entity VALUES ('entity-1', 'work_item');
+    INSERT INTO connector_account (id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state)
+      VALUES ('account-1', 'github', 'https://github.com', 'account', 'octo-1', '账号', NULL, 'connected');
+    INSERT INTO provider_binding (id, implementation_key, connector_account_id) VALUES ('binding-1', 'fake', 'account-1');
+    INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1', 'binding-1', 'planning', 1, 1);
+    INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-2', 'binding-1', 'planning', 1, 1); INSERT INTO entity VALUES ('entity-1', 'work_item');
     INSERT INTO entity VALUES ('entity-2', 'change_request'); INSERT INTO external_identity VALUES ('identity-1', 'entity-1', 'binding-1', 'issue', 'issue-1', 'primary');
     INSERT INTO project_item_membership VALUES ('ws-1', 'project-1', 'item-1', 'issue', 'issue-1', '2026-09-20T00:00:00Z', '2026-09-20T00:00:00Z');
     INSERT INTO planning_field_value VALUES ('ws-1', 'item-1', 'field-1', 'In Progress', '2026-09-20T00:00:02Z'); INSERT INTO workspace_projection VALUES ('ws-1', 'entity-1', 'in_progress', 'work_item', '标题', '正文', NULL, NULL, 1);
   `)
 }
 
-test('空库建出八张表，二次运行是 no-op', () => {
+test('空库建出九张表，二次运行是 no-op', () => {
   withDatabase((db) => {
     const first = migrate(db)
     assert.deepEqual(first.applied, MIGRATIONS.map((entry) => entry.version), '空库必须应用清单里的全部迁移')
@@ -99,7 +103,7 @@ test('出处注释覆盖到约束级：每条 CREATE 与每条表内约束（含
 test('行为 1：外部身份挂在连接锚点上，因此跨工作区只有一条（不变量 6）', () => {
   withDatabase((db) => {
     migrate(db); seed(db)
-    assert.deepEqual(columns(db, 'provider_binding'), ['id', 'implementation_key'])
+    assert.deepEqual(columns(db, 'provider_binding'), ['connector_account_id', 'id', 'implementation_key'])
     assert.deepEqual(columns(db, 'external_identity'), ['binding_id', 'entity_id', 'external_id', 'external_kind', 'id', 'role'])
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM workspace_binding WHERE binding_id = 'binding-1'").get().n, 2,
       '同一条连接被两个工作区挂载（不变量 2）')
@@ -177,15 +181,17 @@ test('每个实体至多一个 primary 身份（库层面）；恰好一个由�
 test('#27 验收 1：第二个启用的 planning 挂载被数据库拒绝，且 domain 是受约束的枚举', () => {
   withDatabase((db) => {
     migrate(db); seed(db)
-    db.exec("INSERT INTO provider_binding VALUES ('binding-2','fake')")
-    db.exec("INSERT INTO provider_binding VALUES ('binding-3','fake')")
-    rejects(db, "INSERT INTO workspace_binding VALUES ('ws-1','binding-2','planning',1,0)", '第二个启用的 planning 挂载必须被拒绝')
-    db.exec("INSERT INTO workspace_binding VALUES ('ws-1','binding-2','planning',0,0)")
-    db.exec("INSERT INTO workspace_binding VALUES ('ws-1','binding-2','development',1,1)")
-    rejects(db, "INSERT INTO workspace_binding VALUES ('ws-1','binding-3','development',1,1)", '同域至多一个启用的默认挂载')
-    rejects(db, "INSERT INTO workspace_binding VALUES ('ws-1','binding-3','delivery',0,1)", '默认绑定必然是启用的')
-    rejects(db, "INSERT INTO workspace_binding VALUES ('ws-1','binding-3','Planning',1,0)", 'domain 的取值集合受 CHECK 约束')
-    rejects(db, "INSERT INTO workspace_binding VALUES ('ws-2','binding-2','planning',1,0)", '同一个工作区里第二个启用的 planning 挂载必须被拒绝')
+    db.exec("INSERT INTO connector_account (id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state) VALUES ('account-2','github','https://github.com','account','octo-2','账号 2',NULL,'connected')")
+    db.exec("INSERT INTO connector_account (id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state) VALUES ('account-3','github','https://github.com','account','octo-3','账号 3',NULL,'connected')")
+    db.exec("INSERT INTO provider_binding (id, implementation_key, connector_account_id) VALUES ('binding-2','fake','account-2')")
+    db.exec("INSERT INTO provider_binding (id, implementation_key, connector_account_id) VALUES ('binding-3','fake','account-3')")
+    rejects(db, "INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1','binding-2','planning',1,0)", '第二个启用的 planning 挂载必须被拒绝')
+    db.exec("INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1','binding-2','planning',0,0)")
+    db.exec("INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1','binding-2','development',1,1)")
+    rejects(db, "INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1','binding-3','development',1,1)", '同域至多一个启用的默认挂载')
+    rejects(db, "INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1','binding-3','delivery',0,1)", '默认绑定必然是启用的')
+    rejects(db, "INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1','binding-3','Planning',1,0)", 'domain 的取值集合受 CHECK 约束')
+    rejects(db, "INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-2','binding-2','planning',1,0)", '同一个工作区里第二个启用的 planning 挂载必须被拒绝')
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM workspace_binding WHERE binding_id = 'binding-1'").get().n, 2,
       '同一条连接被两个工作区各挂载一次（行为 1 的前提）')
   })
@@ -212,9 +218,15 @@ test('#27 验收 5：显式 schema 审查——没有列能存 token / key / pas
     // 逐列白名单（评审订正）：与 `pragma_table_info` **互相覆盖**，未审计的新列即失败（旧版正则两个方向都不准）。
     const AUDITED = {
       'workspace.id': '标识', 'workspace.name': '展示名', 'workspace.status_policy': '枚举：状态归属策略',
+      'connector_account.id': '标识', 'connector_account.platform_family': '平台族', 'connector_account.platform_origin': '规范原点',
+      'connector_account.identity_kind': '枚举：账号身份种类', 'connector_account.external_id': '平台原样值',
+      'connector_account.display_name': '展示名', 'connector_account.secret_handle': '秘密服务句柄（只存引用名，不是凭据材料）',
+      'connector_account.connection_state': '枚举：连接观察状态',
       'provider_binding.id': '标识', 'provider_binding.implementation_key': 'provider 实现标识（不是凭据材料）',
+      'provider_binding.connector_account_id': '标识（可空账号 FK）',
       'workspace_binding.workspace_id': '标识', 'workspace_binding.binding_id': '标识',
       'workspace_binding.domain': '枚举：能力域', 'workspace_binding.enabled': '标志', 'workspace_binding.is_default': '标志',
+      'workspace_binding.configuration_json': '工作区挂载配置（闭集字段，值不是凭据材料）',
       'entity.id': '标识', 'entity.kind': '枚举：实体种类',
       'external_identity.id': '标识', 'external_identity.entity_id': '标识', 'external_identity.binding_id': '标识',
       'external_identity.external_kind': '枚举：身份种类', 'external_identity.external_id': '平台原样值', 'external_identity.role': '枚举：身份角色',
@@ -251,11 +263,11 @@ test('每张表的外键指向存在的表，且悬空引用被拒绝', () => {
       }
     }
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [], '前置行不得留下悬空引用')
-    db.exec("INSERT INTO provider_binding VALUES ('binding-9','fake')")
-    assert.deepEqual(columns(db, 'provider_binding'), ['id', 'implementation_key'], '连接锚点不含工作区外键——它本来就跨工作区')
-    rejects(db, "INSERT INTO workspace_binding VALUES ('ws-none','binding-1','planning',1,0)", '挂载必须属于存在的工作区')
+    db.exec("INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-9','fake')")
+    assert.deepEqual(columns(db, 'provider_binding'), ['connector_account_id', 'id', 'implementation_key'], '连接锚点不含工作区外键——它本来就跨工作区；账号 FK 可空')
+    rejects(db, "INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-none','binding-1','planning',1,0)", '挂载必须属于存在的工作区')
     // 判别性（评审）：用 development 域；写 planning 会先被唯一索引拒绝，外键删掉也不变红。
-    rejects(db, "INSERT INTO workspace_binding VALUES ('ws-1','binding-none','development',0,0)", /FOREIGN KEY constraint failed/, '挂载必须指向存在的连接锚点')
+    rejects(db, "INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1','binding-none','development',0,0)", /FOREIGN KEY constraint failed/, '挂载必须指向存在的连接锚点')
     rejects(db, "INSERT INTO external_identity VALUES ('identity-fk','entity-1','binding-none','issue','issue-fk','alias')", /FOREIGN KEY constraint failed/, '身份必须挂在存在的连接锚点上（ADR-0006 的核心外键）')
     rejects(db, "INSERT INTO external_identity VALUES ('identity-fk','entity-none','binding-1','issue','issue-fk','alias')", /FOREIGN KEY constraint failed/, '身份必须指向存在的实体')
     rejects(db, "INSERT INTO project_item_membership VALUES ('ws-none','project-1','item-9','issue','issue-9','x','x')", '成员关系必须属于存在的工作区')

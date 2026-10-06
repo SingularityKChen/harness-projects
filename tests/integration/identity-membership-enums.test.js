@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { CapabilityDomain } from '@harness-projects/capabilities'
+import { CapabilityDomain, ConnectorConnectionState, ConnectorIdentityKind } from '@harness-projects/capabilities'
 import { ContentKind, EntityKind, ExternalIdentityKind, IdentityRole, MembershipContentKind, NormalizedStatus, StatusPolicy } from '@harness-projects/domain'
 import { migrate, openDatabase } from '@harness-projects/storage-sqlite'
 
@@ -18,6 +18,14 @@ const SENTINEL = '__not_a_domain_value__'
 const CHECK_FAILURE = /CHECK constraint failed/
 
 const CONSTRAINED_COLUMNS = [
+  {
+    table: 'connector_account', column: 'identity_kind', values: Object.values(ConnectorIdentityKind),
+    insert: (value) => `INSERT INTO connector_account (id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state) VALUES ('account-check-${value}', 'github', 'https://github.com', '${value}', 'check-${value}', '账号', NULL, 'connected')`,
+  },
+  {
+    table: 'connector_account', column: 'connection_state', values: Object.values(ConnectorConnectionState),
+    insert: (value) => `INSERT INTO connector_account (id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state) VALUES ('account-state-${value}', 'github', 'https://github.com', 'account', 'state-${value}', '账号', NULL, '${value}')`,
+  },
   {
     table: 'entity', column: 'kind', values: Object.values(EntityKind),
     insert: (value) => `INSERT INTO entity VALUES ('entity-check-${value}', '${value}')`,
@@ -29,7 +37,7 @@ const CONSTRAINED_COLUMNS = [
   {
     table: 'workspace_binding', column: 'domain', values: Object.values(CapabilityDomain),
     prepare: (value) => `INSERT INTO workspace VALUES ('ws-domain-${value}', '工作区', 'provider_authoritative')`,
-    insert: (value) => `INSERT INTO workspace_binding VALUES ('ws-domain-${value}', 'binding-1', '${value}', 0, 0)`,
+    insert: (value) => `INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-domain-${value}', 'binding-1', '${value}', 0, 0)`,
   },
   {
     table: 'external_identity', column: 'external_kind', values: Object.values(ExternalIdentityKind),
@@ -71,8 +79,8 @@ function withDatabase(run) {
 function seed(db) {
   db.exec(`
     INSERT INTO workspace VALUES ('ws-1', '工作区', 'provider_authoritative');
-    INSERT INTO provider_binding VALUES ('binding-1', 'fake');
-    INSERT INTO workspace_binding VALUES ('ws-1', 'binding-1', 'planning', 1, 1);
+    INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-1', 'fake');
+    INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1', 'binding-1', 'planning', 1, 1);
     INSERT INTO entity VALUES ('entity-1', 'work_item');
   `)
 }

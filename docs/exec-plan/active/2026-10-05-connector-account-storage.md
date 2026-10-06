@@ -49,7 +49,9 @@ SQL 原位重写 002，增加账号表的自然键唯一、状态/identity kind 
 
 ## Global Constraints
 
-完整允许文件集只在此声明：`packages/domain/src/ids.ts`；`packages/capabilities/src/connector-account.ts`（新）、`packages/capabilities/src/storage.ts`、`packages/capabilities/src/registry.ts`、`packages/capabilities/src/index.ts`；`packages/providers/fake/src/storage.ts`；`packages/storage/sqlite/migrations/002_identity_membership.sql`、`packages/storage/sqlite/src/storage.ts`、`packages/storage/sqlite/src/storage-rows.ts`；`tests/contract/suites/storage-connector-account.js`（新）、`tests/contract/storage-connector-account.test.js`（新）；`tests/integration/storage-connector-account.test.js`（新）、`tests/integration/identity-membership-schema.test.js`、`tests/integration/identity-membership-enums.test.js`、`tests/integration/execution-relation-write-schema.test.js`；本计划、`docs/README.md`。若实测需要超出集合，先在此修订原因与所有权；不能悄悄扩面。
+完整允许文件集只在此声明：`packages/domain/src/ids.ts`；`packages/capabilities/src/connector-account.ts`（新）、`packages/capabilities/src/storage.ts`、`packages/capabilities/src/registry.ts`、`packages/capabilities/src/index.ts`；`packages/providers/fake/src/storage.ts`；`packages/storage/sqlite/migrations/002_identity_membership.sql`、`packages/storage/sqlite/src/storage.ts`、`packages/storage/sqlite/src/storage-rows.ts`、`packages/storage/sqlite/src/storage-sync.ts`；`tests/contract/suites/storage-connector-account.js`（新）、`tests/contract/storage-connector-account.test.js`（新）；`tests/integration/storage-connector-account.test.js`（新）、`tests/integration/identity-membership-schema.test.js`、`tests/integration/identity-membership-enums.test.js`、`tests/integration/execution-relation-write-schema.test.js`；本计划、`docs/README.md`。若实测需要超出集合，先在此修订原因与所有权；不能悄悄扩面。
+
+`packages/storage/sqlite/src/storage-sync.ts` 的扩面原因与所有权（2026-10-05 CST 实测补入）：旧 002 表形的**迁移前拒绝**与策略传递必须由工厂 `createSqliteStorage` 的 `migrate` 之前预检、以及根实例构造函数自检**两条入口共用同一判据**，而构造函数、事务作用域创建与写者/读者队列都只在这份基类文件里。若把预检只放在 `storage.ts`，直接构造 `SqliteStorage`（集成测试与宿主装配的实际入口）就绕过它，计划里「直接构造也做同样检查」的承诺不成立。新增判据 `isConnectorAccountShapeMissing` / `CONNECTOR_ACCOUNT_SCHEMA_MESSAGE`、构造函数的策略形参与已存元数据自检都归本 Storage 单元唯一 owner（与工厂同一人），不引入第二个预检点。
 
 本轮只写计划与索引，不实现产品。未来一个 owner 负责本 Storage 单元；与 #133/#130 的调查和不相交修改可并行，Storage port、SQL 和公共 export 由主集成者串行落 patch，重跑共同契约，不把语义并行误写成无冲突保证。不修改 UI、外部 Provider 行为、Host resolve、Project Status 或人类依赖边。
 
@@ -112,8 +114,15 @@ canary、错误输入及行为期望独立于实现 parser 构造。临时删除
 - [x] (2026-10-05 CST) 完成两套独立方案裁决、源码复核及自包含规格；文件边界见 Global Constraints。
 - [x] (2026-10-05 CST) Batch 0 文档自查：13 节顺序、Progress、可移植性、预算与本地链接通过；`git diff --check` 退出 0；独立语义评审 Pass。
 - [x] (2026-10-05 CST) 管理登记回执：已创建 [draft PR #270](https://github.com/SingularityKChen/harness-projects/pull/270)，核对双向 issue 引用及 Project 计划字段；产品实施仍 pending。
-- [ ] (2026-10-05 CST) Batch 1：完成产品闭环、预算实测、共享契约与重启证据；目前未实施。
+- [x] (2026-10-05 CST) Batch 1：完成产品闭环、预算实测、共享契约与重启证据。
 - [ ] (2026-10-05 CST) 最终远端回读、独立验收与人类合并决定；通过后归档计划。
+
+Batch 1 实测证据（均在 `.worktrees/connector-account-plan` 工作树根）：
+
+- `node --test tests/contract/storage-connector-account.test.js tests/integration/storage-connector-account.test.js tests/integration/provider-binding-registration.test.js`：45 tests / 45 pass / 0 fail，exit 0。
+- `node --test --test-timeout=120000 tests/contract tests/integration`：1090 tests / 1090 pass / 0 fail，exit 0（基线 1074，新增 16）。
+- `pnpm run typecheck`、`pnpm run boundaries`：exit 0（boundaries 8/8 pass）。
+- 变异（临时改后恢复，不提交）：删 allowlist 成员检查 → 两个 adapter 的 `trusted-handle-only` 均红；跳过 implementationKey 分派 → 两个 adapter 的 `configuration-is-workspace-scoped` 均红；重登记清空配置 → 两个 adapter 的 `registration-and-removal-preserve-account` 均红；删工厂 `migrate` 前预检 → `restart-and-empty-schema-repeatability` 红。恢复后 45/45 绿。
 
 ## Surprises & Discoveries
 
@@ -124,6 +133,12 @@ canary、错误输入及行为期望独立于实现 parser 构造。临时删除
 同日核 `migrate.ts`：已应用迁移仅按版本跳过；现有 `storage-sync.ts` 启动检查发生在 migrate 之后。因此旧 002 拒绝须在工厂迁移前补只读预检，不能只复制现有检查时点而承诺零写入。
 
 宿主 Q2 已观察按名称引用与逐操作解析；随机 UUID 字符串协议没有相应宿主证据。自由文本可携带任何内容，秘密保证必须收敛到受信接口，不能把 schema review 写成绝对证明。
+
+2026-10-05 CST 实测：`json_valid` / `json_type` 的 CHECK 可以建表，但 **SQLite 要求表级约束出现在全部列定义之后**；把新列写在旧表级 `CHECK (is_default = 0 OR enabled = 1)` 之后会让 `002` 在解析阶段报 `near "configuration_json": syntax error`，而 `migrate` 只回报一个位置模糊的驱动错误。修正为把 `configuration_json` 插在 `is_default` 之后、表级约束之前，并在迁移文件里注明这条排序要求。
+
+2026-10-05 CST 实测：`node --test` 的断言消息/末行只给测试名，定位方法体错误仍需看完整输出，因此 `restart-and-empty-schema` 的预检用例把「旧 002 形状 + 缺连接账号表/列」写成临时目录夹具，并同时断言 schema、既有行与 `schema_migrations` 三者零改动，让「预检早于 migrate」可判别而不是只由构造函数兜底。
+
+2026-10-05 CST 实测：旧基线的 `identity-membership-schema` / `identity-membership-enums` / `execution-relation-write-schema` 用位置 INSERT 与写死的表/列清单；给 002 加列后这些用例必须先改成显式列清单并同步审计表，否则会因为列错位或未审计表而全红。这类修订属于测验对象变更而不是放宽断言：审计表仍逐列覆盖，新增列必须显式登记。
 
 ## Decision Log
 
@@ -136,6 +151,8 @@ canary、错误输入及行为期望独立于实现 parser 构造。临时删除
 | 同日 / 独立最终评审者 | native blockedBy #197/#120 已关闭是协调回读来源，正文 #27/#120 是旧来源。保留来源差异与回读门，不改 Status、Priority、Size、Iteration 或关系。 |
 | 同日 / 独立最终评审者 | 按人类本轮要求，draft 阶段即登记 Closes 与双向关闭关联，表示预期交付；实施和验收 pending，不能据此合并或关闭 issue。Iteration 5 晚于 E1 目标，模型裁决或明确排除前 #4 继续 hold，不擅改排期。 |
 | 同日 / 独立最终评审者 | 采用 First Principles 的结果/约束拆分和 Qian 的状态拥有/全链失败分析；Superpowers 的先设计后实现、判别性验证用于本计划，按用户只设计范围不进入产品实现。 |
+| 2026-10-05 CST / 实现者 | 预检判据与策略形参落在 `packages/storage/sqlite/src/storage-sync.ts`（扩面，理由与所有权见 Global Constraints）：直接构造 `SqliteStorage` 的调用方与工厂 `migrate` 前预检必须共用同一判据；若只在 `storage.ts` 里做预检，集成测试与宿主装配入口会绕过它。 |
+| 2026-10-05 CST / 实现者 | 已存元数据的策略自检放在根实例构造函数：打开时重放账号与配置的闭集校验（漏策略的空库合法）。这让 `trusted-handle-only` 的「缺策略重开拒绝」在两个适配器上同形，而不是只在写入路径有效。 |
 
 2026-10-05 CST / 主控：Actor 为 SingularityKChen；管理目标是 GitHub 仓库 SingularityKChen/harness-projects 与 Project 10，不虚构产品内 ProviderBinding。幂等标识为 `plan/issue-126/feature/connector-account-storage`，字段赋值以 issue/字段名去重；创建结果为 PR #270。观察时刻 @ 2374dbdf0497：base=main、draft=true，PR closingIssuesReferences 包含 #126、issue closedByPullRequestsReferences 包含 #270，无评审线程，标题/标签/issue policy 检查通过。Project ExecPlan/Batch 已回读匹配，Kind/Area/M4 已具备；Status=Todo、Priority=P0、Size=M、Iteration 5 及依赖关系保持原值。易失结果用 `gh pr view 270 -R SingularityKChen/harness-projects --json headRefOid,baseRefName,isDraft,closingIssuesReferences,statusCheckRollup` 和 `gh issue view 126 -R SingularityKChen/harness-projects --json closedByPullRequestsReferences,projectItems` 复读；最终文档 push 后再次回读当前 head/checks。
 
@@ -183,6 +200,8 @@ createFakeStorage(data?: FakeStorageData, policy?: StorageValidationPolicy): Mem
 
 2026-10-05 CST：产物是设计和实施规格，独立语义评审及文档结构/链接自查通过；产品端口、SQL、测试未修改，新功能尚无通过证据。当前下一门是主控登记与提交后发布面检查，之后按 Batch 1 执行完整产品闭环。收口时补实际代码/文档规模、测试与变异结果、远端回读、偏差及债务结论，并将计划移入 completed 更新索引。
 
+2026-10-05 CST（Batch 1 收口）：产品闭环落地。文件集与 Global Constraints 一致，仅新增 `packages/storage/sqlite/src/storage-sync.ts` 一处已声明扩面；规模实测代码 794 行（≤800 门**通过**，余量 6 行）、文档 214 行（≤1300 门通过）。验收：新窄命令 45/45 pass、`tests/contract tests/integration` 1090/1090 pass、`tests/e2e tests/mvp0` 64/64 pass、`typecheck` 与 `boundaries` exit 0；四个变异均 old-red→恢复后 new-green。偏差一：原估算分配低估了旧 fixture 的显式列清单修订（52 行）与已存元数据自检（约 20 行），首轮实测 818 行超门 18 行；收敛方式是压注释与把重复的吊挂/列构造收成单点，未删任何判别性测试，未牺牲闭集校验或变异判别力。偏差二：`isConnectorAccountShapeMissing` 只在库已建（`provider_binding` 存在）时判定，空库与未迁移库不判定——这是「旧 002 形状」的精确判据，计划没有要求对空库拒绝。未决：`packages/storage/sqlite/src/storage-sync.ts` 的扩面已记入 Global Constraints 与 Decision Log；远端回读、独立验收与人类合并决定仍 pending。
+
 ## Bottom Change Note
 
 - 2026-10-05 CST：首次独立综合两方案并复核源码；修正平台实例、宿主句柄、初次补绑身份、重登记保留、策略传递与迁移前拒绝边界；采用单 PR 优先并将规模设为执行门。
@@ -190,3 +209,5 @@ createFakeStorage(data?: FakeStorageData, policy?: StorageValidationPolicy): Mem
 - 2026-10-05 CST：根据主控转达人类本轮要求，draft 即登记 Closes 双向关联；补 E1 与 Iteration 5 日期冲突及 #4 冻结保持条件，保留产品验收 pending。
 
 2026-10-05 CST：主控补选题依据、实际 draft PR/双向引用与 Project 回读结果，完成本轮管理登记；所有产品验收保留 pending，未改规划状态或依赖边。
+
+2026-10-05 CST：Batch 1 实施完成并回填证据；按计划规则把 `packages/storage/sqlite/src/storage-sync.ts` 加进 Global Constraints（迁移前预检与直接构造必须共用同一判据），记录四个变异的 old-red/new-green、规模实测与两处偏差；代码 794 行未超 800 门，文档 214 行未超 1300 门。
