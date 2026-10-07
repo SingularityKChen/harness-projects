@@ -88,10 +88,10 @@ function actionsFor(entity: ClientEntity, access: ReadonlyMap<string, AccessLeve
   return entity.content.contentKind === ContentKind.WorkItem ? [startWorkAvailability(access)] : []
 }
 
-/** 遮蔽内容不透出标题与正文：即使上游带着缓存值，页面也不会拿到它。 */
-function visibleContent(entity: ClientEntity): { title: string | undefined; body: string | undefined } {
-  if (entity.content.contentKind === ContentKind.Redacted) return { title: undefined, body: undefined }
-  return { title: entity.content.title, body: entity.content.body }
+/** 遮蔽内容不透出标题、正文与字段事实：即使上游带着缓存值，页面也不会拿到它。 */
+function visibleContent(entity: ClientEntity): { title: string | undefined; body: string | undefined; planningFields: ClientEntity['planningFields'] } {
+  if (entity.content.contentKind === ContentKind.Redacted) return { title: undefined, body: undefined, planningFields: undefined }
+  return { title: entity.content.title, body: entity.content.body, planningFields: entity.planningFields }
 }
 
 function rowOf(
@@ -101,7 +101,7 @@ function rowOf(
   const content = visibleContent(entry.entity)
   return {
     entityId: entry.entity.entityId, contentKind: entry.entity.content.contentKind, title: content.title,
-    planningStatus: entry.entity.planningStatus, derived: entry.entity.derived, source: sourceOf(entry.entity),
+    planningStatus: entry.entity.planningStatus, planningFields: content.planningFields, derived: entry.entity.derived, source: sourceOf(entry.entity),
     freshness: freshnessOf(entry, read, degradation), actions: actionsFor(entry.entity, access),
   }
 }

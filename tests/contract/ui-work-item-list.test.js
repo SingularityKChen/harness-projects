@@ -18,21 +18,28 @@ const { createElement } = uiRequire('react')
 const { renderToStaticMarkup } = uiRequire('react-dom/server')
 
 const T = '2026-10-01T08:00:00.000Z'
-const CANARIES = ['CANARY-TITLE', 'CANARY-BODY', 'CANARY-EXT', 'CANARY-BIND', 'CANARY-REASON', '已完成', '需要关注']
+const CANARIES = ['CANARY-TITLE', 'CANARY-BODY', 'CANARY-EXT', 'CANARY-BIND', 'CANARY-REASON', '已完成', '需要关注', 'CANARY-STATUS', 'CANARY-ITERATION', '2099-12-31']
 const LONG = '超长标题'.repeat(30)
 const meta = { planningSourceName: '规划源', sourceNames: { 'bind-1': '来源一', 'bind-long': LONG } }
 
-const wire = (entityId, { planningStatus = 'in_progress', derived = ['ci_failing'], content = {}, source = {} } = {}) => ({
+const wire = (entityId, { planningStatus = 'in_progress', derived = ['ci_failing'], content = {}, source = {}, planningFields } = {}) => ({
   entityId, kind: 'work_item', planningStatus, derived,
   content: { contentKind: 'work_item', title: 'Visible A', body: 'b', bindingId: 'bind-1', externalKind: 'issue', externalId: '7', ...content },
+  ...(planningFields === undefined ? {} : { planningFields }),
   source: { revision: 1, freshness: 'fresh', authority: 'provider', reason: undefined, ...source },
 })
+/** 恶意 redacted 行：上游违约带着字段事实，canary 只出现在被遮蔽字段里。 */
 const redacted = (freshness = 'fresh') => wire('ent-bb', {
   planningStatus: 'done', derived: ['attention'],
   content: { contentKind: 'redacted', title: 'CANARY-TITLE', body: 'CANARY-BODY', bindingId: 'CANARY-BIND', externalId: 'CANARY-EXT' },
+  planningFields: { statusName: 'CANARY-STATUS', iterationTitle: 'CANARY-ITERATION', targetDate: '2099-12-31' },
   source: { freshness, reason: 'CANARY-REASON', authority: 'host' },
 })
-const rows = (freshness = 'fresh') => [wire('ent-aa'), redacted(freshness), wire('ent-cc', { content: { title: LONG, bindingId: 'bind-long', externalKind: 'change_request' }, source: { freshness } })]
+/** 可见行：A 已映射（规范状态是权威，原生名不出现），C 未映射（unknown + 原生名 Done，不得变成「已完成」）。 */
+const rows = (freshness = 'fresh') => [
+  wire('ent-aa', { planningFields: { statusName: 'In Progress', iterationTitle: 'E1 Sprint 1', targetDate: '2026-09-24' } }), redacted(freshness),
+  wire('ent-cc', { planningStatus: 'unknown', planningFields: { statusName: 'Done' }, content: { title: LONG, bindingId: 'bind-long', externalKind: 'change_request' }, source: { freshness } }),
+]
 const denied = (kind) => ({ phase: 'failed', hasReceivedSnapshot: true, cacheVisibility: 'authorized', failure: { kind } })
 
 /** 场景：名称 → 读取输入。revision 0 的空 store 同时用于 pending 与 received，证明区别只来自 Host 的读取阶段。 */
@@ -96,13 +103,16 @@ test('真 empty：只有收到的 revision 0 空 baseline；同 store 的 pendin
 
 test('内容：原生 table 语义、稳定状态区在 busy 容器外、规划状态与工程提示分列、固定时刻与缺失时间', () => {
   const columns = [...H.content.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1])
-  assert.deepEqual(columns, ['工作项', '内容身份', '规划状态', '工程提示', '来源', '新鲜度'])
+  assert.deepEqual(columns, ['工作项', '内容身份', '规划状态', '迭代', '目标日期', '工程提示', '来源', '新鲜度'])
   assert.match(H.content, /<caption>[^<]+<\/caption>/)
   assert.match(H.content, /<th scope="row"[^>]*>Visible A<\/th>/)
   const [, visible, hidden, long] = cells(H.content)
-  assert.deepEqual(visible, ['Visible A', 'Issue', '进行中', 'CI 失败', '来源一（提供方权威）', '当前值'])
-  assert.deepEqual(hidden, ['内容不可见', '—', '—', '—', '—', '—'])
-  assert.deepEqual([long[0], long[1], long[4]], [LONG, 'PR', `${LONG}（提供方权威）`])
+  assert.deepEqual(visible, ['Visible A', 'Issue', '进行中', 'E1 Sprint 1', '2026-09-24', 'CI 失败', '来源一（提供方权威）', '当前值'], '已映射：显示规范状态，迭代 title 与日期原样')
+  assert.deepEqual(hidden, ['内容不可见', '—', '—', '—', '—', '—', '—', '—'])
+  assert.deepEqual(long.slice(0, 5), [LONG, 'PR', 'Done（未映射）', '—', '—'], '未映射：只显示原生名，不归一成「已完成」；缺值占位')
+  assert.equal(long[6], `${LONG}（提供方权威）`)
+  const [, unmapped] = cells(render({ phase: 'received', refreshing: false, entities: [wire('ent-dd', { planningStatus: 'unknown' })] }))
+  assert.deepEqual(unmapped.slice(2, 5), ['未知', '—', '—'], '无映射的默认路径：unknown 且没有展示事实时显示「未知」')
   assert.match(H.content, /<div role="status" aria-live="polite" aria-atomic="true">已读取当前快照，共 3 项<\/div><div aria-busy="false">/)
   assert.match(H.content, /规划来源：(<[^>]+>)?规划源.*<time dateTime="2026-10-01T08:00:00.000Z">2026-10-01T08:00:00.000Z<\/time>/)
   const never = render({ ...SCENARIOS.content, lastUpdatedAt: null })
@@ -113,7 +123,7 @@ test('内容：原生 table 语义、稳定状态区在 busy 容器外、规划�
 test('陈旧 / 刷新 / 降级 / 缺口：保行；状态区只宣告一次，横幅只带来源与固定时刻；页首与行都不冒充当前值', () => {
   const status = (html) => html.match(/<div role="status"[^>]*>(.*?)<\/div>/)[1]
   const banner = /来源：(<[^>]+>)?规划源.*最后已知值（最后读取：<time dateTime="2026-10-01T08:00:00.000Z">/
-  const freshness = (name) => cells(H[name]).slice(1).map((row) => row[5])
+  const freshness = (name) => cells(H[name]).slice(1).map((row) => row[7])
   for (const name of ['stale', 'degraded', 'gap', 'offlineKept', 'staleEmpty']) assert.equal(status(H[name]), '当前结果尚未确认，最后已知值不是当前值', name)
   for (const name of ['stale', 'degraded', 'gap', 'offlineKept', 'refreshing']) assert.equal(H[name].match(/尚未确认|正在刷新/g).length, 1, `${name} 只宣告一次`)
   for (const name of ['stale', 'degraded', 'gap', 'offlineKept', 'refreshing', 'staleEmpty', 'refreshingEmpty']) {
@@ -140,8 +150,9 @@ test('版式：滚动容器可聚焦且横向可滚；短标签列不换行，�
   assert.match(H.content, /<div role="region" aria-label="[^"]+" tabindex="0" style="overflow-x:auto"><table>/)
   const [head, visible, hidden] = [...H.content.matchAll(/<tr>(.*?)<\/tr>/g)].map(([, tr]) => [...tr.matchAll(/style="([^"]*)"/g)].map((match) => match[1]))
   const [nowrap, wrap] = ['white-space:nowrap', 'overflow-wrap:anywhere;min-width:12em']
-  assert.deepEqual(head, Array(6).fill(nowrap))
-  assert.deepEqual([visible, hidden], [[wrap, nowrap, nowrap, nowrap, wrap, nowrap], [wrap, nowrap, nowrap, nowrap, wrap, nowrap]])
+  assert.deepEqual(head, Array(8).fill(nowrap))
+  const row = [wrap, nowrap, nowrap, nowrap, nowrap, nowrap, wrap, nowrap]
+  assert.deepEqual([visible, hidden], [row, row])
 })
 
 test('不可用：权限 / 不支持 / 未知 / 离线 / 错误说明各不相同，不借缓存，没有行；每类都写出还能做什么，读门已观测不可用不说尚未确认', () => {

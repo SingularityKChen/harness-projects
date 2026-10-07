@@ -3,7 +3,7 @@
  * 平台名不参与任何分支。工作区身份、能力与时间都由客户端同步会话生产（`sync.read()`），展示层不读时钟，
  * 因此同一输入必然得到同一输出（不变量 7）。跨层约定的理由写在各自字段上，不外包给已归档的计划。
  */
-import type { AccessLevel, ContentKind, DerivedFlag, EntityId, NormalizedStatus } from '@harness-projects/domain'
+import type { AccessLevel, ContentKind, DerivedFlag, EntityId, NormalizedStatus, PlanningFieldsSnapshot } from '@harness-projects/domain'
 import type { ClientWorkspaceRead, StoredEntity } from '@harness-projects/client'
 
 /** 客户端模型里一个条目的字段面；类型经 client 的 `StoredEntity` 取得，不新增依赖边。 */
@@ -110,6 +110,8 @@ export interface WorkItemRow {
   /** redacted 恒为 undefined：页面显示占位，不得回退到缓存标题。 */
   readonly title: string | undefined
   readonly planningStatus: NormalizedStatus
+  /** 列表展示的字段事实（#133）；redacted 恒为 undefined。规范状态只看 `planningStatus`。 */
+  readonly planningFields: PlanningFieldsSnapshot | undefined
   /** 派生标记：只用于展示，永不参与规划状态判定（不变量 3）。 */
   readonly derived: readonly DerivedFlag[]
   readonly source: SourcePresentation

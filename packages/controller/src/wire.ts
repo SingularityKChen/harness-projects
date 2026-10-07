@@ -6,7 +6,8 @@
  */
 import { ContentKind } from '@harness-projects/domain'
 import type {
-  AccessLevel, DerivedFlag, EntityId, EntityKind, ExternalIdentityKind, NormalizedStatus, ProviderBindingId, WorkspaceId,
+  AccessLevel, DerivedFlag, EntityId, EntityKind, ExternalIdentityKind, NormalizedStatus, PlanningFieldsSnapshot,
+  ProviderBindingId, WorkspaceId,
 } from '@harness-projects/domain'
 import type { CapabilityKey } from '@harness-projects/capabilities'
 import { StatusPolicyMode } from '@harness-projects/core'
@@ -52,6 +53,8 @@ export interface WireEntity {
   readonly kind: EntityKind
   readonly planningStatus: NormalizedStatus
   readonly content: WireContentRef
+  /** 列表展示的字段事实（#133）；redacted 行一律不带，与内容外部 id 一样不出 wire。 */
+  readonly planningFields?: PlanningFieldsSnapshot
   readonly derived: readonly DerivedFlag[]
   readonly source: SourceMetadata
 }
@@ -121,6 +124,7 @@ export function toWireEntity(view: PlanningItemView, authority: WireAuthority): 
       externalKind: shown ? view.content.identity.externalKind : undefined,
       externalId: shown ? view.content.identity.externalId : undefined,
     },
+    ...(shown && view.planningFields !== undefined ? { planningFields: view.planningFields } : {}),
     derived: view.engineering.derived,
     source: metadataOf(view, authority),
   }
