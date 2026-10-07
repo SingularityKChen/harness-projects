@@ -1,7 +1,7 @@
 /** SQLite 行 → 端口记录的映射：列名是 snake_case，端口字段是 camelCase，本模块是两者之间唯一的翻译层（换列名只改这里，改一处）。 */
 import type { BindingConfigurationRecord, CapabilityDomain, ConnectorAccountRecord, ExecutionContextRecord, ExecutionRunRecord, ExternalObjectRef, FieldValueRecord, MembershipRecord, MutationAttemptRecord, ProviderBindingRecord, ReconcileCursorRecord, RepositoryRecord, SecretHandle, SyncCursorRecord, SyncState, WorkspaceRecord } from '@harness-projects/capabilities'
 import type { ConnectorAccountId, EntityId, ExecutionContextId, ExecutionContextStatus, ExecutionRunId, ExecutionRunStatus, ExternalIdentity, ExternalIdentityId, IdentityRole, MembershipContentKind,
-  NormalizedStatus, PlanningContent, ProjectErrorCode, ProviderBindingId, RedactionReason, Relation, RelationClass, RelationSource, RelationState, RelationType, StatusPolicy,
+  NormalizedStatus, PlanningContent, PlanningFieldsSnapshot, ProjectErrorCode, ProviderBindingId, RedactionReason, Relation, RelationClass, RelationSource, RelationState, RelationType, StatusPolicy,
   WorkspaceId, WorkspaceProjection, WriteState } from '@harness-projects/domain'
 
 export type Row = Record<string, unknown>
@@ -108,6 +108,16 @@ function rowToContent(row: Row): PlanningContent {
   return { contentKind: 'work_item', title: text(row, 'content_title'), body: text(row, 'content_body') }
 }
 
-export const rowToProjection = (row: Row): WorkspaceProjection => ({ workspaceId: text(row, 'workspace_id') as WorkspaceId,
-  entityId: text(row, 'entity_id') as EntityId, planningStatus: text(row, 'planning_status') as NormalizedStatus,
-  revision: row['revision'] as number, content: rowToContent(row) })
+const FIELD_COLUMNS = { statusName: 'field_status_name', iterationTitle: 'field_iteration_title', targetDate: 'field_target_date' } as const
+/** 展示事实三列全空 = 没有可展示的字段值，读回时省略 `planningFields`；只有非空列成为键，与内存替身逐字一致。 */
+function rowToPlanningFields(row: Row): PlanningFieldsSnapshot | undefined {
+  const present = Object.entries(FIELD_COLUMNS).flatMap(([key, column]) => { const value = optionalText(row, column); return value === undefined ? [] : [[key, value]] })
+  return present.length === 0 ? undefined : Object.fromEntries(present) as PlanningFieldsSnapshot
+}
+
+export const rowToProjection = (row: Row): WorkspaceProjection => {
+  const planningFields = rowToPlanningFields(row)
+  return { workspaceId: text(row, 'workspace_id') as WorkspaceId,
+    entityId: text(row, 'entity_id') as EntityId, planningStatus: text(row, 'planning_status') as NormalizedStatus,
+    revision: row['revision'] as number, content: rowToContent(row), ...(planningFields === undefined ? {} : { planningFields }) }
+}

@@ -7,12 +7,13 @@ import {
 } from '@harness-projects/capabilities'
 import {
   NormalizedStatus, StatusPolicy, WriteState, newEntityId, newExternalIdentityId, newRelationId,
-  newWorkspaceId, type EntityId, type ExternalIdentityId, type RelationId, type WorkspaceId,
+  newWorkspaceId, type EntityId, type ExternalIdentityId, type RelationId, type WorkspaceId, type WorkspacePlanningFieldMapping,
 } from '@harness-projects/domain'
 import { bootstrapWorkspace, type BootstrapResult } from './bootstrap.ts'
 import { rerunPipeline, type DeliveryWriteAttempt } from './delivery.ts'
 import { startWorkUnavailable, type ExecutionContextQuery, type StartWorkRequest, type StartWorkResult } from './execution-context.ts'
 import { cancelExecutionRun, type CancelExecutionRunResult } from './execution-run.ts'
+import { planningFieldMappingSnapshot } from './planning-fields.ts'
 import { createQueries, type CoreQueries } from './queries.ts'
 import { collectBindings, type CoreProviderTable } from './registry.ts'
 import { confirmRelation, type RecordedEdge, type RelationRef } from './relations.ts'
@@ -38,6 +39,11 @@ export interface CoreWorkspaceInput {
   readonly statusPolicy?: StatusPolicy
   /** 可选显式规划项目范围；不传时由 bootstrap 从 provider 观察中发现。 */
   readonly project?: ExternalObjectRef
+  /**
+   * 字段角色映射（#133）：与 `project` 一样是每次组装的输入，不持久化——它是 Host 自己的配置，不是外部写入，没有待确认态。
+   * 省略即不归一任何原生状态（规划状态为 unknown），绝不按名称猜。
+   */
+  readonly planningFieldMapping?: WorkspacePlanningFieldMapping
 }
 
 export interface CoreDeps {
@@ -58,6 +64,7 @@ export interface CoreContext {
   readonly policy: Readonly<Partial<Record<CapabilityKey, AccessLevel>>>
   /** bootstrap 成功解析后回填；重启的实例靠 provider 观察重新发现。 */
   projectRef: ExternalObjectRef | undefined
+  readonly planningFieldMapping: WorkspacePlanningFieldMapping | undefined
 }
 
 export interface CoreCommands {
@@ -103,6 +110,7 @@ export async function createContext(deps: CoreDeps): Promise<CoreContext | undef
   const storage = deps.storage ?? deps.providers.storage
   if (storage === undefined) return undefined
   const workspace = workspaceRecord(deps.workspace)
+  const planningFieldMapping = deps.workspace.planningFieldMapping === undefined ? undefined : planningFieldMappingSnapshot(deps.workspace.planningFieldMapping)
   const policy = deps.policy ?? {}
   const prepared = await collectBindings({ workspaceId: workspace.id, providers: deps.providers, policy })
   await storage.transaction(async (tx) => {
@@ -113,7 +121,7 @@ export async function createContext(deps: CoreDeps): Promise<CoreContext | undef
     storage, workspaceId: workspace.id, registry: providerRegistry(prepared.bindings),
     clock: deps.clock ?? (() => new Date().toISOString()),
     ids: deps.ids ?? defaultIdFactory, policy,
-    projectRef: deps.workspace.project,
+    projectRef: deps.workspace.project, planningFieldMapping,
   }
 }
 

@@ -71,6 +71,9 @@ export const CONNECTOR_ACCOUNT_SCHEMA_MESSAGE = '本地库是加入连接账号�
 /** 版本 2 的账号必需列：逐项比对列集，不只看表存在（对抗验证 P2-R2 的 `connector_account(id)` 残缺库）。 */
 const CONNECTOR_ACCOUNT_COLUMNS = ['id', 'platform_family', 'platform_origin', 'identity_kind', 'external_id', 'display_name', 'secret_handle', 'connection_state'] as const
 
+/** #133：投影表在、却缺字段展示列的旧 002 库，同样在迁移之前只读拒绝。 */
+export const PLANNING_FIELD_SCHEMA_MESSAGE = '本地库是加入规划字段展示列之前的 002（workspace_projection 缺 field_status_name / field_iteration_title / field_target_date 列）：请显式决定并删除库文件重建（程序不会升级也不会删库）'
+
 /**
  * #126 的形状判据（唯一一份）：已应用版本 2 却缺账号表或必需列时为真——表整体缺失或只有部分列的损坏库都会先被 003–005 部分迁移（对抗验证 P2-2/P2-R2）。工厂在 `migrate` 前只读拒绝，构造函数兜底；空库返回 false。
  * 列名比对按 SQLite 语义大小写不敏感（P3-R4）：`pragma_table_info` 返回声明拼写，逐字比对会误拒大写声明的合法库。
@@ -83,6 +86,16 @@ export function isConnectorAccountShapeMissing(db: WorkspaceDatabase): boolean {
   const accountColumns = columns('connector_account')
   return CONNECTOR_ACCOUNT_COLUMNS.some((name) => !accountColumns.includes(name))
     || !columns('provider_binding').includes('connector_account_id') || !columns('workspace_binding').includes('configuration_json')
+}
+
+/**
+ * 002 原位改写后的形状闸门（#126、#133）：工厂在 `migrate` 之前、003 的 preflight 与构造函数都调用它，账号判据在前。
+ * #133 只判「投影表在、展示列缺」——正是 #133 之前建的库；空库没有投影表，不判定。
+ */
+export function assert002Shape(db: WorkspaceDatabase): void {
+  if (isConnectorAccountShapeMissing(db)) throw new Error(CONNECTOR_ACCOUNT_SCHEMA_MESSAGE)
+  const projection = (db.prepare("SELECT name FROM pragma_table_info('workspace_projection')").all() as { name: string }[]).map((row) => row.name.toLowerCase())
+  if (projection.length > 0 && ['field_status_name', 'field_iteration_title', 'field_target_date'].some((name) => !projection.includes(name))) throw new Error(PLANNING_FIELD_SCHEMA_MESSAGE)
 }
 
 /** 列值 → 端口版本：`undefined` 的 `sourceVersion` 落库时空串（列 NOT NULL），读回必须还原，否则两条都没有 `sourceVersion` 的合法观察里第二条会被判成乱序。 */
@@ -132,10 +145,8 @@ export class SqliteSyncSurface {
    */
   #assertRewrittenSchema(): void { assertRewritten003Shape(this.db) }
 
-  /** #126 的 schema 自检：缺连接账号形状的旧库换一句可执行处置，替代驱动级报错。只在根实例上跑。 */
-  #assertConnectorAccountSchema(): void {
-    if (isConnectorAccountShapeMissing(this.db)) throw new Error(CONNECTOR_ACCOUNT_SCHEMA_MESSAGE)
-  }
+  /** #126 / #133 的 schema 自检：缺连接账号或字段展示列的旧库换一句可执行处置，替代驱动级报错。只在根实例上跑。 */
+  #assertConnectorAccountSchema(): void { assert002Shape(this.db) }
 
   /** #126 的已存元数据自检：用当前策略重放账号与配置的闭集校验（漏策略的空库合法，有不匹配行的库在打开时拒绝）；配置按真实锚点的 implementationKey 分派。 */
   #assertStoredMetadata(): void {

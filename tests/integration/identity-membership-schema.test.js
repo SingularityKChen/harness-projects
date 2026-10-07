@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { MIGRATIONS, migrate, openDatabase } from '@harness-projects/storage-sqlite'
+import { MIGRATIONS, createSqliteStorage, migrate, openDatabase } from '@harness-projects/storage-sqlite'
 
 /** 表 → 出处：与实际表集合互相覆盖（D8）。 */
 const TABLE_PROVENANCE = {
@@ -52,7 +52,7 @@ function seed(db) {
     INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-2', 'binding-1', 'planning', 1, 1); INSERT INTO entity VALUES ('entity-1', 'work_item');
     INSERT INTO entity VALUES ('entity-2', 'change_request'); INSERT INTO external_identity VALUES ('identity-1', 'entity-1', 'binding-1', 'issue', 'issue-1', 'primary');
     INSERT INTO project_item_membership VALUES ('ws-1', 'project-1', 'item-1', 'issue', 'issue-1', '2026-09-20T00:00:00Z', '2026-09-20T00:00:00Z');
-    INSERT INTO planning_field_value VALUES ('ws-1', 'item-1', 'field-1', 'In Progress', '2026-09-20T00:00:02Z'); INSERT INTO workspace_projection VALUES ('ws-1', 'entity-1', 'in_progress', 'work_item', '标题', '正文', NULL, NULL, 1);
+    INSERT INTO planning_field_value VALUES ('ws-1', 'item-1', 'field-1', 'In Progress', '2026-09-20T00:00:02Z'); INSERT INTO workspace_projection VALUES ('ws-1', 'entity-1', 'in_progress', 'work_item', '标题', '正文', NULL, NULL, NULL, NULL, NULL, 1);
   `)
 }
 
@@ -111,7 +111,7 @@ test('行为 1：外部身份挂在连接锚点上，因此跨工作区只有一
     rejects(db, "INSERT INTO external_identity VALUES ('identity-9','entity-2','binding-1','issue','issue-1','alias')", '同一连接上的同一对象只有一条身份，无论从哪个工作区发起')
     assert.equal(db.prepare("SELECT COUNT(DISTINCT entity_id) AS n FROM external_identity WHERE external_id = 'issue-1'").get().n, 1, '同一外部对象只能解析出一个内部实体（ADR-0001 / 不变量 6）')
     db.exec("INSERT INTO project_item_membership VALUES ('ws-2','project-1','item-1','issue','issue-1','x','x')")
-    db.exec("INSERT INTO workspace_projection VALUES ('ws-2','entity-1','todo','work_item','标题','正文',NULL,NULL,1)")
+    db.exec("INSERT INTO workspace_projection VALUES ('ws-2','entity-1','todo','work_item','标题','正文',NULL,NULL,NULL,NULL,NULL,1)")
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM project_item_membership WHERE content_external_id = 'issue-1'").get().n, 2, '同一内容在两个工作区是两条成员关系')
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM workspace_projection WHERE entity_id = 'entity-1'").get().n, 2, '每工作区一行投影')
   })
@@ -202,12 +202,12 @@ test('同一工作区里同一实体只有一行投影（storage 保证的那一
     migrate(db); seed(db)
     const count = () => db.prepare("SELECT COUNT(*) AS n FROM workspace_projection WHERE workspace_id = 'ws-1' AND entity_id = 'entity-1'").get().n
     assert.equal(count(), 1, 'seed 里该实体已有一行投影')
-    db.exec("INSERT INTO workspace_projection VALUES ('ws-1','entity-1','todo','work_item','更新标题','更新正文',NULL,NULL,2) ON CONFLICT (workspace_id, entity_id) DO UPDATE SET content_title = excluded.content_title, content_body = excluded.content_body, revision = excluded.revision")
+    db.exec("INSERT INTO workspace_projection VALUES ('ws-1','entity-1','todo','work_item','更新标题','更新正文',NULL,NULL,NULL,NULL,NULL,2) ON CONFLICT (workspace_id, entity_id) DO UPDATE SET content_title = excluded.content_title, content_body = excluded.content_body, revision = excluded.revision")
     assert.equal(count(), 1, '同一 (workspace, entity) 的第二行必须是更新')
     assert.equal(db.prepare("SELECT content_title FROM workspace_projection WHERE workspace_id = 'ws-1' AND entity_id = 'entity-1'").get().content_title, '更新标题')
-    rejects(db, "INSERT INTO workspace_projection VALUES ('ws-1','entity-1','todo','change_request','另一个','正文',NULL,NULL,3)", '同一 (workspace, entity) 不得出现第二行')
+    rejects(db, "INSERT INTO workspace_projection VALUES ('ws-1','entity-1','todo','change_request','另一个','正文',NULL,NULL,NULL,NULL,NULL,3)", '同一 (workspace, entity) 不得出现第二行')
     db.exec("INSERT INTO entity VALUES ('entity-3','work_item')")
-    db.exec("INSERT INTO workspace_projection VALUES ('ws-1','entity-3','todo','work_item','另一项','正文',NULL,NULL,1)")
+    db.exec("INSERT INTO workspace_projection VALUES ('ws-1','entity-3','todo','work_item','另一项','正文',NULL,NULL,NULL,NULL,NULL,1)")
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM workspace_projection WHERE workspace_id = 'ws-1'").get().n, 2, '不同实体各自保留一行')
   })
 })
@@ -241,6 +241,8 @@ test('#27 验收 5：显式 schema 审查——没有列能存 token / key / pas
       'workspace_projection.planning_status': '归一化状态', 'workspace_projection.content_kind': '枚举：内容三态',
       'workspace_projection.content_title': '内容', 'workspace_projection.content_body': '内容',
       'workspace_projection.content_number': '内容', 'workspace_projection.redaction_reason': '枚举：脱敏原因',
+      'workspace_projection.field_status_name': '#133 原生选项名（展示）', 'workspace_projection.field_iteration_title': '#133 迭代 title（展示）',
+      'workspace_projection.field_target_date': '#133 date-only 目标日期（展示）',
       'workspace_projection.revision': '修订号',
     }
     // 只审计 **002 建出的表**：本用例的验收对象是 #27 的迁移，后续迁移（003 起）由各自的用例审计。
@@ -271,6 +273,39 @@ test('每张表的外键指向存在的表，且悬空引用被拒绝', () => {
     rejects(db, "INSERT INTO external_identity VALUES ('identity-fk','entity-1','binding-none','issue','issue-fk','alias')", /FOREIGN KEY constraint failed/, '身份必须挂在存在的连接锚点上（ADR-0006 的核心外键）')
     rejects(db, "INSERT INTO external_identity VALUES ('identity-fk','entity-none','binding-1','issue','issue-fk','alias')", /FOREIGN KEY constraint failed/, '身份必须指向存在的实体')
     rejects(db, "INSERT INTO project_item_membership VALUES ('ws-none','project-1','item-9','issue','issue-9','x','x')", '成员关系必须属于存在的工作区')
-    rejects(db, "INSERT INTO workspace_projection VALUES ('ws-1','entity-none','todo','work_item','标题','正文',NULL,NULL,1)", '工作区投影必须指向存在的实体')
+    rejects(db, "INSERT INTO workspace_projection VALUES ('ws-1','entity-none','todo','work_item','标题','正文',NULL,NULL,NULL,NULL,NULL,1)", '工作区投影必须指向存在的实体')
   })
+})
+
+test('#133：投影缺字段展示列的旧 002 库在 migrate 之前以可执行处置拒绝且零写入（不写兼容迁移）；大写声明三列的合法库照常打开', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'storage-field-columns-'))
+  const FIELDS = ['field_status_name', 'field_iteration_title', 'field_target_date']
+  /** 建一个最新形状的库，执行 sql 后返回 schema 与迁移记账的指纹；不带 sql 时只读。 */
+  const fingerprint = (path, sql) => { const db = openDatabase(path); try {
+    if (sql) db.exec(sql)
+    return JSON.stringify([db.prepare('SELECT name, sql FROM sqlite_master ORDER BY name').all(), db.prepare('SELECT * FROM schema_migrations ORDER BY version').all()])
+  } finally { db.close() } }
+  const drop = (columns) => columns.map((column) => `ALTER TABLE workspace_projection DROP COLUMN ${column};`).join('')
+  const cases = [['缺全部三列', drop(FIELDS)], ...FIELDS.map((column) => [`只缺 ${column}`, drop([column])]),
+    ['缺列且停在较低版本（删最高版本行，migrate 不再是空操作）', `${drop(['field_target_date'])}DELETE FROM schema_migrations WHERE version = ${MIGRATIONS.at(-1).version};`]]
+  try {
+    for (const [index, [name, sql]] of cases.entries()) {
+      const path = join(dir, `legacy-${index}.sqlite`)
+      createSqliteStorage(path).close()
+      const before = fingerprint(path, sql)
+      assert.throws(() => createSqliteStorage(path), /规划字段展示列.*删除库文件重建/, `${name}：旧形状必须在 migrate 与第一次读写之前被拒绝`)
+      assert.equal(fingerprint(path), before, `${name}：拒绝必须零写入（schema 与迁移记账逐字不变）`)
+    }
+    const upper = join(dir, 'upper.sqlite')
+    createSqliteStorage(upper).close()
+    fingerprint(upper, FIELDS.map((column) => `ALTER TABLE workspace_projection RENAME COLUMN ${column} TO ${column.toUpperCase()};`).join(''))
+    const storage = createSqliteStorage(upper) // 列名按 SQLite 语义大小写不敏感：大写声明的合法库不得被误拒，三列事实照常往返
+    const projection = { workspaceId: 'ws-u', entityId: 'e-u', planningStatus: 'todo', revision: 1, content: { contentKind: 'work_item', title: 'T', body: 'B' }, planningFields: { statusName: 'Todo', iterationTitle: 'S1', targetDate: '2026-10-01' } }
+    try {
+      await storage.putWorkspace({ id: 'ws-u', name: 'U', statusPolicy: 'provider_authoritative' }); await storage.putEntity({ id: 'e-u', kind: 'work_item' }); await storage.putPlanningProjection('ws-u', projection)
+      assert.deepEqual([await storage.getPlanningProjection('ws-u', 'e-u'), await storage.listPlanningProjections('ws-u')], [projection, [projection]])
+    } finally { storage.close() }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

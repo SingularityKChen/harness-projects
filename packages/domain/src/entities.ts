@@ -1,6 +1,7 @@
 /** 实体与规划内容：`Entity` 只有 id 与种类，与工作区和外部 id 都无关；规划状态与内容属于工作区投影（`WorkspaceProjection`），因为一个工作空间同一时刻只有一个 Planning 事实源（AGENTS.md §1.1 不变量 1）。 */
 import { ContentKind, type EntityKind, type NormalizedStatus } from './enums.ts'
 import type { EntityId, WorkspaceId } from './ids.ts'
+import type { PlanningFieldsSnapshot } from './planning-fields.ts'
 
 export interface WorkItemContent {
   readonly contentKind: typeof ContentKind.WorkItem
@@ -58,4 +59,6 @@ export interface WorkspaceProjection {
   readonly planningStatus: NormalizedStatus
   readonly content: PlanningContent
   readonly revision: number
+  /** 列表展示的字段事实（#133）；redacted 内容不带，缺省 = 没有可展示的字段值。 */
+  readonly planningFields?: PlanningFieldsSnapshot
 }

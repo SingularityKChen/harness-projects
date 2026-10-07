@@ -9,14 +9,16 @@ import { openDatabase } from './db.ts'
 import { migrate } from './migrate.ts'
 import { contentColumns, optional, rowToBinding, rowToBindingConfiguration, rowToConnectorAccount, rowToIdentity, rowToProjection, rowToRepository, rowToWorkspace, toFlag, type Row } from './storage-rows.ts'
 import { SqliteExecutionSurface } from './storage-execution.ts'
-import { CONNECTOR_ACCOUNT_SCHEMA_MESSAGE, isConnectorAccountShapeMissing, type TransactionToken } from './storage-sync.ts'
+import { assert002Shape, type TransactionToken } from './storage-sync.ts'
 
-export { CLOSED_MESSAGE, CONNECTOR_ACCOUNT_SCHEMA_MESSAGE, LEGACY_COMMITTED_VERSION_MESSAGE, NESTED_TRANSACTION_MESSAGE, OUTER_INSTANCE_MESSAGE, SETTLED_TRANSACTION_MESSAGE } from './storage-sync.ts'
+export { CLOSED_MESSAGE, CONNECTOR_ACCOUNT_SCHEMA_MESSAGE, LEGACY_COMMITTED_VERSION_MESSAGE, NESTED_TRANSACTION_MESSAGE, OUTER_INSTANCE_MESSAGE, PLANNING_FIELD_SCHEMA_MESSAGE, SETTLED_TRANSACTION_MESSAGE } from './storage-sync.ts'
 
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。绑定列名与拆表前一致（工作区作用域三列来自挂载、实现键来自连接锚点），`rowToBinding` 因此不用改。
 const BINDING_COLUMNS = 'b.id AS id, wb.workspace_id AS workspace_id, wb.domain AS domain, b.implementation_key AS implementation_key, wb.enabled AS enabled, wb.is_default AS is_default'
 const IDENTITY_COLUMNS = 'id, entity_id, binding_id, external_kind, external_id, role'
-const PROJECTION_COLUMNS = 'workspace_id, entity_id, planning_status, content_kind, content_title, content_body, content_number, redaction_reason, revision'
+const PROJECTION_COLUMNS = 'workspace_id, entity_id, planning_status, content_kind, content_title, content_body, content_number, redaction_reason, field_status_name, field_iteration_title, field_target_date, revision'
+/** 读侧逐列 `AS`：大写声明的合法库（闸门按 SQLite 语义大小写不敏感）读回的行键仍是小写，三列事实不因拼写丢失。 */
+const PROJECTION_SELECT = PROJECTION_COLUMNS.split(', ').map((column) => `${column} AS ${column}`).join(', ')
 const REPOSITORY_COLUMNS = 'id, workspace_id, external_identity_id'
 /** #126：账号列清单只写一次。 */
 const ACCOUNT_COLUMNS = 'id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state'
@@ -136,12 +138,14 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   /** 投影 UPSERT：put 与 replace 共用；同 `(workspaceId, entityId)` 的第二次写入是覆盖，不是追加。 */
   protected upsertProjection(workspaceId: WorkspaceId, projection: WorkspaceProjection): void {
     const [kind, title, body, number, reason] = contentColumns(projection.content)
-    this.db.prepare(`INSERT INTO workspace_projection (${PROJECTION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (workspace_id, entity_id) DO UPDATE SET planning_status = excluded.planning_status, content_kind = excluded.content_kind, content_title = excluded.content_title, content_body = excluded.content_body, content_number = excluded.content_number, redaction_reason = excluded.redaction_reason, revision = excluded.revision`).run(workspaceId, projection.entityId, projection.planningStatus, kind, title, body, number, reason, projection.revision)
+    const fields = projection.planningFields
+    this.db.prepare(`INSERT INTO workspace_projection (${PROJECTION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (workspace_id, entity_id) DO UPDATE SET planning_status = excluded.planning_status, content_kind = excluded.content_kind, content_title = excluded.content_title, content_body = excluded.content_body, content_number = excluded.content_number, redaction_reason = excluded.redaction_reason, field_status_name = excluded.field_status_name, field_iteration_title = excluded.field_iteration_title, field_target_date = excluded.field_target_date, revision = excluded.revision`)
+      .run(workspaceId, projection.entityId, projection.planningStatus, kind, title, body, number, reason, fields?.statusName ?? null, fields?.iterationTitle ?? null, fields?.targetDate ?? null, projection.revision)
   }
   getPlanningProjection(workspaceId: WorkspaceId, entityId: EntityId): Promise<WorkspaceProjection | undefined> {
-    return this.read(() => optional(this.db.prepare(`SELECT ${PROJECTION_COLUMNS} FROM workspace_projection WHERE workspace_id = ? AND entity_id = ?`).get(workspaceId, entityId), rowToProjection))
+    return this.read(() => optional(this.db.prepare(`SELECT ${PROJECTION_SELECT} FROM workspace_projection WHERE workspace_id = ? AND entity_id = ?`).get(workspaceId, entityId), rowToProjection))
   }
-  listPlanningProjections(workspaceId: WorkspaceId): Promise<readonly WorkspaceProjection[]> { return this.read(() => (this.db.prepare(`SELECT ${PROJECTION_COLUMNS} FROM workspace_projection WHERE workspace_id = ? ORDER BY rowid`).all(workspaceId) as Row[]).map(rowToProjection)) }
+  listPlanningProjections(workspaceId: WorkspaceId): Promise<readonly WorkspaceProjection[]> { return this.read(() => (this.db.prepare(`SELECT ${PROJECTION_SELECT} FROM workspace_projection WHERE workspace_id = ? ORDER BY rowid`).all(workspaceId) as Row[]).map(rowToProjection)) }
   /** 收敛语义与内存替身一致：作用域 = 该 binding 的身份所指实体；作用域内未出现在 items 中的投影被移除，作用域外不受影响。刻意不删除实体——身份以外键指向 entity，删了会留下悬空身份；内存替身同语义（实体与身份保留），判据是共享地基组「投影被收敛移除后实体与身份保留，条目可以重新加入」。 */
   replacePlanningProjections(scope: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId }, items: readonly WorkspaceProjection[]): Promise<void> {
     return this.atomic(() => {
@@ -178,7 +182,7 @@ export function createSqliteStorage(location: string | ':memory:', policy: Stora
   const snapshot = snapshotPolicy(policy)
   const db = openDatabase(location)
   try {
-    if (isConnectorAccountShapeMissing(db)) throw new Error(CONNECTOR_ACCOUNT_SCHEMA_MESSAGE)
+    assert002Shape(db)
     migrate(db)
     return new SqliteStorage(location, db, false, undefined, undefined, snapshot)
   } catch (error) { try { db.close() } catch { /* 构造函数已关：幂等 */ } throw error }
