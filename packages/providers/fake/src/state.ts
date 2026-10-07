@@ -80,18 +80,20 @@ export function emptyFields(): ProviderPlanningFields {
   }
 }
 
+const options = (...ids: readonly string[]) => ids.map((id) => ({ id, name: id }))
+
 export function defaultFieldDefinitions(): ProviderPlanningFieldDefinition[] {
   return [
-    { id: 'status', name: '状态', kind: 'single_select', options: ['todo', 'in_progress', 'blocked', 'done'] },
-    { id: 'priority', name: '优先级', kind: 'single_select', options: ['low', 'medium', 'high'] },
-    { id: 'iteration', name: '迭代', kind: 'single_select', options: ['iter-1', 'iter-2'] },
+    { id: 'status', name: '状态', kind: 'single_select', options: options('todo', 'in_progress', 'blocked', 'done') },
+    { id: 'priority', name: '优先级', kind: 'single_select', options: options('low', 'medium', 'high') },
+    { id: 'iteration', name: '迭代', kind: 'iteration', iterations: defaultIterations() },
   ]
 }
 
 export function defaultIterations(): ProviderIteration[] {
   return [
-    { id: 'iter-1', title: '迭代一', startDate: '2026-09-01', targetDate: '2026-09-14' },
-    { id: 'iter-2', title: '迭代二', startDate: '2026-09-15', targetDate: '2026-09-28' },
+    { id: 'iter-1', projectFieldId: 'iteration', title: '迭代一', startDate: '2026-09-01', durationDays: 14, completed: false },
+    { id: 'iter-2', projectFieldId: 'iteration', title: '迭代二', startDate: '2026-09-15', durationDays: 14, completed: false },
   ]
 }
 

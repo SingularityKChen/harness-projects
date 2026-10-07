@@ -1,7 +1,7 @@
 /**
  * GitHub Projects 只读 Planning provider。失败一律是结构化 `ProviderResult`，任何路径都不抛错（`composeCore` 会吞掉裸异常
  * 且不写 degraded）。平台查询参数只有 project node id 与游标（R7），`getPlanningItem` 因此用扫描实现。
- * 字段与迭代（#133）、写入（#71）、调度与退避（#134）不在这里。
+ * 字段（#133）只报告原生事实：条目的值随条目读回，定义与迭代来自一次 `PlanningFields`；写入（#71）、调度与退避（#134）不在这里。
  */
 import {
   AccessLevel, CapabilityKey, PLANNING_MEMBERSHIP_OBJECT_KIND, makeObservation, providerErr, providerError, providerOk,
@@ -9,7 +9,7 @@ import {
 } from '@harness-projects/capabilities'
 import { MembershipContentKind, ProviderErrorCode, type ProviderBindingId } from '@harness-projects/domain'
 import { classifyResponse, failure } from './classify.ts'
-import { decodeItemsPage, decodeProject, projectNode, type ItemRow, type Obj } from './decode.ts'
+import { decodeFieldDefinitions, decodeItemsPage, decodeProject, projectNode, type ItemRow, type Obj } from './decode.ts'
 import { PLANNING_QUERIES } from './queries.ts'
 import type { GraphqlRequest, GraphqlTransport } from './transport.ts'
 
@@ -23,9 +23,12 @@ export interface GithubProjectsPlanningProviderOptions {
 const [MAX_PAGE_SIZE, MAX_SCAN_PAGES] = [100, 500]
 const CONTENT_KINDS: readonly string[] = Object.values(MembershipContentKind)
 const invalid = <T>(message: string): ProviderResult<T> => providerErr(providerError(ProviderErrorCode.InvalidInput, message))
-const notSupported = async <T>(): Promise<ProviderResult<T>> => providerErr(providerError(ProviderErrorCode.NotSupported, '字段与迭代读取尚未实现'))
 
-/** 先内容观察（没有内容身份时省略），再成员关系观察；两类主体各用自己的版本（E1-1 实验 1），payload 与稳定字段相同。 */
+/**
+ * 先内容观察（没有内容身份时省略），再成员关系观察；两类主体各用自己的版本（E1-1 实验 1），payload 与稳定字段相同。
+ * 成员关系的 payload 带引导时 reconcile 扫描读到的原生字段值，使同秒内的字段变化改变去重键。它不足以作为写入确认：同秒内
+ * A→B→A 回退时第三次读到的 A 与第一行去重，不留新行；R3 的写入确认读回归 #71。
+ */
 function rowObservations({ item, content }: ItemRow, receivedTime: string): readonly ProviderObservation[] {
   const observe = (subject: ExternalObjectRef, type: string, sourceVersion: string | undefined, fields: Obj): ProviderObservation =>
     makeObservation({ subject, type, eventTime: sourceVersion, receivedTime, sourceVersion, stablePayloadFields: fields, payload: fields })
@@ -34,6 +37,7 @@ function rowObservations({ item, content }: ItemRow, receivedTime: string): read
     'planning.membership.observed', item.sourceVersion, {
       project: item.project.externalId, contentKind: content === undefined ? null : item.ref.objectKind,
       contentExternalId: content === undefined ? null : item.ref.externalId, createdAt: item.membership.createdAt ?? null,
+      nativeValues: item.fields.nativeValues ?? {},
     },
   )
   return content === undefined ? [membership] : [observe(item.ref, 'planning.content.observed', content.version, content.fields), membership]
@@ -67,6 +71,11 @@ export function createGithubProjectsPlanningProvider({ bindingId, projectNodeId,
     (node) => decodeItemsPage(node, project, cursor),
   )
 
+  const definitions = () => call(
+    { operationName: 'PlanningFields', query: PLANNING_QUERIES.PlanningFields, variables: { project: projectNodeId, first: MAX_PAGE_SIZE, after: null } },
+    decodeFieldDefinitions,
+  )
+
   /** 读完全部页；游标回到已发送过的值（成环）或超过页数上界按形状错误处理，不死循环。 */
   async function scan(): Promise<ProviderResult<readonly ItemRow[]>> {
     const rows: ItemRow[] = []
@@ -89,9 +98,11 @@ export function createGithubProjectsPlanningProvider({ bindingId, projectNodeId,
       const code = probe.ok ? undefined : probe.error.code
       const permission = code === undefined ? AccessLevel.Available
         : code === ProviderErrorCode.PermissionDenied || code === ProviderErrorCode.NotFound ? AccessLevel.Unavailable : AccessLevel.Degraded
+      // 只声明已实现的读取：条目与迭代（#133，`listIterations`）共用同一次探针，调用方按 key 分支而不是按 provider 名字。
+      const keys = [CapabilityKey.PlanningItemRead, CapabilityKey.PlanningIterationRead]
       return {
-        bindingId, capability: { [CapabilityKey.PlanningItemRead]: AccessLevel.Available },
-        permission: { [CapabilityKey.PlanningItemRead]: permission }, observedAt: new Date(now()).toISOString(),
+        bindingId, capability: Object.fromEntries(keys.map((key) => [key, AccessLevel.Available])),
+        permission: Object.fromEntries(keys.map((key) => [key, permission])), observedAt: new Date(now()).toISOString(),
       }
     },
     async getProject(ref) {
@@ -114,8 +125,14 @@ export function createGithubProjectsPlanningProvider({ bindingId, projectNodeId,
         : item.ref.objectKind === ref.objectKind && item.ref.externalId === ref.externalId))
       return found === undefined ? providerErr(failure(ProviderErrorCode.NotFound, undefined)) : providerOk(found.item)
     },
-    listFieldDefinitions: notSupported,
-    listIterations: notSupported,
+    async listFieldDefinitions(ref) {
+      return isBoundProject(ref) ? definitions() : invalid('项目不是本绑定的项目')
+    },
+    async listIterations(ref) {
+      if (!isBoundProject(ref)) return invalid('项目不是本绑定的项目')
+      const result = await definitions()
+      return result.ok ? providerOk(result.value.flatMap((field) => (field.kind === 'iteration' ? field.iterations : [])), result.requestId) : result
+    },
     /**
      * 全量比对（R5，忽略 scope.cursor），全有或全无：读完全部页并全部构造成功后才逐条产出；任何失败（含时钟与观察构造）
      * 一条不产出，也不抛错。失败通道归 #134；引导路径上紧随其后的列表读取会对同一故障给出结构化失败。
