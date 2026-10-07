@@ -44,6 +44,7 @@
 | [2026-09-21-gate-e1-write-and-events](exec-plan/active/2026-09-21-gate-e1-write-and-events.md) | Gate E1 写确认与事件可靠性：实测平台无 CAS、事件订不到、重复创建幂等 | Active |
 | [2026-09-24-local-git-worktree](exec-plan/active/2026-09-24-local-git-worktree.md) | 本地 Git provider（#137）：仓库读、分支建、工作树建，路径安全在任何 Git 命令之前；第四轮 18 条意见按根因改完，移除与 core 层验收分别拆到 #138 / #207 | Batch 1–5 已完成；四轮评审响应已记录 |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | epic #216 的控制计划：先把纵向路径与 R1 不变量的证据如实落账，再收敛读写权威、同步和 Client 重连，最后合并发布前 SQL、清理旧形状并重整测试与文档证据 | Batch 0（#217）已验收；纵向路径矩阵见 `docs/product/vertical-path.md` §2.1，R1 映射见 `docs/architecture/release-gates.md` §2.1.1；PR #239 状态以 GitHub 回读为准；Batch 1–7 待实施 |
+| [2026-10-08-development-repository-routing](exec-plan/active/2026-10-08-development-repository-routing.md) | #219：一个工作区挂多个 Development 连接（Local Git 与 GitHub，或多个本地检出），开始工作按已持久化的「仓库属于哪个连接」路由到唯一挂载；歧义与缺路由在任何外部调用前结构化拒绝，缺能力不改道；唯一挂载仍是默认、多个时全部非默认并与 Storage 读回一致；key 级解析在多挂载时 fail closed，谱系读取的接入按跨 PR 契约 K3 交给 #221 的缝函数；并列引用、按绑定的有效访问与登记命令归 #127 | 设计定稿；Batch 1–3 待实施 |
 
 ### Completed
 
