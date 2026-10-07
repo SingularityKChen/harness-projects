@@ -100,6 +100,7 @@ Project A 比 Project B 多三个自定义字段，实测 `fields.totalCount` �
 | `I_kwDOUjWAl88AAAABSUC8og` | E1-2 的 draft-convert 夹具转换后得到的内容 id（issue #6） | E1-2 执行 `convertProjectV2DraftIssueItemToIssue` 时由转换动作产生，不是新建夹具 | §2.3 登记的是转换前的 draft 内容 id `DI_lAHOAY1ahM4BkJ9rzgLKQZ0`；转换后的 issue 不是独立夹具 |
 | `PVTSSF_lAHOAY1ahM4BkJ9szhi7jXQ` | Project B 的 `Status` 字段 id | 建沙箱时随 Project B 产生，未删除；E1-2 观测时读到 | §2.4 的表只列 Project A 的字段 |
 | `PVTF_lAHOAY1ahM4BkJ9rzhi7jWQ` | Project A 的 `Title` 字段 id；E1-3 实验 1 §4.2 的响应里它以 `name = "Title"` 出现 | 建 Project A 时就有，未删除 | §2.4 的表只列自定义字段与 E1 用到的字段，`Title` 没有登记；它的值属内容派生，按 §6 不计入「规划字段值」行 |
+| `PVTF_lAHOAY1ahM4BkJ9rzhi7jWU`、`PVTF_lAHOAY1ahM4BkJ9rzhi7jWc`、`PVTF_lAHOAY1ahM4BkJ9rzhi7jWg`、`PVTF_lAHOAY1ahM4BkJ9rzhi7jWk`、`PVTF_lAHOAY1ahM4BkJ9rzhi7jWo`、`PVTF_lAHOAY1ahM4BkJ9rzhi7jWw`、`PVTF_lAHOAY1ahM4BkJ9rzhi7jW0`、`PVTF_lAHOAY1ahM4BkJ9rzhi7jW4`、`PVTF_lAHOAY1ahM4BkJ9rzhi7jW8`、`PVTF_lAHOAY1ahM4BkJ9rzhi7jXA`、`PVTF_lAHOAY1ahM4BkJ9rzhi7jXE` | Project A 的十一个内置字段（Assignees / Labels / Linked pull requests / Milestone / Repository / Reviewers / Parent issue / Sub-issues progress / Created / Updated / Closed）的字段 id | 建 Project A 时就有，未删除 | §2.4 只登记自定义字段与 E1 用到的字段；#133 的字段读取面按 `fields` 连接原样读回它们，它们因此出现在本轮的录制夹具里 |
 
 ### 2.6 构造的输入（不是平台对象）
 
