@@ -68,8 +68,8 @@ Issue #133 要求四项行为：两个 Project 即使复用 option id 也各自�
 |---|---|
 | 共享计划 | `docs/README.md`；`docs/exec-plan/active/2026-10-05-project-field-read.md`（顶层完成后移动到 `docs/exec-plan/completed/`） |
 | A | `docs/architecture/gate-e1-sandbox.md`；`packages/domain/src/index.ts`；`packages/domain/src/planning-fields.ts`（仅原生值）；`packages/capabilities/src/planning-provider.ts`；`packages/providers/fake/src/fixtures.ts`；`packages/providers/fake/src/planning.ts`；`packages/providers/fake/src/state.ts`；`packages/providers/planning-github-projects/src/decode.ts`；`fields.ts`；`index.ts`；`provider.ts`；`queries.ts`；`tests/contract/fixtures/github-projects/project-a.json`；`project-fields.json`；`replay.js`；`tests/contract/planning-github-projects-contract.test.js`；`planning-github-projects-mapping.test.js` |
-| B | `packages/domain/src/planning-fields.ts`（映射与投影）；`packages/domain/src/entities.ts`；`packages/capabilities/src/registry.ts`；`storage.ts`；`packages/providers/fake/src/storage.ts`；`packages/core/src/bootstrap.ts`；`context.ts`；`planning-fields.ts`；`packages/storage/sqlite/migrations/002_identity_membership.sql`；`packages/storage/sqlite/src/migrations.ts`；`storage-rows.ts`；`storage-sync.ts`；`storage.ts`；`tests/contract/planning-fields.test.js`；`storage-contract.test.js`；`tests/contract/suites/storage-sync.js`；`storage.js`；`tests/integration/execution-relation-write-schema.test.js`；`github-projects-bootstrap.test.js`；`identity-membership-enums.test.js`；`identity-membership-schema.test.js` |
-| C | `packages/core/src/projection.ts`；`packages/controller/src/wire.ts`；`packages/ui-model/src/derive.ts`；`types.ts`；`work-item-list-view.ts`；`packages/ui/src/work-item-list.ts`；`tests/contract/ui-model-presentation.test.js`；`ui-work-item-list-view.test.js`；`ui-work-item-list.test.js` |
+| B | `packages/domain/src/planning-fields.ts`（映射与投影）；`packages/domain/src/entities.ts`；`packages/capabilities/src/registry.ts`；`storage.ts`；`packages/providers/fake/src/storage.ts`；`packages/core/src/bootstrap.ts`；`context.ts`；`planning-fields.ts`；`projection.ts`；`packages/storage/sqlite/migrations/002_identity_membership.sql`；`packages/storage/sqlite/src/migrations.ts`；`storage-rows.ts`；`storage-sync.ts`；`storage.ts`；`tests/contract/planning-fields.test.js`；`storage-contract.test.js`；`tests/contract/suites/storage-sync.js`；`storage.js`；`tests/integration/execution-relation-write-schema.test.js`；`github-projects-bootstrap.test.js`；`identity-membership-enums.test.js`；`identity-membership-schema.test.js` |
+| C | `packages/controller/src/wire.ts`；`packages/ui-model/src/derive.ts`；`types.ts`；`work-item-list-view.ts`；`packages/ui/src/work-item-list.ts`；`tests/contract/ui-model-presentation.test.js`；`ui-work-item-list-view.test.js`；`ui-work-item-list.test.js` |
 
 ## Plan of Work
 
@@ -100,11 +100,11 @@ Issue #133 要求四项行为：两个 Project 即使复用 option id 也各自�
 
 **最小闭环**：Host 能按 binding + project 显式映射原生字段，Memory/SQLite 用同一事务确认原生行、投影、mapping 与 revision，失败保留最后已确认快照。
 
-**涉及文件**：`packages/core/src/planning-fields.ts`、`packages/core/src/bootstrap.ts`、`packages/capabilities/src/storage.ts`、`packages/providers/fake/src/storage.ts`、`packages/storage/sqlite/src/storage-sync.ts`、`tests/contract/planning-fields.test.js`。
+**涉及文件**：`packages/core/src/planning-fields.ts`、`packages/core/src/bootstrap.ts`、`packages/core/src/projection.ts`、`packages/capabilities/src/storage.ts`、`packages/providers/fake/src/storage.ts`、`packages/storage/sqlite/src/storage-sync.ts`、`tests/contract/planning-fields.test.js`。
 
-- [ ] 从 A 继承原生类型，在 B 新增 Host mapping/snapshot 类型和 `WorkspaceProjection.planningFields`。
-- [ ] 将 mapping 的三态输入、重登记保护、定义校验、redacted 清空与 bootstrap 串行化放在 core。
-- [ ] 两种 Storage 实现相同的整组替换、原子失败与重启读回契约。
+- [x] 从 A 继承原生类型，在 B 新增 Host mapping/snapshot 类型和 `WorkspaceProjection.planningFields`。
+- [x] 将 mapping 的三态输入、重登记保护、定义校验、redacted 清空与 bootstrap 串行化放在 core。
+- [x] 两种 Storage 实现相同的整组替换、原子失败与重启读回契约。
 
 **验证**（在检出 `feature/project-field-projection` 的工作树根目录运行）：
 
@@ -123,7 +123,7 @@ Issue #133 要求四项行为：两个 Project 即使复用 option id 也各自�
 
 **最小闭环**：已确认字段投影到达真实列表 HTML，unmapped、unset 与 redacted 的显示语义稳定，完成 issue #133。
 
-**涉及文件**：`packages/core/src/projection.ts`、`packages/controller/src/wire.ts`、`packages/ui-model/src/work-item-list-view.ts`、`packages/ui/src/work-item-list.ts`、`tests/contract/ui-work-item-list.test.js`。
+**涉及文件**：`packages/controller/src/wire.ts`、`packages/ui-model/src/work-item-list-view.ts`、`packages/ui/src/work-item-list.ts`、`tests/contract/ui-work-item-list.test.js`。
 
 - [ ] wire 和 client store 只传已确认投影；redacted 在 wire 与 ui-model 两层剥离。
 - [ ] 列表显示原生未映射状态、迭代 title 与 date-only 目标日期，不做时区转换。
@@ -163,7 +163,7 @@ Issue #133 要求四项行为：两个 Project 即使复用 option id 也各自�
 - [x] (2026-10-07 CST) 锁定 PR #268 当前 base/head、checks、review、issue #133 验收与双向链接。
 - [x] (2026-10-07 CST) 建立 `backup/pr268-before-stack-20261007`，在 `.worktrees/pr268-stack` 从 `origin/main` 建立隔离重构工作树；main baseline 为 1149 contract/integration/e2e + 7 MVP-0，0 fail。
 - [x] (2026-10-07 CST) Batch A：Provider bottom layer 为 746 行 code/test、222 行 docs；1156 contract/integration/e2e + 7 MVP-0、8 boundaries 全部通过，typecheck、workflow、disclosure 与 diff check 通过。
-- [ ] Batch B：重建并验证 Host projection middle layer。
+- [x] (2026-10-07 CST) Batch B：Host projection middle layer 为 772 行 code/test、0 行 docs；1186 contract/integration/e2e + 7 MVP-0、8 boundaries 全部通过，typecheck、workflow、disclosure 与 diff check 通过。
 - [ ] Batch C：重建并验证 List presentation top layer。
 - [ ] 比较旧/新最终 product tree、执行 publication scan，并以精确 lease 更新远端 stack。
 - [ ] 回读三个 PR 的 head/base/checks、issue links、review threads 与 draft/ready 状态；不合并。
@@ -173,6 +173,7 @@ Issue #133 要求四项行为：两个 Project 即使复用 option id 也各自�
 - 2026-10-06：原计划虽然写了 800 行停止门，Batch 1 后仍继续在同一 PR 实现 B/C；最终 1826 行。证据：`node scripts/rule-checks.mjs size origin/main`。
 - 2026-10-06：测试与 fixture 约占原 PR 代码/测试改动的 47%；删除它们会移除分页、scope、事务和 redaction 的判别力，不能作为减量方案。
 - 2026-10-07：原四提交已提供天然责任边界，但 Provider 提交夹带 Host projection 类型与 Memory Storage 整组替换；把 hunk 归回 B 后，预计 A/B/C 都能满足原 800 行预算，必须以逐层 `size` 实测确认。
+- 2026-10-07：B 首次 focused tests 在没有 `packages/core/src/projection.ts` 时出现 14 个失败：Storage 已写入 `planningFields`，core query 却返回 `undefined`。该文件因此归 B；移动后 focused 185/185、全量 1186/1186 通过，B 实测 772 行。
 - 2026-10-07：`pnpm verify` 在无 TTY 的受限环境会触发依赖目录重建；本任务先完成一次 `pnpm install --frozen-lockfile`，之后直接运行 `tsc` 与 `node --test`，避免验证命令把网络可用性误当产品失败。
 
 ## Decision Log
@@ -207,7 +208,7 @@ PR 发布使用普通 `gh` 的 `SingularityKChen` 身份；Reviewer review 使�
 
 ## Outcomes & Retrospective
 
-截至 2026-10-07，产品实现已在旧 PR head 通过完整测试，但交付形态不是最佳实践：单 PR 超过原预算两倍以上并收到 size blocking review。当前重构目标是不改变已验证的产品树，只改变职责归属、提交/PR 拓扑与计划事实；若重构需要改变行为，必须新增判别性测试并在本节记录偏差。
+截至 2026-10-07，A 与 B 已分别以 746/772 行通过完整测试和仓库门禁；旧 PR 的 Provider/Host 行为未删减。重构期间唯一的边界修正是把 `packages/core/src/projection.ts` 从呈现层移回 Host 层，使 B 的写后读取闭环成立。C 尚待重建与最终 product-tree 对照。
 
 完成后记录三层实际行数、测试数、range-diff/product-tree 对照、远端回读与仍未解决的产品风险。人类决定是否和何时合并。
 
@@ -218,3 +219,5 @@ PR 发布使用普通 `gh` 的 `SingularityKChen` 身份；Reviewer review 使�
 2026-10-06 CST：记录完整实现、评审修复、规模超限与单 PR 例外。**Superseded by 2026-10-07 本条**。
 
 2026-10-07 CST：按用户要求重新审视原始 issue/spec/plan；撤销“超限例外是交付路径”的结论，重切 A Provider → B Host projection → C List presentation 三层 stack，并建立逐层 800 行停止门、恢复锚点与精确 force-with-lease 发布流程。
+
+2026-10-07 CST：Batch B 的失败测试证明 core query projection 属于 Host 闭环，已把 `packages/core/src/projection.ts` 从 C 移到 B；记录 772 行、1186 + 7 测试与全部本地门禁通过。
