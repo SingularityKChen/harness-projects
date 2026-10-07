@@ -1,0 +1,87 @@
+# ADR-0011：交付事实按执行上下文存一份「最后确认快照」，`refreshDeliveryFacts` 是唯一写者；只有完整读到的集合才能替换或删除，交付写者不推进业务修订号
+
+> 状态：Proposed
+> 日期：2026-10-08
+> 来源：`docs/exec-plan/active/2026-10-08-delivery-fact-writer.md`（issue #221 的定稿设计与原型证据）；控制计划 `docs/exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md` Batch 3；issue #221 / #222
+
+## Decision
+
+1. **缓存键是执行上下文**：`(workspaceId, contextId)`，`contextId` 是 `contextIdFor(workspace, workItem, repository)` 的确定性 id。
+   没有执行上下文就没有交付事实，由 SQLite 的复合外键与替身的同语义检查强制。键里没有 binding，所以连接路由变化（#219）不改变键。
+2. **来源只有一个方向**：从已观察到的执行上下文与工作树出发，经 Development 的仓库读、变更请求读，以及 Delivery 的流水线读、检查读获得。
+   不来自 Planning，不来自事件（ADR-0003），也不来自 LLM。
+3. **内容是四个集合**：`commit`、`change_request`、`pipeline_run`、`check_run`，各带三样东西：
+   - 节点：`entityId`、`externalId`、`label`、`fact`；
+   - `confirmedAt`：最近一次完整读到该集合的时刻；
+   - 显式的 `stale` 标志。
+
+   整行另带 `attemptedAt`，是最近一次被应用的刷新开始读取的时刻。节点身份是 core 的确定性实体 id（`chainEntityId`），关系仍在关系表里。
+   SQLite 侧是迁移 006 的 `delivery_fact` 表（四列，集合放在一个 JSON 列里），storage 只做整行往返和父行校验，不解释集合内容。
+4. **唯一写者**是 core 的 `refreshDeliveryFacts`。它先在事务外读 provider，再在一个 Storage 事务里依次做三件事：
+   1. 用 `putEntity` 登记节点实体；
+   2. 用 `recordEdges` 只写 `derived_from`、`produced_by`、`runs_on` 三类候选边；
+   3. 用 `putDeliveryFacts` 整行覆盖本上下文的快照。
+
+   `tracks` 与 `has_worktree` 只由开始工作写。任何查询、命令或宿主代码都不得另调 `putDeliveryFacts`。
+5. **完整性与删除**：
+   - 一个集合完整，当且仅当它的锚点集合完整，而且它自己的读取没有缺口。
+   - 锚点被完整读到却确认不存在时（例如分支已删除），下游集合算完整的空集合。
+   - 完整的集合整组替换，包括删除。
+   - 不完整的集合原样保留，只标 `stale`。不完整的情形包括：离线、权限被拒、分页未读完、锚点没读到、提交失败。
+   - provider 必须用结构化错误表达「看不全」，不得返回被过滤过的列表。
+6. **新鲜度只存在快照里**：不写 `sync_cursor`，不写 `reconcile_cursor`（PR-A 的 ADR-0012 第 7 条，PR #290，Proposed），不影响 `getPlanningSync()`。
+   交付写者**从不推进业务修订号**：修订号是规划快照的版本，而交付事实不在那份快照里。
+7. **乱序**：已提交快照的 `attemptedAt` 晚于本次读取的开始时刻时，本次刷新整体放弃（`applied: false`），只有更新的读取能覆盖。
+8. **失败**：从读取到提交，任何异常都折成结构化结果，不裸抛，也不转发异常原文。提交失败后再用第二个事务尽力把全部集合标为陈旧；这一步也失败时，返回诚实的失败。
+9. **查询**：在 #221 期间先委托唯一写者，再读已提交的事实，查询本身不写边。#222 起查询只读已提交的事实，摄入只走 `commands.refreshDeliveryFacts`。
+
+## Why
+
+它保护 `AGENTS.md` §1.1 的以下不变量：
+
+- 不变量 3：CI 事实不改写规划状态，也不改写规划快照的修订号。
+- 不变量 5：provider 读到的关系只进候选。
+- 不变量 6：节点身份是确定性的，沿已记录的关系传播，缺口不落成关系。
+- 不变量 7：Host 的已提交事实是权威，查询不再兼任发现者。
+
+#221 之前在 `main@6417d45` 上可复现的问题：
+
+- 首次读交付视图，关系数从 2 变成 9。
+- Delivery 离线后，5 条已确认的 CI 跳消失。
+- 权限被拒同样让 CI 消失，且不报错。
+- 62 条运行只返回 50 条，`degraded false`，截断被当成了完整。
+- 在 SQLite Storage 上，首次读取直接抛 `FOREIGN KEY constraint failed`：谱系写者写了没登记端点实体的边，替身接受了悬空端点，所以没人发现。
+
+复现命令与输出见来源 ExecPlan 的 `Context and Orientation`。
+
+为什么只有完整读取才能删除：缓存的价值在于「最后确认」。把截断、权限不足或网络失败当成「确认不存在」，等于在 provider 看不全时清空用户已经确认过的事实，这正是 #221 验收 3 禁止的。
+
+为什么新鲜度不放进 `sync_cursor`：
+
+- 游标按单个 binding 定位，而一份交付快照由 Development 与 Delivery 两条连接的读取拼成。
+- 复用游标会触发 TD-021 的「第二个游标写者」。
+- 游标的 `cursor_value` 的语义是 provider 游标值，不是确认时刻。
+
+原型里还实测到一个问题：用「`confirmedAt` 不等于 `attemptedAt`」推断陈旧时，毫秒级的默认时钟会让连续两次刷新拿到同一时刻，陈旧标记因此丢失。所以陈旧必须是显式的标志。
+
+## Rejected
+
+| 被放弃的方案 | 放弃原因 |
+|---|---|
+| 复用 `sync_cursor` 存新鲜度（每集合一条游标） | 见上；还要求 Delivery 绑定存在才能记录「从未读到」 |
+| 每个（上下文，实体）一行，或每个（上下文，种类，binding，外部 id）一行的关系形状 | 验收不需要跨上下文查询；替身与 SQLite 要多写按种类替换、实体外键、种类连接等语义，这些正是本仓库反复出现分叉格的地方；Gate E1（#4）裁决前不冻结细粒度模型。代价登记为 TD-041 |
+| 观察账本（`sync_observation` / `committed_observation`）承载事实 | 账本是连接级、只追加的去重账本，表达不了「完整空集合时删除」，也没有工作区作用域（TD-022） |
+| 给 `entity` 加属性列，或扩 `external_identity` 的种类 | 污染全局身份锚点，扩种类属于 Gate E1 的范围，也没有「当前集合」的概念 |
+| core 内存缓存，或查询侧「出错才回退缓存」 | 重启即丢，而且构成第二个事实拥有者；查询仍然在写 |
+| 每个节点存 `observed_at`，按节点部分增补截断的集合 | 「部分确认」要按节点算陈旧，代价翻倍；截断由 #232 的完整分页消除 |
+| 交付事实变化推进工作区修订号 | 修订号的快照里没有交付事实，推进只会产生空 delta（#220） |
+| 存平台原样的 `status` / `conclusion`，读时再映射 | 要改 `chain-facts` 的读出形状，与 PR #289（#232）正在重写的读取冲突；登记为 TD-043，#289 合并后再评估 |
+
+## Consequences
+
+- 迁移 `006_delivery_facts.sql` 新增 `delivery_fact` 表。#223 合并 SQLite 基线时必须把它并入；控制计划里的 `005_delivery_facts.sql` 已过期，因为 005 被 #203 的载体世代占用。
+- PR #289（#232）的完整分页取代本 ADR 第 5 条在 Delivery 两类读取上的最小截断守卫。Development 的分支与变更请求查找仍按「目标不在第一页且有下一页即缺口」处理（TD-040）。
+- Development 的连接选择只经 `chain-facts.ts` 的一个路由缝。PR-B（#219）合并后，由后合并的一方换成 `routeDevelopment`，并补一条已登记仓库的多挂载正例。
+- #233（谱系同步）必须扩展这个写者的集合，不得另起第二个写者。#234（抽屉谱系条）与 #281（交付视图）必须读 `stale` 与缺口，不得把陈旧值显示成当前值；陈旧集合按记录时的锚点（`hop.to`）归属（TD-042）。
+- #134 的定时刷新与 #234 的打开时刷新调用同一个命令，本 ADR 不规定调度。
+- `delivery_fact.sets_json` 的内部形状由 core 保证，storage 不校验（TD-041）。直接调用端口的宿主若写入形状错误的快照，读路径只能按缺字段降级。
