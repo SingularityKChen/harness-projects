@@ -36,7 +36,7 @@ export type WorkItemListReadInput = {
     }
 )
 
-/** 安全行：redacted 只剩占位；`key` 是内部条目键，只供框架做列表 key，不得进入任何属性或文字。`stale` = 行自身新鲜度（含断网与从未读到）或 页面级保守降级（刷新 / 读门 degraded / 失败保行）；整表来源缺口只降级整表，已确认的行保持 fresh。 */
+/** 安全行：redacted 只剩占位；`key` 是稳定 `EntityId`（ADR-0010 route locator）：item 行可经显式 navigation 契约进入 href，redacted 行只供框架做列表 key，任何行都不得进入 data-*、DOM id、aria-*、title 或文字。`stale` = 行自身新鲜度（含断网与从未读到）或 页面级保守降级（刷新 / 读门 degraded / 失败保行）；整表来源缺口只降级整表，已确认的行保持 fresh。 */
 export type VisibleListRow =
   | { readonly kind: 'redacted'; readonly key: string }
   | {
