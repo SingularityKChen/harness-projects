@@ -26,7 +26,6 @@
 | 计划 | 范围 | 状态 |
 |---|---|---|
 | [2026-10-05-connector-account-storage](exec-plan/completed/2026-10-05-connector-account-storage.md) | #126 连接账号、宿主凭据引用与工作区配置：独立元数据写口、Fake/SQLite 同契约、身份保留及重启验收；已实施并经评审，等待合并回读（PR #270） | Completed |
-| [2026-10-05-project-field-read](exec-plan/active/2026-10-05-project-field-read.md) | #133：GitHub Project 原生字段只读，工作区显式映射归一到唯一的规划状态，列表展示迭代与目标日期 | Active；已实施并本地验证，等待 PR #268 评审 |
 | [2026-09-20-mvp0-parallel-stacks](exec-plan/completed/2026-09-20-mvp0-parallel-stacks.md) | MVP-0 并行堆叠 PR 交付的**控制计划**：栈拓扑、文件所有权、模型路由、批次顺序与合并顺序 | Completed |
 | [2026-09-20-contract-plane](exec-plan/completed/2026-09-20-contract-plane.md) | 契约栈（A）：领域模型、五域能力契约、契约套件与离线替身 | Completed |
 | [2026-09-20-persistence-plane](exec-plan/completed/2026-09-20-persistence-plane.md) | 持久化栈（B）：从空库可重复执行的迁移运行器 | Completed |
@@ -50,6 +49,7 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-10-05-project-field-read](exec-plan/completed/2026-10-05-project-field-read.md) | #133：GitHub Project 原生字段只读，单页读取字段定义与以 project field id 为键的原生值（R2，`hasNextPage` 即整次失败）；工作区显式映射在注册时校验、深拷贝并冻结，只把列出的 option 归一进唯一的 `planningStatus`，未映射显示「名称（未映射）」、不按名称猜；迭代与目标日期随投影同事务确认，经 wire 到真实列表 HTML，redacted 双层剥离。第一版 1826 行经设计复审精简重写（删除只写不读的原生值落库链、映射不持久化，人类批准），第二轮评审与修复复评的 P2 / P3 已处理；原生值持久化归 #71、映射来源归 #229、同步尊重 `StatusPolicy` 归 #273（待人类裁决）、详情显示迭代与日期归 #274；Completed |
 | [2026-10-05-work-item-detail](exec-plan/completed/2026-10-05-work-item-detail.md) | 迭代 5 的 #130：列表与深链打开同一个只读详情抽屉——ui-model 唯一安全投影（scope → 既有列表门 → 安全行 → 白名单 content，详情读取后复验遮蔽）、ui 原生 `<dialog>` 组合页（打开时快照 opener 回焦）、apps/web canonical codec 与产品 `browserHistoryPort`（close 用 replace）。PR #269 的 route-locator P1 经人类伙伴批准 ADR-0010 闭合：规划实体的稳定 ID 是可观察、非秘密、非 capability 的 locator，#129 计划只做限定范围的原处标注；L1–L3 最小披露由带 navigation 的契约用例与变异证据固定（集成树 43 个变异 41 红）。复评 APPROVED 后补 fixture 列表路由 scope 门、组合页 open 通道与 codec 两个拒绝样本。真实 Host 挂载归 #229；与 #268 并集后的详情字段归 #274；非 Chromium 引擎与 300ms 级并发未验证；Completed |
 | [2026-10-03-workspace-sync-scope](exec-plan/completed/2026-10-03-workspace-sync-scope.md) | 迭代 4 的 #189：同一连接挂在两个工作区时，同步游标按（工作区，连接，scope）三元键存取——端口记录带必需 `workspaceId`，Fake 与 SQLite 按三字段定位并各查两条父边，003 原位改三元主键（D10），Core 的成功事务、失败结算与 freshness 都显式传工作区，旧两元主键的库在打开时被拒并关闭句柄；工作区 A 的 degraded 与原因不再被 B 的成功洗成 healthy，经 `composeCore` 与 controller 在两个 Storage 上验收，22 项负对照除裁定存活的 N22 外全部变红。第一轮 MVP 评审修订补入「ws1 已接受的事件不阻止 ws2 刷新」两 Storage 回归用例（N23 证明有牙，TD-022 保持 Open）、写明 revert 后需删除重建本地库、把 vertical-path 的 X2 结论改为 issue 记录的复现；遗留 TD-020–TD-022，合并状态以 PR #264 回读为准；Completed |
 | [2026-10-03-storage-work-item-rejection](exec-plan/completed/2026-10-03-storage-work-item-rejection.md) | 迭代 4 的 #196：直接向 Storage 写执行上下文、引用未登记工作项时，替身与 SQLite 以同一个 `StorageInputError`（`invalid_input` / 恢复 `none` / 不可重试）拒绝，不再一边接受、一边暴露驱动外键文字；SQLite 的预检在同一队列槽、早于自己的 `BEGIN`，失败方法零写入，事务回滚语义不变，`work_item_id` 外键作为最终防线由 DDL 用例钉住。「同槽」只由设计论证、两槽变体经端口不可判别；core 认领目前把 `failure` 压平成 `unavailable / retry`（不可达），连同其余输入缺陷登记为 TD-023。经第一轮 MVP 评审修订（5 条 P3）后归档；Completed |
