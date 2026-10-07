@@ -270,6 +270,24 @@ export class MemoryStorage implements cap.Storage {
   async listFieldValues(workspaceId: domain.WorkspaceId, itemExternalId: string): Promise<readonly cap.FieldValueRecord[]> {
     return this.data.fieldValues.filter((v) => v.workspaceId === workspaceId && v.itemExternalId === itemExternalId)
   }
+  /**
+   * 整组替换（#133）：空组清空。先校验全组——跨 scope、悬挂成员关系、组内重复 `projectFieldId` 一律拒绝且不留行——
+   * 再在**一次** `#mutate` 内删除并写入。刻意不调用 `putFieldValue`：那会排进第二次变更，既破坏原子性，也会在队列内自等。
+   */
+  async replaceFieldValues(workspaceId: domain.WorkspaceId, itemExternalId: string, values: readonly cap.FieldValueRecord[]): Promise<void> {
+    return this.#mutate(() => {
+      const membershipExists = this.data.memberships.some((m) => m.workspaceId === workspaceId && m.itemExternalId === itemExternalId)
+      if (!membershipExists) throw new Error('field value membership does not exist')
+      const seen = new Set<string>()
+      for (const value of values) {
+        if (value.workspaceId !== workspaceId || value.itemExternalId !== itemExternalId) throw new Error('field value replacement record is out of scope')
+        if (seen.has(value.projectFieldId)) throw new Error(`field value replacement has duplicate project field id ${value.projectFieldId}`)
+        seen.add(value.projectFieldId)
+      }
+      this.data.fieldValues = this.data.fieldValues.filter((v) => !(v.workspaceId === workspaceId && v.itemExternalId === itemExternalId))
+      this.data.fieldValues.push(...values)
+    })
+  }
   async putPlanningProjection(workspaceId: domain.WorkspaceId, projection: domain.WorkspaceProjection): Promise<void> {
     return this.#mutate(() => {
       if (!this.data.workspaces.some((workspace) => workspace.id === workspaceId)) throw new Error('projection workspace does not exist')

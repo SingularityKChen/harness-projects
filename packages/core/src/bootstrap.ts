@@ -6,17 +6,19 @@
 import {
   CapabilityKey, ObservationState, ProjectErrorCode, SyncState, projectCodeForProviderError,
   projectError, providerErr, providerError, providerOk, singlePlanningBinding,
-  type ExternalObjectRef, type PlanningProvider, type ProviderError, type ProviderObservation,
-  type ProviderPlanningContent, type ProviderPlanningItem, type ProviderResult, type StorageTransaction,
+  type ExternalObjectRef, type FieldValueRecord, type PlanningProvider, type ProviderError,
+  type ProviderObservation, type ProviderPlanningContent, type ProviderPlanningFieldDefinition,
+  type ProviderPlanningItem, type ProviderResult, type StorageTransaction,
 } from '@harness-projects/capabilities'
 import {
   ContentKind, EntityKind, ProviderErrorCode, normalizePlanningStatus,
   type EntityId, type PlanningContent, type ProjectError, type ProviderBindingId,
-  type WorkspaceId, type WorkspaceProjection,
+  type WorkspaceId, type WorkspacePlanningFieldMapping, type WorkspaceProjection,
 } from '@harness-projects/domain'
 import { gateCommand } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
 import { ensureEntity, entityKindFor, planningContentKind } from './identity.ts'
+import { assertPlanningFieldRoleDefinitions, encodeNativePlanningFieldValue, projectPlanningFields } from './planning-fields.ts'
 
 /** 一个工作空间只有一个 Planning 事实源（不变量 1），因此每个（工作区，绑定）只需要一条同步游标。 */
 export const PLANNING_SYNC_SCOPE = 'planning.project'
@@ -45,7 +47,19 @@ interface SyncCounts {
   unanchored: number
 }
 
-export async function bootstrapWorkspace(context: CoreContext): Promise<BootstrapResult> {
+/**
+ * 引导入口。同一 CoreContext 的调用经 `bootstrapQueue` 串行：队列入口**捕获本次 pending 映射**，ack 之后才更新
+ * 已确认值并清 pending；失败释放队列，下一次仍可用同一 pending 重试（#133）。待确认映射与字段定义在写任何行
+ * 之前校验：定义不可用或角色/选项不合法即整次失败，旧映射与旧快照原样保留。
+ */
+export function bootstrapWorkspace(context: CoreContext): Promise<BootstrapResult> {
+  const pending = context.pendingPlanningFieldMapping
+  const run = context.bootstrapQueue.then(() => runBootstrap(context, pending), () => runBootstrap(context, pending))
+  context.bootstrapQueue = run.then(() => undefined, () => undefined)
+  return run
+}
+
+async function runBootstrap(context: CoreContext, pending: WorkspacePlanningFieldMapping | null | undefined): Promise<BootstrapResult> {
   const binding = singlePlanningBinding(context.registry)
   const gate = gateCommand(context.registry, CapabilityKey.PlanningItemRead, 'read')
   const planning = binding?.planning
@@ -58,7 +72,31 @@ export async function bootstrapWorkspace(context: CoreContext): Promise<Bootstra
   if (!project.ok) return fail(context, binding.ref.bindingId, toProjectError(project.error))
   const items = await readAllItems(planning, project.value)
   if (!items.ok) return fail(context, binding.ref.bindingId, toProjectError(items.error))
-  return commitSync(context, binding.ref.bindingId, items.value, observations)
+  // 定义一次只取一次；读取面不提供定义时映射角色全部降级为 unset（不按名称猜字段）。
+  const definitionResult = await planning.listFieldDefinitions(project.value)
+  if (!definitionResult.ok) return fail(context, binding.ref.bindingId, toProjectError(definitionResult.error))
+  const definitions = definitionResult.value
+  const confirmed = pending === undefined ? context.planningFieldMapping : (pending ?? undefined)
+  try {
+    if (confirmed !== undefined && confirmed.projectExternalId !== project.value.externalId) {
+      throw new TypeError(`planningFieldMapping 的 projectExternalId ${confirmed.projectExternalId} 与实际发现项目 ${project.value.externalId} 不符`)
+    }
+    if (pending !== undefined && pending !== null) assertPlanningFieldRoleDefinitions(pending, definitions)
+  } catch (error) {
+    return fail(context, binding.ref.bindingId, projectError(ProjectErrorCode.InvalidInput, error instanceof Error ? error.message : String(error)))
+  }
+  let result: BootstrapResult
+  try {
+    result = await commitSync(context, binding.ref.bindingId, items.value, observations, definitions, confirmed, pending)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    result = await fail(context, binding.ref.bindingId, projectError(ProjectErrorCode.ResultUnknown, `规划同步事务失败：${message}`))
+  }
+  if (result.ok) {
+    context.planningFieldMapping = confirmed
+    context.pendingPlanningFieldMapping = undefined
+  }
+  return result
 }
 
 /** 项目范围优先用注入值；否则从观察主体反查条目取回 project，不猜外部 id。 */
@@ -114,12 +152,21 @@ async function collectObservations(planning: PlanningProvider): Promise<readonly
 async function commitSync(
   context: CoreContext, bindingId: ProviderBindingId,
   items: readonly ProviderPlanningItem[], observations: readonly ProviderObservation[],
+  definitions: readonly ProviderPlanningFieldDefinition[],
+  confirmedMapping: WorkspacePlanningFieldMapping | undefined,
+  pendingMapping: WorkspacePlanningFieldMapping | null | undefined,
 ): Promise<BootstrapResult> {
   const committed = await context.storage.transaction(async (tx) => {
     const revision = await tx.advanceRevision(context.workspaceId)
-    const synced = await upsertItems(tx, context, items, revision)
+    const synced = await upsertItems(tx, context, items, revision, definitions, confirmedMapping)
     await recordObservations(tx, observations)
     await tx.replacePlanningProjections({ workspaceId: context.workspaceId, bindingId }, synced.projections)
+    // 映射与字段、投影同事务确认：待确认输入在这一笔里才成为已确认配置；省略输入保留注册时读回的旧映射。
+    const workspace = await tx.getWorkspace(context.workspaceId)
+    if (workspace !== undefined) {
+      const mapping = pendingMapping === undefined ? workspace.planningFieldMapping : (pendingMapping ?? undefined)
+      await tx.putWorkspace(mapping === undefined ? { id: workspace.id, name: workspace.name, statusPolicy: workspace.statusPolicy } : { ...workspace, planningFieldMapping: mapping })
+    }
     // 提交成功即 healthy；有缺口只带错误码，不写 degraded（degraded / failed 留给什么都没提交的读取，D23）。
     const incomplete = synced.counts.unanchored > 0
     await tx.putSyncCursor({
@@ -135,10 +182,18 @@ async function commitSync(
     error: unanchored > 0 ? projectError(ProjectErrorCode.PermissionDenied, `${unanchored} 个条目对当前凭据不可见，按成员关系也找不回本地实体`) : undefined,
   }
 }
-/** 一个条目一个成员：先解析稳定内部实体，再把权威字段与三态内容写成工作区投影。 */
+/**
+ * 一个条目一个成员：先解析稳定内部实体，再把权威字段与三态内容写成工作区投影，并在同一事务里整组替换该成员的
+ * 原生字段值（空组 = 清空）。`fields.nativeValues` 缺省 = Provider 没有读取面，投影不带 `planningFields`；空对象 =
+ * 完整读回且没有值（投影 `status: unset`，不残留旧日期/迭代）。redacted 条目按空组处理（不依赖 Provider 记得发
+ * 空对象），因此整组替换会清掉上次可见时留下的行：被平台扣下的值不得继续留在库里，否则一次诊断或导出就能把
+ * Provider 已收回的值读出来。
+ */
 async function upsertItems(
   tx: StorageTransaction, context: CoreContext,
   items: readonly ProviderPlanningItem[], revision: number,
+  definitions: readonly ProviderPlanningFieldDefinition[],
+  mapping: WorkspacePlanningFieldMapping | undefined,
 ): Promise<SyncedItems> {
   const counts: SyncCounts = { entities: 0, workItems: 0, changeRequests: 0, unanchored: 0 }
   const projections: WorkspaceProjection[] = []
@@ -148,7 +203,22 @@ async function upsertItems(
       counts.unanchored += 1
       continue
     }
-    const projection = toProjection(context.workspaceId, anchor.entityId, item, revision)
+    const redacted = item.content.kind === ContentKind.Redacted
+    // 被扣下的内容一律按「完整读回且没有任何值」处理，不依赖 Provider 记得发空对象：Provider 只报告事实，
+    // 「不得把已收回的值留在库里」是 core 的义务。原生字段值缺省表示没有读取面，但 redacted 条目即使缺省
+    // 也必须清空——否则上一次可见时落库的行会留在诊断/导出里（见上方函数注释）。
+    const nativeValues = redacted ? {} : item.fields.nativeValues
+    if (nativeValues !== undefined) {
+      // 空组同样走整组替换：旧日期 / 旧迭代必须被清掉。
+      const observedAt = item.sourceUpdatedAt ?? context.clock()
+      const values: FieldValueRecord[] = Object.entries(nativeValues).map(([projectFieldId, value]) => ({
+        workspaceId: context.workspaceId, itemExternalId: item.membership.externalId, projectFieldId,
+        value: encodeNativePlanningFieldValue(value), observedAt,
+      }))
+      await tx.replaceFieldValues(context.workspaceId, item.membership.externalId, values)
+    }
+    const projection = toProjection(context.workspaceId, anchor.entityId, item, revision,
+      nativeValues === undefined ? undefined : projectPlanningFields(nativeValues, definitions, mapping))
     await tx.putPlanningProjection(context.workspaceId, projection)
     projections.push(projection)
     counts.entities += 1
@@ -183,11 +253,13 @@ async function anchorOf(
 
 function toProjection(
   workspaceId: WorkspaceId, entityId: EntityId, item: ProviderPlanningItem, revision: number,
+  planningFields: WorkspaceProjection['planningFields'],
 ): WorkspaceProjection {
   return {
     workspaceId, entityId, revision,
     planningStatus: normalizePlanningStatus(item.fields.statusKey ?? 'unknown'),
     content: toContent(item.content),
+    ...(planningFields === undefined ? {} : { planningFields }),
   }
 }
 

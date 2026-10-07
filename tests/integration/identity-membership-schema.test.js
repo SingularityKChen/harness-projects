@@ -44,7 +44,7 @@ const rejects = (db, sql, message) => assert.throws(() => db.exec(sql), message)
 /** 满足全部外键的最小库。列清单显式写出：#126 给 provider_binding / workspace_binding 加了列，位置插入会静默错位。 */
 function seed(db) {
   db.exec(`
-    INSERT INTO workspace VALUES ('ws-1', '工作区', 'provider_authoritative'); INSERT INTO workspace VALUES ('ws-2', '工作区 2', 'provider_authoritative');
+    INSERT INTO workspace VALUES ('ws-1', '工作区', 'provider_authoritative', NULL); INSERT INTO workspace VALUES ('ws-2', '工作区 2', 'provider_authoritative', NULL);
     INSERT INTO connector_account (id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state)
       VALUES ('account-1', 'github', 'https://github.com', 'account', 'octo-1', '账号', NULL, 'connected');
     INSERT INTO provider_binding (id, implementation_key, connector_account_id) VALUES ('binding-1', 'fake', 'account-1');
@@ -52,7 +52,7 @@ function seed(db) {
     INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-2', 'binding-1', 'planning', 1, 1); INSERT INTO entity VALUES ('entity-1', 'work_item');
     INSERT INTO entity VALUES ('entity-2', 'change_request'); INSERT INTO external_identity VALUES ('identity-1', 'entity-1', 'binding-1', 'issue', 'issue-1', 'primary');
     INSERT INTO project_item_membership VALUES ('ws-1', 'project-1', 'item-1', 'issue', 'issue-1', '2026-09-20T00:00:00Z', '2026-09-20T00:00:00Z');
-    INSERT INTO planning_field_value VALUES ('ws-1', 'item-1', 'field-1', 'In Progress', '2026-09-20T00:00:02Z'); INSERT INTO workspace_projection VALUES ('ws-1', 'entity-1', 'in_progress', 'work_item', '标题', '正文', NULL, NULL, 1);
+    INSERT INTO planning_field_value VALUES ('ws-1', 'item-1', 'field-1', 'In Progress', '2026-09-20T00:00:02Z'); INSERT INTO workspace_projection VALUES ('ws-1', 'entity-1', 'in_progress', 'work_item', '标题', '正文', NULL, NULL, NULL, 1);
   `)
 }
 
@@ -111,7 +111,7 @@ test('行为 1：外部身份挂在连接锚点上，因此跨工作区只有一
     rejects(db, "INSERT INTO external_identity VALUES ('identity-9','entity-2','binding-1','issue','issue-1','alias')", '同一连接上的同一对象只有一条身份，无论从哪个工作区发起')
     assert.equal(db.prepare("SELECT COUNT(DISTINCT entity_id) AS n FROM external_identity WHERE external_id = 'issue-1'").get().n, 1, '同一外部对象只能解析出一个内部实体（ADR-0001 / 不变量 6）')
     db.exec("INSERT INTO project_item_membership VALUES ('ws-2','project-1','item-1','issue','issue-1','x','x')")
-    db.exec("INSERT INTO workspace_projection VALUES ('ws-2','entity-1','todo','work_item','标题','正文',NULL,NULL,1)")
+    db.exec("INSERT INTO workspace_projection VALUES ('ws-2','entity-1','todo','work_item','标题','正文',NULL,NULL,NULL,1)")
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM project_item_membership WHERE content_external_id = 'issue-1'").get().n, 2, '同一内容在两个工作区是两条成员关系')
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM workspace_projection WHERE entity_id = 'entity-1'").get().n, 2, '每工作区一行投影')
   })
@@ -202,12 +202,12 @@ test('同一工作区里同一实体只有一行投影（storage 保证的那一
     migrate(db); seed(db)
     const count = () => db.prepare("SELECT COUNT(*) AS n FROM workspace_projection WHERE workspace_id = 'ws-1' AND entity_id = 'entity-1'").get().n
     assert.equal(count(), 1, 'seed 里该实体已有一行投影')
-    db.exec("INSERT INTO workspace_projection VALUES ('ws-1','entity-1','todo','work_item','更新标题','更新正文',NULL,NULL,2) ON CONFLICT (workspace_id, entity_id) DO UPDATE SET content_title = excluded.content_title, content_body = excluded.content_body, revision = excluded.revision")
+    db.exec("INSERT INTO workspace_projection VALUES ('ws-1','entity-1','todo','work_item','更新标题','更新正文',NULL,NULL,NULL,2) ON CONFLICT (workspace_id, entity_id) DO UPDATE SET content_title = excluded.content_title, content_body = excluded.content_body, revision = excluded.revision")
     assert.equal(count(), 1, '同一 (workspace, entity) 的第二行必须是更新')
     assert.equal(db.prepare("SELECT content_title FROM workspace_projection WHERE workspace_id = 'ws-1' AND entity_id = 'entity-1'").get().content_title, '更新标题')
-    rejects(db, "INSERT INTO workspace_projection VALUES ('ws-1','entity-1','todo','change_request','另一个','正文',NULL,NULL,3)", '同一 (workspace, entity) 不得出现第二行')
+    rejects(db, "INSERT INTO workspace_projection VALUES ('ws-1','entity-1','todo','change_request','另一个','正文',NULL,NULL,NULL,3)", '同一 (workspace, entity) 不得出现第二行')
     db.exec("INSERT INTO entity VALUES ('entity-3','work_item')")
-    db.exec("INSERT INTO workspace_projection VALUES ('ws-1','entity-3','todo','work_item','另一项','正文',NULL,NULL,1)")
+    db.exec("INSERT INTO workspace_projection VALUES ('ws-1','entity-3','todo','work_item','另一项','正文',NULL,NULL,NULL,1)")
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM workspace_projection WHERE workspace_id = 'ws-1'").get().n, 2, '不同实体各自保留一行')
   })
 })
@@ -218,6 +218,7 @@ test('#27 验收 5：显式 schema 审查——没有列能存 token / key / pas
     // 逐列白名单（评审订正）：与 `pragma_table_info` **互相覆盖**，未审计的新列即失败（旧版正则两个方向都不准）。
     const AUDITED = {
       'workspace.id': '标识', 'workspace.name': '展示名', 'workspace.status_policy': '枚举：状态归属策略',
+      'workspace.planning_field_mapping': 'issue #133 的字段角色映射（JSON）；不含账号、秘密或连接配置',
       'connector_account.id': '标识', 'connector_account.platform_family': '平台族', 'connector_account.platform_origin': '规范原点',
       'connector_account.identity_kind': '枚举：账号身份种类', 'connector_account.external_id': '平台原样值',
       'connector_account.display_name': '展示名', 'connector_account.secret_handle': '秘密服务句柄（只存引用名，不是凭据材料）',
@@ -241,6 +242,7 @@ test('#27 验收 5：显式 schema 审查——没有列能存 token / key / pas
       'workspace_projection.planning_status': '归一化状态', 'workspace_projection.content_kind': '枚举：内容三态',
       'workspace_projection.content_title': '内容', 'workspace_projection.content_body': '内容',
       'workspace_projection.content_number': '内容', 'workspace_projection.redaction_reason': '枚举：脱敏原因',
+      'workspace_projection.planning_fields_json': 'issue #133 的字段展示快照（JSON）；已确认投影，不是第二个状态事实源',
       'workspace_projection.revision': '修订号',
     }
     // 只审计 **002 建出的表**：本用例的验收对象是 #27 的迁移，后续迁移（003 起）由各自的用例审计。
@@ -271,6 +273,6 @@ test('每张表的外键指向存在的表，且悬空引用被拒绝', () => {
     rejects(db, "INSERT INTO external_identity VALUES ('identity-fk','entity-1','binding-none','issue','issue-fk','alias')", /FOREIGN KEY constraint failed/, '身份必须挂在存在的连接锚点上（ADR-0006 的核心外键）')
     rejects(db, "INSERT INTO external_identity VALUES ('identity-fk','entity-none','binding-1','issue','issue-fk','alias')", /FOREIGN KEY constraint failed/, '身份必须指向存在的实体')
     rejects(db, "INSERT INTO project_item_membership VALUES ('ws-none','project-1','item-9','issue','issue-9','x','x')", '成员关系必须属于存在的工作区')
-    rejects(db, "INSERT INTO workspace_projection VALUES ('ws-1','entity-none','todo','work_item','标题','正文',NULL,NULL,1)", '工作区投影必须指向存在的实体')
+    rejects(db, "INSERT INTO workspace_projection VALUES ('ws-1','entity-none','todo','work_item','标题','正文',NULL,NULL,NULL,1)", '工作区投影必须指向存在的实体')
   })
 })

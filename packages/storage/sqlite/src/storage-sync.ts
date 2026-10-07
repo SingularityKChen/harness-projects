@@ -251,6 +251,27 @@ export class SqliteSyncSurface {
       record.workspaceId, record.itemExternalId, record.projectFieldId, record.value, record.observedAt)
   }
 
+  /**
+   * 整组替换（#133）：空组清空。全组先校验——跨 scope、悬挂成员关系、组内重复 `projectFieldId` 一律以裸异常拒绝、
+   * 不留行——再在**一个** `atomic` 里 DELETE + INSERT。删除与写入因此同属一个事务，中途失败重开句柄读不到半组；
+   * 不用两次顶层 `write`（那会留下「删掉了旧值、新值没写进」的中间态）。
+   */
+  replaceFieldValues(workspaceId: WorkspaceId, itemExternalId: string, values: readonly FieldValueRecord[]): Promise<void> {
+    return this.atomic(() => {
+      const membership = this.db.prepare('SELECT 1 AS present FROM project_item_membership WHERE workspace_id = ? AND item_external_id = ?').get(workspaceId, itemExternalId)
+      if (membership === undefined) throw new Error('field value membership does not exist')
+      const seen = new Set<string>()
+      for (const value of values) {
+        if (value.workspaceId !== workspaceId || value.itemExternalId !== itemExternalId) throw new Error('field value replacement record is out of scope')
+        if (seen.has(value.projectFieldId)) throw new Error(`field value replacement has duplicate project field id ${value.projectFieldId}`)
+        seen.add(value.projectFieldId)
+      }
+      this.db.prepare('DELETE FROM planning_field_value WHERE workspace_id = ? AND item_external_id = ?').run(workspaceId, itemExternalId)
+      const insert = this.db.prepare(`INSERT INTO planning_field_value (${FIELD_VALUE_COLUMNS}) VALUES (?, ?, ?, ?, ?)`)
+      for (const value of values) insert.run(value.workspaceId, value.itemExternalId, value.projectFieldId, value.value, value.observedAt)
+    })
+  }
+
   listFieldValues(workspaceId: WorkspaceId, itemExternalId: string): Promise<readonly FieldValueRecord[]> {
     return this.read(() => (this.db.prepare(`SELECT ${FIELD_VALUE_COLUMNS} FROM planning_field_value WHERE workspace_id = ? AND item_external_id = ? ORDER BY project_field_id`).all(workspaceId, itemExternalId) as Row[]).map(rowToFieldValue))
   }

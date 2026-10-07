@@ -5,7 +5,9 @@ CREATE TABLE workspace (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   -- 取值集合来自 packages/domain/src/status.ts 的 StatusPolicy（不变量 3：规划状态与工程执行状态正交）。
-  status_policy TEXT NOT NULL CHECK (status_policy IN ('provider_authoritative', 'host_authoritative', 'manual_only'))
+  status_policy TEXT NOT NULL CHECK (status_policy IN ('provider_authoritative', 'host_authoritative', 'manual_only')),
+  -- issue #133 WorkspacePlanningFieldMapping：本工作区已确认的字段角色映射（JSON）。可空 = 未配置，省略语义靠 NULL 而不是 json 的 `null`。
+  planning_field_mapping TEXT CHECK (planning_field_mapping IS NULL OR (json_valid(planning_field_mapping) AND json_type(planning_field_mapping) = 'object'))
 );
 
 -- connector_account：连接账号的**全局身份**（issue #126）。自然键 (platform_family, platform_origin, identity_kind, external_id) 由唯一索引拒绝重复；
@@ -130,6 +132,8 @@ CREATE TABLE workspace_projection (
   content_body TEXT,
   content_number INTEGER,
   redaction_reason TEXT,
+  -- issue #133 PlanningFieldsSnapshot：已确认的字段展示快照（JSON）。可空 = 该 Provider 没有原生字段读取面；与规划状态同事务写入。
+  planning_fields_json TEXT CHECK (planning_fields_json IS NULL OR (json_valid(planning_fields_json) AND json_type(planning_fields_json) = 'object')),
   revision INTEGER NOT NULL,
   -- 不变量 6 / Gate E1 行为 2 的 storage 侧强制点：同一工作区里同一实体只有一行投影。
   PRIMARY KEY (workspace_id, entity_id),

@@ -32,11 +32,11 @@ const CONSTRAINED_COLUMNS = [
   },
   {
     table: 'workspace', column: 'status_policy', values: Object.values(StatusPolicy),
-    insert: (value) => `INSERT INTO workspace VALUES ('ws-check-${value}', '工作区', '${value}')`,
+    insert: (value) => `INSERT INTO workspace VALUES ('ws-check-${value}', '工作区', '${value}', NULL)`,
   },
   {
     table: 'workspace_binding', column: 'domain', values: Object.values(CapabilityDomain),
-    prepare: (value) => `INSERT INTO workspace VALUES ('ws-domain-${value}', '工作区', 'provider_authoritative')`,
+    prepare: (value) => `INSERT INTO workspace VALUES ('ws-domain-${value}', '工作区', 'provider_authoritative', NULL)`,
     insert: (value) => `INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-domain-${value}', 'binding-1', '${value}', 0, 0)`,
   },
   {
@@ -54,12 +54,12 @@ const CONSTRAINED_COLUMNS = [
   {
     table: 'workspace_projection', column: 'planning_status', values: Object.values(NormalizedStatus),
     prepare: (value) => `INSERT INTO entity VALUES ('entity-status-${value}', 'work_item')`,
-    insert: (value) => `INSERT INTO workspace_projection VALUES ('ws-1', 'entity-status-${value}', '${value}', 'work_item', NULL, '正文', NULL, NULL, 1)`,
+    insert: (value) => `INSERT INTO workspace_projection VALUES ('ws-1', 'entity-status-${value}', '${value}', 'work_item', NULL, '正文', NULL, NULL, NULL, 1)`,
   },
   {
     table: 'workspace_projection', column: 'content_kind', values: Object.values(ContentKind),
     prepare: (value) => `INSERT INTO entity VALUES ('entity-kind-${value}', 'work_item')`,
-    insert: (value) => `INSERT INTO workspace_projection VALUES ('ws-1', 'entity-kind-${value}', 'todo', '${value}', NULL, '正文', NULL, NULL, 1)`,
+    insert: (value) => `INSERT INTO workspace_projection VALUES ('ws-1', 'entity-kind-${value}', 'todo', '${value}', NULL, '正文', NULL, NULL, NULL, 1)`,
   },
 ]
 
@@ -78,7 +78,7 @@ function withDatabase(run) {
 /** 满足全部外键的最小库。 */
 function seed(db) {
   db.exec(`
-    INSERT INTO workspace VALUES ('ws-1', '工作区', 'provider_authoritative');
+    INSERT INTO workspace VALUES ('ws-1', '工作区', 'provider_authoritative', NULL);
     INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-1', 'fake');
     INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1', 'binding-1', 'planning', 1, 1);
     INSERT INTO entity VALUES ('entity-1', 'work_item');

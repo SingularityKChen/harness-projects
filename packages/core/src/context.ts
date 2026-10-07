@@ -7,12 +7,13 @@ import {
 } from '@harness-projects/capabilities'
 import {
   NormalizedStatus, StatusPolicy, WriteState, newEntityId, newExternalIdentityId, newRelationId,
-  newWorkspaceId, type EntityId, type ExternalIdentityId, type RelationId, type WorkspaceId,
+  newWorkspaceId, type EntityId, type ExternalIdentityId, type RelationId, type WorkspaceId, type WorkspacePlanningFieldMapping,
 } from '@harness-projects/domain'
 import { bootstrapWorkspace, type BootstrapResult } from './bootstrap.ts'
 import { rerunPipeline, type DeliveryWriteAttempt } from './delivery.ts'
 import { startWorkUnavailable, type ExecutionContextQuery, type StartWorkRequest, type StartWorkResult } from './execution-context.ts'
 import { cancelExecutionRun, type CancelExecutionRunResult } from './execution-run.ts'
+import { assertWorkspacePlanningFieldMapping } from './planning-fields.ts'
 import { createQueries, type CoreQueries } from './queries.ts'
 import { collectBindings, type CoreProviderTable } from './registry.ts'
 import { confirmRelation, type RecordedEdge, type RelationRef } from './relations.ts'
@@ -38,6 +39,11 @@ export interface CoreWorkspaceInput {
   readonly statusPolicy?: StatusPolicy
   /** 可选显式规划项目范围；不传时由 bootstrap 从 provider 观察中发现。 */
   readonly project?: ExternalObjectRef
+  /**
+   * 字段角色映射的三态（#133）：**省略** = 复用已保存映射；**对象** = 待确认替换；**null** = 待确认清除。
+   * 输入不得先覆盖已确认配置，只有 bootstrap 的字段同步事务 ack 之后才成为已确认值。
+   */
+  readonly planningFieldMapping?: WorkspacePlanningFieldMapping | null
 }
 
 export interface CoreDeps {
@@ -58,6 +64,12 @@ export interface CoreContext {
   readonly policy: Readonly<Partial<Record<CapabilityKey, AccessLevel>>>
   /** bootstrap 成功解析后回填；重启的实例靠 provider 观察重新发现。 */
   projectRef: ExternalObjectRef | undefined
+  /** 本实例已确认的字段角色映射（#133）：注册时从 `getWorkspace` 保留，bootstrap ack 之后更新。 */
+  planningFieldMapping: WorkspacePlanningFieldMapping | undefined
+  /** 待确认的字段映射输入：对象 = 替换、null = 清除、undefined = 无待确认输入（沿用已确认值）。 */
+  pendingPlanningFieldMapping: WorkspacePlanningFieldMapping | null | undefined
+  /** bootstrap 串行队列（Promise 链）：同一 CoreContext 的引导按调用顺序收集并提交，失败后释放队列继续可用。 */
+  bootstrapQueue: Promise<unknown>
 }
 
 export interface CoreCommands {
@@ -98,6 +110,9 @@ function workspaceRecord(input: CoreWorkspaceInput): WorkspaceRecord {
 /**
  * storage 缺失时返回 undefined，由 composeCore 转成结构化不可用。存在时：先全部校验与收集，再用**一个**事务写工作区与全部挂载，
  * Storage ack 之后才发布 Registry——任何一步失败都整批回滚，不留新工作区、孤儿锚点或半批挂载。
+ *
+ * #133：注册事务内先 `getWorkspace` 拿已确认映射，再带着它 `putWorkspace`——新输入只作为待确认输入，
+ * 省略值因此不会在重启时把已保存映射清掉；非法映射在写任何行之前以 TypeError 拒绝。
  */
 export async function createContext(deps: CoreDeps): Promise<CoreContext | undefined> {
   const storage = deps.storage ?? deps.providers.storage
@@ -105,15 +120,33 @@ export async function createContext(deps: CoreDeps): Promise<CoreContext | undef
   const workspace = workspaceRecord(deps.workspace)
   const policy = deps.policy ?? {}
   const prepared = await collectBindings({ workspaceId: workspace.id, providers: deps.providers, policy })
-  await storage.transaction(async (tx) => {
-    await tx.putWorkspace(workspace)
+  const pending = deps.workspace.planningFieldMapping
+  if (pending !== undefined && pending !== null) {
+    const planningBindingId = prepared.records.find((record) => record.domain === 'planning')?.id
+    if (planningBindingId !== undefined && pending.bindingId !== planningBindingId) {
+      throw new TypeError(`planningFieldMapping 的 bindingId ${pending.bindingId} 与工作区 Planning 绑定 ${planningBindingId} 不符`)
+    }
+    const projectExternalId = deps.workspace.project?.externalId
+    if (projectExternalId !== undefined && pending.projectExternalId !== projectExternalId) {
+      throw new TypeError(`planningFieldMapping 的 projectExternalId ${pending.projectExternalId} 与工作区项目 ${projectExternalId} 不符`)
+    }
+    assertWorkspacePlanningFieldMapping(pending, { bindingId: pending.bindingId, projectExternalId: pending.projectExternalId })
+  }
+  const confirmed = await storage.transaction(async (tx) => {
+    const existing = await tx.getWorkspace(workspace.id)
+    const planningFieldMapping = existing?.planningFieldMapping
+    await tx.putWorkspace(planningFieldMapping === undefined ? workspace : { ...workspace, planningFieldMapping })
     for (const record of prepared.records) await tx.putProviderBinding(record)
+    return planningFieldMapping
   })
   return {
     storage, workspaceId: workspace.id, registry: providerRegistry(prepared.bindings),
     clock: deps.clock ?? (() => new Date().toISOString()),
     ids: deps.ids ?? defaultIdFactory, policy,
     projectRef: deps.workspace.project,
+    planningFieldMapping: confirmed,
+    pendingPlanningFieldMapping: pending,
+    bootstrapQueue: Promise.resolve(),
   }
 }
 

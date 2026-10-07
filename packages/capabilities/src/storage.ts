@@ -15,6 +15,7 @@ import type {
   Relation,
   StatusPolicy,
   WorkspaceId,
+  WorkspacePlanningFieldMapping,
   WorkspaceProjection,
   WriteState,
   ConnectorAccountId,
@@ -48,6 +49,8 @@ export class StorageInputError extends Error {
 
 export interface WorkspaceRecord {
   readonly id: WorkspaceId; readonly name: string; readonly statusPolicy: StatusPolicy
+  /** 本工作区已确认的字段角色映射（#133）：可选，省略 = 未配置；重启从这条记录恢复，不靠调用者每次传回。 */
+  readonly planningFieldMapping?: WorkspacePlanningFieldMapping
 }
 
 /**
@@ -128,6 +131,7 @@ export interface MembershipRecord {
 
 /**
  * 规划字段值：**只存平台原样值**，归一化由 core 做（裁决 R2 / R3）；定位键不含可选值 id；不设版本列。
+ * `value` 是同一套原生值形状的 JSON 编码（`FieldValueRecord` 保持字符串，两个 Storage 的行形状因此一致）。
  */
 export interface FieldValueRecord {
   readonly workspaceId: WorkspaceId
@@ -178,6 +182,12 @@ export interface Storage {
   getMembership(workspaceId: WorkspaceId, itemExternalId: string): Promise<MembershipRecord | undefined>
   listMemberships(workspaceId: WorkspaceId, projectExternalId: string): Promise<readonly MembershipRecord[]>
   putFieldValue(record: FieldValueRecord): Promise<void>
+  /**
+   * 全组替换某成员关系的原生字段值（#133）：空组清空该 membership 的全部值。先校验全组（跨 scope 或
+   * 悬挂成员关系一律拒绝），再在**一个**原子入口里删除并写入——不允许「先删后插」变成两个顶层写入，
+   * 否则失败会留下半组。不变量：同一 `(工作区, 条目, 项目字段)` 只剩一条。
+   */
+  replaceFieldValues(workspaceId: WorkspaceId, itemExternalId: string, values: readonly FieldValueRecord[]): Promise<void>
   listFieldValues(workspaceId: WorkspaceId, itemExternalId: string): Promise<readonly FieldValueRecord[]>
 
   // ── 规划：投影承载权威归一化状态与三态内容 ──

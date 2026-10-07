@@ -5,7 +5,8 @@
 import {
   ContentKind, derivedFlagsFor, planningTitle,
   type DerivedFlag, type EngineeringFact, type EntityId, type EntityKind, type ExternalIdentity,
-  type ExternalIdentityKind, type NormalizedStatus, type PlanningContent, type ProviderBindingId,
+  type ExternalIdentityKind, type NormalizedStatus, type PlanningContent, type PlanningFieldsSnapshot,
+  type ProviderBindingId,
   type WorkspaceProjection,
 } from '@harness-projects/domain'
 import type { DeliveryLineageHop } from './delivery.ts'
@@ -43,6 +44,8 @@ export interface PlanningItemView {
   readonly kind: EntityKind
   readonly planningStatus: NormalizedStatus
   readonly content: ContentReference
+  /** 已确认的字段展示投影（#133）；缺省 = Provider 未提供原生字段读取面。 */
+  readonly planningFields: PlanningFieldsSnapshot | undefined
   readonly engineering: EngineeringBlock
   readonly freshness: FreshnessMetadata
 }
@@ -84,6 +87,7 @@ export function toPlanningItemView(
     kind: entityKindFor(projection.content.contentKind, identity.externalKind),
     planningStatus: projection.planningStatus,
     content: contentReference(projection.content, identityRef(identity)),
+    planningFields: projection.planningFields,
     engineering: engineeringBlock(facts),
     freshness: { revision: projection.revision, degraded: sync.stale, reason: sync.stale ? sync.reason : undefined },
   }

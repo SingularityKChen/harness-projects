@@ -38,8 +38,8 @@ function withDatabase(run) {
   try { return run(db) } finally { db.close(); rmSync(dir, { recursive: true, force: true }) }
 }
 function seed(db) {
-  db.exec(`INSERT INTO workspace VALUES ('ws-1','工作区','provider_authoritative');
-    INSERT INTO workspace VALUES ('ws-2','工作区 2','provider_authoritative');
+  db.exec(`INSERT INTO workspace VALUES ('ws-1','工作区','provider_authoritative',NULL);
+    INSERT INTO workspace VALUES ('ws-2','工作区 2','provider_authoritative',NULL);
     INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-1','fake');
     INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-2','fake');
     INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-3','fake');

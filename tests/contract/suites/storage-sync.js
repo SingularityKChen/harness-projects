@@ -152,6 +152,37 @@ export function storageSyncSuite(adapter, register = test) {
     assert.equal(await storage.recordObservation(at('same-2', 'same', '2026-09-21T07:11:54.000Z')), true, '同一时刻不同精度是同一版本，整快照替换')
   })
 
+  register(`${label}：整组替换字段值：空组清空、旧值不残留、读写顺序稳定`, async () => {
+    const storage = makeStorage(); await seedWorkspace(storage)
+    await storage.putMembership(membership())
+    await storage.putFieldValue(fieldValue())
+    await storage.putFieldValue(fieldValue({ projectFieldId: 'field-2', value: 'Todo' }))
+    await storage.replaceFieldValues(WORKSPACE, 'item-1', [fieldValue({ value: 'Done' })])
+    assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-1'), [fieldValue({ value: 'Done' })], '整组替换把未出现的旧字段一起清掉，而不是逐条覆盖')
+    await storage.replaceFieldValues(WORKSPACE, 'item-1', [])
+    assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-1'), [], '空组 = 清空该成员的全部字段值')
+    await storage.replaceFieldValues(WORKSPACE, 'item-1', [fieldValue({ projectFieldId: 'field-b' }), fieldValue({ projectFieldId: 'field-a' })])
+    assert.deepEqual((await storage.listFieldValues(WORKSPACE, 'item-1')).map((v) => v.projectFieldId).sort(), ['field-a', 'field-b'], '两个字段都必须读回；具体顺序由各实现既有契约决定（SQLite 按 project_field_id、替身按写入顺序），不在端口承诺里')
+    // 同一 (工作区, 条目, 项目字段) 至多一条：替换后再次整组替换同键只有一行。
+    await storage.replaceFieldValues(WORKSPACE, 'item-1', [fieldValue({ projectFieldId: 'field-a', value: 'Done' })])
+    assert.deepEqual((await storage.listFieldValues(WORKSPACE, 'item-1')).map((v) => [v.projectFieldId, v.value]), [['field-a', 'Done']], '替换后同键只保留一行')
+  })
+
+  register(`${label}：整组替换先校验全组：跨 scope、组内重复与悬挂成员关系都拒绝且不留行`, async () => {
+    const storage = makeStorage(); await seedWorkspace(storage)
+    await storage.putMembership(membership())
+    await storage.putFieldValue(fieldValue())
+    const before = await storage.listFieldValues(WORKSPACE, 'item-1')
+    await assert.rejects(storage.replaceFieldValues(WORKSPACE, 'item-1', [fieldValue({ itemExternalId: 'item-2' })]), '与入参 scope 不一致的记录必须被拒绝')
+    assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-1'), before, '被拒绝的整组替换不得删掉旧值')
+    await assert.rejects(storage.replaceFieldValues(WORKSPACE, 'item-1', [fieldValue({ workspaceId: 'ws-other' })]), '另一个工作区的记录必须被拒绝')
+    assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-1'), before)
+    await assert.rejects(storage.replaceFieldValues(WORKSPACE, 'item-1', [fieldValue({ projectFieldId: 'dup' }), fieldValue({ projectFieldId: 'dup' })]), '组内重复 projectFieldId 必须被拒绝')
+    assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-1'), before)
+    await assert.rejects(storage.replaceFieldValues(WORKSPACE, 'item-none', [fieldValue({ itemExternalId: 'item-none' })]), '成员关系不存在必须被拒绝')
+    assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-none'), [], '被拒绝的替换不得留下任何行')
+  })
+
   register(`${label}：换一个实例能读到同一份内容（模拟重启）`, async () => {
     const storage = makeStorage(); await seedWorkspace(storage); await seedEntity(storage, 'entity-1')
     await storage.putProviderBinding(binding('binding-1'))

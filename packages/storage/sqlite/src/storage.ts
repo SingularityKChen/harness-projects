@@ -16,7 +16,7 @@ export { CLOSED_MESSAGE, CONNECTOR_ACCOUNT_SCHEMA_MESSAGE, LEGACY_COMMITTED_VERS
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。绑定列名与拆表前一致（工作区作用域三列来自挂载、实现键来自连接锚点），`rowToBinding` 因此不用改。
 const BINDING_COLUMNS = 'b.id AS id, wb.workspace_id AS workspace_id, wb.domain AS domain, b.implementation_key AS implementation_key, wb.enabled AS enabled, wb.is_default AS is_default'
 const IDENTITY_COLUMNS = 'id, entity_id, binding_id, external_kind, external_id, role'
-const PROJECTION_COLUMNS = 'workspace_id, entity_id, planning_status, content_kind, content_title, content_body, content_number, redaction_reason, revision'
+const PROJECTION_COLUMNS = 'workspace_id, entity_id, planning_status, content_kind, content_title, content_body, content_number, redaction_reason, planning_fields_json, revision'
 const REPOSITORY_COLUMNS = 'id, workspace_id, external_identity_id'
 /** #126：账号列清单只写一次。 */
 const ACCOUNT_COLUMNS = 'id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state'
@@ -26,10 +26,12 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   /** 作用域实例就是本类的一个 `scoped` 副本：同一个连接、同一条队列、**共用**的关闭标记与本事务的令牌（见基类的 `transaction()`），并传同一份受信策略。 */
   protected override scopedInstance(state: { closed: boolean }, token: TransactionToken): StorageTransaction { return new SqliteStorage(this.location, this.db, true, state, token, this.policy) }
 
+  /** 工作区写入：#133 的映射列与其它列一起原子覆盖；省略（`undefined`）写 NULL，**不得**写成 JSON 的 `null`（那会读回一个对象）。 */
   putWorkspace(record: WorkspaceRecord): Promise<void> {
-    return this.write('INSERT INTO workspace (id, name, status_policy) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET name = excluded.name, status_policy = excluded.status_policy', record.id, record.name, record.statusPolicy)
+    const mapping = record.planningFieldMapping === undefined ? null : JSON.stringify(record.planningFieldMapping)
+    return this.write('INSERT INTO workspace (id, name, status_policy, planning_field_mapping) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET name = excluded.name, status_policy = excluded.status_policy, planning_field_mapping = excluded.planning_field_mapping', record.id, record.name, record.statusPolicy, mapping)
   }
-  getWorkspace(id: WorkspaceId): Promise<WorkspaceRecord | undefined> { return this.read(() => optional(this.db.prepare('SELECT id, name, status_policy FROM workspace WHERE id = ?').get(id), rowToWorkspace)) }
+  getWorkspace(id: WorkspaceId): Promise<WorkspaceRecord | undefined> { return this.read(() => optional(this.db.prepare('SELECT id, name, status_policy, planning_field_mapping FROM workspace WHERE id = ?').get(id), rowToWorkspace)) }
   /** 绑定写入是两条语句——连接锚点（跨工作区共享）与工作区挂载——必须整体生效：挂载被唯一索引或 CHECK 拒绝时留下孤儿锚点，"被拒绝的挂载不得留下任何行"就不成立。拒绝先于写入：`ON CONFLICT (id) DO NOTHING` 会静默吞掉"同一个 id 换实现"，所以先比对实现键；其余拒绝由 002 的约束给出，事务把它们与前面的写入一起回滚。 */
   putProviderBinding(record: ProviderBindingRecord): Promise<void> {
     const write = () => {
@@ -136,7 +138,8 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   /** 投影 UPSERT：put 与 replace 共用；同 `(workspaceId, entityId)` 的第二次写入是覆盖，不是追加。 */
   protected upsertProjection(workspaceId: WorkspaceId, projection: WorkspaceProjection): void {
     const [kind, title, body, number, reason] = contentColumns(projection.content)
-    this.db.prepare(`INSERT INTO workspace_projection (${PROJECTION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (workspace_id, entity_id) DO UPDATE SET planning_status = excluded.planning_status, content_kind = excluded.content_kind, content_title = excluded.content_title, content_body = excluded.content_body, content_number = excluded.content_number, redaction_reason = excluded.redaction_reason, revision = excluded.revision`).run(workspaceId, projection.entityId, projection.planningStatus, kind, title, body, number, reason, projection.revision)
+    const planningFields = projection.planningFields === undefined ? null : JSON.stringify(projection.planningFields)
+    this.db.prepare(`INSERT INTO workspace_projection (${PROJECTION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (workspace_id, entity_id) DO UPDATE SET planning_status = excluded.planning_status, content_kind = excluded.content_kind, content_title = excluded.content_title, content_body = excluded.content_body, content_number = excluded.content_number, redaction_reason = excluded.redaction_reason, planning_fields_json = excluded.planning_fields_json, revision = excluded.revision`).run(workspaceId, projection.entityId, projection.planningStatus, kind, title, body, number, reason, planningFields, projection.revision)
   }
   getPlanningProjection(workspaceId: WorkspaceId, entityId: EntityId): Promise<WorkspaceProjection | undefined> {
     return this.read(() => optional(this.db.prepare(`SELECT ${PROJECTION_COLUMNS} FROM workspace_projection WHERE workspace_id = ? AND entity_id = ?`).get(workspaceId, entityId), rowToProjection))

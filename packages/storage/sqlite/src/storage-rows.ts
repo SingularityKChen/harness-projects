@@ -15,8 +15,20 @@ export const toFlag = (value: boolean): number => (value ? 1 : 0)
 /** 单行读的统一形状：`get()` 的 `undefined` 原样传回（与端口一致），有行才走映射——三个面共用，不各写一份三目。 */
 export const optional = <T>(row: unknown, map: (row: Row) => T): T | undefined => (row === undefined ? undefined : map(row as Row))
 
-export const rowToWorkspace = (row: Row): WorkspaceRecord => ({ id: text(row, 'id') as WorkspaceId,
-  name: text(row, 'name'), statusPolicy: text(row, 'status_policy') as StatusPolicy })
+export const rowToWorkspace = (row: Row): WorkspaceRecord => {
+  const mappingJson = optionalText(row, 'planning_field_mapping')
+  // 坏 JSON 或不合法数据一律响亮失败：静默读成 undefined 会把「配置被损坏」伪装成「没有配置」，
+  // 下一次 bootstrap 又会按 unset 投影，等于悄悄丢掉已确认映射。
+  let planningFieldMapping: WorkspaceRecord['planningFieldMapping']
+  if (mappingJson !== undefined) {
+    const parsed: unknown = JSON.parse(mappingJson)
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('workspace.planning_field_mapping 不是 JSON 对象')
+    planningFieldMapping = parsed as WorkspaceRecord['planningFieldMapping']
+  }
+  return { id: text(row, 'id') as WorkspaceId, name: text(row, 'name'),
+    statusPolicy: text(row, 'status_policy') as StatusPolicy,
+    ...(planningFieldMapping === undefined ? {} : { planningFieldMapping }) }
+}
 
 export const rowToBinding = (row: Row): ProviderBindingRecord => ({ id: text(row, 'id') as ProviderBindingId,
   workspaceId: text(row, 'workspace_id') as WorkspaceId, domain: text(row, 'domain') as CapabilityDomain,
@@ -108,6 +120,17 @@ function rowToContent(row: Row): PlanningContent {
   return { contentKind: 'work_item', title: text(row, 'content_title'), body: text(row, 'content_body') }
 }
 
-export const rowToProjection = (row: Row): WorkspaceProjection => ({ workspaceId: text(row, 'workspace_id') as WorkspaceId,
-  entityId: text(row, 'entity_id') as EntityId, planningStatus: text(row, 'planning_status') as NormalizedStatus,
-  revision: row['revision'] as number, content: rowToContent(row) })
+export const rowToProjection = (row: Row): WorkspaceProjection => {
+  const fieldsJson = optionalText(row, 'planning_fields_json')
+  // 坏 JSON 视为不合法数据响亮失败：静默读成 undefined 会把「快照被损坏」伪装成「没有字段读取面」。
+  let planningFields: WorkspaceProjection['planningFields']
+  if (fieldsJson !== undefined) {
+    const parsed: unknown = JSON.parse(fieldsJson)
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('workspace_projection.planning_fields_json 不是 JSON 对象')
+    planningFields = parsed as WorkspaceProjection['planningFields']
+  }
+  return { workspaceId: text(row, 'workspace_id') as WorkspaceId,
+    entityId: text(row, 'entity_id') as EntityId, planningStatus: text(row, 'planning_status') as NormalizedStatus,
+    revision: row['revision'] as number, content: rowToContent(row),
+    ...(planningFields === undefined ? {} : { planningFields }) }
+}

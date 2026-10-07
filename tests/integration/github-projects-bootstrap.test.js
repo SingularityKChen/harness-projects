@@ -14,9 +14,14 @@ import { newProviderBindingId, newWorkspaceId } from '@harness-projects/domain'
 import { createFakeStorage, exportFakeStorageState } from '@harness-projects/provider-fake'
 import { createGithubProjectsPlanningProvider } from '@harness-projects/provider-planning-github-projects'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
-import { createReplay, loadFixture } from '../contract/fixtures/github-projects/replay.js'
+import { createReplay, loadAggregateFixture } from '../contract/fixtures/github-projects/replay.js'
 
-const fixture = loadFixture()
+/**
+ * 当前查询文本的完整录制：`PlanningItems` 在 #133 增了 `fieldValues`，旧条目夹具的它已过期，
+ * 合并字段录制后同一键由新响应覆盖。引导用例测的是「core 在本轮查询形状下能读到什么」，
+ * 因此必须用合并夹具；字段读取面之外的断言仍逐条绑定真实录制内容。
+ */
+const fixture = loadAggregateFixture()
 const projectNodeId = fixture.exchanges.find((exchange) => exchange.operationName === 'PlanningProject').variables.project
 const nodes = fixture.exchanges.flatMap((exchange) => exchange.body.data.node.items?.nodes ?? [])
 const nodeIds = new Set(nodes.flatMap((node) => [node.id, node.content.id]))
