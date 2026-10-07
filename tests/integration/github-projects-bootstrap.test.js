@@ -7,12 +7,17 @@
  * (6) 分页游标成环或永不收敛时，真实组装路径有界返回结构化 degraded。
  */
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import test from 'node:test'
-import { createControllerQueries } from '@harness-projects/controller'
+import { createController, createControllerQueries } from '@harness-projects/controller'
+import { createEntityStore } from '@harness-projects/client'
 import { composeCore } from '@harness-projects/core'
 import { newProviderBindingId, newWorkspaceId } from '@harness-projects/domain'
 import { createFakeStorage, exportFakeStorageState } from '@harness-projects/provider-fake'
 import { createGithubProjectsPlanningProvider } from '@harness-projects/provider-planning-github-projects'
+import { WorkItemListPage } from '@harness-projects/ui'
+import { deriveWorkItemListView } from '@harness-projects/ui-model'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
 import { createReplay, loadAggregateFixture } from '../contract/fixtures/github-projects/replay.js'
 
@@ -148,4 +153,52 @@ for (const [label, makeStorage] of [['替身 Storage', createFakeStorage], ['SQL
 test('回放账本：本文件所有回放都没有未命中的请求', () => {
   assert.ok(misses.length > 0)
   assert.deepEqual(misses.flat(), [])
+})
+
+/** 字段录制的回放：Provider → composeCore（显式映射）→ controller → client store → ui-model → 真实列表 HTML。 */
+const fieldsFixture = JSON.parse(readFileSync(new URL('../contract/fixtures/github-projects/project-fields.json', import.meta.url), 'utf8'))
+const WANTED_CONTENT_ID = 'I_kwDOUjWAl88AAAABST4XVQ'
+/** 映射取录制里的真实 field id：Status 选项 f75ad846→todo、47fc9ee4→in_progress、98236657→done。 */
+const FIELD_MAPPING = {
+  status: {
+    projectFieldId: 'PVTSSF_lAHOAY1ahM4BkJ9rzhi7jWY',
+    options: { 'f75ad846': 'todo', '47fc9ee4': 'in_progress', '98236657': 'done' },
+  },
+  iterationFieldId: 'PVTIF_lAHOAY1ahM4BkJ9rzhi7k9M',
+  targetDateFieldId: 'PVTF_lAHOAY1ahM4BkJ9rzhi7k9I',
+}
+const uiRequire = createRequire(new URL('../../packages/ui/package.json', import.meta.url))
+const { createElement: h } = uiRequire('react')
+const { renderToStaticMarkup } = uiRequire('react-dom/server')
+
+test('recorded fields reach real list HTML through both stores', async () => {
+  for (const [label, makeStorage] of [['替身 Storage', createFakeStorage], ['SQLite Storage', () => createSqliteStorage(':memory:')]]) {
+    const storage = makeStorage()
+    const replay = createReplay(fieldsFixture)
+    const bindingId = newProviderBindingId()
+    const planning = createGithubProjectsPlanningProvider({ bindingId, projectNodeId, transport: replay.transport })
+    const project = { bindingId, objectKind: 'project', externalId: projectNodeId, url: undefined }
+    const core = await composeCore({
+      workspace: { id: newWorkspaceId(), name: 'GitHub Projects', project, planningFieldMapping: { bindingId, projectExternalId: projectNodeId, ...FIELD_MAPPING } },
+      providers: { planning, storage },
+    })
+    assert.equal((await core.commands.bootstrapWorkspace()).ok, true, `${label}：字段读取闭环可引导`)
+
+    const controller = createController(core)
+    const snapshot = await controller.baseline()
+    assert.deepEqual(replay.misses, [], `${label}：字段回放没有未命中`)
+    const store = createEntityStore()
+    store.applyBaseline(snapshot)
+    const entry = store.list().find((stored) => stored.entity.content.externalId === WANTED_CONTENT_ID)
+    assert.ok(entry !== undefined, `${label}：录制条目经内容 id 进入客户端模型`)
+    const read = { workspace: snapshot.workspace, store, connection: { connected: true }, lastUpdatedAt: '2026-10-06T00:00:00.000Z', capabilities: snapshot.capabilities }
+    const view = deriveWorkItemListView({ read, metadata: { planningSourceName: '规划源', sourceNames: {} }, phase: 'received', refreshing: false })
+    const html = renderToStaticMarkup(h(WorkItemListPage, { view }))
+
+    assert.match(html, /E1 Sprint 1/, `${label}：迭代 title 到达真实 HTML`)
+    assert.match(html, /2026-09-24/, `${label}：目标日期到达真实 HTML`)
+    assert.match(html, /进行中/, `${label}：映射后的规范状态文本到达真实 HTML`)
+    assert.doesNotMatch(html, /Done（未映射）/, `${label}：该条目已映射，不得显示未映射提示`)
+    storage.close?.()
+  }
 })

@@ -8,17 +8,17 @@ import type { ReactElement } from 'react'
 import type { VisibleListRow, WorkItemListView } from '@harness-projects/ui-model'
 import { EmptyState, FreshnessBadge, LoadingState, SourceBadge, StaleBanner, UnavailableState } from './list-states.ts'
 
-const COLUMNS = ['工作项', '内容身份', '规划状态', '工程提示', '来源', '新鲜度'] as const
+const COLUMNS = ['工作项', '内容身份', '规划状态', '迭代', '目标日期', '工程提示', '来源', '新鲜度'] as const
 /** 版式只能靠内联 style（renderer 没有样式表）：短标签列不换行，窄屏靠横向滚动而不是被挤成一字一行；标题与来源有最小宽度并可换行。 */
 const NOWRAP = { whiteSpace: 'nowrap' } as const
 const WRAP = { overflowWrap: 'anywhere', minWidth: '12em' } as const
-const COLUMN_STYLE = [WRAP, NOWRAP, NOWRAP, NOWRAP, WRAP, NOWRAP] as const
+const COLUMN_STYLE = [WRAP, NOWRAP, NOWRAP, NOWRAP, NOWRAP, NOWRAP, WRAP, NOWRAP] as const
 
 /** redacted 行只显示占位：其它单元格是"—"，不透出是否撤权或删除；行 key 只给框架，不进任何属性。 */
 function ItemRow({ row }: { row: VisibleListRow }): ReactElement {
   const cells = row.kind === 'redacted'
     ? COLUMNS.slice(1).map(() => '—')
-    : [row.identity, row.planningStatus, row.engineering,
+    : [row.identity, row.planningStatus, row.iteration, row.targetDate, row.engineering,
       createElement(SourceBadge, { name: row.source, authority: row.authority }), createElement(FreshnessBadge, { stale: row.stale })]
   return createElement('tr', null,
     createElement('th', { scope: 'row', style: COLUMN_STYLE[0] }, row.kind === 'redacted' ? '内容不可见' : row.title),

@@ -56,6 +56,8 @@ function wireEntity({
   return {
     entityId, kind, planningStatus,
     content: { contentKind, title, body, bindingId, externalKind, externalId },
+    // `undefined` = 这次读取没有字段读取面（#133）；键必须在 wire 形状里，值不属于本层派生。
+    planningFields: undefined,
     derived,
     source: { revision, freshness, authority: 'provider', reason: freshness === 'degraded' ? '规划来源离线' : undefined },
   }

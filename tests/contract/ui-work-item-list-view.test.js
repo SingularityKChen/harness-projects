@@ -9,7 +9,7 @@ import { CapabilityKey } from '@harness-projects/capabilities'
 import { createEntityStore } from '@harness-projects/client'
 import * as domain from '@harness-projects/domain'
 import * as leaf from '@harness-projects/domain/values'
-import { deriveWorkItemListView } from '@harness-projects/ui-model'
+import { deriveWorkItemList, deriveWorkItemListView } from '@harness-projects/ui-model'
 
 const T = '2026-10-01T08:00:00.000Z'
 const READ = 'planning.item.read'
@@ -18,9 +18,10 @@ const metadata = { planningSourceName: '规划源', sourceNames: { 'bind-1': '�
 const CANARIES = ['CANARY-TITLE', 'CANARY-BODY', 'CANARY-EXT', 'CANARY-BIND', 'CANARY-REASON', '已完成', '需要关注']
 
 /** wire 形状条目：字段面与 packages/controller/src/wire.ts 的 WireEntity 一致。 */
-const wire = (entityId, { planningStatus = 'todo', derived = [], content = {}, source = {} } = {}) => ({
+const wire = (entityId, { planningStatus = 'todo', derived = [], content = {}, source = {}, planningFields } = {}) => ({
   entityId, kind: 'work_item', planningStatus, derived,
   content: { contentKind: 'work_item', title: `title-${entityId}`, body: 'body', bindingId: 'bind-1', externalKind: 'issue', externalId: '7', ...content },
+  ...(planningFields === undefined ? {} : { planningFields }),
   source: { revision: 1, freshness: 'fresh', authority: 'provider', reason: undefined, ...source },
 })
 const redacted = (entityId) => wire(entityId, {
@@ -194,4 +195,58 @@ test('契约：./values 只 re-export 四个既有词表（同一引用），读
   assert.deepEqual(Object.keys(leaf).sort(), ['AccessLevel', 'ContentKind', 'DerivedFlag', 'NormalizedStatus'])
   for (const name of Object.keys(leaf)) assert.equal(leaf[name], domain[name], name)
   assert.equal(READ, CapabilityKey.PlanningItemRead, '各用例的读门 key 就是 CapabilityKey，首个用例的 received → content 因此钉住实现的读门')
+})
+
+const mappedFields = {
+  status: { kind: 'mapped', nativeName: 'In Progress', normalized: 'in_progress' },
+  iteration: { title: 'E1 Sprint 1', startDate: '2026-09-21', durationDays: 7 }, targetDate: '2026-09-24',
+}
+
+test('mapped 规划字段显示规范状态文案、迭代 title 与目标日期', () => {
+  const row = received({ entities: [wire('e1', { planningFields: mappedFields })] }).body.rows[0]
+  assert.deepEqual(
+    [row.planningStatus, row.iteration, row.targetDate, row.statusUnmapped],
+    ['进行中', 'E1 Sprint 1', '2026-09-24', false],
+  )
+})
+
+test('native-only status is not shown as a normalized status', () => {
+  const row = received({ entities: [wire('e1', { planningStatus: 'done', planningFields: { status: { kind: 'native_only', nativeName: 'Done' } } })] }).body.rows[0]
+  assert.equal(row.statusUnmapped, true, 'native_only 必须显式标记未映射')
+  assert.match(row.planningStatus, /Done/, '显示平台原生名')
+  assert.match(row.planningStatus, /未映射/, '必须带未映射提示')
+  assert.doesNotMatch(row.planningStatus, /已完成|未知/, '绝不显示规范状态标签，也不显示 Unknown 哨兵')
+  assert.deepEqual([row.iteration, row.targetDate], ['—', '—'], '没有值的字段显示占位')
+})
+
+test('unset fields render as placeholders', () => {
+  const row = received({ entities: [wire('e1', { planningFields: { status: { kind: 'unset' } } })] }).body.rows[0]
+  assert.deepEqual(
+    [row.planningStatus, row.iteration, row.targetDate, row.statusUnmapped],
+    ['—', '—', '—', false],
+    'unset 不是未映射，也不是任何规范状态',
+  )
+})
+
+test('redacted 行的字段面被 visible guard 剥离：恶意上游带上的迭代 / 日期 / 原生状态名都不进输出', () => {
+  const canaries = ['CANARY-ITERATION', 'CANARY-NATIVE', '2099-12-31']
+  const leaky = wire('e2', {
+    content: { contentKind: 'redacted', title: 'CANARY-TITLE', bindingId: 'CANARY-BIND', externalId: 'CANARY-EXT' },
+    planningFields: {
+      status: { kind: 'native_only', nativeName: 'CANARY-NATIVE' },
+      iteration: { title: 'CANARY-ITERATION', startDate: '2099-01-01', durationDays: 1 }, targetDate: '2099-12-31',
+    },
+  })
+  const input = make('received', { refreshing: false, entities: [wire('e1', { planningFields: mappedFields }), leaky] })
+  // 归约点（deriveWorkItemList）也必须剥离，而不只是页面投影：直接查 WorkItemRow 的字段面。
+  assert.deepEqual(
+    deriveWorkItemList(input.read).rows.map((row) => [row.iteration, row.targetDate, row.planningFields, row.statusUnmapped]),
+    [['E1 Sprint 1', '2026-09-24', mappedFields, false], [undefined, undefined, undefined, false]],
+    'redacted 行的字段面在归约点就为空',
+  )
+  const v = deriveWorkItemListView(input)
+  assert.deepEqual(v.body.rows[1], { kind: 'redacted', key: 'e2' }, 'redacted 行只剩 kind 与 key')
+  const json = JSON.stringify(v)
+  assert.match(json, /E1 Sprint 1/, '可见行正控存在')
+  for (const canary of canaries) assert.ok(!json.includes(canary), canary)
 })

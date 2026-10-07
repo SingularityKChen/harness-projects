@@ -6,7 +6,8 @@
  */
 import { ContentKind } from '@harness-projects/domain'
 import type {
-  AccessLevel, DerivedFlag, EntityId, EntityKind, ExternalIdentityKind, NormalizedStatus, ProviderBindingId, WorkspaceId,
+  AccessLevel, DerivedFlag, EntityId, EntityKind, ExternalIdentityKind, NormalizedStatus, PlanningFieldsSnapshot,
+  ProviderBindingId, WorkspaceId,
 } from '@harness-projects/domain'
 import type { CapabilityKey } from '@harness-projects/capabilities'
 import { StatusPolicyMode } from '@harness-projects/core'
@@ -52,6 +53,11 @@ export interface WireEntity {
   readonly kind: EntityKind
   readonly planningStatus: NormalizedStatus
   readonly content: WireContentRef
+  /**
+   * 已确认的规划字段投影（#133）：只透出规范化后的跨层快照，不含 provider 原生对象；`undefined` = Provider 未提供
+   * 字段读取面。redacted 行一律不带（H12：字段文本与内容一样属于被扣下的对象）。
+   */
+  readonly planningFields?: PlanningFieldsSnapshot
   readonly derived: readonly DerivedFlag[]
   readonly source: SourceMetadata
 }
@@ -121,6 +127,8 @@ export function toWireEntity(view: PlanningItemView, authority: WireAuthority): 
       externalKind: shown ? view.content.identity.externalKind : undefined,
       externalId: shown ? view.content.identity.externalId : undefined,
     },
+    // 双层剥离的第一层：redacted 行即使上游误带字段也不出 wire；未提供读取面时省略字段而不是给空对象。
+    ...(shown && view.planningFields !== undefined ? { planningFields: view.planningFields } : {}),
     derived: view.engineering.derived,
     source: metadataOf(view, authority),
   }

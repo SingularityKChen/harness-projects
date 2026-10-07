@@ -8,6 +8,7 @@ import { writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { test } from 'node:test'
 
+import { businessSignature, diffSnapshots, toWireEntity } from '@harness-projects/controller'
 import { createEntityStore } from '@harness-projects/client'
 import * as ui from '@harness-projects/ui'
 import { deriveWorkItemListView } from '@harness-projects/ui-model'
@@ -18,21 +19,40 @@ const { createElement } = uiRequire('react')
 const { renderToStaticMarkup } = uiRequire('react-dom/server')
 
 const T = '2026-10-01T08:00:00.000Z'
-const CANARIES = ['CANARY-TITLE', 'CANARY-BODY', 'CANARY-EXT', 'CANARY-BIND', 'CANARY-REASON', '已完成', '需要关注']
+const CANARIES = ['CANARY-TITLE', 'CANARY-BODY', 'CANARY-EXT', 'CANARY-BIND', 'CANARY-REASON', '已完成', '需要关注', 'CANARY-ITERATION', 'CANARY-NATIVE-STATUS', 'CANARY-TARGET-DATE']
 const LONG = '超长标题'.repeat(30)
 const meta = { planningSourceName: '规划源', sourceNames: { 'bind-1': '来源一', 'bind-long': LONG } }
 
-const wire = (entityId, { planningStatus = 'in_progress', derived = ['ci_failing'], content = {}, source = {} } = {}) => ({
+const wire = (entityId, { planningStatus = 'in_progress', derived = ['ci_failing'], content = {}, source = {}, planningFields } = {}) => ({
   entityId, kind: 'work_item', planningStatus, derived,
   content: { contentKind: 'work_item', title: 'Visible A', body: 'b', bindingId: 'bind-1', externalKind: 'issue', externalId: '7', ...content },
+  ...(planningFields === undefined ? {} : { planningFields }),
   source: { revision: 1, freshness: 'fresh', authority: 'provider', reason: undefined, ...source },
 })
 const redacted = (freshness = 'fresh') => wire('ent-bb', {
   planningStatus: 'done', derived: ['attention'],
   content: { contentKind: 'redacted', title: 'CANARY-TITLE', body: 'CANARY-BODY', bindingId: 'CANARY-BIND', externalId: 'CANARY-EXT' },
   source: { freshness, reason: 'CANARY-REASON', authority: 'host' },
+  // 上游恶意/回归时给 redacted 行带上完整字段面：页面与 wire 都必须双层剥离。
+  planningFields: {
+    status: { kind: 'native_only', nativeName: 'CANARY-NATIVE-STATUS' },
+    iteration: { title: 'CANARY-ITERATION', startDate: '2099-01-01', durationDays: 1 }, targetDate: 'CANARY-TARGET-DATE',
+  },
 })
-const rows = (freshness = 'fresh') => [wire('ent-aa'), redacted(freshness), wire('ent-cc', { content: { title: LONG, bindingId: 'bind-long', externalKind: 'change_request' }, source: { freshness } })]
+const rows = (freshness = 'fresh') => [
+  // 可见行带完整字段面：字段变化的判别性与「正控」都靠它。
+  wire('ent-aa', {
+    planningFields: {
+      status: { kind: 'mapped', nativeName: 'In Progress', normalized: 'in_progress' },
+      iteration: { title: 'E1 Sprint 1', startDate: '2026-09-21', durationDays: 7 }, targetDate: '2026-09-24',
+    },
+  }),
+  redacted(freshness),
+  wire('ent-cc', {
+    content: { title: LONG, bindingId: 'bind-long', externalKind: 'change_request' }, source: { freshness },
+    planningFields: { status: { kind: 'native_only', nativeName: 'Done' } },
+  }),
+]
 const denied = (kind) => ({ phase: 'failed', hasReceivedSnapshot: true, cacheVisibility: 'authorized', failure: { kind } })
 
 /** 场景：名称 → 读取输入。revision 0 的空 store 同时用于 pending 与 received，证明区别只来自 Host 的读取阶段。 */
@@ -96,13 +116,13 @@ test('真 empty：只有收到的 revision 0 空 baseline；同 store 的 pendin
 
 test('内容：原生 table 语义、稳定状态区在 busy 容器外、规划状态与工程提示分列、固定时刻与缺失时间', () => {
   const columns = [...H.content.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1])
-  assert.deepEqual(columns, ['工作项', '内容身份', '规划状态', '工程提示', '来源', '新鲜度'])
+  assert.deepEqual(columns, ['工作项', '内容身份', '规划状态', '迭代', '目标日期', '工程提示', '来源', '新鲜度'])
   assert.match(H.content, /<caption>[^<]+<\/caption>/)
   assert.match(H.content, /<th scope="row"[^>]*>Visible A<\/th>/)
   const [, visible, hidden, long] = cells(H.content)
-  assert.deepEqual(visible, ['Visible A', 'Issue', '进行中', 'CI 失败', '来源一（提供方权威）', '当前值'])
-  assert.deepEqual(hidden, ['内容不可见', '—', '—', '—', '—', '—'])
-  assert.deepEqual([long[0], long[1], long[4]], [LONG, 'PR', `${LONG}（提供方权威）`])
+  assert.deepEqual(visible, ['Visible A', 'Issue', '进行中', 'E1 Sprint 1', '2026-09-24', 'CI 失败', '来源一（提供方权威）', '当前值'])
+  assert.deepEqual(hidden, ['内容不可见', '—', '—', '—', '—', '—', '—', '—'])
+  assert.deepEqual([long[0], long[1], long[6]], [LONG, 'PR', `${LONG}（提供方权威）`])
   assert.match(H.content, /<div role="status" aria-live="polite" aria-atomic="true">已读取当前快照，共 3 项<\/div><div aria-busy="false">/)
   assert.match(H.content, /规划来源：(<[^>]+>)?规划源.*<time dateTime="2026-10-01T08:00:00.000Z">2026-10-01T08:00:00.000Z<\/time>/)
   const never = render({ ...SCENARIOS.content, lastUpdatedAt: null })
@@ -110,10 +130,92 @@ test('内容：原生 table 语义、稳定状态区在 busy 容器外、规划�
   assert.equal(never.match(/最后读取时间未知/g).length, 1, '时间只在横幅里说明一次')
 })
 
+test('field columns show iteration target date and native-only status', () => {
+  const [, visible, , long] = cells(H.content)
+  assert.deepEqual([visible[3], visible[4]], ['E1 Sprint 1', '2026-09-24'], '迭代显示 title，目标日期原样显示')
+  assert.equal(long[2], 'Done（未映射）', 'native-only 显示原生名与未映射提示')
+  assert.doesNotMatch(H.content, /规划状态列.*已完成/, '原生 Done 不得被归一成规范状态文案')
+})
+
+test('unmapped and missing fields render as placeholders without timezone conversion', () => {
+  const missing = render({ ...SCENARIOS.content, entities: [wire('ent-dd')] })
+  const [, only] = cells(missing)
+  assert.deepEqual(only.slice(2, 5), ['进行中', '—', '—'], 'Provider 未提供字段读取面时缺失字段是占位，不是空白')
+})
+
+test('redacted rows never expose field labels or dates', () => {
+  const [, , hidden] = cells(H.content)
+  assert.deepEqual(hidden, ['内容不可见', '—', '—', '—', '—', '—', '—', '—'], 'redacted 行只有占位')
+  for (const canary of ['CANARY-ITERATION', 'CANARY-NATIVE-STATUS', 'CANARY-TARGET-DATE']) {
+    assert.ok(!H.content.includes(canary), canary)
+  }
+  assert.ok(H.content.includes('E1 Sprint 1'), '可见行正控：正常字段仍然出现')
+})
+
+test('toWireEntity strips the field surface from redacted entities before wire', () => {
+  const fields = {
+    status: { kind: 'native_only', nativeName: 'CANARY-NATIVE-STATUS' },
+    iteration: { title: 'CANARY-ITERATION', startDate: '2099-01-01', durationDays: 1 }, targetDate: 'CANARY-TARGET-DATE',
+  }
+  const view = (contentKind, planningFields) => ({
+    entityId: 'ent-x', kind: 'work_item', planningStatus: 'unknown',
+    content: { contentKind, title: 't', body: 'b', identity: { bindingId: 'bind-1', externalKind: 'issue', externalId: '7' } },
+    planningFields, engineering: { derived: [], facts: [] },
+    freshness: { revision: 1, degraded: false, reason: undefined },
+  })
+  const wireView = toWireEntity(view('redacted', fields), 'provider')
+  assert.ok(!Object.hasOwn(wireView, 'planningFields'), 'redacted 行不出字段面')
+  assert.ok(!JSON.stringify(wireView).includes('CANARY-ITERATION'), '字段文本不得出现在 wire 里')
+  // 可见行的正控：字段面照常透出；Provider 未提供读取面时省略字段而不是给空对象。
+  assert.deepEqual(toWireEntity(view('work_item', fields), 'provider').planningFields, fields)
+  assert.ok(!Object.hasOwn(toWireEntity(view('work_item', undefined), 'provider'), 'planningFields'), 'undefined = Provider 未提供字段面')
+})
+
+test('field delta and reconnect preserve confirmed stale display', () => {
+  const HEAD = (revision, entities, source) => ({ revision, entities, workspace: { id: 'ws-1', name: '工作区' }, capabilities: [], source })
+  const business = (targetDate) => ({
+    status: { kind: 'mapped', nativeName: 'In Progress', normalized: 'in_progress' },
+    iteration: { title: 'E1 Sprint 1', startDate: '2026-09-21', durationDays: 7 }, targetDate,
+  })
+  const fresh = (revision) => ({ revision, freshness: 'fresh', authority: 'provider', reason: undefined })
+  const base = wire('ent-aa', { planningFields: business('2026-09-24') })
+  const baseline = HEAD(1, [base], fresh(1))
+  const store = createEntityStore()
+  store.applyBaseline(baseline)
+  const read = () => ({ workspace: { id: 'ws-1', name: '工作区' }, store, connection: { connected: true }, lastUpdatedAt: T, capabilities: [{ key: 'planning.item.read', access: 'available' }] })
+  const shown = () => deriveWorkItemListView({ read: read(), metadata: meta, phase: 'received', refreshing: false }).body.rows[0]
+
+  // 日期变化经过真实 diffSnapshots：字段面必须算业务变化，否则同 revision 的字段更新会被静默吞掉。
+  const changed = wire('ent-aa', { planningFields: business('2026-10-08') })
+  const next = HEAD(2, [changed], fresh(2))
+  const delta = diffSnapshots(baseline, next)
+  assert.deepEqual(delta.upserts.map((entity) => entity.entityId), ['ent-aa'], '字段变化进 upsert')
+  store.applyDelta(delta)
+  assert.equal(shown().targetDate, '2026-10-08', 'delta 推进日期')
+
+  // 同 revision 只换来源：业务签名（去掉逐行 source）逐字不变，watch 因此走 metadata 而不是 gap；连刷两次即 idle。
+  const onlySource = HEAD(2, [wire('ent-aa', { planningFields: business('2026-10-08'), source: { reason: '来源改名' } })], { revision: 2, freshness: 'fresh', authority: 'provider', reason: '来源改名' })
+  assert.equal(businessSignature(onlySource), businessSignature(next), '只有 source 变化时业务签名不变（字段面在签名里）')
+  assert.deepEqual([businessSignature(baseline) === businessSignature(next), businessSignature(baseline) === businessSignature(onlySource)], [false, false], '字段变化确实改变业务签名')
+  assert.deepEqual(diffSnapshots(baseline, onlySource).upserts.map((entity) => entity.entityId), ['ent-aa'], '对 baseline 的净变化仍包含该行')
+
+  // applyMetadata 只改 source：字段快照必须原样保留，不能被丢成 undefined。
+  store.applyMetadata({ revision: 2, workspace: next.workspace, capabilities: [], source: onlySource.source, entities: [{ entityId: 'ent-aa', source: fresh(2) }] })
+  assert.deepEqual(store.get('ent-aa').entity.planningFields, business('2026-10-08'), 'metadata 透传不得丢字段')
+
+  store.markAllStale()
+  const stale = deriveWorkItemListView({ read: read(), metadata: meta, phase: 'received', refreshing: false })
+  assert.deepEqual(
+    [stale.body.rows[0].targetDate, stale.body.rows[0].iteration, stale.body.rows[0].stale],
+    ['2026-10-08', 'E1 Sprint 1', true],
+    '重连 / 缺口后仍显示最后已知值，只是标记陈旧',
+  )
+})
+
 test('陈旧 / 刷新 / 降级 / 缺口：保行；状态区只宣告一次，横幅只带来源与固定时刻；页首与行都不冒充当前值', () => {
   const status = (html) => html.match(/<div role="status"[^>]*>(.*?)<\/div>/)[1]
   const banner = /来源：(<[^>]+>)?规划源.*最后已知值（最后读取：<time dateTime="2026-10-01T08:00:00.000Z">/
-  const freshness = (name) => cells(H[name]).slice(1).map((row) => row[5])
+  const freshness = (name) => cells(H[name]).slice(1).map((row) => row[7])
   for (const name of ['stale', 'degraded', 'gap', 'offlineKept', 'staleEmpty']) assert.equal(status(H[name]), '当前结果尚未确认，最后已知值不是当前值', name)
   for (const name of ['stale', 'degraded', 'gap', 'offlineKept', 'refreshing']) assert.equal(H[name].match(/尚未确认|正在刷新/g).length, 1, `${name} 只宣告一次`)
   for (const name of ['stale', 'degraded', 'gap', 'offlineKept', 'refreshing', 'staleEmpty', 'refreshingEmpty']) {
@@ -140,8 +242,8 @@ test('版式：滚动容器可聚焦且横向可滚；短标签列不换行，�
   assert.match(H.content, /<div role="region" aria-label="[^"]+" tabindex="0" style="overflow-x:auto"><table>/)
   const [head, visible, hidden] = [...H.content.matchAll(/<tr>(.*?)<\/tr>/g)].map(([, tr]) => [...tr.matchAll(/style="([^"]*)"/g)].map((match) => match[1]))
   const [nowrap, wrap] = ['white-space:nowrap', 'overflow-wrap:anywhere;min-width:12em']
-  assert.deepEqual(head, Array(6).fill(nowrap))
-  assert.deepEqual([visible, hidden], [[wrap, nowrap, nowrap, nowrap, wrap, nowrap], [wrap, nowrap, nowrap, nowrap, wrap, nowrap]])
+  assert.deepEqual(head, Array(8).fill(nowrap))
+  assert.deepEqual([visible, hidden], [[wrap, nowrap, nowrap, nowrap, nowrap, nowrap, wrap, nowrap], [wrap, nowrap, nowrap, nowrap, nowrap, nowrap, wrap, nowrap]])
 })
 
 test('不可用：权限 / 不支持 / 未知 / 离线 / 错误说明各不相同，不借缓存，没有行；每类都写出还能做什么，读门已观测不可用不说尚未确认', () => {

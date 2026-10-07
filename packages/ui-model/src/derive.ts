@@ -94,14 +94,40 @@ function visibleContent(entity: ClientEntity): { title: string | undefined; body
   return { title: entity.content.title, body: entity.content.body }
 }
 
+/**
+ * 字段展示面：redacted 行连同规划字段一起被剥离（双层剥离的第二层）——即使上游恶意带上快照，页面也拿不到
+ * 迭代 / 日期 / 原生状态名。`statusUnmapped` 只由 `native_only` 为真；`mapped` / `unset` / 缺快照都不是未映射。
+ */
+function fieldSurface(entity: ClientEntity): {
+  planningFields: ClientEntity['planningFields'] | undefined
+  iteration: string | undefined
+  targetDate: string | undefined
+  statusUnmapped: boolean
+} {
+  if (entity.content.contentKind === ContentKind.Redacted) {
+    return { planningFields: undefined, iteration: undefined, targetDate: undefined, statusUnmapped: false }
+  }
+  const fields = entity.planningFields
+  return {
+    planningFields: fields,
+    iteration: fields?.iteration?.title,
+    targetDate: fields?.targetDate,
+    statusUnmapped: fields?.status.kind === 'native_only',
+  }
+}
+
 function rowOf(
   entry: StoredEntity, read: WorkspaceRead,
   access: ReadonlyMap<string, AccessLevel>, degradation: Degradation,
 ): WorkItemRow {
   const content = visibleContent(entry.entity)
+  const fields = fieldSurface(entry.entity)
   return {
     entityId: entry.entity.entityId, contentKind: entry.entity.content.contentKind, title: content.title,
-    planningStatus: entry.entity.planningStatus, derived: entry.entity.derived, source: sourceOf(entry.entity),
+    planningStatus: entry.entity.planningStatus,
+    planningFields: fields.planningFields, iteration: fields.iteration, targetDate: fields.targetDate,
+    statusUnmapped: fields.statusUnmapped,
+    derived: entry.entity.derived, source: sourceOf(entry.entity),
     freshness: freshnessOf(entry, read, degradation), actions: actionsFor(entry.entity, access),
   }
 }

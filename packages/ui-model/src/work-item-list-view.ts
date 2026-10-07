@@ -43,6 +43,12 @@ export type VisibleListRow =
       readonly kind: 'item'; readonly key: string; readonly title: string; readonly identity: string
       readonly planningStatus: string; readonly engineering: string; readonly source: string
       readonly authority: string; readonly stale: boolean
+      /** 迭代 title；缺值统一占位，不做时区换算。 */
+      readonly iteration: string
+      /** 目标日期原样（`YYYY-MM-DD`）；缺值统一占位。 */
+      readonly targetDate: string
+      /** `native_only` 为真：页面据此显示平台原生名与未映射提示，而不是规范状态标签。 */
+      readonly statusUnmapped: boolean
     }
 export type WorkItemListView = {
   readonly workspaceName: string
@@ -98,12 +104,24 @@ function rowView(row: WorkItemRow, names: ListDisplayMetadata['sourceNames'], st
   return {
     kind: 'item', key: row.entityId, title: row.title || '标题未提供',
     identity: (primary && pick(IDENTITY, primary.externalKind)) ?? '身份未知',
-    planningStatus: pick(STATUS, row.planningStatus) ?? '未知',
-    engineering: row.derived.map((flag) => pick(HINTS, flag) ?? '未知提示').join('、') || '无',
+    planningStatus: statusText(row), engineering: row.derived.map((flag) => pick(HINTS, flag) ?? '未知提示').join('、') || '无',
     source: (primary && pick(names, primary.bindingId)) ?? '来源名称未提供',
     authority: pick(AUTHORITY, row.source.authority) ?? '来源权威未知',
+    iteration: row.iteration || '—', targetDate: row.targetDate || '—', statusUnmapped: row.statusUnmapped,
     stale,
   }
+}
+
+/**
+ * 规划状态文案的唯一归约点：`native_only` 显示平台原生名与「未映射」，绝不显示规范状态标签，也不显示 `Unknown`
+ * 哨兵；`unset` 与缺失快照显示占位；`mapped` 显示快照里的规范状态；没有快照（Provider 无读取面）沿用权威状态。
+ */
+function statusText(row: WorkItemRow): string {
+  const status = row.planningFields?.status
+  if (status?.kind === 'native_only') return status.nativeName === null || status.nativeName === '' ? '未映射' : `${status.nativeName}（未映射）`
+  if (status?.kind === 'unset') return '—'
+  const normalized = status?.kind === 'mapped' ? status.normalized : row.planningStatus
+  return pick(STATUS, normalized) ?? '未知'
 }
 
 /**
