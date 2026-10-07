@@ -4,7 +4,7 @@
  * 读能力全套 + 可选写能力 + 内容三态判别联合。可选能力用 `?` 声明：provider 不实现时，调用方必须
  * 读 capability key 而不是按 provider 名字分支（ExecPlan D2）。
  */
-import { ContentKind, type RedactionReason } from '@harness-projects/domain'
+import { ContentKind, type NativePlanningFieldValue, type RedactionReason } from '@harness-projects/domain'
 import type { ProviderCapabilitySnapshot } from './capability-keys.ts'
 import type { ExternalObjectRef, ProviderObservation, ProviderReconcileScope } from './observation.ts'
 import type { ProviderPage, ProviderResult } from './result.ts'
@@ -28,6 +28,11 @@ export interface ProviderPlanningFields {
   readonly statusKey: string | undefined; readonly priority: string | undefined; readonly assigneeRefs: readonly string[]
   readonly iterationId: string | undefined; readonly startDate: string | undefined; readonly targetDate: string | undefined
   readonly customFields: Readonly<Record<string, unknown>>
+  /**
+   * 原生字段值，以 project field id 为键（#133，裁决 R2）。缺省 = 该 Provider 没有原生字段读取面，core 沿用 `statusKey`；
+   * 提供它的 Provider 的规划状态只经工作区映射归一。redacted 条目不得携带值。
+   */
+  readonly nativeValues?: Readonly<Record<string, NativePlanningFieldValue>>
 }
 
 /** 成员关系（裁决 R1）：条目挂在 project 上的那一行；id 与两个时间戳都独立于内容（E1-1 实验 1）。它不是外部身份种类。 */
@@ -52,8 +57,16 @@ export interface ProviderPlanningItem {
   readonly fields: ProviderPlanningFields; readonly sourceVersion: string | undefined; readonly sourceUpdatedAt: string | undefined
 }
 
-export interface ProviderPlanningFieldDefinition { readonly id: string; readonly name: string; readonly kind: string; readonly options: readonly string[] }
-export interface ProviderIteration { readonly id: string; readonly title: string; readonly startDate: string | undefined; readonly targetDate: string | undefined }
+/** 字段定义（#133）：只有已实现读取的三种 kind 带形状，其余一律 `unsupported`，不伪造空选项。 */
+export type ProviderPlanningFieldDefinition =
+  | { readonly id: string; readonly name: string; readonly kind: 'single_select'; readonly options: readonly { readonly id: string; readonly name: string }[] }
+  | { readonly id: string; readonly name: string; readonly kind: 'iteration'; readonly iterations: readonly ProviderIteration[] }
+  | { readonly id: string; readonly name: string; readonly kind: 'date' | 'unsupported' }
+/** 迭代配置：`projectFieldId` 是承载它的字段（R2）；起始日 date-only，工期以天计；`completed` 是平台已归档的迭代。 */
+export interface ProviderIteration {
+  readonly id: string; readonly projectFieldId: string; readonly title: string
+  readonly startDate: string; readonly durationDays: number; readonly completed: boolean
+}
 export interface ProviderCreatedPlanningItem { readonly item: ProviderPlanningItem }
 export interface ProviderCreatedWorkItem { readonly item: ProviderPlanningItem; readonly workItem: ProviderWorkItemContent }
 

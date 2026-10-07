@@ -4,7 +4,8 @@
  *     响应头、响应体或异常文本，成功响应不因剩余额度为 0 失败（M3、M5、M12、M14、M19）；
  * (2) 解码：种类只由 type 与 __typename 对照决定，任何不符整页失败，REDACTED 不读 content（M6、M20）；
  * (3) 游标停滞与成环是形状错误（M7、M21）；(4) 入口守卫先于任何请求，limit 钳位到 100（M13）；
- * (5) reconcile 全有或全无、忽略 scope.cursor、任何失败都不抛错（M4、M22）；(6) 能力自述只声明读取。
+ * (5) reconcile 全有或全无、忽略 scope.cursor、任何失败都不抛错（M4、M22）；(6) 能力自述只声明已实现的读取（条目、迭代）；
+ * (7) 原生字段（#133）：值以 project field id 为键、不认 option id，一页读全否则整次失败，REDACTED 不读字段值。
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -30,11 +31,18 @@ function scripted(script, now = () => NOW) {
 const res = (status, body, headers = {}) => ({ status, headers, body })
 const ok = (body, headers) => res(200, body, headers)
 const CONTENT = { ISSUE: { __typename: 'Issue', number: 1, url: 'u' }, PULL_REQUEST: { __typename: 'PullRequest', number: 3, url: 'u' }, DRAFT_ISSUE: { __typename: 'DraftIssue' } }
+/** 一个 Project 至多 50 个字段，按 100 取的一页必然是全部：`hasNextPage` 为真即形状错误。 */
+const fieldValues = (nodes = [], hasNextPage = false) => ({ pageInfo: { hasNextPage, endCursor: hasNextPage ? 'v-1' : null }, nodes })
+const select = (fieldId, optionId, name = 'Todo') => ({ __typename: 'ProjectV2ItemFieldSingleSelectValue', field: { id: fieldId, name: 'S' }, optionId, name })
+const dateValue = (date) => ({ __typename: 'ProjectV2ItemFieldDateValue', field: { id: 'field-date', name: 'D' }, date })
+const iterationValue = (patch = {}) => ({ __typename: 'ProjectV2ItemFieldIterationValue', field: { id: 'field-iter', name: 'I' }, iterationId: 'i-1', title: 'Sprint', startDate: '2026-09-21', duration: 7, ...patch })
 const row = (n, type, content = {}, patch = {}) => ({
   id: `item-${n}`, type, createdAt: '2026-09-21T07:00:00Z', updatedAt: '2026-09-21T07:11:54Z',
-  content: content === null ? null : { ...CONTENT[type], id: `content-${n}`, title: `title ${n}`, body: `body ${n}`, updatedAt: '2026-09-21T07:10:00Z', ...content }, ...patch,
+  content: content === null ? null : { ...CONTENT[type], id: `content-${n}`, title: `title ${n}`, body: `body ${n}`, updatedAt: '2026-09-21T07:10:00Z', ...content },
+  fieldValues: fieldValues(), ...patch,
 })
 const page = (nodes, hasNextPage = false, endCursor = null) => ok({ data: { node: { __typename: 'ProjectV2', items: { pageInfo: { hasNextPage, endCursor }, nodes } } } })
+const fieldsPage = (nodes, hasNextPage = false) => ok({ data: { node: { __typename: 'ProjectV2', fields: { pageInfo: { hasNextPage, endCursor: hasNextPage ? 'f-1' : null }, nodes } } } })
 const PROJECT = { data: { node: { __typename: 'ProjectV2', id: 'project-1', title: 'Project A', url: 'u', updatedAt: '2026-09-20T01:02:03Z' } } }
 const list = (provider, input) => provider.listPlanningItems({ project, cursor: undefined, limit: 100, ...input })
 const itemRef = (objectKind, externalId) => ({ bindingId, objectKind, externalId, url: undefined })
@@ -106,18 +114,30 @@ const MALFORMED = [
   ['内容 id 为空串', row(1, 'ISSUE', { id: '' })],
   ['Draft body 为 null（schema 为 String!）', row(1, 'DRAFT_ISSUE', { body: null })],
   ['content 缺失且 type 不是 REDACTED', row(1, 'ISSUE', {}, { content: undefined })],
+  ['条目缺 fieldValues 连接', row(1, 'ISSUE', {}, { fieldValues: undefined })],
+  ['fieldValues 还有下一页（前提被打破，不截断发布）', row(1, 'ISSUE', {}, { fieldValues: fieldValues([], true) })],
+  ['同一条目同一字段出现两次', row(1, 'ISSUE', {}, { fieldValues: fieldValues([select('field-s', 'a'), select('field-s', 'b')]) })],
+  ['日期值不是真实日历日', row(1, 'ISSUE', {}, { fieldValues: fieldValues([dateValue('2026-02-30')]) })],
+  ['迭代工期为负', row(1, 'ISSUE', {}, { fieldValues: fieldValues([iterationValue({ duration: -1 })]) })],
+  ['字段值节点缺 __typename', row(1, 'ISSUE', {}, { fieldValues: fieldValues([{ field: { id: 'field-s', name: 'S' }, optionId: 'a', name: 'A' }]) })],
+  ['同一字段既有空 optionId 又有值（空值也参与同字段去重）', row(1, 'ISSUE', {}, { fieldValues: fieldValues([select('field-s', null, null), select('field-s', 'a')]) })],
+  ['单选值缺 optionId 键或为空串（只有 schema 的 null 才是没有值）', row(1, 'ISSUE', {}, { fieldValues: fieldValues([{ ...select('field-s', 'a'), optionId: undefined }]) })],
+  ['单选 optionId 为空串', row(1, 'ISSUE', {}, { fieldValues: fieldValues([select('field-s', '')]) })],
+  ['同一字段既有空日期又有日期值', row(1, 'ISSUE', {}, { fieldValues: fieldValues([dateValue(null), dateValue('2026-10-01')]) })],
+  ['值节点的字段 id 为空串', row(1, 'ISSUE', {}, { fieldValues: fieldValues([select('', 'a')]) })],
 ]
 for (const [name, bad] of MALFORMED) {
   test(`合成：解码 ${name} 是形状错误`, async () => assertMalformed(await list(scripted([page([row(9, 'ISSUE'), bad])]).provider)))
 }
 
 test('合成：REDACTED 与 content 为 null 退回成员关系 ref，不读 content，只产出成员关系观察', async () => {
-  const { provider } = scripted([page([row(4, 'REDACTED', { __typename: 'Issue', number: -1 }), row(5, 'ISSUE', null)])])
+  // 字段值连接故意是坏形状：REDACTED 与 content 为 null 都不读它，平台扣下的内容不发布任何原生值。
+  const { provider } = scripted([page([row(4, 'REDACTED', { __typename: 'Issue', number: -1 }, { fieldValues: null }), row(5, 'ISSUE', null, { fieldValues: fieldValues([], true) })])])
   const listed = await list(provider)
-  const expected = (n) => [itemRef('project_item', `item-${n}`), `item-${n}`, { kind: 'redacted', reason: 'unavailable' }]
-  assert.deepEqual(listed.value.items.map(({ ref, membership, content }) => [ref, membership.externalId, content]), [expected(4), expected(5)])
+  const expected = (n) => [itemRef('project_item', `item-${n}`), `item-${n}`, { kind: 'redacted', reason: 'unavailable' }, {}]
+  assert.deepEqual(listed.value.items.map(({ ref, membership, content, fields }) => [ref, membership.externalId, content, fields.nativeValues]), [expected(4), expected(5)])
   assert.equal(JSON.stringify(listed).includes('content-4'), false, 'REDACTED 不得读 content')
-  const payload = { project: 'project-1', contentKind: null, contentExternalId: null, createdAt: '2026-09-21T07:00:00Z' }
+  const payload = { project: 'project-1', contentKind: null, contentExternalId: null, createdAt: '2026-09-21T07:00:00Z', nativeValues: {} }
   assert.deepEqual((await reconcile(provider)).map((o) => [o.type, o.payload]), [0, 1].map(() => ['planning.membership.observed', payload]))
   assert.equal((await provider.getPlanningItem(itemRef('project_item', 'item-5'))).value.content.kind, 'redacted', '成员关系 ref 按成员关系 id 扫描匹配')
 })
@@ -152,11 +172,58 @@ test('合成：reconcile 全有或全无，忽略 scope.cursor，任何失败都
   assert.deepEqual(await reconcile(scripted([page([row(1, 'ISSUE')])], () => Number.NaN).provider), [], '时钟或观察构造抛错同样一条不产出')
 })
 
-test('合成：能力自述只声明 planning.item.read，permission 由一次 getProject 探针决定；字段与迭代不伪造空表', async () => {
+test('合成：能力自述只声明已实现的读取（条目与迭代，#133），permission 由同一次 getProject 探针决定', async () => {
   for (const [response, permission] of [[ok(PROJECT), 'available'], [res(401, {}), 'unavailable'], [ok({ data: { node: null } }), 'unavailable'], [new Error('x'), 'degraded']]) {
-    const snapshot = await scripted([response]).provider.describeCapabilities()
-    assert.deepEqual(snapshot, { bindingId, capability: { 'planning.item.read': 'available' }, permission: { 'planning.item.read': permission }, observedAt: '2026-09-29T00:00:00.000Z' })
+    const { provider, calls } = scripted([response])
+    assert.deepEqual(await provider.describeCapabilities(), {
+      bindingId, capability: { 'planning.item.read': 'available', 'planning.field.iteration.read': 'available' },
+      permission: { 'planning.item.read': permission, 'planning.field.iteration.read': permission }, observedAt: '2026-09-29T00:00:00.000Z',
+    })
+    assert.equal(calls.length, 1, '两个键共用一次探针')
   }
-  const { provider } = scripted([page([])])
-  assert.deepEqual([(await provider.listFieldDefinitions(project)).error.code, (await provider.listIterations(project)).error.code], ['not_supported', 'not_supported'])
+})
+
+test('合成：字段值以 project field id 为键（R2）——同一 option id 落在两个字段上各归其位；未实现的值类型、空日期与空 optionId 跳过，空选项名保留为 null', async () => {
+  const values = fieldValues([
+    select('field-status', 'shared-option'), select('field-other', 'shared-option', 'Other'),
+    { __typename: 'ProjectV2ItemFieldTextValue', field: { id: 'field-text', name: 'T' }, text: 'x' }, dateValue(null), iterationValue(),
+    select('__proto__', 'proto-option'), select('field-unset', null, null), select('field-nameless', 'o-nameless', null),
+  ])
+  const listed = await list(scripted([page([row(1, 'ISSUE', {}, { fieldValues: values })])]).provider)
+  const { ['__proto__']: proto, ...rest } = listed.value.items[0].fields.nativeValues
+  assert.deepEqual(rest, {
+    'field-status': { kind: 'single_select', optionId: 'shared-option', name: 'Todo' },
+    'field-other': { kind: 'single_select', optionId: 'shared-option', name: 'Other' },
+    'field-iter': { kind: 'iteration', iterationId: 'i-1', title: 'Sprint', startDate: '2026-09-21', durationDays: 7 },
+    'field-nameless': { kind: 'single_select', optionId: 'o-nameless', name: null },
+  })
+  assert.ok(Object.hasOwn(listed.value.items[0].fields.nativeValues, '__proto__') && proto.optionId === 'proto-option', '任何字段 id 都按字面成为自有键，不落到原型上')
+})
+
+test('合成：同一时刻的字段值变化改变成员关系观察的去重键（同秒整快照替换的前提，R4）', async () => {
+  const observe = async (optionId) => (await reconcile(scripted([page([row(1, 'ISSUE', {}, { fieldValues: fieldValues([select('field-status', optionId)]) })])]).provider))
+    .find((observation) => observation.type === 'planning.membership.observed')
+  const [todo, done] = [await observe('o-todo'), await observe('o-done')]
+  assert.equal(todo.sourceVersion, done.sourceVersion, '前提：成员关系 updatedAt 相同')
+  assert.notEqual(todo.dedupeKey, done.dedupeKey)
+})
+
+test('合成：字段定义一页读全，否则或重复 id 即整次失败；只按 dataType 判别，绑定外项目先于请求拒绝', async () => {
+  const iteration = (startDate) => ({ id: 'f-iter', name: 'Sprint', dataType: 'ITERATION', configuration: {
+    iterations: [{ id: 'i-2', title: 'Next', startDate, duration: 14 }], completedIterations: [{ id: 'i-1', title: 'Done', startDate: '2026-09-01', duration: 14 }] } })
+  const nodes = [{ id: 'f-status', name: 'Status', dataType: 'SINGLE_SELECT', options: [{ id: 'o-1', name: 'Todo' }] }, iteration('2026-09-15'),
+    { id: 'f-date', name: 'Due', dataType: 'DATE' }, { id: 'f-text', name: 'Notes', dataType: 'TEXT', options: 'ignored' }]
+  const { provider, calls } = scripted([fieldsPage(nodes)])
+  assert.deepEqual((await provider.listFieldDefinitions(project)).value.map(({ id, kind }) => [id, kind]),
+    [['f-status', 'single_select'], ['f-iter', 'iteration'], ['f-date', 'date'], ['f-text', 'unsupported']])
+  assert.deepEqual((await provider.listIterations(project)).value.map(({ id, completed }) => [id, completed]), [['i-2', false], ['i-1', true]], '已完成的迭代保留并标记')
+  assert.deepEqual(calls.at(-1), { project: 'project-1', first: 100, after: null }, '只发 project、first、after（R7）')
+  for (const [name, response] of [['还有下一页', fieldsPage(nodes, true)], ['重复字段 id', fieldsPage([nodes[0], nodes[0]])], ['迭代起始日不是日期', fieldsPage([iteration('soon')])]]) {
+    assertMalformed(await scripted([response]).provider.listFieldDefinitions(project), name)
+  }
+  const guarded = scripted([fieldsPage(nodes)])
+  for (const other of [{ ...project, externalId: 'project-2' }, { ...project, bindingId: 'binding-other' }]) {
+    assert.deepEqual([(await guarded.provider.listFieldDefinitions(other)).error.code, (await guarded.provider.listIterations(other)).error.code], ['invalid_input', 'invalid_input'])
+  }
+  assert.equal(guarded.calls.length, 0)
 })
