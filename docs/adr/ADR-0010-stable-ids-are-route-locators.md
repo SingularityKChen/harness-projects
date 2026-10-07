@@ -2,7 +2,7 @@
 
 > 状态：Accepted（人类伙伴 2026-10-07 16:12 CST 在 PR #269 的会话中批准决策门 H1，所选答复原文「Approve as written (Recommended)」；完整的问题原文与机械动作记录见来源 ExecPlan 的 Decision Log）
 > 日期：2026-10-07
-> 来源：`docs/exec-plan/active/2026-10-05-work-item-detail.md`（Route identifier decision gate、决策门 H）；PR #269 review thread `PRRT_kwDOUekeas6pesrq`
+> 来源：`docs/exec-plan/completed/2026-10-05-work-item-detail.md`（Route identifier decision gate、决策门 H）；PR #269 review thread `PRRT_kwDOUekeas6pesrq`
 
 ## Decision
 
