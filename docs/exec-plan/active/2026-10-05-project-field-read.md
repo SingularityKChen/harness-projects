@@ -125,9 +125,9 @@ Issue #133 要求四项行为：两个 Project 即使复用 option id 也各自�
 
 **涉及文件**：`packages/controller/src/wire.ts`、`packages/ui-model/src/work-item-list-view.ts`、`packages/ui/src/work-item-list.ts`、`tests/contract/ui-work-item-list.test.js`。
 
-- [ ] wire 和 client store 只传已确认投影；redacted 在 wire 与 ui-model 两层剥离。
-- [ ] 列表显示原生未映射状态、迭代 title 与 date-only 目标日期，不做时区转换。
-- [ ] 真实 `WorkItemListPage` 和两种 Storage 的录制集成证据通过后归档本计划。
+- [x] wire 和 client store 只传已确认投影；redacted 在 wire 与 ui-model 两层剥离。
+- [x] 列表显示原生未映射状态、迭代 title 与 date-only 目标日期，不做时区转换。
+- [x] 真实 `WorkItemListPage` 和两种 Storage 的录制集成证据通过；远端 stack 验收后归档本计划。
 
 **验证**（在检出 `feature/project-field-list` 的工作树根目录运行）：
 
@@ -164,8 +164,9 @@ Issue #133 要求四项行为：两个 Project 即使复用 option id 也各自�
 - [x] (2026-10-07 CST) 建立 `backup/pr268-before-stack-20261007`，在 `.worktrees/pr268-stack` 从 `origin/main` 建立隔离重构工作树；main baseline 为 1149 contract/integration/e2e + 7 MVP-0，0 fail。
 - [x] (2026-10-07 CST) Batch A：Provider bottom layer 为 746 行 code/test、222 行 docs；1156 contract/integration/e2e + 7 MVP-0、8 boundaries 全部通过，typecheck、workflow、disclosure 与 diff check 通过。
 - [x] (2026-10-07 CST) Batch B：Host projection middle layer 为 772 行 code/test、0 行 docs；1186 contract/integration/e2e + 7 MVP-0、8 boundaries 全部通过，typecheck、workflow、disclosure 与 diff check 通过。
-- [ ] Batch C：重建并验证 List presentation top layer。
-- [ ] 比较旧/新最终 product tree、执行 publication scan，并以精确 lease 更新远端 stack。
+- [x] (2026-10-07 CST) Batch C：List presentation top layer 为 314 行 code/test、0 行 docs；1196 contract/integration/e2e + 7 MVP-0、8 boundaries 全部通过，typecheck、workflow、disclosure 与 diff check 通过。
+- [x] (2026-10-07 CST) 本地比较旧/新最终 `packages/`、`apps/`、`tests/` tree 完全一致；三层 publication scan 均通过。
+- [ ] 以精确 lease 更新 PR #268 并发布 B/C 两层远端 stack。
 - [ ] 回读三个 PR 的 head/base/checks、issue links、review threads 与 draft/ready 状态；不合并。
 
 ## Surprises & Discoveries
@@ -208,7 +209,7 @@ PR 发布使用普通 `gh` 的 `SingularityKChen` 身份；Reviewer review 使�
 
 ## Outcomes & Retrospective
 
-截至 2026-10-07，A 与 B 已分别以 746/772 行通过完整测试和仓库门禁；旧 PR 的 Provider/Host 行为未删减。重构期间唯一的边界修正是把 `packages/core/src/projection.ts` 从呈现层移回 Host 层，使 B 的写后读取闭环成立。C 尚待重建与最终 product-tree 对照。
+截至 2026-10-07，本地三层 A/B/C 分别为 746/772/314 行，完整测试分别为 1156/1186/1196，MVP-0 均为 7，所有结果 0 fail。新 top 与旧 PR #268 head 的 `packages/`、`apps/`、`tests/` tree 完全一致；行为没有删减。唯一的边界修正是把 `packages/core/src/projection.ts` 从呈现层移回 Host 层，使 B 的写后读取闭环成立；真实列表 HTML 集成测试跟随 C。远端 push、CI 与 PR 元数据回读仍待完成。
 
 完成后记录三层实际行数、测试数、range-diff/product-tree 对照、远端回读与仍未解决的产品风险。人类决定是否和何时合并。
 
@@ -221,3 +222,5 @@ PR 发布使用普通 `gh` 的 `SingularityKChen` 身份；Reviewer review 使�
 2026-10-07 CST：按用户要求重新审视原始 issue/spec/plan；撤销“超限例外是交付路径”的结论，重切 A Provider → B Host projection → C List presentation 三层 stack，并建立逐层 800 行停止门、恢复锚点与精确 force-with-lease 发布流程。
 
 2026-10-07 CST：Batch B 的失败测试证明 core query projection 属于 Host 闭环，已把 `packages/core/src/projection.ts` 从 C 移到 B；记录 772 行、1186 + 7 测试与全部本地门禁通过。
+
+2026-10-07 CST：Batch C 以 314 行完成真实列表闭环；1196 + 7 测试和全部本地门禁通过，且新 top 的 product/test tree 与旧 PR #268 head 完全一致。
