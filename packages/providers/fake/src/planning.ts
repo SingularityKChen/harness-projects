@@ -22,13 +22,13 @@ function declaredCapabilities(flags: FakePlanningCapabilities): Partial<Record<c
   // 内容写与移动在 A2 有 key（content.write）但本批未实现：键不声明，方法不提供。
   return map
 }
-/** patch 的三态：undefined = 不改；null = 清空；其它 = 覆盖。 */
+/** patch 的三态：undefined = 不改；null = 清空；其它 = 覆盖。`nativeValues` 不在 patch 里，必须原样保留（#133：写入路径未实现）。 */
 function applyFieldPatch(f: cap.ProviderPlanningFields, p: cap.ProviderPlanningFieldPatch): cap.ProviderPlanningFields {
   const pick = <T>(next: T | null | undefined, current: T | undefined): T | undefined => (next === undefined ? current : (next ?? undefined))
   return {
     statusKey: p.statusKey ?? f.statusKey, priority: p.priority ?? f.priority, assigneeRefs: p.assigneeRefs ?? f.assigneeRefs,
     iterationId: pick(p.iterationId, f.iterationId), startDate: pick(p.startDate, f.startDate), targetDate: pick(p.targetDate, f.targetDate),
-    customFields: f.customFields,
+    customFields: f.customFields, ...(f.nativeValues === undefined ? {} : { nativeValues: f.nativeValues }),
   }
 }
 export type FakePlanningProviderOptions = {

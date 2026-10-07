@@ -30,11 +30,14 @@ function scripted(script, now = () => NOW) {
 const res = (status, body, headers = {}) => ({ status, headers, body })
 const ok = (body, headers) => res(200, body, headers)
 const CONTENT = { ISSUE: { __typename: 'Issue', number: 1, url: 'u' }, PULL_REQUEST: { __typename: 'PullRequest', number: 3, url: 'u' }, DRAFT_ISSUE: { __typename: 'DraftIssue' } }
+const fieldValues = (nodes = [], hasNextPage = false, endCursor = 'Mg') => ({ pageInfo: { hasNextPage, endCursor }, nodes })
 const row = (n, type, content = {}, patch = {}) => ({
   id: `item-${n}`, type, createdAt: '2026-09-21T07:00:00Z', updatedAt: '2026-09-21T07:11:54Z',
-  content: content === null ? null : { ...CONTENT[type], id: `content-${n}`, title: `title ${n}`, body: `body ${n}`, updatedAt: '2026-09-21T07:10:00Z', ...content }, ...patch,
+  content: content === null ? null : { ...CONTENT[type], id: `content-${n}`, title: `title ${n}`, body: `body ${n}`, updatedAt: '2026-09-21T07:10:00Z', ...content },
+  fieldValues: fieldValues(), ...patch,
 })
 const page = (nodes, hasNextPage = false, endCursor = null) => ok({ data: { node: { __typename: 'ProjectV2', items: { pageInfo: { hasNextPage, endCursor }, nodes } } } })
+const fieldsPage = (nodes, hasNextPage = false, endCursor = null) => ok({ data: { node: { __typename: 'ProjectV2', fields: { pageInfo: { hasNextPage, endCursor }, nodes } } } })
 const PROJECT = { data: { node: { __typename: 'ProjectV2', id: 'project-1', title: 'Project A', url: 'u', updatedAt: '2026-09-20T01:02:03Z' } } }
 const list = (provider, input) => provider.listPlanningItems({ project, cursor: undefined, limit: 100, ...input })
 const itemRef = (objectKind, externalId) => ({ bindingId, objectKind, externalId, url: undefined })
@@ -106,6 +109,7 @@ const MALFORMED = [
   ['内容 id 为空串', row(1, 'ISSUE', { id: '' })],
   ['Draft body 为 null（schema 为 String!）', row(1, 'DRAFT_ISSUE', { body: null })],
   ['content 缺失且 type 不是 REDACTED', row(1, 'ISSUE', {}, { content: undefined })],
+  ['条目缺 fieldValues 连接（首页没有 pageInfo 不得读成没有值）', row(1, 'ISSUE', {}, { fieldValues: undefined })],
 ]
 for (const [name, bad] of MALFORMED) {
   test(`合成：解码 ${name} 是形状错误`, async () => assertMalformed(await list(scripted([page([row(9, 'ISSUE'), bad])]).provider)))
@@ -117,7 +121,7 @@ test('合成：REDACTED 与 content 为 null 退回成员关系 ref，不读 con
   const expected = (n) => [itemRef('project_item', `item-${n}`), `item-${n}`, { kind: 'redacted', reason: 'unavailable' }]
   assert.deepEqual(listed.value.items.map(({ ref, membership, content }) => [ref, membership.externalId, content]), [expected(4), expected(5)])
   assert.equal(JSON.stringify(listed).includes('content-4'), false, 'REDACTED 不得读 content')
-  const payload = { project: 'project-1', contentKind: null, contentExternalId: null, createdAt: '2026-09-21T07:00:00Z' }
+  const payload = { project: 'project-1', contentKind: null, contentExternalId: null, createdAt: '2026-09-21T07:00:00Z', nativeValues: {} }
   assert.deepEqual((await reconcile(provider)).map((o) => [o.type, o.payload]), [0, 1].map(() => ['planning.membership.observed', payload]))
   assert.equal((await provider.getPlanningItem(itemRef('project_item', 'item-5'))).value.content.kind, 'redacted', '成员关系 ref 按成员关系 id 扫描匹配')
 })
@@ -152,11 +156,19 @@ test('合成：reconcile 全有或全无，忽略 scope.cursor，任何失败都
   assert.deepEqual(await reconcile(scripted([page([row(1, 'ISSUE')])], () => Number.NaN).provider), [], '时钟或观察构造抛错同样一条不产出')
 })
 
-test('合成：能力自述只声明 planning.item.read，permission 由一次 getProject 探针决定；字段与迭代不伪造空表', async () => {
+test('合成：能力自述只声明 planning.item.read，permission 由一次 getProject 探针决定', async () => {
   for (const [response, permission] of [[ok(PROJECT), 'available'], [res(401, {}), 'unavailable'], [ok({ data: { node: null } }), 'unavailable'], [new Error('x'), 'degraded']]) {
     const snapshot = await scripted([response]).provider.describeCapabilities()
     assert.deepEqual(snapshot, { bindingId, capability: { 'planning.item.read': 'available' }, permission: { 'planning.item.read': permission }, observedAt: '2026-09-29T00:00:00.000Z' })
   }
   const { provider } = scripted([page([])])
-  assert.deepEqual([(await provider.listFieldDefinitions(project)).error.code, (await provider.listIterations(project)).error.code], ['not_supported', 'not_supported'])
+  assert.equal((await list(provider)).ok, true)
+  assert.deepEqual([(await provider.listFieldDefinitions(project)).error.code, (await provider.listIterations(project)).error.code], ['unavailable', 'unavailable'],
+    '字段读取已实现：坏响应下是结构化失败，而不再是 not_supported')
+  const bound = scripted([fieldsPage([])])
+  assert.equal((await bound.provider.listFieldDefinitions(project)).ok, true)
+  for (const other of [{ ...project, externalId: 'project-2' }, { ...project, bindingId: 'binding-other' }, { ...project, objectKind: 'repository' }]) {
+    assert.deepEqual([(await bound.provider.listFieldDefinitions(other)).error.code, (await bound.provider.listIterations(other)).error.code], ['invalid_input', 'invalid_input'],
+      '绑定外项目仍是 invalid_input')
+  }
 })

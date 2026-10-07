@@ -7,27 +7,44 @@ import {
   PLANNING_MEMBERSHIP_OBJECT_KIND, sourceVersionFromTimestamp,
   type ExternalObjectRef, type ProviderPlanningContent, type ProviderPlanningItem, type ProviderProject,
 } from '@harness-projects/capabilities'
+import type { NativePlanningFieldValue } from '@harness-projects/domain'
+import { decodeFieldValuesPage } from './fields.ts'
 
 export type Obj = Readonly<Record<string, unknown>>
-/** 条目行：`content` 只服务内容观察，没有内容身份时为 undefined。 */
-export interface ItemRow { readonly item: ProviderPlanningItem; readonly content: { readonly version: string; readonly fields: Obj } | undefined }
+/**
+ * 条目行：`content` 只服务内容观察，没有内容身份时为 undefined；`fieldValues` 是**字段值首页**的读回结果，
+ * 超过一页时 `nextCursor` 定义，调用方只能用本行的成员关系 id 走 `PlanningItemFields` 续读（R7）。
+ */
+export interface ItemRow {
+  readonly item: ProviderPlanningItem
+  readonly content: { readonly version: string; readonly fields: Obj } | undefined
+  readonly fieldValues: { readonly nativeValues: Readonly<Record<string, NativePlanningFieldValue>>; readonly nextCursor: string | undefined }
+}
 
 const KINDS: Readonly<Record<string, { readonly typename: string; readonly objectKind: string }>> = {
   ISSUE: { typename: 'Issue', objectKind: 'issue' }, DRAFT_ISSUE: { typename: 'DraftIssue', objectKind: 'draft' },
   PULL_REQUEST: { typename: 'PullRequest', objectKind: 'change_request' },
 }
 const emptyFields = () => ({ statusKey: undefined, priority: undefined, assigneeRefs: [], iterationId: undefined, startDate: undefined, targetDate: undefined, customFields: {} })
+/** 形状待解码的字段值首页占位：内容身份尚未确定时用它，避免在内容解码失败前先失败一次。 */
+const noFieldValues = { nativeValues: {}, nextCursor: undefined } as const
 
 const fail = (): never => { throw new TypeError('响应形状不符') }
 export const isRecord = (value: unknown): value is Obj => typeof value === 'object' && value !== null && !Array.isArray(value)
-const obj = (value: unknown): Obj => (isRecord(value) ? value : fail())
-const str = (value: unknown): string => (typeof value === 'string' ? value : fail())
-const id = (value: unknown): string => (str(value) === '' ? fail() : str(value))
+export const obj = (value: unknown): Obj => (isRecord(value) ? value : fail())
+export const str = (value: unknown): string => (typeof value === 'string' ? value : fail())
+export const id = (value: unknown): string => (str(value) === '' ? fail() : str(value))
 
 /** 项目节点；undefined 表示项目不可见（node 为 null 或不是 ProjectV2）：调用方报 not_found，绝不读成空页。 */
 export function projectNode(body: unknown): Obj | undefined {
   const node = obj(obj(body).data).node
   return node === null || (isRecord(node) && node.__typename !== 'ProjectV2') ? undefined : obj(node)
+}
+
+/** 成员关系节点；undefined 表示目标不可见（node 为 null 或不是 ProjectV2Item）：续页据此报 not_found。 */
+export function itemNode(body: unknown): Obj | undefined {
+  const node = obj(obj(body).data).node
+  return node === null || (isRecord(node) && node.__typename !== 'ProjectV2Item') ? undefined : obj(node)
 }
 
 export function decodeProject(node: Obj, project: ExternalObjectRef): ProviderProject {
@@ -39,11 +56,14 @@ function decodeRow(raw: unknown, project: ExternalObjectRef): ItemRow {
   const type = str(node.type)
   const kind = type === 'REDACTED' ? undefined : Object.hasOwn(KINDS, type) ? KINDS[type] : fail()
   const membership = { externalId: id(node.id), createdAt: str(node.createdAt), updatedAt: str(node.updatedAt) }
-  const common = { project, membership, fields: emptyFields(), sourceVersion: sourceVersionFromTimestamp(membership.updatedAt), sourceUpdatedAt: membership.updatedAt }
+  const common = { project, membership, sourceVersion: sourceVersionFromTimestamp(membership.updatedAt), sourceUpdatedAt: membership.updatedAt }
   const { bindingId } = project
   if (kind === undefined || node.content === null) {
+    // 连接形状仍要成立（缺 pageInfo 是形状错误），但平台扣下内容时不发布任何原生值：nativeValues 是空对象。
+    decodeFieldValuesPage(obj(node.fieldValues), undefined)
     const ref = { bindingId, objectKind: PLANNING_MEMBERSHIP_OBJECT_KIND, externalId: membership.externalId, url: undefined }
-    return { item: { ...common, ref, content: { kind: 'redacted', reason: 'unavailable' } }, content: undefined }
+    const fields = { ...emptyFields(), nativeValues: {} }
+    return { item: { ...common, fields, ref, content: { kind: 'redacted', reason: 'unavailable' } }, content: undefined, fieldValues: noFieldValues }
   }
   const { typename, objectKind } = kind
   const source = obj(node.content)
@@ -54,7 +74,9 @@ function decodeRow(raw: unknown, project: ExternalObjectRef): ItemRow {
     ? { kind: 'change_request', changeRequest: { externalId, number, title, body } }
     : { kind: 'work_item', workItem: { externalId, title, body } }
   const ref = { bindingId, objectKind, externalId, url: isDraft ? undefined : str(source.url) }
-  return { item: { ...common, ref, content }, content: { version: sourceVersionFromTimestamp(str(source.updatedAt)), fields: { kind: objectKind, number, title, body } } }
+  const fieldValues = decodeFieldValuesPage(obj(node.fieldValues), undefined)
+  const fields = { ...emptyFields(), nativeValues: fieldValues.nativeValues }
+  return { item: { ...common, fields, ref, content }, content: { version: sourceVersionFromTimestamp(str(source.updatedAt)), fields: { kind: objectKind, number, title, body } }, fieldValues }
 }
 
 /** 一页条目；`after` 是本次请求带的游标：hasNextPage 为真但 endCursor 缺失、为空或等于 after 即形状错误，否则调用方会死循环。 */

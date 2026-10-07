@@ -10,3 +10,7 @@ export const packageId = '@harness-projects/provider-planning-github-projects' a
 export { createGithubProjectsPlanningProvider, GITHUB_PROJECTS_PROVIDER_DEFINITION, type GithubProjectsPlanningProviderOptions } from './provider.ts'
 export type { GraphqlRequest, GraphqlResponse, GraphqlTransport } from './transport.ts'
 export { PLANNING_QUERIES } from './queries.ts'
+export {
+  FIELD_PAGE_SIZE, decodeFieldDefinitionsPage, decodeFieldValuesPage, decodeItemFieldPage,
+} from './fields.ts'
+export { itemNode } from './decode.ts'

@@ -73,25 +73,37 @@ export function toPlanningItem(record: FakePlanningItemRecord): ProviderPlanning
   }
 }
 
+/**
+ * 空字段集：`nativeValues` 恒为 `{}`（不是缺省）——替身提供完整字段读取面，空对象表示「读全了但没有值」。
+ * 只读 provider（GitHub）的缺省表示「没有读取面」，两者由 #133 的 `ProviderPlanningFields` 区分。
+ */
 export function emptyFields(): ProviderPlanningFields {
   return {
     statusKey: undefined, priority: undefined, assigneeRefs: [], iterationId: undefined,
-    startDate: undefined, targetDate: undefined, customFields: {},
+    startDate: undefined, targetDate: undefined, customFields: {}, nativeValues: {},
   }
 }
 
+/** 冻结的字段定义形状（#133）：`single_select` 带 `{id,name}[]`；迭代是独立 kind 且带 field id。 */
 export function defaultFieldDefinitions(): ProviderPlanningFieldDefinition[] {
   return [
-    { id: 'status', name: '状态', kind: 'single_select', options: ['todo', 'in_progress', 'blocked', 'done'] },
-    { id: 'priority', name: '优先级', kind: 'single_select', options: ['low', 'medium', 'high'] },
-    { id: 'iteration', name: '迭代', kind: 'single_select', options: ['iter-1', 'iter-2'] },
+    { id: 'status', name: '状态', kind: 'single_select', options: [
+      { id: 'todo', name: 'Todo' }, { id: 'in_progress', name: 'In Progress' },
+      { id: 'blocked', name: 'Blocked' }, { id: 'done', name: 'Done' },
+    ] },
+    { id: 'priority', name: '优先级', kind: 'single_select', options: [
+      { id: 'low', name: 'Low' }, { id: 'medium', name: 'Medium' }, { id: 'high', name: 'High' },
+    ] },
+    { id: 'iteration', name: '迭代', kind: 'iteration', iterations: defaultIterations(), completedIterations: [] },
+    { id: 'target-date', name: '目标日期', kind: 'date' },
   ]
 }
 
+/** 迭代配置：`projectFieldId` 是承载它的字段 id（R2），起始日是 date-only，工期以天计。 */
 export function defaultIterations(): ProviderIteration[] {
   return [
-    { id: 'iter-1', title: '迭代一', startDate: '2026-09-01', targetDate: '2026-09-14' },
-    { id: 'iter-2', title: '迭代二', startDate: '2026-09-15', targetDate: '2026-09-28' },
+    { id: 'iter-1', projectFieldId: 'iteration', title: '迭代一', startDate: '2026-09-01', durationDays: 14, completed: false },
+    { id: 'iter-2', projectFieldId: 'iteration', title: '迭代二', startDate: '2026-09-15', durationDays: 14, completed: false },
   ]
 }
 
