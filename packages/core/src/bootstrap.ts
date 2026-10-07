@@ -10,13 +10,14 @@ import {
   type ProviderPlanningContent, type ProviderPlanningItem, type ProviderResult, type StorageTransaction,
 } from '@harness-projects/capabilities'
 import {
-  ContentKind, EntityKind, ProviderErrorCode, normalizePlanningStatus,
+  ContentKind, EntityKind, ProviderErrorCode,
   type EntityId, type PlanningContent, type ProjectError, type ProviderBindingId,
-  type WorkspaceId, type WorkspaceProjection,
+  type WorkspaceId, type WorkspacePlanningFieldMapping, type WorkspaceProjection,
 } from '@harness-projects/domain'
 import { gateCommand } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
 import { ensureEntity, entityKindFor, planningContentKind } from './identity.ts'
+import { planningFieldsOf } from './planning-fields.ts'
 
 /** 一个工作空间只有一个 Planning 事实源（不变量 1），因此每个（工作区，绑定）只需要一条同步游标。 */
 export const PLANNING_SYNC_SCOPE = 'planning.project'
@@ -135,7 +136,7 @@ async function commitSync(
     error: unanchored > 0 ? projectError(ProjectErrorCode.PermissionDenied, `${unanchored} 个条目对当前凭据不可见，按成员关系也找不回本地实体`) : undefined,
   }
 }
-/** 一个条目一个成员：先解析稳定内部实体，再把权威字段与三态内容写成工作区投影。 */
+/** 一个条目一个成员：先解析稳定内部实体，再把权威字段（经工作区映射归一的状态与展示事实）与三态内容写成工作区投影。 */
 async function upsertItems(
   tx: StorageTransaction, context: CoreContext,
   items: readonly ProviderPlanningItem[], revision: number,
@@ -148,7 +149,7 @@ async function upsertItems(
       counts.unanchored += 1
       continue
     }
-    const projection = toProjection(context.workspaceId, anchor.entityId, item, revision)
+    const projection = toProjection(context.workspaceId, anchor.entityId, item, revision, context.planningFieldMapping)
     await tx.putPlanningProjection(context.workspaceId, projection)
     projections.push(projection)
     counts.entities += 1
@@ -183,12 +184,9 @@ async function anchorOf(
 
 function toProjection(
   workspaceId: WorkspaceId, entityId: EntityId, item: ProviderPlanningItem, revision: number,
+  mapping: WorkspacePlanningFieldMapping | undefined,
 ): WorkspaceProjection {
-  return {
-    workspaceId, entityId, revision,
-    planningStatus: normalizePlanningStatus(item.fields.statusKey ?? 'unknown'),
-    content: toContent(item.content),
-  }
+  return { workspaceId, entityId, revision, content: toContent(item.content), ...planningFieldsOf(item, mapping) }
 }
 
 /** provider 内容三态 → 领域三态；redacted 是一等状态，不回退到缓存或推断值。 */
