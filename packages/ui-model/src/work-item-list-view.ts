@@ -43,6 +43,8 @@ export type VisibleListRow =
       readonly kind: 'item'; readonly key: string; readonly title: string; readonly identity: string
       readonly planningStatus: string; readonly engineering: string; readonly source: string
       readonly authority: string; readonly stale: boolean
+      /** 迭代 title 与 date-only 目标日期原样显示，缺值统一占位，不做时区换算。 */
+      readonly iteration: string; readonly targetDate: string
     }
 export type WorkItemListView = {
   readonly workspaceName: string
@@ -98,12 +100,19 @@ function rowView(row: WorkItemRow, names: ListDisplayMetadata['sourceNames'], st
   return {
     kind: 'item', key: row.entityId, title: row.title || '标题未提供',
     identity: (primary && pick(IDENTITY, primary.externalKind)) ?? '身份未知',
-    planningStatus: pick(STATUS, row.planningStatus) ?? '未知',
+    planningStatus: statusText(row),
     engineering: row.derived.map((flag) => pick(HINTS, flag) ?? '未知提示').join('、') || '无',
     source: (primary && pick(names, primary.bindingId)) ?? '来源名称未提供',
     authority: pick(AUTHORITY, row.source.authority) ?? '来源权威未知',
+    iteration: row.planningFields?.iterationTitle || '—', targetDate: row.planningFields?.targetDate || '—',
     stale,
   }
+}
+
+/** 规范状态是唯一权威（含 Host 的显式写入）：只有它是 unknown 且有原生选项名时，才显示「名称（未映射）」，绝不把原生名当规范状态。 */
+function statusText(row: WorkItemRow): string {
+  const nativeName = row.planningFields?.statusName
+  return row.planningStatus === NormalizedStatus.Unknown && nativeName ? `${nativeName}（未映射）` : pick(STATUS, row.planningStatus) ?? '未知'
 }
 
 /**

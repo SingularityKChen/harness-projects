@@ -9,11 +9,11 @@ import type { ReactElement } from 'react'
 import type { VisibleListRow, WorkItemListView } from '@harness-projects/ui-model'
 import { EmptyState, FreshnessBadge, LoadingState, SourceBadge, StaleBanner, UnavailableState } from './list-states.ts'
 
-const COLUMNS = ['工作项', '内容身份', '规划状态', '工程提示', '来源', '新鲜度'] as const
+const COLUMNS = ['工作项', '内容身份', '规划状态', '迭代', '目标日期', '工程提示', '来源', '新鲜度'] as const
 /** 版式只能靠内联 style（renderer 没有样式表）：短标签列不换行，窄屏靠横向滚动而不是被挤成一字一行；标题与来源有最小宽度并可换行。 */
 const NOWRAP = { whiteSpace: 'nowrap' } as const
 const WRAP = { overflowWrap: 'anywhere', minWidth: '12em' } as const
-const COLUMN_STYLE = [WRAP, NOWRAP, NOWRAP, NOWRAP, WRAP, NOWRAP] as const
+const COLUMN_STYLE = [WRAP, NOWRAP, NOWRAP, NOWRAP, NOWRAP, NOWRAP, WRAP, NOWRAP] as const
 
 /** 列表页消费的导航契约（ui 无状态回调）：`href` 供真实 href 与修饰键点击，`open` 只在普通左键点击时调用。 */
 export type ItemNavigation = { readonly href: (itemId: string) => string; readonly open: (itemId: string) => void }
@@ -33,7 +33,7 @@ function TitleLink({ itemId, title, navigation }: { itemId: string; title: strin
 function ItemRow({ row, navigation }: { row: VisibleListRow; navigation: ItemNavigation | undefined }): ReactElement {
   const cells = row.kind === 'redacted'
     ? COLUMNS.slice(1).map(() => '—')
-    : [row.identity, row.planningStatus, row.engineering,
+    : [row.identity, row.planningStatus, row.iteration, row.targetDate, row.engineering,
       createElement(SourceBadge, { name: row.source, authority: row.authority }), createElement(FreshnessBadge, { stale: row.stale })]
   const title = row.kind === 'redacted' ? '内容不可见' : row.title
   return createElement('tr', null,

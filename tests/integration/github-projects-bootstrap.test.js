@@ -4,16 +4,22 @@
  * (2) 重复引导幂等：两种 Storage 上实体 id 集合不变，替身上另读行数（实体 9、身份 9、观察 18）；
  * (3) 故障（离线、部分成功）不伪造成功：同步游标 degraded，投影保持最后已知值并带 freshness.degraded；(4) 回放没有未命中；
  * (5) 内容被扣下：有成员关系映射时出剥离正文的 redacted 占位（实体不变、不泄露），没有映射时整次标 degraded / permission_denied 且可查询；
- * (6) 分页游标成环或永不收敛时，真实组装路径有界返回结构化 degraded。
+ * (6) 分页游标成环或永不收敛时，真实组装路径有界返回结构化 degraded；
+ * (7) #133：录制的原生字段经映射走完 controller → client → ui-model → 真实列表 HTML；未映射只显示原生名；规范状态只有一个来源，
+ *     Host 的权威写入在再同步之前随即反映到列表（再同步仍按原生字段整行覆盖它：同步尚不尊重 StatusPolicy，Refs #273）。
  */
 import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
 import test from 'node:test'
-import { createControllerQueries } from '@harness-projects/controller'
+import { createEntityStore } from '@harness-projects/client'
+import { createController, createControllerQueries } from '@harness-projects/controller'
 import { composeCore } from '@harness-projects/core'
-import { newProviderBindingId, newWorkspaceId } from '@harness-projects/domain'
+import { StatusPolicy, newProviderBindingId, newWorkspaceId } from '@harness-projects/domain'
 import { createFakeStorage, exportFakeStorageState } from '@harness-projects/provider-fake'
 import { createGithubProjectsPlanningProvider } from '@harness-projects/provider-planning-github-projects'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
+import { WorkItemListPage } from '@harness-projects/ui'
+import { deriveWorkItemListView } from '@harness-projects/ui-model'
 import { createReplay, loadFixture } from '../contract/fixtures/github-projects/replay.js'
 
 const fixture = loadFixture()
@@ -45,14 +51,14 @@ function paging(nextOf, limit) {
 }
 
 /** transport 是可切换的包装：先指向 route 由本回放派生的 transport（默认即回放本身，回放都进账本），故障用例里切走。 */
-async function assemble(storage, route = (transport) => transport) {
+async function assemble(storage, route = (transport) => transport, workspace = {}) {
   const replay = createReplay(fixture)
   misses.push(replay.misses)
   let current = route(replay.transport)
   const bindingId = newProviderBindingId()
   const planning = createGithubProjectsPlanningProvider({ bindingId, projectNodeId, transport: (request) => current(request) })
   const project = { bindingId, objectKind: 'project', externalId: projectNodeId, url: undefined }
-  const core = await composeCore({ workspace: { id: newWorkspaceId(), name: 'GitHub Projects', project }, providers: { planning, storage } })
+  const core = await composeCore({ workspace: { id: newWorkspaceId(), name: 'GitHub Projects', project, ...workspace }, providers: { planning, storage } })
   const views = () => core.queries.listPlanningItems()
   return { core, views, replay: replay.transport, switchTransport: (transport) => { current = transport } }
 }
@@ -139,6 +145,39 @@ for (const [label, makeStorage] of [['替身 Storage', createFakeStorage], ['SQL
     storage.close?.()
   })
 }
+
+const uiRequire = createRequire(new URL('../../packages/ui/package.json', import.meta.url))
+const { createElement: h } = uiRequire('react')
+const { renderToStaticMarkup } = uiRequire('react-dom/server')
+/** 真实消费链读出某个内容所在行：controller baseline → client store → ui-model → `WorkItemListPage` 的 HTML 单元格文本。 */
+async function listRow(core, contentId) {
+  const snapshot = await createController(core).baseline()
+  const store = createEntityStore()
+  store.applyBaseline(snapshot)
+  const read = { workspace: snapshot.workspace, store, connection: { connected: true }, lastUpdatedAt: '2026-10-07T00:00:00.000Z', capabilities: snapshot.capabilities }
+  const view = deriveWorkItemListView({ read, metadata: { planningSourceName: '规划源', sourceNames: {} }, phase: 'received', refreshing: false })
+  const title = nodes.find((node) => node.content.id === contentId).content.title
+  const row = renderToStaticMarkup(h(WorkItemListPage, { view })).split('<tr').find((markup) => markup.includes(`>${title}</th>`))
+  const cells = [...row.matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((match) => match[1].replace(/<[^>]+>/g, ''))
+  return { cells, entityId: store.list().find((entry) => entry.entity.content.externalId === contentId).entity.entityId }
+}
+
+test('#133：录制字段经两种 Storage 到达真实列表 HTML；未映射只显示原生名；Host 的权威状态写入随即生效', async () => {
+  const [ALPHA, WITH_FIELDS] = ['I_kwDOUjWAl88AAAABST4WDQ', 'I_kwDOUjWAl88AAAABST4XVQ']
+  const planningFieldMapping = {
+    status: { projectFieldId: 'PVTSSF_lAHOAY1ahM4BkJ9rzhi7jWY', options: { f75ad846: 'todo' } },
+    iterationFieldId: 'PVTIF_lAHOAY1ahM4BkJ9rzhi7k9M', targetDateFieldId: 'PVTF_lAHOAY1ahM4BkJ9rzhi7k9I',
+  }
+  for (const [label, makeStorage] of [['替身 Storage', createFakeStorage], ['SQLite Storage', () => createSqliteStorage(':memory:')]]) {
+    const { core } = await assemble(makeStorage(), undefined, { statusPolicy: StatusPolicy.HostAuthoritative, planningFieldMapping })
+    // 单元格顺序：内容身份、规划状态、迭代、目标日期、工程提示、来源、新鲜度。
+    assert.deepEqual((await listRow(core, ALPHA)).cells.slice(1, 4), ['待办', '—', '—'], `${label}：映射的 Todo 显示规范状态`)
+    const before = await listRow(core, WITH_FIELDS)
+    assert.deepEqual(before.cells.slice(1, 4), ['In Progress（未映射）', 'E1 Sprint 1', '2026-09-24'], `${label}：未映射只显示原生名，迭代 title 与目标日期到达 HTML`)
+    assert.equal((await core.commands.applyPlanningStatus({ entityId: before.entityId, status: 'blocked' })).wrote, true)
+    assert.deepEqual((await listRow(core, WITH_FIELDS)).cells.slice(1, 4), ['已阻塞', 'E1 Sprint 1', '2026-09-24'], `${label}：列表必须跟随 Host 的权威写入`)
+  }
+})
 
 test('回放账本：本文件所有回放都没有未命中的请求', () => {
   assert.ok(misses.length > 0)

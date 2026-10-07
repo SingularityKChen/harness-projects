@@ -7,9 +7,10 @@ import { test } from 'node:test'
 
 import { CapabilityKey } from '@harness-projects/capabilities'
 import { createEntityStore } from '@harness-projects/client'
+import { toWireEntity } from '@harness-projects/controller'
 import * as domain from '@harness-projects/domain'
 import * as leaf from '@harness-projects/domain/values'
-import { deriveWorkItemListView } from '@harness-projects/ui-model'
+import { deriveWorkItemList, deriveWorkItemListView } from '@harness-projects/ui-model'
 
 const T = '2026-10-01T08:00:00.000Z'
 const READ = 'planning.item.read'
@@ -18,8 +19,8 @@ const metadata = { planningSourceName: '规划源', sourceNames: { 'bind-1': '�
 const CANARIES = ['CANARY-TITLE', 'CANARY-BODY', 'CANARY-EXT', 'CANARY-BIND', 'CANARY-REASON', '已完成', '需要关注']
 
 /** wire 形状条目：字段面与 packages/controller/src/wire.ts 的 WireEntity 一致。 */
-const wire = (entityId, { planningStatus = 'todo', derived = [], content = {}, source = {} } = {}) => ({
-  entityId, kind: 'work_item', planningStatus, derived,
+const wire = (entityId, { planningStatus = 'todo', derived = [], content = {}, source = {}, planningFields } = {}) => ({
+  entityId, kind: 'work_item', planningStatus, derived, ...(planningFields === undefined ? {} : { planningFields }),
   content: { contentKind: 'work_item', title: `title-${entityId}`, body: 'body', bindingId: 'bind-1', externalKind: 'issue', externalId: '7', ...content },
   source: { revision: 1, freshness: 'fresh', authority: 'provider', reason: undefined, ...source },
 })
@@ -194,4 +195,20 @@ test('契约：./values 只 re-export 四个既有词表（同一引用），读
   assert.deepEqual(Object.keys(leaf).sort(), ['AccessLevel', 'ContentKind', 'DerivedFlag', 'NormalizedStatus'])
   for (const name of Object.keys(leaf)) assert.equal(leaf[name], domain[name], name)
   assert.equal(READ, CapabilityKey.PlanningItemRead, '各用例的读门 key 就是 CapabilityKey，首个用例的 received → content 因此钉住实现的读门')
+})
+
+test('#133 双层剥离：toWireEntity 不把 redacted 行的字段事实发出 wire；上游违约带上时 ui-model 的归约点也剥掉', () => {
+  const fields = { statusName: 'CANARY-STATUS', iterationTitle: 'CANARY-ITERATION', targetDate: '2099-12-31' }
+  const coreView = (contentKind) => ({
+    entityId: 'e1', kind: 'work_item', planningStatus: 'unknown', planningFields: fields,
+    content: { contentKind, title: undefined, body: undefined, identity: { bindingId: 'bind-1', externalKind: 'issue', externalId: '7' } },
+    engineering: { derived: [], facts: [] }, freshness: { revision: 1, degraded: false, reason: undefined },
+  })
+  assert.equal('planningFields' in toWireEntity(coreView('redacted'), 'provider'), false, 'redacted 行不出字段事实')
+  assert.deepEqual(toWireEntity(coreView('work_item'), 'provider').planningFields, fields, '正控：可见行照常透出')
+  const input = make('received', { refreshing: false, entities: [wire('e1', { planningFields: { iterationTitle: 'Sprint 1' } }), { ...redacted('e2'), planningFields: fields }] })
+  assert.deepEqual(deriveWorkItemList(input.read).rows.map((row) => row.planningFields), [{ iterationTitle: 'Sprint 1' }, undefined], '归约点就剥掉 redacted 行的字段事实')
+  const json = JSON.stringify(deriveWorkItemListView(input))
+  assert.match(json, /Sprint 1/, '可见行正控')
+  for (const canary of Object.values(fields)) assert.ok(!json.includes(canary), canary)
 })
