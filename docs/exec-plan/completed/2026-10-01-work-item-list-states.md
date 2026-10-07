@@ -112,13 +112,13 @@ failure.kind由Host对确切读取结果做结构化观察，offline不能通过
           }
     }
 
-visible行输出标题、Issue/Draft/PR/身份未知标签、规划状态文字、独立工程提示、安全来源名/authority及新鲜度。source的provider/host/manual权威必须分别显示，不能把Host权威标成平台。缺标题显示“标题未提供”，缺身份不能回退为Issue，未知规划状态显示“未知”。安全行顺序/key沿现有entity锚点，data-*、href和DOM id不放内部标识。
+visible行输出标题、Issue/Draft/PR/身份未知标签、规划状态文字、独立工程提示、安全来源名/authority及新鲜度。source的provider/host/manual权威必须分别显示，不能把Host权威标成平台。缺标题显示“标题未提供”，缺身份不能回退为Issue，未知规划状态显示“未知”。安全行顺序/key沿现有entity锚点，data-*、href和DOM id不放内部标识。**Superseded by `docs/adr/ADR-0010-stable-ids-are-route-locators.md`（2026-10-07，人类伙伴批准）**：仅限其中 `href` 一项，范围以该 ADR 的 Decision 为准。
 
 redacted输出仅 `{ kind: 'redacted', key: entityId }`，key只供框架内部。该行只显示“内容不可见”，其它单元格为“—”；不显示是否权限撤销/删除，不透title/body/externalId/externalKind/bindingId/entityId属性/authority/planningStatus/derived/row.reason，亦无tooltip、aria-label、隐藏文本或JSON脚本。新投影不返回原WorkItemRow，防止renderer重新读取敏感字段。
 
 横幅不使用WorkItemList.reason或row.freshness.reason；它们可源自redacted条目。横幅只用Host独立safeNotice或中性短语。工作区来源名及最后成功读取时间可以展示，它们不能从redacted身份反推。时间使用read.lastUpdatedAt的绝对ISO文字与相同time.dateTime；缺失显示“最后读取时间未知”，坏ISO沿现有接线TypeError，绝不用Date.now补事实。
 
-共享组件只导出LoadingState、EmptyState、UnavailableState、StaleBanner、SourceBadge、FreshnessBadge，不预建全产品组件库。页面是一处workspace标题、一处稳定状态区和一个table；列为工作项/内容身份/规划状态/工程提示/来源/新鲜度。caption、thead/tbody、th scope=col/row；没有行按钮、死链接、详情或连接入口。
+共享组件只导出LoadingState、EmptyState、UnavailableState、StaleBanner、SourceBadge、FreshnessBadge，不预建全产品组件库。页面是一处workspace标题、一处稳定状态区和一个table；列为工作项/内容身份/规划状态/工程提示/来源/新鲜度。caption、thead/tbody、th scope=col/row；没有行按钮、死链接、详情或连接入口。**Superseded by `docs/adr/ADR-0010-stable-ids-are-route-locators.md`（2026-10-07，人类伙伴批准）**：仅限其中「详情」入口一项，范围以该 ADR 的 Decision 为准。
 
 采用一个持续存在的role=status、aria-live=polite、aria-atomic=true区域，在aria-busy内容容器外；不把整表文本放进live区域，不自动移焦。Skeleton aria-hidden且静态。文字说明只读、未知、降级、陈旧与状态，图标若用仅装饰，不能只靠颜色。窄屏容器允许横向滚动、可聚焦且保留可见focus；标题换行，不隐藏列。
 
@@ -511,3 +511,5 @@ Change Note (2026-10-02 22:45 CST)：验收：Progress 勾选主控视觉验收�
 Change Note (2026-10-03 09:41 CST)：按主控裁决把 ADR-0009 的 node:crypto 后果条与纵向路径 §2.1 第 4 行纳入文档全集并最小订正；就地标注 Global Constraints 的文档全集、Surprises (16) 与 Outcomes 的“另案更新”；Decision Log、Progress 与 Artifacts 各补一条。
 
 Change Note (2026-10-03 11:10 CST)：第一轮 MVP 评审（APPROVE，2 × P2 + 3 × P3）后修订并归档：Design 表补「读门已观测不可读」一行；Validation 的不可用区分行补 remaining 的判别证据；Progress 记评审、变基与修复；Surprises 补 (17)–(20)；Decision Log 补评审处置、待人类裁决的开放问题与提交整理三条，并就地标注 2026-10-02 22:05 的文案部分、Global Constraints 的文档全集与 Concrete Steps 的未授权表述；Outcomes 与 Artifacts 补本轮结果与证据；文件移入 `docs/exec-plan/completed/`，修改全集仍见 Global Constraints。
+
+Change Note (2026-10-07 17:10 CST)：PR #269 的人类伙伴批准决策门 H1 后，按 `docs/adr/ADR-0010-stable-ids-are-route-locators.md` 对第 115 行的 `href` 限制与第 121 行的「详情」入口做限定范围的原处标注；原文保留，#129 已交付的独立列表行为不变。
