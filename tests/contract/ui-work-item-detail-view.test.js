@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { createEntityStore } from '@harness-projects/client'
-import { deriveWorkItemDetailView } from '@harness-projects/ui-model'
+import { deriveWorkItemDetailView, deriveWorkItemListView } from '@harness-projects/ui-model'
 import { CANARIES, T, redacted, wire } from '../fixtures/work-item-wire.mjs'
 
 const READ = 'planning.item.read'
@@ -48,10 +48,103 @@ test('可见内容正控：选中行显示标题、正文、状态、来源名�
   })
   assert.deepEqual(shown, {
     kind: 'content', title: 'VISIBLE-TITLE', body: 'VISIBLE-BODY', planningStatus: '待办', source: '来源一', authority: '提供方权威',
-    identity: { kind: 'PR', externalId: 'ext-1' }, derived: '派生提示：CI 失败、已合并', stale: false, refreshing: false, lastUpdatedAt: T,
+    identity: { kind: 'PR', externalId: 'ext-1' }, derived: '派生提示：CI 失败、已合并', iteration: '—', targetDate: '—', stale: false, refreshing: false, lastUpdatedAt: T,
   }, '白名单字段面精确相等：多出 locator 或内部键即失败')
 })
 
+test('detail-planning-fields-match-safe-row：详情三字段逐字等于列表安全行；unknown 用原生状态名、缺值统一占位、日期原样', () => {
+  const fields = { statusName: 'Native Stage', iterationTitle: 'Iteration A', targetDate: '2026-01-01' }
+  const entities = [wire('ent-aa', { planningStatus: 'unknown', planningFields: fields }), wire('ent-bb', { planningStatus: 'in_progress', planningFields: { statusName: 'Blocked' } })]
+  const tuple = (itemId) => {
+    const { input } = make('received', { refreshing: false, entities })
+    const row = deriveWorkItemListView(input).body.rows.find((candidate) => candidate.key === itemId)
+    const { body: shown } = deriveWorkItemDetailView(input, { projectId: 'ws-1', itemId })
+    assert.deepEqual(
+      [shown.iteration, shown.targetDate, shown.planningStatus], [row.iteration, row.targetDate, row.planningStatus],
+      `${itemId}：详情三字段必须逐字等于带 navigation 的列表安全行`,
+    )
+    for (const field of ['iteration', 'targetDate']) assert.equal(typeof shown[field], 'string', `${itemId}: ${field} 是恒有 string`)
+    return [row.iteration, row.targetDate, row.planningStatus]
+  }
+  // 必需检查在 UTC 下运行，Date / locale 换算在那里恰好还原出同一个日期；进程内切换 TZ（Node 在给 process.env.TZ
+  // 赋值时重读时区）：东八区与洛杉矶覆盖两侧常见偏移，Kiritimati（+14）覆盖只在 12 小时以上偏移才跨日的换算。
+  const original = process.env.TZ
+  try {
+    for (const tz of ['UTC', 'Asia/Shanghai', 'America/Los_Angeles', 'Pacific/Kiritimati']) {
+      process.env.TZ = tz
+      assert.deepEqual(tuple('ent-aa'), ['Iteration A', '2026-01-01', 'Native Stage（未映射）'], `${tz}：unknown + 原生名：name（未映射），date-only 原样透出`)
+      assert.deepEqual(tuple('ent-bb'), ['—', '—', '进行中'], `${tz}：规范状态是权威（冲突原生名被忽略）；迭代与目标日期缺值统一占位`)
+    }
+  } finally {
+    if (original === undefined) delete process.env.TZ
+    else process.env.TZ = original
+  }
+
+  const { input } = make('received', { refreshing: false, entities })
+  assert.deepEqual(deriveWorkItemDetailView(input, TARGET).body, {
+    kind: 'content', title: '标题-ent-aa', body: '正文-ent-aa', planningStatus: 'Native Stage（未映射）', source: '来源一', authority: '提供方权威',
+    identity: { kind: 'Issue', externalId: 'ext-ent-aa' }, iteration: 'Iteration A', targetDate: '2026-01-01',
+    stale: false, refreshing: false, lastUpdatedAt: T,
+  }, '完整白名单字段面：两个新字段恒有且与规划状态同源')
+})
+
+test('redacted-planning-field-differential：遮蔽行三个规划字段逐个变异，view 与列表 view 逐字不变；同字段可见行是夹具正控', () => {
+  const canonical = { statusName: 'CANARY-STATUS', iterationTitle: 'CANARY-ITERATION', targetDate: '2099-12-31' }
+  const variants = {
+    statusName: { ...canonical, statusName: 'CANARY-STATUS-B' },
+    iterationTitle: { ...canonical, iterationTitle: 'CANARY-ITERATION-B' },
+    targetDate: { ...canonical, targetDate: '2098-01-02' },
+  }
+  const outputs = (hiddenFields) => {
+    const { input } = make('received', { refreshing: false, entities: [VISIBLE, redacted('ent-bb', {}, { planningFields: hiddenFields })] })
+    return { list: deriveWorkItemListView(input), detail: deriveWorkItemDetailView(input, { projectId: 'ws-1', itemId: 'ent-bb' }) }
+  }
+  const baseline = outputs(canonical)
+  assert.deepEqual(baseline.detail, { body: { kind: 'redacted' } })
+  assert.equal(baseline.list.body.rows.find((row) => row.key === 'ent-bb').kind, 'redacted')
+  const baselineJson = json(baseline)
+  for (const canary of [...Object.values(canonical), ...Object.values(variants).flatMap((fields) => Object.values(fields))]) {
+    assert.ok(!baselineJson.includes(canary), canary)
+  }
+  for (const [field, canaryFields] of Object.entries(variants)) {
+    assert.deepEqual(outputs(canaryFields), baseline, `${field} 变异不得改变 view 或列表输出`)
+  }
+  const visibleField = { statusName: 'In Progress', iterationTitle: 'Iteration A', targetDate: '2026-03-04' }
+  const { input } = make('received', { refreshing: false, entities: [wire('ent-aa', { planningFields: visibleField }), redacted('ent-bb', {}, { planningFields: canonical })] })
+  const visibleDetail = deriveWorkItemDetailView(input, TARGET).body
+  assert.equal(visibleDetail.iteration, 'Iteration A', '夹具正控：同一字段在可见行确实进入生产路径，遮蔽对照不是空绿')
+  const mixedList = JSON.stringify(deriveWorkItemListView(input))
+  for (const canary of Object.values(canonical)) assert.ok(!mixedList.includes(canary), `${canary} 不得从遮蔽行进入列表 view`)
+})
+
+test('detail-planning-fields-come-from-safe-row-not-raw-detail：详情二次 getter 返回不同的规划字段时，输出仍逐字等于列表安全行，raw canary 不落任何字段', () => {
+  const safe = { iterationTitle: 'SAFE-ITERATION', targetDate: '2026-01-01' }
+  const raw = { statusName: 'RAW-STATUS', iterationTitle: 'RAW-CANARY', targetDate: '2000-01-02' }
+  const entities = [wire('ent-aa', { planningStatus: 'in_progress', planningFields: safe })]
+  // raw 二读的规范状态是 unknown：按列表同一规则从二读重算状态会显示「RAW-STATUS（未映射）」，RAW-STATUS 才是活的 canary。
+  const tear = wire('ent-aa', { planningStatus: 'unknown', planningFields: raw })
+  const view = show('received', { refreshing: false, entities, tear })
+  const shown = view.body
+  assert.deepEqual([shown.kind, shown.iteration, shown.targetDate, shown.planningStatus], ['content', 'SAFE-ITERATION', '2026-01-01', '进行中'],
+    '来源必须是同一次列表安全行复制：从 raw 详情回填或重算会在此处输出 RAW-CANARY / 2000-01-02 / RAW-STATUS（未映射）')
+  for (const value of Object.values(raw)) {
+    assert.ok(!json(view).includes(value), `${value} 是 raw 详情独有值，不得出现在详情输出的任何字段`)
+  }
+  const { input } = make('received', { refreshing: false, entities, tear })
+  const row = deriveWorkItemListView(input).body.rows.find((candidate) => candidate.key === 'ent-aa')
+  assert.deepEqual([row.iteration, row.targetDate], [safe.iterationTitle, safe.targetDate], '正控：安全行本身是 SAFE 值，raw 只存在于第二次 getter，两值确实不同')
+})
+
+test('torn-read-planning-fields-stay-redacted：列表行可见、详情二读返回带规划字段 canary 的遮蔽条目时，只输出 redacted', () => {
+  const canaries = { statusName: 'CANARY-STATUS', iterationTitle: 'CANARY-ITERATION', targetDate: '2099-12-31' }
+  const view = show('received', {
+    refreshing: false,
+    entities: [wire('ent-aa', { planningFields: { iterationTitle: 'Iteration A', targetDate: '2026-01-01' } })],
+    tear: redacted('ent-aa', {}, { planningFields: canaries }),
+  })
+  assert.deepEqual(view, { body: { kind: 'redacted' } })
+  for (const canary of Object.values(canaries)) assert.ok(!json(view).includes(canary), canary)
+})
 test('pending-never-shows-cache：未明确阻断时只 loading，即使 store 已有行也不提前显示，详情 getter 为 0 次', () => {
   const { input, counts } = make('pending', { entities: [VISIBLE] })
   assert.deepEqual(deriveWorkItemDetailView(input, TARGET), { body: { kind: 'loading' } })

@@ -33,6 +33,8 @@ function contentPanel(body: Extract<WorkItemDetailView['body'], { kind: 'content
   const at = body.lastUpdatedAt === undefined ? '读取时间未知' : createElement('time', { dateTime: body.lastUpdatedAt }, body.lastUpdatedAt)
   return createElement('div', null,
     createElement('p', null, '规划状态：', body.planningStatus),
+    createElement('p', null, '迭代：', body.iteration),
+    createElement('p', null, '目标日期：', body.targetDate),
     createElement('p', null, '来源身份：', createElement(SourceBadge, { name: body.source, authority: body.authority }),
       body.identity === undefined ? '（来源身份尚未提供）' : `（${body.identity.kind} ${body.identity.externalId}）`),
     createElement('p', { style: ROW_STYLE }, body.body),
