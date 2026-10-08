@@ -1,6 +1,6 @@
 # GitHub Actions 精确提交只读事实 ExecPlan
 
-> 状态：Active；设计与计划已收敛，产品批次未实施。Superseded by Decision Log「对抗验证后·拆分」（2026-10-08）：A1 base 片（端口/fake/core/共享 suite + core 级集成）已在 #295 实施；adapter 片由 #289 负责，状态以 PR #289 回读为准。
+> 状态：Completed；A1 base 片（#295，已合并）与 adapter 片（#289）均已实施，并经 MMP 评审与修复独立复评；#232 由 #289 关闭，合并状态以 PR #289 回读为准。（初版状态「设计与计划已收敛，产品批次未实施」已被 Decision Log「对抗验证后·拆分」与「人类裁决·拆分」取代。）
 > 创建：2026-10-07（Asia/Shanghai）
 > 关联：同仓 issue #232；规范：`PLANS.md`。
 > 执行上下文：检出 `feature/github-actions-read` 的工作树根目录；隔离目录 `.worktrees/github-actions-read-plan`。base 片（#295）在检出 `feature/github-actions-delivery-pages` 的工作树根目录执行（`.worktrees/github-actions-delivery-pages`）。
@@ -9,7 +9,7 @@
 
 调用方可以对明确仓库与不可变提交读取 GitHub Actions workflow runs 和 Checks；workflow 可再按 branch 筛选。每条运行保留原生状态，只有明确完成的成功才形成 CiPassed；读取不完整、未知、失败或限流不能冒充成功，CI 事实不改变规划状态。
 
-最小成功证据是只读真实 adapter + 合成录制 transport 通过同一 Delivery suite；第二页失败检查经真实 core 查询产生 CiFailed/ci_failing，三种 StatusPolicy 下规划存储逐字不变。当前闭环是离线库级交付，不宣称真实凭据、Host 默认挂载或发布门已完成。
+最小成功证据是只读真实 adapter + 合成录制 transport 通过同一 Delivery suite；第二页失败检查经真实 core 查询产生 CiFailed/ci_failing，三种 StatusPolicy 下规划存储逐字不变（Superseded by Decision Log「对抗验证后·拆分」（2026-10-08）：三策略规划不变与 ci_failing 派生由 base 片 `tests/integration/delivery-pages-complete.test.js` 的 `ci-facts-preserve-planning-in-all-policies` 用内联 stub 固定；真 adapter 只在 adapter→core 接缝用例中以 ManualOnly 经真实 core 查询验证，不断言规划不变与派生标记）。当前闭环是离线库级交付，不宣称真实凭据、Host 默认挂载或发布门已完成。
 
 ## Context and Orientation
 
@@ -25,7 +25,7 @@ core 已掌握 repository/head；Delivery 自己 GET 当前 PR 再读 head 会�
 
 现 CI 只有逐条 EngineeringFactKind 与派生提示，没有 required-check aggregate gate。workflow 同 SHA 可以有多个历史 run/attempt，旧失败与新成功均是单条事实；本项不按名字去重、不用 max id 伪造最新状态，也不把这些事实宣称为整个 PR 当前 gate。
 
-事实是端口、分页和状态三个缺口相互影响；硬约束是精确 SHA、全页或无结果、规划/工程正交与 800 行预算。决策是注入 GET-only transport + core 唯一映射。最高不确定性是实际增删规模，A1 后必须重新估算，不以遗漏分页闭环换体量。
+事实是端口、分页和状态三个缺口相互影响；硬约束是精确 SHA、全页或无结果、规划/工程正交与 800 行预算。决策是注入 GET-only transport + core 唯一映射。最高不确定性是实际增删规模，A1 后必须重新估算，不以遗漏分页闭环换体量。Superseded by Decision Log「人类裁决·拆分」（2026-10-08）：800 行预算不再是硬约束，两片各自受 `AGENTS.md` §6 的 1000 / 1500 硬上限约束。
 
 ## Design / Spec
 
@@ -88,7 +88,7 @@ workflow GET `/repos/{owner}/{repo}/actions/runs`，query 的 head_sha、branch 
 
 每次返回一页，per_page = min(limit,100)，limit 必须正整数。cursor 为本 provider 生成的 endpoint/repository/commit/branch/page/pageSize scope，携首个 totalCount 与累计 readCount；改变 scope 或 limit 重用拒绝，不接受 URL cursor。游标 page 必须严格前进、有界。后续页 total_count 必须等于首值；累计不能超过它，没有 next 时累计必须恰好等于它，防止缺 Link 被误认完整。
 
-Link 只解析 rel=next 页号；校验 api.github.com、固定 endpoint、当前 filters/pageSize，拒绝多 next、变 host/path/scope、回退或不可解析。后续请求从配置和当前 scope 重建，绝不向 Link URL 携凭据请求。total_count/数组/id/name/status 必须合法；同 scan count 变化、缺页、重复 id 或不结束均不能报完整。
+Link 只解析 rel=next 页号；校验 api.github.com、固定 endpoint、当前 filters/pageSize，拒绝多 next、变 host/path/scope、回退或不可解析。Superseded by Decision Log「评审修订·Link 路径」（2026-10-08）：path 接受请求路径本身或 `/repositories/<数字>` 加同一 endpoint 后缀（GitHub 真实 Link 用仓库数字 id），其余校验不变；每道守卫的失败按各自的 `rawClass` 区分，见「评审修订·守卫标签」。后续请求从配置和当前 scope 重建，绝不向 Link URL 携凭据请求。total_count/数组/id/name/status 必须合法；同 scan count 变化、缺页、重复 id 或不结束均不能报完整。
 
 workflow 筛选搜索上限 1000，total_count >=1000 保守 unavailable，不尝试日期切分抓无限历史。Checks 上限是最近 1000 suites，check-runs.total_count 是 runs 数，不能代替 suites 计数：每次 checks 页读取前额外 GET `/repos/{owner}/{repo}/commits/{commit}/check-suites`，per_page 1/page 1，确认合法 total_count <1000；达到边界/探针失败则该页 unavailable。checks cursor 另外携首个 expectedSuiteCount，后续探针 count 与之不等即整页 unavailable；无状态Provider从游标恢复此约束。这里只数 suites，不穷举旧历史。
 
@@ -98,9 +98,9 @@ collector 只接 Delivery 两类读取；不顺手修 Development 分支/CR 分�
 
 ### 错误与恢复
 
-401/非限流403 → permission_denied；404 → not_found（不可见不等于空）；429/有明确 exhausted、Retry-After 或 secondary-rate 证据的403 → rate_limited；5xx/network reject/timeout/坏 body/分页完整性错误 → unavailable。限流分类先于普通403；retryable 复用既有八码模型。
+401/非限流403 → permission_denied；404 → not_found（不可见不等于空）；429/有明确 exhausted、Retry-After 或 secondary-rate 证据的403 → rate_limited；5xx/network reject/timeout/坏 body/分页完整性错误 → unavailable。限流分类先于普通403；retryable 复用既有八码模型。Superseded by Decision Log「对抗验证后·403」（2026-10-08）：403 的限流证据只有 exhausted 与合法 Retry-After 两种，没有独立的 secondary-rate 判据；合法形态见「评审修订·Retry-After」。
 
-message 固定安全文案，rawClass 是固定分类标签；只透出严格校验的 requestId。retryAfterMs 只从合法数值 Retry-After/reset 得出，范围限定 0..86400000。原始异常、stack、响应正文、请求头或 token 不进入 ProviderResult/observation/日志。
+message 固定安全文案，rawClass 是固定分类标签；只透出严格校验的 requestId。retryAfterMs 只从合法数值 Retry-After/reset 得出，范围限定 0..86400000。Superseded by Decision Log「评审修订·Retry-After」「评审修订·request id 与静态头」（2026-10-08）：requestId 只透出 GitHub request id 形状（十六进制冒号分段）；Retry-After 另接受 IMF-fixdate，按注入的 clock 换算。原始异常、stack、响应正文、请求头或 token 不进入 ProviderResult/observation/日志。
 
 无缓存、自动重试、reconcile 或凭据存储；失败由 core gap/degraded 表达本次未知。持久 last-known/stale、Query 纯读分别归 #221/#222，本项不声称这些产品能力完成。
 
@@ -112,11 +112,11 @@ message 固定安全文案，rawClass 是固定分类标签；只透出严格校
 
 ## Global Constraints
 
-唯一允许改动集如下；当前发布只有计划与索引，其余是未来 A1–A2。Superseded by Decision Log「对抗验证后·拆分」（2026-10-08）：#295 改动「当前文档」、三行「产品」（端口、fake、core）、「测试」与「新建集成」`delivery-pages-complete`；`packages/providers/delivery-github-actions/src/index.ts` 与标「将新建」的 adapter 产品、测试、夹具文件由 #289 负责。
+唯一允许改动集如下；当前发布只有计划与索引，其余是未来 A1–A2。Superseded by Decision Log「对抗验证后·拆分」（2026-10-08）：#295 改动「当前文档」、三行「产品」（端口、fake、core）、「测试」与「新建集成」`delivery-pages-complete`；`packages/providers/delivery-github-actions/src/index.ts` 与标「将新建」的 adapter 产品、测试、夹具文件由 #289 负责。#289 已新建这些文件，验收命令见 `Progress` 的 adapter 片段落。
 
 | 类型 | 路径 | 职责 |
 |---|---|---|
-| 当前文档 | `docs/exec-plan/active/2026-10-07-github-actions-read.md`、`docs/README.md` | spec + plan 与索引 |
+| 当前文档 | `docs/exec-plan/completed/2026-10-07-github-actions-read.md`（实施期间位于 `active/`）、`docs/README.md` | spec + plan 与索引 |
 | 产品 | `packages/capabilities/src/delivery-provider.ts` | 精确提交/branch 输入与事实 |
 | 产品 | `packages/providers/fake/src/delivery.ts` | 同端口的仓库/SHA/branch 种子与过滤 |
 | 产品 | `packages/core/src/chain-facts.ts` | Delivery 完整分页、锚点与唯一 CI 映射 |
@@ -127,7 +127,7 @@ message 固定安全文案，rawClass 是固定分类标签；只透出严格校
 | 新建集成 | `tests/integration/delivery-pages-complete.test.js` | core 级完整分页、提交锚点、状态映射与三策略正交（内联 stub，不依赖 adapter） |
 | 将新建测试 | `tests/contract/delivery-github-actions-contract.test.js` | adapter 共享 suite 与对抗矩阵 |
 | 将新建夹具 | `tests/fixtures/github-actions.mjs` | 合成公开协议 envelope、严格 replay 与请求清单 |
-| 将新建集成 | `tests/integration/github-actions-ci-facts.test.js` | 真 adapter → core 查询 → 规划/派生证据 |
+| 将新建集成 | `tests/integration/github-actions-ci-facts.test.js` | 真 adapter → core 查询 → 规划/派生证据。Superseded by Decision Log「对抗验证后·拆分」（2026-10-08）：只固定 adapter→core 接缝（第二页故障不残留、请求精确落在已观察提交、非终态不产 CiPassed、未观察锚点零请求）；规划/派生证据在 base 片的 `delivery-pages-complete` |
 
 Node `>=22`、pnpm `10.28.2`，无新依赖、SDK、真实凭据、HTTP 客户端或 Host 默认装配；不改 schema、StatusPolicy、credential 服务、Development GitHub、UI 或其它 plans。
 
@@ -157,7 +157,7 @@ git diff --check
 最小闭环：按仓库/SHA/branch 读原生页，真实 adapter 和 fake 同过 Delivery suite，错误/未知/变更尝试 fail closed。涉及主文件为 delivery-provider.ts、fake delivery.ts、chain-facts.ts 的定位调用、GitHub Actions provider/decode 与 Delivery suite，确切集合见 `Global Constraints`。
 
 1. `pnpm install --frozen-lockfile` 期望 exit 0。新增严格 replay：要求 method/path/query/静态 headers 完全一致，未知请求即失败，源 envelope 可 clone，记录全部请求；SHA 使用完整 40位小写十六进制，合成 owner/repo 无真实个人数据。
-2. 写 `actions-exact-commit-and-branch`、`checks-use-observed-sha`、`readonly-actions-mutations-make-no-request`：同SHA不同branch、同branch旧SHA/新SHA、foreign binding、wrong response SHA、branch带斜线、坏limit/cursor；请求定位精确，坏引用/写尝试零GET。旧代码应 RED 于缺工厂/旧输入或对应断言，不接受模块缺依赖假红。
+2. 写 `actions-exact-commit-and-branch`、`checks-use-observed-sha`、`readonly-actions-mutations-make-no-request`（Superseded（2026-10-08）：没有名为 `checks-use-observed-sha` 的用例，checks 的提交定位分在 `actions-exact-commit-and-branch` 与完整性矩阵的 `checks wrong SHA` / `checks 行缺 head_sha` 行，见 `tests/contract/delivery-github-actions-contract.test.js`）：同SHA不同branch、同branch旧SHA/新SHA、foreign binding、wrong response SHA、branch带斜线、坏limit/cursor；请求定位精确，坏引用/写尝试零GET。旧代码应 RED 于缺工厂/旧输入或对应断言，不接受模块缺依赖假红。
 3. 直接升级端口与 fake：checks 记录 repository+commit；pipeline 记录 branch，过滤先于分页。同时改core readChecks参数与readChainFacts调用，传已观察repository/head并保留CR门，保证A1 typecheck能独立通过。suite checks 输入同仓+commit；optional deployment/environment 按实际 snapshot：unavailable+absent 合法，present 必须NS；保留 fake 声明可用环境的内容正控。不增 port 方法，因此 keyof 锁保持。
 4. 实现工厂/definition 与 injected transport；输入身份→suite计数保护→GET→整页decode→ProviderPage，固定API版本。未知枚举保留原生文本，错误用既有结构化结果；rerun/cancel 永远NS，fixture前后无变且请求清单不增加。
 5. 写表驱动 `actions-page-completeness-and-safe-errors`：正常多页/空页、next循环/跨scope/重复、第二页429、计数变化、workflow1000、suite999/1000、wrong shape、401/403/404/429/5xx/network。错误body/throw含token canary，输出无canary。同时验证 full fake 和只支持runs/checks adapter 同过共享suite。
@@ -177,7 +177,7 @@ pnpm run boundaries
 
 1. 写 `ci-pages-complete-before-publishing-facts`：首成功/第二页失败、第二页429、循环cursor、重复id、超过1000页，分别调用真实 getDeliveryProjection；失败必须degraded/gap且本次无该类观察事实，不能遗留第一页CiPassed。正常两页第二页failure必须被看见。
 2. 写 `ci-native-status-never-guesses-passed` 表：completed success/failure/timed_out/action_required；queued/pending/in_progress携success；unknown/null/neutral/skipped/cancelled/stale；空集合。success正控产CiPassed，显式失败产CiFailed，其余均无pass；故障后不会使用fixture旧success缓存。
-3. 写 `ci-facts-preserve-planning-in-all-policies`：三种StatusPolicy，各自fakePlanning/Development/Storage + 真Actions adapter；把fake commit种子换成fixture同一完整SHA，走startWork与createCR观察锚点，再query真实projection。失败检查进入CiFailed、withDeliveryLineage派生ci_failing；前后getPlanningProjection、planningStatus/content严格相等。mixed workflow旧失败+新成功保留两个id/事实，不宣称aggregatepassed。
+3. 写 `ci-facts-preserve-planning-in-all-policies`：三种StatusPolicy，各自fakePlanning/Development/Storage + 真Actions adapter（Superseded by Decision Log「对抗验证后·拆分」（2026-10-08）：该用例在 base 片 `tests/integration/delivery-pages-complete.test.js` 中用内联 stub 代替真 adapter；真 adapter 不跑三策略，见 `Global Constraints` 表中接缝集成一行）；把fake commit种子换成fixture同一完整SHA，走startWork与createCR观察锚点，再query真实projection。失败检查进入CiFailed、withDeliveryLineage派生ci_failing；前后getPlanningProjection、planningStatus/content严格相等。mixed workflow旧失败+新成功保留两个id/事实，不宣称aggregatepassed。
 4. 写 `ci-unobserved-anchor-makes-no-request`：未观察commit时所有Delivery GET为0；有commit无CR时check-suites/check-runs为0但pipeline正控可读。不直接调用policy helper代替生产查询。
 5. 运行集成命令确认A1后的core在分页/status护栏处RED；实现共用collector并在gated中完整收集，改factFor，保持A1已升级的精确定位和原observed门。重跑GREEN，执行现lineage/statusPolicy与typecheck/boundaries。
 6. 对移除completed guard、忽略head_sha/branch、只取第一页、rerun返回ok四种最小临时变异重跑对应具名用例，必须RED并撤销变异。只在隔离检出保留正常最终实现，重算最终实际预算与diff，再整理A1/A2各实现+判别提交。
@@ -215,16 +215,19 @@ pnpm run boundaries
 
 - [x] (2026-10-07 23:05 +08:00) 当前端口、首分页与conclusion-only问题及官方API核对完成。
 - [x] (2026-10-07 23:05 +08:00) 三方设计独立审评完成；精确SHA、原生事实/core映射、完整分页与suite计数保护已收敛。
-- [ ] (2026-10-07) P0文档验证、draft发布与两侧issue/Project机械回读。
+- [x] (2026-10-07) P0文档验证、draft发布与两侧issue/Project机械回读。（2026-10-08 回读：#295 `Refs #232`、#289 `Closes #232`，两层均已发布并评审。）
 - [x] (2026-10-08 01:05 +08:00) A1 core件（端口/fake/共享suite/collectDeliveryPages/factFor）RED→GREEN，作为本片 PR-A（#295）发布。
-- [ ] A1 adapter 件（github-actions factory/decode/协议矩阵）由 #289 负责，在本片之上 stacked 发布与验收；状态以 PR #289 回读为准。
-- [ ] (2026-10-07) 产品独立审评与完成归档。
+- [x] (2026-10-08 02:03 +08:00) A1 adapter 件（github-actions factory/decode/协议矩阵）rebase 到 #295 当时的 head `28b454a2` 后，作者会话记录的独立验收：契约 24/24、adapter 集成与谱系/策略 13/13、全量 contract/integration/e2e 1231/1231，typecheck、boundaries、size、disclosure、diff-check 通过。
+- [x] (2026-10-07) 产品独立审评与完成归档。（2026-10-08：两层均经 MMP 评审与修复独立复评；#295 已合并，本计划随 #289 的归档提交移入 `completed/`，合并状态以 PR #289 回读为准。）
 - [x] (2026-10-08 02:00 +08:00) base 片独立验收：契约 9/9、集成/E2E 16/16；typecheck、boundaries、size、disclosure、diff-check 均实跑通过；P2-a branch 判别用例变异 RED 后还原。
 - [x] (2026-10-08 02:00 +08:00) P2-b 清理计划中的本机路径；P3-a 将 `collectDeliveryPages` 收窄为 core 模块内函数，确认无外部消费者。
 - [x] (2026-10-08) 评审第 1 轮（head `28b454a2`）：CHANGES_REQUESTED，1 P1 / 3 P2 / 9 P3（共 13 条）。
 - [x] (2026-10-08 11:51 +08:00) 评审第 1 轮修订：本片先 rebase 到 `origin/main@7a46a272`，再在检出 `feature/github-actions-delivery-pages` 的工作树根目录修订。13 条中 12 条按根因修复；P2「拆分决策没有就地取代旧结论」里与归档裁决的冲突一项待人类裁决（见 `Surprises & Discoveries`；2026-10-08 已裁决，见 Decision Log「人类裁决·拆分」），其余部分已修。实测：定向（delivery 契约 + `delivery-pages-complete` + `delivery-lineage` + `status-policy`）27/27；全量 `node --test --test-timeout=120000 tests/contract tests/integration tests/e2e` 1221/1221；`pnpm run typecheck` exit 0；`pnpm run boundaries` 8/8；文档契约（content-placement、plan-facts-consistency、board-status-semantics）15/15；`size origin/main` 代码 449 / 1000（文档桶随本条回填变化，以重算为准）；`disclosure origin/main` 与 `git diff --check origin/main...HEAD` 通过。变异 M1–M26（评审脚本 M1–M21 + 本轮新守卫 M22–M26，全量模式，每个变异先断言锚点唯一并确认写入，跑完写回原文逐字比对）：24 个 RED；M19（失败页改为 break 后落到页数上界错误）、M21（错误码统一成 unavailable）存活，二者在公共查询上与原实现等价（见 `Surprises & Discoveries`）。与 #289 的并集：在临时克隆上把 `#289` 第 1 轮评审 head 合并到本片，代码文件的冲突只来自两侧都带着 #295 内容、按本片取值，#289 自身对这些文件无改动；文档冲突 4 处（`docs/README.md` 1、本计划 3）按本片取值；并集全量 1239/1239、typecheck exit 0、boundaries 8/8。
 - [x] (2026-10-08) 复评第 2 轮（第 1 轮修订后的 head）：第 1 轮 13 条均确认已修，新增 0 P0–P2 / 5 P3。
 - [x] (2026-10-08 16:33 +08:00) 复评第 2 轮修订：本片已 rebase 到 `origin/main@ebe6dc40`，在检出 `feature/github-actions-delivery-pages` 的工作树根目录修订，5 条 P3 全部修复。实测：定向 27/27；全量 `node --test --test-timeout=120000 tests/contract tests/integration tests/e2e` 1274/1274；`pnpm run typecheck` exit 0；`pnpm run boundaries` 8/8；文档契约 15/15；`size origin/main` 代码 483 / 1000（文档桶随本条回填变化，以重算为准）；`disclosure origin/main` 与 `git diff --check origin/main...HEAD` 通过。变异（全量模式，锚点唯一、确认写入、写回逐字比对）：提交核对 MC1–MC7（含只核首页 MC3、缺 commit 放行 MC7）、M13 / M13p（用未观察提交请求）、形状守卫 MS1 与本轮 MN1–MN4（页值、元素对象、`ref`、`ref.externalId`）、M4、M10 共 16 个全部 RED。与 #289 第 1 轮评审 head 的并集（临时克隆，冲突按本片取值）：全量 1292/1292、typecheck exit 0、boundaries 8/8。
+- [x] (2026-10-08) #289 评审第 1 轮（head `9135cf34`，base 为 `28b454a2`）：APPROVE，3 P2 / 5 P3（共 8 条）。
+- [x] (2026-10-08 17:56 +08:00) #289 评审第 1 轮修订（评审会话按 Decision Log「评审修订·接手」执行）：#295 合并后本片 rebase 到 `origin/main@780d6184`；代码提交无冲突，原文档提交与 base 片修订后的计划、索引冲突，整体丢弃后在本片 diff 中重写，`9135cf34` 保留为恢复锚点。在检出 `feature/github-actions-read` 的工作树根目录修订：3 条 P2 与 3 条代码 P3（request id、Retry-After、静态头）按根因修复；体量门 P3 由已有的「人类裁决·拆分」裁决，剩余的旧 800 行陈述就地标 Superseded；易失状态 P3 中写错的 rebase 目标与「保持 draft」不再写入，头部状态补本片事实，`docs/README.md` 索引行留给归档整合。实测：adapter 定向（delivery 契约 + adapter 契约）24/24；集成与 E2E（adapter 接缝 + `delivery-pages-complete` + `delivery-lineage` + `status-policy`）20/20；全量 `node --test --test-timeout=120000 tests/contract tests/integration tests/e2e` 1291/1291；`pnpm run typecheck` exit 0；`pnpm run boundaries` 8/8；文档契约（content-placement、plan-facts-consistency、board-status-semantics）15/15；`size origin/main`（观察时刻 2026-10-08 17:56 +08:00，回读命令即本条）代码 978 / 1000；`disclosure origin/main` 与 `git diff --check origin/main...HEAD` 通过。变异（全量模式，锚点唯一、确认写入、写回逐字比对）：评审的 M01–M41 与组合变异 C1 按评审意见重建（意见点名的 M08–M10、M19–M23、M29、M36、M37 与 C1 编号一致，其余编号为重建），加本轮新守卫 N01–N14，共 56 个，52 个 RED 且都红在对应的具名行；存活的 4 个是 `decodeCursor` 的等价变异 M01–M04（见 `Surprises & Discoveries`）。
+- [x] (2026-10-08 18:26 +08:00) #289 复评（head `6bfb2a0f`）：原 8 条均确认已修，新增 0 P0–P2 / 4 P3。在检出 `feature/github-actions-read` 的工作树根目录修订其中 3 条：完整性矩阵补「next 的仓库号不是数字」→ `link_path`；错误分类表补「Retry-After 形似 HTTP-date 但日期非法」→ permission_denied；Purpose、`Global Constraints` 接缝集成行、A1 第 2 步与 A2 第 3 步就地标 Superseded，并在 Decision Log「评审修订·Link 路径」写明数字仓库号为何不与绑定比对。第 4 条（提交正文与 PR 描述）在整合提交与最终 push 时处理。实测：adapter 契约 + 接缝 17/17；delivery 契约 + adapter 契约 24/24；集成与 E2E 20/20；全量 1291/1291；`pnpm run typecheck` exit 0；`pnpm run boundaries` 8/8；文档契约 15/15；`size origin/main`（观察时刻 2026-10-08 18:26 +08:00，按 merge-base 三点范围）代码 980 / 1000；`disclosure origin/main` 与 `git diff --check origin/main...HEAD` 通过。变异 L3（仓库号放宽为任意路径段）与 RA6（删除 NaN 守卫）全量模式各 1 条 RED，分别红在上述两条新增行。
 
 本片为 stacked 拆分的 **base 片**：只含 capabilities 端口、fake、core `collectDeliveryPages` / `factFor` / `readChecks` 签名与未观察锚点门、共享 Delivery suite，以及用内联故障 stub 承载的 core 级集成。在检出 `feature/github-actions-delivery-pages` 的工作树根目录执行验收命令（期望全 pass / exit 0，size 期望代码 ≤1000、文档 ≤1500）：
 
@@ -236,7 +239,17 @@ pnpm run boundaries
 node scripts/rule-checks.mjs size origin/main
 ```
 
-#289 负责 adapter 片：`packages/providers/delivery-github-actions/src/index.ts` 与 `Global Constraints` 中标「将新建」的 adapter 产品、测试、夹具文件，以及它们的验收命令；状态以 PR #289 回读为准：`gh pr view 289 -R SingularityKChen/harness-projects --json state,isDraft,baseRefName,headRefOid`。
+adapter 片（#289）在 base 片之上，持有 `packages/providers/delivery-github-actions/src/{provider,decode,index}.ts`、`tests/fixtures/github-actions.mjs`、`tests/contract/delivery-github-actions-contract.test.js` 与 `tests/integration/github-actions-ci-facts.test.js`。#295 合并后 base 片已在 `main`；在检出 `feature/github-actions-read` 的工作树根目录执行验收命令（期望全 pass / exit 0，size 期望代码 ≤1000、文档 ≤1500）：
+
+```sh
+node --test tests/contract/delivery-contract.test.js tests/contract/delivery-github-actions-contract.test.js
+node --test tests/integration/github-actions-ci-facts.test.js tests/integration/delivery-pages-complete.test.js tests/e2e/delivery-lineage.test.js tests/e2e/status-policy.test.js
+pnpm run typecheck
+pnpm run boundaries
+node scripts/rule-checks.mjs size origin/main
+```
+
+PR 状态以回读为准：`gh pr view 289 -R SingularityKChen/harness-projects --json state,isDraft,baseRefName,headRefOid`。
 
 ## Surprises & Discoveries
 
@@ -265,6 +278,17 @@ P2-a 验收发现 base fake 的 branch 过滤缺少判别性断言；补入同�
 
 - **`providerOk(undefined)` 相对 main 是行为回退**：main（`6417d459` 的 `packages/core/src/chain-facts.ts` 第 117、128 行 `(read.value?.items ?? [])`）把缺失的页值静默当成空集、不记 gap；第 1 轮修订后的本片在 collector 里抛 `Cannot read properties of undefined (reading 'items')`，整次查询 reject。`items: [null]` 与元素缺 `ref` 在 main 和第 1 轮修订后都抛。第 2 轮把三者都降级成 gap（决策见「评审修订·坏形状（第 2 轮）」）。
 - **第 1 轮的提交核对负控只覆盖「第一页、带 commit」**：stub 回显又把缺失的 `commit` 补成请求的提交，所以「只核首页」（MC3）与「缺 commit 放行」（MC7）两个变异全量存活。第 2 轮补第二页错提交与显式缺 `commit` 的用例，并让 stub 只在对象上没有 `commit` 键时回显。
+
+#289 adapter 片的事实（评审第 1 轮修订，2026-10-08，在检出 `feature/github-actions-read` 的工作树根目录复现）：
+
+- 拆分前的独立对抗验证另发现 403 限流误判（单有 `x-ratelimit-reset` 被当限流）与 adapter 层缺 cursor 复用/循环/超页数回归，均在 adapter 片修正并有具名用例（403 判定见 Decision Log「对抗验证后·403」）。
+- **GitHub 真实 Link 用仓库数字 id 路径**：对本仓库自己的 `actions/runs?head_sha=…`、`commits/{sha}/check-runs?filter=latest`、`commits/{sha}/check-suites` 各做一次 `per_page=1` 的只读 GET，`Link` 都是 `https://api.github.com/repositories/<数字 id>/<同一 endpoint 后缀>?<请求的 filters>&per_page=1&page=N`，带 `rel="last"`，非首页另带 `prev` / `first`，filters 按请求回显。评审 head 的 `nextPageFromLink` 要求 pathname 等于 `/repos/{owner}/{repo}/…`，合成夹具又按请求路径回显 Link，于是接上真实 transport 后任何超过一页的读取都恒为 unavailable（经 core 即 degraded，第二页的失败也看不到），而全部测试仍绿。
+- **完整性矩阵只断言 `code`，守卫互相兜底**：完整性失败都是同一个 `unavailable` / `shape`，删掉某道守卫后失败只是推迟到后续 GET 由别的守卫拦下。评审在 `9135cf34` 上逐个删除 total_count 漂移、累计超过 total、搜索 1000 上界与 Link host/path/页号/filters/多 next 共 8 道守卫，全部存活；搜索上界最严重，1000 条一致数据删掉守卫后读满 10 页并报告完整。
+- **原生 status/conclusion 透传两层都没测**：base 的状态矩阵用内联 stub、不经过 adapter，adapter 接缝只有 completed 样本；把 runs/checks 改写成 `completed` + `conclusion ?? 'success'` 的组合变异 C1 在全量 1231/1231 下存活。修订后 adapter 契约与接缝各有一处判别；只跑 adapter 两个测试文件时，删除 core `factFor` 的 `completed` 守卫也有 1 条 RED（接缝的 in_progress + success 行）。作者会话 02:03 曾记录「仅跑 adapter 集成时 3/3 仍 GREEN，adapter 接缝测试不能替代 base 状态矩阵」（该记录随被丢弃的文档提交未进入本计划）；接缝现在能单独抓到这一项，base 状态矩阵仍是状态映射的主证据。
+- **`Number()` 解析 Retry-After**：`''` 得 0 并被当成限流证据，`1e3` 得 1000 秒，合法的 HTTP-date 得 NaN，403 因此落成不可重试的 permission_denied。
+- **旧 request id 正则放行 token**：`/^[A-Za-z0-9._:-]{1,64}$/` 能匹配 `ghp_` + 36 位的 classic PAT；真实 request id 是十六进制冒号分段（同一批只读 GET 的响应头）。
+- **体量**：本轮新增的判别用例靠折叠等价断言放进 1000 行硬上限——wrong SHA/branch 用例、规范大小写头用例与重复的 suites 两页用例并入表驱动矩阵，`retryable` 在矩阵里不再逐行断言（它由 capabilities 按 code 推导，错误分类表仍逐行断言）。观察时刻 2026-10-08 17:56 +08:00 的实测见 `Progress`。
+- **等价变异**：`decodeCursor` 对 endpoint、repositoryId、commit、pageSize 的类型校验（M01–M04）删除后行为不变，因为 `cursorFor` 随后按严格相等把这四个字段与本次请求的 scope 比较，而 scope 的取值都已合法；保留它们作为 `decodeCursor` 自身的返回契约，不算测试缺口。
 
 ## Decision Log
 
@@ -296,6 +320,16 @@ P2-a 验收发现 base fake 的 branch 过滤缺少判别性断言；补入同�
 
 决策（评审修订·fake 负控）：检查按 repository + commit 过滤的负控写成 fake 专属用例（`tests/contract/delivery-contract.test.js`），不给共享 suite 的 `expect` 增加 `otherCommit`。Rationale：共享 suite 加字段需要同步 #289 的 adapter 夹具，属于上层 diff；fake 专属用例已能让「删 commit 过滤」「删 repository 过滤」两个变异变红。日期/作者：2026-10-08 11:35 +08:00 / 评审修订会话。
 
+决策（对抗验证后·403）：限流证据只认 `x-ratelimit-remaining === '0'`（exhausted）或显式 `Retry-After`（secondary）；`x-ratelimit-reset` 仅在 exhausted 时作为退避来源。Rationale：《错误与恢复》规定普通非限流 403 是 permission_denied（不可重试），旧实现把 reset 单独当限流证据，会把权限拒绝误报成可重试。日期/作者：2026-10-08 01:05 +08:00 / 实现者。（2026-10-08 评审修订注：「显式 `Retry-After`」收紧为合法的 Retry-After，见「评审修订·Retry-After」。）
+
+决策（评审修订·Link 路径）：`nextPageFromLink` 的 path 接受请求路径本身，或 `/repositories/<数字>` 加与请求相同的 endpoint 后缀（`/actions/runs`、`/commits/<sha>/check-runs`）；host 必须是 `api.github.com`，页号必须严格前进，filters 与 per_page 必须与当前 scope 一致，多个 rel=next 与不可解析的 URL 仍然拒绝。Rationale：后续请求从配置与 scope 重建，从不请求 Link URL，路径只用来确认「这是同一 endpoint 的下一页」；GitHub 真实 Link 用仓库数字 id（见 `Surprises & Discoveries`），按请求路径等值比较会让真实平台上的多页读取恒为 unavailable。其它后缀、非数字的仓库号与别的仓库的 `/repos/` 路径仍拒绝，以免把别的 endpoint 的分页当成本页的继续。`/repositories/` 后的数字 id 不与绑定比对：绑定配置只有 externalId/owner/name，没有 GitHub 数字仓库 id；放行任意数字是安全的，因为下一页请求总是由配置与游标 scope 重建、从不请求 Link URL，伪造的仓库号最多多发一次本仓库请求，再由 head_sha 复验、total_count 一致与 `missing_link` 失败关闭。夹具 Link 默认改为数字 id 形态（仓库号取 GitHub 分页文档的示例），保留一条 `/repos/` 形态用例，另有 runs 与 check runs 两份脱敏的真实形状 envelope。日期/作者：2026-10-08 17:56 +08:00 / 评审修订会话。
+
+决策（评审修订·守卫标签）：`PageShapeError` 携带拦下这一页的守卫名，provider 原样写进 `rawClass`：`link_host`、`link_path`、`link_page`、`link_filters`、`link_multiple`、`link_url`、`total_count_changed`、`read_over_total`、`missing_link`、`head_sha`、`head_branch`，解码形状错误仍是 `shape`。Rationale：只看 `code` 时守卫互相兜底，删掉任何一道都不会让测试变红（见 `Surprises & Discoveries`）；按守卫命名后，矩阵每行同时断言 rawClass 与 GET 次数，能证明是哪道守卫在第几次请求拦下。标签是固定字面量、不含响应内容，符合「rawClass 是固定分类标签」。日期/作者：同上。
+
+决策（评审修订·Retry-After）：Retry-After 只认 delay-seconds（纯数字）或 RFC 9110 的 IMF-fixdate；HTTP-date 用注入的 `clock` 换算并夹到 0..86400000（已过去的时刻得 0）；`''`、`1e3`、`0x10` 等既不产出 retryAfterMs，也不算 403 的限流证据；exhausted 时的 `x-ratelimit-reset` 同样只认纯数字。Rationale：`Number()` 把空头当成「0 秒后重试」的限流，又把合法的 HTTP-date 当成无证据，让真实限流落成不可重试的 permission_denied；provider 已有可注入的 clock，HTTP-date 可以精确换算，不必退化成没有数值的「稍后重试」。日期/作者：同上。
+
+决策（评审修订·request id 与静态头）：requestId 只透出 GitHub request id 的形状（`/^[0-9A-F]{1,8}(?::[0-9A-F]{1,16}){3,5}$/i`），token 形态的值丢弃；每次请求交给 transport 一份新的静态头对象，不共享模块级引用。Rationale：旧正则会放行 classic PAT，与「token 不进入 ProviderResult」不符；宿主 transport 就地改入参（例如注入 Authorization）时，共享引用会把一个绑定的凭据串到其它绑定的请求里。日期/作者：同上。
+
 ## Idempotence and Recovery
 
 fixture每例独立，recordedtransport是合成公开规范形状，重复运行零远端请求；source envelope前后比较。临时变异逐一撤销并确认最终diff只有允许文件；失败停在本批，不把半页/旧success作为权威回填。
@@ -316,6 +350,8 @@ Host负责真实凭据、网络timeout与权限证据，当前fixture显式注�
 
 2026-10-08 01:05 +08:00（本 base 片）：端口/fake/共享 suite/core 完整摄入与唯一状态映射落地并全绿；体量以 `node scripts/rule-checks.mjs size origin/main` 重算（期望代码 ≤1000、文档 ≤1500），带日期的实测值只记在 Progress。判别证据：第二页 429/坏形状/循环 cursor/重复 id/超 1000 页都放弃整次集合且无 CiPassed 残留（Superseded by Progress 评审修订条目（2026-10-08）：修订前「坏形状」用例实际给的是结构化 unavailable、「游标成环」实际由重复检测拦下，修订后两者都按名字所述的路径判别）；native 状态表只有 completed+success 产 pass；三策略规划存储逐字不变；未观察锚点零 Delivery 请求；首屏 429/5xx 经真实 core 查询降级。
 
+2026-10-08（adapter 片 #289）：只读 GitHub Actions adapter（工厂、解码、游标与 Link 校验、错误分类）、合成协议夹具、adapter 契约矩阵与 adapter→core 接缝集成落地；base 片的分页/状态矩阵与 adapter 片的协议/接缝矩阵共同构成证据。体量以 `node scripts/rule-checks.mjs size origin/main` 重算，带日期的实测值只记在 Progress。验收全部基于合成响应：Link 与 request id 的形状做过一次只读回读，但未接真实 GitHub 凭据与 Host，不能把合成响应验收说成线上权限验收。adapter 片同样无实施技术债。
+
 本次无实施技术债，未改tracker。#221/#222、真实Host挂载与发布门是明确范围边界；独立验收确认 branch 过滤已有行为且新增具名判别证据；`collectDeliveryPages` 收窄为模块内函数不影响验收结果。若实现出现真实延期或预算导致范围修订，必须更新本计划并按事实登记 `docs/exec-plan/tech-debt-tracker.md`，不能虚构完成或吞并别issue。
 
 ## Bottom Change Note
@@ -330,3 +366,7 @@ Host负责真实凭据、网络timeout与权限证据，当前fixture显式注�
 2026-10-08 11:35 +08:00：评审第 1 轮修订——栈底只留本片事实（#289 专属段落移出、删除重复段落）；就地标注被拆分取代的旧结论；core 核对提交锚点、坏形状页降级、`startup_failure` 计失败并在端口写明原生词表；补跨提交、fake 检查过滤、成环请求次数、非终态失败与请求提交账本的判别用例；A1/A2 原命令加 `test -f` 守卫；改动集补 `delivery-pages-complete`。
 
 2026-10-08 16:10 +08:00：复评（第 2 轮）P3 修订——删去第 1 轮修订又写进本片的两处 #289 实现细节，改为「由 #289 负责」；验收表体量行标 Superseded；人类裁决中 1383 行改标为裁决时的估计；core 形状守卫扩展到页值与元素；补第二页错提交与显式缺 `commit` 的负控。
+
+2026-10-08 02:03 +08:00：#289 adapter 片在 #295 当时的 head `28b454a2` 之上完成作者会话的独立验收。该轮的文档提交在 #295 合并后的 rebase 中与 base 片修订冲突而丢弃，事实由下一条重写。
+
+2026-10-08 17:56 +08:00：#289 评审第 1 轮修订——Link 路径接受 `/repositories/{id}`；守卫按名写入 rawClass，矩阵逐行断言 rawClass 与 GET 次数；原生 status/conclusion 透传与接缝判别；Retry-After 严格解析并支持 HTTP-date；request id 形状收紧；静态头逐请求拷贝；在本片重写文件清单、验收命令、403 判定与 adapter 回归，并就地标注被取代的旧结论。
