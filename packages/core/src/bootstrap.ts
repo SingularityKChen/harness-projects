@@ -1,7 +1,7 @@
 /**
- * 工作区引导：绑定 Planning provider → 读项目与条目 → 落成三态投影 → 写游标 → 修订号 +1（#76）。
+ * 工作区引导：绑定 Planning provider → 读项目与条目 → 落成三态投影 → 写游标与对账时刻；快照内容变化才推进修订号，规则见 ADR-0012（#76、#220）。
  * 重复引导安全：身份按外部对象唯一键幂等，观察按 (binding, dedupeKey) 去重，投影按 (workspace, entity)
- * upsert。provider 失败只把同步游标标成 degraded 并返回结构化结果，最后已知值原样留给查询读。
+ * upsert。一轮没有提交（provider 失败或任何异常）只把同步游标标成 degraded 并返回结构化结果，最后已知值原样留给查询读；异常的原文不进结果，只经宿主的诊断出口（TD-030）。
  */
 import {
   CapabilityKey, ObservationState, ProjectErrorCode, SyncState, projectCodeForProviderError,
@@ -14,8 +14,10 @@ import {
   type EntityId, type PlanningContent, type ProjectError, type ProviderBindingId,
   type WorkspaceId, type WorkspacePlanningFieldMapping, type WorkspaceProjection,
 } from '@harness-projects/domain'
+import { isDeepStrictEqual } from 'node:util'
 import { gateCommand } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
+import { reportSyncRoundFailure } from './diagnostics.ts'
 import { ensureEntity, entityKindFor, planningContentKind } from './identity.ts'
 import { planningFieldsOf } from './planning-fields.ts'
 
@@ -24,6 +26,8 @@ export const PLANNING_SYNC_SCOPE = 'planning.project'
 const PAGE_LIMIT = 50
 /** 单次引导的页数上界（50 × 1000 = 5 万条）；与成环判定各自独立，任一命中都按不完整读取处理、不提交。 */
 const MAX_PAGES = 1000
+/** 一轮同步在读取或提交时异常中止的固定文案：不含驱动文字、SQL、provider 给的版本值或堆栈，因为命令结果会经 controller 发给 client（#199）。 */
+const SYNC_ROUND_FAILED = '同步异常中止，本轮没有提交任何事实；读侧保留最后已知值'
 
 export interface BootstrapResult {
   readonly ok: boolean
@@ -32,12 +36,15 @@ export interface BootstrapResult {
   readonly changeRequests: number
   /** 没有内容身份、且按成员关系也找不回已登记实体的条目数：它们不进投影，其余照常提交，游标记为 healthy 加错误码（D23）。 */
   readonly unanchored: number
+  /** 本轮结束时的工作区业务修订号：内容不变或未提交时就是当前值，内容变化时是推进后的值（ADR-0012）。 */
   readonly revision: number
   readonly degraded: boolean
   readonly error: ProjectError | undefined
 }
 
-interface SyncedItems { counts: SyncCounts; projections: readonly WorkspaceProjection[] }
+/** 同步先算出不带修订号的行：行修订号由事务里的变化判定决定（ADR-0012 第 2 条）。 */
+type UnstampedProjection = Omit<WorkspaceProjection, 'revision'>
+interface SyncedItems { counts: SyncCounts; projections: readonly UnstampedProjection[] }
 
 interface SyncCounts {
   entities: number
@@ -54,12 +61,31 @@ export async function bootstrapWorkspace(context: CoreContext): Promise<Bootstra
     const error = gate.error ?? projectError(ProjectErrorCode.NotSupported, '没有可用的 Planning 绑定')
     return fail(context, binding?.ref.bindingId, error)
   }
+  const bindingId = binding.ref.bindingId
+  // 从读取到提交的任何异常（Storage 拒绝观察、provider 抛出、编程错误）都是未提交：结构化失败 + degraded 游标，绝不裸抛、不转发原文（K2、#199）；
+  // 原异常只交给宿主的诊断出口（TD-030），先于 `fail`，这样记录失败时 Storage 再出错也不丢原因。
+  // `fail` 自己不吞异常：记录失败时 Storage 再出错（degraded 游标写不进，或写进后读不出当前修订号）就以该错误拒绝，不假装结果已落账（TD-031）；
+  // 显式命令的调用方直接拿到这个拒绝，组合期的水合由 `composeCore` 吞掉它，所以在那里先交给宿主的诊断出口。
+  let round: ProviderResult<BootstrapResult>
+  try {
+    round = await syncRound(context, bindingId, planning)
+  } catch (error) {
+    reportSyncRoundFailure(context, error)
+    return fail(context, bindingId, projectError(ProjectErrorCode.Unavailable, SYNC_ROUND_FAILED))
+  }
+  return round.ok ? round.value : fail(context, bindingId, toProjectError(round.error))
+}
+
+/** 一轮同步：读观察、读项目、分页读全部条目、在一个 Storage 事务里提交；provider 的结构化失败原样交回，异常由调用方整轮接住。 */
+async function syncRound(
+  context: CoreContext, bindingId: ProviderBindingId, planning: PlanningProvider,
+): Promise<ProviderResult<BootstrapResult>> {
   const observations = await collectObservations(planning)
   const project = await readProject(context, planning, observations)
-  if (!project.ok) return fail(context, binding.ref.bindingId, toProjectError(project.error))
+  if (!project.ok) return providerErr(project.error)
   const items = await readAllItems(planning, project.value)
-  if (!items.ok) return fail(context, binding.ref.bindingId, toProjectError(items.error))
-  return commitSync(context, binding.ref.bindingId, items.value, observations)
+  if (!items.ok) return providerErr(items.error)
+  return providerOk(await commitSync(context, bindingId, items.value, observations))
 }
 
 /** 项目范围优先用注入值；否则从观察主体反查条目取回 project，不猜外部 id。 */
@@ -116,17 +142,28 @@ async function commitSync(
   context: CoreContext, bindingId: ProviderBindingId,
   items: readonly ProviderPlanningItem[], observations: readonly ProviderObservation[],
 ): Promise<BootstrapResult> {
+  const { workspaceId } = context
   const committed = await context.storage.transaction(async (tx) => {
-    const revision = await tx.advanceRevision(context.workspaceId)
-    const synced = await upsertItems(tx, context, items, revision)
+    const before = await tx.listPlanningProjections(workspaceId)
+    let revision = await tx.currentRevision(workspaceId)
+    const synced = await upsertItems(tx, context, items)
     await recordObservations(tx, observations)
-    await tx.replacePlanningProjections({ workspaceId: context.workspaceId, bindingId }, synced.projections)
+    // 先按原行修订号（新行用当前修订号）写一遍，再把事务前后的读回比较：内容变化才推进，并把本轮写入的行整批重盖（ADR-0012 第 1、2 条）。
+    const scope = { workspaceId, bindingId }
+    const kept = new Map(before.map((row) => [row.entityId, row.revision]))
+    await tx.replacePlanningProjections(scope, synced.projections.map((row) => ({ ...row, revision: kept.get(row.entityId) ?? revision })))
+    if (!sameProjections(before, await tx.listPlanningProjections(workspaceId))) {
+      revision = await tx.advanceRevision(workspaceId)
+      await tx.replacePlanningProjections(scope, synced.projections.map((row) => ({ ...row, revision })))
+    }
     // 提交成功即 healthy；有缺口只带错误码，不写 degraded（degraded / failed 留给什么都没提交的读取，D23）。
     const incomplete = synced.counts.unanchored > 0
     await tx.putSyncCursor({
-      workspaceId: context.workspaceId, bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined,
+      workspaceId, bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined,
       state: SyncState.Healthy, lastErrorCode: incomplete ? ProjectErrorCode.PermissionDenied : undefined,
     })
+    // 对账时刻（ADR-0003 第 3 条）只在提交成功时记：内容不变的刷新在 Storage 里只留这一笔新鲜度。
+    await tx.putReconcileCursor({ workspaceId, lastReconciledAt: context.clock() })
     return { revision, counts: synced.counts }
   })
   const { unanchored } = committed.counts
@@ -136,22 +173,28 @@ async function commitSync(
     error: unanchored > 0 ? projectError(ProjectErrorCode.PermissionDenied, `${unanchored} 个条目对当前凭据不可见，按成员关系也找不回本地实体`) : undefined,
   }
 }
+
+/** 已提交内容是否相同：两侧都是同一 Storage 的读回，去掉行修订号、按实体排序后深比较（不依赖键序）。 */
+function sameProjections(left: readonly WorkspaceProjection[], right: readonly WorkspaceProjection[]): boolean {
+  const content = (rows: readonly WorkspaceProjection[]) => rows.map(({ revision: _revision, ...row }) => row)
+    .sort((a, b) => (a.entityId < b.entityId ? -1 : 1))
+  return isDeepStrictEqual(content(left), content(right))
+}
+
 /** 一个条目一个成员：先解析稳定内部实体，再把权威字段（经工作区映射归一的状态与展示事实）与三态内容写成工作区投影。 */
 async function upsertItems(
   tx: StorageTransaction, context: CoreContext,
-  items: readonly ProviderPlanningItem[], revision: number,
+  items: readonly ProviderPlanningItem[],
 ): Promise<SyncedItems> {
   const counts: SyncCounts = { entities: 0, workItems: 0, changeRequests: 0, unanchored: 0 }
-  const projections: WorkspaceProjection[] = []
+  const projections: UnstampedProjection[] = []
   for (const item of items) {
     const anchor = await anchorOf(tx, context, item)
     if (anchor === undefined) {
       counts.unanchored += 1
       continue
     }
-    const projection = toProjection(context.workspaceId, anchor.entityId, item, revision, context.planningFieldMapping)
-    await tx.putPlanningProjection(context.workspaceId, projection)
-    projections.push(projection)
+    projections.push(toProjection(context.workspaceId, anchor.entityId, item, context.planningFieldMapping))
     counts.entities += 1
     if (anchor.kind === EntityKind.ChangeRequest) counts.changeRequests += 1
     else counts.workItems += 1
@@ -183,10 +226,10 @@ async function anchorOf(
 }
 
 function toProjection(
-  workspaceId: WorkspaceId, entityId: EntityId, item: ProviderPlanningItem, revision: number,
+  workspaceId: WorkspaceId, entityId: EntityId, item: ProviderPlanningItem,
   mapping: WorkspacePlanningFieldMapping | undefined,
-): WorkspaceProjection {
-  return { workspaceId, entityId, revision, content: toContent(item.content), ...planningFieldsOf(item, mapping) }
+): UnstampedProjection {
+  return { workspaceId, entityId, content: toContent(item.content), ...planningFieldsOf(item, mapping) }
 }
 
 /** provider 内容三态 → 领域三态；redacted 是一等状态，不回退到缓存或推断值。 */

@@ -81,14 +81,15 @@ export function createQueries(context: CoreContext): CoreQueries {
   }
 }
 
-/** freshness 的唯一来源：能力门 + 最近一次同步游标；degraded / failed 表示什么都没提交（行 stale），healthy 加错误码表示提交了但有缺口。 */
+/** freshness 的唯一来源：能力门 + 最近一次同步游标；degraded / failed 表示什么都没提交（行 stale），healthy 加错误码表示提交了但有缺口；游标缺失或 state 为 idle（从未写进过任何结果、没有成功证据）即陈旧。 */
 async function syncSummary(context: CoreContext): Promise<SyncSummary> {
   const gate = gateCommand(context.registry, CapabilityKey.PlanningItemRead, 'read')
   if (!gate.allowed) return { degraded: true, stale: true, reason: gate.error?.message ?? '规划读取能力不可用' }
   const binding = singlePlanningBinding(context.registry)
   if (binding === undefined) return { degraded: true, stale: true, reason: '没有默认 Planning 绑定' }
   const cursor = await context.storage.getSyncCursor(context.workspaceId, binding.ref.bindingId, PLANNING_SYNC_SCOPE)
-  if (cursor === undefined) return { degraded: false, stale: false, reason: undefined }
+  // syncing（一轮在途）今天没有写者，读侧语义待 #134 的调度器定义（TD-034）；这里只让「没有成功证据」的两种形态一致地读作陈旧。
+  if (cursor === undefined || cursor.state === SyncState.Idle) return { degraded: true, stale: true, reason: SyncState.Idle }
   if (cursor.state === SyncState.Degraded || cursor.state === SyncState.Failed) {
     return { degraded: true, stale: true, reason: cursor.lastErrorCode ?? cursor.state }
   }

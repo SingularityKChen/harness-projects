@@ -13,6 +13,7 @@ import {
   EntityKind,
   newWorkspaceId,
 } from '@harness-projects/domain'
+import { sourceVersionFromTimestamp } from '@harness-projects/capabilities'
 import { composeCore, promoteEntityIdentity, withEngineeringFacts } from '@harness-projects/core'
 import {
   FaultKind,
@@ -177,4 +178,80 @@ test('身份：没有内容身份的条目不登记外部身份（裁决 R1）',
   assert.equal(identities.some((identity) => identity.externalId === 'm-orphan'), false, '成员关系 id 不得进外部身份表')
   assert.deepEqual((await core.queries.listPlanningItems()).map((view) => [view.freshness.degraded, view.freshness.reason]), Array(3).fill([false, undefined]), '本次读取确认的可见行保持 fresh（H11）')
   assert.deepEqual(await core.queries.getPlanningSync(), { degraded: true, stale: false, reason: 'permission_denied' })
+})
+
+const revisionOf = (providers) => providers.storage.currentRevision(WORKSPACE.id)
+const rowRevisions = async (providers) => (await providers.storage.listPlanningProjections(WORKSPACE.id)).map((row) => `${row.entityId}@${row.revision}`).sort()
+
+test('修订号：相同输入的重复引导不推进业务修订号，也不重写行修订号（#220 验收 1，P2）', async () => {
+  const providers = threeItemComposition()
+  const core = await compose(providers)
+  const [revision, rows, memberships] = [await revisionOf(providers), await rowRevisions(providers), exportFakeStorageState(providers.storage).memberships.length]
+  for (let round = 0; round < 2; round += 1) {
+    const result = await core.commands.bootstrapWorkspace()
+    assert.deepEqual([result.ok, result.revision], [true, revision], `第 ${round + 1} 次相同引导的结果修订号不得前进`)
+  }
+  assert.equal(await revisionOf(providers), revision, '工作区修订号不得前进')
+  assert.deepEqual(await rowRevisions(providers), rows, '内容没变的行不得被重盖修订号')
+  assert.equal(exportFakeStorageState(providers.storage).memberships.length, memberships, '成员关系数不变（#134 验收 4）')
+})
+
+test('重复观察：同一观察经 core 投递 N 次，实体、账本与修订号同投递一次（R1 第 7 条）', async () => {
+  const providers = threeItemComposition()
+  const core = await compose(providers)
+  const before = [signatures(await core.queries.listPlanningItems()), exportFakeStorageState(providers.storage).observations.length, await revisionOf(providers)]
+  providers.planning.setFault(FaultKind.DuplicateEvent, true)
+  for (let round = 0; round < 3; round += 1) assert.equal((await core.commands.bootstrapWorkspace()).ok, true)
+  const after = [signatures(await core.queries.listPlanningItems()), exportFakeStorageState(providers.storage).observations.length, await revisionOf(providers)]
+  assert.deepEqual(after, before, '重复投递后实体、账本行数与修订号都必须与投递一次相同')
+})
+
+test('乱序观察：经 core 先投递新观察再投递旧观察，旧观察不落账本，投影与修订号不变（R1 第 8 条）', async () => {
+  const providers = threeItemComposition()
+  const ref = providers.planning.state.items.find((item) => item.ref.objectKind === 'issue').ref
+  const core = await compose(providers)
+  providers.planning.emitObservation({ ref, type: 'issue.updated', stableFields: { v: 2 }, sourceVersion: sourceVersionFromTimestamp('2026-10-04T00:00:02Z') })
+  await core.commands.bootstrapWorkspace()
+  const before = [await core.queries.listPlanningItems(), exportFakeStorageState(providers.storage).observations.length, await revisionOf(providers)]
+  providers.planning.emitObservation({ ref, type: 'issue.updated', stableFields: { v: 1 }, sourceVersion: sourceVersionFromTimestamp('2026-10-04T00:00:01Z') })
+  assert.equal((await core.commands.bootstrapWorkspace()).ok, true)
+  const after = [await core.queries.listPlanningItems(), exportFakeStorageState(providers.storage).observations.length, await revisionOf(providers)]
+  assert.deepEqual(after, before, '更旧的观察被拒绝：账本不增，投影与修订号不变')
+})
+
+test('修订号：内容变化的全量快照恰好推进一次，移除也是变化，随后相同引导不再推进（#220 验收 2）', async () => {
+  const providers = threeItemComposition()
+  const core = await compose(providers)
+  const start = await revisionOf(providers)
+  const record = providers.planning.state.items.find((item) => item.ref.objectKind === 'issue')
+  record.content = { ...record.content, workItem: { ...record.content.workItem, title: '改过的标题' } }
+  assert.equal((await core.commands.bootstrapWorkspace()).revision, start + 1, '一个标题变化恰好推进一次')
+  assert.ok((await rowRevisions(providers)).every((row) => row.endsWith(`@${start + 1}`)), '推进修订号的引导把本轮写入的行重盖成新修订号')
+  assert.equal((await core.commands.bootstrapWorkspace()).revision, start + 1, '随后的相同引导不再推进')
+  removeItem(providers.planning.state, record.ref)
+  assert.equal((await core.commands.bootstrapWorkspace()).revision, start + 2, '只有移除的全量快照也是变化')
+  assert.equal((await core.commands.bootstrapWorkspace()).revision, start + 2)
+  assert.equal(await revisionOf(providers), start + 2)
+})
+
+test('新鲜度：内容不变的手动刷新记录对账时刻，不推进修订号（#220 验收 3）', async () => {
+  const providers = threeItemComposition()
+  const times = ['2026-10-08T00:00:01.000Z', '2026-10-08T00:00:02.000Z']
+  const core = await composeCore({ workspace: WORKSPACE, providers, clock: () => times.shift() ?? 'clock exhausted' })
+  const revision = await revisionOf(providers)
+  assert.deepEqual(await providers.storage.getReconcileCursor(WORKSPACE.id), { workspaceId: WORKSPACE.id, lastReconciledAt: '2026-10-08T00:00:01.000Z' })
+  assert.equal((await core.commands.bootstrapWorkspace()).revision, revision)
+  assert.deepEqual(await providers.storage.getReconcileCursor(WORKSPACE.id), { workspaceId: WORKSPACE.id, lastReconciledAt: '2026-10-08T00:00:02.000Z' }, '刷新只记新鲜度')
+  assert.equal(await revisionOf(providers), revision, '新鲜度不是业务修订号')
+})
+
+test('修订号：换 Planning 源后旧源残留的投影不被当成每轮的变化（#202 交接）', async () => {
+  const providers = threeItemComposition()
+  await compose(providers)
+  const old = (await providers.storage.listProviderBindings(WORKSPACE.id)).find((binding) => binding.domain === 'planning')
+  await providers.storage.putProviderBinding({ ...old, enabled: false, isDefault: false })
+  const second = await compose({ ...providers, planning: createFakePlanningProvider() }, providers.storage)
+  const revision = await revisionOf(providers)
+  assert.equal((await second.commands.bootstrapWorkspace()).revision, revision, '新源内容不变时，旧源残留行不得让修订号每轮前进')
+  assert.equal(await revisionOf(providers), revision)
 })

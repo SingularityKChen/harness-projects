@@ -10,7 +10,8 @@ import type { EntityStore } from './store.ts'
  * 一次"工作区读取"：客户端模型 + 同步会话才知道的事实。
  *
  * `lastUpdatedAt` = client 接受一帧「宿主判定为当前值」的帧的时刻（ISO 8601），不是 provider 的更新时间；真伪跟随宿主的
- * freshness（宿主误报 fresh 时也推进，#199）。idle poll 不推进，reconnect / gap 重拉的基线被判定为当前值就推进，即使数据未变；
+ * freshness（宿主误报 fresh 时也推进；#199 之后只剩双重故障会误报，见 TD-031）。idle poll 不推进，reconnect / gap 重拉的基线被判定为当前值就推进，即使数据未变；
+ * 内容不变的成功刷新不产生帧（#220、ADR-0012），所以不推进；
  * 同修订的 metadata 帧只在整表或某行由 degraded 恢复为 fresh 时推进，纯来源改名、能力变化与降级都不推进。
  * 省略 = 从未读到当前值，是合法的降级形态。`capabilities` 省略 = 未观测到任何能力（权限未知不得当成可用）。
  * `reason`：断网优先于来源降级，来源降级必有解释。断网与「降级但无原因」是 client 的安全散文；来源降级时原样是宿主的值，
