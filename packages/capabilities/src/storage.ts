@@ -216,7 +216,7 @@ export interface Storage {
   // 成员关系落账**（对账先到、成员关系后到），storage 不要求成员关系存在。`sourceVersion` 必须是规范载体（定宽 UTC
   // 纳秒时间戳，由 provider 用 `sourceVersionFromTimestamp` 归一；比较器只有 `compareSourceVersion` 一份）。未归一的
   // 秒级 / 变精度 / 带偏移时间戳、不定长编号、sha、非 ASCII 与空串由 `assertComparableSourceVersion` 在任何写入之前
-  // 拒绝且不留行——拒绝是裸异常，core 的同步事务整笔回滚、游标不变 degraded（#199 承载结构化失败）。
+  // 拒绝且不留行——拒绝仍是裸异常（端口不新增类型）；core 的一轮同步整笔回滚，并把它转成结构化失败：游标 degraded + `unavailable`（#199）。
   // 对规范载体：更新者返回 true，更旧者返回 false，同版本不同 dedupeKey 返回 true（R4 ② 整快照替换）。`payload` 由 provider
   // 负责脱敏（见 `ProviderObservation` 的契约注释），storage 原样持久化。
   recordObservation(record: ObservationRecord): Promise<boolean>
@@ -234,6 +234,7 @@ export interface Storage {
   listMutationAttempts(workspaceId: WorkspaceId): Promise<readonly MutationAttemptRecord[]>
 
   // ── 投影修订号：单调递增；客户端从 afterRevision 续传，发现缺口就重新拉基线 ──
+  // 何时推进由写者按 ADR-0012 决定：快照内容变化才推进，一个事务至多一次。
   currentRevision(workspaceId: WorkspaceId): Promise<number>
   advanceRevision(workspaceId: WorkspaceId): Promise<number>
 }

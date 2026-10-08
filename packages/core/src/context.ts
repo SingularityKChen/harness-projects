@@ -11,6 +11,7 @@ import {
 } from '@harness-projects/domain'
 import { bootstrapWorkspace, type BootstrapResult } from './bootstrap.ts'
 import { rerunPipeline, type DeliveryWriteAttempt } from './delivery.ts'
+import { reportSyncRoundFailure } from './diagnostics.ts'
 import { startWorkUnavailable, type ExecutionContextQuery, type StartWorkRequest, type StartWorkResult } from './execution-context.ts'
 import { cancelExecutionRun, type CancelExecutionRunResult } from './execution-run.ts'
 import { planningFieldMappingSnapshot } from './planning-fields.ts'
@@ -46,6 +47,22 @@ export interface CoreWorkspaceInput {
   readonly planningFieldMapping?: WorkspacePlanningFieldMapping
 }
 
+/**
+ * 宿主诊断出口（TD-030）：把 core 不能放进命令结果或 wire 的原始失败原因交给宿主自己的日志或遥测。全部可选，缺省即 no-op；
+ * 钩子自己失败（同步抛出，或返回被拒绝的 promise / thenable）不改变 core 的任何结果，返回值也不被等待（慢的或永不 resolve 的钩子拖不住同步）。
+ *
+ * **脱敏义务在宿主**：交出的原异常可能含凭据片段、本机磁盘路径、SQL 与提供方原文（SQLite 旧载体的修复指令也在其中）。
+ * 宿主写入日志或遥测前负责脱敏，不得把它（或由它派生的文字）转发到 wire 或 UI——命令结果与读侧只有固定文案，正是为了不外发它。
+ */
+export interface CoreDiagnostics {
+  /**
+   * 一轮规划同步没有提交，原因是异常（Storage 拒绝、provider 抛出、编程错误）：原异常原样（同一个对象）交给宿主；provider 的结构化失败与成功提交不调用它。
+   * 另有一种情形同样调用它：组合期的首轮引导里，连「记录失败」本身也被 Storage 拒绝（双重故障，TD-031）——这个拒绝会被 `composeCore` 吞掉，
+   * 吞掉之前交给宿主；显式命令里的同一拒绝直接到调用方，不另交。
+   */
+  readonly syncRoundFailed?: (error: unknown) => void
+}
+
 export interface CoreDeps {
   readonly workspace: CoreWorkspaceInput
   readonly providers: CoreProviderTable
@@ -53,6 +70,7 @@ export interface CoreDeps {
   readonly clock?: () => string
   readonly ids?: IdFactory
   readonly policy?: Readonly<Partial<Record<CapabilityKey, AccessLevel>>>
+  readonly diagnostics?: CoreDiagnostics
 }
 
 export interface CoreContext {
@@ -65,6 +83,7 @@ export interface CoreContext {
   /** bootstrap 成功解析后回填；重启的实例靠 provider 观察重新发现。 */
   projectRef: ExternalObjectRef | undefined
   readonly planningFieldMapping: WorkspacePlanningFieldMapping | undefined
+  readonly diagnostics: CoreDiagnostics | undefined
 }
 
 export interface CoreCommands {
@@ -121,7 +140,7 @@ export async function createContext(deps: CoreDeps): Promise<CoreContext | undef
     storage, workspaceId: workspace.id, registry: providerRegistry(prepared.bindings),
     clock: deps.clock ?? (() => new Date().toISOString()),
     ids: deps.ids ?? defaultIdFactory, policy,
-    projectRef: deps.workspace.project, planningFieldMapping,
+    projectRef: deps.workspace.project, planningFieldMapping, diagnostics: deps.diagnostics,
   }
 }
 
@@ -131,8 +150,10 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
   if (context === undefined) return unavailableCore('没有可用的 storage 绑定')
   try {
     await bootstrapWorkspace(context)
-  } catch {
+  } catch (error) {
     // port 契约要求失败是结构化 ProviderResult；裸异常只阻断本次水合，降级交给游标状态表达。
+    // 这里能漏出来的只有「记录失败本身也被拒绝」（双重故障，TD-031）：吞掉之前交给宿主的诊断出口，否则冷启动时没有别的路径让宿主知道原因。
+    reportSyncRoundFailure(context, error)
   }
   return {
     queries: namespace(createQueries(context)),

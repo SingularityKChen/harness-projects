@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { StatusPolicy, newWorkspaceId } from '@harness-projects/domain'
-import { PLANNING_SYNC_SCOPE, StatusPolicyMode, composeCore } from '@harness-projects/core'
+import { StatusPolicyMode, composeCore } from '@harness-projects/core'
 import { createController, toWireMetadata, watchWorkspace } from '@harness-projects/controller'
 import * as capabilities from '@harness-projects/capabilities'
 import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
@@ -30,10 +30,6 @@ async function compose(providers = createFakeProviders(), { project, ...extra } 
   return { id, providers, core, controller: createController(core, { authority: StatusPolicyMode.HarnessManaged, workspaceRevision }) }
 }
 
-/** 不经 bootstrap、同修订地改写本工作区的规划游标（游标按工作区归属，#189）。 */
-const cursor = ({ id, providers }, state, lastErrorCode) => providers.storage.putSyncCursor({
-  workspaceId: id, bindingId: providers.planning.bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined, state, lastErrorCode,
-})
 const capabilityOf = (header, key) => header.capabilities.find((entry) => entry.key === key)
 const viewOf = (read) => deriveWorkItemListView({ read, metadata: { sourceNames: {} }, phase: 'received', refreshing: false })
 const itemRows = (read) => viewOf(read).body.rows.filter((row) => row.kind === 'item')
@@ -74,7 +70,7 @@ test('producer：没有 Storage 的 core 不伪造 descriptor，来源是 degrad
 })
 
 test('metadata：同 revision 的来源降级与恢复各发一个窄事件，业务 revision 与内容不变，重复 poll idle', async () => {
-  const { id, providers, core, controller } = await compose()
+  const { providers, core, controller } = await compose()
   const base = await controller.baseline()
   const watch = controller.watch({ afterRevision: base.revision, seed: base })
   assert.equal(await watch.poll(), undefined, '什么都没变是 idle')
@@ -95,7 +91,7 @@ test('metadata：同 revision 的来源降级与恢复各发一个窄事件，�
   assert.equal(await watch.poll(), undefined, '完全相同内容 idle')
 
   providers.planning.faultsSwitch.set(FaultKind.Offline, false)
-  await cursor({ id, providers }, 'healthy', undefined)
+  await core.commands.bootstrapWorkspace()
   const up = await watch.poll()
   assert.equal(up.kind, 'metadata')
   assert.deepEqual([up.metadata.revision, up.metadata.source.freshness], [base.revision, 'fresh'])
@@ -239,7 +235,7 @@ test('断网：poll / reconnect 拒绝后 connected=false，行引用、内容�
 
 const hiddenStale = (read) => deriveWorkItemList(read).rows.filter((row) => row.contentKind === 'redacted').map((row) => row.freshness.stale)
 test('metadata：同 revision 降级 / 恢复同时更新整表与每行 source（含 Fake 唯一的 redacted 条目），时间只在恢复确认时推进', async () => {
-  const { id, providers, core, controller } = await compose()
+  const { providers, core, controller } = await compose()
   const { store, sync } = await client(controller)
   await sync.connect()
   const rows = store.list()
@@ -256,11 +252,14 @@ test('metadata：同 revision 降级 / 恢复同时更新整表与每行 source�
   assert.equal((await sync.poll()).kind, 'idle')
 
   providers.planning.faultsSwitch.set(FaultKind.Offline, false)
-  await cursor({ id, providers }, 'healthy', undefined)
+  await core.commands.bootstrapWorkspace()
   assert.equal((await sync.poll()).kind, 'metadata')
   assert.deepEqual(hiddenStale(sync.read()), [false], 'redacted 条目随工作区级同步恢复回到 fresh（决策 E）')
   assert.deepEqual([sync.read().reason, store.list().some((entry) => entry.stale), sync.read().lastUpdatedAt], [undefined, false, T(2)])
   assert.ok(itemRows(sync.read()).every((row) => !row.stale), '来源恢复后行回到 fresh')
+
+  await core.commands.bootstrapWorkspace()
+  assert.deepEqual([(await sync.poll()).kind, sync.revision, sync.read().lastUpdatedAt], ['idle', rows[0].revision, T(2)], '内容不变的成功刷新不产生帧，也不推进 lastUpdatedAt（#220 决定）')
 })
 
 /** 同 revision 的 metadata：整表 fresh 与否、第 i 行 fresh 与否各自指定。 */
