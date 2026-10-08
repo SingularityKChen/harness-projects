@@ -4,19 +4,23 @@
  */
 import { CapabilityKey, ProjectErrorCode, projectError, type DeliveryFactSetKind, type DeliveryFactsRecord, type DeliveryNodeFact, type ProjectError } from '@harness-projects/capabilities'
 import { RelationType, type ExecutionContextId } from '@harness-projects/domain'
-import { readChainFacts, type CapabilityGap, type ChainFacts, type DeliveryScopeInput } from './chain-facts.ts'
+import { readChainFacts, type ChainFacts } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
+import { isDeliveryScope, type NormalizedDeliveryScope } from './delivery.ts'
 import { contextIdFor } from './execution-context.ts'
 import { EdgeProvenance, recordEdges, type ChainNode, type DiscoveredEdge } from './relations.ts'
+
+/** 刷新结果里的缺口：只带能力键。provider 的错误文字（可能带路径、令牌）不进结果，因为结果会原样到达 controller 的 wire（K2）；原因码归 TD-046。 */
+export interface DeliveryRefreshGap { readonly key: CapabilityKey }
 
 export interface DeliveryRefreshResult {
   /** 读取或提交失败为 false；provider 读不全不是失败（那是 `gaps`，对应集合保留并标陈旧）。 */
   readonly ok: boolean
-  /** 有已观察到的执行上下文与工作树：没有锚点时什么也不写；读取阶段就失败时还不知道，记为 false。 */
+  /** 有已观察到的执行上下文与工作树：没有锚点时不提交读取，只把已有的快照标陈旧；读取阶段就失败时还不知道，记为 false。 */
   readonly anchored: boolean
   /** 本次读取被提交。没有锚点、读取或提交失败、令牌平手或更晚的读取已先提交（乱序守卫）时都为 false。 */
   readonly applied: boolean
-  readonly gaps: readonly CapabilityGap[]
+  readonly gaps: readonly DeliveryRefreshGap[]
   readonly error: ProjectError | undefined
 }
 
@@ -49,26 +53,43 @@ const toFact = (node: ChainNode): DeliveryNodeFact => ({ entityId: node.id, exte
 const superseded = (record: DeliveryFactsRecord | undefined, attemptedAt: string): boolean => record !== undefined && Date.parse(record.attemptedAt) >= Date.parse(attemptedAt)
 
 /**
- * 读取开始时刻，同时是乱序令牌（I6）：取墙钟、「已提交的 `attemptedAt` 加 1 毫秒」、「同一个上下文对象内上一次令牌加 1 毫秒」的最大值，对任何先于本次读取
+ * 乱序令牌（I6，存为 `attemptedAt`）：取读取开始时的墙钟读数、「已提交的 `attemptedAt` 加 1 毫秒」、「同一个上下文对象内上一次令牌加 1 毫秒」的最大值，对任何先于本次读取
  * 提交的刷新严格递增，与墙钟、上下文对象、重启和时钟回拨都无关；只有读取开始时彼此看不见的并发刷新（只可能来自不同对象）才会平手，先提交者胜。
+ * 它只用来定序，可以领先墙钟：给人看的确认时刻另存墙钟读数（`confirmedAt`，ADR-0011 第 3、7 条）。
  */
 const issued = new WeakMap<CoreContext, number>()
-async function attemptedAtFor(context: CoreContext, contextId: ExecutionContextId): Promise<string> {
+async function attemptedAtFor(context: CoreContext, contextId: ExecutionContextId, wall: number): Promise<string> {
   const committed = await (async () => Date.parse((await context.storage.getDeliveryFacts(context.workspaceId, contextId))?.attemptedAt ?? '') || 0)().catch(() => 0)
-  const at = Math.max(Date.parse(context.clock()) || 0, committed + 1, (issued.get(context) ?? 0) + 1)
+  const at = Math.max(wall || 0, committed + 1, (issued.get(context) ?? 0) + 1)
   issued.set(context, at)
   return new Date(at).toISOString()
 }
 
-export async function refreshDeliveryFacts(context: CoreContext, scope: DeliveryScopeInput): Promise<DeliveryRefreshResult> {
+/**
+ * 把本上下文已提交的快照全部标陈旧并前移 `attemptedAt`，确认时刻、节点与锚点原样保留；没有快照、或已被更晚的读取取代时什么也不写。
+ * 用在两处「这次没能重新确认」的尝试上：没有锚点（什么也没读）与提交失败。否则纯读的查询会把旧事实显示成最新（TD-047，ADR-0011 第 9 条）。
+ */
+const markStale = (context: CoreContext, contextId: ExecutionContextId, attemptedAt: string): Promise<void> => context.storage.transaction(async (tx) => {
+  const existing = await tx.getDeliveryFacts(context.workspaceId, contextId)
+  if (existing !== undefined && !superseded(existing, attemptedAt)) await tx.putDeliveryFacts({ ...existing, attemptedAt, sets: existing.sets.map((set) => ({ ...set, stale: true })) })
+})
+
+export async function refreshDeliveryFacts(context: CoreContext, scope: NormalizedDeliveryScope): Promise<DeliveryRefreshResult> {
+  // 查询不再先挡空输入（#222），命令直接调写者：空工作项（含不是字符串的）不读 provider、不取令牌，也不写任何东西。
+  if (!isDeliveryScope(scope)) return { ok: false, anchored: false, applied: false, gaps: [], error: projectError(ProjectErrorCode.InvalidInput, 'workItemId 不能为空') }
   const contextId = contextIdFor(context.workspaceId, scope.workItemId, scope.repositoryId ?? '')
-  const attemptedAt = await attemptedAtFor(context, contextId)
-  let gaps: readonly CapabilityGap[] = []
+  const wall = Date.parse(context.clock()) // 读取开始时的墙钟读数：完整集合的 confirmedAt 存它，令牌只用来定序
+  const attemptedAt = await attemptedAtFor(context, contextId, wall)
+  let gaps: readonly DeliveryRefreshGap[] = []
   let anchored = false
   try {
+    const confirmedAt = new Date(wall).toISOString() // 读数不能解析时这里抛 RangeError，走下面的降级路径，不写入非法的确认时刻
     const facts = await readChainFacts(context, scope)
-    gaps = facts.gaps
-    if (!facts.context.observed || !facts.worktree.observed) return { ok: true, anchored: false, applied: false, gaps, error: undefined }
+    gaps = facts.gaps.map(({ key }) => ({ key }))
+    if (!facts.context.observed || !facts.worktree.observed) {
+      await markStale(context, contextId, attemptedAt) // 什么也没读，证明不了已提交的快照还是最新；这一步失败走下面的 catch，返回诚实的失败
+      return { ok: true, anchored: false, applied: false, gaps, error: undefined }
+    }
     anchored = true
     const complete = completeSets(facts)
     const sets = SET_KINDS.map((kind) => ({ kind, confirmed: complete.has(kind), ...setOf(facts, kind) }))
@@ -83,7 +104,7 @@ export async function refreshDeliveryFacts(context: CoreContext, scope: Delivery
       await tx.putDeliveryFacts({
         workspaceId: context.workspaceId, contextId, attemptedAt,
         sets: sets.map(({ kind, confirmed, nodes, anchor }) => confirmed
-          ? { kind, anchorId: anchor.id, confirmedAt: attemptedAt, stale: false, nodes: nodes.map(toFact) }
+          ? { kind, anchorId: anchor.id, confirmedAt, stale: false, nodes: nodes.map(toFact) }
           : { ...(existing?.sets.find((set) => set.kind === kind) ?? { kind, anchorId: undefined, confirmedAt: undefined, nodes: [] }), stale: true }),
       })
       return true
@@ -91,10 +112,7 @@ export async function refreshDeliveryFacts(context: CoreContext, scope: Delivery
     return { ok: true, anchored: true, applied, gaps, error: undefined }
   } catch {
     // K2：读取或提交失败不裸抛。已确认的事实随回滚保持原样；尽力把这次尝试记成陈旧（全部集合标 stale），这一步再失败也只吞掉，返回结构化失败。
-    await context.storage.transaction(async (tx) => {
-      const existing = await tx.getDeliveryFacts(context.workspaceId, contextId)
-      if (existing !== undefined && !superseded(existing, attemptedAt)) await tx.putDeliveryFacts({ ...existing, attemptedAt, sets: existing.sets.map((set) => ({ ...set, stale: true })) })
-    }).catch(() => undefined)
+    await markStale(context, contextId, attemptedAt).catch(() => undefined)
     return { ok: false, anchored, applied: false, gaps, error: projectError(ProjectErrorCode.Unavailable, '交付事实未能提交；已确认的事实保持不变') }
   }
 }

@@ -39,10 +39,12 @@ node --test tests/mvp0    # 直接跑，不需要凭据、不需要网络
 | 3 工作项 | `queries.getItemDetail` | Draft→Issue 提升后内部 `Entity` id 不变，一个实体只有一个 primary 身份 |
 | 4 开始工作 | `commands.startWork` | provider 确认前不得报告为权威 `Saved`（AGENTS.md §1.1 硬约束） |
 | 5 执行上下文 | `queries.getExecutionContext` | 同一工作项 + 仓库最多一个 active 执行上下文，重复开始复用 |
-| 6 分支/变更请求 | `queries.getDeliveryLineage` | 谱系沿已记录关系传播，不重新识别对象（不变量 6） |
-| 7 CI | `queries.getDeliveryLineage` | CI 事实不改写规划状态（不变量 3） |
+| 6 分支/变更请求 | `commands.refreshDeliveryFacts` + `queries.getDeliveryLineage` | 谱系沿已记录关系传播，不重新识别对象（不变量 6） |
+| 7 CI | `commands.refreshDeliveryFacts` + `queries.getDeliveryLineage` | CI 事实不改写规划状态（不变量 3） |
 
 > **Superseded by `docs/product/vertical-path.md` §2.1 附行（2026-09-29，#217）**：上表第 3 行写节点 3 保护"Draft→Issue 提升后内部 `Entity` id 不变"，不成立：节点 3 的用例体不执行提升，只检查详情回指同一 `entityId`、恰好一个 primary 身份与重复引导后实体数不变；提升的断言在 `tests/e2e/chain-bootstrap.test.js`，且是直接调用 `promoteEntityIdentity` 的旁证层，生产同步路径的反例见 §2.1 复现命令 P1。登记见 `docs/exec-plan/tech-debt-tracker.md` TD-001。原文保留。
+
+> 节点 6、7 的入口随 #222 加上 `commands.refreshDeliveryFacts`：查询纯读已提交事实，交付事实只经这条命令摄入，所以两个节点读谱系之前先调它。
 
 `chain.test.js` 同时钉下期望的 CoreApi 表面：`composeCore(deps)` → `{ queries, commands }`，方法名沿用
 capabilities 各 port 的动词。后续批次若不采用某个名字，必须显式改对应断言并说明原因。

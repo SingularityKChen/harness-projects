@@ -5,7 +5,7 @@
  * 调用方拿不到 provider 的实例、ref 形状或平台字段。
  */
 import type {
-  CoreApi, DeliveryLineageHop, DeliveryScope, ExecutionContextQuery, ExecutionContextView,
+  CoreApi, DeliveryLineageHop, DeliveryProjection, DeliveryScope, ExecutionContextQuery, ExecutionContextView,
 } from '@harness-projects/core'
 import { toWireEntity, toWireSnapshot, type WireAuthority, type WireEntity, type WireSnapshot } from './wire.ts'
 
@@ -15,6 +15,8 @@ export interface ControllerQueries {
   getEntity(entityId: string): Promise<WireEntity | undefined>
   getExecutionContext(query: ExecutionContextQuery): Promise<ExecutionContextView | undefined>
   getDeliveryLineage(scope: DeliveryScope): Promise<readonly DeliveryLineageHop[]>
+  /** 交付投影原样转发：逐跳 stale、降级、逐集合 freshness 与逐位置 gaps 都是查询结果的一部分（#222）。 */
+  getDeliveryProjection(scope: DeliveryScope): Promise<DeliveryProjection>
 }
 
 export function createControllerQueries(
@@ -34,5 +36,6 @@ export function createControllerQueries(
     },
     getExecutionContext: (query) => core.queries.getExecutionContext(query),
     getDeliveryLineage: (scope) => core.queries.getDeliveryLineage(scope),
+    getDeliveryProjection: (scope) => core.queries.getDeliveryProjection(scope),
   }
 }

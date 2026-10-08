@@ -1,11 +1,11 @@
 /**
- * 类型化命令 API（issue #79 / ExecPlan D3）：每条命令都带 actorRef 与 idempotencyKey，返回写状态。
+ * 类型化命令 API（issue #79 / ExecPlan D3）：除 `refreshDeliveryFacts` 外，每条命令都带 actorRef 与 idempotencyKey，返回写状态；刷新天然幂等，只带 actorRef，不带键、不进账本（#222）。
  *
  * wire 层刻意没有 `saved`：只有 provider ack / read-after-write 证据才叫 confirmed，reconcile 找回同值
  * 才叫 reconciled，只落了本地控制事实（外部写入未确认，或规划本来由宿主权威）才叫 local_only。调用方
  * 因此不可能把一个尚未确认的外部写入显示成"已保存"。
  *
- * 同键重放由控制器实例内的账本兜住（startWork 另有 core 的持久写账本）。跨重启的持久账本属 Storage，
+ * 同键重放（刷新除外）由控制器实例内的账本兜住（startWork 另有 core 的持久写账本）。跨重启的持久账本属 Storage，
  * 受 Gate E1 约束，本切片不落库——这里不假装它是持久的。
  */
 import { ProjectErrorCode, projectError } from '@harness-projects/capabilities'
@@ -13,7 +13,7 @@ import type { ExternalObjectRef, ProjectError } from '@harness-projects/capabili
 import type { EntityId, NormalizedStatus } from '@harness-projects/domain'
 import {
   WritePhase,
-  type BootstrapResult, type CoreApi, type DeliveryWriteAttempt, type RecordedEdge,
+  type BootstrapResult, type CoreApi, type DeliveryRefreshResult, type DeliveryScope, type DeliveryWriteAttempt, type RecordedEdge,
   type RelationRef, type StartWorkResult, type StatusDecision,
 } from '@harness-projects/core'
 
@@ -140,6 +140,13 @@ export interface ControllerCommands {
   /** 显式确认候选边：唯一把 candidate 变成 confirmed 的入口；边不存在时不造关系。 */
   confirmRelation(ref: RelationRef, envelope: CommandEnvelope): Promise<CommandResult<RecordedEdge>>
   rerunPipeline(ref: ExternalObjectRef, envelope: CommandEnvelope): Promise<CommandResult<DeliveryWriteAttempt>>
+  /**
+   * 交付事实的显式刷新（#222）：只写本地已确认事实，没有外部写入，因此成功报 local_only，不是权威确认。
+   * `local_only` 只说明没有外部写入、本地没有失败；这次是否真的提交了新事实看 `value.applied` / `anchored` / `gaps`
+   * （没开始工作的工作项、没有锚点、provider 离线时都是 `local_only`，但 `applied` 为 false 或 `gaps` 非空）。
+   * 天然幂等：没有外部写入，重复调用会重新读取，不重放，所以不进重放账本、不带幂等键；`actorRef` 只是发起方。UI 以重读后的投影为准，不以这个结果为准。
+   */
+  refreshDeliveryFacts(scope: DeliveryScope, request: Pick<CommandEnvelope, 'actorRef'>): Promise<CommandResult<DeliveryRefreshResult>>
 }
 
 /** 控制器实例内的重放账本：键含命令名，避免同名幂等键在不同命令间串结果。 */
@@ -179,5 +186,10 @@ export function createControllerCommands(core: CoreApi): ControllerCommands {
       const attempt = await core.commands.rerunPipeline(ref)
       return resultOf(attempt.confirmed ? CommandWriteState.Confirmed : CommandWriteState.Failed, attempt, attempt.error)
     }),
+
+    refreshDeliveryFacts: async (scope) => {
+      const result = await core.commands.refreshDeliveryFacts(scope) // 不经 replay：每次调用都是一次真的读取
+      return resultOf(result.ok ? CommandWriteState.LocalOnly : CommandWriteState.Failed, result, result.error)
+    },
   }
 }

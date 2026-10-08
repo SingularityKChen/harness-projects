@@ -21,6 +21,15 @@ const BINDING = 'binding-github-actions'
 const PERMISSION = { 'delivery.pipeline.read': 'available', 'delivery.check.read': 'available' }
 const PAGE_LIMIT = 50
 
+/** #222 起查询纯读、摄入只经刷新命令：本文件的每次交付读取先经 `commands.refreshDeliveryFacts` 摄入再读（相当于打开视图时刷新），被测的仍是 core 的完整分页与映射。 */
+const refreshBeforeRead = (core) => {
+  const read = (method) => async (scope) => {
+    // provider 读不全（页故障、429/5xx、读回别的提交）是缺口，不是刷新失败：刷新把它报成失败时这里变红。
+    assert.equal((await core.commands.refreshDeliveryFacts(scope)).error, undefined, '刷新本身不得失败')
+    return core.queries[method](scope)
+  }
+  return { ...core, queries: { ...core.queries, getDeliveryProjection: read('getDeliveryProjection'), getDeliveryLineage: read('getDeliveryLineage') } }
+}
 /** 组合根：planning/development/storage 用离线替身，delivery 用真 adapter + 合成 protocol。 */
 function composeFor(handler) {
   const { transport, calls } = createRecordedTransport(handler)
@@ -38,7 +47,7 @@ function composeFor(handler) {
     sha: COMMIT, ref: refOf(providers.development.gate.bindingId, 'commit', COMMIT),
   }
   const workspace = { id: newWorkspaceId(), name: 'github-actions/adapter-seam', statusPolicy: StatusPolicy.ManualOnly }
-  return { providers, calls, compose: () => composeCore({ workspace, providers }) }
+  return { providers, calls, compose: async () => refreshBeforeRead(await composeCore({ workspace, providers })) }
 }
 
 async function startChain(composed, key) {

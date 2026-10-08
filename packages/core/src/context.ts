@@ -10,7 +10,8 @@ import {
   newWorkspaceId, type EntityId, type ExternalIdentityId, type RelationId, type WorkspaceId, type WorkspacePlanningFieldMapping,
 } from '@harness-projects/domain'
 import { bootstrapWorkspace, type BootstrapResult } from './bootstrap.ts'
-import { rerunPipeline, type DeliveryWriteAttempt } from './delivery.ts'
+import { normalizeScope, rerunPipeline, type DeliveryScope, type DeliveryWriteAttempt } from './delivery.ts'
+import { refreshDeliveryFacts, type DeliveryRefreshResult } from './delivery-facts.ts'
 import { reportSyncRoundFailure } from './diagnostics.ts'
 import { startWorkUnavailable, type ExecutionContextQuery, type StartWorkRequest, type StartWorkResult } from './execution-context.ts'
 import { cancelExecutionRun, type CancelExecutionRunResult } from './execution-run.ts'
@@ -95,6 +96,8 @@ export interface CoreCommands {
   confirmRelation(ref: RelationRef): Promise<RecordedEdge | undefined>
   /** 对只读交付方的写尝试：只回结构化 not supported，不改任何状态。 */
   rerunPipeline(ref: ExternalObjectRef): Promise<DeliveryWriteAttempt>
+  /** 交付事实唯一的摄入入口（#222）：读 provider、在一个事务里提交最后确认的事实；查询只读它提交的结果，不推进修订号。 */
+  refreshDeliveryFacts(scope: DeliveryScope): Promise<DeliveryRefreshResult>
   /** 规划状态的唯一显式写入命令；工程事实无权调用它（不变量 3）。 */
   applyPlanningStatus(command: PlanningStatusCommand): Promise<StatusDecision>
 }
@@ -163,6 +166,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
       cancelExecutionRun: (query: ExecutionContextQuery) => cancelExecutionRun(context, query),
       confirmRelation: (ref: RelationRef) => confirmRelation(context, ref),
       rerunPipeline: (ref: ExternalObjectRef) => rerunPipeline(context, ref),
+      refreshDeliveryFacts: (scope: DeliveryScope) => refreshDeliveryFacts(context, normalizeScope(scope)),
       applyPlanningStatus: (command: PlanningStatusCommand) => writePlanningStatus(context, command),
     }),
   }
@@ -178,9 +182,7 @@ function unavailableCore(reason: string): CoreApi {
     getPlanningSync: async () => ({ degraded: true, stale: true, reason }),
     getWorkspaceMetadata: async () => ({ workspace: undefined, capabilities: [] }),
     getDeliveryProjection: async (scope) => ({
-      workItemId: typeof scope === 'string' ? scope : scope.workItemId,
-      repositoryId: typeof scope === 'string' ? undefined : scope.repositoryId,
-      hops: [], optional: [], degraded: true, error,
+      ...normalizeScope(scope), hops: [], optional: [], degraded: true, error, attemptedAt: undefined, freshness: [], gaps: [],
     }),
     getDeliveryLineage: async () => [],
   }
@@ -192,6 +194,7 @@ function unavailableCore(reason: string): CoreApi {
     cancelExecutionRun: async () => ({ status: undefined, runExternalId: undefined, error }),
     confirmRelation: async () => undefined,
     rerunPipeline: async () => ({ supported: false, writeState: WriteState.Failed, saving: false, confirmed: false, error }),
+    refreshDeliveryFacts: async () => ({ ok: false, anchored: false, applied: false, gaps: [], error }),
     applyPlanningStatus: async (command: PlanningStatusCommand) => ({
       entityId: command.entityId, status: NormalizedStatus.Unknown, derived: [], wrote: false,
       policy: StatusPolicy.ProviderAuthoritative, mode: StatusPolicyMode.SourceManaged, reason: reason, error,
