@@ -39,7 +39,7 @@ export interface CoreQueries {
   /** 工作区级规划新鲜度：与逐条 freshness 同源；没有条目时它是表达「不完整 / 权限缺口」的唯一载体。 */
   getPlanningSync(): Promise<SyncSummary>
   getWorkspaceMetadata(): Promise<WorkspaceMetadata>
-  /** 交付投影：链路事实 + 能力状态 + 新鲜度；只读，不触发任何外部写入。 */
+  /** 交付投影：链路事实 + 能力状态 + 新鲜度与缺口；纯读已提交事实，不调 provider、不写任何东西（#222）。 */
   getDeliveryProjection(scope: DeliveryScope): Promise<DeliveryProjection>
   /** 工作项 → 执行上下文 → 分支 → 提交 → 变更请求 → CI 的可查询谱系。 */
   getDeliveryLineage(scope: DeliveryScope): Promise<readonly DeliveryLineageHop[]>

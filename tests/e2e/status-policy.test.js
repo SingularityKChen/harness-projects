@@ -86,6 +86,7 @@ test('交付谱系里的 CI 失败只进 derived 块：planningStatus 与内容�
     repository: refOf(providers.delivery.gate.bindingId, 'repository', REPOSITORY),
     status: 'completed', commit: providers.development.state.commits[0].sha, conclusion: 'failure' })
   const view = (await core.queries.listPlanningItems()).find((item) => item.entityId === workItemId)
+  await core.commands.refreshDeliveryFacts({ workItemId, repositoryId: REPOSITORY }) // 查询纯读（#222）：交付事实只经刷新命令摄入
   const hops = await core.queries.getDeliveryLineage({ workItemId, repositoryId: REPOSITORY })
   assert.ok(hops.some((hop) => hop.fact === EngineeringFactKind.CiFailed), 'CI 失败必须作为工程事实出现在谱系里')
   const folded = withDeliveryLineage(view, hops, workItemId)

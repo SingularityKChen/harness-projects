@@ -148,7 +148,7 @@ export interface DeliveryFactSet {
   readonly kind: DeliveryFactSetKind
   /** 这些节点挂靠的锚点实体（提交与变更请求挂工作树，流水线挂提交，检查挂变更请求），按确认时的值记录：读回按它取边，不在全局关系里重新找（同一个流水线实体可以挂在多个上下文的提交上）；从未完整读到时为 undefined。 */
   readonly anchorId: EntityId | undefined
-  /** 最近一次完整读到该集合的刷新时刻；undefined 表示从未完整读到。 */
+  /** 最近一次完整读到该集合的那次读取开始时的墙钟读数（给人看、算年龄的唯一起点）；undefined 表示从未完整读到。 */
   readonly confirmedAt: string | undefined
   /** 最近一次被应用的刷新没能重新确认这个集合（离线、权限、截断、锚点未读到、提交失败）：节点是最后确认的值。 */
   readonly stale: boolean
@@ -158,7 +158,7 @@ export interface DeliveryFactSet {
 /** 一个执行上下文的交付事实快照（#221，ADR-0011），唯一写者是 core 的 `refreshDeliveryFacts`；父行必须是同一工作区里已登记的执行上下文。 */
 export interface DeliveryFactsRecord {
   readonly workspaceId: WorkspaceId; readonly contextId: ExecutionContextId
-  /** 最近一次被应用的刷新的读取开始时刻：乱序守卫与陈旧判定的基准。 */
+  /** 最近一次写入本行的刷新尝试的乱序令牌：只用来定序，可以领先墙钟，不得展示，不得做减法（年龄从集合的 `confirmedAt` 起算）。 */
   readonly attemptedAt: string
   readonly sets: readonly DeliveryFactSet[]
 }

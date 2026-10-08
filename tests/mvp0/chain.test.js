@@ -154,6 +154,7 @@ test('节点 6 · 分支/变更请求：谱系沿已记录关系传播，不反�
   const invariant = '工程产物关系沿谱系传播：分支 / 变更请求按已记录关系读回，不重新识别'
   const { api, started, scope } = await chainFor('mvp0-node6-1')
   const lineage = needMethod(api, 'queries.getDeliveryLineage', '分支/变更请求', invariant)
+  await needMethod(api, 'commands.refreshDeliveryFacts', '分支/变更请求', invariant)(scope)
   const discovered = await lineage(scope)
   for (const hop of discovered) await api.commands.confirmRelation({ from: hop.from, to: hop.to, type: hop.relationType })
   const hops = await lineage(scope)
@@ -175,6 +176,7 @@ test('节点 7 · CI：工程事实（CI 结果）不改写规划状态（不变
   const snapshot = async () => JSON.stringify((await listItems()).map((item) => [item.entityId, item.planningStatus, item.content]).sort())
   const before = await snapshot()
   providers.delivery.state.runs.push({ ...providers.delivery.state.runs[0], ref: { ...providers.delivery.state.runs[0].ref, externalId: 'run-fail' }, conclusion: 'failure' })
+  await needMethod(api, 'commands.refreshDeliveryFacts', 'CI', invariant)(scope)
   const hops = await lineage(scope)
   requireNode('CI', invariant, hops.some((hop) => hop?.observed === true && hop?.fact === EngineeringFactKind.CiFailed), 'CI 失败必须作为已观察到的工程事实出现在谱系里')
   const projection = await providers.storage.getPlanningProjection(providers.storage.data.workspaces[0].id, workItemId)
