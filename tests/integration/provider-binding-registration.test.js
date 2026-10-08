@@ -113,6 +113,36 @@ async function starter(storage, providers, policy) {
 const runsOf = (...ports) => ports.map((port) => port.state.runs.length)
 
 const SCENARIOS = [
+  ['Development 多挂载按角色读回：唯一挂载是默认；两个挂载都非默认且与 Registry 一致，从一个重组为两个时原默认被改写；同一连接在另一个工作区仍是默认；空数组即没有挂载；同一对象注入两次 0 事务被拒；谱系读在多挂载且仓库未登记时是缺口而不取第一个（接线前后都成立，不是路由接线的护栏）', async (storage) => {
+    const { planning, development } = fakes()
+    const other = createFakeDevelopmentProvider({ bindingId: 'conn-dev-b' })
+    await compose(storage, { planning, development })
+    assert.deepEqual(await rows(storage), [row(SHARED, 'development'), row(SHARED, 'planning')])
+    const context = await compose(storage, { planning, development: [development, other] })
+    assert.deepEqual(await rows(storage), [row('conn-dev-b', 'development', KEY, false), row(SHARED, 'development', KEY, false), row(SHARED, 'planning')])
+    assert.deepEqual(context.registry.bindings.filter((b) => b.ref.domain === 'development').map((b) => [b.ref.bindingId, b.isDefault]), [[SHARED, false], ['conn-dev-b', false]])
+    await compose(storage, { planning, development }, { workspace: { id: 'ws-2' } })
+    await compose(storage, { planning, development: [] }, { workspace: { id: 'ws-3' } })
+    assert.deepEqual([await rows(storage, 'ws-2'), await rows(storage, 'ws-3')], [[row(SHARED, 'development'), row(SHARED, 'planning')], [row(SHARED, 'planning')]])
+    assert.deepEqual(await rows(storage), [row('conn-dev-b', 'development', KEY, false), row(SHARED, 'development', KEY, false), row(SHARED, 'planning')], '另一个工作区的装配不改本工作区的角色')
+    const { seen, storage: probed } = probe(storage)
+    await assert.rejects(compose(probed, { planning, development: [development, development] }), { name: 'TypeError', message: /重复/ })
+    assert.equal(seen.transactions, 0)
+    // 这里没有登记任何仓库：key 级解析 fail closed 时它是缺口，谱系读改走 routeDevelopment 之后仓库未登记仍是歧义，所以接线前后都成立——它不能证明接线已经完成；
+    // 接线方（独立小 PR #297，等 #219 与 #221 都进 main 之后）另带「已登记仓库的多挂载谱系读只进路由到的挂载」的正例，并要求它在接线缺失时变红。
+    assert.ok((await readChainFacts(context, QUERY)).gaps.some((gap) => gap.key === CapabilityKey.DevelopmentRepositoryRead), '多挂载且仓库未登记时谱系的仓库解析是缺口，不取第一个注册者（K3）')
+  }],
+  ['注入表的数组只属于 development 槽位：其他槽位传数组（含空数组）被 TypeError 拒绝且 0 事务；单元素数组与单个同义（读回默认）；数组里的非法元素点名下标', async (storage) => {
+    const { planning, development, execution } = fakes()
+    const { seen, storage: probed } = probe(storage)
+    for (const providers of [{ planning: [], development }, { planning: [planning], development }, { planning, execution: [execution] }, { planning, execution: [] }]) {
+      await assert.rejects(compose(probed, providers), { name: 'TypeError', message: /port 缺少必需方法/ }, JSON.stringify(Object.keys(providers).map((slot) => [slot, Array.isArray(providers[slot])])))
+    }
+    await assert.rejects(compose(probed, { planning, development: [development, {}] }), { name: 'TypeError', message: /development\[1\]/ })
+    assert.equal(seen.transactions, 0)
+    await compose(storage, { planning, development: [development] })
+    assert.deepEqual(await rows(storage), [row(SHARED, 'development'), row(SHARED, 'planning')], '单元素数组与单个 provider 同义：唯一挂载是默认')
+  }],
   ['同一连接挂到 Planning、Development 与 Execution：读回三个挂载，同配置经 composeCore 重复装配幂等，开始工作的写入各进本域实例', async (storage) => {
     const { planning, development, execution } = fakes()
     const context = await compose(storage, { planning, development, execution })

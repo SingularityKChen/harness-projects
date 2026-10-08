@@ -42,7 +42,8 @@ const PORT_DOMAINS = Object.values(CapabilityDomain)
 
 /**
  * 发布一个 Registry：先验证再返回，非法输入拒绝而不是取第一条。同一工作区的 `(bindingId, domain)` 挂载唯一（同 id 跨域合法）；
- * 每域至多一个默认、至多一个备用，且 Execution 之外的域只有默认挂载（因此同一工作区至多一个 Planning 事实源，不变量 1）；每个挂载只带本域的 port。
+ * 每域至多一个默认；Execution 至多一个备用；Development 的唯一挂载是默认，多个挂载一律非默认、由上层按仓库路由；
+ * 其余域只有默认挂载（因此同一工作区至多一个 Planning 事实源，不变量 1）；每个挂载只带本域的 port。默认 = key 级解析的目标。
  */
 export function providerRegistry(bindings: readonly ResolvedBinding[]): ProviderRegistry {
   const seen = new Set<string>()
@@ -54,12 +55,15 @@ export function providerRegistry(bindings: readonly ResolvedBinding[]): Provider
     seen.add(tuple)
     const foreign = PORT_DOMAINS.find((name) => name !== ref.domain && binding[name] !== undefined)
     if (foreign !== undefined) throw new TypeError(`挂载 ${tuple} 带有其他域的 port ${foreign}`)
-    if (!binding.isDefault && ref.domain !== 'execution') throw new TypeError(`挂载 ${tuple} 不是默认挂载：只有 Execution 允许备用`)
+    if (!binding.isDefault && ref.domain !== 'execution' && ref.domain !== 'development') throw new TypeError(`挂载 ${tuple} 不是默认挂载：只有 Execution 允许备用、Development 允许按仓库路由的对等挂载`)
   }
   for (const domain of PORT_DOMAINS) {
     const mounts = bindings.filter((binding) => binding.ref.domain === domain)
-    if (mounts.filter((binding) => binding.isDefault).length > 1) throw new TypeError(`能力域 ${domain} 有多个默认挂载`)
-    if (mounts.filter((binding) => !binding.isDefault).length > 1) throw new TypeError(`能力域 ${domain} 有多个备用挂载：备用至多一个，读才有唯一备用可选`)
+    const defaults = mounts.filter((binding) => binding.isDefault).length
+    if (defaults > 1) throw new TypeError(`能力域 ${domain} 有多个默认挂载`)
+    if (domain === 'development') {
+      if ((defaults === 1) !== (mounts.length === 1)) throw new TypeError(`能力域 development 的挂载角色不一致（${mounts.length} 个挂载、${defaults} 个默认）：唯一挂载才是默认，多个挂载一律非默认、按仓库路由`)
+    } else if (mounts.length - defaults > 1) throw new TypeError(`能力域 ${domain} 有多个备用挂载：备用至多一个，读才有唯一备用可选`)
   }
   return { bindings }
 }
@@ -76,14 +80,14 @@ export function singlePlanningBinding(registry: ProviderRegistry): ResolvedBindi
 
 /**
  * 按 capability key 找路由目标：先按 key 的域筛选，再按角色定位——`execution.run.fallback` 只选备用，`execution.run.start` 只选主，
- * 其余读写选主、主缺失才选备用。目标不声明该 key 时返回 undefined；目标声明了但 unavailable 也照样返回它，由调用方判拒绝，
- * 绝不另找一个可用实例（备用不因主不可用而升级）。
+ * 其余读写选主、主缺失且该域只有这一个挂载才选它。目标不声明该 key 时返回 undefined；目标声明了但 unavailable 也照样返回它，由调用方判拒绝，
+ * 绝不另找一个可用实例（备用不因主不可用而升级）。同域多个对等挂载（Development）时 key 级解析 fail closed，要选其中一个只能由上层按仓库路由。
  */
 export function bindingForCapability(registry: ProviderRegistry, key: CapabilityKey): ResolvedBinding | undefined {
   const mounts = bindingsForDomain(registry, key.split('.')[0] as CapabilityDomain)
   const primary = mounts.find((binding) => binding.isDefault)
   const spare = mounts.find((binding) => !binding.isDefault)
-  const target = key === CapabilityKey.ExecutionRunFallback ? spare : key === CapabilityKey.ExecutionRunStart ? primary : primary ?? spare
+  const target = key === CapabilityKey.ExecutionRunFallback ? spare : key === CapabilityKey.ExecutionRunStart ? primary : primary ?? (mounts.length === 1 ? spare : undefined)
   return target?.capabilities.some((capability) => capability.key === key) ? target : undefined
 }
 

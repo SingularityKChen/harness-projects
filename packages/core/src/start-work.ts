@@ -9,10 +9,10 @@ import {
   ContentKind, EntityKind, ExecutionContextStatus, ExecutionRunStatus, ExternalIdentityKind, IdentityRole, ProviderErrorCode, RelationType, asBrandedId,
   type EntityId, type ExecutionContextId, type ProjectError, type ProviderBindingId,
 } from '@harness-projects/domain'
-import { gateCommand, resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
-import { resolveCapability } from './registry.ts'
+import { resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
 import { chainNode, worktreeEntityId } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
+import { routeDevelopment } from './development-route.ts'
 import {
   StartWorkFallback, contextIdFor, contextRecord, fallbackOf, readyGap, reportForExisting, runIdFor, runStatusFor,
   startWorkUnavailable, toResult,
@@ -98,7 +98,7 @@ function existingRun(git: GitOutcome, existing: ExecutionRunRecord): StartWorkRe
   return toResult(git.report, outcomeOf(git, fallbackOf(existing), existing.providerRef?.externalId), undefined)
 }
 
-/** 新请求的写前准备额外要求的能力：分支创建的写门（只读即拒绝）与仓库读、工作树读两个读门，先于任何本地与外部写入；工作树创建的写门由随后的 `resolveWriteTarget` 检查。 */
+/** 新请求的写前准备额外要求的能力：分支创建的写门（只读即拒绝）与仓库读、工作树读两个读门，先于任何本地与外部写入；它们与路由的锚点（工作树创建的写门）都在路由选中的同一个挂载上、按这个顺序先于锚点判定（`routeDevelopment` 的 `earlier`）。 */
 const REGISTRATION_GATES = [
   [CapabilityKey.DevelopmentBranchCreate, 'write'], [CapabilityKey.DevelopmentRepositoryRead, 'read'], [CapabilityKey.DevelopmentWorktreeRead, 'read'],
 ] as const
@@ -108,8 +108,8 @@ type Registration = (tx: StorageTransaction) => Promise<void>
 type Prepared = { readonly ok: true; readonly register: Registration } | { readonly ok: false; readonly error: ProjectError }
 
 /**
- * 新请求在任何写入之前的只读准备：工作项预检（工作区作用域的规划投影，只有 `work_item` 内容可开始）→ 能力门 → 向同一个
- * Development provider 要仓库 ack（`ref` 必须逐字等于请求）→ 挂载冲突预检；通过后返回写前事务里的登记。
+ * 新请求在任何写入之前的只读准备：工作项预检（工作区作用域的规划投影，只有 `work_item` 内容可开始）→ 按仓库路由并在同一挂载上过能力门
+ * （缺路由、歧义与「绑定 id 变了」都在这里拒绝）→ 向路由到的 Development provider 要仓库 ack（`ref` 必须逐字等于路由给出的引用）；通过后返回写前事务里的登记。
  */
 async function prepareRegistration(context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId): Promise<Prepared> {
   const reject = (error: ProjectError): Prepared => ({ ok: false, error })
@@ -117,29 +117,16 @@ async function prepareRegistration(context: CoreContext, request: StartWorkReque
   if (projection === undefined) return reject(projectError(ProjectErrorCode.NotFound, `工作项 ${request.workItemId} 不在当前工作区的规划投影里`))
   if (projection.content.contentKind === ContentKind.ChangeRequest) return reject(projectError(ProjectErrorCode.InvalidInput, '变更请求不是可开始工作的工作项'))
   if (projection.content.contentKind === ContentKind.Redacted) return reject(projectError(ProjectErrorCode.Unavailable, '工作项内容被扣下，不是可操作的规划条目'))
-  for (const [key, mode] of REGISTRATION_GATES) {
-    const gate = gateCommand(context.registry, key, mode)
-    if (!gate.allowed) return reject(gate.error ?? unsupportedCapability(key))
-  }
-  const target = resolveWriteTarget(context.registry, CapabilityKey.DevelopmentWorktreeCreate)
-  const provider = target.binding?.development
-  if (target.binding === undefined || provider === undefined) return reject(target.error ?? unsupportedCapability(CapabilityKey.DevelopmentWorktreeCreate))
-  const bindingId = target.binding.ref.bindingId
-  const repository: ExternalObjectRef = { bindingId, objectKind: 'repository', externalId: request.repositoryId, url: undefined }
+  const route = await routeDevelopment(context, request.repositoryId, CapabilityKey.DevelopmentWorktreeCreate, 'write', REGISTRATION_GATES)
+  if (!route.ok) return reject(route.error)
+  const { provider, repository } = route
   const found = await provider.getRepository(repository)
   if (!found.ok) return reject(toProjectError(found.error))
   const acked = found.value.ref
-  if (acked.bindingId !== bindingId || acked.objectKind !== repository.objectKind || acked.externalId !== repository.externalId) {
-    return reject(projectError(ProjectErrorCode.Conflict, `仓库 ack 的身份 ${acked.bindingId}/${acked.objectKind}/${acked.externalId} 与请求的 ${bindingId}/repository/${request.repositoryId} 不一致`))
+  if (acked.bindingId !== repository.bindingId || acked.objectKind !== repository.objectKind || acked.externalId !== repository.externalId) {
+    return reject(projectError(ProjectErrorCode.Conflict, `仓库 ack 的身份 ${acked.bindingId}/${acked.objectKind}/${acked.externalId} 与请求的 ${repository.bindingId}/repository/${repository.externalId} 不一致`))
   }
-  const mounted = (await context.storage.listRepositories(context.workspaceId)).find((mount) => mount.id === request.repositoryId)
-  const identity = await context.storage.findExternalIdentity(bindingId, ExternalIdentityKind.Repository, request.repositoryId)
-  if (mounted !== undefined && mounted.externalIdentityId !== identity?.id) {
-    // 当前绑定下查不到这个仓库的身份，最常见的成因是 Development 绑定 id 跨重启变了（装配时必须固定，#228）；不猜映射（评审 P2）。
-    const cause = identity === undefined ? `当前 Development 绑定 ${bindingId} 下没有它的身份——绑定 id 变了，或仓库来自另一个连接` : `当前绑定下它的身份是 ${identity.id}`
-    return reject(projectError(ProjectErrorCode.Conflict, `工作区已把仓库 ${request.repositoryId} 挂在另一个外部身份上（${cause}）：不猜映射，Development 绑定 id 必须跨重启稳定，多 binding 路由见 #219`))
-  }
-  return { ok: true, register: (tx) => registerParents(tx, context, request, contextId, bindingId) }
+  return { ok: true, register: (tx) => registerParents(tx, context, request, contextId, repository.bindingId) }
 }
 
 /**
@@ -414,11 +401,12 @@ async function verifyExistingWorktree(
   if (record.worktreeExternalId === undefined || record.branchExternalId === undefined) {
     return { ok: false, definite: true, error: projectError(ProjectErrorCode.ResultUnknown, 'ready 上下文缺少工作树或分支身份，不能确认 Saved') }
   }
-  const target = resolveCapability(context.registry, CapabilityKey.DevelopmentWorktreeRead)
-  if (!target.available) return { ok: false, definite: false, error: target.error }
-  const provider = target.binding.development
-  if (provider?.getWorktree === undefined) return { ok: false, definite: false, error: projectError(ProjectErrorCode.NotSupported, '当前 Development provider 没有工作树读能力，不能确认 Saved') }
-  const ref = { bindingId: target.binding.ref.bindingId, objectKind: 'worktree', externalId: record.worktreeExternalId, url: undefined }
+  // 读回也按仓库路由：缺路由（例如重组后换了连接）只是「此刻无法确认」，绝不问另一个连接、也不据此改判 Failed（D8）。
+  const route = await routeDevelopment(context, record.repositoryId, CapabilityKey.DevelopmentWorktreeRead, 'read')
+  if (!route.ok) return { ok: false, definite: false, error: route.error }
+  const { provider } = route
+  if (provider.getWorktree === undefined) return { ok: false, definite: false, error: projectError(ProjectErrorCode.NotSupported, '当前 Development provider 没有工作树读能力，不能确认 Saved') }
+  const ref = { bindingId: route.binding.ref.bindingId, objectKind: 'worktree', externalId: record.worktreeExternalId, url: undefined }
   const observed = await provider.getWorktree({ worktree: ref })
   if (!observed.ok) return { ok: false, definite: observed.error.code === ProviderErrorCode.NotFound, error: toProjectError(observed.error) }
   if (observed.value.branch !== record.branchExternalId) {
