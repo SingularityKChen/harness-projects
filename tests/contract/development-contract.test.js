@@ -23,7 +23,7 @@ const changeRequestInput = { repository, head: 'main', base: 'main', title: '标
 // 预置对象身份与 `objects` 钩子与 fixture 的 `SUITE_EXPECT` 共用一份定义，避免两处漂移；
 // `baseProvider` 是真实 fake + 三条预置分支 + 一份预置工作树。
 const adapterFixture = fileURLToPath(new URL('../fixtures/development-suite-adapters.mjs', import.meta.url))
-const { OPTIONAL_METHOD_KEYS, SUITE_ADAPTERS, SUITE_EXPECT, baseProvider, omitMethods } = await import('../fixtures/development-suite-adapters.mjs')
+const { OPTIONAL_METHOD_KEYS, RULE_LIAR_NAMES, SUITE_ADAPTERS, SUITE_EXPECT, baseProvider, omitMethods } = await import('../fixtures/development-suite-adapters.mjs')
 
 developmentContractSuite({
   label: '离线 Development 替身',
@@ -82,6 +82,66 @@ test('Development 替身：变更请求的反向谱系记在提交上，不重�
   assert.ok(commit, '种子提交必须存在')
   assert.equal(commit.changeRequest.externalId, created.value.ref.externalId, '头部提交必须记住自己属于哪个变更请求')
   assert.equal(commit.changeRequest.objectKind, 'change_request')
+})
+
+test('Development 替身：四种 reviewState 逐个精确透出，union 之外的来源枚举投影为 unknown，不从 open 状态猜结论', async () => {
+  const provider = createFakeDevelopmentProvider({ bindingId })
+  const base = {
+    repository, title: '标题占位', body: '正文占位', state: 'open',
+    headBranch: 'feature/review', headCommit: 'sha-1', sourceVersion: 'sha-1',
+  }
+  const states = ['approved', 'changes_requested', 'review_required', 'unknown']
+  // fake 专属判别器直接构造记录：投影层只要把某一档压成 unknown，approved / changes_requested 正控就会红；
+  // 末尾的 dismissed 是 union 之外的来源枚举，原样透传会让下面的集合比较与 pr-4 的读回一起红。
+  for (const [index, reviewState] of [...states, 'dismissed'].entries()) {
+    provider.state.changeRequests.push({
+      ...base, ref: { ...repository, objectKind: 'change_request', externalId: `pr-${index}` },
+      number: index + 1, reviewState,
+    })
+  }
+  const listed = await provider.listChangeRequests({ repository, cursor: undefined, limit: 100 })
+  assert.deepEqual([...new Set(listed.value.items.map((item) => item.reviewState))].sort(), [...states].sort(),
+    '四种状态必须逐个透出，不得折叠成单一值')
+  const approved = listed.value.items.find((item) => item.reviewState === 'approved')
+  assert.equal(approved.reviewState, 'approved', '来源明确批准是正控：压成 unknown 会让这里变红')
+  assert.equal(listed.value.items.find((item) => item.reviewState === 'changes_requested').reviewState, 'changes_requested',
+    '来源明确要求修改是第二个非 unknown 正控')
+  const read = await provider.getChangeRequest({ ...repository, objectKind: 'change_request', externalId: 'pr-0' })
+  assert.equal(read.value.reviewState, 'approved')
+  assert.equal(read.value.headBranch, 'feature/review', '未知来源不改变已记录的分支事实')
+  const outside = await provider.getChangeRequest({ ...repository, objectKind: 'change_request', externalId: 'pr-4' })
+  assert.equal(outside.value.reviewState, 'unknown', 'union 之外的来源枚举必须投影为 unknown，不得透传或默认 approved')
+})
+
+test('Development 替身：同一提交上的两个分支各自只读回自己的变更请求（相等身份，不按 SHA 反推分支）', async () => {
+  const provider = createFakeDevelopmentProvider({ bindingId })
+  for (const name of ['feature/same-sha-a', 'feature/same-sha-b']) {
+    assert.equal((await provider.createBranch({ repository, name, fromRef: 'main' })).ok, true)
+  }
+  const first = await provider.createChangeRequest({ ...changeRequestInput, head: 'feature/same-sha-a' })
+  const second = await provider.createChangeRequest({ ...changeRequestInput, head: 'feature/same-sha-b' })
+  assert.equal(first.value.sourceVersion, second.value.sourceVersion, '两个分支指向同一头部提交，版本相等')
+  assert.equal(first.value.headBranch, 'feature/same-sha-a')
+  assert.equal(second.value.headBranch, 'feature/same-sha-b')
+  const pageA = await provider.listChangeRequests({ repository, cursor: undefined, limit: 10, headBranch: 'feature/same-sha-a' })
+  assert.deepEqual(pageA.value.items.map((item) => item.ref.externalId), [first.value.ref.externalId],
+    '同 SHA 不得让另一个分支的变更请求混进来')
+})
+
+test('Development 替身：同一 binding 的另一个仓库同名分支不混入过滤结果（repository 身份先于 headBranch）', async () => {
+  const provider = createFakeDevelopmentProvider({ bindingId })
+  const second = { ...repository, externalId: 'repo-beta' }
+  provider.state.repositories.push({ ref: second, name: 'beta', defaultBranch: 'main', sourceUpdatedAt: undefined })
+  provider.state.branches.push({ repository: second, ref: { ...second, objectKind: 'branch', externalId: 'main' }, name: 'main', headCommit: 'sha-1' })
+  const mine = await provider.createChangeRequest(changeRequestInput)
+  const theirs = await provider.createChangeRequest({ ...changeRequestInput, repository: second })
+  assert.equal(mine.ok, true)
+  assert.equal(theirs.ok, true)
+  assert.equal(mine.value.headBranch, 'main')
+  assert.equal(theirs.value.headBranch, 'main', '跨仓同名分支是不同对象，但字段形状相同')
+  const page = await provider.listChangeRequests({ repository, cursor: undefined, limit: 10, headBranch: 'main' })
+  assert.deepEqual(page.value.items.map((item) => item.ref.externalId), [mine.value.ref.externalId],
+    '先按 repository 身份限定后，另一个仓库的同名分支变更请求不得出现')
 })
 
 test('Development 替身：能力未启用时不落任何外部对象', async () => {
@@ -219,7 +279,12 @@ test('development-subset-matrix-rejects-liars：合法子集零退出，坏 adap
   const required = Object.keys(OPTIONAL_METHOD_KEYS)
     .flatMap((method) => ['available-absent', 'undeclared-success', 'ns-sideeffect', 'bare-throw'].map((spec) => `${spec}-${method}`))
     .concat(['getChangeRequest', 'listChangeRequests'].flatMap((method) => [`undeclared-success-${method}`, `ns-sideeffect-${method}`]))
-  for (const name of [...required, 'worktree-identity-swapped', 'cr-read-offline-first', 'cr-create-ambiguous-first', 'ns-sideeffect-createChangeRequest-lineage-input']) {
+  // 变更请求分支与评审规则的坏形态（RULE_LIAR_NAMES）逐个必需：套件里任一条新断言被改成 no-op，对应的坏形态就会零退出。
+  const ruleLiars = ['fresh-reports-approved', 'fresh-reports-changes-requested', 'sha-create-infers-branch', 'sha-reject-not-found',
+    'sha-reject-not-supported', 'sha-reject-retryable', 'sha-reject-side-effect', 'readonly-review-squashed', 'readonly-filter-casefold',
+    'filter-prefix', 'filter-suffix', 'empty-branch-wrong-code', 'missing-prepared-change-request-field']
+  assert.deepEqual([...RULE_LIAR_NAMES].sort(), [...ruleLiars].sort(), '规则坏形态清单必须与夹具一致，不得静默删减')
+  for (const name of [...required, ...ruleLiars, 'worktree-identity-swapped', 'cr-read-offline-first', 'cr-create-ambiguous-first', 'ns-sideeffect-createChangeRequest-lineage-input']) {
     assert.ok(cases.some(([candidate]) => candidate === name), `坏 adapter 矩阵必须覆盖 ${name}`)
   }
   for (const [name, adapter] of cases) {

@@ -4,7 +4,10 @@
  * `{ capabilities: { branchCreate: false } }` 可选能力未启用；`{ faults: { permissionDenied: true } }`
  * 权限被拒；`{ faults: { offline: true } }` 离线；`{ faults: { ambiguousCreate: true } }` 创建结果不确定。
  * `expect`：`{ repository, baseBranch, headCommit, pageSize, worktreePath, worktreeBranch?, worktreeRef?, worktreeRefBranch?,
- * worktreeDupBranch?, objects }`。能力子集从
+ * worktreeDupBranch?, preparedChangeRequest?, objects }`。`preparedChangeRequest` 是适配器预置的一份变更请求事实
+ * `{ ref, headBranch, reviewState }`：声明 `change_request.read` 时套件据它判定 get / list 的分支与评审投影和
+ * headBranch 过滤。只读形态（能读、不能建变更请求）的判别力只能来自它，所以该形态**必须**提供，缺失时具名报「测试装配缺」；
+ * 能现建变更请求的形态可选。能力子集从
  * `describeCapabilities()` 推导，不接受适配器另报一份事实。**判定一律按被测方法自己的 capability key**：
  * 同一族的读与写是两个独立键，「能读不能建」（只读凭据）是合法形态。未声明的能力不是「跳过用例」：套件
  * 仍会断言结构化 `not_supported`、`retryable === false`、调用前后对象集合不变（`expect.objects`，必填；
@@ -44,6 +47,9 @@ const METHOD_KEY = {
   listChangeRequests: CapabilityKey.DevelopmentChangeRequestRead,
   removeWorktree: CapabilityKey.DevelopmentWorktreeRemove,
 }
+
+/** 新建变更请求在创建那一刻允许的审核状态：来源不给结论是 unknown，开了必需审核的仓库明确报 review_required。 */
+const FRESH_REVIEW_STATES = ['unknown', 'review_required']
 
 /** 方法标识：每条失败信息都同时点名方法与 key，坏适配器的红才可定位。 */
 const labelOf = (method) => `${method}（${METHOD_KEY[method]}）`
@@ -90,6 +96,57 @@ async function assertFreshAfterWrite(provider, expected, before, what) {
 /** 拒绝路径：完整对象集合必须原样，不是只看数组长度。 */
 async function assertObjectsUnchanged(provider, expected, before, what) {
   assert.deepEqual(await expected.objects(provider), before, `被拒的 ${what} 不得改动任何对象`)
+}
+
+/**
+ * 刚建的变更请求在创建那一刻还没有任何审核：approved 与 changes_requested 都只能来自审核事实，此刻出现就是
+ * 猜的——把「没有审批」读成任一结论，都会让调用方按平台没说过的事实行动（合并或催作者返工）。
+ */
+function assertFreshReviewState(changeRequest) {
+  assert.ok(FRESH_REVIEW_STATES.includes(changeRequest.reviewState),
+    `新建变更请求在创建时还没有任何审核：reviewState 只能是 unknown 或来源明确报告的 review_required，实际 ${changeRequest.reviewState}`)
+}
+
+/** 按 headBranch 过滤读一次大页：每一项都必须带这个分支事实（字节精确相等），返回命中项的外部 id。 */
+async function idsOnBranch(provider, repository, headBranch, why) {
+  const page = await provider.listChangeRequests({ repository, cursor: undefined, limit: 1000, headBranch })
+  assert.equal(page.ok, true, `非空分支名 ${JSON.stringify(headBranch)} 是合法的过滤输入，未知分支也是成功的空页`)
+  assert.equal(page.value.nextCursor, undefined, '一次大页装得下全部命中项时 nextCursor 必须为 undefined')
+  assert.deepEqual(page.value.items.filter((item) => item.headBranch !== headBranch), [], why)
+  return page.value.items.map((item) => item.ref.externalId)
+}
+
+/**
+ * 字节精确：大小写、首尾空白、真前缀与后缀子串都是另一个分支名，不得命中原分支的变更请求（不 trim、不 case-fold，
+ * 也不是 GitHub 搜索 `head:` 限定符那样的前缀匹配）。
+ */
+async function assertByteExactBranch(provider, repository, branch, hitIds) {
+  const ids = await idsOnBranch(provider, repository, branch, `按 ${branch} 过滤的每一项都必须带这个 headBranch 事实`)
+  assert.ok(hitIds.every((id) => ids.includes(id)), `按 ${branch} 过滤必须命中该分支上的全部已知变更请求`)
+  const variants = [branch.toUpperCase(), ` ${branch}`, `${branch} `, branch.slice(0, -1), branch.slice(1)]
+  for (const variant of variants.filter((candidate) => candidate !== branch && candidate !== '')) {
+    await idsOnBranch(provider, repository, variant, `headBranch 过滤必须字节精确：${JSON.stringify(variant)} 不得命中 ${branch} 的变更请求`)
+  }
+}
+
+/** 从 `cursor: undefined` 起以 limit 1 逐页读完（有界：坏游标以断言失败告终而不是挂住），返回每页的外部 id。 */
+async function walkChangeRequests(provider, scope, bound) {
+  const pages = []
+  let cursor
+  do {
+    assert.ok(pages.length < bound, `游标必须在 ${bound} 页之内结束（实际已读 ${pages.length} 页）`)
+    const page = await provider.listChangeRequests({ ...scope, cursor, limit: 1 })
+    assert.equal(page.ok, true)
+    pages.push(page.value.items.map((item) => item.ref.externalId))
+    cursor = page.value.nextCursor
+  } while (cursor !== undefined)
+  return pages
+}
+
+/** 逐页结果与一次大页**相对**比较：共享状态的适配器里可能还有别的用例留下的对象，不能假设集合从空开始。 */
+function assertSameSet(actual, whole, message) {
+  assert.equal(new Set(actual).size, actual.length, `${message}：无并发写入时每个对象恰好出现一次`)
+  assert.deepEqual([...actual].sort(), [...whole].sort(), message)
 }
 
 /** 装配字段校验：字段缺失是**测试装配**问题，必须在断言里点名，而不是让 undefined 解引用到处炸。 */
@@ -307,6 +364,147 @@ export function developmentContractSuite(adapter) {
       assert.equal(listed.result.ok, true, '声明了 change_request.read 就必须能列出')
       assert.equal(listed.result.value.items.some((item) => item.ref.externalId === target.externalId), created?.ok === true)
     }
+  })
+
+  /**
+   * 预置变更请求事实：只读形态（声明 change_request.read、不声明 create）没有现建对象，投影与字节精确过滤的判别
+   * 只能靠它，所以必须提供；能现建时可选。不声明读时没有可判定的对象，返回 undefined。
+   */
+  const preparedFor = async (provider) => {
+    if (!await declares(provider, 'listChangeRequests')) return undefined
+    const prepared = await declares(provider, 'createChangeRequest')
+      ? expected.preparedChangeRequest
+      : need('preparedChangeRequest', '只读形态的投影与字节精确过滤只能靠预置变更请求事实')
+    if (prepared !== undefined) {
+      assert.ok(typeof prepared.headBranch === 'string' && prepared.headBranch !== '',
+        '测试装配缺 expect.preparedChangeRequest.headBranch：必须是非空分支名')
+    }
+    return prepared
+  }
+
+  /**
+   * 直接提交 sha 作 head 是 provider 的**可选**形态（GitHub 的 `POST /pulls` 只收分支名）：要么建成且不按 sha
+   * 反推分支，要么结构化 `invalid_input`（retryable false）且不留任何对象。返回建成的变更请求，被拒时为 undefined。
+   */
+  const createFromSha = async (provider, create) => {
+    const before = await expected.objects(provider)
+    const result = await create(crInput(repository, expected.headCommit, expected.baseBranch))
+    if (result.ok) {
+      assert.equal(result.value.headBranch, undefined, '直接提交 SHA 输入不得反推分支身份')
+      assert.equal(result.value.sourceVersion, expected.headCommit)
+      assertFreshReviewState(result.value)
+      return result.value
+    }
+    assert.equal(result.error.code, 'invalid_input', '不接受 sha 作 head 时必须答结构化 invalid_input，而不是别的失败')
+    assert.equal(result.error.retryable, false, 'sha 作 head 被拒是输入形态问题，不可重试')
+    await assertObjectsUnchanged(provider, expected, before, '直接提交 SHA 输入')
+    return undefined
+  }
+
+  test(`${label}：变更请求的分支与评审事实（change-request-head-branch-and-review-facts）`, async () => {
+    const provider = makeProvider({})
+    // reviewState 是 CR 读快照的字段，不构成独立能力：声明 review.read 才是虚构能力面。这条与 create 是否声明
+    // 无关，必须在任何早退之前断言，否则只读子集 / 本地 Git / 省略方法的 provider 根本走不到。
+    assert.equal(accessOf(await provider.describeCapabilities(), CapabilityKey.DevelopmentReviewRead), 'unavailable',
+      'reviewState 不得升格成独立的 review.read 能力声明（port 没有对应方法）')
+    // 预置事实按 read 自己的键判定（get / list 同属 change_request.read），在 create 门之前：只读形态的投影判别靠它。
+    const prepared = await preparedFor(provider)
+    if (prepared !== undefined) {
+      const read = await provider.getChangeRequest(prepared.ref)
+      assert.equal(read.ok, true, '预置变更请求必须能按外部 id 读回')
+      assert.equal(read.value.headBranch, prepared.headBranch, '预置事实的 headBranch 必须原样投影')
+      assert.equal(read.value.reviewState, prepared.reviewState, '来源给出的审核结论必须原样投影，不得压成 unknown')
+      const listed = await provider.listChangeRequests({ repository, cursor: undefined, limit: 1000 })
+      assert.deepEqual(listed.value.items.find((item) => item.ref.externalId === prepared.ref.externalId), read.value,
+        'list 与 get 必须透出同一份预置事实')
+    }
+    if (!await declares(provider, 'createChangeRequest')) {
+      await assertUndeclaredRejected(provider, 'createChangeRequest', crInput(repository, expected.baseBranch, expected.baseBranch), expected)
+      return
+    }
+    const create = implemented(provider, 'createChangeRequest')
+    const fromBranch = await create(crInput(repository, expected.baseBranch, expected.baseBranch))
+    assert.equal(fromBranch.ok, true)
+    assert.equal(fromBranch.value.headBranch, expected.baseBranch, '分支名输入必须投影出真实 headBranch')
+    assertFreshReviewState(fromBranch.value)
+    const fromSha = await createFromSha(provider, create)
+    // create / get / list 三面必须透出同一字段组：某一面漏字段就会在这里变红。
+    if (await declares(provider, 'getChangeRequest')) {
+      const listed = await provider.listChangeRequests({ repository, cursor: undefined, limit: 1000 })
+      const byRef = new Map(listed.value.items.map((item) => [item.ref.externalId, item]))
+      for (const created of fromSha === undefined ? [fromBranch.value] : [fromBranch.value, fromSha]) {
+        assert.deepEqual((await provider.getChangeRequest(created.ref)).value, created, 'get 必须与 create 透出同一份分支与评审事实')
+        assert.deepEqual(byRef.get(created.ref.externalId), created, 'list 必须与 create 透出同一份分支与评审事实')
+      }
+    }
+  })
+
+  test(`${label}：变更请求先按 headBranch 过滤再分页（change-request-filter-before-pagination）`, async () => {
+    const provider = makeProvider({})
+    // 被测方法是 listChangeRequests，判定按它自己的键（change_request.read），不按 create：不需要现建对象的断言
+    // （空串、未知分支、预置事实的字节精确过滤）对只读形态同样成立，所以都在 create 门之前。
+    if (!await declares(provider, 'listChangeRequests')) {
+      await assertUndeclaredRejected(provider, 'listChangeRequests', { repository, cursor: undefined, limit: 1, headBranch: expected.baseBranch }, expected)
+      return
+    }
+    const empty = await provider.listChangeRequests({ repository, cursor: undefined, limit: 10, headBranch: '' })
+    assert.equal(empty.ok, false, '空串分支名是输入错误：不 trim、不 case-fold、不当作不筛选')
+    assert.equal(empty.error.code, 'invalid_input', '空串分支名必须答结构化 invalid_input')
+    assert.equal(empty.error.retryable, false, '空串分支名是调用方的输入错误，不可重试')
+    assert.deepEqual(await idsOnBranch(provider, repository, 'feature/absent', '未知分支不得命中任何对象'), [], '未知但非空的分支是成功的空页')
+    const prepared = await preparedFor(provider)
+    if (prepared !== undefined) await assertByteExactBranch(provider, repository, prepared.headBranch, [prepared.ref.externalId])
+    if (!await declares(provider, 'createChangeRequest')) {
+      await assertUndeclaredRejected(provider, 'createChangeRequest', crInput(repository, expected.baseBranch, expected.baseBranch), expected)
+      return
+    }
+    const create = implemented(provider, 'createChangeRequest')
+    // 分支创建是独立可选能力：能建时诱饵是「不同分支 + 同一提交的另一分支」；不能建时以 expected.baseBranch 为
+    // 目标、预置的 worktreeBranch 为诱饵分支。直接 sha 的 detached 诱饵只在 provider 接受 sha 作 head 时存在。
+    const canCreateBranch = await declares(provider, 'createBranch')
+    const targetBranch = canCreateBranch ? 'feature/filter-a' : expected.baseBranch
+    const decoyBranches = canCreateBranch
+      ? ['feature/filter-b', expected.baseBranch]
+      : [need('worktreeBranch', '分支创建不可用时过滤用例以预置分支作诱饵')]
+    for (const name of canCreateBranch ? ['feature/filter-a', 'feature/filter-b'] : []) {
+      const branch = await implemented(provider, 'createBranch')({ repository, name, fromRef: expected.baseBranch })
+      assert.equal(branch.ok, true, `${name} 必须建得出来，否则分支过滤没有足够输入`)
+    }
+    assert.equal(decoyBranches.includes(targetBranch), false, '诱饵分支不得与目标分支相同')
+    const make = async (head) => {
+      const created = await create(crInput(repository, head, expected.baseBranch))
+      assert.equal(created.ok, true, `以分支 ${head} 为 head 的变更请求必须建得出来`)
+      return created.value
+    }
+    const expectedIds = [(await make(targetBranch)).ref.externalId, (await make(targetBranch)).ref.externalId]
+    const decoys = []
+    for (const branch of decoyBranches) decoys.push(await make(branch))
+    const detached = await createFromSha(provider, create)
+    if (detached !== undefined) decoys.push(detached)
+    // 两个 scope 都与同 scope 的一次大页**相对**比较：共享状态的适配器里可能还有别的用例留下的对象。页数上界取
+    // 全体对象数，让「先分页再过滤」走完游标、红在下面「每页都有命中项」的具名断言，而不是先撞上界。
+    const wholeB = await provider.listChangeRequests({ repository, cursor: undefined, limit: 1000 })
+    assert.equal(wholeB.ok, true, '不提供 headBranch 表示不筛选，scope B 必须可读')
+    const wholeBIds = wholeB.value.items.map((item) => item.ref.externalId)
+    const pageBound = wholeBIds.length + 2
+    // 先过滤后分页：limit 1 逐页读到的必须与目标分支的一次大页是同一集合，且每页都有命中项——先分页再过滤会在
+    // 诱饵的位置吐出空页。
+    const wholeA = await idsOnBranch(provider, repository, targetBranch, '过滤后的每一项都必须命中目标分支')
+    assert.ok(expectedIds.every((id) => wholeA.includes(id)), '按目标分支过滤必须命中本用例在该分支上建的全部变更请求')
+    for (const decoy of decoys) assert.equal(wholeA.includes(decoy.ref.externalId), false, '非目标分支的变更请求不得混入过滤结果')
+    const pagesA = await walkChangeRequests(provider, { repository, headBranch: targetBranch }, pageBound)
+    assert.ok(pagesA.every((page) => page.length === 1), '先过滤后分页时每一页都必须有命中项；先分页再过滤会返回空页')
+    assertSameSet(pagesA.flat(), wholeA, '先过滤后分页必须恰好枚举目标分支的全部变更请求，不重不漏')
+    // 过滤匹配解析后的 headBranch 事实而不是创建时的原始 head 串，且字节精确（不 trim、不 case-fold）。
+    await idsOnBranch(provider, repository, expected.headCommit, '按 sha 过滤不得带出以该 sha 直接创建的 detached 变更请求')
+    await assertByteExactBranch(provider, repository, targetBranch, expectedIds)
+    // 改变 scope 必须从 cursor undefined 重新读取（用旧游标读新 scope 不是本 port 承诺的行为），并完整枚举
+    // 包含本用例全部对象的 scope B。
+    assert.ok([...expectedIds, ...decoys.map((item) => item.ref.externalId)].every((id) => wholeBIds.includes(id)),
+      'scope B 必须包含本用例建的全部变更请求（目标与诱饵）')
+    const pagesB = await walkChangeRequests(provider, { repository }, pageBound)
+    assertSameSet(pagesB.flat(), wholeBIds, '改变 scope 后从 cursor undefined 重新读取必须完整枚举 scope B')
+    assert.equal(pagesB.length, wholeBIds.length, 'limit 1 时 scope B 的页数必须等于对象数')
   })
 
   test(`${label}：原生谱系——分支头部提交按外部 id 找回，变更请求版本锚定或按子集拒答`, async () => {

@@ -10,6 +10,7 @@ import { test } from 'node:test'
 
 import * as cap from '@harness-projects/capabilities'
 import { compareSourceVersion, isComparableSourceVersion, makeObservation, observationDedupeKey, scopedSubjectKey, stablePayloadHash } from '@harness-projects/capabilities'
+import { createFakeDevelopmentProvider } from '@harness-projects/provider-fake'
 
 const subject = (bindingId = 'binding-a', externalId = 'issue-1') => ({ bindingId, objectKind: 'issue', externalId, url: undefined })
 
@@ -151,6 +152,40 @@ test('#203 的反例经归一后码点序即时间序（比较器不变）', () 
   // 对照：原始串直接比较会把更新的判成更旧，这就是必须先归一的原因。
   assert.equal(compareSourceVersion('2026-09-21T07:11:54.500Z', '2026-09-21T07:11:54Z'), -1)
   for (const raw of ['9', '10', 'v9', 'v10']) assert.equal(isComparableSourceVersion(raw), false, raw)
+})
+
+test('development-observation-version-remains-canonical：CR 的 SHA 身份不进观察定序，只按引用相等读回', async () => {
+  // 判别性内核只有两点：① sha / v9 / v10 永远不是观察 sourceVersion（CR 的 sourceVersion 是另一字段）；
+  // ② 两个词法顺序相反的 sha 作为 CR 身份各自按**引用**相等读回，不因任何排序 / 比较器回归串味。② 按两种创建
+  // 顺序各跑一次：只跑升序时「取最大」类回归恰好读回正确值，只跑降序时「取最小」类回归同样漏网。
+  // 观察侧的乱序拒绝与「sha 不是载体」的主判据在 tests/contract/suites/storage-sync.js 的两个 Storage 实现组上，
+  // ① 只是 Development 侧的护栏。
+  const shaSmall = '0'.repeat(40)
+  const shaLarge = 'f'.repeat(40)
+  assert.ok(shaSmall < shaLarge, '两个 sha 的词法顺序是前提，用它证明读取不走排序')
+  for (const version of [shaSmall, shaLarge, 'v9', 'v10']) {
+    assert.throws(() => makeObservation(input({ sourceVersion: version })), /规范载体/,
+      `${version} 不得成为观察 sourceVersion`)
+  }
+
+  const repository = { bindingId: 'binding-a', objectKind: 'repository', externalId: 'repo-alpha', url: undefined }
+  for (const order of [[shaSmall, shaLarge], [shaLarge, shaSmall]]) {
+    const provider = createFakeDevelopmentProvider({ bindingId: 'binding-a' })
+    for (const sha of order) {
+      provider.state.commits.push({ ref: { ...repository, objectKind: 'commit', externalId: sha }, sha, message: undefined, changeRequest: undefined })
+    }
+    const created = []
+    for (const sha of order) {
+      const result = await provider.createChangeRequest({ repository, head: sha, base: 'main', title: '标题占位', body: '正文占位' })
+      assert.equal(result.ok, true)
+      assert.equal(result.value.headBranch, undefined, '直接 sha 输入不反推分支，因此两个 CR 都是 detached 身份')
+      created.push([sha, result.value.ref])
+    }
+    for (const [sha, ref] of created) {
+      assert.equal((await provider.getChangeRequest(ref)).value.sourceVersion, sha,
+        `创建顺序 ${order.map((item) => item[0]).join('→')}：读取按引用相等，不按版本排序`)
+    }
+  }
 })
 
 test('makeObservation 与入口断言拒绝非规范 sourceVersion', () => {
