@@ -5,8 +5,9 @@ import {
   CapabilityKey, ProjectErrorCode, projectError, type ExternalObjectRef, type ProjectError, type ResolvedBinding,
 } from '@harness-projects/capabilities'
 import { ExecutionContextStatus, ProviderErrorCode, type ExecutionContextId, type ProviderBindingId } from '@harness-projects/domain'
-import { resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
+import { toProjectError, unsupportedCapability } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
+import { routeDevelopment } from './development-route.ts'
 import { StartWorkFallback, type StartOutcome, type StartWorkRequest } from './execution-context.ts'
 import {
   beginWrite, confirmWrite, markFailed, markUnknown, markWriting, reconcileWrite, WritePhase,
@@ -116,16 +117,10 @@ export async function provisionGit(
   context: CoreContext, request: StartWorkRequest, names: Names, contextId: ExecutionContextId,
   recordStep: RecordStep = async () => {},
 ): Promise<GitOutcome> {
-  const target = resolveWriteTarget(context.registry, CapabilityKey.DevelopmentWorktreeCreate)
-  const provider = target.binding?.development
-  const bindingId = target.binding?.ref.bindingId
-  if (target.binding === undefined || provider === undefined) {
-    const error = target.error ?? unsupportedCapability(CapabilityKey.DevelopmentWorktreeCreate)
-    return gitFailure(contextId, markFailed(beginWrite(names.path), error), bindingId, undefined)
-  }
-  const repository: ExternalObjectRef = {
-    bindingId: target.binding.ref.bindingId, objectKind: 'repository', externalId: request.repositoryId, url: undefined,
-  }
+  const route = await routeDevelopment(context, request.repositoryId, CapabilityKey.DevelopmentWorktreeCreate, 'write')
+  if (!route.ok) return gitFailure(contextId, markFailed(beginWrite(names.path), route.error), undefined, undefined)
+  const { provider, repository } = route
+  const bindingId = repository.bindingId
   // 恢复：上下文里已经记录了分支步的结果就**整个跳过它**——不解析 `fromRef`，因此「基线是否
   // 前进」不进入判定。分支名是身份，我们记录的那一行是所有权（批次计划 D1 / D2）。
   const recorded = await context.storage.getExecutionContext(contextId)

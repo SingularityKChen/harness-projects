@@ -7,7 +7,7 @@ import {
   type CapabilityKey, type ProviderError, type ProviderRegistry, type ResolvedBinding,
 } from '@harness-projects/capabilities'
 import { ProjectErrorCode, projectError, type ProjectError } from '@harness-projects/domain'
-import { resolveCapability } from './registry.ts'
+import { resolveBinding, resolveCapability, type CapabilityResolution } from './registry.ts'
 
 export type CommandMode = 'read' | 'write'
 
@@ -28,7 +28,15 @@ export function effectiveAccess(registry: ProviderRegistry, key: CapabilityKey):
 
 /** 命令入口的拒绝检查：拒绝是结构化结果，不是异常；写命令不得在 read_only 下静默成功。 */
 export function gateCommand(registry: ProviderRegistry, key: CapabilityKey, mode: CommandMode): CommandGate {
-  const resolution = resolveCapability(registry, key)
+  return gateOn(resolveCapability(registry, key), key, mode)
+}
+
+/** 在一个已选定（例如按仓库路由到）的挂载上过门：一次操作只路由一次，其余 key 都在同一个挂载上判定。 */
+export function gateBinding(binding: ResolvedBinding | undefined, key: CapabilityKey, mode: CommandMode): CommandGate {
+  return gateOn(resolveBinding(binding, key), key, mode)
+}
+
+function gateOn(resolution: CapabilityResolution, key: CapabilityKey, mode: CommandMode): CommandGate {
   if (!resolution.available) return denied(AccessLevel.Unavailable, resolution.error)
   if (mode === 'write' && resolution.access === AccessLevel.ReadOnly) {
     return denied(resolution.access, projectError(ProjectErrorCode.PermissionDenied, `能力 ${key} 当前只读，写命令被拒绝`))

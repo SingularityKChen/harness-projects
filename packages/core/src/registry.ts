@@ -13,10 +13,11 @@ import {
   ProjectErrorCode, type ProjectError, type WorkspaceId,
 } from '@harness-projects/domain'
 
-/** 注入表：四个能力域各自一个可选 provider，外加本地 storage；core 不 import 任何实现。 */
+/** 注入表：每个能力域一个可选 provider（Development 可以是多个），外加本地 storage；core 不 import 任何实现。 */
 export interface CoreProviderTable {
   readonly planning?: PlanningProvider
-  readonly development?: DevelopmentProvider
+  /** 单个与单元素数组同义；空数组即没有挂载。唯一挂载是默认，多个挂载一律非默认、命令按仓库路由（`development-route.ts`）。 */
+  readonly development?: DevelopmentProvider | readonly DevelopmentProvider[]
   readonly delivery?: DeliveryProvider
   readonly execution?: ExecutionProvider
   readonly executionFallback?: ExecutionProvider
@@ -35,7 +36,7 @@ export interface PreparedBindings {
   readonly records: readonly ProviderBindingRecord[]
 }
 
-/** 注入槽位 → 挂载域与角色：主槽位 isDefault=true，执行备用 isDefault=false。 */
+/** 注入槽位 → 挂载域与角色：主槽位 isDefault=true，执行备用 isDefault=false；Development 只在恰好一个挂载时是默认（`mountsOf`）。 */
 const MOUNT_SLOTS = [
   ['planning', 'planning', true], ['development', 'development', true], ['delivery', 'delivery', true],
   ['execution', 'execution', true], ['executionFallback', 'execution', false],
@@ -75,9 +76,16 @@ function mountsOf(providers: CoreProviderTable): readonly Mount[] {
   for (const [slot, port] of Object.entries(providers)) if (port !== undefined && !SLOT_NAMES.includes(slot)) reject(`未知的 provider 槽位 ${slot}`)
   const mounts: Mount[] = []
   const domainSets = new Map<string, string>()
-  for (const [slot, domain, isDefault] of MOUNT_SLOTS) {
-    const port = providers[slot] as unknown as Record<string, unknown> | undefined
-    if (port === undefined) continue
+  // 每个槽位展开成 0..N 个挂载：只有 development 接受数组，其余槽位的数组照旧按「port 缺少必需方法」拒绝。
+  const slots = MOUNT_SLOTS.flatMap(([name, domain, primary]) => {
+    const value: unknown = providers[name]
+    const peers = name === 'development' && Array.isArray(value)
+    const ports: readonly unknown[] = peers ? value : value === undefined ? [] : [value]
+    const isDefault = name === 'development' ? ports.length === 1 : primary
+    return ports.map((port, index) => [peers ? `${name}[${index}]` : name, domain, isDefault, port] as const)
+  })
+  for (const [slot, domain, isDefault, raw] of slots) {
+    const port = raw as Record<string, unknown>
     const [required, optional] = PORT_METHODS[domain]
     const callable = (name: string): boolean => typeof port[name] === 'function'
     if (typeof port !== 'object' || port === null || !callable('describeCapabilities') || !required.every(callable)) reject(`槽位 ${slot} 的 port 缺少必需方法`)
@@ -147,11 +155,18 @@ export type CapabilityResolution =
 
 /** 按 key 找提供它的绑定；找不到或不可用给出结构化结论。 */
 export function resolveCapability(registry: ProviderRegistry, key: CapabilityKey): CapabilityResolution {
-  const binding = bindingForCapability(registry, key)
-  if (binding === undefined) return unavailableCapability(`没有绑定提供能力 ${key}`)
-  const access = binding.capabilities.find((capability) => capability.key === key)?.access ?? AccessLevel.Unavailable
-  if (access === AccessLevel.Unavailable) return unavailableCapability(`能力 ${key} 当前不可用`)
-  return { available: true, access, binding }
+  return resolveBinding(bindingForCapability(registry, key), key)
+}
+
+/**
+ * 在一个已选定的挂载上判定 key：挂载缺失或没有声明该 key 是「没有绑定提供能力」（与按 key 解析时 `bindingForCapability` 对未声明 key 返回 undefined 的措辞一致），
+ * 声明了但不可用是「当前不可用」；都是结构化不可用，绝不改找别的挂载。
+ */
+export function resolveBinding(binding: ResolvedBinding | undefined, key: CapabilityKey): CapabilityResolution {
+  const declared = binding?.capabilities.find((capability) => capability.key === key)
+  if (binding === undefined || declared === undefined) return unavailableCapability(`没有绑定提供能力 ${key}`)
+  if (declared.access === AccessLevel.Unavailable) return unavailableCapability(`能力 ${key} 当前不可用`)
+  return { available: true, access: declared.access, binding }
 }
 
 function unavailableCapability(reason: string): CapabilityResolution {

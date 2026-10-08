@@ -95,13 +95,17 @@ const mount = (domain, bindingId, isDefault, keys = {}, workspaceId = 'ws-1') =>
   planning: undefined, development: undefined, delivery: undefined, execution: undefined, storage: undefined, [domain]: {},
 })
 
-test('providerRegistry：同 id 跨域与主 + 备用合法；跨工作区、重复挂载、多个 Planning（默认）、多个备用与非 Execution 备用、串域 port 被拒绝而不是取第一条', () => {
+test('providerRegistry：同 id 跨域、主 + 备用与多个对等 Development 合法；跨工作区、重复挂载、多个默认、多个备用、非 Execution 备用、Development 角色不一致与串域 port 被拒绝而不是取第一条', () => {
   const planning = mount('planning', 'conn-1', true)
   assert.equal(providerRegistry([planning, mount('development', 'conn-1', true), mount('execution', 'run-1', true), mount('execution', 'run-2', false)]).bindings.length, 4)
+  assert.equal(providerRegistry([planning, mount('development', 'dev-a', false), mount('development', 'dev-b', false), mount('development', 'dev-c', false)]).bindings.length, 4, '多个 Development 对等挂载（按仓库路由）合法')
   for (const [bindings, message] of [
     [[planning, mount('planning', 'conn-1', false)], /重复/],
     [[planning, mount('planning', 'conn-2', true)], /默认/],
-    [[mount('development', 'conn-1', false)], /备用/],
+    [[mount('development', 'conn-1', false)], /角色/],
+    [[mount('development', 'dev-a', true), mount('development', 'dev-b', false)], /角色/],
+    [[mount('development', 'dev-a', true), mount('development', 'dev-b', true)], /默认/],
+    [[mount('delivery', 'conn-1', false)], /备用/],
     [[mount('execution', 'run-1', true), mount('execution', 'run-2', false), mount('execution', 'run-3', false)], /多个备用/],
     [[mount('execution', 'run-1', true), mount('execution', 'run-2', true)], /默认/],
     [[planning, mount('development', 'conn-1', true, {}, 'ws-2')], /工作区/],
@@ -131,4 +135,15 @@ test('bindingForRef：严格匹配工作区 + 连接 + 域并要求启用；重�
   assert.deepEqual([find({}), find({ domain: 'delivery' }), find({ workspaceId: 'ws-2' }), find({ bindingId: 'conn-2' })], [development, undefined, undefined, undefined])
   assert.equal(find({}, { bindings: [{ ...development, enabled: false }] }), undefined, '未启用的挂载不是目标')
   assert.throws(() => find({}, { bindings: [development, development] }), { name: 'TypeError', message: /重复/ })
+})
+
+test('bindingForCapability：同域多个对等挂载时 key 级解析拒绝而不是取第一条，也不按「唯一声明者」改道；单个挂载照旧选中', () => {
+  const { Available } = AccessLevel
+  const { DevelopmentRepositoryRead, DevelopmentChangeRequestRead } = CapabilityKey
+  const both = { [DevelopmentRepositoryRead]: Available }
+  const peers = [mount('development', 'dev-a', false, both), mount('development', 'dev-b', false, { ...both, [DevelopmentChangeRequestRead]: Available }), mount('development', 'dev-c', false, both)]
+  for (const count of [2, 3]) {
+    assert.deepEqual([DevelopmentRepositoryRead, DevelopmentChangeRequestRead].map((key) => bindingForCapability({ bindings: peers.slice(0, count) }, key)), [undefined, undefined], `${count} 个对等挂载`)
+  }
+  assert.equal(bindingForCapability({ bindings: [mount('development', 'dev-a', true, both)] }, DevelopmentRepositoryRead)?.ref.bindingId, 'dev-a')
 })
