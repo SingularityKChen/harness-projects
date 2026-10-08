@@ -33,11 +33,12 @@ export interface FakeStorageData {
   revisions: { workspaceId: domain.WorkspaceId; revision: number }[]
   memberships: cap.MembershipRecord[]
   fieldValues: cap.FieldValueRecord[]
+  deliveryFacts: cap.DeliveryFactsRecord[]
 }
 export function emptyStorageData(): FakeStorageData {
   return { workspaces: [], providerBindings: [], workspaceBindings: [], accounts: [], bindingAccounts: [], bindingConfigurations: [],
     entities: [], identities: [], projections: [], repositories: [],
-    contexts: [], runs: [], relations: [], observations: [], cursors: [], reconcileCursors: [], attempts: [], revisions: [], memberships: [], fieldValues: [] }
+    contexts: [], runs: [], relations: [], observations: [], cursors: [], reconcileCursors: [], attempts: [], revisions: [], memberships: [], fieldValues: [], deliveryFacts: [] }
 }
 /** 版本定序的唯一判据来自 capabilities（与 SQLite 的 BINARY 同判据）；本文件不再自写一份比较器。 */
 const compareSourceVersion = cap.compareSourceVersion
@@ -356,12 +357,13 @@ export class MemoryStorage implements cap.Storage {
   /**
    * 关系：工作区必须存在，`state` / `source` 必须是 domain 的已知取值，candidate 不接受 `explicit`
    * （`explicit` 按 domain 的 `initialRelationState` 只能进 confirmed）——三条与 SQLite 的
-   * `relation` / `candidate_relation` CHECK 同语义。两端（`from` / `to`）**仍然分叉**：SQLite 的外键拒绝未登记的
-   * 实体，替身接受——core 会把谱系边写到从未 `putEntity` 的实体上（issue #187），由执行组的显式用例按能力位断言。
+   * `relation` / `candidate_relation` CHECK 同语义。两端（`from` / `to`）必须是已登记实体，与 SQLite 的端点外键同语义
+   * （#221 对齐：唯一的谱系写者先登记端点），共享执行组有用例钉住。
    */
   async putRelation(workspaceId: domain.WorkspaceId, relation: domain.Relation): Promise<void> {
     return this.#mutate(() => {
       if (!this.data.workspaces.some((workspace) => workspace.id === workspaceId)) throw new Error('relation workspace does not exist')
+      if (![relation.from, relation.to].every((id) => this.data.entities.some((entity) => entity.id === id))) throw new Error('relation endpoint entity does not exist')
       if (!RELATION_STATES.includes(relation.state)) throw new Error(`relation state is not a known value: ${relation.state}`)
       if (!RELATION_SOURCES.includes(relation.source)) throw new Error(`relation source is not a known value: ${relation.source}`)
       if (relation.state === domain.RelationState.Candidate && relation.source === domain.RelationSource.Explicit) throw new Error('candidate relation source must be deterministic or lineage')
@@ -373,6 +375,14 @@ export class MemoryStorage implements cap.Storage {
     })
   }
   async listRelations(workspaceId: domain.WorkspaceId): Promise<readonly domain.Relation[]> { return this.data.relations.filter((r) => r.workspaceId === workspaceId).map((r) => r.relation) }
+  async getDeliveryFacts(workspaceId: domain.WorkspaceId, contextId: domain.ExecutionContextId): Promise<cap.DeliveryFactsRecord | undefined> { return structuredClone(this.data.deliveryFacts.find((r) => r.workspaceId === workspaceId && r.contextId === contextId)) }
+  /** 整行覆盖；父行是同一工作区里的执行上下文（与 006 的复合外键同语义），缺失即拒绝且不留行。 */
+  async putDeliveryFacts(record: cap.DeliveryFactsRecord): Promise<void> {
+    return this.#mutate(() => {
+      if (!this.data.contexts.some((c) => c.id === record.contextId && c.workspaceId === record.workspaceId)) throw new Error('delivery facts context does not exist in the workspace')
+      upsert(this.data.deliveryFacts, structuredClone(record), (r) => r.workspaceId === record.workspaceId && r.contextId === record.contextId)
+    })
+  }
   /**
    * false 表示本次观察未被应用（重复或乱序），调用方不得读成“已应用”。
    * 观察的主体是连接：`bindingId` 必须已登记（与 SQLite 的 `sync_observation.binding_id` 外键同语义）——

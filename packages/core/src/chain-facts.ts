@@ -8,7 +8,7 @@
  */
 import {
   CapabilityKey, providerErr, providerError, providerOk,
-  type ExternalObjectRef, type ProviderPage, type ProviderResult, type ResolvedBinding,
+  type ExternalObjectRef, type ProjectError, type ProviderPage, type ProviderResult, type ResolvedBinding,
 } from '@harness-projects/capabilities'
 import { EngineeringFactKind, EntityKind, ProviderErrorCode, type EntityId, type WorkspaceId } from '@harness-projects/domain'
 import { gateCommand } from './capabilities.ts'
@@ -112,47 +112,60 @@ function factFor(status: string, conclusion: string | undefined): EngineeringFac
     ? EngineeringFactKind.CiFailed : undefined
 }
 
-/** 读能力门：未声明/只读以外一律折成 gap；provider 缺失也走同一条路，调用方永远拿到结构化结论。 */
-async function gated<T>(context: CoreContext, key: CapabilityKey,
-  run: (binding: ResolvedBinding) => Promise<ProviderResult<T>> | undefined): Promise<ReadResult<T>> {
+/** 一次读取的路由结论：成功时带服务这次读取的挂载，Development 读取另带该连接下的仓库引用（调用方只用它调 provider）。 */
+type ReadRoute = { readonly ok: true; readonly binding: ResolvedBinding; readonly repository?: ExternalObjectRef } | { readonly ok: false; readonly error: ProjectError | undefined }
+
+/** key 级解析：能力被策略摘掉或没有绑定时，路由失败，调用方折成缺口。 */
+function readRoute(context: CoreContext, key: CapabilityKey): ReadRoute {
   const gate = gateCommand(context.registry, key, 'read')
-  if (!gate.allowed || gate.binding === undefined) return { value: undefined, gap: { key, reason: gate.error?.message ?? '能力不可用' } }
-  const pending = run(gate.binding)
+  return gate.allowed && gate.binding !== undefined ? { ok: true, binding: gate.binding } : { ok: false, error: gate.error }
+}
+
+/**
+ * Development 读取的**唯一**路由缝（CONTRACTS K3）：返回 `{ binding, repository }`，调用方只用这个 `repository` 调 provider，不再自己拼引用；今天按 key 级解析，
+ * 路由失败得到缺口，不读错连接。#219 与 #221 都进 main 后，由 #297 把函数体换成 `routeDevelopment(...)`（人类伙伴 2026-10-08 裁决）。
+ * 引用只用于调用 provider，**不参与任何实体身份**：工作树的身份只从执行上下文记录取 `repositoryId`（见 `worktreeEntityId`）。
+ */
+async function developmentReadBinding(context: CoreContext, key: CapabilityKey, repositoryId: string): Promise<ReadRoute> {
+  const route = readRoute(context, key)
+  return route.ok ? { ...route, repository: refFor(route.binding, 'repository', repositoryId) } : route
+}
+
+/**
+ * 读能力门：路由失败、provider 缺失或失败一律折成 gap。Development 的两处查找另带 `settled`（#221）：页没读完、要找的又不在这一页也是 gap，
+ * 截断不得被当成"已确认不存在"，找到即完整。默认谓词只认 #295 的 `collectDeliveryPages` 交来的完整数组：单页结果不带自己的谓词就一律是缺口（fail closed）。
+ */
+async function gated<T>(route: ReadRoute, key: CapabilityKey,
+  run: (binding: ResolvedBinding, repository: ExternalObjectRef | undefined) => Promise<ProviderResult<T>> | undefined,
+  settled: (value: T) => boolean = (value) => Array.isArray(value)): Promise<ReadResult<T>> {
+  if (!route.ok) return { value: undefined, gap: { key, reason: route.error?.message ?? '能力不可用' } }
+  const pending = run(route.binding, route.repository)
   if (pending === undefined) return { value: undefined, gap: { key, reason: '绑定没有该域的 provider 实例' } }
   const result = await pending
   if (!result.ok) return { value: undefined, gap: { key, reason: result.error.message } }
+  if (!settled(result.value)) return { value: undefined, gap: { key, reason: '分页未读完' } }
   return { value: result.value, gap: undefined }
 }
 
 function collect(gaps: CapabilityGap[], gap: CapabilityGap | undefined): void { if (gap !== undefined) gaps.push(gap) }
 
-/**
- * 把仓库 id 解析成一个 binding 作用域的 provider 引用——**只用于调用 provider**（读分支头、变更请求、
- * 流水线）。它**不参与任何实体身份**：工作树的身份只从执行上下文记录取 `repositoryId`（见
- * `worktreeEntityId`），因为这条解析走的是 `DevelopmentRepositoryRead`，与写入侧走的
- * `DevelopmentWorktreeCreate` 是两个可以独立不可用的 capability key。
- */
-async function resolveRepository(context: CoreContext, repositoryId: string, gaps: CapabilityGap[]): Promise<ExternalObjectRef | undefined> {
-  const key = CapabilityKey.DevelopmentRepositoryRead
-  const gate = gateCommand(context.registry, key, 'read')
-  if (!gate.allowed || gate.binding === undefined) {
-    collect(gaps, { key, reason: gate.error?.message ?? '不能定位仓库绑定的 capability' })
-    return undefined
-  }
-  return refFor(gate.binding, 'repository', repositoryId)
-}
-
-async function readHeadCommit(context: CoreContext, repository: ExternalObjectRef, branch: string, gaps: CapabilityGap[]): Promise<string | undefined> {
-  const read = await gated(context, CapabilityKey.DevelopmentRepositoryRead, (binding) =>
-    binding.development?.listBranches({ repository, cursor: undefined, limit: PAGE_LIMIT }))
+async function readHeadCommit(route: ReadRoute, branch: string, gaps: CapabilityGap[]): Promise<string | undefined> {
+  const read = await gated(route, CapabilityKey.DevelopmentRepositoryRead, (binding, repository) =>
+    repository === undefined ? undefined : binding.development?.listBranches({ repository, cursor: undefined, limit: PAGE_LIMIT }),
+  (page) => page.nextCursor === undefined || page.items.some((item) => item.name === branch))
   collect(gaps, read.gap)
-  return read.value?.items.find((item) => item.name === branch)?.headCommit
+  const found = read.value?.items.find((item) => item.name === branch)
+  // 分支存在而头部提交未知，不是「没有头部提交」：不能当作锚点确认不存在，否则下游事实会被整组删除（#221 验收 3）。
+  if (found !== undefined && found.headCommit === undefined) collect(gaps, { key: CapabilityKey.DevelopmentRepositoryRead, reason: '分支没有头部提交' })
+  return found?.headCommit
 }
 
 /** 只认头部提交匹配的变更请求：不匹配就当没观察到，绝不把别的分支的提交挂到本链上。 */
-async function readChangeRequest(context: CoreContext, repository: ExternalObjectRef, head: string, gaps: CapabilityGap[]): Promise<ChangeRequestFact | undefined> {
-  const read = await gated(context, CapabilityKey.DevelopmentChangeRequestRead, (binding) =>
-    binding.development?.listChangeRequests({ repository, cursor: undefined, limit: PAGE_LIMIT }))
+async function readChangeRequest(context: CoreContext, repositoryId: string, branch: string, head: string, gaps: CapabilityGap[]): Promise<ChangeRequestFact | undefined> {
+  const key = CapabilityKey.DevelopmentChangeRequestRead
+  const read = await gated(await developmentReadBinding(context, key, repositoryId), key, (binding, repository) =>
+    repository === undefined ? undefined : binding.development?.listChangeRequests({ repository, headBranch: branch, cursor: undefined, limit: PAGE_LIMIT }),
+  (page) => Array.isArray(page.items) && (page.nextCursor === undefined || page.items.some((item) => item.sourceVersion === head)))
   collect(gaps, read.gap)
   const found = (read.value?.items ?? []).find((item) => item.sourceVersion === head)
   return found === undefined ? undefined : { ref: found.ref, label: `#${found.number} ${found.title}` }
@@ -164,7 +177,7 @@ function refFor(binding: ResolvedBinding, kind: string, externalId: string): Ext
 }
 
 async function readPipelines(context: CoreContext, repositoryId: string, commit: string, gaps: CapabilityGap[]): Promise<readonly ChainNode[]> {
-  const read = await gated(context, CapabilityKey.DeliveryPipelineRead, (binding) => {
+  const read = await gated(readRoute(context, CapabilityKey.DeliveryPipelineRead), CapabilityKey.DeliveryPipelineRead, (binding) => {
     const delivery = binding.delivery
     if (delivery === undefined) return undefined
     return collectDeliveryPages(commit, (cursor) => delivery.listPipelineRuns({ repository: refFor(binding, 'repository', repositoryId), commit, cursor, limit: PAGE_LIMIT }))
@@ -178,7 +191,7 @@ async function readPipelines(context: CoreContext, repositoryId: string, commit:
 }
 
 async function readChecks(context: CoreContext, repositoryId: string, commit: string, gaps: CapabilityGap[]): Promise<readonly ChainNode[]> {
-  const read = await gated(context, CapabilityKey.DeliveryCheckRead, (binding) => {
+  const read = await gated(readRoute(context, CapabilityKey.DeliveryCheckRead), CapabilityKey.DeliveryCheckRead, (binding) => {
     const delivery = binding.delivery
     if (delivery === undefined) return undefined
     return collectDeliveryPages(commit, (cursor) => delivery.listChecks({ repository: refFor(binding, 'repository', repositoryId), commit, cursor, limit: PAGE_LIMIT }))
@@ -209,7 +222,7 @@ function contextNode(context: CoreContext, scope: DeliveryScopeInput, observedId
 }
 
 /**
- * 工作树节点。身份只从**执行上下文记录**取 `repositoryId`——不碰 `resolveRepository` 的返回值，
+ * 工作树节点。身份只从**执行上下文记录**取 `repositoryId`——不碰路由缝 `developmentReadBinding` 的返回值，
  * 否则投影侧的身份就会依赖 `DevelopmentRepositoryRead` 的解析结果，与写入侧分叉。
  * 上下文尚未创建时（骨架节点）退到调用方给的作用域：给定 `repositoryId` 时这个 id 与创建后的真实工作树**同一身份**
  * （这正是骨架要的稳定身份）；骨架跳因 `observed = false` 不落成关系，所以不会与真实工作树的关系重复。
@@ -245,15 +258,17 @@ type ChainView = Awaited<ReturnType<typeof readExecutionContext>>
 export async function readChainFacts(context: CoreContext, scope: DeliveryScopeInput): Promise<ChainFacts> {
   const gaps: CapabilityGap[] = []
   const view = await readExecutionContext(context, { workItemId: scope.workItemId, repositoryId: scope.repositoryId ?? '' })
-  const repository = scope.repositoryId === undefined ? undefined : await resolveRepository(context, scope.repositoryId, gaps)
+  const route = scope.repositoryId === undefined ? undefined : await developmentReadBinding(context, CapabilityKey.DevelopmentRepositoryRead, scope.repositoryId)
+  if (route?.ok === false) collect(gaps, { key: CapabilityKey.DevelopmentRepositoryRead, reason: route.error?.message ?? '不能定位仓库绑定的 capability' })
+  const repository = route?.ok === true ? route.repository : undefined
   const worktree = worktreeNode(context, scope, view)
   const branch = worktree.label ?? branchNameFor(scope.workItemId)
   // A default branch name is only a skeleton label, never an observation. Without a recorded worktree
   // handle there is no provisioned artifact to anchor branch, change-request, or CI facts to; reading
   // `work/<workItemId>` here would let an unrelated/manual branch manufacture lineage for a missing context.
   const hasObservedWorktree = view?.worktreeExternalId !== undefined
-  const head = repository === undefined || !hasObservedWorktree ? undefined : await readHeadCommit(context, repository, branch, gaps)
-  const crFact = repository === undefined || head === undefined ? undefined : await readChangeRequest(context, repository, head, gaps)
+  const head = route?.ok !== true || !hasObservedWorktree ? undefined : await readHeadCommit(route, branch, gaps)
+  const crFact = repository === undefined || head === undefined ? undefined : await readChangeRequest(context, scope.repositoryId ?? '', branch, head, gaps)
   const changeRequest = changeRequestNode(context, repository, branch, crFact)
   // 事实必须挂在已观察到的锚点上（ExecPlan D4）：head 未观察到就不读流水线，也不得以 commit: undefined 读取整个仓库的运行；
   // 检查同理，没有已观察到的变更请求就不读。此时只保留"缺哪一跳"的骨架，骨架不进谱系。

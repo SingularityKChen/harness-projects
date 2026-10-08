@@ -7,11 +7,10 @@
  *   `(workspaceId, contextId)` 复合键（上下文必须在同一工作区）、`mutation_attempt.workspaceId` + `bindingId`、`relation.workspaceId`、`observation.bindingId`；
  *   枚举：执行上下文状态、执行运行状态、写尝试状态、候选关系的来源（candidate 不得 explicit）。
  * `execution_context.workItemId` 已对齐（#196）：两个实现都以同一个 `StorageInputError` 拒绝，共享用例见下方"未登记工作项以同结构拒绝"。
- * **依赖 core 的两格**见本文件末尾的 `storageExecutionDivergenceSuite`（按适配器、按边的能力位
+ * **依赖 core 的格**只剩仓库一格，见本文件末尾的 `storageExecutionDivergenceSuite`（按适配器、按边的能力位
  * `acceptsDanglingCoreParents` 断言"这一格当前接受还是拒绝"）：
  *   - `execution_context.repositoryId`：已对齐——core 的写前登记先建仓库挂载再写上下文（#187 / #188），替身与 SQLite 都拒绝；
- *   - relation 两端点：仍分叉，Start Work 的 tracks / has_worktree 端点已由 core 写前登记，其余谱系写者仍写未登记的实体（#221）。
- * 仍分叉的一格等 core 侧收口后把替身对齐、共享用例从"分叉"改成"拒绝"；能力位与替身注释同批改。
+ *   - 工作项父边（#196）与关系两端点（#221）已对齐并移入共享执行组：唯一的谱系写者先登记端点实体，替身随之拒绝悬空端点。
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -37,7 +36,7 @@ export async function seedExecutionPrereqs(storage) {
 }
 
 export function storageExecutionSuite(adapter, register = test) {
-  const { label, makeStorage } = adapter
+  const { label, makeStorage, restart } = adapter
 
   register(`${label}：同一工作项+仓库最多一个 active 执行上下文`, async () => {
     const storage = makeStorage()
@@ -72,6 +71,27 @@ export function storageExecutionSuite(adapter, register = test) {
     assert.deepEqual(await storage.listRelations('ws-other'), [])
   })
 
+  // #221：交付事实一个执行上下文一行；storage 只做整行往返与父行校验，不解释集合内容（父行的拒绝在下方「悬空父边」用例里）。
+  const facts = (contextId, overrides = {}) => ({ workspaceId: WORKSPACE, contextId, attemptedAt: '2026-10-08T00:00:01.000Z', sets: [
+    { kind: 'pipeline_run', anchorId: 'entity-1', confirmedAt: '2026-10-08T00:00:01.000Z', stale: false, nodes: [{ entityId: 'entity-2', externalId: 'run-1', label: undefined, fact: 'ci_passed' }] },
+    { kind: 'commit', anchorId: undefined, confirmedAt: undefined, stale: true, nodes: [] }], ...overrides })
+  register(`${label}：交付事实整行往返与覆盖，重启后逐字段读回（#221）`, async () => {
+    let storage = makeStorage()
+    await seedExecutionPrereqs(storage)
+    await storage.putExecutionContext(context('context-facts'))
+    const written = facts('context-facts')
+    await storage.putDeliveryFacts(written)
+    written.sets[0].nodes[0].fact = 'ci_failed' // 调用方事后改自己的对象，不得改到存储里
+    ;(await storage.getDeliveryFacts(WORKSPACE, 'context-facts')).sets[0].stale = true // 读出的对象同理
+    assert.deepEqual(await storage.getDeliveryFacts(WORKSPACE, 'context-facts'), facts('context-facts'), '逐字段读回：缺省值仍是显式 undefined，写入与读出的对象都不与存储共享')
+    const replaced = facts('context-facts', { attemptedAt: '2026-10-08T00:00:02.000Z', sets: [] })
+    await storage.putDeliveryFacts(replaced)
+    assert.deepEqual(await storage.getDeliveryFacts(WORKSPACE, 'context-facts'), replaced, '同一上下文整行覆盖，不合并旧集合')
+    storage = await restart(storage)
+    assert.deepEqual(await storage.getDeliveryFacts(WORKSPACE, 'context-facts'), replaced, '重启后读回同一行')
+    assert.equal(await storage.getDeliveryFacts('ws-other', 'context-facts'), undefined, '键含工作区')
+  })
+
   // 一行一键（2026-09-24 评审：旧模型在 DDL / 端口 / 替身 / core 之间有四种说法）：同 (工作区, 幂等键) 只有一行，
   // 状态原地推进；`id` 在工作区内唯一，跨工作区同键同 id 互不影响。
   register(`${label}：写尝试一行一键，状态原地推进且 id 在工作区内唯一`, async () => {
@@ -94,8 +114,8 @@ export function storageExecutionSuite(adapter, register = test) {
    * 引用完整性（L6 评审 F1，第四轮评审 P3 订正清单，第五轮补全）：执行面在两个实现上**已对齐**的父边与枚举
    * 逐条钉住——仓库 → 身份、执行上下文 → 工作区、执行运行 → 工作区 + 上下文、写尝试 → 工作区 + 绑定、
    * 关系 → 工作区、观察 → 绑定；枚举：执行上下文状态、执行运行状态、写尝试状态、候选关系的来源
-   * （candidate 不得 explicit）。**依赖 core** 的两格见本文件末尾的 `storageExecutionDivergenceSuite`：
-   * 仓库一格已对齐（两边都拒绝），关系端点一格仍分叉（SQLite 的外键拒绝，替身接受）；工作项父边已对齐（#196）。
+   * （candidate 不得 explicit）；关系两端 → 已登记实体、交付事实 → 同一工作区的执行上下文（#221）。**依赖 core** 的格只剩仓库一格，
+   * 见本文件末尾的 `storageExecutionDivergenceSuite`：两边都拒绝；工作项父边（#196）已对齐，共享用例见下方。
    */
   register(`${label}：悬空父边与非法枚举必须被拒绝（两个实现已对齐的引用完整性）`, async () => {
     const storage = makeStorage()
@@ -109,6 +129,7 @@ export function storageExecutionSuite(adapter, register = test) {
     await storage.putExecutionContext({ ...base, id: 'context-1', status: 'ready' })
     await storage.putExecutionRun(run({}))
     await storage.putMutationAttempt(attempt({}))
+    await storage.putDeliveryFacts(facts('context-1'))
     // 已对齐的父边：SQLite 的外键与替身逐条同语义。
     await assert.rejects(storage.putRepository({ id: 'repo-dangling', workspaceId: WORKSPACE, externalIdentityId: 'repo-identity-none' }), '仓库必须挂在存在的身份上')
     await assert.rejects(storage.putExecutionContext({ ...base, id: 'context-dangling-ws', workspaceId: 'ws-none', status: 'ready' }), '执行上下文必须属于存在的工作区')
@@ -118,6 +139,10 @@ export function storageExecutionSuite(adapter, register = test) {
     await assert.rejects(storage.putMutationAttempt(attempt({ id: 'attempt-dangling-binding', bindingId: 'binding-none' })), '写尝试必须指向存在的绑定')
     await assert.rejects(storage.putMutationAttempt(attempt({ id: 'attempt-dangling-ws', workspaceId: 'ws-none', idempotencyKey: 'key-2' })), '写尝试必须属于存在的工作区')
     await assert.rejects(storage.putRelation('ws-none', { from: 'entity-1', to: 'entity-2', type: 'relates_to', class: 'business_semantics', source: 'deterministic', state: 'candidate' }), '关系必须属于存在的工作区')
+    await assert.rejects(storage.putRelation(WORKSPACE, { from: 'entity-none', to: 'entity-2', type: 'relates_to', class: 'business_semantics', source: 'deterministic', state: 'candidate' }), '关系起点必须是已登记实体（#221）')
+    await assert.rejects(storage.putRelation(WORKSPACE, { from: 'entity-1', to: 'entity-none', type: 'relates_to', class: 'business_semantics', source: 'deterministic', state: 'candidate' }), '关系终点必须是已登记实体（#221）')
+    await assert.rejects(storage.putDeliveryFacts(facts('context-none')), '交付事实必须挂在存在的执行上下文上（#221）')
+    await assert.rejects(storage.putDeliveryFacts({ ...facts('context-1'), workspaceId: 'ws-other' }), '交付事实不得挂到另一个工作区的执行上下文上（复合外键）')
     await assert.rejects(storage.recordObservation({ state: 'pending', observation: { bindingId: 'binding-none', dedupeKey: 'dedupe-dangling', type: 'issue.updated', eventTime: undefined, receivedTime: '2026-09-20T00:00:01Z', subject: { bindingId: 'binding-none', objectKind: 'issue', externalId: 'issue-1', url: undefined }, sourceVersion: '2026-09-20T00:00:00.000000000Z', payloadHash: 'payload-hash', payload: {} } }), '观察必须属于存在的绑定')
     // 已对齐的枚举：SQLite 的 CHECK 与替身同语义。
     await assert.rejects(storage.putExecutionContext({ ...base, id: 'context-bogus-status', status: 'bogus' }), '执行上下文状态必须是已知取值')
@@ -131,6 +156,8 @@ export function storageExecutionSuite(adapter, register = test) {
     assert.equal(await storage.getExecutionRun('run-dangling-ws'), undefined, '被拒绝的运行写入不得留下行')
     assert.equal(await storage.getExecutionRun('run-cross-ws'), undefined, '被拒绝的跨工作区运行不得留下行')
     assert.deepEqual(await storage.listRelations(WORKSPACE), [], '被拒绝的关系写入不得留下行')
+    assert.equal(await storage.getDeliveryFacts(WORKSPACE, 'context-none'), undefined, '被拒绝的交付事实写入不得留下行')
+    assert.equal(await storage.getDeliveryFacts('ws-other', 'context-1'), undefined, '被拒绝的跨工作区交付事实不得留下行')
     assert.deepEqual((await storage.listMutationAttempts(WORKSPACE)).map((item) => item.id), ['attempt-1'], '被拒绝的写尝试不得留下行')
   })
 
@@ -280,6 +307,8 @@ export function storageExecutionSuite(adapter, register = test) {
       read: (storage) => storage.getExecutionRun('run-read'), uncommitted: run, rolledBack: undefined }],
     ['listRelations', { write: (tx) => tx.putRelation(WORKSPACE, relation),
       read: (storage) => storage.listRelations(WORKSPACE), uncommitted: [relation], rolledBack: [] }],
+    ['getDeliveryFacts', { write: async (tx) => { await tx.putExecutionContext(context('context-facts')); await tx.putDeliveryFacts(facts('context-facts')) },
+      read: (storage) => storage.getDeliveryFacts(WORKSPACE, 'context-facts'), uncommitted: facts('context-facts'), rolledBack: undefined }],
     ['findMutationAttempt', { write: (tx) => tx.putMutationAttempt(attempt),
       read: (storage) => storage.findMutationAttempt(WORKSPACE, 'key-read'), uncommitted: attempt, rolledBack: undefined }],
     ['listMutationAttempts', { write: (tx) => tx.putMutationAttempt(attempt),
@@ -305,14 +334,14 @@ export function storageExecutionSuite(adapter, register = test) {
 }
 
 /**
- * 共享组里的**显式分叉用例**（2026-09-26 第五轮评审 R4-4）：依赖 core 的两格里，仓库一格已对齐（#187 / #188，两边都拒绝），
- * 关系端点一格仍给出相反答案——SQLite 的外键拒绝悬空引用，内存替身接受（工作项一格 #196 已对齐，移入共享执行组）。适配器用能力位 `acceptsDanglingCoreParents` 声明自己这一侧
+ * 共享组里的**显式分叉用例**（2026-09-26 第五轮评审 R4-4）：依赖 core 的格里只剩仓库一格（#187 / #188 已对齐，两边都拒绝）；
+ * 工作项一格（#196）与关系端点一格（#221）已对齐并移入共享执行组。适配器用能力位 `acceptsDanglingCoreParents` 声明自己这一侧
  * 的事实，本函数按位断言**实际行为**：对齐一侧（改替身或改 SQLite）而不改声明，对应用例立刻变红。
  *
  * 为什么独立成函数而不是注册进 `storageExecutionSuite`：切分守卫按组文件的注册条数核账，组文件的新增账在
  * `suites/storage.js`；这些用例与 `storage-contract.test.js` 的其余适配器循环并列注册，不参与切分账。返回值是本
  * 函数**实际注册**的条数，装配点的守卫按独立期望核账——删掉一条 GRIDS 会让守卫红，而不是静默缩小覆盖。
- * 能力位按边声明（`{ repository, relation }`），拒绝的错误文本按适配器各自的真实来源写（`rejection`：SQLite 是外键，替身是显式的存在性检查）。
+ * 能力位按边声明（目前只有 `{ repository }`），拒绝的错误文本按适配器各自的真实来源写（`rejection`：SQLite 是外键，替身是显式的存在性检查）。
  */
 export function storageExecutionDivergenceSuite(adapter, register = test) {
   const { label, makeStorage, acceptsDanglingCoreParents, rejection } = adapter
@@ -328,8 +357,6 @@ export function storageExecutionDivergenceSuite(adapter, register = test) {
         if (outcomes.some((error) => error === undefined)) throw new Error('父边检查随上下文状态而变：ready 与 failed 的结果不一致')
         throw outcomes[0]
       }],
-    ['relation', '关系端点（`relation.from` / `relation.to`，其余谱系写者会把边写到未登记的实体上 / #221）',
-      (storage) => storage.putRelation(WORKSPACE, { from: 'entity-none', to: 'entity-2', type: 'depends_on', class: 'business_semantics', source: 'deterministic', state: 'candidate' })],
   ]
   let registered = 0
   const counted = (name, fn, options) => { registered += 1; register(name, fn, options) }

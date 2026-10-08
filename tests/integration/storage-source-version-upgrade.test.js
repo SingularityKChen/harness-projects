@@ -130,7 +130,7 @@ test('U3 可归一的旧值被迁移并纠正定序；snapshot_json 不变', asy
       { item: 'item-d', legacy: CANONICAL('54.250000000Z'), observedAt: T(5) },
     ])
     const snapshots = read(location, 'SELECT snapshot_json FROM sync_observation ORDER BY rowid')
-    assert.deepEqual(withDb(location, (db) => migrate(db).applied), [5], '005 只执行一次，且是唯一待应用的迁移')
+    assert.deepEqual(withDb(location, (db) => migrate(db).applied), [5, 6], '005 只执行一次，其后只有 006（交付事实，#221）')
     assert.deepEqual(updatedAt(location), [CANONICAL('54.000000000Z'), CANONICAL('55.000000000Z'), CANONICAL('54.000000000Z'), '', CANONICAL('54.250000000Z')],
       '可归一的值改写为规范载体，无版本与规范值保持原样')
     assert.deepEqual(read(location, 'SELECT snapshot_json FROM sync_observation ORDER BY rowid'), snapshots, 'snapshot_json 是端口收到的原样记录，不得改写')
@@ -168,7 +168,7 @@ test('U5 / U7 幂等与降级拒绝：005 只执行一次且不动定义域内�
     const location = join(dir, 'legacy.sqlite')
     legacyDatabase(location, 4, [{ item: 'item-1', legacy: CANONICAL('54.000000000Z'), observedAt: T(1) }, { item: 'item-2', legacy: undefined, observedAt: T(2) }])
     const before = read(location, 'SELECT * FROM sync_observation ORDER BY rowid')
-    assert.deepEqual(withDb(location, (db) => migrate(db).applied), [5])
+    assert.deepEqual(withDb(location, (db) => migrate(db).applied), [5, 6])
     assert.deepEqual(read(location, 'SELECT * FROM sync_observation ORDER BY rowid'), before, '已在定义域内的库：005 不改任何一行')
     assert.throws(() => withDb(location, (db) => migrate(db, { entries: MIGRATIONS.slice(0, 4) })), /已应用版本与迁移清单不一致/, 'U7：降级写入在结构上被挡住')
   })
@@ -249,7 +249,7 @@ test('U9 恢复路径：先备份并核对，再保留全部行；降为无版�
     // 5 重开成功（应用 005）；评审的反例在修复后返回 true。
     assert.equal(await write(location, 'item-1', 101, T(5), '2026-09-30T00:00:00.000000000Z'), true, '评审的原输入：修复后更晚的规范观察被应用')
     assert.equal(await write(location, 'item-3', 102, T(5), CANONICAL('53.000000000Z')), false, '比已提交的规范值更旧的观察仍是乱序')
-    assert.deepEqual(versions(location), [1, 2, 3, 4, 5])
+    assert.deepEqual(versions(location), [1, 2, 3, 4, 5, 6])
 
     // 6 幂等：没有非规范值时什么也不做，也不备份。
     const second = join(dir, 'bak', 'second.sqlite')

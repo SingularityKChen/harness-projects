@@ -21,14 +21,15 @@
  * 覆盖写成单语句 UPSERT，查与写之间没有窗口。DDL 的 `created_at` / `updated_at` 是 NOT NULL 而端口记录没有时间戳，
  * 插入时用同一个 ISO-8601 UTC 时刻填两列（覆盖时保留 `created_at`）；端口不读回这两列，因此它们不构成第二套事实。
  */
-import { StorageInputError, type ExecutionContextRecord, type ExecutionRunRecord, type MutationAttemptRecord } from '@harness-projects/capabilities'
+import { StorageInputError, type DeliveryFactsRecord, type ExecutionContextRecord, type ExecutionRunRecord, type MutationAttemptRecord } from '@harness-projects/capabilities'
 import type { EntityId, ExecutionContextId, ExecutionRunId, Relation, WorkspaceId } from '@harness-projects/domain'
-import { optional, rowToExecutionContext, rowToExecutionRun, rowToMutationAttempt, rowToRelation, type Row } from './storage-rows.ts'
+import { optional, rowToDeliveryFacts, rowToExecutionContext, rowToExecutionRun, rowToMutationAttempt, rowToRelation, type Row } from './storage-rows.ts'
 import { SqliteSyncSurface } from './storage-sync.ts'
 
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。
 const CONTEXT_COLUMNS = 'id, workspace_id, work_item_id, repository_id, status, branch_external_id, worktree_external_id, provisioning_started_at'
 const RUN_COLUMNS = 'id, workspace_id, context_id, status, updated_at, provider_ref_json, fallback'
+const FACT_COLUMNS = 'workspace_id, context_id, attempted_at, sets_json'
 const ATTEMPT_COLUMNS = 'id, workspace_id, binding_id, command_name, idempotency_key, state, expected_source_version, error_code'
 /** 两张关系表的列名相同：路由到哪张表由 `state` 决定，读回形状因此只有一份。 */
 const RELATION_COLUMNS = 'from_entity_id, to_entity_id, relation_type, relation_class, source, state'
@@ -131,6 +132,17 @@ export class SqliteExecutionSurface extends SqliteSyncSurface {
       const candidates = this.db.prepare(`SELECT ${RELATION_COLUMNS} FROM candidate_relation WHERE workspace_id = ? ${order}`).all(workspaceId) as Row[]
       return [...confirmed, ...candidates].map(rowToRelation)
     })
+  }
+
+  /** 交付事实快照（#221）：一个执行上下文一行，整行覆盖；父行由 006 的复合外键强制。列清单只在这里写一次（读写两条语句共用）。 */
+  putDeliveryFacts(record: DeliveryFactsRecord): Promise<void> {
+    return this.write(`INSERT INTO delivery_fact (${FACT_COLUMNS}) VALUES (?, ?, ?, ?)
+      ON CONFLICT (workspace_id, context_id) DO UPDATE SET attempted_at = excluded.attempted_at, sets_json = excluded.sets_json`,
+      record.workspaceId, record.contextId, record.attemptedAt, JSON.stringify(record.sets))
+  }
+
+  getDeliveryFacts(workspaceId: WorkspaceId, contextId: ExecutionContextId): Promise<DeliveryFactsRecord | undefined> {
+    return this.read(() => optional(this.db.prepare(`SELECT ${FACT_COLUMNS} FROM delivery_fact WHERE workspace_id = ? AND context_id = ?`).get(workspaceId, contextId), rowToDeliveryFacts))
   }
 
   /**

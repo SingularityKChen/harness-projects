@@ -2,6 +2,7 @@
  * 交付投影：把交付链读成可查询的跳（hop）列表与能力状态（issue #78 / ExecPlan D5、D6）。每一跳都是关系图里的一条边，读回时标
  * `lineage`（沿已记录关系传播，不重新识别）；来源与确认态分开暴露（`relationSource` / `relationState`），候选边因此不会被读成
  * 已确认关系。缺可选能力（部署 / 环境）只报 unavailable，不是 error；只读交付方的写尝试返回 not supported，不写状态也不假造"已保存"。
+ * 交付事实只有一个写者（`delivery-facts.ts` 的 `refreshDeliveryFacts`，#221）；本文件的读路径只读本地已提交的最后确认快照，逐跳带 `stale`。
  */
 import {
   CapabilityKey, ProjectErrorCode, projectError, type ExternalObjectRef, type ProjectError,
@@ -10,9 +11,11 @@ import {
   EntityKind, RelationSource, RelationState, RelationType, WriteState, type EngineeringFactKind, type EntityId, type Relation,
 } from '@harness-projects/domain'
 import { gateCommand, resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
-import { readChainFacts, type CapabilityGap, type ChainFacts, type DeliveryScopeInput } from './chain-facts.ts'
+import { worktreeEntityId, type DeliveryScopeInput } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
-import { EdgeProvenance, recordEdges, type ChainNode, type DiscoveredEdge } from './relations.ts'
+import { refreshDeliveryFacts } from './delivery-facts.ts'
+import { contextIdFor } from './execution-context.ts'
+import { EdgeProvenance, asEntityId } from './relations.ts'
 
 export type DeliveryScope = string | DeliveryScopeInput
 
@@ -23,6 +26,8 @@ export interface DeliveryLineageHop {
   readonly externalId: string | undefined; readonly label: string | undefined; readonly observed: boolean
   readonly unavailable: boolean; readonly detail: string | undefined
   readonly fact: EngineeringFactKind | undefined // 这一跳隐含的工程事实（CI 成功/失败）：只能折成派生标记
+  /** 这一跳来自最近一次刷新没能重新确认的集合：是最后确认的值，不是当前值（#221）；`tracks` / `has_worktree` 是命令事实，恒为 false。 */
+  readonly stale: boolean
 }
 
 export interface DeliveryCapabilityState { readonly key: CapabilityKey; readonly available: boolean; readonly reason: string | undefined }
@@ -43,45 +48,13 @@ export function normalizeScope(scope: DeliveryScope): DeliveryScopeInput {
   return { workItemId: scope.workItemId, repositoryId: scope.repositoryId }
 }
 
-/** 未观察到的事实只能算链骨架：provenance 决定它落成 candidate，而不是已确认的系统事实。 */
-function provenanceFor(artifact: ChainNode, declared: EdgeProvenance): EdgeProvenance {
-  return artifact.observed ? declared : EdgeProvenance.ChainSkeleton
-}
-
-/** 链的边按 tracks → has_worktree → derived_from / produced_by → runs_on 的顺序排列。 */
-export function chainEdges(facts: ChainFacts): readonly DiscoveredEdge[] {
-  const { workItem, context, worktree, commit, changeRequest } = facts
-  const edges: DiscoveredEdge[] = [
-    { from: workItem.id, to: context.id, type: RelationType.Tracks, artifact: context, provenance: provenanceFor(context, EdgeProvenance.Command) },
-    { from: context.id, to: worktree.id, type: RelationType.HasWorktree, artifact: worktree, provenance: provenanceFor(worktree, EdgeProvenance.Command) },
-    { from: commit.id, to: worktree.id, type: RelationType.DerivedFrom, artifact: commit, provenance: provenanceFor(commit, EdgeProvenance.ProviderRead) },
-    { from: changeRequest.id, to: worktree.id, type: RelationType.ProducedBy, artifact: changeRequest, provenance: provenanceFor(changeRequest, EdgeProvenance.ProviderRead) },
-  ]
-  for (const pipeline of facts.pipelines) {
-    edges.push({ from: pipeline.id, to: commit.id, type: RelationType.RunsOn, artifact: pipeline, provenance: provenanceFor(pipeline, EdgeProvenance.ProviderRead) })
-  }
-  for (const check of facts.checks) {
-    edges.push({ from: check.id, to: changeRequest.id, type: RelationType.RunsOn, artifact: check, provenance: provenanceFor(check, EdgeProvenance.ProviderRead) })
-  }
-  return edges
-}
-
-function gapKeysFor(kind: EntityKind): readonly CapabilityKey[] {
-  if (kind === EntityKind.PipelineRun) return [CapabilityKey.DeliveryPipelineRead]
-  if (kind === EntityKind.CheckRun) return [CapabilityKey.DeliveryCheckRead]
-  return []
-}
-
-function toHop(edge: DiscoveredEdge, relation: Relation, gaps: readonly CapabilityGap[]): DeliveryLineageHop {
-  const keys = gapKeysFor(edge.artifact.kind)
-  return {
-    relationType: relation.type, source: RelationSource.Lineage, relationSource: relation.source,
-    relationState: relation.state, provenance: edge.provenance, from: relation.from, to: relation.to,
-    entityKind: edge.artifact.kind, externalId: edge.artifact.externalId, label: edge.artifact.label,
-    observed: edge.artifact.observed, detail: edge.artifact.detail, fact: edge.artifact.fact,
-    unavailable: gaps.some((gap) => keys.includes(gap.key)),
-  }
-}
+/** 集合 → 它的实体种类、谱系边类型；流水线与检查的能力键用来在本地 registry 上报 unavailable。 */
+const SETS = [
+  { kind: 'commit', entity: EntityKind.Commit, edge: RelationType.DerivedFrom, key: undefined },
+  { kind: 'change_request', entity: EntityKind.ChangeRequest, edge: RelationType.ProducedBy, key: undefined },
+  { kind: 'pipeline_run', entity: EntityKind.PipelineRun, edge: RelationType.RunsOn, key: CapabilityKey.DeliveryPipelineRead },
+  { kind: 'check_run', entity: EntityKind.CheckRun, edge: RelationType.RunsOn, key: CapabilityKey.DeliveryCheckRead },
+] as const
 
 /** 可选能力读结论：缺能力是 unavailable（可恢复说明），不是 error。 */
 export function capabilityState(context: CoreContext, key: CapabilityKey): DeliveryCapabilityState {
@@ -93,7 +66,42 @@ function optionalCapabilities(context: CoreContext): readonly DeliveryCapability
   return [capabilityState(context, CapabilityKey.DeliveryDeploymentRead)]
 }
 
-/** 组装交付投影：先读链事实，再把每一跳按三元组落成候选边（已存在则复用），最后读回成跳。 */
+/**
+ * 只读已提交事实（#221）：执行上下文记录、关系表、交付事实快照与本地 registry；不调 provider，不写任何东西。
+ * tracks / has_worktree 只在开始工作写过时出现；其余每一跳是快照里的一个节点加上它在关系表里的那条边（身份沿谱系传播，不重新识别）。
+ */
+export async function readDeliveryProjection(context: CoreContext, scope: DeliveryScopeInput): Promise<DeliveryProjection> {
+  const contextId = contextIdFor(context.workspaceId, scope.workItemId, scope.repositoryId ?? '')
+  const contextEntity = asEntityId(contextId)
+  const record = await context.storage.getExecutionContext(contextId)
+  const snapshot = record === undefined ? undefined : await context.storage.getDeliveryFacts(context.workspaceId, contextId)
+  // 快照在先、关系在后：写者在一个事务里同时提交两者、且从不删边，两次读取之间提交了新刷新，较晚读到的关系只会更全，不会比快照少。
+  const relations = await context.storage.listRelations(context.workspaceId)
+  const worktreeId = worktreeEntityId(context.workspaceId, record?.repositoryId ?? scope.repositoryId ?? '', scope.workItemId)
+  const hop = (relation: Relation | undefined, entityKind: EntityKind, node: { externalId: string | undefined; label: string | undefined; fact?: EngineeringFactKind | undefined },
+    provenance: EdgeProvenance, stale = false, key?: CapabilityKey): DeliveryLineageHop[] => relation === undefined ? [] : [{
+    relationType: relation.type, source: RelationSource.Lineage, relationSource: relation.source, relationState: relation.state,
+    provenance, from: relation.from, to: relation.to, entityKind, externalId: node.externalId, label: node.label, observed: true, detail: undefined, fact: node.fact, stale,
+    unavailable: key !== undefined && !gateCommand(context.registry, key, 'read').allowed,
+  }]
+  const hops = record === undefined ? [] : [
+    ...hop(relations.find((relation) => relation.type === RelationType.Tracks && relation.to === contextEntity), EntityKind.ExecutionContext,
+      { externalId: contextId, label: undefined }, EdgeProvenance.Command),
+    ...hop(relations.find((relation) => relation.type === RelationType.HasWorktree && relation.from === contextEntity && relation.to === worktreeId), EntityKind.Worktree,
+      { externalId: record.worktreeExternalId, label: record.branchExternalId }, EdgeProvenance.Command),
+    ...SETS.flatMap(({ kind, entity, edge, key }) => {
+      const set = snapshot?.sets.find((candidate) => candidate.kind === kind)
+      return (set?.nodes ?? []).flatMap((node) => hop(relations.find((candidate) => candidate.from === node.entityId && candidate.type === edge && candidate.to === set?.anchorId),
+        entity, node, EdgeProvenance.ProviderRead, set?.stale, key))
+    }),
+  ]
+  return {
+    workItemId: scope.workItemId, repositoryId: scope.repositoryId, hops, optional: optionalCapabilities(context),
+    degraded: snapshot?.sets.some((set) => set.stale) ?? false, error: undefined,
+  }
+}
+
+/** 交付投影：#221 期间先委托唯一写者刷新（会写候选边与快照）、再读已提交事实；#222 起查询纯读，去掉刷新这一行。 */
 export async function getDeliveryProjection(context: CoreContext, scope: DeliveryScope): Promise<DeliveryProjection> {
   const normalized = normalizeScope(scope)
   if (normalized.workItemId.trim() === '') {
@@ -102,20 +110,12 @@ export async function getDeliveryProjection(context: CoreContext, scope: Deliver
       degraded: true, error: projectError(ProjectErrorCode.InvalidInput, 'workItemId 不能为空'),
     }
   }
-  const facts = await readChainFacts(context, normalized)
-  // 骨架跳（observed=false）只是"缺哪一跳"的位置标记，不是链路存在：它既不落成关系，也不进谱系。
-  const edges = chainEdges(facts).filter((edge) => edge.artifact.observed)
-  const recorded = await recordEdges(context, edges)
-  const hops: DeliveryLineageHop[] = []
-  for (let index = 0; index < edges.length; index += 1) {
-    const edge = edges[index]
-    const relation = recorded[index]?.relation
-    if (edge !== undefined && relation !== undefined) hops.push(toHop(edge, relation, facts.gaps))
-  }
-  return {
-    workItemId: normalized.workItemId, repositoryId: normalized.repositoryId, hops, optional: optionalCapabilities(context),
-    degraded: facts.gaps.length > 0, error: undefined,
-  }
+  const refreshed = await refreshDeliveryFacts(context, normalized) // #222 删除这一行
+  const projection = await readDeliveryProjection(context, normalized)
+  // 刷新失败、被丢弃（平手或更晚的并发读取已提交）或没有锚点（工作树句柄被清空）而仍显示旧快照时，不能证明它是最新：降级并逐跳标陈旧（controller 只转发跳）。
+  const unconfirmed = !refreshed.ok || (!refreshed.applied && (refreshed.anchored || projection.hops.some((hop) => hop.provenance === EdgeProvenance.ProviderRead)))
+  const hops = unconfirmed ? projection.hops.map((hop) => hop.provenance === EdgeProvenance.ProviderRead ? { ...hop, stale: true } : hop) : projection.hops
+  return { ...projection, hops, degraded: projection.degraded || unconfirmed || refreshed.gaps.length > 0, error: refreshed.error }
 }
 
 /** 只读交付方的写尝试：能力没声明就 not supported，且不写任何本地或外部状态。 */
