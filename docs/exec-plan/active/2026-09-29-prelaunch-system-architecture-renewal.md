@@ -29,7 +29,7 @@ Batch 0 先交付最后那一半：只读仓库的人能在 `docs/product/vertic
 | Host 权威、规划/工程正交、身份与成员分离 | 主轴仍在；当前 schema 与早期表形不同有 Gate E1 和 ADR 的后续理由，不自动算漂移 | `AGENTS.md` §1、`docs/adr/ADR-0002-membership-identity-separate-from-content.md`、`docs/adr/ADR-0006-connection-anchor-and-workspace-mount.md` |
 | 独立 Web 先落地 | 宿主探针选择的有意调整，并非放弃 Host 权威 | `docs/architecture/harness-host-spike.md` 的 `fallback-web` 裁决；宿主与 UI 尚未交付 |
 | 多 Development 来源 | core 注册表每域一个实例，`implementationKey` 取的是域名（Superseded by `docs/exec-plan/completed/2026-10-01-provider-binding-registration.md`（2026-10-02，#197）：`implementationKey` 改由实现作者的静态 `definition` 声明，同一连接可在一个工作区挂多个域；每域一个主实例不变） | `packages/core/src/registry.ts`；#197、#219 |
-| 同步与交付事实 | 已复现：交付 Query 发现并写关系、离线时丢最后已知 CI；重复 bootstrap 推进 revision | `packages/core/src/delivery.ts`、`chain-facts.ts`、`bootstrap.ts`；复现命令 P2、P3 |
+| 同步与交付事实 | 已复现：交付 Query 发现并写关系、离线时丢最后已知 CI；重复 bootstrap 推进 revision（**Superseded by #220 修复**，2026-10-08，`fix/sync-revision-freshness`：重复引导不再推进，见 P2 的观察行） | `packages/core/src/delivery.ts`、`chain-facts.ts`、`bootstrap.ts`；复现命令 P2、P3 |
 | 客户端连接 | 重连期间可把 revision 2 覆盖回迟到 baseline 1，旧值仍报 current | `packages/client/src/sync.ts`、`store.ts`；#218 |
 | MVP-0 / 首发 | 7 条节点测试不等于 13 步都有生产入口；第 9 步与 Draft→Issue 没有生产入口 | Batch 0 的矩阵；真实 Provider、Host、UI 未交付属于分期，不是已实现后退 |
 
@@ -39,7 +39,7 @@ Batch 0 先交付最后那一半：只读仓库的人能在 `docs/product/vertic
 - `ControllerCommands` 不暴露 `cancelExecutionRun`（`packages/controller/src/commands.ts:128-137`）；`ControllerQueries` 只有 `snapshot`、`getEntity`、`getExecutionContext`、`getDeliveryLineage`，没有 `getItemDetail`，也不转发交付投影的 `degraded` / `optional`（`packages/controller/src/queries.ts:12-18`）。
 - `git grep -n createChangeRequest -- packages/core/src packages/controller/src packages/client/src` 无输出；`tests/mvp0/chain.test.js:70` 与 `tests/e2e/delivery-lineage.test.js:32`、`:84` 直接调用 `providers.development.createChangeRequest`。
 - `promoteEntityIdentity`（`packages/core/src/identity.ts:71`）唯一调用在 `tests/e2e/chain-bootstrap.test.js:142`；`decideFromEngineeringFact`（`packages/core/src/status-policy.ts:44`）只被 `tests/e2e/status-policy.test.js` 与 `tests/mvp0/chain.test.js` 调用。`git grep -ci membership -- packages/core/src` 无命中；`ProviderPlanningItem` 没有成员关系字段（`packages/capabilities/src/planning-provider.ts:32-35`）。
-- `bootstrap.ts:110` 无条件 `advanceRevision`；`delivery.ts:108` 在查询里 `recordEdges`；交付链上的变更请求实体按 `chainEntityId` 哈希得到（`relations.ts:34-37`、`chain-facts.ts:175-178`），不查外部身份表。
+- `bootstrap.ts:110` 无条件 `advanceRevision`（**Superseded by #220 修复**，2026-10-08，`fix/sync-revision-freshness`：`commitSync` 只在已提交快照内容变化时推进，规则见 ADR-0012；这里的行号与「无条件推进」是 `origin/main@6417d45` 的基线）；`delivery.ts:108` 在查询里 `recordEdges`；交付链上的变更请求实体按 `chainEntityId` 哈希得到（`relations.ts:34-37`、`chain-facts.ts:175-178`），不查外部身份表。
 - `packages/providers/{planning-github-projects,development-github,delivery-github-actions,execution-harness,planning-local}/src/index.ts` 与 `apps/*/src/index.ts` 都是 8 行占位；真实实现只有 `development-local-git` 与 `execution-human`。经 `composeCore` 装配真实 provider 的只有 `tests/integration/human-execution-provider.test.js`；`tests/integration/local-git-core-provisioning.test.js` 的多数用例走 `createContext` + `provisionGit`（core 内部函数）。`main@699d715` 起另有 `local-git-start-work-resume.test.js`、`local-git-branch-probe.test.js`，它们与 `local-git-core-provisioning.test.js` 的 `startWork` 用例一起，在真实 Git 上调用 core 导出的 `startWork` 函数（`commands.startWork` 直接委托的那个），上下文是手工 `createContext`、没有 Planning 绑定，不经 `composeCore` 与 `commands`：按 0.2 仍是旁证，但覆盖的是完整供应序列，不只是 `provisionGit`。没有任何测试把 core 组合在 SQLite Storage 上。
 - 故障注入：`FaultKind.OutOfOrder` 从未被测试使用；`duplicateEvent` 只在 `tests/contract/suites/planning.js`（provider 契约层）；`permissionDenied` 经 core 只出现在执行域（`human-execution-provider.test.js`）。
 - 会读 active 计划的契约测试：`tests/contract/e1-evidence-consistency.test.js` 按内容发现携带 Gate E1 沙箱 id 字面量的计划；`tests/contract/board-status-semantics.test.js` 扫描旧的 Status 读法；`tests/integration/execution-relation-write-schema.test.js:16-29` 把 `release-gates.md R1` 与"R1 第 10 项"当出处 token。
@@ -318,7 +318,7 @@ const api = await composeCore({ workspace: { name: 'probe' }, providers: createF
 const a = await api.commands.bootstrapWorkspace(); const b = await api.commands.bootstrapWorkspace()
 console.log('revision', a.revision, '->', b.revision, '| entities', a.entities, '->', b.entities)
 "
-# 观察：revision 2 -> 3 | entities 5 -> 5（组合时已引导一次，修订号从 1 起）
+# 观察：revision 2 -> 3 | entities 5 -> 5（组合时已引导一次，修订号从 1 起） Superseded by #220 修复（2026-10-08，`fix/sync-revision-freshness`）：读回 `revision 1 -> 1 | entities 5 -> 5`
 
 # P3 交付首读写关系、离线丢 CI（#221、#222；第 10、13 行）
 node --input-type=module -e "
@@ -421,6 +421,7 @@ cd "$SCRATCH/export" && node --input-type=module -e "console.log(import.meta.res
 - H7：是否允许本 PR 顺带修改 mvp0 节点 3 标题与文件头（约 5 行测试代码）（默认：不改，归 TD-001 / #224）。
 - [ ] Batch 1（#218）。
 - [ ] Batch 2：2A–2E（#197 #219 #189 #198 #203 #202 #199 #220）。
+  - 2E（#199 #220）在 `fix/sync-revision-freshness` 实现，计划 `docs/exec-plan/completed/2026-10-08-sync-revision-freshness.md`；合并状态以 PR 回读为准。
 - [ ] Batch 3：3A/3B（#221 #222）。
 - [ ] Batch 4（#194 #204 #191）。
 - [ ] Batch 5（#223）。
