@@ -6,3 +6,10 @@
  */
 
 export const packageId = '@harness-projects/provider-delivery-github-actions' as const
+
+export {
+  GITHUB_ACTIONS_DEFINITION,
+  createGithubActionsDeliveryProvider,
+  type GithubActionsProviderOptions,
+  type GithubActionsTransport,
+} from './provider.ts'
