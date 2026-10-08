@@ -79,6 +79,60 @@ test('readonly-planning-source：实际 SSR 显示标题 / 正文 / 状态 / 来
   for (const canary of [...CANARIES, 'ent-bb']) assert.ok(!hidden.includes(canary), canary)
 })
 
+test('detail-planning-fields-render：真实 SSR 逐字显示两个只读规划字段，日期不经 Date / locale 漂移，遮蔽态不出现标签与 canary', () => {
+  // 必需检查在 UTC 下运行，renderer 里的 Date / locale 换算在那里恰好还原出同一个日期；进程内切换 TZ（Node 在给
+  // process.env.TZ 赋值时重读时区）：东八区与洛杉矶覆盖两侧常见偏移，Kiritimati（+14）覆盖只在 12 小时以上偏移才跨日的换算。
+  const original = process.env.TZ
+  try {
+    for (const tz of ['UTC', 'Asia/Shanghai', 'America/Los_Angeles', 'Pacific/Kiritimati']) {
+      process.env.TZ = tz
+      const html = drawer(views([wire('ent-aa', { planningStatus: 'unknown', planningFields: { statusName: 'Native Stage', iterationTitle: 'Iteration A', targetDate: '2026-01-01' } })]).detailView)
+      for (const text of ['迭代：', 'Iteration A', '目标日期：', '2026-01-01', 'Native Stage（未映射）']) assert.ok(html.includes(text), `${tz}：${text}`)
+      assert.match(html, /<p>迭代：Iteration A<\/p>/, `${tz}：迭代是只读文字行，值紧邻标签，不经过任何格式化`)
+      assert.match(html, /<p>目标日期：2026-01-01<\/p>/, `${tz}：date-only 原样逐字显示：任何时区换算都会改变这一行`)
+    }
+  } finally {
+    if (original === undefined) delete process.env.TZ
+    else process.env.TZ = original
+  }
+  const { listView, detailView: compositeDetail } = views([wire('ent-aa', { planningStatus: 'unknown', planningFields: { statusName: 'Native Stage', iterationTitle: 'Iteration A', targetDate: '2026-01-01' } })])
+  const composite = renderToStaticMarkup(createElement(ui.WorkItemProjectPage, {
+    listView, detailView: compositeDetail, navigation: { href: (itemId) => itemPath({ projectId: 'ws-1', itemId }), open: () => undefined }, onCloseDetail: () => undefined,
+  }))
+  assert.equal(composite.match(/<p>迭代：Iteration A<\/p>/g)?.length, 1, '组合页 SSR 同样逐字显示迭代行（验收表第 4 行的 composite 面）')
+  assert.equal(composite.match(/<p>目标日期：2026-01-01<\/p>/g)?.length, 1, '组合页 SSR 同样逐字显示目标日期行')
+
+  const hiddenFields = { statusName: 'CANARY-STATUS', iterationTitle: 'CANARY-ITERATION', targetDate: '2099-12-31' }
+  const redactedHtml = drawer(views([wire('ent-aa'), redacted('ent-bb', {}, { planningFields: hiddenFields })], { target: { projectId: 'ws-1', itemId: 'ent-bb' } }).detailView)
+  assert.doesNotMatch(redactedHtml, /迭代：|目标日期：/, '遮蔽态连标签都不出现，不只是值')
+  for (const canary of Object.values(hiddenFields)) assert.ok(!redactedHtml.includes(canary), canary)
+})
+
+test('redacted-planning-field-differential：遮蔽行单字段变异不改变列表 / 组合页 / drawer 的完整 SSR 与属性面', () => {
+  const canonical = { statusName: 'CANARY-STATUS', iterationTitle: 'CANARY-ITERATION', targetDate: '2099-12-31' }
+  const target = { projectId: 'ws-1', itemId: 'ent-bb' }
+  const navigation = { href: (itemId) => itemPath({ projectId: 'ws-1', itemId }), open: () => undefined }
+  /** React useId 依赖渲染位置；只归一化它，其余 HTML 逐字比较。 */
+  const normalize = (html) => html.replace(/:[Rr][0-9a-zA-Z]*:/g, ':R:')
+  const render = (hiddenFields) => {
+    const { listView, detailView } = views([wire('ent-aa', { planningFields: { iterationTitle: 'Iteration A' } }), redacted('ent-bb', {}, { planningFields: hiddenFields })], { target })
+    return {
+      list: normalize(renderToStaticMarkup(createElement(ui.WorkItemListPage, { view: listView, navigation }))),
+      composite: normalize(renderToStaticMarkup(createElement(ui.WorkItemProjectPage, { listView, detailView, navigation, onCloseDetail: () => undefined }))),
+      drawer: normalize(drawer(detailView)),
+    }
+  }
+  const baseline = render(canonical)
+  assert.ok(baseline.composite.includes('内容不可见'), '正控：组合页确实渲染了遮蔽目标，不是空输出假绿')
+  for (const field of ['statusName', 'iterationTitle', 'targetDate']) {
+    const mutated = { ...canonical, [field]: `${canonical[field]}-B` }
+    assert.deepEqual(render(mutated), baseline, `${field} 单字段变异不得改变列表 / 组合页 / drawer 的完整 HTML`)
+  }
+  for (const html of Object.values(baseline)) {
+    for (const canary of Object.values(canonical)) assert.ok(!html.includes(canary), canary)
+  }
+})
+
 test('text-is-escaped：标题、正文按文字转义，不产生可执行标签', () => {
   const html = drawer(views([wire('ent-aa', { content: { title: '<img src=x onerror=alert(1)>', body: '<script>alert(1)</script>' } })]).detailView)
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/)

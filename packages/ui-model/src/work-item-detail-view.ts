@@ -11,6 +11,9 @@ export type WorkItemDetailContent = {
   readonly title: string
   readonly body: string
   readonly planningStatus: string
+  /** 迭代标题与 date-only 目标日期：与 `planningStatus` 同一次列表安全行复制，缺值由列表层统一占位 `—`。 */
+  readonly iteration: string
+  readonly targetDate: string
   readonly source: string
   readonly authority: string
   readonly identity?: { readonly kind: string; readonly externalId: string }
@@ -50,7 +53,8 @@ export function deriveWorkItemDetailView(input: WorkItemListReadInput, target: W
   return {
     body: {
       kind: 'content', title: row.title, body: detail.planning.body || '正文未提供',
-      planningStatus: row.planningStatus, source: row.source, authority: row.authority,
+      planningStatus: row.planningStatus, iteration: row.iteration, targetDate: row.targetDate,
+      source: row.source, authority: row.authority,
       ...(identity === undefined ? {} : { identity }),
       ...(derived === undefined ? {} : { derived }),
       stale: row.stale, refreshing: view.body.refreshing,
