@@ -1,6 +1,6 @@
 # ADR-0012：业务修订号只随已提交的工作区快照内容变化推进；刷新与新鲜度不是修订号
 
-> 状态：Accepted（人类伙伴 2026-10-08 18:40 CST 前后在协调者会话的一次四问提问中批准，所选答复原文「Adopt ADR-0012, keep ADR-0011 for #292's review (Recommended)」；完整的问题原文与机械动作记录见来源 ExecPlan 的 Decision Log）
+> 状态：Accepted（人类伙伴 2026-10-08 18:40 CST 前后在协调者会话（负责迭代规划与交付这几个 PR 的会话）的一次四问提问中直接批准，所选答复原文「Adopt ADR-0012, keep ADR-0011 for #292's review (Recommended)」；完整的问题原文与机械动作记录见来源 ExecPlan 的 Decision Log）
 > 日期：2026-10-08
 > 来源：`docs/exec-plan/completed/2026-10-08-sync-revision-freshness.md`（#220、#199，epic #216 的 Batch 2E）；复现见 `docs/exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md`「复现命令（P1–P5）」的 P2
 

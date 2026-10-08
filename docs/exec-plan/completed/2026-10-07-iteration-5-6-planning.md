@@ -171,7 +171,7 @@
 | P0 承诺 | #219（由迭代 6 提前） | L | `packages/core/src/{registry,context}.ts`、`packages/capabilities/src/{registry,development-provider}.ts` | 无 |
 | P0 承诺 | #4 人类裁决 | — | 裁决后回填 `docs/architecture/gate-e1-ruling.md` | 人类 |
 | P0 承诺 | #275 本计划 | — | 本文件、`docs/README.md` | 人类批准 |
-| P0 追加 | #220 + #199（一个 PR） | M | `packages/core/src/{bootstrap,context}.ts` | 与 #219 同改 `context.ts`，排在它合并之后 |
+| P0 追加 | #220 + #199（一个 PR） | M | `packages/core/src/{bootstrap,context}.ts` | 与 #219 同改 `context.ts`，排在它合并之后。**Superseded by `docs/exec-plan/completed/2026-10-08-sync-revision-freshness.md` Decision Log（2026-10-08）**：本 PR 与 #219 都不改 `context.ts`，先后约束解除；**再订正（评审修复轮，2026-10-08）**：本 PR 终究在 `context.ts` 新增可选的 `CoreDiagnostics` / `CoreDeps.diagnostics`（TD-030 的宿主诊断出口，人类伙伴裁决），与 #219 仍没有共享改动，先后约束仍解除 |
 | P1 追加 | #274 | S | `packages/ui-model`、`packages/ui` | 应在 #229 之前合并 |
 
 移出：#140 移到迭代 7（先做 #280）。
