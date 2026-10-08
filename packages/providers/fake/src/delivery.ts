@@ -1,5 +1,5 @@
 /**
- * 离线 Delivery provider：只读交付面——按提交查流水线、按变更请求查检查、可选的部署与环境。
+ * 离线 Delivery provider：只读交付面——按仓库 + 提交（可选 branch）查流水线、按仓库 + 已观察提交查检查、可选的部署与环境。
  *
  * 写操作（重跑 / 取消）**一律**返回 not_supported 且不触碰任何状态：静默成功比失败更危险（调用方会
  * 以为远端已改变）。可选读能力缺失时报 unavailable 而不是平台错误；环境读与 deployment.read 共用能力面。
@@ -24,25 +24,26 @@ function declaredCapabilities(flags: FakeDeliveryCapabilities): Partial<Record<c
   return map
 }
 
-export type FakePipelineRunRecord = { ref: cap.ExternalObjectRef; repository: cap.ExternalObjectRef; status: string; commit: string; conclusion: string | undefined }
-export type FakeCheckRunRecord = { ref: cap.ExternalObjectRef; changeRequest: cap.ExternalObjectRef; name: string; status: string; conclusion: string | undefined }
+export type FakePipelineRunRecord = { ref: cap.ExternalObjectRef; repository: cap.ExternalObjectRef; status: string; commit: string; branch: string | undefined; conclusion: string | undefined }
+export type FakeCheckRunRecord = { ref: cap.ExternalObjectRef; repository: cap.ExternalObjectRef; commit: string; name: string; status: string; conclusion: string | undefined }
 export type FakeDeploymentRecord = { ref: cap.ExternalObjectRef; repository: cap.ExternalObjectRef; environment: string; status: string }
 export type FakeEnvironmentRecord = { ref: cap.ExternalObjectRef; repository: cap.ExternalObjectRef; name: string; protected: boolean }
 export type FakeDeliveryState = {
   runs: FakePipelineRunRecord[]; checks: FakeCheckRunRecord[]; deployments: FakeDeploymentRecord[]; environments: FakeEnvironmentRecord[]
 }
 
-/** 默认种子：同一提交上的成功与进行中运行、另一提交上的失败运行，以及检查、部署与环境各一组。 */
+/** 默认种子：同一提交上的成功、进行中与失败运行，另一个提交的失败运行，以及检查、部署与环境各一组。 */
 function seedDeliveryState(bindingId: ProviderBindingId): FakeDeliveryState {
   const repository = refOf(bindingId, EntityKind.Repository, 'repo-alpha')
-  const changeRequest = refOf(bindingId, EntityKind.ChangeRequest, 'pr-1')
-  const run = (id: string, commit: string, status: string, conclusion: string | undefined): FakePipelineRunRecord => ({ ref: refOf(bindingId, EntityKind.PipelineRun, id), repository, status, commit, conclusion })
-  const check = (id: string, name: string, status: string, conclusion: string | undefined): FakeCheckRunRecord => ({ ref: refOf(bindingId, EntityKind.CheckRun, id), changeRequest, name, status, conclusion })
+  const run = (id: string, commit: string, status: string, conclusion: string | undefined, branch?: string): FakePipelineRunRecord =>
+    ({ ref: refOf(bindingId, EntityKind.PipelineRun, id), repository, status, commit, branch, conclusion })
+  const check = (id: string, name: string, status: string, conclusion: string | undefined): FakeCheckRunRecord =>
+    ({ ref: refOf(bindingId, EntityKind.CheckRun, id), repository, commit: 'sha-1', name, status, conclusion })
   const deployment = (id: string, environment: string, status: string): FakeDeploymentRecord => ({ ref: refOf(bindingId, 'deployment', id), repository, environment, status })
   const environment = (name: string, protectedFlag: boolean): FakeEnvironmentRecord => ({ ref: refOf(bindingId, 'environment', name), repository, name, protected: protectedFlag })
 
   return {
-    runs: [run('run-1', 'sha-1', 'completed', 'success'), run('run-2', 'sha-1', 'in_progress', undefined), run('run-3', 'sha-2', 'completed', 'failure')],
+    runs: [run('run-1', 'sha-1', 'completed', 'success', 'main'), run('run-2', 'sha-1', 'in_progress', undefined, 'main'), run('run-3', 'sha-2', 'completed', 'failure', 'main')],
     checks: [check('check-build', 'build', 'completed', 'success'), check('check-lint', 'lint', 'queued', undefined), check('check-test', 'test', 'in_progress', undefined)],
     deployments: [deployment('deploy-1', 'staging', 'succeeded'), deployment('deploy-2', 'production', 'pending')],
     environments: [environment('staging', false), environment('production', true)],
@@ -76,14 +77,16 @@ export class FakeDeliveryProvider implements cap.DeliveryProvider {
     const blocked = this.gate.blocked<cap.ProviderPage<cap.ProviderPipelineRun>>()
     if (blocked !== undefined) return blocked
     const rows = this.state.runs.filter((r) => itemKey(r.repository) === itemKey(input.repository))
-      .filter((r) => input.commit === undefined || r.commit === input.commit).sort(byExternalId)
+      .filter((r) => input.commit === undefined || r.commit === input.commit)
+      .filter((r) => input.branch === undefined || r.branch === input.branch).sort(byExternalId)
     return cap.providerOk(paginate(rows.map(toRun), input))
   }
 
   async listChecks(input: cap.ProviderListChecksInput): Promise<cap.ProviderResult<cap.ProviderPage<cap.ProviderCheckRun>>> {
     const blocked = this.gate.blocked<cap.ProviderPage<cap.ProviderCheckRun>>()
     if (blocked !== undefined) return blocked
-    const rows = this.state.checks.filter((c) => itemKey(c.changeRequest) === itemKey(input.changeRequest)).sort(byExternalId)
+    const rows = this.state.checks.filter((c) => itemKey(c.repository) === itemKey(input.repository))
+      .filter((c) => c.commit === input.commit).sort(byExternalId)
     return cap.providerOk(paginate(rows.map(toCheck), input))
   }
 
@@ -114,10 +117,10 @@ export class FakeDeliveryProvider implements cap.DeliveryProvider {
 }
 
 function toRun(record: FakePipelineRunRecord): cap.ProviderPipelineRun {
-  return { ref: record.ref, status: record.status, commit: record.commit, conclusion: record.conclusion }
+  return { ref: record.ref, status: record.status, commit: record.commit, branch: record.branch, conclusion: record.conclusion }
 }
 function toCheck(record: FakeCheckRunRecord): cap.ProviderCheckRun {
-  return { ref: record.ref, name: record.name, status: record.status, conclusion: record.conclusion }
+  return { ref: record.ref, name: record.name, status: record.status, commit: record.commit, conclusion: record.conclusion }
 }
 function toDeployment(record: FakeDeploymentRecord): cap.ProviderDeployment {
   return { ref: record.ref, environment: record.environment, status: record.status }

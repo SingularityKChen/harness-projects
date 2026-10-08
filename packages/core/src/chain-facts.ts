@@ -1,12 +1,16 @@
 /**
- * 交付链的 provider 读取（issue #78 / ExecPlan D5）。只读：按提交读流水线、按变更请求读检查、按仓库读分支与变更请求。任何一步缺能力
- * 或 provider 失败都折成一条 `CapabilityGap`，该节点退回骨架（`observed: false`）——读侧降级是"最后已知值 + 显式不可用"，不是异常。
+ * 交付链的 provider 读取（issue #78 / ExecPlan D5）。只读：按已观察提交读流水线与检查（检查另以已观察的变更请求为前置门）、按仓库读分支与
+ * 变更请求。任何一步缺能力或 provider 失败都折成一条 `CapabilityGap`，该节点退回骨架（`observed: false`）——读侧降级是"最后已知值 + 显式不可用"，不是异常。
  * 骨架仍有稳定身份（`chainEntityId`），谱系在链路推进前后都查得到且不因重新读取换 id（不变量 6）；本文件不写外部状态，也不触碰规划投影。
- * 事实只能挂在**已观察到的锚点**上：提交未观察到就不读流水线（绝不以 `commit: undefined` 读整个仓库），变更请求未观察到就不读检查。
+ * 事实只能挂在**已观察到的锚点**上：提交未观察到就不读流水线（绝不以 `commit: undefined` 读整个仓库），变更请求未观察到就不读检查；
+ * provider 读回的任一运行或检查不属于该提交，整次集合作废。
  * Gate E1 落地前，同一外部 id 视为各 provider 下的同一对象，E1 通过后由身份表替换这条显式假设。
  */
-import { CapabilityKey, type ExternalObjectRef, type ProviderResult, type ResolvedBinding } from '@harness-projects/capabilities'
-import { EngineeringFactKind, EntityKind, type EntityId, type WorkspaceId } from '@harness-projects/domain'
+import {
+  CapabilityKey, providerErr, providerError, providerOk,
+  type ExternalObjectRef, type ProviderPage, type ProviderResult, type ResolvedBinding,
+} from '@harness-projects/capabilities'
+import { EngineeringFactKind, EntityKind, ProviderErrorCode, type EntityId, type WorkspaceId } from '@harness-projects/domain'
 import { gateCommand } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
 import { contextIdFor, readExecutionContext } from './execution-context.ts'
@@ -26,6 +30,50 @@ type ReadResult<T> = { readonly value: T | undefined; readonly gap: CapabilityGa
 interface ChangeRequestFact { readonly ref: ExternalObjectRef; readonly label: string }
 
 const PAGE_LIMIT = 50
+/** 单次集合读取的页数上界；成环或超限都按整次读取不完整处理。 */
+const MAX_PAGES = 1000
+
+/** 读侧形状守卫：端口有类型，但 provider 交来的坏形状只能降级成 gap，不能让整次查询变成异常。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+/**
+ * 完整收集一类 Delivery 页后才返回元素：任何一页失败、页值不是带数组 `items` 的对象、元素不是带 `ref.externalId` 的对象、
+ * 游标成环、id 重复、页数超限，或任一元素的 `commit` 不是已观察的 `head`，都返回结构化 unavailable 并放弃**整次**集合——
+ * 调用方因此不会拿着第一页的成功事实、或别的提交上的运行/检查，以为本 head 的整个集合已经读过（ExecPlan A2）。
+ * 只丢坏行会让剩下的事实冒充完整集合，故不过滤。
+ * 记录已请求的 cursor 与 `(binding, kind, id)`：同一对象重复投递、游标不前进都不能报完整。
+ */
+async function collectDeliveryPages<T extends { readonly ref: ExternalObjectRef; readonly commit: string }>(
+  head: string, readPage: (cursor: string | undefined) => Promise<ProviderResult<ProviderPage<T>>>,
+): Promise<ProviderResult<readonly T[]>> {
+  const items: T[] = []
+  const seen = new Set<string>()
+  const sent = new Set<string>()
+  let cursor: string | undefined
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const result = await readPage(cursor)
+    if (!result.ok) return providerErr(result.error)
+    const value: unknown = result.value
+    if (!isRecord(value) || !Array.isArray(value.items)) return providerErr(providerError(ProviderErrorCode.Unavailable, '分页形状不合法，本次读取不完整'))
+    for (const item of result.value.items) {
+      if (!isRecord(item) || !isRecord(item.ref) || typeof item.ref.externalId !== 'string') {
+        return providerErr(providerError(ProviderErrorCode.Unavailable, '分页元素缺少对象引用，本次读取不完整'))
+      }
+      if (item.commit !== head) return providerErr(providerError(ProviderErrorCode.Unavailable, '读回的运行或检查不属于已观察的提交，本次读取作废'))
+      const key = `${item.ref.bindingId}|${item.ref.objectKind}|${item.ref.externalId}`
+      if (seen.has(key)) return providerErr(providerError(ProviderErrorCode.Unavailable, '分页重复投递同一对象，本次读取不完整'))
+      seen.add(key)
+      items.push(item)
+    }
+    cursor = result.value.nextCursor
+    if (cursor === undefined) return providerOk(items)
+    if (sent.has(cursor)) return providerErr(providerError(ProviderErrorCode.Unavailable, '分页游标成环，本次读取不完整'))
+    sent.add(cursor)
+  }
+  return providerErr(providerError(ProviderErrorCode.Unavailable, '分页超过页数上界，本次读取不完整'))
+}
 
 /**
  * 工作树实体的**唯一身份定义**：这个工作项**在这个仓库上**的工作树。
@@ -53,10 +101,15 @@ export function chainNode(id: ChainNode['id'], kind: EntityKind, externalId: str
   return { id, kind, externalId, label, observed, detail, fact }
 }
 
-/** CI 观察 → 工程事实种类：只有明确的结论才算事实，其余（进行中 / 排队）不猜。 */
-function factFor(conclusion: string | undefined): EngineeringFactKind | undefined {
-  if (conclusion === 'failure') return EngineeringFactKind.CiFailed
-  return conclusion === 'success' ? EngineeringFactKind.CiPassed : undefined
+/**
+ * CI 观察 → 工程事实种类：只有完整结束的运行才可能产生事实，进行中无论携何结论都不猜。词表是 Delivery 端口声明的
+ * GitHub 原生小写值（见 `ProviderPipelineRun` 上的词表契约）；`startup_failure` 是启动即失败，按失败计。
+ */
+function factFor(status: string, conclusion: string | undefined): EngineeringFactKind | undefined {
+  if (status !== 'completed') return undefined
+  if (conclusion === 'success') return EngineeringFactKind.CiPassed
+  return conclusion === 'failure' || conclusion === 'timed_out' || conclusion === 'action_required' || conclusion === 'startup_failure'
+    ? EngineeringFactKind.CiFailed : undefined
 }
 
 /** 读能力门：未声明/只读以外一律折成 gap；provider 缺失也走同一条路，调用方永远拿到结构化结论。 */
@@ -111,24 +164,30 @@ function refFor(binding: ResolvedBinding, kind: string, externalId: string): Ext
 }
 
 async function readPipelines(context: CoreContext, repositoryId: string, commit: string, gaps: CapabilityGap[]): Promise<readonly ChainNode[]> {
-  const read = await gated(context, CapabilityKey.DeliveryPipelineRead, (binding) =>
-    binding.delivery?.listPipelineRuns({ repository: refFor(binding, 'repository', repositoryId), commit, cursor: undefined, limit: PAGE_LIMIT }))
+  const read = await gated(context, CapabilityKey.DeliveryPipelineRead, (binding) => {
+    const delivery = binding.delivery
+    if (delivery === undefined) return undefined
+    return collectDeliveryPages(commit, (cursor) => delivery.listPipelineRuns({ repository: refFor(binding, 'repository', repositoryId), commit, cursor, limit: PAGE_LIMIT }))
+  })
   collect(gaps, read.gap)
-  return (read.value?.items ?? []).map((run) => chainNode(
+  return (read.value ?? []).map((run) => chainNode(
     chainEntityId(context.workspaceId, EntityKind.PipelineRun, `${run.ref.bindingId}|${run.ref.externalId}`),
     EntityKind.PipelineRun, run.ref.externalId, `${run.status}: ${run.conclusion ?? '未完成'}`, true,
-    undefined, factFor(run.conclusion),
+    undefined, factFor(run.status, run.conclusion),
   ))
 }
 
-async function readChecks(context: CoreContext, changeRequestId: string, gaps: CapabilityGap[]): Promise<readonly ChainNode[]> {
-  const read = await gated(context, CapabilityKey.DeliveryCheckRead, (binding) =>
-    binding.delivery?.listChecks({ changeRequest: refFor(binding, 'change_request', changeRequestId), cursor: undefined, limit: PAGE_LIMIT }))
+async function readChecks(context: CoreContext, repositoryId: string, commit: string, gaps: CapabilityGap[]): Promise<readonly ChainNode[]> {
+  const read = await gated(context, CapabilityKey.DeliveryCheckRead, (binding) => {
+    const delivery = binding.delivery
+    if (delivery === undefined) return undefined
+    return collectDeliveryPages(commit, (cursor) => delivery.listChecks({ repository: refFor(binding, 'repository', repositoryId), commit, cursor, limit: PAGE_LIMIT }))
+  })
   collect(gaps, read.gap)
-  return (read.value?.items ?? []).map((check) => chainNode(
+  return (read.value ?? []).map((check) => chainNode(
     chainEntityId(context.workspaceId, EntityKind.CheckRun, `${check.ref.bindingId}|${check.ref.externalId}`),
     EntityKind.CheckRun, check.ref.externalId, `${check.name}: ${check.conclusion ?? check.status}`, true,
-    undefined, factFor(check.conclusion),
+    undefined, factFor(check.status, check.conclusion),
   ))
 }
 
@@ -199,7 +258,8 @@ export async function readChainFacts(context: CoreContext, scope: DeliveryScopeI
   // 事实必须挂在已观察到的锚点上（ExecPlan D4）：head 未观察到就不读流水线，也不得以 commit: undefined 读取整个仓库的运行；
   // 检查同理，没有已观察到的变更请求就不读。此时只保留"缺哪一跳"的骨架，骨架不进谱系。
   const pipelines = head === undefined || scope.repositoryId === undefined ? [] : await readPipelines(context, scope.repositoryId, head, gaps)
-  const checks = crFact === undefined ? [] : await readChecks(context, crFact.ref.externalId, gaps)
+  const checks = crFact === undefined || head === undefined || scope.repositoryId === undefined
+    ? [] : await readChecks(context, scope.repositoryId, head, gaps)
   const slot = scope.repositoryId ?? 'unbound'
   return {
     workItem: await workItemNode(context, scope.workItemId),
