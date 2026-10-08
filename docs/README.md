@@ -25,7 +25,6 @@
 
 | 计划 | 范围 | 状态 |
 |---|---|---|
-| [2026-10-07-development-subset-contract](exec-plan/active/2026-10-07-development-subset-contract.md) | Development 五方法能力子集、对象副作用判别与真实 Local Git 共享套件 | 设计与计划已审评；S1 · 可选能力矩阵与真实子集验收未实施 |
 | [2026-10-05-connector-account-storage](exec-plan/completed/2026-10-05-connector-account-storage.md) | #126 连接账号、宿主凭据引用与工作区配置：独立元数据写口、Fake/SQLite 同契约、身份保留及重启验收；已实施并经评审，等待合并回读（PR #270） | Completed |
 | [2026-09-20-mvp0-parallel-stacks](exec-plan/completed/2026-09-20-mvp0-parallel-stacks.md) | MVP-0 并行堆叠 PR 交付的**控制计划**：栈拓扑、文件所有权、模型路由、批次顺序与合并顺序 | Completed |
 | [2026-09-20-contract-plane](exec-plan/completed/2026-09-20-contract-plane.md) | 契约栈（A）：领域模型、五域能力契约、契约套件与离线替身 | Completed |
@@ -50,6 +49,7 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-10-07-development-subset-contract](exec-plan/completed/2026-10-07-development-subset-contract.md) | #205：Development 共享契约套件按 `describeCapabilities()` 的有效能力（capability ∩ permission）选子集——五个可选方法双向受约束（未声明必须结构化 not_supported 且不改对象，声明可用就必须实现），`expect.objects` 必须给出新鲜快照；fake 完整形态加五种子集、Local Git 默认加三种关闭形态共用同一套件，liar 矩阵只按失败消息判别。第一轮评审（APPROVE，3 × P2、8 × P3）修订恢复了两条被误删的「未声明 × fault」断言，补上 CR 读的未声明判定与对应 liar，把没有判别力的 alias 负控改为合法适配器（快照克隆才是承重点）；Completed |
 | [2026-10-07-detail-planning-fields](exec-plan/completed/2026-10-07-detail-planning-fields.md) | #274：详情抽屉与列表共享同一份规划事实——`WorkItemDetailContent` 增加恒有的 `iteration` / `targetDate`，在详情遮蔽复验之后从同一次列表安全行复制（不回填 raw 详情、不重新格式化），`contentPanel` 只增加两行只读文字，日期不经 `Date` / locale 解析；loading / unavailable / unresolved / redacted 变体保持精确白名单。遮蔽 differential 覆盖 view、列表、组合页与 drawer；第一轮评审（APPROVE，1 × P2、3 × P3）修订后，date-only 判别在用例内切换四个时区（含 +14 的 Kiritimati），safe-row 来源的状态 canary 改为活的，最终树 12 个变异在 UTC 下全部变红；Completed |
 | [2026-10-07-iteration-5-6-planning](exec-plan/completed/2026-10-07-iteration-5-6-planning.md) | #275：迭代 5–6 的规划与 demo 条目规模收敛。规模按「实现 + 测试」重新标定后，demo 路径上原标 `M` 的 12 个条目改为 `L`；#228、#229、#127、#231、#234、#142 各拆出一个同级 issue（#276–#282），另建 M4.1 加固 epic #284 与 Draft→Issue 承接 #283。依赖边新增 19 条、删除 2 条，#143 走查只等 M4；#213 #207 #211 #212 #198 按交付证据关闭。人类伙伴裁决：demo 目标 2026-11-08（加缓冲迭代 9）、Gate E1（#4）在迭代 5 内裁决；Completed |
 | [2026-10-05-project-field-read](exec-plan/completed/2026-10-05-project-field-read.md) | #133：GitHub Project 原生字段只读，单页读取字段定义与以 project field id 为键的原生值（R2，`hasNextPage` 即整次失败）；工作区显式映射在注册时校验、深拷贝并冻结，只把列出的 option 归一进唯一的 `planningStatus`，未映射显示「名称（未映射）」、不按名称猜；迭代与目标日期随投影同事务确认，经 wire 到真实列表 HTML，redacted 双层剥离。第一版 1826 行经设计复审精简重写（删除只写不读的原生值落库链、映射不持久化，人类批准），第二轮评审与修复复评的 P2 / P3 已处理；原生值持久化归 #71、映射来源归 #229、同步尊重 `StatusPolicy` 归 #273（待人类裁决）、详情显示迭代与日期归 #274；Completed |
