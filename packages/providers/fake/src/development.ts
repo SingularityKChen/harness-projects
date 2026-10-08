@@ -44,6 +44,10 @@ export type FakeWorktreeRecord = { repository: cap.ExternalObjectRef; ref: cap.E
 export type FakeChangeRequestRecord = {
   ref: cap.ExternalObjectRef; repository: cap.ExternalObjectRef; number: number
   title: string; body: string; state: string; head: string; headCommit: string; sourceVersion: string
+  /** 精确解析出的分支身份；直接 sha 输入与直接构造的记录都可以是 undefined。 */
+  headBranch: string | undefined
+  /** 来源的原始审核枚举，创建路径默认 unknown；投影时 union 之外的值一律读成 unknown（`toChangeRequest`）。 */
+  reviewState: string
 }
 export type FakeDevelopmentState = {
   repositories: FakeRepositoryRecord[]; branches: FakeBranchRecord[]; commits: FakeCommitRecord[]
@@ -134,11 +138,22 @@ export class FakeDevelopmentProvider implements cap.DevelopmentProvider {
     return found === undefined ? this.gate.notFound('变更请求') : cap.providerOk(toChangeRequest(found))
   }
 
+  /**
+   * 先按 repository 身份、再按 headBranch 字节精确相等过滤，最后才按 externalId 稳定排序分页：
+   * 先在全体上分页再过滤会漏页，先排序再过滤虽然结果相同，但把「过滤是限定条件」写进顺序更难被改动破坏。
+   * 空串是输入错误（不 trim、不 case-fold）；未提供 headBranch 表示不筛选；未知但非空分支是成功的空页。
+   */
   async listChangeRequests(input: cap.ProviderListChangeRequestsInput): Promise<cap.ProviderResult<cap.ProviderPage<cap.ProviderChangeRequest>>> {
     const blocked = this.gate.blocked<cap.ProviderPage<cap.ProviderChangeRequest>>()
     if (blocked !== undefined) return blocked
     if (this.knownRepository(input.repository) === undefined) return this.gate.notFound('仓库')
-    const rows = this.state.changeRequests.filter((c) => itemKey(c.repository) === itemKey(input.repository)).sort(byExternalId)
+    if (input.headBranch === '') {
+      return providerFail(ProviderErrorCode.InvalidInput, 'headBranch 不得为空串：未提供表示不筛选')
+    }
+    const rows = this.state.changeRequests
+      .filter((c) => itemKey(c.repository) === itemKey(input.repository))
+      .filter((c) => input.headBranch === undefined || c.headBranch === input.headBranch)
+      .sort(byExternalId)
     return cap.providerOk(paginate(rows.map(toChangeRequest), input))
   }
 
@@ -200,19 +215,25 @@ export class FakeDevelopmentProvider implements cap.DevelopmentProvider {
     return cap.providerOk(undefined)
   }
 
-  /** head 可以是分支名，也可以直接是提交 sha；sourceVersion 锚定头部提交，谱系由此原生可读。 */
+  /**
+   * head 可以是分支名，也可以直接是提交 sha；sourceVersion 锚定头部提交，谱系由此原生可读。
+   * headBranch 只在 head 精确解析为本仓库分支时落库：直接 sha 无法确定分支身份（同一 sha 可能被多个分支
+   * 指向），因此留 undefined 而不是反推。reviewState 从创建路径看来源没有给出结论，一律 unknown。
+   */
   async createChangeRequest(input: cap.ProviderCreateChangeRequestInput): Promise<cap.ProviderResult<cap.ProviderChangeRequest>> {
     const blocked = this.gate.blocked<cap.ProviderChangeRequest>()
     if (blocked !== undefined) return blocked
     if (!this.flags.changeRequestCreate) return this.gate.unsupported(cap.CapabilityKey.DevelopmentChangeRequestCreate)
     if (this.knownRepository(input.repository) === undefined) return this.gate.notFound('仓库')
     if (this.faultsSwitch.isOn(FaultKind.AmbiguousCreate)) return this.gate.ambiguous('创建变更请求')
-    const head = this.branchOf(input.repository, input.head)?.headCommit ?? input.head
+    const branch = this.branchOf(input.repository, input.head)
+    const head = branch?.headCommit ?? input.head
     if (!this.state.commits.some((c) => c.sha === head)) return this.gate.notFound('头部提交')
     this.state.seq += 1
     const record: FakeChangeRequestRecord = {
       ref: refOf(this.gate.bindingId, EntityKind.ChangeRequest, `pr-${this.state.seq}`), repository: input.repository,
       number: this.state.seq, title: input.title, body: input.body, state: 'open', head: input.head, headCommit: head, sourceVersion: head,
+      headBranch: branch?.name, reviewState: 'unknown',
     }
     this.state.changeRequests.push(record)
     // 反向谱系：提交记住自己属于哪个变更请求（AGENTS.md §1.1 不变量 6）。
@@ -224,10 +245,15 @@ export class FakeDevelopmentProvider implements cap.DevelopmentProvider {
 function toBranch(record: FakeBranchRecord): cap.ProviderBranch {
   return { ref: record.ref, name: record.name, headCommit: record.headCommit }
 }
+const REVIEW_STATES: ReadonlySet<string> = new Set<cap.ProviderReviewState>(['approved', 'changes_requested', 'review_required', 'unknown'])
+const isReviewState = (value: string): value is cap.ProviderReviewState => REVIEW_STATES.has(value)
+
 function toChangeRequest(record: FakeChangeRequestRecord): cap.ProviderChangeRequest {
   return {
     ref: record.ref, number: record.number, title: record.title, body: record.body,
     state: record.state, sourceVersion: record.sourceVersion,
+    // 来源出现 union 之外的枚举（例如 dismissed）时投影为 unknown，绝不透传、也不默认 approved。
+    headBranch: record.headBranch, reviewState: isReviewState(record.reviewState) ? record.reviewState : 'unknown',
   }
 }
 
