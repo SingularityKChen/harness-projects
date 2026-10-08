@@ -25,6 +25,7 @@
 
 | 计划 | 范围 | 状态 |
 |---|---|---|
+| [2026-10-07-detail-planning-fields](exec-plan/active/2026-10-07-detail-planning-fields.md) | 详情共享列表安全规划状态、迭代与目标日期；遮蔽 differential 与 date-only 验收 | 设计与计划已审评；D1 · 安全规划字段与详情一致性验收未实施 |
 | [2026-10-05-connector-account-storage](exec-plan/completed/2026-10-05-connector-account-storage.md) | #126 连接账号、宿主凭据引用与工作区配置：独立元数据写口、Fake/SQLite 同契约、身份保留及重启验收；已实施并经评审，等待合并回读（PR #270） | Completed |
 | [2026-09-20-mvp0-parallel-stacks](exec-plan/completed/2026-09-20-mvp0-parallel-stacks.md) | MVP-0 并行堆叠 PR 交付的**控制计划**：栈拓扑、文件所有权、模型路由、批次顺序与合并顺序 | Completed |
 | [2026-09-20-contract-plane](exec-plan/completed/2026-09-20-contract-plane.md) | 契约栈（A）：领域模型、五域能力契约、契约套件与离线替身 | Completed |
