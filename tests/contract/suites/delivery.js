@@ -2,11 +2,12 @@
  * Delivery 契约套件：接受任意 DeliveryProvider 适配器 `{ label, makeProvider(scenario), expect }`。
  * scenario：`{}` 全能力无故障；`{ capabilities: { deployments: false } }` 可选部署/环境读未启用；
  * `{ faults: { offline: true } }` 离线。
- * `expect`：`{ repository, commit, changeRequest, pageSize, checkNames, environmentNames }`。
+ * `expect`：`{ repository, commit, pageSize, checkNames, environmentNames }`；checks 按 required repository + commit 读取。
  *
  * 看护的不变量（tests/README.md §2.3、§2.6）：写尝试（重跑 / 取消）必须返回 not_supported 且
  * **不改变任何状态**——静默成功会让调用方以为远端已经改变；缺可选能力时调用方从 capability 快照
- * 就看到 unavailable，而不是拿到平台错误；声明了的能力必须真的能读到内容，不能只有键没有数据。
+ * 就看到 unavailable，而不是拿到平台错误；声明了的能力必须真的能读到内容，不能只有键没有数据；
+ * 检查项必须带回它所属的提交，精确提交定位才有锚点。
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -51,11 +52,12 @@ export function deliveryContractSuite(adapter) {
     assert.equal(new Set(seen).size, seen.length, '分页不得重复投递同一运行')
   })
 
-  test(`${label}：检查按变更请求映射，带回名称与状态`, async () => {
+  test(`${label}：检查按已观察提交映射，带回名称、状态与所属提交`, async () => {
     const provider = makeProvider({})
-    const result = await provider.listChecks({ changeRequest: expected.changeRequest, cursor: undefined, limit: 100 })
+    const result = await provider.listChecks({ repository, commit: expected.commit, cursor: undefined, limit: 100 })
     assert.equal(result.ok, true)
     assert.deepEqual(sorted(result.value.items.map((check) => check.name)), sorted(expected.checkNames))
+    assert.ok(result.value.items.every((check) => check.commit === expected.commit), '每条检查必须复验它属于请求的提交')
     assert.ok(result.value.items.every((check) => typeof check.status === 'string' && check.status.length > 0))
   })
 
@@ -78,12 +80,25 @@ export function deliveryContractSuite(adapter) {
     assert.deepEqual((await allRuns(provider)).value.items, before.value.items, '被拒的写尝试不得改变任何运行')
   })
 
-  test(`${label}：可选部署与环境能力——启用时读得到内容，未启用时报 unavailable`, async () => {
+  test(`${label}：可选部署与环境能力——按快照诚实省略，声明了就必须读到内容`, async () => {
+    // 只读交付面可以完全不声明部署/环境：unavailable + 方法缺席是合法实现；声明了就必须真的读得到。
     const enabled = makeProvider({})
-    if (typeof enabled.listEnvironments === 'function') {
+    const declared = accessOf(await enabled.describeCapabilities(), CapabilityKey.DeliveryDeploymentRead)
+    if (declared !== 'unavailable') {
+      assert.ok(typeof enabled.listEnvironments === 'function', '声明了部署读能力就必须有办法读到它，不能只有键没有数据')
       const environments = await enabled.listEnvironments(repository)
       assert.equal(environments.ok, true, '声明了的能力不能只有键没有数据')
       assert.deepEqual(sorted(environments.value.map((environment) => environment.name)), sorted(expected.environmentNames))
+    } else {
+      for (const method of [enabled.listDeployments, enabled.listEnvironments]) {
+        if (typeof method !== 'function') continue
+        const result = method === enabled.listEnvironments
+          ? await enabled.listEnvironments(repository)
+          : await enabled.listDeployments({ repository, cursor: undefined, limit: 10 })
+        assert.equal(result.ok, false, '未声明的可选能力除 unavailable 外不得给出别的结论')
+        assert.equal(result.error.code, 'not_supported', '缺能力不是平台错误，调用方要走降级路径')
+        assert.equal(result.error.retryable, false)
+      }
     }
 
     const disabled = makeProvider({ capabilities: { deployments: false } })
@@ -91,7 +106,6 @@ export function deliveryContractSuite(adapter) {
     const calls = []
     if (typeof disabled.listDeployments === 'function') calls.push(disabled.listDeployments({ repository, cursor: undefined, limit: 10 }))
     if (typeof disabled.listEnvironments === 'function') calls.push(disabled.listEnvironments(repository))
-    assert.ok(calls.length > 0, '缺可选能力时仍必须有办法让调用方观察到 unavailable')
     for (const result of await Promise.all(calls)) {
       assert.equal(result.ok, false)
       assert.equal(result.error.code, 'not_supported', '缺能力不是平台错误，调用方要走降级路径')
@@ -103,7 +117,7 @@ export function deliveryContractSuite(adapter) {
     const provider = makeProvider({ faults: { offline: true } })
     const results = await Promise.all([
       allRuns(provider),
-      provider.listChecks({ changeRequest: expected.changeRequest, cursor: undefined, limit: 10 }),
+      provider.listChecks({ repository, commit: expected.commit, cursor: undefined, limit: 10 }),
     ])
     for (const result of results) {
       assert.equal(result.ok, false)
