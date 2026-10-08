@@ -44,6 +44,7 @@
 | [2026-09-21-gate-e1-write-and-events](exec-plan/active/2026-09-21-gate-e1-write-and-events.md) | Gate E1 写确认与事件可靠性：实测平台无 CAS、事件订不到、重复创建幂等 | Active |
 | [2026-09-24-local-git-worktree](exec-plan/active/2026-09-24-local-git-worktree.md) | 本地 Git provider（#137）：仓库读、分支建、工作树建，路径安全在任何 Git 命令之前；第四轮 18 条意见按根因改完，移除与 core 层验收分别拆到 #138 / #207 | Batch 1–5 已完成；四轮评审响应已记录 |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | epic #216 的控制计划：先把纵向路径与 R1 不变量的证据如实落账，再收敛读写权威、同步和 Client 重连，最后合并发布前 SQL、清理旧形状并重整测试与文档证据 | Batch 0（#217）已验收；纵向路径矩阵见 `docs/product/vertical-path.md` §2.1，R1 映射见 `docs/architecture/release-gates.md` §2.1.1；PR #239 状态以 GitHub 回读为准；Batch 1–7 待实施 |
+| [2026-10-08-sync-revision-freshness](exec-plan/active/2026-10-08-sync-revision-freshness.md) | #220 + #199（epic #216 的 Batch 2E）：业务修订号只随已提交的规划快照内容变化推进（写后重读、深比较、整批重盖，移除也算变化，#202 残留不误判）；一轮同步的任何异常转成结构化失败（游标 degraded + `unavailable`，固定文案不转发原文），游标缺失读作陈旧；成功提交写 `reconcile_cursor` 对账时刻，wire 与 client 不变；规则见 ADR-0012（Proposed）；技术债务 TD-030–TD-033 | Active：设计定稿，实现未开始 |
 
 ### Completed
 
