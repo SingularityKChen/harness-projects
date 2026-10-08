@@ -17,23 +17,59 @@ import {
   recordingRunner, repositoryRef, worktreePaths,
 } from './local-git-fixture.js'
 
+/**
+ * 契约 suite **专用**的 module-level 夹具：只有 `localGitSuite(suiteFixture)` 一行消费它。下方所有具名
+ * `test(...)` 用例一律走 `fixtureFor(t)` 的 per-test 夹具，不复用本夹具，因此 suite 内部的创建/移除
+ * 残留无法污染那些用例。新增用例请继续用 `fixtureFor(t)`——不要向本夹具写状态。
+ */
 const suiteFixture = await makeFixture((cleanup) => after(cleanup))
+/** 套件共用的预置分支：`PREPARED_BRANCH` 供工作树创建用例检出，`PREPARED_DUP_BRANCH` 只服务"同一路径重复
+ *  创建"用例，`main` 被主检出占着因此不能当检出新工作树的分支。worktreeCreate:false 形态下 `PREPARED_BRANCH`
+ *  已被预置工作树 `wt-prepared` 检出；该形态不声明 createWorktree，创建用例不会再去检出它。 */
+const PREPARED_BRANCH = 'feature/prepared'
+const PREPARED_DUP_BRANCH = 'feature/prepared-dup'
+await suiteFixture.run(['branch', PREPARED_BRANCH, 'main'])
+await suiteFixture.run(['branch', PREPARED_DUP_BRANCH, 'main'])
 
-developmentContractSuite({
-  label: '本地 Git provider',
-  makeProvider: (scenario = {}) => providerFor(suiteFixture, {
-    runGit: faultRunner(scenario.faults), capabilities: scenario.capabilities,
-    repository: { externalId: REPOSITORY_ID, path: suiteFixture.repositoryPath, defaultBranch: 'main' },
+/** 对象钩子：每次从磁盘真实读取 refs 与 worktree 登记，不缓存、不 alias。 */
+const diskObjects = (fixture) => async () => ({
+  branches: (await git(['for-each-ref', '--format=%(refname:short)\t%(objectname)', 'refs/heads'], fixture.repositoryPath)).trim(),
+  worktrees: await worktreePaths(fixture),
+})
+
+/** 同 suite 的真实 Local Git 装配：每个能力形态用**独立**临时仓库/允许根，互不复用残留。 */
+const localGitSuite = (fixture, capabilities) => developmentContractSuite({
+  label: capabilities === undefined ? '本地 Git provider' : `本地 Git provider（${JSON.stringify(capabilities)}）`,
+  makeProvider: (scenario = {}) => providerFor(fixture, {
+    runGit: faultRunner(scenario.faults), capabilities: { ...capabilities, ...scenario.capabilities },
+    repository: { externalId: REPOSITORY_ID, path: fixture.repositoryPath, defaultBranch: 'main' },
   }),
   expect: {
-    repository: repositoryRef, baseBranch: 'main', headCommit: suiteFixture.headCommit, pageSize: 1,
-    worktreePath: path.join(suiteFixture.root, 'wt-suite'),
-    objects: async () => ({
-      branches: (await git(['for-each-ref', '--format=%(refname:short)\t%(objectname)', 'refs/heads'], suiteFixture.repositoryPath)).trim(),
-      worktrees: await worktreePaths(suiteFixture),
-    }),
+    repository: repositoryRef, baseBranch: 'main', headCommit: fixture.headCommit, pageSize: 1,
+    worktreePath: path.join(fixture.root, 'wt-suite'),
+    worktreeBranch: PREPARED_BRANCH,
+    worktreeRef: fixture.worktreeRef,
+    worktreeRefBranch: fixture.worktreeRefBranch,
+    worktreeDupBranch: PREPARED_DUP_BRANCH,
+    objects: diskObjects(fixture),
   },
 })
+
+localGitSuite(suiteFixture)
+
+// 三个剩余能力关闭的真实子集：分支创建关闭、工作树创建关闭（读取仍可用）、工作树读取关闭。
+for (const capabilities of [{ branchCreate: false }, { worktreeCreate: false }, { worktreeRead: false }]) {
+  const fixture = await makeFixture((cleanup) => after(cleanup))
+  await fixture.run(['branch', PREPARED_BRANCH, 'main'])
+  await fixture.run(['branch', PREPARED_DUP_BRANCH, 'main'])
+  // worktree.create 关闭时读取用例必须读回一份真实存在于磁盘上的预置工作树，而不是跳过。
+  if (capabilities.worktreeCreate === false) {
+    fixture.worktreeRef = { bindingId: BINDING, objectKind: 'worktree', externalId: path.join(fixture.root, 'wt-prepared'), url: undefined }
+    fixture.worktreeRefBranch = PREPARED_BRANCH
+    await fixture.run(['worktree', 'add', fixture.worktreeRef.externalId, PREPARED_BRANCH])
+  }
+  localGitSuite(fixture, capabilities)
+}
 test('路径安全：越界、含 .. 与符号链接逃逸都在任何 Git 命令之前被拒（零次调用）', async (t) => {
   const fixture = await fixtureFor(t)
   const outsideDirectory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'local-git-outside-')))
