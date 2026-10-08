@@ -26,7 +26,6 @@
 | 计划 | 范围 | 状态 |
 |---|---|---|
 | [2026-10-07-github-actions-read](exec-plan/active/2026-10-07-github-actions-read.md) | 精确仓库/提交只读 Actions 与 Checks，完整分页及保守 CI 事实 | A1 base 片（端口、fake、core 完整摄入与唯一状态映射、core 级集成，#295）已实施并验收；adapter 片由 #289 负责，状态以 PR #289 回读为准 |
-| [2026-10-07-development-change-request-facts](exec-plan/active/2026-10-07-development-change-request-facts.md) | 变更请求 headBranch/reviewState、分支先过滤后分页与观察版本边界 | 设计与计划已审评；C1 · 变更请求形状、分支过滤与版本语义未实施 |
 | [2026-10-05-connector-account-storage](exec-plan/completed/2026-10-05-connector-account-storage.md) | #126 连接账号、宿主凭据引用与工作区配置：独立元数据写口、Fake/SQLite 同契约、身份保留及重启验收；已实施并经评审，等待合并回读（PR #270） | Completed |
 | [2026-09-20-mvp0-parallel-stacks](exec-plan/completed/2026-09-20-mvp0-parallel-stacks.md) | MVP-0 并行堆叠 PR 交付的**控制计划**：栈拓扑、文件所有权、模型路由、批次顺序与合并顺序 | Completed |
 | [2026-09-20-contract-plane](exec-plan/completed/2026-09-20-contract-plane.md) | 契约栈（A）：领域模型、五域能力契约、契约套件与离线替身 | Completed |
@@ -51,6 +50,7 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-10-07-development-change-request-facts](exec-plan/completed/2026-10-07-development-change-request-facts.md) | #279：变更请求快照透出真实 `headBranch`（直接以提交 SHA 创建时为 undefined，不反推）与保守的 `reviewState`（来源未给结论为 unknown，union 之外的枚举投影为 unknown，新建时只能是 unknown 或 review_required）；`listChangeRequests` 按 repository 再按 headBranch 字节精确过滤后才分页，空串是 invalid_input。共享 suite 按方法自己的 capability key 判定，只读形态必须提供预置变更请求事实；裸 SHA 作 head 可以成功或答 invalid_input。第一轮评审（APPROVE，2 × P2、6 × P3）与修复复评（5 × P3）修订后，13 个规则坏适配器把每条新规则钉住，最终树 47 个变异全部变红；Completed |
 | [2026-10-07-development-subset-contract](exec-plan/completed/2026-10-07-development-subset-contract.md) | #205：Development 共享契约套件按 `describeCapabilities()` 的有效能力（capability ∩ permission）选子集——五个可选方法双向受约束（未声明必须结构化 not_supported 且不改对象，声明可用就必须实现），`expect.objects` 必须给出新鲜快照；fake 完整形态加五种子集、Local Git 默认加三种关闭形态共用同一套件，liar 矩阵只按失败消息判别。第一轮评审（APPROVE，3 × P2、8 × P3）修订恢复了两条被误删的「未声明 × fault」断言，补上 CR 读的未声明判定与对应 liar，把没有判别力的 alias 负控改为合法适配器（快照克隆才是承重点）；Completed |
 | [2026-10-07-detail-planning-fields](exec-plan/completed/2026-10-07-detail-planning-fields.md) | #274：详情抽屉与列表共享同一份规划事实——`WorkItemDetailContent` 增加恒有的 `iteration` / `targetDate`，在详情遮蔽复验之后从同一次列表安全行复制（不回填 raw 详情、不重新格式化），`contentPanel` 只增加两行只读文字，日期不经 `Date` / locale 解析；loading / unavailable / unresolved / redacted 变体保持精确白名单。遮蔽 differential 覆盖 view、列表、组合页与 drawer；第一轮评审（APPROVE，1 × P2、3 × P3）修订后，date-only 判别在用例内切换四个时区（含 +14 的 Kiritimati），safe-row 来源的状态 canary 改为活的，最终树 12 个变异在 UTC 下全部变红；Completed |
 | [2026-10-07-iteration-5-6-planning](exec-plan/completed/2026-10-07-iteration-5-6-planning.md) | #275：迭代 5–6 的规划与 demo 条目规模收敛。规模按「实现 + 测试」重新标定后，demo 路径上原标 `M` 的 12 个条目改为 `L`；#228、#229、#127、#231、#234、#142 各拆出一个同级 issue（#276–#282），另建 M4.1 加固 epic #284 与 Draft→Issue 承接 #283。依赖边新增 19 条、删除 2 条，#143 走查只等 M4；#213 #207 #211 #212 #198 按交付证据关闭。人类伙伴裁决：demo 目标 2026-11-08（加缓冲迭代 9）、Gate E1（#4）在迭代 5 内裁决；Completed |
