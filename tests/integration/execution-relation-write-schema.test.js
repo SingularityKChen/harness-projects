@@ -54,7 +54,7 @@ function seed(db) {
 
 test('空库建出 L3 十一张表，二次运行是 no-op', () => withDatabase((db) => {
   assert.deepEqual(migrate(db).applied, MIGRATIONS.map((entry) => entry.version))
-  assert.deepEqual(allTables(db), [...Object.keys(TABLE_PROVENANCE), 'connector_account', 'entity', 'external_identity', 'planning_field_value', 'project_item_membership', 'provider_binding', 'schema_migrations', 'workspace', 'workspace_binding', 'workspace_projection'].sort())
+  assert.deepEqual(allTables(db), [...Object.keys(TABLE_PROVENANCE), 'connector_account', 'delivery_fact', 'entity', 'external_identity', 'planning_field_value', 'project_item_membership', 'provider_binding', 'schema_migrations', 'workspace', 'workspace_binding', 'workspace_projection'].sort())
   const before = JSON.stringify(db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all())
   assert.deepEqual(migrate(db).applied, []); assert.equal(JSON.stringify(db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all()), before)
 }))
@@ -77,7 +77,7 @@ test('D8：每张表的出处注释带该表期望的 token，且全文 token �
   }
   assert.deepEqual(allTables(db), [])
   migrate(db)
-  const actual = allTables(db).filter((name) => !['schema_migrations','workspace','connector_account','provider_binding','workspace_binding','entity','external_identity','project_item_membership','planning_field_value','workspace_projection'].includes(name))
+  const actual = allTables(db).filter((name) => !['schema_migrations','workspace','connector_account','delivery_fact','provider_binding','workspace_binding','entity','external_identity','project_item_membership','planning_field_value','workspace_projection'].includes(name))
   assert.deepEqual(actual, Object.keys(TABLE_PROVENANCE).sort())
 }))
 
@@ -288,4 +288,19 @@ test('003 显式 schema 审查：十一张表的 66 列全部在白名单内，�
   const credentialLike = /token|password|passwd|secret|credential|private_?key|access_?key|api_?key/i
   assert.deepEqual(actual.filter((qualified) => credentialLike.test(qualified)), [],
     '没有任何列能存凭据材料；凭据只保存 secret 服务句柄')
+}))
+
+test('006 显式 schema 审查：delivery_fact 一个执行上下文一行，父行是同一工作区的执行上下文，没有列能存凭据材料（#221）', () => withDatabase((db) => {
+  migrate(db); seed(db)
+  assert.deepEqual(columns(db, 'delivery_fact'), ['attempted_at', 'context_id', 'sets_json', 'workspace_id'], '四列全部被审计，没有一列能存凭据材料：新增列必须同步写进这里')
+  assert.deepEqual(db.prepare('SELECT "table" AS target, "from" AS col FROM pragma_foreign_key_list(?) ORDER BY seq').all('delivery_fact').map((row) => `${row.target}.${row.col}`),
+    ['execution_context.workspace_id', 'execution_context.context_id'], '唯一的父边是 (工作区, 执行上下文) 复合外键')
+  assert.deepEqual(db.prepare('SELECT name FROM pragma_table_info(?) WHERE "notnull" = 0').all('delivery_fact'), [], '四列全部 NOT NULL：json_valid(NULL) 会放行 CHECK，缺 NOT NULL 就能写进没有快照内容的行')
+  const insert = (ws, ctx, sets) => `INSERT INTO delivery_fact VALUES ('${ws}','${ctx}','2026-10-08T00:00:00.000Z','${sets}')`
+  db.exec(insert('ws-1', 'context-1', '[]'))
+  rejects(db, insert('ws-2', 'context-1', '[]'), /FOREIGN KEY constraint failed/)
+  rejects(db, insert('ws-1', 'context-none', '[]'), /FOREIGN KEY constraint failed/)
+  rejects(db, "UPDATE delivery_fact SET sets_json = '{not json' WHERE context_id = 'context-1'", /CHECK constraint failed/)
+  rejects(db, "UPDATE delivery_fact SET sets_json = '{}' WHERE context_id = 'context-1'", /CHECK constraint failed/)
+  rejects(db, insert('ws-1', 'context-1', '[]'), /UNIQUE constraint failed|PRIMARY KEY/)
 }))

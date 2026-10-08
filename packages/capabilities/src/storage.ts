@@ -2,6 +2,7 @@
  *
  */
 import type {
+  EngineeringFactKind,
   Entity,
   EntityId,
   ExecutionContextId,
@@ -137,6 +138,31 @@ export interface FieldValueRecord {
   readonly observedAt: string
 }
 
+/** 交付事实快照里的一个节点（#221，ADR-0011）：core 写入时已观察到的显示值；身份是 `entityId`，关系另在关系表。 */
+export interface DeliveryNodeFact { readonly entityId: EntityId; readonly externalId: string; readonly label: string | undefined; readonly fact: EngineeringFactKind | undefined }
+
+/** 交付链的四个集合；完整性按集合判定：不完整的集合整组原样保留。 */
+export type DeliveryFactSetKind = 'commit' | 'change_request' | 'pipeline_run' | 'check_run'
+
+export interface DeliveryFactSet {
+  readonly kind: DeliveryFactSetKind
+  /** 这些节点挂靠的锚点实体（提交与变更请求挂工作树，流水线挂提交，检查挂变更请求），按确认时的值记录：读回按它取边，不在全局关系里重新找（同一个流水线实体可以挂在多个上下文的提交上）；从未完整读到时为 undefined。 */
+  readonly anchorId: EntityId | undefined
+  /** 最近一次完整读到该集合的刷新时刻；undefined 表示从未完整读到。 */
+  readonly confirmedAt: string | undefined
+  /** 最近一次被应用的刷新没能重新确认这个集合（离线、权限、截断、锚点未读到、提交失败）：节点是最后确认的值。 */
+  readonly stale: boolean
+  readonly nodes: readonly DeliveryNodeFact[]
+}
+
+/** 一个执行上下文的交付事实快照（#221，ADR-0011），唯一写者是 core 的 `refreshDeliveryFacts`；父行必须是同一工作区里已登记的执行上下文。 */
+export interface DeliveryFactsRecord {
+  readonly workspaceId: WorkspaceId; readonly contextId: ExecutionContextId
+  /** 最近一次被应用的刷新的读取开始时刻：乱序守卫与陈旧判定的基准。 */
+  readonly attemptedAt: string
+  readonly sets: readonly DeliveryFactSet[]
+}
+
 export interface Storage {
   // ── 事务：一个 transaction 内的写入要么全部生效，要么全部不生效 ──
   transaction<T>(work: (tx: StorageTransaction) => Promise<T>): Promise<T>
@@ -210,6 +236,10 @@ export interface Storage {
   // 不变量 5 的直接推论：**候选不得降级已确认**——同键已有 confirmed 行时，写入 candidate 是 no-op。
   putRelation(workspaceId: WorkspaceId, relation: Relation): Promise<void>
   listRelations(workspaceId: WorkspaceId): Promise<readonly Relation[]>
+
+  // ── 交付事实（#221，ADR-0011）：一个执行上下文一行，整行覆盖（不合并旧集合）；父行是该工作区里的执行上下文，缺失即拒绝且不留行 ──
+  getDeliveryFacts(workspaceId: WorkspaceId, contextId: ExecutionContextId): Promise<DeliveryFactsRecord | undefined>
+  putDeliveryFacts(record: DeliveryFactsRecord): Promise<void>
 
   // ── 同步：重复或乱序观察返回 false，表示本次观察未被应用，调用方不得读成“已应用” ──
   // 主体是 `ProviderObservation.subject = (bindingId, objectKind, externalId)`，作用域是**连接**；观察**可以先于

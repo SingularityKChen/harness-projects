@@ -36,6 +36,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 4, file: '004_execution_run_identity.sql' },
   // 005 不含 DDL：载体世代步骤（#203），`schema_migrations` 里的 5 是世代标记。
   { version: 5, file: '005_source_version_carrier.sql', data: SOURCE_VERSION_CARRIER_STEP },
+  { version: 6, file: '006_delivery_facts.sql' },
 ]
 
 /** 迁移体所在目录，按本模块位置解析，不依赖进程工作目录。 */

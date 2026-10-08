@@ -1,5 +1,5 @@
 /** SQLite 行 → 端口记录的映射：列名是 snake_case，端口字段是 camelCase，本模块是两者之间唯一的翻译层（换列名只改这里，改一处）。 */
-import type { BindingConfigurationRecord, CapabilityDomain, ConnectorAccountRecord, ExecutionContextRecord, ExecutionRunRecord, ExternalObjectRef, FieldValueRecord, MembershipRecord, MutationAttemptRecord, ProviderBindingRecord, ReconcileCursorRecord, RepositoryRecord, SecretHandle, SyncCursorRecord, SyncState, WorkspaceRecord } from '@harness-projects/capabilities'
+import type { BindingConfigurationRecord, CapabilityDomain, ConnectorAccountRecord, DeliveryFactsRecord, ExecutionContextRecord, ExecutionRunRecord, ExternalObjectRef, FieldValueRecord, MembershipRecord, MutationAttemptRecord, ProviderBindingRecord, ReconcileCursorRecord, RepositoryRecord, SecretHandle, SyncCursorRecord, SyncState, WorkspaceRecord } from '@harness-projects/capabilities'
 import type { ConnectorAccountId, EntityId, ExecutionContextId, ExecutionContextStatus, ExecutionRunId, ExecutionRunStatus, ExternalIdentity, ExternalIdentityId, IdentityRole, MembershipContentKind,
   NormalizedStatus, PlanningContent, PlanningFieldsSnapshot, ProjectErrorCode, ProviderBindingId, RedactionReason, Relation, RelationClass, RelationSource, RelationState, RelationType, StatusPolicy,
   WorkspaceId, WorkspaceProjection, WriteState } from '@harness-projects/domain'
@@ -120,4 +120,13 @@ export const rowToProjection = (row: Row): WorkspaceProjection => {
   return { workspaceId: text(row, 'workspace_id') as WorkspaceId,
     entityId: text(row, 'entity_id') as EntityId, planningStatus: text(row, 'planning_status') as NormalizedStatus,
     revision: row['revision'] as number, content: rowToContent(row), ...(planningFields === undefined ? {} : { planningFields }) }
+}
+
+/** `sets_json` → 端口记录：逐字段重建，JSON 里缺省的键还原成显式 `undefined`（与替身的 structuredClone 往返一致）；集合内容由 core 写入，这里不解释。 */
+export function rowToDeliveryFacts(row: Row): DeliveryFactsRecord {
+  const sets = JSON.parse(text(row, 'sets_json')) as DeliveryFactsRecord['sets']
+  return {
+    workspaceId: text(row, 'workspace_id') as WorkspaceId, contextId: text(row, 'context_id') as ExecutionContextId, attemptedAt: text(row, 'attempted_at'),
+    sets: sets.map(({ kind, anchorId, confirmedAt, stale, nodes }) => ({ kind, anchorId, confirmedAt, stale, nodes: nodes.map(({ entityId, externalId, label, fact }) => ({ entityId, externalId, label, fact })) })),
+  }
 }

@@ -268,7 +268,8 @@ test('身份只有一处派生：读一次谱系不得写出第二条 has_worktr
   assert.equal(before[0].to, expectedWorktreeId(providers, workItemId))
 
   // 读谱系会把观察到的每一跳落成关系。若投影侧的实体键与写入侧不同，这里就会多出一条 confirmed 关系。
-  await core.queries.getDeliveryLineage({ workItemId, repositoryId: REQUEST.repositoryId })
+  const hops = await core.queries.getDeliveryLineage({ workItemId, repositoryId: REQUEST.repositoryId })
+  assert.equal(hops.find((hop) => hop.relationType === 'has_worktree')?.to, expectedWorktreeId(providers, workItemId), '投影侧按同一个身份找到这条关系（#221 起读路径不再写边，判别力落在这里）')
 
   const after = await worktreeRelations(providers)
   assert.equal(after.length, 1, '读一次谱系不得为同一份工作树写出第二条 confirmed 关系')
@@ -310,7 +311,8 @@ test('身份的作用域是仓库而不是 binding：开始工作之后仓库读
     policy: { [CapabilityKey.DevelopmentRepositoryRead]: AccessLevel.Unavailable },
   })
   // 投影侧一旦拿不到 binding，就会去算另一个身份——读一次谱系于是写出第二条 confirmed 关系。
-  await second.queries.getDeliveryLineage({ workItemId, repositoryId: REQUEST.repositoryId })
+  const hops = await second.queries.getDeliveryLineage({ workItemId, repositoryId: REQUEST.repositoryId })
+  assert.equal(hops.find((hop) => hop.relationType === 'has_worktree')?.to, expectedWorktreeId(providers, workItemId), '仓库读能力不可用时投影侧仍按同一个身份找到这条关系')
 
   const after = await worktreeRelations(providers)
   assert.equal(after.length, 1, '仓库读能力不可用不得让投影侧算出第二个身份')
