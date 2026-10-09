@@ -29,7 +29,7 @@ Batch 0 先交付最后那一半：只读仓库的人能在 `docs/product/vertic
 | Host 权威、规划/工程正交、身份与成员分离 | 主轴仍在；当前 schema 与早期表形不同有 Gate E1 和 ADR 的后续理由，不自动算漂移 | `AGENTS.md` §1、`docs/adr/ADR-0002-membership-identity-separate-from-content.md`、`docs/adr/ADR-0006-connection-anchor-and-workspace-mount.md` |
 | 独立 Web 先落地 | 宿主探针选择的有意调整，并非放弃 Host 权威 | `docs/architecture/harness-host-spike.md` 的 `fallback-web` 裁决；宿主与 UI 尚未交付 |
 | 多 Development 来源 | core 注册表每域一个实例，`implementationKey` 取的是域名（Superseded by `docs/exec-plan/completed/2026-10-01-provider-binding-registration.md`（2026-10-02，#197）：`implementationKey` 改由实现作者的静态 `definition` 声明，同一连接可在一个工作区挂多个域；每域一个主实例不变；Superseded by `docs/exec-plan/completed/2026-10-08-development-repository-routing.md`（2026-10-08，#219）：Development 可以有多个挂载，唯一挂载是默认、多个时全部非默认并按仓库路由，其余域仍每域一个主实例） | `packages/core/src/registry.ts`；#197、#219 |
-| 同步与交付事实 | 已复现：交付 Query 发现并写关系、离线时丢最后已知 CI；重复 bootstrap 推进 revision（**Superseded by #220 修复**，2026-10-08，`fix/sync-revision-freshness`：重复引导不再推进，见 P2 的观察行） | `packages/core/src/delivery.ts`、`chain-facts.ts`、`bootstrap.ts`；复现命令 P2、P3 |
+| 同步与交付事实 | 已复现：交付 Query 发现并写关系、离线时丢最后已知 CI；重复 bootstrap 推进 revision（**Superseded by #220 修复**，2026-10-08，`fix/sync-revision-freshness`：重复引导不再推进，见 P2 的观察行；交付两项 **Superseded by #221 / #222**，2026-10-09：交付事实只经唯一刷新写者写入，离线保留最后确认的 CI 并标陈旧，查询纯读，见 P3′ 的观察行） | `packages/core/src/delivery.ts`、`chain-facts.ts`、`bootstrap.ts`；复现命令 P2、P3 |
 | 客户端连接 | 重连期间可把 revision 2 覆盖回迟到 baseline 1，旧值仍报 current | `packages/client/src/sync.ts`、`store.ts`；#218 |
 | MVP-0 / 首发 | 7 条节点测试不等于 13 步都有生产入口；第 9 步与 Draft→Issue 没有生产入口 | Batch 0 的矩阵；真实 Provider、Host、UI 未交付属于分期，不是已实现后退 |
 
@@ -340,6 +340,7 @@ console.log('relations', r0, '->', r1, '| ci online', ci(online), '| ci offline'
 "
 # 观察：relations 2 -> 9 | ci online 5 | ci offline 0 | degraded true
 # Superseded by #221（2026-10-08）：PR-C 之后观察为 ci offline 5（relations 2 -> 9 | ci online 5 | ci offline 5 | degraded true）
+# Superseded by docs/exec-plan/completed/2026-10-08-delivery-query-pure-read.md 的 P3′（2026-10-08）：#222 之后查询纯读，P3 原命令输出 relations 2 -> 2 | ci online 0 | ci offline 0 | degraded true，摄入要先调 commands.refreshDeliveryFacts
 
 # P4 同幂等键换工作项仍报 saved（#194；第 6 行、R1 第 6 条）
 node --input-type=module -e "
@@ -424,7 +425,8 @@ cd "$SCRATCH/export" && node --input-type=module -e "console.log(import.meta.res
 - [ ] Batch 2：2A–2E（#197 #219 #189 #198 #203 #202 #199 #220）。
   - 2E（#199 #220）在 `fix/sync-revision-freshness` 实现，计划 `docs/exec-plan/completed/2026-10-08-sync-revision-freshness.md`；合并状态以 PR 回读为准。
 - [ ] Batch 3：3A/3B（#221 #222）。
-  - [x] (2026-10-08 CST) 3A（#221）：实现与回填完成，PR #292（`feature/delivery-fact-writer`，draft，待人类评审与合并），ExecPlan `docs/exec-plan/completed/2026-10-08-delivery-fact-writer.md`。回读：在 `.worktrees/delivery-fact-writer` 运行 `node --test --test-timeout=60000 tests/e2e/delivery-lineage.test.js tests/contract/storage-contract.test.js tests/integration/execution-relation-write-schema.test.js`，`ℹ fail 0`；P3 原命令观察 `relations 2 -> 9 | ci online 5 | ci offline 5 | degraded true`。3B（#222）未做。
+  - [x] (2026-10-08 CST) 3A（#221）：实现与回填完成，PR #292（`feature/delivery-fact-writer`；三轮 MMP 评审 APPROVED，2026-10-09 归档，合并由评审会话进行），ExecPlan `docs/exec-plan/completed/2026-10-08-delivery-fact-writer.md`。回读：在 `.worktrees/delivery-fact-writer` 运行 `node --test --test-timeout=60000 tests/e2e/delivery-lineage.test.js tests/contract/storage-contract.test.js tests/integration/execution-relation-write-schema.test.js`，`ℹ fail 0`；P3 原命令观察 `relations 2 -> 9 | ci online 5 | ci offline 5 | degraded true`。3B（#222）未做。
+  - [x] (2026-10-08 CST) 3B（#222；上一行末尾的「3B（#222）未做」随本行作废）：实现与回填完成，PR #293（`fix/delivery-query-pure-read`，栈在 PR #292 上；三轮 MMP 评审 APPROVED，2026-10-09 归档，合并由评审会话进行），ExecPlan `docs/exec-plan/completed/2026-10-08-delivery-query-pure-read.md`。回读：在 `.worktrees/delivery-query-pure-read` 运行 `node --test --test-timeout=120000 tests/integration tests/e2e` 与 `pnpm run boundaries`，都以 `ℹ fail 0` 或退出码 0 结束；P3 原命令观察 `relations 2 -> 2 | ci online 0 | ci offline 0 | degraded true`，P3′ 观察 `read relations 2 -> 2 | refresh relations -> 9 | ci online 5 | ci offline 5 | stale true | degraded true`。
 - [ ] Batch 4（#194 #204 #191）。
 - [ ] Batch 5（#223）。
 - [ ] Batch 6（#224）。

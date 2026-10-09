@@ -1,6 +1,6 @@
 # ADR-0011：交付事实按执行上下文存一份「最后确认快照」，`refreshDeliveryFacts` 是唯一写者；只有完整读到的集合才能替换或删除，交付写者不推进业务修订号
 
-> 状态：Proposed
+> 状态：Accepted（人类伙伴 2026-10-09 在协调者会话（负责迭代规划与交付这几个 PR 的会话）的一次提问中直接批准，所选答复原文「Adopt after #293's fixes (Recommended)」；前提是 #293 落地 `confirmedAt` 墙钟读数与本 ADR 的文字修订之后；问题原文与记录见 `docs/exec-plan/completed/2026-10-08-delivery-query-pure-read.md` 的 Decision Log）
 > 日期：2026-10-08
 > 来源：`docs/exec-plan/completed/2026-10-08-delivery-fact-writer.md`（issue #221 的定稿设计与原型证据）；控制计划 `docs/exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md` Batch 3；issue #221 / #222
 
@@ -86,5 +86,5 @@
 - Delivery 两类读取的分页完整性由 #295 的 `collectDeliveryPages` 承担：页失败、游标成环、重复投递、超过页数上界与不属于已观察提交的读回都报成该集合的缺口，第 5 条的「分页未读完」对 Delivery 就是这些缺口，core 不另设截断守卫。Development 的变更请求查找先按本分支过滤再分页（端口的 `headBranch`，#287），别的分支的变更请求不占这一页；分支查找仍只读第一页，按「目标不在第一页且有下一页即缺口」处理（TD-040，有界翻页由 #233 承接）。
 - Development 的连接选择只经 `chain-facts.ts` 的一个路由缝。#219 与 #221 都进 main 后，由 #297 把它换成 `routeDevelopment`，并补一条已登记仓库的多挂载正例；在此之前，多 Development 挂载的工作区里谱系读取退化为缺口，不读错连接（#219 让同域多挂载的 key 级解析 fail closed）。
 - #233（谱系同步）必须扩展这个写者的集合，不得另起第二个写者。#234（抽屉谱系条）与 #281（交付视图）必须读 `stale` 与缺口，不得把陈旧值显示成当前值；陈旧集合按记录时的锚点（`hop.to`）归属（TD-042）。
-- #134 的定时刷新与 #234 的打开时刷新调用同一个命令，本 ADR 不规定调度。
+- #234、#281 的打开与手动刷新调用同一个命令；定时、节流与合并由宿主或调度器持有，本 ADR 不规定调度（TD-045；#134 的范围排除交付绑定，不是承接方）。
 - `delivery_fact.sets_json` 的内部形状由 core 保证，storage 不校验（TD-041）。直接调用端口的宿主若写入形状错误的快照，读路径只能按缺字段降级。
