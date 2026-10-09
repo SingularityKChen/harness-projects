@@ -1,0 +1,219 @@
+{
+  "command": [
+    "node",
+    "--test",
+    "tests/contract/review-mutation-harness.test.js"
+  ],
+  "mutants": [
+    {
+      "id": "H1 ambiguous anchor counted as applied",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "if (count !== 1) {",
+      "replacement": "if (count === 0) {",
+      "killedBy": "五种结论"
+    },
+    {
+      "id": "H2 keep NODE_TEST_CONTEXT",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "delete childEnv.NODE_TEST_CONTEXT",
+      "replacement": "void childEnv",
+      "killedBy": "五种结论"
+    },
+    {
+      "id": "H3 skip restore write",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "      applied = undefined\n      restore(file, original)\n    }",
+      "replacement": "      applied = undefined\n    }",
+      "killedBy": "五种结论"
+    },
+    {
+      "id": "H4 survived never reported",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "red.length === 0\n",
+      "replacement": "red.length < 0\n",
+      "killedBy": "五种结论"
+    },
+    {
+      "id": "H5 killedBy ignored",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "m.killedBy === undefined ||",
+      "replacement": "true ||",
+      "killedBy": "五种结论"
+    },
+    {
+      "id": "H6 baseline not checked",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "if (r.exit !== 0) throw new HarnessError(`基线在",
+      "replacement": "if (false) throw new HarnessError(`基线在",
+      "killedBy": "基线不绿"
+    },
+    {
+      "id": "H7 root containment dropped",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "if (real !== root && !real.startsWith(root + path.sep))",
+      "replacement": "if (false)",
+      "killedBy": "root 之外"
+    },
+    {
+      "id": "H8 signal ignored",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "    interrupted = true\n",
+      "replacement": "",
+      "killedBy": "三种信号"
+    },
+    {
+      "id": "H9 per-run env dropped",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "const childEnv = { ...process.env, ...env }",
+      "replacement": "const childEnv = { ...process.env }",
+      "killedBy": "五种结论"
+    },
+    {
+      "id": "H10 not-applied exits 0",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "return results.every((r) => r.status === 'KILLED') ? 0 : 1",
+      "replacement": "return results.every((r) => r.status !== 'SURVIVED' && r.status !== 'KILLED_OTHER') ? 0 : 1",
+      "killedBy": "NOT_APPLIED 也不是 0"
+    },
+    {
+      "id": "H11 TAP parser dropped",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "    ...[...output.matchAll(/^\\s*not ok \\d+ - (.+?)(?: # .*)?$/gm)].map((m) => m[1]),\n",
+      "replacement": "",
+      "killedBy": "TAP 报告格式"
+    },
+    {
+      "id": "H12 post-restore baseline not checked",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "    if (r.exit !== 0) throw new HarnessError(`还原后基线在",
+      "replacement": "    if (false) throw new HarnessError(`还原后基线在",
+      "killedBy": "还原后基线变红"
+    },
+    {
+      "id": "H13 SIGTERM not handled",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'])",
+      "replacement": "for (const signal of ['SIGINT', 'SIGHUP'])",
+      "killedBy": "三种信号"
+    },
+    {
+      "id": "H14 kill only the direct child",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "    process.kill(-activeGroup, signal)",
+      "replacement": "    activeChild?.kill(signal)",
+      "killedBy": "三种信号"
+    },
+    {
+      "id": "H15 no kill on interrupt",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "    interrupted = true\n    killGroup(signal)\n",
+      "replacement": "    interrupted = true\n",
+      "killedBy": "三种信号"
+    },
+    {
+      "id": "H16 overlapping anchors counted once",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "  for (let i = text.indexOf(anchor); i !== -1; i = text.indexOf(anchor, i + 1)) count += 1",
+      "replacement": "  count = text.split(anchor).length - 1",
+      "killedBy": "五种结论"
+    },
+    {
+      "id": "H17 restore through a utf8 string",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "  writeFileSync(file, original)\n",
+      "replacement": "  writeFileSync(file, original.toString('utf8'))\n",
+      "killedBy": "非 UTF-8"
+    },
+    {
+      "id": "H18 empty killedBy accepted",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "(typeof m.killedBy !== 'string' || m.killedBy === '')",
+      "replacement": "(typeof m.killedBy !== 'string')",
+      "killedBy": "spec 不合法"
+    },
+    {
+      "id": "H19 files resolved lazily",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "  const files = new Map(spec.mutants.map((m) => [m.id, resolveInside(root, m.file)]))",
+      "replacement": "  const files = { get: (id) => resolveInside(root, spec.mutants.find((m) => m.id === id).file) }",
+      "killedBy": "文件不存在"
+    },
+    {
+      "id": "H20 no synchronous restore in the handler",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "    if (applied) restore(applied.file, applied.original)\n",
+      "replacement": "",
+      "killedBy": "三种信号"
+    },
+    {
+      "id": "H21 no SIGKILL escalation on a second signal",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "      killGroup('SIGKILL')\n",
+      "replacement": "",
+      "killedBy": "三种信号"
+    },
+    {
+      "id": "H22 no exit hook",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "process.on('exit', () => {\n  if (applied) restore(applied.file, applied.original)\n})\n",
+      "replacement": "",
+      "killedBy": "EPIPE"
+    },
+    {
+      "id": "H23 group forgotten when the command exits",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "      } else {\n        activeGroup = undefined\n      }",
+      "replacement": "      }\n      activeGroup = undefined",
+      "killedBy": "三种信号"
+    },
+    {
+      "id": "H24 child pipes kept open after an interrupt",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "        child.stdout.destroy()\n        child.stderr.destroy()\n",
+      "replacement": "",
+      "killedBy": "脱离进程组"
+    },
+    {
+      "id": "H25 interrupt during baseline not checked",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "    const r = await runOnce(spec.command, root, env)\n    if (interrupted) return finishInterrupted()\n    if (r.exit !== 0) throw new HarnessError(`基线在",
+      "replacement": "    const r = await runOnce(spec.command, root, env)\n    if (r.exit !== 0) throw new HarnessError(`基线在",
+      "killedBy": "基线运行期间被中断"
+    },
+    {
+      "id": "H26 directory target accepted",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "  if (!statSync(real).isFile()) throw new HarnessError(`${file} 不是普通文件`)\n",
+      "replacement": "",
+      "killedBy": "spec 不合法"
+    },
+    {
+      "id": "H27 mutated text written as utf8",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "writeFileSync(file, Buffer.from(text.replace(asBytes(m.anchor), () => asBytes(m.replacement)), 'latin1'))",
+      "replacement": "writeFileSync(file, text.replace(asBytes(m.anchor), () => asBytes(m.replacement)))",
+      "killedBy": "非 UTF-8"
+    },
+    {
+      "id": "H28 signal-killed run counted green",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "exit: code ?? (signal ? 128 : 1)",
+      "replacement": "exit: code ?? 0",
+      "killedBy": "被信号杀死"
+    },
+    {
+      "id": "H29 empty anchor accepted",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "    if (m.anchor === '') throw new HarnessError(`${m.id}：anchor 不能为空`)\n",
+      "replacement": "",
+      "killedBy": "spec 不合法"
+    },
+    {
+      "id": "H30 no SIGKILL of leftovers when finishing an interrupt",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "function finishInterrupted() {\n  killGroup('SIGKILL')\n",
+      "replacement": "function finishInterrupted() {\n",
+      "killedBy": "三种信号"
+    }
+  ]
+}

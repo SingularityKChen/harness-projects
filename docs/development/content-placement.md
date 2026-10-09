@@ -56,7 +56,7 @@
 | 理解架构和依赖 | `docs/architecture/` | 约定 | 留 |
 | 日常开发和验证 | `docs/development/workflow.md`、`docs/development/ci.md` | 约定、机械 | 留。其 W1–W7 机械部分已在 `scripts/workflow-check.mjs` |
 | 记录长期决策 | `docs/adr/` | 约定 | 留 |
-| 提交 PR / 处理评审 | `docs/review/README.md`、`docs/review/responding.md`、`docs/review/mvp-review.md` | 技法、约定 | **拆**。技法部分进 skill（后续批次）；七条不变量、两轴、P0–P3 定级与归档路径留 docs |
+| 提交 PR / 处理评审 | `docs/review/README.md`、`docs/review/responding.md`、`docs/review/mvp-review.md`、`scripts/review-mutate.mjs` | 技法、约定、机械 | **拆**（issue #298）。变异纪律里可判定的部分是 `scripts/review-mutate.mjs`，由 `tests/contract/review-mutation-harness.test.js` 固定；七条不变量、两轴、P0–P3 定级、变异表、账号、owner、合并授权与归档路径留 docs。技法部分按 `superpowers:writing-skills` 先跑了不带该 skill 的对照：同一模型、可用用户级技能库、没有记忆、单一聚焦场景，八个场景都没有观察到失败，所以本批次**不建 skill**；这不覆盖其他 agent 与长会话多 PR 的负载，是否建留在 issue #298，依据见 `docs/exec-plan/completed/2026-10-09-review-technique-absorb.md` |
 | 合并堆叠 PR | `docs/project-management/merge-queue.md` | 约定 | 留。通用栈操作全局已有 `gh-stack` |
 | 项目看板语义和 agent 写入 | `docs/product/board-semantics.md`、`docs/project-management/README.md` | 约定 | 留 |
 | 发布面与敏感信息 | `docs/development/publication.md` | 约定、机械 | 留。机械部分已在 `scripts/rule-checks.mjs` |
@@ -90,7 +90,7 @@
 
 `projectRoot` 由 cwd 向上找第一个含 `.git` 的目录决定。项目级 rank 200 高于用户级 rank 500，所以**同名会在项目内静默遮蔽全局技能**——正是本仓库反复在修的那类静默失效。
 
-两个已定的候选名据此避开全局同名：`reviewing-a-delivery-pr`（执行评审）与 `closing-review-feedback`（闭环回复，文首写 `REQUIRED BACKGROUND: receiving-code-review`，定位成全局技能的下半场而不是竞争者）。
+两个预留的名字据此避开全局同名：`reviewing-a-delivery-pr`（执行评审）与 `closing-review-feedback`（闭环回复，文首写 `REQUIRED BACKGROUND: receiving-code-review`，定位成全局技能的下半场而不是竞争者）。两者都尚未建立：前者 2026-10-09 的对照没有观察到失败（§4，范围有限，留在 #298），建立时按 `superpowers:writing-skills` 先跑对照。
 
 ## 7. 这条规则不覆盖什么
 
