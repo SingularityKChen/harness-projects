@@ -37,7 +37,7 @@
     "@harness-projects/storage-sqlite": "workspace:*",
     "@harness-projects/ui": "workspace:*",
     "@harness-projects/ui-model": "workspace:*",
-    "@types/node": "^24.10.1",
+    "@types/node": "~24.13.5",
     "typescript": "^5.9.3",
     "yaml": "^2.9.1"
   }
