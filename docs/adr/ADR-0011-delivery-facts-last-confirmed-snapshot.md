@@ -2,7 +2,7 @@
 
 > 状态：Proposed
 > 日期：2026-10-08
-> 来源：`docs/exec-plan/active/2026-10-08-delivery-fact-writer.md`（issue #221 的定稿设计与原型证据）；控制计划 `docs/exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md` Batch 3；issue #221 / #222
+> 来源：`docs/exec-plan/completed/2026-10-08-delivery-fact-writer.md`（issue #221 的定稿设计与原型证据）；控制计划 `docs/exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md` Batch 3；issue #221 / #222
 
 ## Decision
 
@@ -30,7 +30,7 @@
    - 完整的集合整组替换，包括删除。
    - 不完整的集合原样保留，只标 `stale`。不完整的情形包括：离线、权限被拒、分页未读完、锚点没读到、提交失败。
    - provider 必须用结构化错误表达「看不全」，不得返回被过滤过的列表。
-6. **新鲜度只存在快照里**：不写 `sync_cursor`，不写 `reconcile_cursor`（PR-A 的 ADR-0012 第 7 条，PR #290，Proposed），不影响 `getPlanningSync()`。
+6. **新鲜度只存在快照里**：不写 `sync_cursor`，不写 `reconcile_cursor`（ADR-0012 第 7 条，Accepted），不影响 `getPlanningSync()`。
    交付写者**从不推进业务修订号**：修订号是规划快照的版本，而交付事实不在那份快照里。
 7. **乱序**：读取开始时刻同时是乱序令牌，取三者的最大值：墙钟、读取开始时已提交快照的 `attemptedAt` 加 1 毫秒、同一个 core 上下文对象内上一次的时刻加 1 毫秒。令牌因此对任何先于本次读取提交的刷新严格递增，与墙钟、上下文对象、进程重启（含时钟回拨）无关。提交时，已提交快照的 `attemptedAt` 不早于（`>=`）本次令牌，本次刷新整体放弃（`applied: false`）：这是乱序的旧读取，或读取开始时彼此看不见、令牌平手的并发读取（先提交者胜）。#221 期间，查询据刷新结果对被放弃的刷新逐跳标陈旧并报降级，而不是把旧事实当最新（第 9 条）；#222 起查询看不到刷新结果，被放弃的刷新由刷新结果的 `applied: false` 表达。
 8. **失败**：唯一写者从读取到提交，任何异常都折成结构化结果，不裸抛，也不转发异常原文。提交失败后再用第二个事务尽力把全部集合标为陈旧；这一步也失败时，返回诚实的失败。读路径是纯本地读，它的存储异常与其它查询一样原样 reject，不在本条范围内，结构化由 ADR-0012 与 #222 统一。
@@ -50,7 +50,7 @@
 - 首次读交付视图，关系数从 2 变成 9。
 - Delivery 离线后，5 条已确认的 CI 跳消失。
 - 权限被拒同样让 CI 消失，且不报错。
-- 62 条运行只返回 50 条，`degraded false`，截断被当成了完整。
+- 62 条运行只返回 50 条，`degraded false`，截断被当成了完整（读取侧已由 #232 的 base 片 #295 修正：`origin/main@a357ef8c` 上 62 条全部读回）。
 - 在 SQLite Storage 上，首次读取直接抛 `FOREIGN KEY constraint failed`：谱系写者写了没登记端点实体的边，替身接受了悬空端点，所以没人发现。
 
 复现命令与输出见来源 ExecPlan 的 `Context and Orientation`。
@@ -74,16 +74,16 @@
 | 观察账本（`sync_observation` / `committed_observation`）承载事实 | 账本是连接级、只追加的去重账本，表达不了「完整空集合时删除」，也没有工作区作用域（TD-022） |
 | 给 `entity` 加属性列，或扩 `external_identity` 的种类 | 污染全局身份锚点，扩种类属于 Gate E1 的范围，也没有「当前集合」的概念 |
 | core 内存缓存，或查询侧「出错才回退缓存」 | 重启即丢，而且构成第二个事实拥有者；查询仍然在写 |
-| 每个节点存 `observed_at`，按节点部分增补截断的集合 | 「部分确认」要按节点算陈旧，代价翻倍；截断由 #232 的完整分页消除 |
+| 每个节点存 `observed_at`，按节点部分增补截断的集合 | 「部分确认」要按节点算陈旧，代价翻倍；截断已由 #232 的 base 片 #295 的完整分页消除（读不完即缺口，不交出部分集合） |
 | 在快照行里加代际整数列当乱序令牌 | `attemptedAt` 兼作逻辑时钟（取已提交值加 1 毫秒）已经严格递增，与墙钟、上下文对象、重启无关，不改端口与迁移；整数代际要改端口、006 与两个适配器 |
 | 交付事实变化推进工作区修订号 | 修订号的快照里没有交付事实，推进只会产生空 delta（#220） |
-| 存平台原样的 `status` / `conclusion`，读时再映射 | 要改 `chain-facts` 的读出形状，与 PR #289（#232）正在重写的读取冲突；登记为 TD-043，#289 合并后再评估 |
+| 存平台原样的 `status` / `conclusion`，读时再映射 | 要改 `chain-facts` 的读出形状，当时与 #232 正在重写的读取冲突；#232 的 base 片 #295 已合并（`factFor(status, conclusion)`），改存原样值仍不服务任何 #221 验收，登记为 TD-043 |
 
 ## Consequences
 
 - 迁移 `006_delivery_facts.sql` 新增 `delivery_fact` 表。#223 合并 SQLite 基线时必须把它并入；控制计划里的 `005_delivery_facts.sql` 已过期，因为 005 被 #203 的载体世代占用。
-- PR #289（#232）的完整分页取代本 ADR 第 5 条在 Delivery 两类读取上的最小截断守卫。Development 的分支与变更请求查找仍按「目标不在第一页且有下一页即缺口」处理（TD-040）。
-- Development 的连接选择只经 `chain-facts.ts` 的一个路由缝。PR-B（#219）合并后，由后合并的一方换成 `routeDevelopment`，并补一条已登记仓库的多挂载正例。
+- Delivery 两类读取的分页完整性由 #295 的 `collectDeliveryPages` 承担：页失败、游标成环、重复投递、超过页数上界与不属于已观察提交的读回都报成该集合的缺口，第 5 条的「分页未读完」对 Delivery 就是这些缺口，core 不另设截断守卫。Development 的变更请求查找先按本分支过滤再分页（端口的 `headBranch`，#287），别的分支的变更请求不占这一页；分支查找仍只读第一页，按「目标不在第一页且有下一页即缺口」处理（TD-040，有界翻页由 #233 承接）。
+- Development 的连接选择只经 `chain-facts.ts` 的一个路由缝。#219 与 #221 都进 main 后，由 #297 把它换成 `routeDevelopment`，并补一条已登记仓库的多挂载正例；在此之前，多 Development 挂载的工作区里谱系读取退化为缺口，不读错连接（#219 让同域多挂载的 key 级解析 fail closed）。
 - #233（谱系同步）必须扩展这个写者的集合，不得另起第二个写者。#234（抽屉谱系条）与 #281（交付视图）必须读 `stale` 与缺口，不得把陈旧值显示成当前值；陈旧集合按记录时的锚点（`hop.to`）归属（TD-042）。
 - #134 的定时刷新与 #234 的打开时刷新调用同一个命令，本 ADR 不规定调度。
 - `delivery_fact.sets_json` 的内部形状由 core 保证，storage 不校验（TD-041）。直接调用端口的宿主若写入形状错误的快照，读路径只能按缺字段降级。

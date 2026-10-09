@@ -169,7 +169,7 @@ SQLite 目标是发布前单一空库建表基线。允许不支持旧开发库�
 | 控制与产品/架构事实 | `docs/exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md`、`docs/exec-plan/tech-debt-tracker.md`、`docs/README.md`、`docs/product/{vertical-path,board-semantics}.md`、`docs/project-management/README.md`、`docs/development/content-placement.md`、`docs/architecture/{README,release-gates,gate-e1-ruling}.md`、`tests/mvp0/README.md`、经独立决策新增的 `docs/architecture/*.md` / `docs/adr/ADR-*.md` |
 | Client 时序 | `packages/client/src/sync.ts`、`packages/client/src/store.ts`、`tests/e2e/client-sync.test.js` |
 | Core 事实/编排 | `packages/core/src/{registry,context,identity,bootstrap,queries,delivery,chain-facts,relations,start-work,write-machine,execution-run}.ts`、`packages/controller/src/{commands,queries}.ts` |
-| 能力/持久化 | `packages/capabilities/src/{storage,planning-provider,development-provider,observation}.ts`、`packages/providers/fake/src/{development,state}.ts`、`packages/providers/execution-human/src/index.ts`、`packages/storage/sqlite/migrations/{001_init,002_identity_membership,003_control_facts,004_execution_run_identity,005_delivery_facts}.sql`（005 仅在 Batch 3 需要新持久事实时创建）、`packages/storage/sqlite/src/{migrations,migrate,storage,storage-sync,storage-execution,storage-rows}.ts` |
+| 能力/持久化 | `packages/capabilities/src/{storage,planning-provider,development-provider,observation}.ts`、`packages/providers/fake/src/{development,state}.ts`、`packages/providers/execution-human/src/index.ts`、`packages/storage/sqlite/migrations/{001_init,002_identity_membership,003_control_facts,004_execution_run_identity,005_delivery_facts}.sql`（005 仅在 Batch 3 需要新持久事实时创建；Superseded by `docs/exec-plan/completed/2026-10-08-delivery-fact-writer.md`（2026-10-08）：005 已被 #203 的载体世代占用，交付事实是 `006_delivery_facts.sql`；本批另增的写入路径见该计划 Global Constraints）、`packages/storage/sqlite/src/{migrations,migrate,storage,storage-sync,storage-execution,storage-rows}.ts` |
 | 判别性测试/规则 | `tests/mvp0/chain.test.js`、`tests/e2e/{chain-bootstrap,client-sync,delivery-lineage,start-work,write-machine,start-work-recovery}.test.js`、`tests/integration/{migration-runner,storage-sync-surface,identity-membership-schema,execution-relation-write-schema,human-execution-provider}.test.js`、`tests/contract/{package-boundaries,capabilities-keys,capabilities-observation,storage-contract,content-placement,board-status-semantics}.test.js`、`tests/contract/suites/storage-execution.js` |
 
 ### Batch 0 文件所有权
@@ -225,7 +225,7 @@ SQLite 目标是发布前单一空库建表基线。允许不支持旧开发库�
 
 必须等 2A 与 2C 合并才可定缓存键。总体闭环是首次读取交付视图不写关系，Delivery 离线时读到最近确认的 CI/谱系节点与 stale 标记，刷新才可能更新持久事实。主文件 `packages/core/src/delivery.ts`、`chain-facts.ts`、`relations.ts`、`queries.ts`、`packages/capabilities/src/storage.ts`、`packages/storage/sqlite/src/storage-execution.ts`、`tests/e2e/delivery-lineage.test.js`；以 ADR 定义交付事实缓存的键、来源、freshness 与唯一写者。分页截断、权限下降或网络失败不得把缓存误写成"已确认不存在"。
 
-3A（#221）增加持久交付事实（需要时先加 `005_delivery_facts.sql`）与唯一的 `refreshDeliveryFacts` 写入口；旧 Query 只委托这个入口，自身不再 `recordEdges`。新增"离线保留已知事实""写入路径只有一个""失败不清空完整缓存"的回归断言，先红后绿、合并时全绿；"Query 纯读"的红用例不进 3A，也不以 skip/todo 消音。运行 `node --test tests/e2e/delivery-lineage.test.js tests/contract/storage-contract.test.js tests/integration/execution-relation-write-schema.test.js`；P3 离线 CI 应保留并标陈旧；合并时更新矩阵第 10、13 行。
+3A（#221）增加持久交付事实（需要时先加 `005_delivery_facts.sql`；Superseded by `docs/exec-plan/completed/2026-10-08-delivery-fact-writer.md`（2026-10-08）：005 已被 #203 的载体世代占用，交付事实是 `006_delivery_facts.sql`）与唯一的 `refreshDeliveryFacts` 写入口；旧 Query 只委托这个入口，自身不再 `recordEdges`。新增"离线保留已知事实""写入路径只有一个""失败不清空完整缓存"的回归断言，先红后绿、合并时全绿；"Query 纯读"的红用例不进 3A，也不以 skip/todo 消音。运行 `node --test tests/e2e/delivery-lineage.test.js tests/contract/storage-contract.test.js tests/integration/execution-relation-write-schema.test.js`；P3 离线 CI 应保留并标陈旧；合并时更新矩阵第 10、13 行。
 
 3B（#222）开工时把"首读前后关系与 revision 不变"反例加入 `tests/e2e/delivery-lineage.test.js` 先见红；由显式 bootstrap/refresh 命令触发同一 ingest 入口，普通 Query 只读已提交事实并带 stale/degraded 元数据，controller 查询面转发这些元数据。另验证重复/乱序交付观察、完整空集合才允许删除、缺失节点显示为缺口。运行 `node --test tests/e2e/delivery-lineage.test.js tests/e2e/chain-bootstrap.test.js`、`node --test tests/integration tests/e2e` 与 `pnpm run boundaries`；合并时更新矩阵第 11 行。
 
@@ -339,6 +339,7 @@ const offline = await api.queries.getDeliveryProjection(scope)
 console.log('relations', r0, '->', r1, '| ci online', ci(online), '| ci offline', ci(offline), '| degraded', offline.degraded)
 "
 # 观察：relations 2 -> 9 | ci online 5 | ci offline 0 | degraded true
+# Superseded by #221（2026-10-08）：PR-C 之后观察为 ci offline 5（relations 2 -> 9 | ci online 5 | ci offline 5 | degraded true）
 
 # P4 同幂等键换工作项仍报 saved（#194；第 6 行、R1 第 6 条）
 node --input-type=module -e "
@@ -423,6 +424,7 @@ cd "$SCRATCH/export" && node --input-type=module -e "console.log(import.meta.res
 - [ ] Batch 2：2A–2E（#197 #219 #189 #198 #203 #202 #199 #220）。
   - 2E（#199 #220）在 `fix/sync-revision-freshness` 实现，计划 `docs/exec-plan/completed/2026-10-08-sync-revision-freshness.md`；合并状态以 PR 回读为准。
 - [ ] Batch 3：3A/3B（#221 #222）。
+  - [x] (2026-10-08 CST) 3A（#221）：实现与回填完成，PR #292（`feature/delivery-fact-writer`，draft，待人类评审与合并），ExecPlan `docs/exec-plan/completed/2026-10-08-delivery-fact-writer.md`。回读：在 `.worktrees/delivery-fact-writer` 运行 `node --test --test-timeout=60000 tests/e2e/delivery-lineage.test.js tests/contract/storage-contract.test.js tests/integration/execution-relation-write-schema.test.js`，`ℹ fail 0`；P3 原命令观察 `relations 2 -> 9 | ci online 5 | ci offline 5 | degraded true`。3B（#222）未做。
 - [ ] Batch 4（#194 #204 #191）。
 - [ ] Batch 5（#223）。
 - [ ] Batch 6（#224）。
