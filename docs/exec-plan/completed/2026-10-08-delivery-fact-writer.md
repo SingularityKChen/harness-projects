@@ -2,7 +2,7 @@
 
 > 状态：Completed（2026-10-09，PR #292 合并前归档；三轮 MMP 评审均 APPROVED，见 `docs/review/pr-292-mmp-review.md`）。设计已定稿（定稿评审者，2026-10-08）；批次 C1、C2 与 C3 的回填、债务行、变异已由实现者完成并本地提交，第一轮对抗验证（`3aef993`）的 1 个 P1、5 个 P2 与可修的 P3 已按根因修复（批次 C4）；第二轮（`ed554d0`）的 3 个 P2、7 条 P3 已处置（批次 C5）；第三轮（`0bf8b70`）的发现由验收者处置（批次 C6，见 Progress）；验收之后的规模收敛（批次 C7）把代码桶收到规划上限 800 以内，判别力不降；第四轮（`a256dda`）通过，没有 P0、P1、P2，P3 的处置见批次 C8；批次 C9 把本分支 rebase 到 `origin/main@a357ef8c`，适配 #295 已合并的完整分页与新读取签名（K4）；K3 接线原定等 #291 合并后由本 PR 做，人类伙伴已改为由 #297 单独做（Decision Log 第 44、45 行）；批次 C10 处理 rebase 后独立对抗验证的 P3：完整性表补两条路由门、`settled` 的默认谓词改成 fail closed、文档订正，代码桶仍不超过 800；批次 C11 处理 #292 第一轮 MMP 评审：变更请求查找改按 `headBranch` 过滤（TD-050 解决，TD-040 收窄为分支一侧、承接 #233），补判别用例，订正过期事实（C11 Progress）。批次 C12 处理 #292 复评轮（APPROVE）的 3 条 P3 与 #293 复评轮里属于本层的迁移 006 列注释：变更请求查找把页形非法的成功页记成缺口，订正用例注释、TD-040 的引用与 `attempted_at` 列注释，永久的判别用例随 #293（C12 Progress）。整合提交、推送与归档由协调者在人类评审后做。
 > 创建：2026-10-08 CST。规范：`PLANS.md`。
-> 关联：issue #221，由 PR 正文尾注关闭；属于 epic #216 的 Batch 3A。下一层是 PR-D（#222，分支 `fix/delivery-query-pure-read`，栈在本 PR 上），计划见 `docs/exec-plan/active/2026-10-08-delivery-query-pure-read.md`（将新建，随 PR-D 落地）。
+> 关联：issue #221，由 PR 正文尾注关闭；属于 epic #216 的 Batch 3A。下一层是 PR-D（#222，分支 `fix/delivery-query-pure-read`，栈在本 PR 上），计划见 `docs/exec-plan/completed/2026-10-08-delivery-query-pure-read.md`（已随 PR-D 落地并归档）。
 > 执行上下文：检出 `feature/delivery-fact-writer` 的工作树根目录（`.worktrees/delivery-fact-writer`），base 是 `origin/main`。
 > 上游输入：
 > - 控制计划 `docs/exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md` Batch 3；
