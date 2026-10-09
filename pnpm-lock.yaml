@@ -63,7 +63,7 @@ importers:
         specifier: workspace:*
         version: link:packages/ui-model
       '@types/node':
-        specifier: ^24.10.1
+        specifier: ~24.13.5
         version: 24.13.5
       typescript:
         specifier: ^5.9.3

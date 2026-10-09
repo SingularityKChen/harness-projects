@@ -43,6 +43,16 @@ export const CORDIS_PEER_RANGE = '~4.0.4'
 /** 宿主半边的构建目标（D26）：不高于 Desktop 的 Node 24.18.1 与仓库 engines.node >=22。 */
 export const HOST_NODE_TARGET = 'node22'
 
+/**
+ * 验收宿主的 Node 版本：Desktop 0.2.0-rc.2 的 Electron 44 内嵌 Node 24.18.1（ADR-0009 Decision 5、D26）。宿主半边
+ * 依赖的 Node API 面不得超过它。esbuild 的 `target` 只降级语法、不检查 API，CI 又只跑 `.nvmrc` 的 Node 26，所以类型
+ * 检查是唯一的自动闸门：`@types/node` 的 major.minor 不得高于它，由 `tests/contract/host-node-types.test.js` 断言。
+ * 比较 minor 而不只是 major，因为 `@types/node` 的 major.minor 标示它描述到哪个 Node 小版本：24.13 最高到
+ * `@since v24.13`，24.19 带来 `@since v24.19.0` 的 `Blob#textStream()`，而 Desktop 的 Node 24.18.1 上它是 undefined。
+ * Desktop 换到更高的 Node 时，这里与 `@types/node` 一起改。
+ */
+export const HOST_NODE_VERSION = '24.18.1'
+
 /** 安装件 peer：至少一个 dsh-* peer，没有这类 peer 时宿主兼容闸门直接放行（F12）。 */
 export const HOST_PEERS = Object.freeze({
   '@deepseek-ai/cordis': CORDIS_PEER_RANGE,
