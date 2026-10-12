@@ -1,0 +1,188 @@
+# Controller in-flight 重放与 Pending 收敛 ExecPlan
+
+> 状态：Completed
+> 创建：2026-10-12
+> 范围：在 #306 的完整请求身份之上修复 #307 的 Controller in-flight 合并与 Pending/Unknown live replay；本分支以 `fix/controller-request-identity` 为栈底。
+> 上游输入：`AGENTS.md`、`PLANS.md`、`docs/development/workflow.md`、`docs/exec-plan/active/2026-10-12-controller-request-identity.md`、issue #307。
+
+## Purpose / Big Picture
+
+同一个完整请求并发到达 Controller 时只调用一次 Core/Provider；同一请求的 `Pending` 或 `Unknown` 结果不能永久冻结为旧答案。Start Work 的后续重放重新进入 Core，由 Host durable ledger / read-back 取得当前状态；不同请求互不串结果；Rejected Promise 清理 in-flight，不污染终态缓存。
+
+最小成功证据是：barrier 让两个同请求并发调用同时等待，Core 调用计数为 1；首次返回 Pending 后 Core 状态推进，下一次同请求返回当前终态；拒绝后再次调用可继续；终态重放不产生额外写入。
+
+## Context and Orientation
+
+栈底 #306 已把 replay entry 绑定到完整 request fingerprint，并保留 Start Work actor id。当前 `createReplayLog` 仍只在 `run()` 完成后写入结果，两个并发调用会同时 miss；它也会把 Pending/Unknown 当成终态缓存。
+
+当前 Core 只有 Start Work 明确拥有 durable idempotency ledger 和 read-back 状态；bootstrap/status/relation/rerun 的 Controller 结果没有同等的持久 operation contract，也不会自然返回 Pending。故本 PR 的 live replay 语义只对 `startWork` 的 Pending/Unknown 生效；其他命令的当前终态集合保持原有缓存语义，不盲目重调外部写。
+
+## Design / Spec
+
+### 方案比较
+
+1. **inFlight Promise + terminal cache（采用）**：同指纹先登记 Promise，再运行；完成后只缓存终态；Pending/Unknown 的 Start Work 不进入终态缓存，下一次从 Core 读取当前 Host 状态。Rejected Promise 在 `finally` 清理。
+2. **只加调用锁，不区分 Pending/Unknown**：能防并发双写，但会把 Pending 永久冻结。放弃。
+3. **所有命令 Pending/Unknown 都盲目重调外部写**：没有 durable/read-back 合同的命令会重复外部写。放弃。
+
+### 采用方案
+
+- replay key/fingerprint 使用 #306 的 canonical identity，不建立第二个 durable authority。
+- `inFlight` entry 保存 `{ fingerprint, promise }`，在调用 `run()` 前登记；相同指纹返回同一 Promise，不同指纹立即 conflict。
+- Promise 成功后：`startWork` 的 Pending/Unknown 不写 terminal cache；Confirmed/Reconciled/LocalOnly/Failed/Conflict 仍按既有语义缓存。
+- Promise reject 后：不写 terminal cache，`finally` 删除 inFlight；下一次请求可重新运行。
+- 同键 Pending/Unknown 的下一次请求重新调用 `core.commands.startWork`，依赖 Host durable ledger / read-back，不能由 Controller 猜测完成或再次直接调用 Provider。
+- `refreshDeliveryFacts` 继续不进 replay；它是每次真实读取。
+
+### 关键不变量
+
+1. 同一完整请求并发只执行一次 Core/Provider。
+2. 不同 fingerprint 即使同幂等键也不共享 Promise/result。
+3. Pending/Unknown 不被永久缓存；Start Work replay 可以向 Host 当前状态前进。
+4. Rejected Promise 不污染终态缓存，后续调用不挂死。
+5. 终态重放不产生额外外部写。
+6. Controller in-flight/cache 是短生命周期优化，跨重启与跨进程持久语义由 Host ledger 负责。
+
+### 独立设计与审查
+
+独立设计建议 B1→B2 stacked；另一份边界审查要求 Pending/Unknown 只在有 durable/read-back 合同的 Start Work 上 live replay，禁止对其他命令盲重调用外部写；与 #306 的 reviewer 结论一致。
+
+## Global Constraints
+
+- 只修改 `packages/controller/src/commands.ts`、Controller 相关测试、本 ExecPlan；代码 ≤800 行，文档 ≤1300 行。
+- 不改 Storage schema、Host ledger、Provider 接口、wire DTO 或 #306 的 canonical encoder。
+- 生产代码先写能正确失败的 barrier/replay 测试；不使用 sleep 代替同步门。
+- 实现分支 `fix/controller-live-replay-impl`；PR #321 当前 base 为 `main@ee07c323`，#306 已合并，PR 使用 `Closes #307`。
+
+## Plan of Work
+
+### Batch 1 · 红灯与 stacked draft
+
+**最小闭环**：证明旧 replay 在并发同请求下重复 Core，并把 Pending 永久冻结。
+
+**涉及文件**：`tests/e2e/controller-roundtrip.test.js`、`tests/e2e/start-work.test.js`、本 ExecPlan。
+
+- [ ] 用 Core spy/barrier 写两个 simultaneous identical `startWork` 调用，旧实现先红。
+- [ ] 用可控 Core 结果序列写 Pending→Confirmed replay，旧实现先红。
+- [ ] 提交计划与红灯测试，创建以 #306 为 base 的 stacked draft PR。
+
+**验证**：
+
+```sh
+node --test tests/e2e/controller-roundtrip.test.js tests/e2e/start-work.test.js
+```
+
+期望：新增并发/推进用例非 0，失败来自重复调用或旧 Pending。
+
+### Batch 2 · in-flight coordinator
+
+**最小闭环**：先登记 Promise，再运行；成功终态缓存，拒绝清理。
+
+**涉及文件**：`packages/controller/src/commands.ts`。
+
+- [ ] 扩展 replay log 保存 `inFlight` fingerprint/promise。
+- [ ] 同指纹并发返回同一 Promise；异指纹 conflict。
+- [ ] `finally` 删除 inFlight；Promise reject 不写终态。
+- [ ] 仅 `startWork` Pending/Unknown 不写终态缓存。
+
+**验证**：
+
+```sh
+node --test tests/e2e/controller-roundtrip.test.js tests/e2e/start-work.test.js tests/e2e/write-machine.test.js
+node_modules/.bin/tsc --noEmit
+```
+
+### Batch 3 · 对抗验收与 ready
+
+**最小闭环**：验证不同 key 隔离、终态 no-extra-write、公开面和栈关系。
+
+**涉及文件**：相关测试、本 ExecPlan。
+
+- [x] 注入不同 key 并发、Rejected Promise、Unknown 和 Host read-back 失败。
+- [x] 运行 boundaries/workflow/size/disclosure/diff-check。
+- [x] 推送后回读 PR base=`main`、head、checks、closing references 和 threads；通过后已置 ready。
+
+## Validation and Acceptance
+
+| # | 验收项 | 判定证据 |
+|---|---|---|
+| 1 | 同请求并发合并 | barrier + Core/Provider call count = 1 |
+| 2 | Pending→current | Start Work 首次 Pending，后续同请求读到当前终态/Unknown |
+| 3 | Rejected recovery | 首次 Promise reject 后第二次仍可运行 |
+| 4 | 不同请求隔离 | 不同 key/fingerprint 各自运行，不共享结果 |
+| 5 | 终态重放不重复写 | Confirmed/Reconciled replay 不增加 provider call |
+| 6 | Host ledger owner 保持 | 无 schema/Provider/公共 wire 变更；跨重启不由 Controller 宣称 |
+
+## Progress
+
+- [x] 读取 #307、#306、Controller replay 与 Start Work durable ledger 事实。
+- [x] 完成独立设计与边界审查。
+- [x] Batch 1 红灯和 stacked draft PR；旧实现复现并发双调用与 Pending 冻结。
+- [x] Batch 2 实现；in-flight claim、reject cleanup 与 Start Work live replay 已完成。
+- [x] Batch 3 对抗验收；已补齐 rerunPipeline barrier 反例，完成 current-head review、required checks 和公开面回读。
+
+## Surprises & Discoveries
+
+- 2026-10-12：只有 Start Work 当前有明确 Host durable/read-back 合同；其他命令不能把 Pending/Unknown live replay 泛化成盲重写。
+- 2026-10-12：#306 的 fingerprint 必须先于 in-flight 注册，否则同 key 异请求会共享 Promise。
+- 2026-10-12：TDD 用例证明旧实现并发调用两次、Pending 永久缓存；修复后 61 项相关测试与 typecheck 通过。
+- 2026-10-12：补充 in-flight 期间同键异 fingerprint 的 barrier 用例；移除 active fingerprint 检查的临时变异会让该用例等待共享 gate，证明测试能区分错误实现。
+- 2026-10-12：补充 rerunPipeline 同键并发 barrier 用例；将 coordinator 的 active claim 限制到 startWork 的变异会使该用例失败，证明其他 replay command 也受同一并发不变量保护。
+- 2026-10-12：Controller 不直接读取 Storage/Host ledger；Unknown progression 的权威验收留在 Core/Storage recovery 测试。Controller 层只验证不缓存 Unknown、下一次调用重新进入 Core 并原样转换结果，避免建立第二个 Host 状态源。
+
+## Decision Log
+
+- 2026-10-12：B2 最初以 #306 为 stacked base；B1 identity 与 B2 lifecycle 分开，保持独立回滚。Superseded by 当前 PR #321 已重锁 `main@ee07c323`（2026-10-12）。
+- 2026-10-12：只对 Start Work Pending/Unknown 关闭终态缓存；理由是其余命令缺少等价 Host read-back 合同。
+- 2026-10-12：采用 Stripe/AWS/Temporal 共同的先 claim 再执行语义；输入冲突或未开始执行的拒绝不进入终态缓存。
+- 2026-10-12：同键异请求在 in-flight 阶段必须立即返回 conflict，不能等待或共享首个 Promise；这是 #306 完整身份约束在 #307 并发窗口内的延伸，而不是新的持久权威。
+
+## External Research and Decision Rationale
+
+### 研究证据
+
+- **Stripe idempotent requests**（官方）：同一 key 必须对应同一组参数；参数不同会报错；并发冲突或请求尚未进入 endpoint execution 时不保存 idempotent result，允许安全重试；执行开始后保存首个 status/body，包括错误。来源：<https://docs.stripe.com/api/idempotent_requests>。
+- **AWS Builders' Library — Making retries safe with idempotent APIs**：重试安全依赖稳定的 client request identity，服务端必须区分“同一次意图的重试”和“同 key 的另一意图”，不能把网络重试当成新操作。来源：<https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/>。
+- **AWS Durable Execution SDK**（官方）：重放和 retry 都可能再次运行副作用；at-least-once/at-most-once 都不等于端到端 exactly-once；外部副作用应使用稳定 idempotency key，并把 key 绑定在可持久的 step/operation identity 上。来源：<https://docs.aws.amazon.com/durable-execution/patterns/best-practices/idempotency/>。
+- **Temporal Activity 文档**：Activity 会因 timeout/retry 再次执行，外部副作用必须由 Activity 自己保证幂等；工作流引擎的 retry 不是外部系统的 exactly-once。来源：<https://docs.temporal.io/standalone-activity>、<https://docs.temporal.io/encyclopedia/retry-policies>。
+- **AWS Lambda Powertools idempotency**：常见状态模型是 payload hash + in-progress/complete 记录；并发请求需要先 claim in-progress，完成后才写 response；超时的 in-progress 需要过期/恢复策略。来源：<https://aws.amazon.com/blogs/compute/handling-lambda-functions-idempotency-with-aws-lambda-powertools/>。
+
+### 权衡
+
+- 只在 `run()` 完成后写 Map 无法合并并发请求；这与 Stripe/ Powertools 的“先 claim，再执行”相反，因此必须先登记 in-flight Promise。
+- 同一完整请求共享 in-flight Promise 是本地优化；真正的幂等性仍由 Host durable ledger 提供。不能把 Controller Map 当作跨重启权威。
+- Pending/Unknown 不能当成永久终态。对 Start Work，Core 已有 durable mutation ledger、execution context 和 run read-back，因此重放可以重新进入 Core，让 Host 判断已完成、仍在途或需要 reconcile。
+- 对 `confirmRelation`、`rerunPipeline`、`applyPlanningStatus` 等命令，当前没有等价的 durable operation/read-back contract；盲目重新调用外部写会把“等待结果”变成重复副作用。因此 live replay 只开放给 Start Work，其他命令保持已有终态缓存边界，后续若增加 durable operation contract 再扩展。
+- 结构化输入错误、fingerprint conflict、尚未进入执行的拒绝不应永久缓存；Stripe 的规则是 endpoint 未开始时不保存结果。执行已开始并产生 durable operation 的失败才可缓存并原样重放。
+
+### 最终决定
+
+采用 **in-flight Promise claim + command-specific terminal cache**：
+
+1. 先校验 #306 canonical fingerprint；同 key 异 fingerprint 立即 `conflict`，不共享 Promise。
+2. 同 key 同 fingerprint 在 `run()` 前登记 Promise；并发调用返回同一 Promise。
+3. Promise reject 时 `finally` 清理 in-flight，不写终态缓存；下一次可重新尝试。
+4. Start Work 的 Pending/Unknown 不写终态缓存；下一次同请求重新调用 Core，由 durable ledger/read-back 给出当前事实，绝不由 Controller 盲目直接重调 Provider。
+5. 已开始并已形成 Host operation 的终态结果可缓存；输入校验失败、identity conflict 和未开始的拒绝不冻结重试。
+6. `refreshDeliveryFacts` 继续每次真实读取，不进入 replay。
+
+## Idempotence and Recovery
+
+inFlight Promise 可重复合并；终态缓存可重复读取；Rejected Promise finally 清理。Controller 重启丢失内存 Map，Host ledger 负责跨重启恢复。无 schema/data repair。
+
+## Interfaces and Dependencies
+
+- #306 的 canonical request identity 与 `createReplayLog`。
+- `CoreApi.commands.startWork`、`CommandWriteState`、`WritePhase`。
+- Node test、TypeScript、workflow/rule-check scripts。
+
+## Outcomes & Retrospective
+
+实际结果：PR #321 当前 head 为 `2f83ca012c0353cd5e3dd044b651a4ec749da4d8`，base 为 `main@ee07c323`。Controller 定向测试 61 项、全量 `pnpm test` 1485 项、typecheck、boundaries、workflow、size、disclosure 和 diff-check 均通过。rerunPipeline barrier 变异与 Pending cache 变异均被新增测试 `KILLED`。Unknown 的 Host durable progression 由 Core/Storage recovery 契约验收；Controller 只负责 live replay 协调，不读取或复制 Host ledger。ExecPlan 已完成并可归档。
+
+## Bottom Change Note
+
+- 2026-10-12：创建 #307 B2 ExecPlan，基于三份独立设计/审查确定 in-flight + terminal cache 与 Start Work live replay 边界。
+- 2026-10-12：完成 Batch 1–2；实现分支以 #306 为 base，准备提交 stacked PR 并回读 #307 关联。
+- 2026-10-12：PR #321 已在 #306 合并后的 `main@ee07c323` 上重锁；新增 in-flight 身份冲突与 rerunPipeline barrier 反例，完成当前 head 的复审证据。
+- 2026-10-12：最终 head 已完成整合、checks 和 reviewer 复评；归档本 ExecPlan并更新 docs 索引。
