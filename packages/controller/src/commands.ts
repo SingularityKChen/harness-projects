@@ -114,7 +114,7 @@ async function runStartWork(core: CoreApi, input: StartWorkCommandInput): Promis
   const result = await core.commands.startWork({
     workItemId: input.workItemId,
     repositoryId: input.repositoryId,
-    actor: { kind: input.actorRef.kind },
+    actor: { kind: input.actorRef.kind, ...(input.actorRef.id === undefined ? {} : { id: input.actorRef.id }) },
     idempotencyKey: input.idempotencyKey,
     ...(input.branchName === undefined ? {} : { branchName: input.branchName }),
     ...(input.worktreePath === undefined ? {} : { worktreePath: input.worktreePath }),
@@ -149,17 +149,59 @@ export interface ControllerCommands {
   refreshDeliveryFacts(scope: DeliveryScope, request: Pick<CommandEnvelope, 'actorRef'>): Promise<CommandResult<DeliveryRefreshResult>>
 }
 
-/** 控制器实例内的重放账本：键含命令名，避免同名幂等键在不同命令间串结果。 */
+type ReplayEntry = { readonly fingerprint: string; readonly result: CommandResult<unknown> }
+
+function canonical(value: unknown, seen = new Set<object>()): string {
+  if (value === undefined) return 'u'
+  if (value === null) return 'n'
+  if (typeof value === 'string') return `s${value.length}:${value}`
+  if (typeof value === 'boolean') return value ? 'b1' : 'b0'
+  if (typeof value === 'number') {
+    if (Number.isNaN(value)) return 'd:NaN'
+    if (Object.is(value, -0)) return 'd:-0'
+    if (value === Infinity) return 'd:+Inf'
+    if (value === -Infinity) return 'd:-Inf'
+    return `d:${value}`
+  }
+  if (typeof value !== 'object') throw new TypeError('请求身份含不支持的值')
+  if (seen.has(value)) throw new TypeError('请求身份不能含循环引用')
+  seen.add(value)
+  try {
+    if (Array.isArray(value)) return `a${value.length}[${value.map((item) => canonical(item, seen)).join('|')}]`
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) throw new TypeError('请求身份只接受普通对象')
+    const keys = Object.keys(value).sort()
+    return `o${keys.length}{${keys.map((key) => `${canonical(key)}=${canonical((value as Record<string, unknown>)[key], seen)}`).join('|')}}`
+  } finally {
+    seen.delete(value)
+  }
+}
+
+function requestPayload(input: CommandEnvelope & object): Record<string, unknown> {
+  const { actorRef: _actorRef, idempotencyKey: _idempotencyKey, ...payload } = input
+  return payload
+}
+
+/** 控制器实例内的重放账本：键含命令名，另以完整请求指纹拒绝同键异请求。 */
 function createReplayLog() {
-  const entries = new Map<string, CommandResult<unknown>>()
+  const entries = new Map<string, ReplayEntry>()
   return async function replay<T>(
-    commandName: string, envelope: CommandEnvelope, run: () => Promise<CommandResult<T>>,
+    commandName: string, envelope: CommandEnvelope, request: unknown, run: () => Promise<CommandResult<T>>,
   ): Promise<CommandResult<T>> {
     const key = `${commandName}:${envelope.idempotencyKey}`
+    let fingerprint: string
+    try {
+      fingerprint = canonical({ version: 1, commandName, actorRef: envelope.actorRef, request })
+    } catch (error) {
+      return resultOf<T>(CommandWriteState.Failed, undefined, projectError(ProjectErrorCode.InvalidInput, error instanceof Error ? error.message : '请求身份不合法'))
+    }
     const cached = entries.get(key)
-    if (cached !== undefined) return cached as CommandResult<T>
+    if (cached !== undefined && cached.fingerprint !== fingerprint) {
+      return resultOf<T>(CommandWriteState.Conflict, undefined, projectError(ProjectErrorCode.Conflict, '幂等键已绑定另一个完整请求'))
+    }
+    if (cached !== undefined) return cached.result as CommandResult<T>
     const result = await run()
-    entries.set(key, result)
+    entries.set(key, { fingerprint, result })
     return result
   }
 }
@@ -167,22 +209,22 @@ function createReplayLog() {
 export function createControllerCommands(core: CoreApi): ControllerCommands {
   const replay = createReplayLog()
   return {
-    bootstrapWorkspace: (envelope) => replay('bootstrapWorkspace', envelope, async () => {
+    bootstrapWorkspace: (envelope) => replay('bootstrapWorkspace', envelope, null, async () => {
       const result = await core.commands.bootstrapWorkspace()
       return resultOf(result.ok ? CommandWriteState.LocalOnly : CommandWriteState.Failed, result, result.error)
     }),
 
-    startWork: (input) => replay('startWork', input, () => runStartWork(core, input)),
+    startWork: (input) => replay('startWork', input, requestPayload(input), () => runStartWork(core, input)),
 
-    applyPlanningStatus: (input) => replay('applyPlanningStatus', input, async () => {
+    applyPlanningStatus: (input) => replay('applyPlanningStatus', input, requestPayload(input), async () => {
       const decision = await core.commands.applyPlanningStatus({ entityId: input.entityId, status: input.status })
       if (decision.error !== undefined) return resultOf(CommandWriteState.Failed, decision, decision.error)
       return resultOf(CommandWriteState.LocalOnly, decision, undefined)
     }),
 
-    confirmRelation: (ref, envelope) => replay('confirmRelation', envelope, () => runConfirmRelation(core, ref)),
+    confirmRelation: (ref, envelope) => replay('confirmRelation', envelope, ref, () => runConfirmRelation(core, ref)),
 
-    rerunPipeline: (ref, envelope) => replay('rerunPipeline', envelope, async () => {
+    rerunPipeline: (ref, envelope) => replay('rerunPipeline', envelope, ref, async () => {
       const attempt = await core.commands.rerunPipeline(ref)
       return resultOf(attempt.confirmed ? CommandWriteState.Confirmed : CommandWriteState.Failed, attempt, attempt.error)
     }),
