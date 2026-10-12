@@ -12,7 +12,7 @@ import type { CoreContext } from './context.ts'
 import { asEntityId, findRelation } from './relations.ts'
 import { emptyValues, reportFor, WritePhase, type WriteReport } from './write-machine.ts'
 
-export interface StartWorkActor { readonly kind: string }
+export interface StartWorkActor { readonly kind: string; readonly id?: string }
 
 export const StartWorkFallback = { Manual: 'manual_fallback' } as const
 export type StartWorkFallback = (typeof StartWorkFallback)[keyof typeof StartWorkFallback]

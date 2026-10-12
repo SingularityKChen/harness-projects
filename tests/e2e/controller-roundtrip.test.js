@@ -39,6 +39,23 @@ const writeStatus = (controller, target, status, idempotencyKey) => controller.c
   entityId: target.entityId, status, actorRef: { kind: 'user', id: 'user-1' }, idempotencyKey,
 })
 
+function countedCore(core) {
+  const calls = new Map()
+  const seen = new Map()
+  const commands = new Proxy(core.commands, {
+    get(target, key) {
+      const value = Reflect.get(target, key)
+      if (typeof value !== 'function') return value
+      return (...args) => {
+        calls.set(String(key), (calls.get(String(key)) ?? 0) + 1)
+        seen.set(String(key), args)
+        return value(...args)
+      }
+    },
+  })
+  return { core: { ...core, commands }, calls, seen }
+}
+
 test('wire：快照只承载内部对象，并说明新鲜度与权威归属（issue #79 / ExecPlan D7）', async () => {
   const { controller } = await compose()
   const snapshot = await controller.baseline()
@@ -76,6 +93,78 @@ test('命令：同键重放返回原结果，且取不到乐观 saved（ExecPlan
   assert.ok(first.value.runExternalId !== undefined, '视图带出已 ack 的 run 句柄：Unknown 时客户端靠它对账（TD-013）')
   assert.equal(replay.value.runExternalId, first.value.runExternalId, '重放带回同一个 run 句柄')
   assert.ok(!Object.values(CommandWriteState).includes('saved'), 'wire 写状态里不得有乐观的 saved')
+})
+
+test('命令：同键绑定完整请求身份，actor/目标/参数变化返回 conflict 且不调用 core（#306）', async () => {
+  const cases = [
+    {
+      name: 'bootstrap actor',
+      invoke: async ({ controller }) => controller.commands.bootstrapWorkspace({ actorRef: { kind: 'agent', id: 'a-1' }, idempotencyKey: 'identity-key' }),
+      change: (controller) => controller.commands.bootstrapWorkspace({ actorRef: { kind: 'agent', id: 'a-2' }, idempotencyKey: 'identity-key' }),
+      command: 'bootstrapWorkspace',
+    },
+    {
+      name: 'status payload',
+      invoke: async ({ controller, target }) => controller.commands.applyPlanningStatus({ entityId: target.entityId, status: 'blocked', actorRef: { kind: 'user', id: 'a-1' }, idempotencyKey: 'identity-key' }),
+      change: (controller, target) => controller.commands.applyPlanningStatus({ entityId: target.entityId, status: 'done', actorRef: { kind: 'user', id: 'a-1' }, idempotencyKey: 'identity-key' }),
+      command: 'applyPlanningStatus',
+    },
+    {
+      name: 'relation target',
+      invoke: async ({ controller, target }) => controller.commands.confirmRelation({ from: target.entityId, to: 'missing-a', type: 'tracks' }, { actorRef: { kind: 'agent', id: 'a-1' }, idempotencyKey: 'identity-key' }),
+      change: (controller, target) => controller.commands.confirmRelation({ from: target.entityId, to: 'missing-b', type: 'tracks' }, { actorRef: { kind: 'agent', id: 'a-1' }, idempotencyKey: 'identity-key' }),
+      command: 'confirmRelation',
+    },
+    {
+      name: 'pipeline ref',
+      invoke: async ({ controller }) => controller.commands.rerunPipeline({ bindingId: 'binding-a', objectKind: 'pipeline_run', externalId: 'run-a', url: undefined }, { actorRef: { kind: 'agent', id: 'a-1' }, idempotencyKey: 'identity-key' }),
+      change: (controller) => controller.commands.rerunPipeline({ bindingId: 'binding-a', objectKind: 'pipeline_run', externalId: 'run-b', url: undefined }, { actorRef: { kind: 'agent', id: 'a-1' }, idempotencyKey: 'identity-key' }),
+      command: 'rerunPipeline',
+    },
+    {
+      name: 'start work actor and target',
+      invoke: async ({ controller, target }) => controller.commands.startWork({ workItemId: target.entityId, repositoryId: REPOSITORY, actorRef: { kind: 'agent', id: 'a-1' }, idempotencyKey: 'identity-key' }),
+      change: (controller, target) => controller.commands.startWork({ workItemId: target.entityId, repositoryId: 'repo-beta', actorRef: { kind: 'agent', id: 'a-2' }, idempotencyKey: 'identity-key' }),
+      command: 'startWork',
+    },
+  ]
+  for (const scenario of cases) {
+    const { core } = await compose()
+    const counted = countedCore(core)
+    const controller = createController(counted.core)
+    const target = openWorkItem(await controller.baseline())
+    const first = await scenario.invoke({ controller, target })
+    const conflict = await scenario.change(controller, target)
+    assert.equal(conflict.writeState, CommandWriteState.Conflict, `${scenario.name}：同键变参必须 conflict`)
+    assert.equal(conflict.value, undefined, `${scenario.name}：冲突不得复用首个结果`)
+    assert.equal(counted.calls.get(scenario.command), 1, `${scenario.name}：冲突不得再次调用 core`)
+    assert.ok(first !== undefined, `${scenario.name}：前置请求必须返回结构化结果`)
+    if (scenario.command === 'startWork') assert.equal(counted.seen.get('startWork')[0].actor.id, 'a-1', 'Start Work handoff 必须保留 actor id')
+  }
+})
+
+test('命令：canonical identity 忽略对象键序但保留 undefined/null 与数组顺序差异（#306）', async () => {
+  const { core } = await compose()
+  const counted = countedCore(core)
+  const controller = createController(counted.core)
+  const target = openWorkItem(await controller.baseline())
+  const first = await controller.commands.startWork({
+    workItemId: target.entityId, repositoryId: REPOSITORY, branchName: undefined,
+    actorRef: { id: 'a-1', kind: 'agent' }, idempotencyKey: 'canonical-key',
+  })
+  const reordered = await controller.commands.startWork({
+    repositoryId: REPOSITORY, workItemId: target.entityId, branchName: undefined,
+    actorRef: { kind: 'agent', id: 'a-1' }, idempotencyKey: 'canonical-key',
+  })
+  assert.equal(reordered.writeState, first.writeState, '对象键序变化不得改变请求身份')
+  assert.equal(counted.calls.get('startWork'), 1)
+
+  const explicitNull = await controller.commands.startWork({
+    workItemId: target.entityId, repositoryId: REPOSITORY, branchName: null,
+    actorRef: { kind: 'agent', id: 'a-1' }, idempotencyKey: 'canonical-key',
+  })
+  assert.equal(explicitNull.writeState, CommandWriteState.Conflict, 'undefined 与 null 必须是不同请求身份')
+  assert.equal(counted.calls.get('startWork'), 1, '身份冲突不得调用 core')
 })
 
 test('命令：provider 权威拒绝显式写入，宿主权威写入报 local_only（ExecPlan D6）', async () => {
