@@ -140,6 +140,17 @@ async function client(controller, options = {}) {
 /** 真实 baseline + 脚本化的后续事件：用来喂 sync 一些真实 watch 不会产出的非法载体。 */
 const scripted = (controller) => ({ events: [], closed: 0, fetchBaseline: () => controller.baseline(), poll() { return Promise.resolve(this.events.shift()) }, close() { this.closed += 1 } })
 const shapeOf = (sync) => { const { store, ...rest } = sync.read(); return { ...rest, revision: store.revision, rows: store.list().map((entry) => [entry, entry.entity]) } }
+const stateOf = (sync) => {
+  const read = sync.read()
+  return structuredClone({
+    workspace: read?.workspace,
+    capabilities: read?.capabilities,
+    connected: read?.connection.connected,
+    lastUpdatedAt: read?.lastUpdatedAt,
+    revision: read?.store.revision,
+    rows: read?.store.list().map((entry) => ({ ...entry, current: read.store.isCurrent(entry.entityId) })),
+  })
+}
 
 test('assembler：六个字段全部来自真实生产者；首个已确认 descriptor 前 read 为 undefined', async () => {
   const { id, controller } = await compose()
@@ -382,6 +393,104 @@ test('接受点：clock 非法、store 拒绝的载体都不推进头 / 能力 /
     assert.deepEqual([after.workspace, after.capabilities, after.lastUpdatedAt, after.store.revision], [before.workspace, before.capabilities, before.lastUpdatedAt, before.revision], `${label}：头 / 能力 / 时间 / store 修订不变`)
     assert.ok(after.store.list().every((entry, i) => entry === before.rows[i][0] && entry.entity === before.rows[i][1]), `${label}：行内容与来源未被半更新`)
   }
+})
+
+test('接受点：倒退 / 不前进 delta 与重复、未知、坏 access capability 都 fail closed 且拒绝保持深相等', async () => {
+  const { controller } = await compose()
+  const base = await controller.baseline()
+  const row = base.entities[0]
+  const transport = scripted(controller)
+  const { sync } = await client(controller, { transport })
+  await sync.connect()
+
+  const events = [
+    ['倒退 revision', { kind: 'delta', delta: { ...base, previousRevision: base.revision, revision: base.revision - 1, source: { ...base.source, revision: base.revision - 1 }, upserts: [{ ...row, source: { ...row.source, revision: base.revision - 1 }, content: { ...row.content, title: 'rollback' } }], removed: [] } }],
+    ['不前进 revision', { kind: 'delta', delta: { ...base, previousRevision: base.revision, revision: base.revision, source: { ...base.source }, upserts: [], removed: [] } }],
+    ['重复 capability', { kind: 'delta', delta: { ...base, previousRevision: base.revision, revision: base.revision + 1, source: { ...base.source, revision: base.revision + 1 }, capabilities: [...base.capabilities, base.capabilities[0]], upserts: [], removed: [] } }],
+    ['未知 capability', { kind: 'delta', delta: { ...base, previousRevision: base.revision, revision: base.revision + 1, source: { ...base.source, revision: base.revision + 1 }, capabilities: [...base.capabilities, { key: 'planning.item.unknown', access: 'available', reason: undefined }], upserts: [], removed: [] } }],
+    ['坏 access', { kind: 'delta', delta: { ...base, previousRevision: base.revision, revision: base.revision + 1, source: { ...base.source, revision: base.revision + 1 }, capabilities: base.capabilities.map((entry, i) => i === 0 ? { ...entry, access: 'superuser' } : entry), upserts: [], removed: [] } }],
+  ]
+
+  for (const [label, event] of events) {
+    const before = stateOf(sync)
+    transport.events.push(event)
+    await assert.rejects(sync.poll(), label)
+    assert.deepEqual(stateOf(sync), before, `${label}：rows/header/current/stale/time 必须保持深相等`)
+  }
+})
+
+test('接受点：低 revision baseline 只有新 generation evidence 才能 reset', async () => {
+  const { controller } = await compose()
+  const first = await controller.baseline()
+  const transport = scripted(controller)
+  let nextBaseline = { ...first, generation: 1 }
+  transport.fetchBaseline = () => Promise.resolve(nextBaseline)
+  const { sync } = await client(controller, { transport })
+  await sync.connect()
+
+  const higher = { ...first, revision: first.revision + 1, source: { ...first.source, revision: first.revision + 1 }, generation: 1 }
+  transport.events.push({ kind: 'delta', delta: { ...higher, previousRevision: first.revision, revision: higher.revision, upserts: [], removed: [] } })
+  await sync.poll()
+
+  nextBaseline = { ...first, revision: Math.max(0, first.revision - 1), source: { ...first.source, revision: Math.max(0, first.revision - 1) }, generation: 1 }
+  sync.disconnect()
+  const rejectedBefore = stateOf(sync)
+  await assert.rejects(sync.reconnect(), /generation|revision/i)
+  assert.deepEqual(stateOf(sync), rejectedBefore, '重连预先标 stale；拒绝帧不得再改变快照')
+
+  nextBaseline = { ...nextBaseline, generation: 2 }
+  await sync.reconnect()
+  assert.equal(sync.revision, nextBaseline.revision, '新 generation 的低 revision baseline 可按 #218 合同 reset')
+})
+
+test('接受点：generation 建立后，缺 generation 的 delta / metadata 被拒绝且快照不变', async () => {
+  const { controller } = await compose()
+  const base = await controller.baseline()
+  const transport = scripted(controller)
+  transport.fetchBaseline = () => Promise.resolve({ ...base, generation: 1 })
+  const { sync } = await client(controller, { transport })
+  await sync.connect()
+  const before = stateOf(sync)
+  const next = base.revision + 1
+  transport.events.push({ kind: 'delta', delta: { ...base, previousRevision: base.revision, revision: next, source: { ...base.source, revision: next }, upserts: [], removed: [] } })
+  await assert.rejects(sync.poll(), /generation/i)
+  assert.deepEqual(stateOf(sync), before)
+
+  transport.events.push({ kind: 'metadata', metadata: { ...base, revision: base.revision, entities: base.entities.map(({ entityId, source }) => ({ entityId, source })) } })
+  await assert.rejects(sync.poll(), /generation/i)
+  assert.deepEqual(stateOf(sync), before)
+})
+
+test('接受点：前游标超前的合法 delta 走 gap recovery，倒退或不前进仍原子拒绝', async () => {
+  const { controller } = await compose()
+  const base = await controller.baseline()
+  const transport = scripted(controller)
+  let recovery = base
+  transport.fetchBaseline = () => Promise.resolve(recovery)
+  const observed = []
+  const { sync } = await client(controller, { transport, sync: { onGap: (gap, store) => observed.push([gap.requestedAfter, gap.currentRevision, store.isCurrent(base.entities[0].entityId)]) } })
+  await sync.connect()
+  const next = base.revision + 1
+  const beforeMalformed = stateOf(sync)
+  transport.events.push({ kind: 'delta', delta: { ...base, previousRevision: next, revision: next + 1, source: { ...base.source, revision: next + 1 }, upserts: [base.entities[0], base.entities[0]], removed: [] } })
+  await assert.rejects(sync.poll(), /重复实体|delta/i)
+  assert.deepEqual(stateOf(sync), beforeMalformed)
+  assert.deepEqual(observed, [])
+  transport.events.push({ kind: 'delta', delta: { ...base, previousRevision: next, revision: next + 1, source: { ...base.source, revision: next + 1 }, upserts: [], removed: null } })
+  await assert.rejects(sync.poll(), /删除表|delta/i)
+  assert.deepEqual(stateOf(sync), beforeMalformed)
+  assert.deepEqual(observed, [])
+
+  recovery = { ...base, revision: next + 1, source: { ...base.source, revision: next + 1 }, entities: base.entities.map((entity) => ({ ...entity, source: { ...entity.source, revision: next + 1 } })) }
+  transport.events.push({ kind: 'delta', delta: { ...base, previousRevision: next, revision: next + 1, source: { ...base.source, revision: next + 1 }, upserts: [], removed: [] } })
+  assert.equal((await sync.poll()).kind, 'gap')
+  assert.deepEqual(observed, [[base.revision, next + 1, false]])
+  assert.equal(sync.revision, next + 1)
+
+  const before = stateOf(sync)
+  transport.events.push({ kind: 'delta', delta: { ...base, previousRevision: sync.revision - 1, revision: sync.revision - 2, source: { ...base.source, revision: sync.revision - 2 }, upserts: [], removed: [] } })
+  await assert.rejects(sync.poll(), /严格前进/i)
+  assert.deepEqual(stateOf(sync), before)
 })
 
 test('单真源：ui-model 所取的 client/keys 叶子与 capabilities 是同一对象（经 controller/keys 重导出）', () => {
