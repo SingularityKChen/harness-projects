@@ -54,7 +54,7 @@ function seed(db) {
 
 test('空库建出 L3 十一张表，二次运行是 no-op', () => withDatabase((db) => {
   assert.deepEqual(migrate(db).applied, MIGRATIONS.map((entry) => entry.version))
-  assert.deepEqual(allTables(db), [...Object.keys(TABLE_PROVENANCE), 'connector_account', 'delivery_fact', 'entity', 'external_identity', 'planning_field_value', 'project_item_membership', 'provider_binding', 'schema_migrations', 'workspace', 'workspace_binding', 'workspace_projection'].sort())
+  assert.deepEqual(allTables(db), [...Object.keys(TABLE_PROVENANCE), 'planning_sync_round', 'connector_account', 'delivery_fact', 'entity', 'external_identity', 'planning_field_value', 'project_item_membership', 'provider_binding', 'schema_migrations', 'workspace', 'workspace_binding', 'workspace_projection'].sort())
   const before = JSON.stringify(db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all())
   assert.deepEqual(migrate(db).applied, []); assert.equal(JSON.stringify(db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all()), before)
 }))
@@ -77,7 +77,7 @@ test('D8：每张表的出处注释带该表期望的 token，且全文 token �
   }
   assert.deepEqual(allTables(db), [])
   migrate(db)
-  const actual = allTables(db).filter((name) => !['schema_migrations','workspace','connector_account','delivery_fact','provider_binding','workspace_binding','entity','external_identity','project_item_membership','planning_field_value','workspace_projection'].includes(name))
+  const actual = allTables(db).filter((name) => !['schema_migrations','workspace','connector_account','delivery_fact','provider_binding','workspace_binding','entity','external_identity','project_item_membership','planning_field_value','workspace_projection','planning_sync_round'].includes(name))
   assert.deepEqual(actual, Object.keys(TABLE_PROVENANCE).sort())
 }))
 

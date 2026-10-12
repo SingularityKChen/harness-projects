@@ -28,6 +28,7 @@ export interface FakeStorageData {
   relations: { workspaceId: domain.WorkspaceId; relation: domain.Relation }[]
   observations: cap.ObservationRecord[]
   cursors: cap.SyncCursorRecord[]
+  planningSyncRounds: cap.PlanningSyncRoundRecord[]
   reconcileCursors: cap.ReconcileCursorRecord[]
   attempts: cap.MutationAttemptRecord[]
   revisions: { workspaceId: domain.WorkspaceId; revision: number }[]
@@ -38,7 +39,7 @@ export interface FakeStorageData {
 export function emptyStorageData(): FakeStorageData {
   return { workspaces: [], providerBindings: [], workspaceBindings: [], accounts: [], bindingAccounts: [], bindingConfigurations: [],
     entities: [], identities: [], projections: [], repositories: [],
-    contexts: [], runs: [], relations: [], observations: [], cursors: [], reconcileCursors: [], attempts: [], revisions: [], memberships: [], fieldValues: [], deliveryFacts: [] }
+    contexts: [], runs: [], relations: [], observations: [], cursors: [], planningSyncRounds: [], reconcileCursors: [], attempts: [], revisions: [], memberships: [], fieldValues: [], deliveryFacts: [] }
 }
 /** 版本定序的唯一判据来自 capabilities（与 SQLite 的 BINARY 同判据）；本文件不再自写一份比较器。 */
 const compareSourceVersion = cap.compareSourceVersion
@@ -87,6 +88,7 @@ export class MemoryStorage implements cap.Storage {
   constructor(data: FakeStorageData = emptyStorageData(), transactionScope = false, policy: cap.StorageValidationPolicy = cap.EMPTY_POLICY) {
     this.#policy = cap.snapshotPolicy(policy)
     this.data = data
+    this.data.planningSyncRounds ??= []
     this.#transactionScope = transactionScope
     // 导入时校验已存元数据与引用完整性（对抗验证 P3-2）：配置必须有挂载、账号关联必须指向存在的账号，否则孤儿状态会被导入。
     for (const record of this.data.accounts) cap.parseConnectorAccount(record, this.#policy)
@@ -419,6 +421,21 @@ export class MemoryStorage implements cap.Storage {
       if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('sync cursor workspace does not exist')
       if (!this.data.providerBindings.some((anchor) => anchor.id === record.bindingId)) throw new Error('sync cursor binding does not exist')
       upsert(this.data.cursors, record, (c) => c.workspaceId === record.workspaceId && c.bindingId === record.bindingId && c.scopeKey === record.scopeKey)
+    })
+  }
+  async getPlanningSyncRound(workspaceId: domain.WorkspaceId, bindingId: domain.ProviderBindingId, scopeKey: string): Promise<cap.PlanningSyncRoundRecord | undefined> {
+    return this.data.planningSyncRounds.find((round) => round.workspaceId === workspaceId && round.bindingId === bindingId && round.scopeKey === scopeKey)
+  }
+  async putPlanningSyncRound(record: cap.PlanningSyncRoundRecord): Promise<void> {
+    return this.#mutate(() => {
+      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('sync round workspace does not exist')
+      if (!this.data.providerBindings.some((binding) => binding.id === record.bindingId)) throw new Error('sync round binding does not exist')
+      if (!Number.isInteger(record.latestStartedRound) || record.latestStartedRound < 1) throw new Error('sync round must be a positive integer')
+      if (record.latestCommittedRound !== undefined && (!Number.isInteger(record.latestCommittedRound) || record.latestCommittedRound < 1 || record.latestCommittedRound > record.latestStartedRound)) throw new Error('sync round committed value is invalid')
+      const current = this.data.planningSyncRounds.find((round) => round.workspaceId === record.workspaceId && round.bindingId === record.bindingId && round.scopeKey === record.scopeKey)
+      if (current !== undefined && record.latestStartedRound < current.latestStartedRound) throw new Error('sync round started value must not move backwards')
+      if (current?.latestCommittedRound !== undefined && (record.latestCommittedRound === undefined || record.latestCommittedRound < current.latestCommittedRound)) throw new Error('sync round committed value must not move backwards')
+      upsert(this.data.planningSyncRounds, structuredClone(record), (round) => round.workspaceId === record.workspaceId && round.bindingId === record.bindingId && round.scopeKey === record.scopeKey)
     })
   }
   async getReconcileCursor(workspaceId: domain.WorkspaceId): Promise<cap.ReconcileCursorRecord | undefined> {

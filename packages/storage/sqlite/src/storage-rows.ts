@@ -1,5 +1,5 @@
 /** SQLite 行 → 端口记录的映射：列名是 snake_case，端口字段是 camelCase，本模块是两者之间唯一的翻译层（换列名只改这里，改一处）。 */
-import type { BindingConfigurationRecord, CapabilityDomain, ConnectorAccountRecord, DeliveryFactsRecord, ExecutionContextRecord, ExecutionRunRecord, ExternalObjectRef, FieldValueRecord, MembershipRecord, MutationAttemptRecord, ProviderBindingRecord, ReconcileCursorRecord, RepositoryRecord, SecretHandle, SyncCursorRecord, SyncState, WorkspaceRecord } from '@harness-projects/capabilities'
+import type { BindingConfigurationRecord, CapabilityDomain, ConnectorAccountRecord, DeliveryFactsRecord, ExecutionContextRecord, ExecutionRunRecord, ExternalObjectRef, FieldValueRecord, MembershipRecord, MutationAttemptRecord, PlanningSyncRoundRecord, ProviderBindingRecord, ReconcileCursorRecord, RepositoryRecord, SecretHandle, SyncCursorRecord, SyncState, WorkspaceRecord } from '@harness-projects/capabilities'
 import type { ConnectorAccountId, EntityId, ExecutionContextId, ExecutionContextStatus, ExecutionRunId, ExecutionRunStatus, ExternalIdentity, ExternalIdentityId, IdentityRole, MembershipContentKind,
   NormalizedStatus, PlanningContent, PlanningFieldsSnapshot, ProjectErrorCode, ProviderBindingId, RedactionReason, Relation, RelationClass, RelationSource, RelationState, RelationType, StatusPolicy,
   WorkspaceId, WorkspaceProjection, WriteState } from '@harness-projects/domain'
@@ -56,6 +56,12 @@ export const rowToFieldValue = (row: Row): FieldValueRecord => ({ workspaceId: t
 export const rowToSyncCursor = (row: Row): SyncCursorRecord => ({ workspaceId: text(row, 'workspace_id') as WorkspaceId, bindingId: text(row, 'binding_id') as ProviderBindingId,
   scopeKey: text(row, 'scope_key'), cursorValue: optionalText(row, 'cursor_value'), state: text(row, 'state') as SyncState,
   lastErrorCode: optionalText(row, 'last_error_code') })
+
+export const rowToPlanningSyncRound = (row: Row): PlanningSyncRoundRecord => ({
+  workspaceId: text(row, 'workspace_id') as WorkspaceId, bindingId: text(row, 'binding_id') as ProviderBindingId,
+  scopeKey: text(row, 'scope_key'), latestStartedRound: row.latest_started_round as number,
+  latestCommittedRound: row.latest_committed_round == null ? undefined : row.latest_committed_round as number,
+})
 
 export const rowToReconcileCursor = (row: Row): ReconcileCursorRecord => ({ workspaceId: text(row, 'workspace_id') as WorkspaceId,
   lastReconciledAt: text(row, 'last_reconciled_at') })

@@ -31,16 +31,17 @@
  * 落库形态（安全，本层决定）：`snapshot_json` **原样**持久化整条 `ProviderObservation`——`payload` 由 provider 负责脱敏，storage 不裁剪、不改写、不丢弃（见 `ProviderObservation` 的契约注释；本层计划遗留「`payload` 由 provider 先脱敏」已收口）。
  */
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { assertComparableSourceVersion, compareSourceVersion, isComparableSourceVersion, parseBindingConfiguration, parseConnectorAccount, snapshotPolicy, EMPTY_POLICY, type FieldValueRecord, type MembershipRecord, type ObservationRecord, type ReconcileCursorRecord, type StorageTransaction, type StorageValidationPolicy, type SyncCursorRecord } from '@harness-projects/capabilities'
+import { assertComparableSourceVersion, compareSourceVersion, isComparableSourceVersion, parseBindingConfiguration, parseConnectorAccount, snapshotPolicy, EMPTY_POLICY, type FieldValueRecord, type MembershipRecord, type ObservationRecord, type PlanningSyncRoundRecord, type ReconcileCursorRecord, type StorageTransaction, type StorageValidationPolicy, type SyncCursorRecord } from '@harness-projects/capabilities'
 import type { ProviderBindingId, WorkspaceId } from '@harness-projects/domain'
 import type { WorkspaceDatabase } from './db.ts'
 import { assertRewritten003Shape } from './source-version-carrier.ts'
-import { optional, rowToBindingConfiguration, rowToConnectorAccount, rowToFieldValue, rowToMembership, rowToReconcileCursor, rowToSyncCursor, type Row } from './storage-rows.ts'
+import { optional, rowToBindingConfiguration, rowToConnectorAccount, rowToFieldValue, rowToMembership, rowToPlanningSyncRound, rowToReconcileCursor, rowToSyncCursor, type Row } from './storage-rows.ts'
 
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。
 const MEMBERSHIP_COLUMNS = 'workspace_id, project_external_id, item_external_id, content_external_kind, content_external_id, membership_created_at, membership_updated_at'
 const FIELD_VALUE_COLUMNS = 'workspace_id, item_external_id, project_field_id, value, observed_at'
 const SYNC_CURSOR_COLUMNS = 'workspace_id, binding_id, scope_key, cursor_value, state, last_error_code'
+const PLANNING_SYNC_ROUND_COLUMNS = 'workspace_id, binding_id, scope_key, latest_started_round, latest_committed_round'
 /** 观察账本列（与 003 的 DDL 同序）：主体是端口主体 `(binding_id, object_kind, object_external_id)`，`observed_at` 是本地接收时刻（同版本的 tie-breaker），`updated_at` 是平台版本载体（R4），`dedupe_key` 是端口去重键的落点。 */
 const OBSERVATION_COLUMNS = 'binding_id, object_kind, object_external_id, observed_at, dedupe_key, updated_at, snapshot_json, state'
 
@@ -315,6 +316,25 @@ export class SqliteSyncSurface {
     return this.write(`INSERT INTO sync_cursor (${SYNC_CURSOR_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT (workspace_id, binding_id, scope_key) DO UPDATE SET cursor_value = excluded.cursor_value, state = excluded.state, last_error_code = excluded.last_error_code`,
       record.workspaceId, record.bindingId, record.scopeKey, record.cursorValue ?? null, record.state, record.lastErrorCode ?? null)
+  }
+
+  getPlanningSyncRound(workspaceId: WorkspaceId, bindingId: ProviderBindingId, scopeKey: string): Promise<PlanningSyncRoundRecord | undefined> {
+    return this.read(() => optional(this.db.prepare(`SELECT ${PLANNING_SYNC_ROUND_COLUMNS} FROM planning_sync_round WHERE workspace_id = ? AND binding_id = ? AND scope_key = ?`).get(workspaceId, bindingId, scopeKey), rowToPlanningSyncRound))
+  }
+
+  putPlanningSyncRound(record: PlanningSyncRoundRecord): Promise<void> {
+    return this.atomic(() => {
+      const current = this.db.prepare(`SELECT ${PLANNING_SYNC_ROUND_COLUMNS} FROM planning_sync_round WHERE workspace_id = ? AND binding_id = ? AND scope_key = ?`)
+        .get(record.workspaceId, record.bindingId, record.scopeKey) as Row | undefined
+      if (current !== undefined && record.latestStartedRound < Number(current.latest_started_round)) throw new Error('sync round started value must not move backwards')
+      if (current?.latest_committed_round !== null && current?.latest_committed_round !== undefined
+        && (record.latestCommittedRound === undefined || record.latestCommittedRound < Number(current.latest_committed_round))) {
+        throw new Error('sync round committed value must not move backwards')
+      }
+      this.db.prepare(`INSERT INTO planning_sync_round (${PLANNING_SYNC_ROUND_COLUMNS}) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (workspace_id, binding_id, scope_key) DO UPDATE SET latest_started_round = excluded.latest_started_round, latest_committed_round = excluded.latest_committed_round`)
+        .run(record.workspaceId, record.bindingId, record.scopeKey, record.latestStartedRound, record.latestCommittedRound ?? null)
+    })
   }
 
   /** 对账游标（R5）：只记工作区上次全量对账时刻，**没有**平台 `updated_at` 增量游标列。 */
