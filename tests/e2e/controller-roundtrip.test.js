@@ -167,6 +167,45 @@ test('命令：canonical identity 忽略对象键序但保留 undefined/null 与
   assert.equal(counted.calls.get('startWork'), 1, '身份冲突不得调用 core')
 })
 
+test('命令：相同幂等键在不同 command 之间隔离 replay 结果（#306）', async () => {
+  const { core } = await compose()
+  const counted = countedCore(core)
+  const controller = createController(counted.core)
+  const target = openWorkItem(await controller.baseline())
+  const idempotencyKey = 'cross-command-key'
+  const actorRef = { kind: 'agent', id: 'a-1' }
+
+  const bootstrapped = await controller.commands.bootstrapWorkspace({ actorRef, idempotencyKey })
+  const status = await controller.commands.applyPlanningStatus({
+    entityId: target.entityId, status: 'blocked', actorRef, idempotencyKey,
+  })
+
+  assert.equal(bootstrapped.writeState, CommandWriteState.LocalOnly)
+  assert.equal(status.writeState, CommandWriteState.LocalOnly, '不同 command 不能复用 bootstrap 的结果')
+  assert.equal(status.value.entityId, target.entityId, 'status command 必须返回自己的结果')
+  assert.equal(counted.calls.get('bootstrapWorkspace'), 1)
+  assert.equal(counted.calls.get('applyPlanningStatus'), 1, '不同 command 必须各自调用 Core 一次')
+})
+
+test('命令：canonical identity 保留数组顺序差异（#306）', async () => {
+  const { core } = await compose()
+  const counted = countedCore(core)
+  const controller = createController(counted.core)
+  const target = openWorkItem(await controller.baseline())
+  const first = await controller.commands.startWork({
+    workItemId: target.entityId, repositoryId: REPOSITORY,
+    actorRef: { kind: 'agent', id: 'a-1', metadata: ['one', 'two'] }, idempotencyKey: 'array-key',
+  })
+  const reordered = await controller.commands.startWork({
+    workItemId: target.entityId, repositoryId: REPOSITORY,
+    actorRef: { kind: 'agent', id: 'a-1', metadata: ['two', 'one'] }, idempotencyKey: 'array-key',
+  })
+
+  assert.ok(first !== undefined)
+  assert.equal(reordered.writeState, CommandWriteState.Conflict, '数组顺序变化必须形成不同请求身份')
+  assert.equal(counted.calls.get('startWork'), 1, '数组身份冲突不得再次调用 Core')
+})
+
 test('命令：provider 权威拒绝显式写入，宿主权威写入报 local_only（ExecPlan D6）', async () => {
   for (const mode of [StatusPolicyMode.SourceManaged, StatusPolicyMode.HarnessManaged]) {
     const { controller } = await compose(mode)

@@ -28,7 +28,7 @@ issue #306 只拥有 Controller boundary 的身份缺口，不要求建立第二
 ### 采用方案
 
 - 每个带幂等键命令构造 `RequestIdentity`：`version`、`commandName`、`actorRef`、`target`、`payload`。
-- 使用结构化编码：对象键按码点序排序，数组保序，primitive 带类型标签；`undefined`、`null`、数字、字符串、布尔分别编码；循环/unsupported value 返回 `invalid_input`，不调用 Core。
+- 使用结构化编码：对象键按 JavaScript 默认字符串序稳定排序，数组保序，primitive 带类型标签；`undefined`、`null`、数字、字符串、布尔分别编码；循环/unsupported value 返回 `invalid_input`，不调用 Core。
 - Replay key 仍是命令名 + idempotencyKey；entry 另存 fingerprint 与 result。
 - 同 key 不同 fingerprint 返回 `conflict`；同 fingerprint 返回缓存结果。
 - `runStartWork` 传 `{ kind: actorRef.kind, id: actorRef.id }`。
@@ -141,6 +141,7 @@ git diff --check origin/main...HEAD
 - [x] Batch 1 红灯；旧实现对 actor/target/参数变更错误复用结果。
 - [x] Batch 2 实现 canonical request identity 与 actor handoff。
 - [x] Batch 3 对抗验收和 ready；PR #317 已置 ready，required PR Fast Gate 与本地验证通过，等待人类评审。
+- [x] 评审后补齐跨 command 隔离与数组顺序反例；复评记录写入 `docs/review/pr-317-mmp-review.md`。
 
 ## Surprises & Discoveries
 
@@ -155,6 +156,7 @@ git diff --check origin/main...HEAD
 - 2026-10-12：采用 Controller 私有 canonical fingerprint，不引入第二个持久幂等权威。
 - 2026-10-12：将 core durable ledger 跨命令键风险记为 #194/#204 follow-up，不扩大本 PR。
 - 2026-10-12：为让 Controller→Core 保留 actor id，`StartWorkActor` 增加可选 `id`；不进入持久 schema。
+- 2026-10-12：复评后将排序语义与实现统一为 JavaScript 默认字符串序，并补充跨 command 与数组顺序的判别性测试。
 
 ## Idempotence and Recovery
 
@@ -169,10 +171,11 @@ git diff --check origin/main...HEAD
 
 ## Outcomes & Retrospective
 
-实际结果：代码增删 155 行、文档增删 177 行；21 项相关测试与 typecheck 通过。PR #317 已关联 #306、标签/milestone 已回读并置 ready。GitHub 的本地 DSH review session lane 因 127.0.0.1:3081 不可用而失败，该外部 review hook 不影响 PR Fast Gate。
+实际结果：初始实现代码增删 155 行、文档增删 177 行；评审修复新增 20 行测试与 1 行计划说明，相关命令测试增至 23 项并通过，typecheck 与门禁验证通过。PR #317 已关联 #306、标签/milestone 已回读并置 ready。GitHub 的本地 DSH review session lane 因 127.0.0.1:3081 不可用而失败，该外部 review hook 不影响 PR Fast Gate。
 
 ## Bottom Change Note
 
 - 2026-10-12：创建 B1 ExecPlan，基于 #306/#307 实时 issue、三份独立方案/审查和当前 Controller 代码确定 identity-only 边界。
 - 2026-10-12：完成 Batch 1–2；相关 21 项测试与 typecheck 通过，等待 draft PR 发布和最终发布面验收。
 - 2026-10-12：完成 Batch 3；PR #317 当前 head 已回读，未合并，#307 由 plan-only PR #320 承接，等待人类评审。
+- 2026-10-12：针对 reviewer 的 P2/P3 补充跨 command 同键隔离、数组顺序测试，并将排序语义与实现对齐；待整理提交、推送和当前 head 复评。
