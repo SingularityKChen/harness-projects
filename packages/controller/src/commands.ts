@@ -150,6 +150,7 @@ export interface ControllerCommands {
 }
 
 type ReplayEntry = { readonly fingerprint: string; readonly result: CommandResult<unknown> }
+type InFlightEntry = { readonly fingerprint: string; readonly promise: Promise<CommandResult<unknown>> }
 
 function canonical(value: unknown, seen = new Set<object>()): string {
   if (value === undefined) return 'u'
@@ -185,6 +186,9 @@ function requestPayload(input: CommandEnvelope & object): Record<string, unknown
 /** 控制器实例内的重放账本：键含命令名，另以完整请求指纹拒绝同键异请求。 */
 function createReplayLog() {
   const entries = new Map<string, ReplayEntry>()
+  const inFlight = new Map<string, InFlightEntry>()
+  const liveStartWork = (commandName: string, result: CommandResult<unknown>): boolean =>
+    commandName === 'startWork' && (result.writeState === CommandWriteState.Pending || result.writeState === CommandWriteState.Unknown)
   return async function replay<T>(
     commandName: string, envelope: CommandEnvelope, request: unknown, run: () => Promise<CommandResult<T>>,
   ): Promise<CommandResult<T>> {
@@ -200,9 +204,22 @@ function createReplayLog() {
       return resultOf<T>(CommandWriteState.Conflict, undefined, projectError(ProjectErrorCode.Conflict, '幂等键已绑定另一个完整请求'))
     }
     if (cached !== undefined) return cached.result as CommandResult<T>
-    const result = await run()
-    entries.set(key, { fingerprint, result })
-    return result
+    const active = inFlight.get(key)
+    if (active !== undefined) {
+      if (active.fingerprint !== fingerprint) {
+        return resultOf<T>(CommandWriteState.Conflict, undefined, projectError(ProjectErrorCode.Conflict, '幂等键已绑定另一个完整请求'))
+      }
+      return await active.promise as CommandResult<T>
+    }
+    let task: Promise<CommandResult<unknown>>
+    task = Promise.resolve().then(run).then((result) => {
+      if (!liveStartWork(commandName, result)) entries.set(key, { fingerprint, result })
+      return result
+    }).finally(() => {
+      if (inFlight.get(key)?.promise === task) inFlight.delete(key)
+    })
+    inFlight.set(key, { fingerprint, promise: task })
+    return await task as CommandResult<T>
   }
 }
 

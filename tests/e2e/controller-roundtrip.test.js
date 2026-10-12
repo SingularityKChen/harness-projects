@@ -8,8 +8,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { StatusPolicy, newWorkspaceId } from '@harness-projects/domain'
-import { StatusPolicyMode, composeCore } from '@harness-projects/core'
+import { StatusPolicy, WriteState, newWorkspaceId } from '@harness-projects/domain'
+import { StatusPolicyMode, WritePhase, composeCore } from '@harness-projects/core'
 import { CommandWriteState, createController, isAuthoritativeWriteState } from '@harness-projects/controller'
 import { FaultKind, createFakeProviders, exportFakeStorageState } from '@harness-projects/provider-fake'
 
@@ -204,6 +204,142 @@ test('命令：canonical identity 保留数组顺序差异（#306）', async () 
   assert.ok(first !== undefined)
   assert.equal(reordered.writeState, CommandWriteState.Conflict, '数组顺序变化必须形成不同请求身份')
   assert.equal(counted.calls.get('startWork'), 1, '数组身份冲突不得再次调用 Core')
+})
+
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+
+function coreWithCommands(core, overrides) {
+  return { ...core, commands: { ...core.commands, ...overrides } }
+}
+
+test('命令：同一完整请求的并发 replay 只调用一次 core（#307）', async () => {
+  const { core } = await compose()
+  const target = openWorkItem(await (createController(core)).baseline())
+  const gate = deferred()
+  let calls = 0
+  const original = core.commands.startWork
+  const controlled = coreWithCommands(core, {
+    startWork: async (input) => {
+      calls += 1
+      await gate.promise
+      return original(input)
+    },
+  })
+  const controller = createController(controlled)
+  const input = { workItemId: target.entityId, repositoryId: REPOSITORY, actorRef: { kind: 'agent', id: 'replay-1' }, idempotencyKey: 'inflight-1' }
+  const first = controller.commands.startWork(input)
+  while (calls === 0) await Promise.resolve()
+  const second = controller.commands.startWork(input)
+  assert.equal(calls, 1, '第二个并发请求必须共享已登记的 in-flight promise')
+  gate.resolve()
+  const [a, b] = await Promise.all([first, second])
+  assert.deepEqual(b, a, '并发 replay 必须返回同一个 command result')
+  assert.equal(calls, 1)
+})
+
+test('命令：rerunPipeline 同一完整请求的并发 replay 只调用一次 core（#307）', async () => {
+  const { core } = await compose()
+  const gate = deferred()
+  let calls = 0
+  const controlled = coreWithCommands(core, {
+    rerunPipeline: async () => {
+      calls += 1
+      await gate.promise
+      return { supported: true, writeState: WriteState.Saved, saving: false, confirmed: true, error: undefined }
+    },
+  })
+  const controller = createController(controlled)
+  const ref = { bindingId: 'binding-a', objectKind: 'pipeline_run', externalId: 'run-inflight', url: undefined }
+  const envelope = { actorRef: { kind: 'agent', id: 'replay-rerun' }, idempotencyKey: 'rerun-inflight-1' }
+  const first = controller.commands.rerunPipeline(ref, envelope)
+  while (calls === 0) await Promise.resolve()
+  const second = controller.commands.rerunPipeline(ref, envelope)
+  gate.resolve()
+  const [a, b] = await Promise.all([first, second])
+  assert.equal(calls, 1, 'rerunPipeline 并发请求必须共享已登记的 in-flight promise')
+  assert.deepEqual(b, a, 'rerunPipeline 并发 replay 必须返回同一个 command result')
+  assert.equal(calls, 1, '同一完整请求只能调用一次 Core/Provider boundary')
+})
+
+test('命令：in-flight 期间同键异请求立即 conflict 且不共享 promise（#307）', async () => {
+  const { core } = await compose()
+  const target = openWorkItem(await (createController(core)).baseline())
+  const gate = deferred()
+  let calls = 0
+  const original = core.commands.startWork
+  const controlled = coreWithCommands(core, {
+    startWork: async (input) => {
+      calls += 1
+      await gate.promise
+      return original(input)
+    },
+  })
+  const controller = createController(controlled)
+  const input = {
+    workItemId: target.entityId, repositoryId: REPOSITORY,
+    actorRef: { kind: 'agent', id: 'replay-inflight' }, idempotencyKey: 'inflight-conflict',
+  }
+  const first = controller.commands.startWork(input)
+  while (calls === 0) await Promise.resolve()
+
+  const conflict = await controller.commands.startWork({
+    ...input, actorRef: { kind: 'agent', id: 'different-actor' },
+  })
+  assert.equal(conflict.writeState, CommandWriteState.Conflict)
+  assert.equal(calls, 1, 'in-flight 身份冲突不得调用 Core 或共享首个 promise')
+
+  gate.resolve()
+  await first
+})
+
+test('命令：Rejected replay 清理 in-flight，下一次同请求可以恢复（#307）', async () => {
+  const { core } = await compose()
+  const target = openWorkItem(await (createController(core)).baseline())
+  let calls = 0
+  const original = core.commands.startWork
+  const controlled = coreWithCommands(core, {
+    startWork: async (input) => {
+      calls += 1
+      if (calls === 1) throw new Error('injected controller failure')
+      return original(input)
+    },
+  })
+  const controller = createController(controlled)
+  const input = { workItemId: target.entityId, repositoryId: REPOSITORY, actorRef: { kind: 'agent', id: 'replay-2' }, idempotencyKey: 'reject-1' }
+  await assert.rejects(controller.commands.startWork(input), /injected controller failure/)
+  const recovered = await controller.commands.startWork(input)
+  assert.equal(recovered.writeState, CommandWriteState.Confirmed, 'reject 不得污染后续 replay')
+  assert.equal(calls, 2)
+})
+
+test('命令：Start Work 的 Pending/Unknown replay 重新读取 Host 当前结果，不永久冻结 Pending（#307）', async () => {
+  const { core } = await compose()
+  const target = openWorkItem(await (createController(core)).baseline())
+  let calls = 0
+  const pending = {
+    phase: WritePhase.Writing, writeState: WriteState.Pending, saving: true, confirmed: false,
+    executionContextId: 'ctx-pending', status: 'provisioning', branchExternalId: undefined, worktreeExternalId: undefined,
+    branchHeadCommit: undefined, runExternalId: undefined, fallback: undefined, degraded: false, error: undefined,
+  }
+  const confirmed = {
+    ...pending, phase: WritePhase.Confirmed, writeState: WriteState.Saved, saving: false, confirmed: true,
+    status: 'ready', executionContextId: 'ctx-pending', runExternalId: 'run-1',
+  }
+  const controlled = coreWithCommands(core, {
+    startWork: async () => { calls += 1; return calls === 1 ? pending : confirmed },
+  })
+  const controller = createController(controlled)
+  const input = { workItemId: target.entityId, repositoryId: REPOSITORY, actorRef: { kind: 'agent', id: 'replay-3' }, idempotencyKey: 'pending-1' }
+  const first = await controller.commands.startWork(input)
+  const replay = await controller.commands.startWork(input)
+  assert.equal(first.writeState, CommandWriteState.Pending)
+  assert.equal(replay.writeState, CommandWriteState.Confirmed, 'Pending 不能成为永久缓存的终态')
+  assert.equal(calls, 2)
 })
 
 test('命令：provider 权威拒绝显式写入，宿主权威写入报 local_only（ExecPlan D6）', async () => {
