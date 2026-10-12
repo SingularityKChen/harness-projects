@@ -140,7 +140,7 @@ git diff --check origin/main...HEAD
 - [x] 完成三份独立设计/对抗结论；记录 core durable ledger follow-up 风险。
 - [x] Batch 1 红灯；旧实现对 actor/target/参数变更错误复用结果。
 - [x] Batch 2 实现 canonical request identity 与 actor handoff。
-- [ ] Batch 3 对抗验收和 ready。
+- [x] Batch 3 对抗验收和 ready；PR #317 已置 ready，required PR Fast Gate 与本地验证通过，等待人类评审。
 
 ## Surprises & Discoveries
 
@@ -169,9 +169,10 @@ git diff --check origin/main...HEAD
 
 ## Outcomes & Retrospective
 
-待 Batch 3 填写实际结果、规模、遗留 #307 和 core ledger follow-up。
+实际结果：代码增删 155 行、文档增删 177 行；21 项相关测试与 typecheck 通过。PR #317 已关联 #306、标签/milestone 已回读并置 ready。GitHub 的本地 DSH review session lane 因 127.0.0.1:3081 不可用而失败，该外部 review hook 不影响 PR Fast Gate。
 
 ## Bottom Change Note
 
 - 2026-10-12：创建 B1 ExecPlan，基于 #306/#307 实时 issue、三份独立方案/审查和当前 Controller 代码确定 identity-only 边界。
 - 2026-10-12：完成 Batch 1–2；相关 21 项测试与 typecheck 通过，等待 draft PR 发布和最终发布面验收。
+- 2026-10-12：完成 Batch 3；PR #317 当前 head 已回读，未合并，#307 由 plan-only PR #320 承接，等待人类评审。
