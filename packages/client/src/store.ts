@@ -53,6 +53,11 @@ function assertFrame(frame: Pick<WireSnapshot, 'revision' | 'source'>, rows: rea
   if (new Set(rows.map((row) => row.entityId)).size !== rows.length) throw new TypeError(`${what} 含重复实体`)
 }
 
+/** Delta 的纯 shape 校验供 sync 在 gap 分流前复用，避免 malformed delta 伪装成缺口恢复。 */
+export function assertDeltaFrame(delta: WireDelta): void {
+  assertFrame(delta, delta.upserts, 'delta', delta.removed)
+}
+
 const METADATA_KEYS = ['revision', 'workspace', 'capabilities', 'source', 'entities']
 const ROW_KEYS = ['entityId', 'source']
 const onlyKeys = (value: object, allowed: readonly string[]): boolean => Object.keys(value).every((key) => allowed.includes(key))
@@ -74,7 +79,7 @@ export function createEntityStore(): EntityStore {
       revision = snapshot.revision
     },
     applyDelta(delta: WireDelta): void {
-      assertFrame(delta, delta.upserts, 'delta', delta.removed)
+      assertDeltaFrame(delta)
       for (const entity of delta.upserts) upsertInto(entries, entity, delta.revision)
       for (const entityId of delta.removed) entries.delete(entityId)
       revision = delta.revision

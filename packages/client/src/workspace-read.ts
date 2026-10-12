@@ -3,8 +3,10 @@
  * 这里还放帧头与时钟的运行时校验——TS 形状不能替代边界验证，不合契约的帧在任何状态变更之前被拒绝。
  */
 import { WireFreshness } from '@harness-projects/controller/values'
+import { AccessLevel } from '@harness-projects/domain/values'
 import type { WireCapabilityEntry, WireWorkspaceDescriptor, WireWorkspaceHeader } from '@harness-projects/controller'
 import type { EntityStore } from './store.ts'
+import { CapabilityKey } from './keys.ts'
 
 /**
  * 一次"工作区读取"：客户端模型 + 同步会话才知道的事实。
@@ -28,6 +30,8 @@ export interface ClientWorkspaceRead {
 
 /** 契约是 ISO 8601（与 ui-model 的展示校验同口径）。 */
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
+const KNOWN_CAPABILITIES = new Set(Object.values(CapabilityKey))
+const ACCESS_LEVELS = new Set(Object.values(AccessLevel))
 
 export function isSource(value: unknown): boolean {
   const source = value as { revision?: unknown; freshness?: unknown } | null
@@ -45,9 +49,17 @@ export function readClock(clock: () => string): string {
 }
 
 export function assertHeader(header: WireWorkspaceHeader): void {
+  if (typeof header !== 'object' || header === null) throw new TypeError('帧头不合契约：workspace / capabilities / source 形状错误')
   const { workspace, capabilities, source } = header
   const described = workspace === undefined || (typeof workspace.id === 'string' && workspace.id !== '' && typeof workspace.name === 'string')
-  if (!described || !Array.isArray(capabilities) || !isSource(source)) {
+  const unique = new Set<string>()
+  const validCapabilities = Array.isArray(capabilities) && capabilities.every((entry) => {
+    if (typeof entry !== 'object' || entry === null || !KNOWN_CAPABILITIES.has(entry.key) || !ACCESS_LEVELS.has(entry.access)
+      || (entry.reason !== undefined && typeof entry.reason !== 'string') || unique.has(entry.key)) return false
+    unique.add(entry.key)
+    return Object.keys(entry).every((key) => key === 'key' || key === 'access' || key === 'reason')
+  })
+  if (!described || !validCapabilities || !isSource(source)) {
     throw new TypeError('帧头不合契约：workspace / capabilities / source 形状错误')
   }
 }

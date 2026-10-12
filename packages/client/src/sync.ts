@@ -10,7 +10,7 @@
  */
 import { WireFreshness } from '@harness-projects/controller/values'
 import type { SourceMetadata, WireEntity, WireGap, WireWorkspaceHeader } from '@harness-projects/controller'
-import type { EntityStore } from './store.ts'
+import { assertDeltaFrame, type EntityStore } from './store.ts'
 import type { Transport } from './transport.ts'
 import { assertHeader, readClock, type ClientWorkspaceRead } from './workspace-read.ts'
 
@@ -48,6 +48,14 @@ const isFresh = (source: SourceMetadata): boolean => source.freshness === WireFr
 /** baseline / delta 确认了当前值：整表 fresh（含真实空集），或 partial 帧确有 fresh 行。 */
 const confirms = (source: SourceMetadata, rows: readonly WireEntity[]): boolean => isFresh(source) || rows.some((row) => isFresh(row.source))
 const recovered = (before: SourceMetadata | undefined, after: SourceMetadata): boolean => before?.freshness === WireFreshness.Degraded && isFresh(after)
+type GenerationFrame = { readonly generation?: unknown }
+const generationOf = (frame: GenerationFrame): number | undefined => {
+  if (frame.generation === undefined) return undefined
+  if (typeof frame.generation !== 'number' || !Number.isInteger(frame.generation) || frame.generation < 0) throw new TypeError('generation 必须是非负整数')
+  return frame.generation
+}
+
+class FrameRejectedError extends TypeError {}
 
 export function createSync(transport: Transport, store: EntityStore, options: SyncOptions = {}): WorkspaceSync {
   const clock = options.clock ?? ((): string => new Date().toISOString())
@@ -55,14 +63,31 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
   /** 最近一次被接受帧的整表头：整体替换，不跨帧拼字段（宿主不再确认 descriptor 时 read 回到 undefined）。 */
   let head: WireWorkspaceHeader | undefined
   let lastUpdatedAt: string | undefined
+  let generation: number | undefined
 
-  const accept = (frame: WireWorkspaceHeader, apply: () => void, confirmed: boolean): void => {
+  const validateFrame = (frame: WireWorkspaceHeader, allowGenerationReset = false): number | undefined => {
     assertHeader(frame)
-    const at = confirmed ? readClock(clock) : undefined
-    apply()
-    head = { workspace: frame.workspace, capabilities: frame.capabilities, source: frame.source }
-    if (at !== undefined) lastUpdatedAt = at
-    connected = true
+    const frameGeneration = generationOf(frame as GenerationFrame)
+    if (generation !== undefined && frameGeneration === undefined) throw new TypeError('generation evidence 缺失')
+    if (frameGeneration !== undefined && generation !== undefined && frameGeneration !== generation
+      && !(allowGenerationReset && frameGeneration > generation)) {
+      throw new TypeError('frame generation 与当前连接不一致')
+    }
+    return frameGeneration
+  }
+
+  const accept = (frame: WireWorkspaceHeader, apply: () => void, confirmed: boolean, allowGenerationReset = false): void => {
+    try {
+      const frameGeneration = validateFrame(frame, allowGenerationReset)
+      const at = confirmed ? readClock(clock) : undefined
+      apply()
+      head = { workspace: frame.workspace, capabilities: frame.capabilities, source: frame.source }
+      if (at !== undefined) lastUpdatedAt = at
+      if (frameGeneration !== undefined) generation = frameGeneration
+      connected = true
+    } catch (error) {
+      throw new FrameRejectedError(error instanceof Error ? error.message : '帧拒绝')
+    }
   }
 
   const lose = (): void => {
@@ -74,6 +99,7 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
     try {
       return await run()
     } catch (error) {
+      if (error instanceof FrameRejectedError) throw error
       lose()
       throw error
     }
@@ -81,7 +107,16 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
 
   const baseline = async (): Promise<SyncReport> => {
     const snapshot = await transport.fetchBaseline()
-    accept(snapshot, () => store.applyBaseline(snapshot), confirms(snapshot.source, snapshot.entities))
+    let nextGeneration: number | undefined
+    try {
+      nextGeneration = validateFrame(snapshot, true)
+    } catch (error) {
+      throw new FrameRejectedError(error instanceof Error ? error.message : 'generation 不合契约')
+    }
+    if (store.revision > snapshot.revision && (nextGeneration === undefined || nextGeneration === generation)) {
+      throw new FrameRejectedError(`baseline revision ${snapshot.revision} 低于本地 ${store.revision}，没有新的 generation evidence`)
+    }
+    accept(snapshot, () => store.applyBaseline(snapshot), confirms(snapshot.source, snapshot.entities), true)
     return { kind: 'baseline', revision: snapshot.revision, reason: undefined }
   }
 
@@ -93,6 +128,7 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
   }
 
   const reconnect = (): Promise<SyncReport> => guarded(async () => {
+    connected = false
     store.markAllStale()
     return baseline()
   })
@@ -119,7 +155,17 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
         return { kind: 'metadata', revision: store.revision, reason: undefined }
       }
       const { delta } = event
-      if (delta.previousRevision !== store.revision) {
+      if (!Number.isInteger(delta.previousRevision) || !Number.isInteger(delta.revision)
+        || delta.revision <= delta.previousRevision || delta.previousRevision < store.revision) {
+        throw new FrameRejectedError(`delta 必须从本地修订 ${store.revision} 严格前进`)
+      }
+      if (delta.previousRevision > store.revision) {
+        try {
+          validateFrame(delta)
+          assertDeltaFrame(delta)
+        } catch (error) {
+          throw new FrameRejectedError(error instanceof Error ? error.message : '帧拒绝')
+        }
         return recover({
           requestedAfter: store.revision,
           currentRevision: delta.revision,
