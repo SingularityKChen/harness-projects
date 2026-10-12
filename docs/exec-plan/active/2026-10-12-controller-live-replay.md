@@ -131,6 +131,35 @@ node_modules/.bin/tsc --noEmit
 - 2026-10-12：B2 以 #306 为 stacked base；B1 identity 与 B2 lifecycle 分开，保持独立回滚。
 - 2026-10-12：只对 Start Work Pending/Unknown 关闭终态缓存；理由是其余命令缺少等价 Host read-back 合同。
 
+## External Research and Decision Rationale
+
+### 研究证据
+
+- **Stripe idempotent requests**（官方）：同一 key 必须对应同一组参数；参数不同会报错；并发冲突或请求尚未进入 endpoint execution 时不保存 idempotent result，允许安全重试；执行开始后保存首个 status/body，包括错误。来源：<https://docs.stripe.com/api/idempotent_requests>。
+- **AWS Builders' Library — Making retries safe with idempotent APIs**：重试安全依赖稳定的 client request identity，服务端必须区分“同一次意图的重试”和“同 key 的另一意图”，不能把网络重试当成新操作。来源：<https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/>。
+- **AWS Durable Execution SDK**（官方）：重放和 retry 都可能再次运行副作用；at-least-once/at-most-once 都不等于端到端 exactly-once；外部副作用应使用稳定 idempotency key，并把 key 绑定在可持久的 step/operation identity 上。来源：<https://docs.aws.amazon.com/durable-execution/patterns/best-practices/idempotency/>。
+- **Temporal Activity 文档**：Activity 会因 timeout/retry 再次执行，外部副作用必须由 Activity 自己保证幂等；工作流引擎的 retry 不是外部系统的 exactly-once。来源：<https://docs.temporal.io/standalone-activity>、<https://docs.temporal.io/encyclopedia/retry-policies>。
+- **AWS Lambda Powertools idempotency**：常见状态模型是 payload hash + in-progress/complete 记录；并发请求需要先 claim in-progress，完成后才写 response；超时的 in-progress 需要过期/恢复策略。来源：<https://aws.amazon.com/blogs/compute/handling-lambda-functions-idempotency-with-aws-lambda-powertools/>。
+
+### 权衡
+
+- 只在 `run()` 完成后写 Map 无法合并并发请求；这与 Stripe/ Powertools 的“先 claim，再执行”相反，因此必须先登记 in-flight Promise。
+- 同一完整请求共享 in-flight Promise 是本地优化；真正的幂等性仍由 Host durable ledger 提供。不能把 Controller Map 当作跨重启权威。
+- Pending/Unknown 不能当成永久终态。对 Start Work，Core 已有 durable mutation ledger、execution context 和 run read-back，因此重放可以重新进入 Core，让 Host 判断已完成、仍在途或需要 reconcile。
+- 对 `confirmRelation`、`rerunPipeline`、`applyPlanningStatus` 等命令，当前没有等价的 durable operation/read-back contract；盲目重新调用外部写会把“等待结果”变成重复副作用。因此 live replay 只开放给 Start Work，其他命令保持已有终态缓存边界，后续若增加 durable operation contract 再扩展。
+- 结构化输入错误、fingerprint conflict、尚未进入执行的拒绝不应永久缓存；Stripe 的规则是 endpoint 未开始时不保存结果。执行已开始并产生 durable operation 的失败才可缓存并原样重放。
+
+### 最终决定
+
+采用 **in-flight Promise claim + command-specific terminal cache**：
+
+1. 先校验 #306 canonical fingerprint；同 key 异 fingerprint 立即 `conflict`，不共享 Promise。
+2. 同 key 同 fingerprint 在 `run()` 前登记 Promise；并发调用返回同一 Promise。
+3. Promise reject 时 `finally` 清理 in-flight，不写终态缓存；下一次可重新尝试。
+4. Start Work 的 Pending/Unknown 不写终态缓存；下一次同请求重新调用 Core，由 durable ledger/read-back 给出当前事实，绝不由 Controller 盲目直接重调 Provider。
+5. 已开始并已形成 Host operation 的终态结果可缓存；输入校验失败、identity conflict 和未开始的拒绝不冻结重试。
+6. `refreshDeliveryFacts` 继续每次真实读取，不进入 replay。
+
 ## Idempotence and Recovery
 
 inFlight Promise 可重复合并；终态缓存可重复读取；Rejected Promise finally 清理。Controller 重启丢失内存 Map，Host ledger 负责跨重启恢复。无 schema/data repair。
