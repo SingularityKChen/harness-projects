@@ -99,6 +99,12 @@ export interface SyncCursorRecord {
   readonly cursorValue: string | undefined; readonly state: SyncState; readonly lastErrorCode: string | undefined
 }
 
+/** Planning 全量同步的持久提交世代，独立于 provider cursor。 */
+export interface PlanningSyncRoundRecord {
+  readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId; readonly scopeKey: string
+  readonly latestStartedRound: number; readonly latestCommittedRound: number | undefined
+}
+
 /** 观察的处理状态：ignored 表示已按去重规则丢弃，不再进入投影。 */
 export const ObservationState = { Pending: 'pending', Processed: 'processed', Ignored: 'ignored', Failed: 'failed' } as const
 export type ObservationState = (typeof ObservationState)[keyof typeof ObservationState]
@@ -253,6 +259,8 @@ export interface Storage {
   // 游标的两条父边（工作区、连接锚点）各自独立：只证明父行存在，不证明该工作区已挂载该连接；缺任一父行的写入被拒绝且不留行。
   getSyncCursor(workspaceId: WorkspaceId, bindingId: ProviderBindingId, scopeKey: string): Promise<SyncCursorRecord | undefined>
   putSyncCursor(record: SyncCursorRecord): Promise<void>
+  getPlanningSyncRound(workspaceId: WorkspaceId, bindingId: ProviderBindingId, scopeKey: string): Promise<PlanningSyncRoundRecord | undefined>
+  putPlanningSyncRound(record: PlanningSyncRoundRecord): Promise<void>
   getReconcileCursor(workspaceId: WorkspaceId): Promise<ReconcileCursorRecord | undefined>
   putReconcileCursor(record: ReconcileCursorRecord): Promise<void>
 

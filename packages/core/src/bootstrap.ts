@@ -6,7 +6,7 @@
 import {
   CapabilityKey, ObservationState, ProjectErrorCode, SyncState, projectCodeForProviderError,
   projectError, providerErr, providerError, providerOk, singlePlanningBinding,
-  type ExternalObjectRef, type PlanningProvider, type ProviderError, type ProviderObservation,
+  type ExternalObjectRef, type PlanningProvider, type PlanningSyncRoundRecord, type ProviderError, type ProviderObservation,
   type ProviderPlanningContent, type ProviderPlanningItem, type ProviderResult, type StorageTransaction,
 } from '@harness-projects/capabilities'
 import {
@@ -66,26 +66,41 @@ export async function bootstrapWorkspace(context: CoreContext): Promise<Bootstra
   // 原异常只交给宿主的诊断出口（TD-030），先于 `fail`，这样记录失败时 Storage 再出错也不丢原因。
   // `fail` 自己不吞异常：记录失败时 Storage 再出错（degraded 游标写不进，或写进后读不出当前修订号）就以该错误拒绝，不假装结果已落账（TD-031）；
   // 显式命令的调用方直接拿到这个拒绝，组合期的水合由 `composeCore` 吞掉它，所以在那里先交给宿主的诊断出口。
-  let round: ProviderResult<BootstrapResult>
+  let result: ProviderResult<BootstrapResult>
+  let round: PlanningSyncRoundRecord | undefined
   try {
-    round = await syncRound(context, bindingId, planning)
+    round = await beginSyncRound(context, bindingId)
+    result = await syncRound(context, bindingId, planning, round)
   } catch (error) {
     reportSyncRoundFailure(context, error)
-    return fail(context, bindingId, projectError(ProjectErrorCode.Unavailable, SYNC_ROUND_FAILED))
+    return fail(context, bindingId, projectError(ProjectErrorCode.Unavailable, SYNC_ROUND_FAILED), round)
   }
-  return round.ok ? round.value : fail(context, bindingId, toProjectError(round.error))
+  return result.ok ? result.value : fail(context, bindingId, toProjectError(result.error), round)
 }
 
 /** 一轮同步：读观察、读项目、分页读全部条目、在一个 Storage 事务里提交；provider 的结构化失败原样交回，异常由调用方整轮接住。 */
 async function syncRound(
-  context: CoreContext, bindingId: ProviderBindingId, planning: PlanningProvider,
+  context: CoreContext, bindingId: ProviderBindingId, planning: PlanningProvider, round: PlanningSyncRoundRecord,
 ): Promise<ProviderResult<BootstrapResult>> {
   const observations = await collectObservations(planning)
   const project = await readProject(context, planning, observations)
   if (!project.ok) return providerErr(project.error)
   const items = await readAllItems(planning, project.value)
   if (!items.ok) return providerErr(items.error)
-  return providerOk(await commitSync(context, bindingId, items.value, observations))
+  return providerOk(await commitSync(context, bindingId, items.value, observations, round))
+}
+
+async function beginSyncRound(context: CoreContext, bindingId: ProviderBindingId): Promise<PlanningSyncRoundRecord> {
+  return context.storage.transaction(async (tx) => {
+    const previous = await tx.getPlanningSyncRound(context.workspaceId, bindingId, PLANNING_SYNC_SCOPE)
+    const round: PlanningSyncRoundRecord = {
+      workspaceId: context.workspaceId, bindingId, scopeKey: PLANNING_SYNC_SCOPE,
+      latestStartedRound: (previous?.latestStartedRound ?? 0) + 1,
+      latestCommittedRound: previous?.latestCommittedRound,
+    }
+    await tx.putPlanningSyncRound(round)
+    return round
+  })
 }
 
 /** 项目范围优先用注入值；否则从观察主体反查条目取回 project，不猜外部 id。 */
@@ -140,10 +155,14 @@ async function collectObservations(planning: PlanningProvider): Promise<readonly
 
 async function commitSync(
   context: CoreContext, bindingId: ProviderBindingId,
-  items: readonly ProviderPlanningItem[], observations: readonly ProviderObservation[],
+  items: readonly ProviderPlanningItem[], observations: readonly ProviderObservation[], round: PlanningSyncRoundRecord,
 ): Promise<BootstrapResult> {
   const { workspaceId } = context
   const committed = await context.storage.transaction(async (tx) => {
+    const latest = await tx.getPlanningSyncRound(workspaceId, bindingId, PLANNING_SYNC_SCOPE)
+    if (latest?.latestStartedRound !== round.latestStartedRound) {
+      return { stale: true as const, revision: await tx.currentRevision(workspaceId) }
+    }
     const before = await tx.listPlanningProjections(workspaceId)
     let revision = await tx.currentRevision(workspaceId)
     const synced = await upsertItems(tx, context, items)
@@ -164,8 +183,16 @@ async function commitSync(
     })
     // 对账时刻（ADR-0003 第 3 条）只在提交成功时记：内容不变的刷新在 Storage 里只留这一笔新鲜度。
     await tx.putReconcileCursor({ workspaceId, lastReconciledAt: context.clock() })
-    return { revision, counts: synced.counts }
+    await tx.putPlanningSyncRound({ ...round, latestCommittedRound: round.latestStartedRound })
+    return { stale: false as const, revision, counts: synced.counts }
   })
+  if (committed.stale) {
+    return {
+      ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0,
+      revision: committed.revision, degraded: true,
+      error: projectError(ProjectErrorCode.StaleRevision, '本轮 Planning 快照已被更新的同步轮次取代'),
+    }
+  }
   const { unanchored } = committed.counts
   return {
     ok: true, entities: committed.counts.entities, workItems: committed.counts.workItems,
@@ -254,12 +281,18 @@ async function recordObservations(
 
 /** 失败只改同步游标：投影保持最后已知值，查询据此标记 degraded。 */
 async function fail(
-  context: CoreContext, bindingId: ProviderBindingId | undefined, error: ProjectError,
+  context: CoreContext, bindingId: ProviderBindingId | undefined, error: ProjectError, round?: PlanningSyncRoundRecord,
 ): Promise<BootstrapResult> {
   if (bindingId !== undefined) {
-    await context.storage.putSyncCursor({
-      workspaceId: context.workspaceId, bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined,
-      state: SyncState.Degraded, lastErrorCode: error.code,
+    await context.storage.transaction(async (tx) => {
+      if (round !== undefined) {
+        const latest = await tx.getPlanningSyncRound(context.workspaceId, bindingId, PLANNING_SYNC_SCOPE)
+        if (latest?.latestStartedRound !== round.latestStartedRound) return
+      }
+      await tx.putSyncCursor({
+        workspaceId: context.workspaceId, bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined,
+        state: SyncState.Degraded, lastErrorCode: error.code,
+      })
     })
   }
   return {

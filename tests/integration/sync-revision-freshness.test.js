@@ -88,13 +88,13 @@ async function assertRoundFailed(world, core, forbidden, label) {
  * 两级必须同时拒绝：只拒绝 tx 级，把这笔写入挪到事务之外（提交之后用根句柄写）的实现会从根级溜走，反之亦然。
  * 方法 bind 到被代理对象，避开私有字段的 TypeError；`transaction` 把交给回调的 tx 也包一层。
  */
-function rejecting(storage, method, applies = () => true) {
+function rejecting(storage, method, applies = () => true, rejected = new Error(SECRET)) {
   const gate = { armed: false }
   const wrap = (target) => new Proxy(target, {
     get(object, key) {
       const value = Reflect.get(object, key)
       if (typeof value !== 'function') return value
-      if (key === method) return (...args) => (gate.armed && applies(...args) ? Promise.reject(new Error(SECRET)) : value.apply(object, args))
+      if (key === method) return (...args) => (gate.armed && applies(...args) ? Promise.reject(rejected) : value.apply(object, args))
       if (key === 'transaction') return (work) => value.call(object, (tx) => work(wrap(tx)))
       return value.bind(object)
     },
@@ -457,15 +457,10 @@ for (const [label, make] of STORAGES) {
     const diskFull = new Error('disk full /secret/path')
     const probe = hostDiagnostics()
     const storage = make()
-    const broken = new Proxy(storage, {
-      get(target, key) {
-        if (key === 'putSyncCursor') return () => Promise.reject(diskFull)
-        const value = Reflect.get(target, key)
-        return typeof value === 'function' ? value.bind(target) : value
-      },
-    })
-    const world = await setup(broken, { diagnostics: probe.diagnostics })
+    const rejected = rejecting(storage, 'putSyncCursor', () => true, diskFull)
+    const world = await setup(rejected.storage, { diagnostics: probe.diagnostics })
     world.providers.planning.faultsSwitch.set(FaultKind.Offline, true)
+    rejected.arm()
     const core = await world.open()
     assert.equal(probe.seen.length, 1, '组合期：provider 的结构化失败本身不调用钩子，记录它时被拒绝的那个异常调用一次')
     assert.strictEqual(probe.seen[0], diskFull, '交给宿主的是被拒绝的那个异常本身')
@@ -479,9 +474,10 @@ for (const [label, make] of STORAGES) {
   test(`诊断出口：冷启动记录失败也被拒绝、钩子返回永不 resolve 的 promise 时，不挂住组合期，显式命令仍直接拒绝（TD-030、TD-031，${label}）`, async () => {
     const diskFull = new Error('disk full')
     const probe = hostDiagnostics(() => new Promise(() => {}))
-    const broken = new Proxy(make(), { get(target, key) { const value = Reflect.get(target, key); return key === 'putSyncCursor' ? () => Promise.reject(diskFull) : typeof value === 'function' ? value.bind(target) : value } })
-    const world = await setup(broken, { diagnostics: probe.diagnostics })
+    const rejected = rejecting(make(), 'putSyncCursor', () => true, diskFull)
+    const world = await setup(rejected.storage, { diagnostics: probe.diagnostics })
     world.providers.planning.faultsSwitch.set(FaultKind.Offline, true)
+    rejected.arm()
     const core = await settlesWithin(world.open())
     assert.notEqual(core, HUNG, '组合期的水合 catch 是诊断出口的第二个调用点：钩子的返回值同样不挂住组合')
     assert.equal(probe.seen.length, 1, '钩子确实被调用了（否则这条用例空转）')
