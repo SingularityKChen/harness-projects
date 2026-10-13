@@ -128,7 +128,16 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   /** 身份全局一份：重复登记保留已分配的 id 与 entityId（否则引用会断），只更新角色。种类先过 domain 的解析器：未知种类在任何写入之前以与替身相同的 RangeError（Promise 拒绝）失败，不依赖 002 的 CHECK 措辞；CHECK 是第二道防线。 */
   async putExternalIdentity(record: ExternalIdentity): Promise<void> {
     parseExternalIdentityKind(record.externalKind)
-    return this.write(`INSERT INTO external_identity (${IDENTITY_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (binding_id, external_kind, external_id) DO UPDATE SET role = excluded.role`, record.id, record.entityId, record.bindingId, record.externalKind, record.externalId, record.role)
+    return this.atomic(() => {
+      const sameId = this.db.prepare(`SELECT ${IDENTITY_COLUMNS} FROM external_identity WHERE id = ?`).get(record.id) as Row | undefined
+      const sameKey = this.db.prepare(`SELECT ${IDENTITY_COLUMNS} FROM external_identity WHERE binding_id = ? AND external_kind = ? AND external_id = ?`)
+        .get(record.bindingId, record.externalKind, record.externalId) as Row | undefined
+      if (sameId !== undefined && (sameKey === undefined || sameKey.id !== sameId.id)) {
+        throw new Error('external identity id already points at another object')
+      }
+      this.db.prepare(`INSERT INTO external_identity (${IDENTITY_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (binding_id, external_kind, external_id) DO UPDATE SET role = excluded.role`)
+        .run(record.id, record.entityId, record.bindingId, record.externalKind, record.externalId, record.role)
+    })
   }
   findExternalIdentity(bindingId: ProviderBindingId, externalKind: string, externalId: string): Promise<ExternalIdentity | undefined> {
     return this.read(() => optional(this.db.prepare(`SELECT ${IDENTITY_COLUMNS} FROM external_identity WHERE binding_id = ? AND external_kind = ? AND external_id = ?`).get(bindingId, externalKind, externalId), rowToIdentity))
