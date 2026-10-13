@@ -111,10 +111,12 @@ function failingTests(output) {
   return [...new Set(names)]
 }
 
-let activeChild
-let activeGroup // 命令的进程组号；中断后命令自己先退出时仍保留，第二次信号与收尾据此结束剩下的进程
-let applied // { file, original }：正在施加的变异，信号处理与 exit 钩子据此同步还原
-let interrupted = false
+const lifecycle = {
+  activeChild: undefined,
+  groups: new Set(),
+  applied: undefined,
+  interrupted: false,
+}
 
 function restore(file, original) {
   writeFileSync(file, original)
@@ -123,12 +125,30 @@ function restore(file, original) {
 
 /** 结束命令的整个进程组：包装进程（`sh -c …`）下的孙进程也一起结束。 */
 function killGroup(signal) {
-  if (activeGroup === undefined) return
-  try {
-    process.kill(-activeGroup, signal)
-  } catch {
-    activeChild?.kill(signal)
+  for (const group of lifecycle.groups) {
+    try {
+      process.kill(-group, signal)
+    } catch {
+      lifecycle.activeChild?.kill(signal)
+    }
   }
+}
+
+function pruneGroups() {
+  for (const group of lifecycle.groups) {
+    try {
+      process.kill(-group, 0)
+    } catch (error) {
+      if (error.code === 'ESRCH') lifecycle.groups.delete(group)
+    }
+  }
+}
+
+function restoreApplied() {
+  if (!lifecycle.applied) return
+  const { file, original } = lifecycle.applied
+  restore(file, original)
+  lifecycle.applied = undefined
 }
 
 /**
@@ -141,25 +161,24 @@ function runOnce(command, cwd, env) {
   delete childEnv.NODE_TEST_CONTEXT
   return new Promise((resolve, reject) => {
     const child = spawn(command[0], command.slice(1), { cwd, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
-    activeChild = child
-    activeGroup = child.pid
+    lifecycle.activeChild = child
+    lifecycle.groups.add(child.pid)
     let output = ''
     child.stdout.on('data', (chunk) => { output += chunk })
     child.stderr.on('data', (chunk) => { output += chunk })
     child.on('error', reject)
     const done = (code, signal) => {
-      activeChild = undefined
-      if (interrupted) {
+      lifecycle.activeChild = undefined
+      if (lifecycle.interrupted) {
         // 孙进程可能还握着管道：不再读，事件循环才能结束。
         child.stdout.destroy()
         child.stderr.destroy()
-      } else {
-        activeGroup = undefined
       }
+      pruneGroups()
       resolve({ env, exit: code ?? (signal ? 128 : 1), failing: failingTests(output) })
     }
     // 中断时不等 stdio 关闭：继承了管道的孙进程可能还活着。
-    child.on('exit', (code, signal) => { if (interrupted) done(code, signal) })
+    child.on('exit', (code, signal) => { if (lifecycle.interrupted) done(code, signal) })
     child.on('close', done)
   })
 }
@@ -167,6 +186,7 @@ function runOnce(command, cwd, env) {
 /** 中断收尾：结束命令进程组里剩下的进程，结论不完整。 */
 function finishInterrupted() {
   killGroup('SIGKILL')
+  lifecycle.activeChild = undefined
   console.log('INTERRUPTED：已还原全部文件，结论不完整')
   return 130
 }
@@ -185,14 +205,14 @@ async function main() {
   const distinct = [...new Map([defaultRuns, ...spec.mutants.map(runsOf)].flat().map((e) => [JSON.stringify(e), e])).values()]
   for (const env of distinct) {
     const r = await runOnce(spec.command, root, env)
-    if (interrupted) return finishInterrupted()
+    if (lifecycle.interrupted) return finishInterrupted()
     if (r.exit !== 0) throw new HarnessError(`基线在 ${envLabel(env)} 下不绿（exit ${r.exit}），变异结论不可用：${r.failing.join('；')}`)
   }
 
   const originals = new Map()
   const results = []
   for (const m of spec.mutants) {
-    if (interrupted) break
+    if (lifecycle.interrupted) break
     const file = files.get(m.id)
     const original = readFileSync(file)
     if (!originals.has(file)) originals.set(file, original)
@@ -204,21 +224,20 @@ async function main() {
       continue
     }
     const runs = []
-    applied = { file, original }
+    lifecycle.applied = { file, original }
     try {
       writeFileSync(file, Buffer.from(text.replace(asBytes(m.anchor), () => asBytes(m.replacement)), 'latin1'))
       if (readFileSync(file).equals(original)) throw new HarnessError(`${m.id}：写入后文件未变`)
       for (const env of runsOf(m)) {
-        if (interrupted) break
+        if (lifecycle.interrupted) break
         const r = await runOnce(spec.command, root, env)
         runs.push(r)
         console.log(`${m.id} [${envLabel(env)}] ${r.exit === 0 ? 'GREEN' : 'RED'} exit=${r.exit} failing=${JSON.stringify(r.failing)}`)
       }
     } finally {
-      applied = undefined
-      restore(file, original)
+      restoreApplied()
     }
-    if (interrupted) break
+    if (lifecycle.interrupted) break
     const red = runs.filter((r) => r.exit !== 0)
     const status = red.length === 0
       ? 'SURVIVED'
@@ -231,40 +250,55 @@ async function main() {
   for (const [file, original] of originals) {
     if (!readFileSync(file).equals(original)) throw new HarnessError(`${path.relative(root, file)} 结束时与原文不等`)
   }
-  if (interrupted) return finishInterrupted()
+  if (lifecycle.interrupted) return finishInterrupted()
   for (const env of distinct) {
     const r = await runOnce(spec.command, root, env)
-    if (interrupted) return finishInterrupted()
+    if (lifecycle.interrupted) return finishInterrupted()
     if (r.exit !== 0) throw new HarnessError(`还原后基线在 ${envLabel(env)} 下不绿（exit ${r.exit}）`)
   }
   console.log(`SUMMARY ${JSON.stringify(results.map(({ id, status, reason }) => ({ id, status, ...(reason ? { reason } : {}) })))}`)
   return results.every((r) => r.status === 'KILLED') ? 0 : 1
 }
 
-// 未捕获异常（例如 stdout 的 EPIPE）会绕过 finally 与信号处理；exit 钩子是最后一道还原。
+function cleanupFailure() {
+  killGroup('SIGKILL')
+  try {
+    restoreApplied()
+  } catch {}
+}
+
+function reportFailure(error) {
+  if (reportFailure.called) return
+  reportFailure.called = true
+  cleanupFailure()
+  try { process.stderr.write(`HARNESS_ERROR ${error instanceof Error ? error.message : String(error)}\n`) } catch {}
+  process.exit(2)
+}
+
+// 未捕获异常（例如 stdout 的 EPIPE）会绕过 finally 与信号处理；同步清理后退出 2。
 process.on('exit', () => {
-  if (applied) restore(applied.file, applied.original)
+  try { restoreApplied() } catch {}
 })
+
+process.on('uncaughtException', reportFailure)
+process.stdout.on('error', reportFailure)
+process.stderr.on('error', reportFailure)
 
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(signal, () => {
     // 第一次：同步还原、把信号转给命令的进程组，主循环随后以 130 收尾。
     // 命令不理会信号时夹具会一直等它；再来一次就 SIGKILL 整组并立即退出。
-    if (applied) restore(applied.file, applied.original)
-    applied = undefined
-    if (interrupted) {
+    try { restoreApplied() } catch (error) { reportFailure(error) }
+    if (lifecycle.interrupted) {
       killGroup('SIGKILL')
       process.exit(130)
     }
-    interrupted = true
+    lifecycle.interrupted = true
     killGroup(signal)
   })
 }
 
 main().then(
   (code) => { process.exitCode = code },
-  (error) => {
-    console.error(error instanceof HarnessError ? `HARNESS_ERROR ${error.message}` : error)
-    process.exitCode = 2
-  },
+  (error) => reportFailure(error),
 )
