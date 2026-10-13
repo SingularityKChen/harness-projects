@@ -2,7 +2,7 @@
  * 客户端装配出的"工作区读取"（issue #178）：展示层消费的输入由同步会话**生产**，不再由宿主手工拼装。
  * 这里还放帧头与时钟的运行时校验——TS 形状不能替代边界验证，不合契约的帧在任何状态变更之前被拒绝。
  */
-import { WireFreshness } from '@harness-projects/controller'
+import { WireFreshness } from '@harness-projects/controller/values'
 import type { WireCapabilityEntry, WireWorkspaceDescriptor, WireWorkspaceHeader } from '@harness-projects/controller'
 import type { EntityStore } from './store.ts'
 

@@ -6,7 +6,8 @@
   "description": "对外类型化 API 与增量流",
   "exports": {
     ".": "./src/index.ts",
-    "./keys": "./src/keys.ts"
+    "./keys": "./src/keys.ts",
+    "./values": "./src/values.ts"
   },
   "dependencies": {
     "@harness-projects/domain": "workspace:*",

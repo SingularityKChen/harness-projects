@@ -5,7 +5,7 @@
  * 每个条目带 stale 标记：来源降级（freshness = degraded）、缺口与重连期间的值一律 stale；`isCurrent`
  * 只在条目存在且不 stale 时为真，所以陈旧值永远不会被当成当前值。
  */
-import { WireFreshness } from '@harness-projects/controller'
+import { WireFreshness } from '@harness-projects/controller/values'
 import type { WireDelta, WireEntity, WireSnapshot, WireWorkspaceMetadata } from '@harness-projects/controller'
 import { isSource } from './workspace-read.ts'
 

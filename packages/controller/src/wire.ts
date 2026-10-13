@@ -12,13 +12,10 @@ import type {
 import type { CapabilityKey } from '@harness-projects/capabilities'
 import { StatusPolicyMode } from '@harness-projects/core'
 import type { PlanningItemView, SyncSummary, WorkspaceMetadata } from '@harness-projects/core'
+import { WireAuthority, WireFreshness } from './values.ts'
 
-export const WireFreshness = { Fresh: 'fresh', Degraded: 'degraded' } as const
-export type WireFreshness = (typeof WireFreshness)[keyof typeof WireFreshness]
-
-/** 权威归属：provider 拥有字段 / 宿主本地权威 / 只由人的显式操作改变。 */
-export const WireAuthority = { Provider: 'provider', Host: 'host', Manual: 'manual' } as const
-export type WireAuthority = (typeof WireAuthority)[keyof typeof WireAuthority]
+export { WireAuthority, WireFreshness }
+export type { WireAuthority as WireAuthorityType, WireFreshness as WireFreshnessType } from './values.ts'
 
 const AUTHORITY_BY_MODE: Readonly<Record<StatusPolicyMode, WireAuthority>> = {
   [StatusPolicyMode.SourceManaged]: WireAuthority.Provider,
