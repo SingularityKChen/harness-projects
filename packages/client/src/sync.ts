@@ -8,7 +8,7 @@
  * 时间 / 连接状态——被拒绝的帧不会留下半个新状态。传输失败与被拒绝的帧一样走 `lose`：保留最后已知的
  * 内容、头与时间，只把连接标成断开、行标成 stale。
  */
-import { WireFreshness } from '@harness-projects/controller'
+import { WireFreshness } from '@harness-projects/controller/values'
 import type { SourceMetadata, WireEntity, WireGap, WireWorkspaceHeader } from '@harness-projects/controller'
 import type { EntityStore } from './store.ts'
 import type { Transport } from './transport.ts'
