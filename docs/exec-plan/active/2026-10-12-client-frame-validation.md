@@ -52,6 +52,27 @@ client 接受点必须拒绝旧/倒退 revision、重复或未知 capability ide
 
 运行 client browser #308 contract、frame/client e2e、boundaries、workflow、size、disclosure、diff-check；独立 current-head review 通过后置 ready。
 
+### Batch 4 · 评审响应与畸形 event 原子拒绝
+
+**最小闭环**：transport 返回缺失或错误嵌套载体时，在读取字段前归类为帧拒绝，保持已确认快照不变。
+
+- [x] 先加入 `metadata.entities=null` 与 `delta=null` 的真实 `sync.poll()` 反例，并在旧实现上确认会误触发 `lose()`。
+- [x] 在 client 接受点前增加 event shape guard，避免普通 TypeError 进入连接失败路径。
+- [x] 复跑 client/browser focused suite、typecheck 和 package boundaries。
+
+**验证**：
+
+```sh
+node --test tests/e2e/workspace-read-assembly.test.js --test-name-pattern='畸形 event'
+node --test tests/e2e/workspace-read-assembly.test.js tests/e2e/client-sync.test.js tests/contract/client-browser.test.js tests/contract/ui-work-item-list-browser.test.js tests/contract/ui-work-item-detail-browser.test.js
+node_modules/.bin/tsc --noEmit
+pnpm run boundaries
+```
+
+期望：畸形 event 被拒绝，`rows/header/current/stale/time` 深相等；focused suite、typecheck 和 boundaries 全绿。
+
+**回滚**：反向提交 event shape guard 与对应反例；不改 generation producer、Host transport 或 schema。
+
 ## Validation and Acceptance
 
 | # | 验收项 | 判定证据 |
@@ -63,6 +84,7 @@ client 接受点必须拒绝旧/倒退 revision、重复或未知 capability ide
 | 5 | gap/reconnect 回归 | 前游标超前 delta 进入 gap，stale 窗口与合法 baseline recovery 全绿 |
 | 6 | #308 stacked regression | browser bundle external=[]、无 Host inputs |
 | 7 | 规模与公开面 | size≤800/1300、checks、native links 回读 |
+| 8 | 畸形 event 原子拒绝 | `metadata.entities=null` / `delta=null` 在统一拒绝前不改变连接、行 stale 或当前性 |
 
 ## Progress
 
@@ -71,7 +93,8 @@ client 接受点必须拒绝旧/倒退 revision、重复或未知 capability ide
 - [x] 创建 stacked worktree，base #308 head f2308fd1。
 - [x] Batch 1 红灯与 draft PR（2026-10-12）。
 - [x] Batch 2 实现（2026-10-12）。
-- [ ] Batch 3 复评与 ready。
+- [x] Batch 3 复评与 ready（2026-10-13：独立 MMP 评审；P0/P1=0，P2=1）。
+- [x] Batch 4 评审响应与 event shape guard（2026-10-13）。
 
 ## Surprises & Discoveries
 
@@ -90,6 +113,8 @@ client 接受点必须拒绝旧/倒退 revision、重复或未知 capability ide
 - 2026-10-12：adversarial review 后恢复 delta 缺口分支：`previousRevision > local revision` 且 delta 自身严格前进是丢帧信号，必须标 stale 并重拉 baseline；只有倒退 previousRevision 或不前进 revision 才是 malformed reject。
 - 2026-10-12：adversarial review 后要求 gap 分支先做完整 delta shape validation；将既有 `store.assertFrame` 提升为 `assertDeltaFrame` 纯校验并由 apply 与 recover 共用，避免 duplicate upserts、`removed:null` 或坏 row source 触发 `onGap`。
 - 2026-10-12：generation 正式字段与 producer 由 #218 定义；本 PR 只在 client 接受点消费可选 evidence，并在 evidence 已建立后拒绝缺省帧。这样保持 fail-closed，同时不把未定义的 wire 字段冒充为 #312 已完成的端到端协议。
+- 2026-10-13：独立 MMP 评审复现 `metadata.entities=null` / `delta=null` 在分支判断前抛普通 TypeError，`guarded()` 因而把畸形帧误报为连接失败并标 stale；根因是 event envelope 未在嵌套字段读取前验证。
+- 2026-10-13：采用最小 event shape guard；畸形载体统一包装为 `FrameRejectedError`，保持已确认快照不变；正式 generation producer 与迟到异步 fencing仍由 #218 承接。
 
 ## Idempotence and Recovery
 
@@ -101,9 +126,10 @@ validation 纯读，可重复执行；apply 只有全部验证成功后发生。
 
 ## Outcomes & Retrospective
 
-已完成：client acceptance paths 增加严格 delta 顺序、generation evidence 完整性、capability identity/access 运行时校验和拒绝原子性；gap 分流前复用完整 delta shape 校验；新增倒退、不前进、前游标超前 gap、gap 伪装 duplicate/removed:null、缺 generation、重复、未知和坏 access 判别性反例。定向测试 26/26，完整 `pnpm verify` 1486 + mvp0 7 全绿；复评无本 PR 范围内的 P0/P1。未完成：#218 的正式 generation wire producer 与 late async fencing；两者均已记录为依赖转移；主控最终 commit 整理与 PR 外部回读。
+已完成：client acceptance paths 增加严格 delta 顺序、generation evidence 完整性、capability identity/access 运行时校验、event envelope shape guard 和拒绝原子性；gap 分流前复用完整 delta shape 校验；新增倒退、不前进、前游标超前 gap、gap 伪装 duplicate/removed:null、缺 generation、重复、未知、坏 access 以及 `metadata.entities=null` / `delta=null` 反例。当前修复后 focused client/browser suite 34/34、typecheck 和 boundaries 通过；完整 `pnpm verify` 与 GitHub required checks 在最终 head 上待复跑。未完成：#218 的正式 generation wire producer 与 late async fencing；两者均已记录为依赖转移。
 
 ## Bottom Change Note
 
 - 2026-10-12：创建 #312 stacked plan-only ExecPlan；基于新 issue 三方分析和 #308 current head，选择独立 frame validation 闭环。
 - 2026-10-12：Batch 1/2 完成；补入 RFC 1982、Kubernetes resourceVersion 作为定序与一致快照惯例来源，记录 generation 字段证据边界、红绿测试和拒绝与 reconnect stale 转换的语义区分。
+- 2026-10-13：根据 MMP 评审的 P2 反例新增 Batch 4；先观察旧实现红灯，再加入 event shape guard 与深相等快照断言。
