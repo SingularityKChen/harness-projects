@@ -80,6 +80,32 @@ export function storageIdentityFoundationSuite(adapter, register = test) {
       assert.deepEqual(await storage.listIdentitiesForEntity('entity-2'), [], '覆盖不得把身份搬到另一个实体')
     })
 
+    register(`${label}：identity id 与 natural key 双冲突必须拒绝且保留两个 owner`, async () => {
+      const storage = makeStorage()
+      await seedWorkspace(storage)
+      await storage.putProviderBinding(binding('binding-1'))
+      await seedEntity(storage, 'entity-1')
+      await seedEntity(storage, 'entity-2')
+      const first = { id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'alias' }
+      const second = { id: 'identity-2', entityId: 'entity-2', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-2', role: 'alias' }
+      await storage.putExternalIdentity(first)
+      await storage.putExternalIdentity(second)
+      await assert.rejects(storage.putExternalIdentity({ ...first, externalId: 'issue-2', role: 'primary' }), /external identity id already points at another object/)
+      assert.deepEqual(await storage.findExternalIdentity('binding-1', 'issue', 'issue-1'), first, 'id owner must remain unchanged')
+      assert.deepEqual(await storage.findExternalIdentity('binding-1', 'issue', 'issue-2'), second, 'natural-key owner must remain unchanged')
+    })
+
+    register(`${label}：合法 natural-key replay 只更新 role 且保留稳定身份`, async () => {
+      const storage = makeStorage()
+      await seedWorkspace(storage)
+      await storage.putProviderBinding(binding('binding-1'))
+      await seedEntity(storage, 'entity-1')
+      const owner = { id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'alias' }
+      await storage.putExternalIdentity(owner)
+      await storage.putExternalIdentity({ ...owner, id: 'retry-id', entityId: 'entity-1', role: 'historical' })
+      assert.deepEqual(await storage.findExternalIdentity('binding-1', 'issue', 'issue-1'), { ...owner, role: 'historical' })
+    })
+
     register(`${label}：投影指向不存在的工作区或实体必须被拒绝且不留行`, async () => {
       const storage = makeStorage()
       await seedWorkspace(storage)
