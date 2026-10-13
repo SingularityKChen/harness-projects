@@ -9,7 +9,7 @@
  * 内容、头与时间，只把连接标成断开、行标成 stale。
  */
 import { WireFreshness } from '@harness-projects/controller/values'
-import type { SourceMetadata, WireEntity, WireGap, WireWorkspaceHeader } from '@harness-projects/controller'
+import type { SourceMetadata, WireEntity, WireEvent, WireGap, WireWorkspaceHeader } from '@harness-projects/controller'
 import { assertDeltaFrame, type EntityStore } from './store.ts'
 import type { Transport } from './transport.ts'
 import { assertHeader, readClock, type ClientWorkspaceRead } from './workspace-read.ts'
@@ -53,6 +53,26 @@ const generationOf = (frame: GenerationFrame): number | undefined => {
   if (frame.generation === undefined) return undefined
   if (typeof frame.generation !== 'number' || !Number.isInteger(frame.generation) || frame.generation < 0) throw new TypeError('generation 必须是非负整数')
   return frame.generation
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
+function assertEventShape(event: unknown): asserts event is WireEvent {
+  if (!isRecord(event) || !['delta', 'metadata', 'gap'].includes(event.kind as string)) {
+    throw new TypeError('event 不合契约')
+  }
+  if (event.kind === 'delta') {
+    const delta = event.delta
+    if (!isRecord(delta) || !Array.isArray(delta.upserts) || !Array.isArray(delta.removed)
+      || delta.upserts.some((row) => !isRecord(row))) throw new TypeError('delta 载体不合契约')
+  } else if (event.kind === 'metadata') {
+    const metadata = event.metadata
+    if (!isRecord(metadata) || !isRecord(metadata.source) || !Array.isArray(metadata.entities)
+      || metadata.entities.some((row) => !isRecord(row) || !isRecord(row.source))) {
+      throw new TypeError('metadata 载体不合契约')
+    }
+  } else if (!isRecord(event.gap)) {
+    throw new TypeError('gap 载体不合契约')
+  }
 }
 
 class FrameRejectedError extends TypeError {}
@@ -146,6 +166,11 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       if (!connected) return baseline()
       const event = await transport.poll(store.revision)
       if (event === undefined) return { kind: 'idle', revision: store.revision, reason: undefined }
+      try {
+        assertEventShape(event)
+      } catch (error) {
+        throw new FrameRejectedError(error instanceof Error ? error.message : 'event 不合契约')
+      }
       if (event.kind === 'gap') return recover(event.gap)
       if (event.kind === 'metadata') {
         const { metadata } = event

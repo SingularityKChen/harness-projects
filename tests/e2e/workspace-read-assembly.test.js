@@ -419,6 +419,25 @@ test('接受点：倒退 / 不前进 delta 与重复、未知、坏 access capab
   }
 })
 
+test('接受点：畸形 event 在读取嵌套字段前拒绝且快照保持深相等', async () => {
+  const { controller } = await compose()
+  const base = await controller.baseline()
+  const cases = [
+    ['metadata entities 缺失', { kind: 'metadata', metadata: { ...base, entities: null } }],
+    ['delta 载体缺失', { kind: 'delta', delta: null }],
+  ]
+
+  for (const [label, event] of cases) {
+    const transport = scripted(controller)
+    const { sync } = await client(controller, { transport })
+    await sync.connect()
+    const before = stateOf(sync)
+    transport.events.push(event)
+    await assert.rejects(sync.poll())
+    assert.deepEqual(stateOf(sync), before, `${label}：拒绝不得改变 rows/header/current/stale/time`)
+  }
+})
+
 test('接受点：低 revision baseline 只有新 generation evidence 才能 reset', async () => {
   const { controller } = await compose()
   const first = await controller.baseline()
