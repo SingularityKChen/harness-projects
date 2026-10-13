@@ -25,6 +25,7 @@
 
 | 计划 | 范围 | 状态 |
 |---|---|---|
+| [2026-10-13-harness-host-composition](exec-plan/active/2026-10-13-harness-host-composition.md) | #228：Harness host 组合 Core/Controller/SQLite、typed remote 往返、迁移打包、凭据句柄和卸载生命周期 | Active |
 | [2026-10-13-worktree-root-outside-checkout](exec-plan/completed/2026-10-13-worktree-root-outside-checkout.md) | #214：默认 worktree 落点移出独立检出、嵌套与 bare 仓库默认 fail closed、取消 info/exclude 补偿、旧默认工作树的手工移除说明；已实施并经第二轮 MMP 评审与两轮修复复评（PR #328） | Completed |
 | [2026-10-13-planning-refresh-scheduler](exec-plan/completed/2026-10-13-planning-refresh-scheduler.md) | #334（从 #134 拆出）：Core explicit refresh 与 bounded single-flight scheduler，复用 #305 fence；定时失败交宿主诊断出口；Host 接线与 scheduled 验收由 #335 承接；已实施并经第二轮 MMP 评审与修复复评（PR #331） | Completed |
 | [2026-10-13-planning-membership-reconcile](exec-plan/completed/2026-10-13-planning-membership-reconcile.md) | #332（从 #134 拆出）：Planning membership scope 收敛、删除 stale field values、保持 remove/re-add identity；已实施并经第二轮 MMP 评审与修复复评（PR #330） | Completed |
