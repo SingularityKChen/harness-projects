@@ -22,8 +22,8 @@
     {
       "id": "H3 skip restore write",
       "file": "scripts/review-mutate.mjs",
-      "anchor": "      applied = undefined\n      restore(file, original)\n    }",
-      "replacement": "      applied = undefined\n    }",
+      "anchor": "      restoreApplied()\n",
+      "replacement": "",
       "killedBy": "五种结论"
     },
     {
@@ -57,7 +57,7 @@
     {
       "id": "H8 signal ignored",
       "file": "scripts/review-mutate.mjs",
-      "anchor": "    interrupted = true\n",
+      "anchor": "    lifecycle.interrupted = true\n",
       "replacement": "",
       "killedBy": "三种信号"
     },
@@ -99,15 +99,15 @@
     {
       "id": "H14 kill only the direct child",
       "file": "scripts/review-mutate.mjs",
-      "anchor": "    process.kill(-activeGroup, signal)",
-      "replacement": "    activeChild?.kill(signal)",
+      "anchor": "      process.kill(-group, signal)",
+      "replacement": "      lifecycle.activeChild?.kill(signal)",
       "killedBy": "三种信号"
     },
     {
       "id": "H15 no kill on interrupt",
       "file": "scripts/review-mutate.mjs",
-      "anchor": "    interrupted = true\n    killGroup(signal)\n",
-      "replacement": "    interrupted = true\n",
+      "anchor": "    lifecycle.interrupted = true\n    killGroup(signal)\n",
+      "replacement": "    lifecycle.interrupted = true\n",
       "killedBy": "三种信号"
     },
     {
@@ -141,29 +141,22 @@
     {
       "id": "H20 no synchronous restore in the handler",
       "file": "scripts/review-mutate.mjs",
-      "anchor": "    if (applied) restore(applied.file, applied.original)\n",
+      "anchor": "    try { restoreApplied() } catch (error) { reportFailure(error) }\n",
       "replacement": "",
       "killedBy": "三种信号"
     },
     {
       "id": "H21 no SIGKILL escalation on a second signal",
       "file": "scripts/review-mutate.mjs",
-      "anchor": "      killGroup('SIGKILL')\n",
+      "anchor": "    if (lifecycle.interrupted) {\n      killGroup('SIGKILL')\n      process.exit(130)",
       "replacement": "",
       "killedBy": "三种信号"
     },
     {
-      "id": "H22 no exit hook",
-      "file": "scripts/review-mutate.mjs",
-      "anchor": "process.on('exit', () => {\n  if (applied) restore(applied.file, applied.original)\n})\n",
-      "replacement": "",
-      "killedBy": "EPIPE"
-    },
-    {
       "id": "H23 group forgotten when the command exits",
       "file": "scripts/review-mutate.mjs",
-      "anchor": "      } else {\n        activeGroup = undefined\n      }",
-      "replacement": "      }\n      activeGroup = undefined",
+      "anchor": "      pruneGroups()\n",
+      "replacement": "      lifecycle.groups.clear()\n",
       "killedBy": "三种信号"
     },
     {
@@ -176,7 +169,7 @@
     {
       "id": "H25 interrupt during baseline not checked",
       "file": "scripts/review-mutate.mjs",
-      "anchor": "    const r = await runOnce(spec.command, root, env)\n    if (interrupted) return finishInterrupted()\n    if (r.exit !== 0) throw new HarnessError(`基线在",
+      "anchor": "    const r = await runOnce(spec.command, root, env)\n    if (lifecycle.interrupted) return finishInterrupted()\n    if (r.exit !== 0) throw new HarnessError(`基线在",
       "replacement": "    const r = await runOnce(spec.command, root, env)\n    if (r.exit !== 0) throw new HarnessError(`基线在",
       "killedBy": "基线运行期间被中断"
     },
@@ -214,6 +207,20 @@
       "anchor": "function finishInterrupted() {\n  killGroup('SIGKILL')\n",
       "replacement": "function finishInterrupted() {\n",
       "killedBy": "三种信号"
+    },
+    {
+      "id": "H31 crash leaves command group alive",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "function cleanupFailure() {\n  killGroup('SIGKILL')\n",
+      "replacement": "function cleanupFailure() {\n",
+      "killedBy": "EPIPE 崩溃"
+    },
+    {
+      "id": "H32 crash keeps exit 1",
+      "file": "scripts/review-mutate.mjs",
+      "anchor": "  process.exit(2)\n}",
+      "replacement": "  process.exit(1)\n}",
+      "killedBy": "EPIPE 崩溃"
     }
   ]
 }

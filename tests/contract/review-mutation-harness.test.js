@@ -88,6 +88,15 @@ const summary = (output) => {
 const PLUS = { file: 'lib.mjs', anchor: 'a + b', replacement: 'a - b' }
 const LOCAL_HOURS = { file: 'lib.mjs', anchor: 'getUTCHours', replacement: 'getHours' }
 
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 test('五种结论各自可区分，且结束时文件逐字节还原', async (t) => {
   const root = fixture(t)
   const { code, output } = await harness(root, {
@@ -274,6 +283,45 @@ test('输出管道提前关闭、夹具因 EPIPE 退出时，正在施加的变�
   sameBytes(root, LIB)
 })
 
+test('EPIPE 崩溃时以 2 退出并杀死仍在变异批中的命令组', { timeout: 60_000 }, async (t) => {
+  const root = fixture(t)
+  const flag = path.join(root, 'crash-child.flag')
+  writeFileSync(
+    path.join(root, 'crash-child.mjs'),
+    [
+      "import { spawn } from 'node:child_process'",
+      "import { readFileSync, writeFileSync } from 'node:fs'",
+      "if (readFileSync('lib.mjs', 'utf8').includes('a - b')) {",
+      "  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' }); child.unref()",
+      `  writeFileSync(${JSON.stringify(flag)}, String(child.pid))`,
+      '}',
+      '',
+    ].join('\n'),
+  )
+  const run = start(root, {
+    command: ['node', 'crash-child.mjs'],
+    mutants: [
+      { id: 'first', ...PLUS },
+      { id: 'second', ...LOCAL_HOURS },
+    ],
+  })
+  t.after(() => run.child.kill('SIGKILL'))
+  const first = Date.now() + 20_000
+  while (!existsSync(flag) && Date.now() < first) await new Promise((resolve) => setTimeout(resolve, 25))
+  assert.ok(existsSync(flag), `变异命令没有派生子进程：\n${run.output()}`)
+  const leaked = Number(readFileSync(flag, 'utf8'))
+  run.child.stdout.once('data', () => run.child.stdout.destroy())
+  const outcome = await Promise.race([
+    run.done,
+    new Promise((resolve) => setTimeout(() => resolve({ code: 'timeout', output: run.output() }), 8_000)),
+  ])
+  assert.equal(outcome.code, 2, outcome.output)
+  sameBytes(root, LIB)
+  const gone = Date.now() + 3_000
+  while (alive(leaked) && Date.now() < gone) await new Promise((resolve) => setTimeout(resolve, 50))
+  assert.ok(!alive(leaked), `EPIPE 崩溃后命令组留下孤儿进程 ${leaked}`)
+})
+
 test('TAP 报告格式下同样能按用例名区分 KILLED 与 KILLED_OTHER', async (t) => {
   const root = fixture(t)
   const { code, output } = await harness(root, {
@@ -443,4 +491,76 @@ test('基线运行期间被中断时以 130 退出，不报基线不绿', { time
   assert.match(output, /INTERRUPTED/)
   assert.doesNotMatch(output, /HARNESS_ERROR/)
   sameBytes(root, LIB)
+})
+
+test('还原后基线运行期间被中断时仍以 130 退出', { timeout: 60_000 }, async (t) => {
+  const root = fixture(t)
+  const restored = path.join(root, 'restored.flag')
+  writeFileSync(
+    path.join(root, 'post-restore.mjs'),
+    [
+      "import { readFileSync, writeFileSync, existsSync } from 'node:fs'",
+      "if (readFileSync('lib.mjs', 'utf8').includes('a - b')) { writeFileSync('mutated.flag', '1'); process.exitCode = 1 }",
+      "else if (existsSync('mutated.flag')) { writeFileSync('restored.flag', '1'); setTimeout(() => {}, 30000) }",
+      '',
+    ].join('\n'),
+  )
+  const run = start(root, { command: ['node', 'post-restore.mjs'], mutants: [{ id: 'm', ...PLUS }] })
+  t.after(() => run.child.kill('SIGKILL'))
+  const deadline = Date.now() + 20_000
+  while (!existsSync(restored) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25))
+  assert.ok(existsSync(restored), `还原后基线没有启动：\n${run.output()}`)
+  run.child.kill('SIGINT')
+  const outcome = await run.done
+  assert.equal(outcome.code, 130, outcome.output)
+  assert.match(outcome.output, /INTERRUPTED/)
+  assert.doesNotMatch(outcome.output, /HARNESS_ERROR/)
+  sameBytes(root, LIB)
+})
+
+test('基线中断后即使包装进程退出也 SIGKILL 剩余进程组', { timeout: 60_000 }, async (t) => {
+  const root = fixture(t)
+  const flag = path.join(root, 'baseline-leftover.flag')
+  writeFileSync(
+    path.join(root, 'baseline-leftover.mjs'),
+    [
+      "import { spawn } from 'node:child_process'",
+      "import { writeFileSync } from 'node:fs'",
+      "const child = spawn(process.execPath, ['-e', \"for (const s of ['SIGINT','SIGTERM','SIGHUP']) process.on(s, () => {}); setTimeout(() => {}, 30000)\"], { stdio: 'ignore' })",
+      `writeFileSync(${JSON.stringify(flag)}, String(child.pid))`,
+      'setTimeout(() => {}, 30000)',
+      '',
+    ].join('\n'),
+  )
+  const run = start(root, { command: ['sh', '-c', 'node baseline-leftover.mjs; true'], mutants: [{ id: 'm', ...PLUS }] })
+  t.after(() => run.child.kill('SIGKILL'))
+  const deadline = Date.now() + 20_000
+  while (!existsSync(flag) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25))
+  assert.ok(existsSync(flag), `基线剩余进程没有启动：\n${run.output()}`)
+  const leftover = Number(readFileSync(flag, 'utf8'))
+  run.child.kill('SIGINT')
+  const outcome = await run.done
+  assert.equal(outcome.code, 130, outcome.output)
+  const gone = Date.now() + 3_000
+  while (alive(leftover) && Date.now() < gone) await new Promise((resolve) => setTimeout(resolve, 50))
+  assert.ok(!alive(leftover), `基线中断后剩余进程 ${leftover} 未被 SIGKILL`)
+})
+
+test('最后一个变异 target 缺失时首个 command 不启动', async (t) => {
+  const root = fixture(t)
+  const started = path.join(root, 'started.flag')
+  writeFileSync(
+    path.join(root, 'mark-start.mjs'),
+    `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(started)}, '1')\n`,
+  )
+  const { code, output } = await harness(root, {
+    command: ['node', 'mark-start.mjs'],
+    mutants: [
+      { id: 'inside', ...PLUS },
+      { id: 'missing-last', file: 'missing-last.mjs', anchor: 'x', replacement: 'y' },
+    ],
+  })
+  assert.equal(code, 2, output)
+  assert.match(output, /HARNESS_ERROR missing-last\.mjs 不存在/)
+  assert.equal(existsSync(started), false, 'target 预检应当早于首个 baseline command')
 })
