@@ -25,6 +25,7 @@
 
 | 计划 | 范围 | 状态 |
 |---|---|---|
+| [2026-10-13-planning-membership-reconcile](exec-plan/active/2026-10-13-planning-membership-reconcile.md) | #134A：Planning membership scope 收敛、删除 stale field values、保持 remove/re-add identity | Active |
 | [2026-10-05-connector-account-storage](exec-plan/completed/2026-10-05-connector-account-storage.md) | #126 连接账号、宿主凭据引用与工作区配置：独立元数据写口、Fake/SQLite 同契约、身份保留及重启验收；已实施并经评审，等待合并回读（PR #270） | Completed |
 | [2026-09-20-mvp0-parallel-stacks](exec-plan/completed/2026-09-20-mvp0-parallel-stacks.md) | MVP-0 并行堆叠 PR 交付的**控制计划**：栈拓扑、文件所有权、模型路由、批次顺序与合并顺序 | Completed |
 | [2026-09-20-contract-plane](exec-plan/completed/2026-09-20-contract-plane.md) | 契约栈（A）：领域模型、五域能力契约、契约套件与离线替身 | Completed |
