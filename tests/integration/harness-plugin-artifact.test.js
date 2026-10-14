@@ -24,6 +24,7 @@ import vm from 'node:vm'
 import { parse as parseYaml } from 'yaml'
 
 import { build } from '../../apps/harness-plugin/scripts/build.mjs'
+import { createFakeProviders } from '@harness-projects/provider-fake'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -94,14 +95,14 @@ function unwrapExports(exports) {
  * `require` 只回答基线键：`react` 返回记录型 `createElement`，其余基线键返回空对象，
  * 非基线一律抛出与宿主同形的错误。
  */
-async function evaluateClientBundle(clientFile) {
+async function evaluateClientBundle(clientFile, console = globalThis.console) {
   const code = await readFile(clientFile, 'utf8')
   const loadCalls = []
   const requested = []
   // 记录型 `createElement`：把调用还原成 `{ type, props, children }` 节点。
   const react = { createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }) }
   const window = { __ModuleLoader__: { load: (descriptor) => loadCalls.push(descriptor) } }
-  vm.runInContext(code, vm.createContext({ window }), { filename: clientFile })
+  vm.runInContext(code, vm.createContext({ window, console }), { filename: clientFile })
 
   const stubRequire = (id) => {
     requested.push(id)
@@ -231,6 +232,7 @@ describe('Harness 插件安装件契约', () => {
   describe('c. 宿主半边是 Node 可直接加载的 JS', () => {
     let installedRoot
     let hostText
+    let hostCleanup
 
     before(async () => {
       installedRoot = path.join(tmpRoot, 'host', 'node_modules', ...sourceManifest.name.split('/'))
@@ -249,21 +251,48 @@ describe('Harness 插件安装件契约', () => {
       assert.ok(clientPath.endsWith(path.join('lib', 'client.js')))
     })
 
-    it('import() 包名得到的 apply 是函数，调用后打出宿主就绪行', async (t) => {
+    it('import() 包名得到的 apply 是函数，调用后打出宿主就绪行，并经包内 migrations 完成 baseline + bootstrap 往返', async (t) => {
       const require = createRequire(path.join(tmpRoot, 'host', 'entry.cjs'))
       const hostModule = await import(pathToFileURL(require.resolve(sourceManifest.name)).href)
       assert.equal(typeof hostModule.apply, 'function')
 
       const info = t.mock.method(console, 'info', () => {})
-      hostModule.apply({})
+      const previousHome = process.env.DSH_HOME
+      process.env.DSH_HOME = path.join(tmpRoot, 'profile')
+      const effects = []
+      const services = new Map()
+      const context = {
+        effect(callback) { effects.push(callback()) },
+        provide(name, value) { services.set(name, value); return () => services.delete(name) },
+        typert: { register() { return async () => {} } },
+        get(name) {
+          if (name === 'credentials') return { resolve: async () => undefined }
+          if (name === 'harnessProjectsProviders') return { create: async () => createFakeProviders() }
+          return undefined
+        },
+      }
+      try {
+        await hostModule.apply(context)
+        const service = services.get('harnessProjects')
+        assert.ok((await service.baseline()).entities.length > 0)
+        assert.equal((await service.bootstrapWorkspace({ kind: 'agent', id: 'packaged-host' }, 'packaged-host-1')).writeState, 'local_only')
+      } finally {
+        if (previousHome === undefined) delete process.env.DSH_HOME
+        else process.env.DSH_HOME = previousHome
+      }
+      hostCleanup = async () => { for (const dispose of effects.reverse()) await dispose() }
       const lines = info.mock.calls.map((call) => call.arguments.join(' '))
       assert.ok(lines.includes(HOST_READY_LINE), `没有打出 ${HOST_READY_LINE}，实际：${JSON.stringify(lines)}`)
     })
 
-    it('宿主半边文本里没有工作区说明符、.ts 说明符与 file: 说明符', () => {
-      assert.equal(hostText.includes('@harness-projects/'), false)
-      assert.equal(/["'`][^"'`\n]*\.tsx?["'`]/.test(hostText), false, '出现以 .ts 结尾的说明符')
-      assert.equal(/["'`]file:/.test(hostText), false, '出现 file: 说明符')
+    after(async () => { await hostCleanup?.() })
+
+    it('宿主半边的模块说明符里没有工作区包、.ts 与 file:，fake provider 不在宿主输入里', () => {
+      // 只看 import / require 形式的说明符：未压缩产物的注释与字符串里出现 `.ts` 文件名不是说明符。
+      const specifiers = [...hostText.matchAll(/(?:\brequire\s*\(|\bimport\s*\(|\bfrom\s*|\bimport\s*)(["'`])([^"'`\n]+)\1/g)].map((match) => match[2])
+      assert.ok(specifiers.some((specifier) => specifier.startsWith('node:')), '没有扫到任何说明符，本断言空转')
+      assert.deepEqual(specifiers.filter((specifier) => /^@harness-projects\/|\.tsx?$|^file:/.test(specifier)), [])
+      assert.deepEqual(Object.keys(result.metafiles.host.inputs).filter((input) => input.startsWith('packages/providers/fake/')), [])
     })
   })
 
@@ -278,11 +307,11 @@ describe('Harness 插件安装件契约', () => {
       assert.equal(evaluated.descriptor.id, sourceManifest.name)
     })
 
-    it('按宿主 unwrapExports 的规则解包后，恰好导出 apply 与 inject，且 inject 含 slots', () => {
+    it('按宿主 unwrapExports 的规则解包后，恰好导出 apply 与 inject，且 inject 含 remote', () => {
       const { exported } = evaluated
       assert.equal(typeof exported.apply, 'function')
       assert.ok(Array.isArray(exported.inject))
-      assert.ok([...exported.inject].includes('slots'))
+      assert.ok([...exported.inject].includes('remote'))
       assert.deepEqual([...Object.keys(exported)].sort(), ['apply', 'inject'])
     })
 
@@ -299,23 +328,32 @@ describe('Harness 插件安装件契约', () => {
     })
   })
 
-  describe('e. 客户端只读根 Context 的 slots，并注册 main 面板与侧栏入口', () => {
+  describe('e. 客户端先 mount Remote，在注入子 Context 里读 namespace 与 slots，并注册 main 面板与侧栏入口', () => {
     let registrations
     let injectedNames
+    let contextNames
+    let logs
 
-    before(async () => {
-      const { exported } = await evaluateClientBundle(path.join(packageDir, 'lib/client.js'))
+    /** 宿主 0.2.0-rc.2 的 unary 调用返回 RemoteResult：Host / 载体失败 resolve 成 `{ ok: false, error }`，不 reject。 */
+    async function applyClient(baseline) {
+      const seen = { registrations: [], injectedNames: [], contextNames: [], logs: [] }
+      const record = (level) => (...args) => seen.logs.push([level, ...args])
+      const { exported } = await evaluateClientBundle(path.join(packageDir, 'lib/client.js'), { info: record('info'), error: record('error') })
       const exposed = new Set([...exported.inject])
-      registrations = []
-      injectedNames = []
-
       const slots = {
         inject(name, callback) {
-          injectedNames.push(name)
+          seen.injectedNames.push(name)
           callback()
         },
         register(options, component) {
-          registrations.push({ options: { ...options }, component })
+          seen.registrations.push({ options: { ...options }, component })
+        },
+      }
+      const root = {
+        remote: { $mount: async () => async () => {} },
+        inject(names, callback) {
+          seen.contextNames.push(...names)
+          callback({ remote: { harnessProjects: { baseline: async () => baseline } }, slots })
         },
       }
       // 复刻 M17：根 Context 只暴露模块级 `inject` 声明过的服务，读别的属性就抛错。
@@ -324,17 +362,30 @@ describe('Harness 插件安装件契约', () => {
         {
           get(_target, property) {
             if (typeof property === 'symbol') return undefined
-            if (property === 'slots' && exposed.has('slots')) return slots
+            if (property === 'inject' || exposed.has(property)) return root[property]
             throw new Error(`cannot get property "${String(property)}" without inject`)
           },
         },
       )
-      exported.apply(ctx)
+      await exported.apply(ctx)
+      await new Promise((resolve) => setImmediate(resolve))
+      return seen
+    }
+
+    before(async () => {
+      ({ registrations, injectedNames, contextNames, logs } = await applyClient({ ok: true, value: { entities: [] } }))
     })
 
     it('slots.inject 的名字恰好是 main 与 sidebar.panellist', () => {
+      assert.deepEqual([...contextNames].sort(), ['remote.harnessProjects', 'slots'])
       assert.deepEqual([...injectedNames].sort(), ['main', 'sidebar.panellist'])
       assert.equal(registrations.length, 2)
+    })
+
+    it('baseline 按 RemoteResult 分支：ok 记 info，{ ok: false } 记 error 而不是当作收到', async () => {
+      assert.deepEqual(logs.map(([level, line]) => [level, line]), [['info', '[harness-projects] baseline received']])
+      const error = { code: 'gateway/invocation-unavailable' }
+      assert.deepEqual((await applyClient({ ok: false, error })).logs, [['error', '[harness-projects] baseline failed', error]])
     })
 
     it('main 注册的选项是 { name, key }，key 为 harness-projects', () => {

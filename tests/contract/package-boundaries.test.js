@@ -7,6 +7,7 @@
  * 允许的依赖边（左侧只能依赖右侧）：
  *
  *   apps/*            -> ui, ui-model, client, domain
+ *   （例外）HOST_ENTRY 列出的 apps/harness-plugin Host 入口文件另可 -> core, controller, storage/sqlite
  *   ui                -> ui-model, client, domain
  *   ui-model          -> client, domain
  *   client            -> controller, domain
@@ -95,6 +96,17 @@ const EXPECTED = {
     'packages/ui-model',
     'packages/ui',
   ]),
+}
+
+/**
+ * ADR-0013（Proposed）的唯一例外：只有这些 Host 入口文件可以 import core / controller / storage，
+ * 且它们不得从 client 入口经相对 import 可达；包内其它文件（含 client 与 Host 共用的 remote.ts）仍按 apps/* 的边。
+ */
+const HOST_ENTRY = {
+  dir: 'apps/harness-plugin',
+  files: ['apps/harness-plugin/src/host.ts', 'apps/harness-plugin/src/host-composition.ts'],
+  allow: ['packages/core', 'packages/controller', 'packages/storage/sqlite'],
+  clientEntry: 'apps/harness-plugin/src/client.ts',
 }
 
 /** 允许出现的外部运行时依赖。未列出的包不得声明它们。 */
@@ -225,7 +237,7 @@ test('依赖：源码中的跨包 import 必须落在允许的边上', async () 
         const target = resolveInternal(specifier)
         if (target !== undefined) {
           assert.ok(
-            allow.includes(target),
+            allow.includes(target) || (HOST_ENTRY.files.includes(relative) && HOST_ENTRY.allow.includes(target)),
             `${relative} 依赖了 ${target}，但 ${dir} 的允许依赖是 [${allow.join(', ')}]（AGENTS.md §2.2）`,
           )
           continue
@@ -269,6 +281,20 @@ test('依赖：源码 import 的兄弟包必须在本包 manifest 中声明', as
   }
 })
 
+test('依赖：Host 入口例外从 client 入口经相对 import 不可达（ADR-0013）', async () => {
+  const reachable = new Set()
+  const visit = async (relative) => {
+    if (reachable.has(relative)) return
+    reachable.add(relative)
+    for (const specifier of importSpecifiers(await readFile(path.join(repoRoot, relative), 'utf8'))) {
+      if (specifier.startsWith('.')) await visit(path.relative(repoRoot, path.resolve(repoRoot, path.dirname(relative), specifier)))
+    }
+  }
+  await visit(HOST_ENTRY.clientEntry)
+  assert.ok(reachable.size > 1, 'client 入口没有任何相对 import，本断言空转')
+  assert.deepEqual(HOST_ENTRY.files.filter((file) => reachable.has(file)), [], 'client 入口不得到达 Host 入口文件')
+})
+
 test('依赖：根 manifest 声明全部工作区包，测试层才能按包名 import', async () => {
   const root = await readJson(path.join(repoRoot, 'package.json'))
   const declared = root.devDependencies ?? {}
@@ -293,7 +319,7 @@ test('依赖：manifest 中声明的内部与外部依赖同样受约束', async
       const target = resolveInternal(dependency)
       if (target !== undefined) {
         assert.ok(
-          allow.includes(target),
+          allow.includes(target) || (dir === HOST_ENTRY.dir && HOST_ENTRY.allow.includes(target)),
           `${dir}/package.json 声明了 ${dependency}，但它不在允许依赖 [${allow.join(', ')}] 中`,
         )
         continue
