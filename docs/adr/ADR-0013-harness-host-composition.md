@@ -2,7 +2,7 @@
 
 > 状态：Proposed
 > 日期：2026-10-13
-> 来源：`docs/exec-plan/active/2026-10-13-harness-host-composition.md`、issue #228、`docs/architecture/harness-host-spike.md` §11
+> 来源：`docs/exec-plan/completed/2026-10-13-harness-host-composition.md`、issue #228、`docs/architecture/harness-host-spike.md` §11
 
 ## Decision
 
