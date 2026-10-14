@@ -58,8 +58,8 @@ export interface CoreWorkspaceInput {
 export interface CoreDiagnostics {
   /**
    * 一轮规划同步没有提交，原因是异常（Storage 拒绝、provider 抛出、编程错误）：原异常原样（同一个对象）交给宿主；provider 的结构化失败与成功提交不调用它。
-   * 另有一种情形同样调用它：组合期的首轮引导里，连「记录失败」本身也被 Storage 拒绝（双重故障，TD-031）——这个拒绝会被 `composeCore` 吞掉，
-   * 吞掉之前交给宿主；显式命令里的同一拒绝直接到调用方，不另交。
+   * 另有一种情形同样调用它：连「记录失败」本身也被 Storage 拒绝（双重故障，TD-031），而这一轮没有调用方——组合期的首轮引导（被 `composeCore` 吞掉），
+   * 或 `createPlanningReconciler` 的定时 tick（宿主把同一个对象传给它的 `diagnostics`）——吞掉之前交给宿主；显式命令里的同一拒绝直接到调用方，不另交（显式命令与定时 tick 共用同一轮时，tick 那一侧仍会上报，见 `PlanningReconcilerOptions.diagnostics`）。
    */
   readonly syncRoundFailed?: (error: unknown) => void
 }
@@ -88,7 +88,10 @@ export interface CoreContext {
 }
 
 export interface CoreCommands {
+  /** 既有引导命令：每次调用独立一轮，不进 `refreshPlanning` 的单飞槽；与刷新并发时由 #305 的轮次栅栏裁决，后开始的一轮胜出。 */
   bootstrapWorkspace(): Promise<BootstrapResult>
+  /** 显式 Planning 全量刷新；与 scheduler 共用单飞槽，不进入 controller replay。 */
+  refreshPlanning(): Promise<BootstrapResult>
   startWork(request: StartWorkRequest): Promise<StartWorkResult>
   /** 按运行身份取消：已取消原样返回，否则路由回签发者、ack 后原子替换状态与引用。 */
   cancelExecutionRun(query: ExecutionContextQuery): Promise<CancelExecutionRunResult>
@@ -158,10 +161,21 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
     // 这里能漏出来的只有「记录失败本身也被拒绝」（双重故障，TD-031）：吞掉之前交给宿主的诊断出口，否则冷启动时没有别的路径让宿主知道原因。
     reportSyncRoundFailure(context, error)
   }
+  let refreshInFlight: Promise<BootstrapResult> | undefined
+  const refreshPlanning = (): Promise<BootstrapResult> => {
+    if (refreshInFlight !== undefined) return refreshInFlight
+    let task: Promise<BootstrapResult>
+    task = bootstrapWorkspace(context).finally(() => {
+      if (refreshInFlight === task) refreshInFlight = undefined
+    })
+    refreshInFlight = task
+    return task
+  }
   return {
     queries: namespace(createQueries(context)),
     commands: namespace({
       bootstrapWorkspace: () => bootstrapWorkspace(context),
+      refreshPlanning,
       startWork: (request: StartWorkRequest) => startWork(context, request),
       cancelExecutionRun: (query: ExecutionContextQuery) => cancelExecutionRun(context, query),
       confirmRelation: (ref: RelationRef) => confirmRelation(context, ref),
@@ -188,6 +202,9 @@ function unavailableCore(reason: string): CoreApi {
   }
   const commands: CoreCommands = {
     bootstrapWorkspace: async () => ({
+      ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0, revision: 0, degraded: true, error,
+    }),
+    refreshPlanning: async () => ({
       ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0, revision: 0, degraded: true, error,
     }),
     startWork: async () => startWorkUnavailable(error),
