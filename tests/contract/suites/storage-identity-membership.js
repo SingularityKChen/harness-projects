@@ -225,6 +225,59 @@ export function storageIdentitySyncSuite(adapter, register = test) {
       assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-1'), [], '字段值是被删除而不是读取时过滤：旧 item id 重新加入不得让旧值复活')
     })
 
+    register(`${label}：规划成员 scope replace 只收敛 workspace+project 并保留实体身份`, async () => {
+      const storage = makeStorage()
+      await seedWorkspace(storage)
+      await seedWorkspace(storage, 'ws-2')
+      await storage.putProviderBinding(binding('binding-1'))
+      await seedEntity(storage, 'entity-1')
+      await seedEntity(storage, 'entity-2')
+      await storage.putExternalIdentity({ id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
+      await storage.putExternalIdentity({ id: 'identity-2', entityId: 'entity-2', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-2', role: 'primary' })
+      await storage.putMembership(membership({ itemExternalId: 'item-1', contentExternalId: 'issue-1' }))
+      await storage.putMembership(membership({ itemExternalId: 'item-2', contentExternalId: 'issue-2' }))
+      await storage.putMembership(membership({ projectExternalId: 'project-2', itemExternalId: 'item-3', contentExternalId: 'issue-2' }))
+      await storage.putMembership(membership({ workspaceId: 'ws-2', itemExternalId: 'item-4', contentExternalId: 'issue-2' }))
+      await storage.putFieldValue(fieldValue({ itemExternalId: 'item-2', value: 'stale' }))
+      await storage.putFieldValue(fieldValue({ itemExternalId: 'item-3', value: 'other-project' }))
+      await storage.putFieldValue(fieldValue({ workspaceId: 'ws-2', itemExternalId: 'item-4', value: 'other-workspace' }))
+
+      await storage.transaction((tx) => tx.replacePlanningMemberships(
+        { workspaceId: WORKSPACE, projectExternalId: 'project-1' },
+        [membership({ itemExternalId: 'item-1', contentExternalId: 'issue-1' })],
+      ))
+
+      assert.deepEqual((await storage.listMemberships(WORKSPACE, 'project-1')).map((m) => m.itemExternalId), ['item-1'])
+      assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-2'), [], '被移除成员的字段值必须一并删除')
+      assert.deepEqual((await storage.listMemberships(WORKSPACE, 'project-2')).map((m) => m.itemExternalId), ['item-3'], '另一个 project 不得被全局清理')
+      assert.deepEqual((await storage.listMemberships('ws-2', 'project-1')).map((m) => m.itemExternalId), ['item-4'], '另一个 workspace 不得被清理')
+      assert.equal((await storage.findExternalIdentity('binding-1', 'issue', 'issue-2'))?.entityId, 'entity-2', '成员移除不得删除 entity/external identity')
+
+      await assert.rejects(storage.transaction((tx) => tx.replacePlanningMemberships(
+        { workspaceId: WORKSPACE, projectExternalId: 'project-1' },
+        [membership({ workspaceId: 'ws-2', itemExternalId: 'item-4', contentExternalId: 'issue-2' })],
+      )), 'incoming 成员越过 scope 必须拒绝')
+      assert.deepEqual((await storage.listMemberships(WORKSPACE, 'project-1')).map((m) => m.itemExternalId), ['item-1'], 'scope 校验失败不得先删除原成员')
+
+      await storage.transaction((tx) => tx.replacePlanningMemberships(
+        { workspaceId: WORKSPACE, projectExternalId: 'project-1' },
+        [membership({ itemExternalId: 'item-2', contentExternalId: 'issue-2' })],
+      ))
+      assert.equal((await storage.getMembership(WORKSPACE, 'item-2'))?.contentExternalId, 'issue-2', '移除后重新加入可登记')
+      assert.deepEqual((await storage.listMemberships(WORKSPACE, 'project-2')).map((m) => m.itemExternalId), ['item-3'], '同内容在另一个 project 的成员关系仍须保留')
+      assert.equal((await storage.findExternalIdentity('binding-1', 'issue', 'issue-2'))?.id, 'identity-2', '重新加入复用稳定 external identity')
+
+      // provider 移走最后一个条目：空 incoming 是合法的完整集合，必须清空 scope，而不是被当成「没有输入」跳过。
+      await storage.putFieldValue(fieldValue({ itemExternalId: 'item-2', value: 'last' }))
+      await storage.transaction((tx) => tx.replacePlanningMemberships({ workspaceId: WORKSPACE, projectExternalId: 'project-1' }, []))
+      assert.deepEqual({
+        scope: await storage.listMemberships(WORKSPACE, 'project-1'), scopeValues: await storage.listFieldValues(WORKSPACE, 'item-2'),
+        otherProject: (await storage.listFieldValues(WORKSPACE, 'item-3')).map((v) => v.value),
+        otherWorkspace: (await storage.listFieldValues('ws-2', 'item-4')).map((v) => v.value),
+        identity: (await storage.findExternalIdentity('binding-1', 'issue', 'issue-2'))?.entityId,
+      }, { scope: [], scopeValues: [], otherProject: ['other-project'], otherWorkspace: ['other-workspace'], identity: 'entity-2' }, '空 incoming 清空 scope 内成员与字段值，scope 外与身份不动')
+    })
+
     register(`${label}：item 是字段值的定位分量——两个条目同一 projectFieldId 各自一条`, async () => {
       const storage = makeStorage()
       await seedWorkspace(storage)

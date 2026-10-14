@@ -256,6 +256,34 @@ export class SqliteSyncSurface {
     return this.read(() => (this.db.prepare(`SELECT ${MEMBERSHIP_COLUMNS} FROM project_item_membership WHERE workspace_id = ? AND project_external_id = ? ORDER BY item_external_id`).all(workspaceId, projectExternalId) as Row[]).map(rowToMembership))
   }
 
+  /** 完整 Planning project 读取的成员关系收敛：删除 scope 内不在 incoming 的成员与字段值，再在同一事务中 upsert incoming。实体、身份与账本表不受影响。 */
+  replacePlanningMemberships(scope: { readonly workspaceId: WorkspaceId; readonly projectExternalId: string }, incoming: readonly MembershipRecord[]): Promise<void> {
+    return this.atomic(() => {
+      if (this.db.prepare('SELECT 1 FROM workspace WHERE id = ?').get(scope.workspaceId) === undefined) throw new Error('membership workspace does not exist')
+      if (incoming.some((record) => record.workspaceId !== scope.workspaceId || record.projectExternalId !== scope.projectExternalId)) {
+        throw new Error('membership does not belong to replacement scope')
+      }
+      const ids = incoming.map((record) => record.itemExternalId)
+      const keep = ids.length === 0 ? '' : ` AND item_external_id NOT IN (${ids.map(() => '?').join(', ')})`
+      const params: readonly WriteParam[] = [scope.workspaceId, scope.projectExternalId, ...ids]
+      this.db.prepare(`DELETE FROM planning_field_value WHERE workspace_id = ? AND item_external_id IN (SELECT item_external_id FROM project_item_membership WHERE workspace_id = ? AND project_external_id = ?${keep})`).run(scope.workspaceId, ...params)
+      this.db.prepare(`DELETE FROM project_item_membership WHERE workspace_id = ? AND project_external_id = ?${keep}`).run(scope.workspaceId, scope.projectExternalId, ...ids)
+      for (const record of incoming) {
+        const stale = 'workspace_id = ? AND project_external_id = ? AND content_external_kind = ? AND content_external_id = ? AND item_external_id <> ?'
+        const staleParams: readonly WriteParam[] = [record.workspaceId, record.projectExternalId, record.contentKind, record.contentExternalId, record.itemExternalId]
+        const orphans = `SELECT item_external_id FROM project_item_membership WHERE ${stale}`
+        this.db.prepare(`DELETE FROM planning_field_value WHERE workspace_id = ? AND item_external_id IN (${orphans})`).run(record.workspaceId, ...staleParams)
+        this.db.prepare(`DELETE FROM project_item_membership WHERE ${stale}`).run(...staleParams)
+        this.db.prepare(`INSERT INTO project_item_membership (${MEMBERSHIP_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (workspace_id, item_external_id) DO UPDATE SET project_external_id = excluded.project_external_id,
+            content_external_kind = excluded.content_external_kind, content_external_id = excluded.content_external_id,
+            membership_created_at = excluded.membership_created_at, membership_updated_at = excluded.membership_updated_at`)
+          .run(record.workspaceId, record.projectExternalId, record.itemExternalId, record.contentKind, record.contentExternalId,
+            record.membershipCreatedAt ?? null, record.membershipUpdatedAt ?? null)
+      }
+    })
+  }
+
   /** 字段值（R2）：键 `(工作区, 条目, 项目字段)`，不含可选值 id；挂在成员关系上，悬空写入由外键拒绝。 */
   putFieldValue(record: FieldValueRecord): Promise<void> {
     return this.write(`INSERT INTO planning_field_value (${FIELD_VALUE_COLUMNS}) VALUES (?, ?, ?, ?, ?)

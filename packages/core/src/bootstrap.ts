@@ -6,7 +6,7 @@
 import {
   CapabilityKey, ObservationState, ProjectErrorCode, SyncState, projectCodeForProviderError,
   projectError, providerErr, providerError, providerOk, singlePlanningBinding,
-  type ExternalObjectRef, type PlanningProvider, type PlanningSyncRoundRecord, type ProviderError, type ProviderObservation,
+  type ExternalObjectRef, type MembershipRecord, type PlanningProvider, type PlanningSyncRoundRecord, type ProviderError, type ProviderObservation,
   type ProviderPlanningContent, type ProviderPlanningItem, type ProviderResult, type StorageTransaction,
 } from '@harness-projects/capabilities'
 import {
@@ -44,7 +44,9 @@ export interface BootstrapResult {
 
 /** 同步先算出不带修订号的行：行修订号由事务里的变化判定决定（ADR-0012 第 2 条）。 */
 type UnstampedProjection = Omit<WorkspaceProjection, 'revision'>
-interface SyncedItems { counts: SyncCounts; projections: readonly UnstampedProjection[] }
+interface SyncedItems { counts: SyncCounts; projections: readonly UnstampedProjection[]; memberships: readonly MembershipRecord[] }
+/** 通过整批校验的完整读取：成员关系的删除 scope 只能取自这里的 project，与条目校验同源。 */
+interface ValidatedPlanningRead { readonly project: ExternalObjectRef; readonly items: readonly ProviderPlanningItem[] }
 
 interface SyncCounts {
   entities: number
@@ -87,7 +89,9 @@ async function syncRound(
   if (!project.ok) return providerErr(project.error)
   const items = await readAllItems(planning, project.value)
   if (!items.ok) return providerErr(items.error)
-  return providerOk(await commitSync(context, bindingId, items.value, observations, round))
+  const validated = validatePlanningItems(project.value, items.value)
+  if (!validated.ok) return validated
+  return providerOk(await commitSync(context, bindingId, validated.value, observations, round))
 }
 
 async function beginSyncRound(context: CoreContext, bindingId: ProviderBindingId): Promise<PlanningSyncRoundRecord> {
@@ -143,6 +147,25 @@ async function readAllItems(
   return providerErr(providerError(ProviderErrorCode.Unavailable, '规划条目分页成环或超过页数上界，本次读取不完整'))
 }
 
+/**
+ * 完整读取的所有条目必须属于同一个已确认的 project。尤其是没有内容身份的
+ * `project_item`（redacted）不能借旧 membership 找回实体后再参与本轮写入；否则
+ * scope replace 会删掉当前 project 的 membership，却留下旧 projection。先做整批校验，
+ * 再进入任何 membership/projection 写入路径。
+ */
+function validatePlanningItems(
+  project: ExternalObjectRef, items: readonly ProviderPlanningItem[],
+): ProviderResult<ValidatedPlanningRead> {
+  for (const item of items) {
+    if (item.project.bindingId !== project.bindingId
+      || item.project.objectKind !== project.objectKind
+      || item.project.externalId !== project.externalId) {
+      return providerErr(providerError(ProviderErrorCode.InvalidInput, '规划条目所属项目与本轮确认项目不一致，本次读取不完整'))
+    }
+  }
+  return providerOk({ project, items })
+}
+
 /** 观察流是同步输入（D2）：provider 没有观察流时返回空表，不影响权威读取。 */
 async function collectObservations(planning: PlanningProvider): Promise<readonly ProviderObservation[]> {
   if (planning.reconcile === undefined) return []
@@ -155,7 +178,7 @@ async function collectObservations(planning: PlanningProvider): Promise<readonly
 
 async function commitSync(
   context: CoreContext, bindingId: ProviderBindingId,
-  items: readonly ProviderPlanningItem[], observations: readonly ProviderObservation[], round: PlanningSyncRoundRecord,
+  read: ValidatedPlanningRead, observations: readonly ProviderObservation[], round: PlanningSyncRoundRecord,
 ): Promise<BootstrapResult> {
   const { workspaceId } = context
   const committed = await context.storage.transaction(async (tx) => {
@@ -165,8 +188,9 @@ async function commitSync(
     }
     const before = await tx.listPlanningProjections(workspaceId)
     let revision = await tx.currentRevision(workspaceId)
-    const synced = await upsertItems(tx, context, items)
+    const synced = await upsertItems(tx, context, read.items)
     await recordObservations(tx, observations)
+    await tx.replacePlanningMemberships({ workspaceId, projectExternalId: read.project.externalId }, synced.memberships)
     // 先按原行修订号（新行用当前修订号）写一遍，再把事务前后的读回比较：内容变化才推进，并把本轮写入的行整批重盖（ADR-0012 第 1、2 条）。
     const scope = { workspaceId, bindingId }
     const kept = new Map(before.map((row) => [row.entityId, row.revision]))
@@ -215,7 +239,19 @@ async function upsertItems(
 ): Promise<SyncedItems> {
   const counts: SyncCounts = { entities: 0, workItems: 0, changeRequests: 0, unanchored: 0 }
   const projections: UnstampedProjection[] = []
+  const memberships: MembershipRecord[] = []
   for (const item of items) {
+    const contentKind = planningContentKind(item.ref.objectKind)
+    if (contentKind !== undefined) {
+      memberships.push({
+        workspaceId: context.workspaceId, projectExternalId: item.project.externalId, itemExternalId: item.membership.externalId,
+        contentKind, contentExternalId: item.ref.externalId,
+        membershipCreatedAt: item.membership.createdAt, membershipUpdatedAt: item.membership.updatedAt,
+      })
+    } else {
+      const known = await tx.getMembership(context.workspaceId, item.membership.externalId)
+      if (known !== undefined && known.projectExternalId === item.project.externalId) memberships.push(known)
+    }
     const anchor = await anchorOf(tx, context, item)
     if (anchor === undefined) {
       counts.unanchored += 1
@@ -226,7 +262,7 @@ async function upsertItems(
     if (anchor.kind === EntityKind.ChangeRequest) counts.changeRequests += 1
     else counts.workItems += 1
   }
-  return { counts, projections }
+  return { counts, projections, memberships }
 }
 
 /**
