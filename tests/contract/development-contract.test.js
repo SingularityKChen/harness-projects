@@ -69,7 +69,7 @@ developmentContractSuite({
   label: '离线 Development 替身（省略可选方法）',
   makeProvider: (scenario = {}) => omitMethods(
     baseProvider({ ...scenario, capabilities: { changeRequestCreate: false, worktreeRemove: false, ...scenario.capabilities } }),
-    'createChangeRequest', 'removeWorktree',
+    'preflightWorktree', 'createChangeRequest', 'removeWorktree',
   ),
   expect: SUITE_EXPECT,
 })

@@ -45,7 +45,7 @@ const SLOT_NAMES: readonly string[] = [...MOUNT_SLOTS.map(([slot]) => slot), 'st
 /** 各外部域 port 的 [必需成员, 可选成员]：必需缺失、可选存在却不是函数，都在读快照与写 Storage 之前拒绝。 */
 const PORT_METHODS: Record<ExternalCapabilityDomain, readonly [readonly string[], readonly string[]]> = {
   planning: [['getProject', 'listPlanningItems', 'getPlanningItem', 'listFieldDefinitions', 'listIterations'], ['createIssueWorkItem', 'createDraftItem', 'updateWorkItemContent', 'updatePlanningFields', 'movePlanningItem', 'reconcile']],
-  development: [['getRepository', 'listBranches', 'getCommit', 'getChangeRequest', 'listChangeRequests'], ['createBranch', 'createWorktree', 'getWorktree', 'createChangeRequest', 'removeWorktree', 'reconcile']],
+  development: [['getRepository', 'listBranches', 'getCommit', 'getChangeRequest', 'listChangeRequests'], ['createBranch', 'preflightWorktree', 'createWorktree', 'getWorktree', 'createChangeRequest', 'removeWorktree', 'reconcile']],
   delivery: [['listPipelineRuns', 'listChecks'], ['listDeployments', 'listEnvironments', 'rerunPipeline', 'cancelPipeline', 'reconcile']],
   execution: [['startRun', 'getRun'], ['cancelRun']],
 }

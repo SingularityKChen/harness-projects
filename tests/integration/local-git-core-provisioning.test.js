@@ -11,11 +11,12 @@ import path from 'node:path'
 import { test } from 'node:test'
 
 import { ExecutionContextStatus, RelationType } from '@harness-projects/domain'
-import { namesFor, provisionGit, startWork, worktreeEntityId } from '@harness-projects/core'
+import { contextIdFor, namesFor, provisionGit, readChainFacts, startWork, worktreeEntityId } from '@harness-projects/core'
 import { createLocalGitDevelopmentProvider } from '@harness-projects/provider-development-local-git'
 
 import {
-  BINDING, REPOSITORY_ID, coreContextFor, fixtureFor, git, providerFor, registerWorkItem, repositoryRef, worktreePaths,
+  BINDING, LEASE_EXPIRED_MS, REPOSITORY_ID, controllableClock, coreContextFor, fixtureFor, git,
+  interruptAfterBranchStep, providerFor, registerWorkItem, repositoryRef, worktreePaths,
 } from './local-git-fixture.js'
 
 /** 句柄可能相对、可能绝对：比较前统一规范化。断言的是「指向同一份工作树」这个不变量本身，
@@ -58,6 +59,182 @@ test('core 复用：同一请求重试返回既有 worktree 与分支，不重�
   assert.deepEqual(branches, ['work/wi-1'], '重试不得产生第二个工作分支（按总数断言，不是按名字过滤）')
 })
 
+test('core 默认只传稳定工作树意图，不把 checkout 内 .worktrees 当本机路径', () => {
+  const names = namesFor({ workItemId: 'wi-intent', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'intent-1' })
+  assert.deepEqual(names, { branch: 'work/wi-intent', path: undefined, worktreeKey: 'wi-intent' })
+})
+
+test('core 在目标预检失败时不得先创建孤立分支', async (t) => {
+  const fixture = await fixtureFor(t)
+  const recorder = { calls: [], runGit: undefined }
+  const provider = providerFor(fixture, { runGit: async (args) => {
+    recorder.calls.push([...args])
+    const { defaultGitRunner } = await import('@harness-projects/provider-development-local-git')
+    return defaultGitRunner(args)
+  } })
+  const { context } = await coreContextFor(fixture, { development: provider })
+  const request = {
+    workItemId: 'wi-preflight', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'preflight-1',
+    worktreePath: path.join(fixture.root, '..', 'outside-worktree'),
+  }
+  const outcome = await provisionGit(context, request, namesFor(request), 'ctx-preflight')
+  assert.equal(outcome.ok, false)
+  assert.equal((await fixture.run(['show-ref', '--verify', '--quiet', 'refs/heads/work/wi-preflight']).then(() => true, () => false)), false,
+    '目标预检失败不得留下分支')
+  assert.equal((await worktreePaths(fixture)).length, 1, '目标预检失败不得留下工作树')
+  assert.equal(recorder.calls.some((args) => args.includes('branch')), false, '预检失败不得调用 git branch')
+})
+
+test('路由失败的报告保留工作树尝试值：默认意图下是稳定 key', async (t) => {
+  const fixture = await fixtureFor(t)
+  const { context } = await coreContextFor(fixture, { development: providerFor(fixture, { capabilities: { worktreeCreate: false } }) })
+  const request = { workItemId: 'wi-route', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'route-1' }
+  const outcome = await provisionGit(context, request, namesFor(request), 'ctx-route')
+  assert.deepEqual([outcome.ok, outcome.report.error?.code, outcome.report.values.attemptedValue], [false, 'not_supported', 'wi-route'])
+})
+
+test('未观察的工作树骨架只带稳定 key，不传播 checkout 内 .worktrees 假路径（验收 7）', async (t) => {
+  const fixture = await fixtureFor(t)
+  const { storage, workspaceId, context } = await coreContextFor(fixture)
+  await registerWorkItem(storage, workspaceId, 'wi-skeleton')
+  const { worktree } = await readChainFacts(context, { workItemId: 'wi-skeleton', repositoryId: REPOSITORY_ID })
+  assert.deepEqual([worktree.observed, worktree.externalId], [false, 'wi-skeleton'], '骨架句柄是稳定 key，不含路径分隔符')
+})
+
+/** 只改写 `hooks` 点名的方法（`hook(原方法) → 新方法`），其余成员绑定回真实 provider，私有状态因此可达。 */
+const withHooks = (base, hooks) => new Proxy(base, {
+  get(target, key) {
+    const value = Reflect.get(target, key, target)
+    if (typeof value !== 'function') return value
+    const bound = value.bind(target)
+    return typeof key === 'string' && hooks[key] !== undefined ? hooks[key](bound) : bound
+  },
+})
+/** 预检照常判定，但把成功结果的 target 换成 `canonical`：core 之后的每一步都必须用这个值。 */
+const preflightAnswers = (canonical) => (fn) => async (input) => {
+  const result = await fn(input)
+  return result.ok ? { ...result, value: { ...result.value, path: canonical } } : result
+}
+
+test('恢复预检必须使用已持久化的分支身份，而不是重放请求重新推导的分支', async (t) => {
+  const fixture = await fixtureFor(t)
+  const clock = controllableClock()
+  const decidedBranch = 'work/wi-decided-branch'
+  const checked = withHooks(providerFor(fixture), {
+    preflightWorktree: (fn) => async (input) => {
+      assert.equal(input.branch, decidedBranch, '分支敏感 provider 的预检必须使用已决定的分支')
+      return fn(input)
+    },
+  })
+  const provider = interruptAfterBranchStep(checked)
+  const { storage, workspaceId, context } = await coreContextFor(fixture, { development: provider }, { clock: clock.clock })
+  await registerWorkItem(storage, workspaceId, 'wi-custom-branch')
+  const firstRequest = {
+    workItemId: 'wi-custom-branch', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' },
+    idempotencyKey: 'custom-branch-1', branchName: decidedBranch,
+  }
+  await assert.rejects(startWork(context, firstRequest), /测试注入的中断/)
+  const contextId = contextIdFor(workspaceId, firstRequest.workItemId, REPOSITORY_ID)
+  const saved = await storage.getExecutionContext(contextId)
+  assert.equal(saved?.branchExternalId, decidedBranch)
+
+  clock.advance(LEASE_EXPIRED_MS)
+  const { branchName: _omitted, ...retryRequest } = firstRequest
+  const retried = await startWork(context, { ...retryRequest, idempotencyKey: 'custom-branch-2' })
+
+  assert.equal(retried.status, ExecutionContextStatus.Ready)
+  assert.equal(retried.branchExternalId, decidedBranch)
+})
+
+test('工作树已落盘但 ack 丢失：换 key 省略 branchName 重放，预检用已决定分支，conflict 读回 canonical 句柄后 Ready', async (t) => {
+  // 默认意图下 names.path 为 undefined：conflict 读回只能靠预检返回的 target，退回 worktreeKey 会读错位置（PR #160 F1 那条路径）。
+  const fixture = await fixtureFor(t)
+  const clock = controllableClock()
+  const decided = 'custom/decided-landed'
+  const seen = []
+  let crash = true
+  const provider = withHooks(providerFor(fixture), {
+    preflightWorktree: (fn) => async (input) => { seen.push(input.branch); return fn(input) },
+    createWorktree: (fn) => async (input) => {
+      const result = await fn(input)
+      if (crash) { crash = false; throw new Error('测试注入的中断：工作树写入落盘后进程退出') }
+      return result
+    },
+  })
+  const { storage, workspaceId, context } = await coreContextFor(fixture, { development: provider }, { clock: clock.clock })
+  await registerWorkItem(storage, workspaceId, 'wi-landed')
+  const first = { workItemId: 'wi-landed', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'landed-1', branchName: decided }
+  await assert.rejects(startWork(context, first), /工作树写入落盘后进程退出/)
+  clock.advance(LEASE_EXPIRED_MS)
+  const { branchName: _omitted, ...retry } = first
+  const result = await startWork(context, { ...retry, idempotencyKey: 'landed-2' })
+  assert.deepEqual(
+    [seen, result.status, result.branchExternalId, result.worktreeExternalId, (await worktreePaths(fixture)).length],
+    [[decided, decided], ExecutionContextStatus.Ready, decided, path.join(fixture.root, 'wi-landed'), 2],
+    '两次预检都用已决定分支；读回落盘的那一份，不出现第二份工作树',
+  )
+})
+
+test('预检返回的 canonical target 必须原样传给 createWorktree', async (t) => {
+  const fixture = await fixtureFor(t)
+  const rawPath = path.join(fixture.root, 'raw-target')
+  const canonicalPath = path.join(fixture.root, 'canonical-target')
+  let createdInput
+  const provider = withHooks(providerFor(fixture), {
+    preflightWorktree: preflightAnswers(canonicalPath),
+    createWorktree: (fn) => async (input) => { createdInput = input; return fn(input) },
+  })
+  const { context } = await coreContextFor(fixture, { development: provider })
+  const request = {
+    workItemId: 'wi-canonical-target', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' },
+    idempotencyKey: 'canonical-target-1', worktreePath: rawPath,
+  }
+
+  const outcome = await provisionGit(context, request, namesFor(request), 'ctx-canonical-target')
+
+  assert.equal(outcome.ok, true)
+  assert.equal(createdInput?.path, canonicalPath, 'createWorktree 不得退回使用预检前的原始路径')
+  assert.equal(outcome.worktreeExternalId, canonicalPath)
+  assert.deepEqual(await worktreePaths(fixture), [fixture.repositoryPath, canonicalPath])
+})
+
+test('create 结果不确定时，对账读回的也是预检返回的 canonical target', async (t) => {
+  const fixture = await fixtureFor(t)
+  const canonical = path.join(fixture.root, 'canonical-ambiguous')
+  const reads = []
+  const provider = withHooks(providerFor(fixture), {
+    preflightWorktree: preflightAnswers(canonical),
+    createWorktree: (fn) => async (input) => {
+      assert.equal((await fn(input)).ok, true, '写入真实落盘，只是 ack 不确定')
+      return { ok: false, error: { code: 'ambiguous_result', message: '测试注入：结果不确定', retryable: false } }
+    },
+    getWorktree: (fn) => async (input) => { reads.push(input.worktree.externalId); return fn(input) },
+  })
+  const { context } = await coreContextFor(fixture, { development: provider })
+  const request = {
+    workItemId: 'wi-ambiguous', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' },
+    idempotencyKey: 'ambiguous-1', worktreePath: path.join(fixture.root, 'raw-ambiguous'),
+  }
+  const outcome = await provisionGit(context, request, namesFor(request), 'ctx-ambiguous')
+  assert.deepEqual([reads, outcome.ok, outcome.worktreeExternalId], [[canonical], true, canonical], '对账只读 canonical target，句柄也取它')
+})
+
+test('已持久化的工作树句柄与新默认不同：重放沿用持久化句柄（验收 6）', async (t) => {
+  const fixture = await fixtureFor(t)
+  const { storage, workspaceId, context } = await coreContextFor(fixture)
+  await registerWorkItem(storage, workspaceId, 'wi-persisted')
+  const persisted = path.join(fixture.root, 'persisted-handle')
+  const first = { workItemId: 'wi-persisted', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'persisted-1', worktreePath: persisted }
+  assert.equal((await startWork(context, first)).status, ExecutionContextStatus.Ready)
+  const contextId = contextIdFor(workspaceId, 'wi-persisted', REPOSITORY_ID)
+  const record = await storage.getExecutionContext(contextId)
+  // 模拟最终事务前中断：句柄已回填、状态仍是 Provisioning；重放省略 worktreePath，新默认会算出另一个位置。
+  await storage.putExecutionContext({ ...record, status: ExecutionContextStatus.Provisioning })
+  const { worktreePath: _omitted, ...replay } = first
+  const outcome = await provisionGit(context, { ...replay, idempotencyKey: 'persisted-2' }, namesFor(replay), contextId)
+  assert.deepEqual([record.worktreeExternalId, outcome.ok, outcome.worktreeExternalId], [persisted, true, persisted])
+})
+
 test('恢复供应：同一工作树只保留一条 has_worktree 关系（#165）', async (t) => {
   const fixture = await fixtureFor(t)
   const { storage, workspaceId, context } = await coreContextFor(fixture)
@@ -90,7 +267,7 @@ test('恢复供应：同一工作树只保留一条 has_worktree 关系（#165�
   // #207 验收 1 要求「`startWork` … yields `ready` and the branch/worktree exist on disk」。本文件此前经
   // `startWork` 的用例只断言 storage 里的状态，磁盘回读全在 `provisionGit` 用例里（第六轮评审 P2）。这里补上，
   // 判据是**磁盘事实**而不是返回值：报 ready 就必须真的能在盘上找到这份工作树与这条分支。
-  const expectedWorktree = path.join(fixture.repositoryPath, '.worktrees', 'wi-165')
+  const expectedWorktree = path.join(fixture.root, 'wi-165')
   assert.deepEqual(await worktreePaths(fixture), [fixture.repositoryPath, expectedWorktree], '恢复后工作树必须真的在盘上')
   assert.equal(await handlePath(fixture, second.worktreeExternalId), await handlePath(fixture, expectedWorktree), '报出的句柄必须指向盘上那一份')
   const workBranches = (await git(['for-each-ref', '--format=%(refname:short)', 'refs/heads'], fixture.repositoryPath))
@@ -148,15 +325,15 @@ test('core 不得报成功：分支已被别处检出时', async (t) => {
   assert.notEqual(outcome.status, ExecutionContextStatus.Ready)
 })
 
-test('默认允许根：不注入 allowedRoot 时 core 的默认工作树路径在新仓库上成立', async (t) => {
+test('默认允许根：不注入 allowedRoot 时 core 的 checkout 外默认工作树路径成立', async (t) => {
   const fixture = await fixtureFor(t)
   const provider = createLocalGitDevelopmentProvider({
     bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: fixture.repositoryPath },
   })
   const request = { workItemId: 'wi-default', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'k-1' }
   const outcome = await provisionGit((await coreContextFor(fixture, { development: provider })).context, request, namesFor(request), 'ctx-default')
-  assert.equal(outcome.status, ExecutionContextStatus.Ready, '默认允许根 <repo>/.worktrees 尚不存在时首个工作树也必须能建出来')
-  assert.equal(outcome.worktreeExternalId, path.join(fixture.repositoryPath, '.worktrees', 'wi-default'))
+  assert.equal(outcome.status, ExecutionContextStatus.Ready, 'checkout 外默认根尚不存在时首个工作树也必须能建出来')
+  assert.equal(outcome.worktreeExternalId, path.join(path.dirname(fixture.repositoryPath), `${path.basename(fixture.repositoryPath)}.worktrees`, 'wi-default'))
 })
 
 test('非 main 且没有 origin/HEAD 的仓库上 Start Work 必须成立', async (t) => {

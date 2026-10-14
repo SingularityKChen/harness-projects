@@ -351,7 +351,7 @@ test('默认分支：无 origin/HEAD 时按本地事实推断，不用当前检�
   assert.deepEqual(recorder.calls[0]?.slice(2), ['rev-parse', '--verify', '--end-of-options', '--help^{commit}'])
 })
 
-test('默认允许根：仓库里的 .worktrees 符号链接一律被拒，指向哪里都一样', async (t) => {
+test('显式注入检出内的旧允许根：仓库里的 .worktrees 符号链接一律被拒，指向哪里都一样', async (t) => {
   const fixture = await fixtureFor(t)
   const outside = await realpath(await mkdtemp(path.join(os.tmpdir(), 'local-git-outside-root-')))
   t.after(() => rm(outside, { recursive: true, force: true }))
@@ -359,34 +359,145 @@ test('默认允许根：仓库里的 .worktrees 符号链接一律被拒，指�
   const link = path.join(fixture.repositoryPath, '.worktrees')
   // 三种指向都必须被拒。第四轮只判「realpath 之后是否仍在仓库内」，于是指向仓库内部的两种被放行：检出写进
   // 被跟踪目录（主检出 `git add -A` 会当嵌入仓库暂存，`info/exclude` 覆盖不到），或写进 git 自己的管理区。
-  // 判定的是**写法**而不是解析结果，与 `..` 分量同一条口径。
+  // 判定的是**写法**而不是解析结果，与 `..` 分量同一条口径。默认根已在检出外（#214），这条不变量只剩显式注入的
+  // 检出内允许根会走到，所以这里显式注入旧根：否则 `.worktrees/...` 先以逃出默认根被拒，符号链接判定无人看护。
+  // 目标经链接下一个已存在的子目录 `sub`：尾部判定只看最近存在祖先之下，于是只剩允许根的符号链接判定在拦。
   for (const [what, target] of [['被跟踪目录', 'src'], ['git 管理区', '.git'], ['仓库之外', outside]]) {
+    const pointed = target === outside ? outside : path.join(fixture.repositoryPath, target)
     await rm(link, { recursive: true, force: true })
-    await symlink(target === outside ? outside : path.join(fixture.repositoryPath, target), link)
+    await mkdir(path.join(pointed, 'sub'), { recursive: true })
+    await symlink(pointed, link)
     const recorder = recordingRunner()
     const provider = createLocalGitDevelopmentProvider({
-      bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: fixture.repositoryPath }, runGit: recorder.runGit,
+      bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: fixture.repositoryPath }, runGit: recorder.runGit, allowedRoot: link,
     })
-    const result = await provider.createWorktree({ repository: repositoryRef, path: '.worktrees/wi-escape', branch: 'main' })
-    assert.equal(result.error?.code, 'invalid_input', `默认根是符号链接（${what}）时必须结构化拒绝`)
+    const result = await provider.createWorktree({ repository: repositoryRef, path: '.worktrees/sub/wi-escape', branch: 'main' })
+    assert.equal(result.error?.code, 'invalid_input', `允许根是符号链接（${what}）时必须结构化拒绝`)
     assert.deepEqual(recorder.calls, [], `拒绝必须在任何 Git 命令之前（#137 验收 1，${what}）`)
     assert.deepEqual(await worktreePaths(fixture), [fixture.repositoryPath], `不得留下工作树（${what}）`)
   }
-  assert.deepEqual(await readdir(outside), [], '仓库外不得出现任何工作树')
+  assert.deepEqual(await readdir(path.join(outside, 'sub')), [], '仓库外不得出现任何工作树')
 })
 
-test('默认允许根：/.worktrees/ 幂等写进 info/exclude，不动用户跟踪的 .gitignore', async (t) => {
+test('默认工作树根在 checkout 外，且不受 checkout 内 .worktrees 符号链接或 info/exclude 影响', async (t) => {
   const fixture = await fixtureFor(t)
+  const outside = await realpath(await mkdtemp(path.join(os.tmpdir(), 'local-git-derived-root-')))
+  t.after(() => rm(outside, { recursive: true, force: true }))
+  await symlink(outside, path.join(fixture.repositoryPath, '.worktrees'))
   const provider = createLocalGitDevelopmentProvider({
     bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: fixture.repositoryPath },
+  })
+  const beforePath = path.resolve(fixture.repositoryPath, (await git(['rev-parse', '--git-path', 'info/exclude'], fixture.repositoryPath)).trim())
+  const before = await readFile(beforePath).catch(() => Buffer.alloc(0))
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: 'work/derived', fromRef: 'main' })).ok, true)
+  const created = await provider.createWorktree({ repository: repositoryRef, path: undefined, worktreeKey: 'wi-derived', branch: 'work/derived' })
+  assert.equal(created.ok, true)
+  assert.equal(created.value.path, path.join(path.dirname(fixture.repositoryPath), `${path.basename(fixture.repositoryPath)}.worktrees`, 'wi-derived'))
+  assert.equal(created.value.path.startsWith(`${fixture.repositoryPath}${path.sep}`), false, '默认目标必须在 checkout 外')
+  assert.equal((await readFile(beforePath).catch(() => Buffer.alloc(0))).compare(before), 0, '默认创建不得写 info/exclude')
+  assert.deepEqual(await readdir(outside), [], 'checkout 内的 .worktrees 符号链接目标不得被写入')
+})
+
+test('默认根按真实 checkout 根派生，而不是 repository.path 指向的子目录', async (t) => {
+  const fixture = await fixtureFor(t)
+  const nestedRepositoryPath = path.join(fixture.repositoryPath, 'packages', 'core')
+  await mkdir(nestedRepositoryPath, { recursive: true })
+  const provider = createLocalGitDevelopmentProvider({
+    bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: nestedRepositoryPath },
+  })
+  const nestedRepository = { ...repositoryRef, externalId: REPOSITORY_ID }
+  const branch = 'work/subdirectory-repository'
+  assert.equal((await provider.createBranch({ repository: nestedRepository, name: branch, fromRef: 'main' })).ok, true)
+  const expectedRoot = path.join(path.dirname(fixture.repositoryPath), `${path.basename(fixture.repositoryPath)}.worktrees`)
+  const preflight = await provider.preflightWorktree({ repository: nestedRepository, worktreeKey: 'wi-subdirectory', branch })
+  assert.equal(preflight.ok, true)
+  assert.equal(preflight.value.path, path.join(expectedRoot, 'wi-subdirectory'), '预检必须按 Git 真实 checkout 根派生默认目标')
+  const created = await provider.createWorktree({ repository: nestedRepository, path: undefined, worktreeKey: 'wi-subdirectory', branch })
+  assert.equal(created.ok, true)
+  assert.equal(created.value.path, path.join(expectedRoot, 'wi-subdirectory'))
+  assert.equal(created.value.path.startsWith(`${fixture.repositoryPath}${path.sep}`), false, '子目录配置不得把默认工作树放回 checkout 内')
+})
+
+test('子目录配置的非法目标在任何 Git argv 之前被拒', async (t) => {
+  const fixture = await fixtureFor(t)
+  const nestedRepositoryPath = path.join(fixture.repositoryPath, 'packages', 'core')
+  await mkdir(nestedRepositoryPath, { recursive: true })
+  const recorder = recordingRunner()
+  const provider = createLocalGitDevelopmentProvider({
+    bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: nestedRepositoryPath }, runGit: recorder.runGit,
+  })
+  const result = await provider.createWorktree({
+    repository: repositoryRef, path: '../escape-worktree', worktreeKey: 'wi-invalid', branch: 'main',
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.error.code, 'invalid_input')
+  assert.deepEqual(recorder.calls, [], '子目录配置的路径拒绝不得先解析 Git checkout')
+})
+
+test('默认根只认独立检出：位于另一 Git 检出之内、bare 与缺席的仓库目录在任何 Git argv 之前 fail closed，不借用外层检出', async (t) => {
+  const fixture = await fixtureFor(t)
+  const source = await fixtureFor(t)
+  const outer = fixture.repositoryPath
+  await fixture.run(['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', source.repositoryPath, 'sub'])
+  await git(['init', '-q', path.join(outer, 'vendor', 'nested')], fixture.root)
+  await git(['clone', '-q', '--bare', source.repositoryPath, path.join(outer, 'vendor', 'x.git')], fixture.root)
+  await git(['clone', '-q', '--bare', source.repositoryPath, path.join(fixture.root, 'x.git')], fixture.root)
+  await fixture.run(['worktree', 'add', '-q', '-b', 'side', path.join(fixture.root, 'linked')])
+  await git(['init', '-q', path.join(fixture.root, 'linked', 'vendor', 'inner')], fixture.root)
+  // Git 不认的 .git 不是外层检出：空目录、内容不以 gitdir: 开头的文件（Git 在那里答 not a git repository）。
+  await mkdir(path.join(fixture.root, 'stale', '.git'), { recursive: true })
+  await git(['init', '-q', path.join(fixture.root, 'stale', 'repo')], fixture.root)
+  await mkdir(path.join(fixture.root, 'junk'))
+  await writeFile(path.join(fixture.root, 'junk', '.git'), 'not a gitfile\n')
+  await git(['init', '-q', path.join(fixture.root, 'junk', 'repo')], fixture.root)
+  const late = path.join(fixture.root, 'late')
+  const grown = path.join(outer, 'grown')
+  await mkdir(grown)
+  const recorder = recordingRunner()
+  const providerAt = (at) => createLocalGitDevelopmentProvider({ bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: at }, runGit: recorder.runGit })
+  const preflight = async (provider) => {
+    const result = await provider.preflightWorktree({ repository: repositoryRef, worktreeKey: 'wi-x', branch: 'main' })
+    return result.ok ? path.relative(fixture.root, result.value.path) : result.error.code
+  }
+  const lateProvider = providerAt(late)
+  const grownProvider = providerAt(grown)
+  const shapes = {
+    submodule: 'repo/sub', nested: 'repo/vendor/nested', nestedBare: 'repo/vendor/x.git', bare: 'x.git', missingInsideCheckout: 'repo/absent',
+    linked: 'linked', insideLinked: 'linked/vendor/inner', emptyGitAncestor: 'stale/repo', junkGitFileAncestor: 'junk/repo',
+  }
+  const actual = {}
+  for (const [shape, at] of Object.entries(shapes)) actual[shape] = await preflight(providerAt(path.join(fixture.root, at)))
+  actual.lateBefore = await preflight(lateProvider)
+  await git(['init', '-q', late], fixture.root)
+  actual.lateAfter = await preflight(lateProvider)
+  // 目录先存在（子目录配置，派生外层检出的兄弟目录）、后 git init 成嵌套仓库：同一实例必须跟着改判，不得沿用首次结论。
+  actual.grownBefore = await preflight(grownProvider)
+  await git(['init', '-q', grown], fixture.root)
+  actual.grownAfter = await preflight(grownProvider)
+  assert.deepEqual(actual, {
+    submodule: 'invalid_input', nested: 'invalid_input', nestedBare: 'invalid_input', bare: 'invalid_input',
+    missingInsideCheckout: 'unavailable', linked: path.join('linked.worktrees', 'wi-x'), insideLinked: 'invalid_input',
+    emptyGitAncestor: path.join('stale', 'repo.worktrees', 'wi-x'), junkGitFileAncestor: path.join('junk', 'repo.worktrees', 'wi-x'),
+    lateBefore: 'unavailable', lateAfter: path.join('late.worktrees', 'wi-x'),
+    grownBefore: path.join('repo.worktrees', 'wi-x'), grownAfter: 'invalid_input',
+  }, '只有 Git 认得的外层检出才拒绝；仓库目录缺席时不借用；派生结论不缓存')
+  const refused = await providerAt(path.join(fixture.root, 'repo', 'sub')).preflightWorktree({ repository: repositoryRef, worktreeKey: 'wi-x', branch: 'main' })
+  assert.match(refused.error.message, /位于另一个 Git 检出 .+ 之内.*显式注入 allowedRoot.*#132/, '消息点名外层检出与出路，不把它断言成 submodule')
+  assert.deepEqual(recorder.calls, [], '默认根判定只做文件系统探测')
+})
+
+test('显式旧根仍可注入，且 provider 不写 info/exclude 或 .gitignore', async (t) => {
+  const fixture = await fixtureFor(t)
+  const excludePath = path.join(fixture.repositoryPath, '.git', 'info', 'exclude')
+  const before = await readFile(excludePath)
+  const provider = createLocalGitDevelopmentProvider({
+    bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: fixture.repositoryPath },
+    allowedRoot: path.join(fixture.repositoryPath, '.worktrees'),
   })
   assert.equal((await provider.createBranch({ repository: repositoryRef, name: 'work/wi-ignored', fromRef: 'main' })).ok, true)
   const created = await provider.createWorktree({ repository: repositoryRef, path: '.worktrees/wi-ignored', branch: 'work/wi-ignored' })
   assert.equal(created.ok, true)
-  // git 不会自动忽略嵌套工作树：不写 exclude 的话主检出的 git add -A 会把工作树当嵌入仓库收进索引。
-  assert.equal((await git(['status', '--porcelain'], fixture.repositoryPath)).trim(), '', '主检出不得把默认根看成未跟踪内容')
-  const exclude = await readFile(path.join(fixture.repositoryPath, '.git', 'info', 'exclude'), 'utf8')
-  assert.equal(exclude.split('\n').filter((line) => line === '/.worktrees/').length, 1, '幂等：只写一条')
+  assert.equal((await readFile(excludePath)).compare(before), 0, '显式旧根也不得由 provider 改写 info/exclude')
   assert.equal(await readFile(path.join(fixture.repositoryPath, '.gitignore'), 'utf8').then(() => true, () => false), false, '不得改用户跟踪的 .gitignore')
 })
 
