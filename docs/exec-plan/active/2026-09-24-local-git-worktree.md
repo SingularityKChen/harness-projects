@@ -1,6 +1,7 @@
 # 本地 Git 工作树与分支 provider ExecPlan
 
 > 状态：Active
+> 2026-10-13：默认根、`info/exclude` 补偿与 core 路径意图已由 issue #214 / `docs/exec-plan/completed/2026-10-13-worktree-root-outside-checkout.md` 取代；本文件保留历史安全证据与旧根迁移背景。
 > 创建：2026-09-24
 > 范围：#137 —— 让本机真的出现 worktree 与 branch，且路径安全在**任何 Git 命令之前**生效；只实现 Development 能力域的本地子集。**第四轮后本计划只覆盖 provider 自身**：共享契约套件的能力驱动拆到 **#205**（PR 基线 `main`，已合入），接进 core 供应序列的验收拆到 **#207**（叠加在本层之上）。**第五轮起本计划只修路径安全的判据与文档**：三族根因里两族的根在 core，见「系统级根因分析」（#212 / #213 / #214）。
 > 上游输入：`docs/product/vertical-path.md` §2 步骤 7、`packages/capabilities/src/development-provider.ts`、`packages/core/src/git-provisioning.ts`、`tests/contract/suites/development.js`、`AGENTS.md` §7、issue #205 / #207 / #138 / #206 / #212 / #213 / #214、ADR-0007。
