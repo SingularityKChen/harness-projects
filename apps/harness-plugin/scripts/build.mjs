@@ -71,6 +71,11 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url))
 const APP_DIR = path.resolve(SCRIPT_DIR, '..')
 const REPO_ROOT = path.resolve(APP_DIR, '..', '..')
 const DEFAULT_OUT_DIR = path.join(APP_DIR, 'dist')
+const MIGRATIONS_DIR = path.join(REPO_ROOT, 'packages', 'storage', 'sqlite', 'migrations')
+const MIGRATION_FILES = [
+  '001_init.sql', '002_identity_membership.sql', '003_control_facts.sql', '004_execution_run_identity.sql',
+  '005_source_version_carrier.sql', '006_delivery_facts.sql', '007_planning_sync_round.sql',
+]
 
 const NODE_BUILTINS = new Set(builtinModules.map((name) => name.replace(/^node:/, '')))
 
@@ -150,7 +155,7 @@ function createManifest({ source, rootManifest }) {
       './package.json': './package.json',
       './cordis.patch.yml': './cordis.patch.yml',
     },
-    files: ['lib/index.js', 'lib/client.js', 'cordis.patch.yml'],
+    files: ['lib/index.js', 'lib/client.js', 'cordis.patch.yml', ...MIGRATION_FILES.map((file) => `migrations/${file}`)],
     peerDependencies: { ...HOST_PEERS },
     dsh: {
       manifestVersion: 1,
@@ -224,6 +229,9 @@ export async function build({ outDir = DEFAULT_OUT_DIR } = {}) {
   const manifest = createManifest({ source, rootManifest })
 
   await mkdir(libDir, { recursive: true })
+  const packageMigrations = path.join(packageDir, 'migrations')
+  await mkdir(packageMigrations, { recursive: true })
+  for (const file of MIGRATION_FILES) await writeFile(path.join(packageMigrations, file), await readFile(path.join(MIGRATIONS_DIR, file)))
   await writeFile(path.join(libDir, 'index.js'), host.text)
   await writeFile(path.join(libDir, 'client.js'), client.text)
   await writeFile(

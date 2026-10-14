@@ -26,7 +26,25 @@ export interface SlotsService {
   register(options: SlotRegisterOptions, component: SlotComponent): unknown
 }
 
-/** 根 Context：只读 `slots`；读别的属性宿主会抛错（模块级 `inject` 声明了什么才能读什么）。 */
-export interface ClientContext {
+/** 宿主 0.2.0-rc.2 的 unary 结果（dsh-api-gateway RemoteResult）：失败 resolve 成 `{ ok: false, error }`，不 reject。 */
+export type RemoteResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown }
+
+export interface RemoteNamespace {
+  baseline(): Promise<RemoteResult<unknown>>
+  bootstrapWorkspace(actorRef: unknown, idempotencyKey: string): Promise<RemoteResult<unknown>>
+}
+
+export interface ClientRemote {
+  $mount(contribution: unknown): Promise<() => Promise<void>>
+}
+
+export interface ClientInjectedContext {
+  readonly remote: { readonly harnessProjects: RemoteNamespace }
   readonly slots: SlotsService
+}
+
+/** 根 Context 只读 `remote`；namespace 与 slots 只能在注入子 Context 里读取。 */
+export interface ClientContext {
+  readonly remote: ClientRemote
+  inject(names: readonly string[], callback: (ctx: ClientInjectedContext) => unknown): unknown
 }

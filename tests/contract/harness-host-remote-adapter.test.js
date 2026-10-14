@@ -1,0 +1,93 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import {
+  CLIENT_REMOTE,
+  HOST_REMOTE,
+  installHostRemote,
+  REMOTE_NAMESPACE,
+  REMOTE_PACKAGE,
+} from '../../apps/harness-plugin/src/remote.ts'
+
+function recordingContext() {
+  const services = new Map()
+  const registrations = []
+  const events = []
+  const ctx = {
+    provide(name, value) {
+      services.set(name, value)
+      const dispose = async () => { events.push('provide-dispose-start'); services.delete(name); await Promise.resolve(); events.push('provide-dispose-end') }
+      return dispose
+    },
+    typert: {
+      register(contribution) {
+        registrations.push(contribution)
+        return async () => { events.push('remote-dispose') }
+      },
+    },
+  }
+  return { ctx, services, registrations, events }
+}
+
+test('typed remote contribution exposes the same strict unary descriptors on Host and Client', () => {
+  assert.deepEqual([REMOTE_PACKAGE, HOST_REMOTE.package, HOST_REMOTE.face], ['@harness-projects/app-harness-plugin', '@harness-projects/app-harness-plugin', 'host'])
+  assert.deepEqual(CLIENT_REMOTE, { package: REMOTE_PACKAGE, descriptors: HOST_REMOTE.invocations })
+  assert.deepEqual(HOST_REMOTE.invocations.map(({ namespace, method }) => `${namespace}/${method}`), [
+    `${REMOTE_NAMESPACE}/baseline`, `${REMOTE_NAMESPACE}/bootstrapWorkspace`,
+  ])
+  // Host 网关对 strict 结果只调 `encode`（参数才走 `create().parse`）：非 JSON 值必须在边界报错，而不是被序列化静默降级。
+  const nonJson = [JSON.parse('{"__proto__":{"injected":true}}'), new Date(0), { at: new Map() }, [undefined], Number.NaN]
+  for (const descriptor of HOST_REMOTE.invocations) {
+    const modes = [descriptor.invocation.kind, descriptor.result.mode, ...descriptor.parameters.map((parameter) => parameter.codec.mode)]
+    assert.deepEqual(modes, ['direct', 'strict', ...descriptor.parameters.map(() => 'strict')])
+    for (const value of nonJson) assert.throws(() => descriptor.result.encode(value), /可传输|普通对象|禁止字段/)
+    assert.equal(JSON.stringify(descriptor.result.encode({ entities: [1, 'x'], skipped: undefined })), '{"entities":[1,"x"]}')
+  }
+})
+
+test('host adapter validates through the strict parser before reaching Core and unregisters idempotently', async () => {
+  const calls = []
+  const composition = {
+    call: async (name, input) => { calls.push([name, input]); return { ok: true, name } },
+  }
+  const { ctx, services, registrations, events } = recordingContext()
+  const installed = await installHostRemote(ctx, composition)
+  assert.equal(registrations.length, 1)
+  const service = services.get('harnessProjects')
+
+  assert.deepEqual(await service.baseline(), { ok: true, name: 'baseline' })
+  assert.deepEqual(
+    await service.bootstrapWorkspace({ kind: 'agent', id: 'adapter-test' }, 'idempotency-1'),
+    { ok: true, name: 'bootstrapWorkspace' },
+  )
+  assert.deepEqual(calls, [
+    ['baseline', {}],
+    ['bootstrapWorkspace', { actorRef: { kind: 'agent', id: 'adapter-test' }, idempotencyKey: 'idempotency-1' }],
+  ])
+  await assert.rejects(() => service.bootstrapWorkspace({ kind: 7 }, 'idempotency-2'), /actorRef/)
+  await assert.rejects(() => service.bootstrapWorkspace({ kind: 'agent' }, ''), /idempotencyKey/)
+  await assert.rejects(() => service.bootstrapWorkspace({ kind: 'agent', extra: true }, 'idempotency-3'), /未知字段/)
+  assert.equal(calls.length, 2, 'strict adapter must reject malformed input before Core')
+
+  await installed.dispose()
+  await installed.dispose()
+  assert.deepEqual(events, ['remote-dispose', 'provide-dispose-start', 'provide-dispose-end'], '二次 dispose 不再撤回')
+  await assert.rejects(() => installed.service.baseline(), /已卸载/)
+})
+
+test('host adapter drains an in-flight call before the provider service disposer completes', async () => {
+  let release
+  const pending = new Promise((resolve) => { release = resolve })
+  const composition = { call: async () => pending }
+  const { ctx, events } = recordingContext()
+  const installed = await installHostRemote(ctx, composition)
+  const call = installed.service.baseline()
+  let disposed = false
+  const dispose = installed.dispose().then(() => { disposed = true })
+  await Promise.resolve()
+  assert.deepEqual([disposed, events], [false, []])
+  release({ ok: true })
+  await call
+  await dispose
+  assert.deepEqual([disposed, events], [true, ['remote-dispose', 'provide-dispose-start', 'provide-dispose-end']])
+})

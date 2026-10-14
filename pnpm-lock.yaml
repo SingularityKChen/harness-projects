@@ -77,9 +77,18 @@ importers:
       '@harness-projects/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@harness-projects/controller':
+        specifier: workspace:*
+        version: link:../../packages/controller
+      '@harness-projects/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@harness-projects/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@harness-projects/storage-sqlite':
+        specifier: workspace:*
+        version: link:../../packages/storage/sqlite
       '@harness-projects/ui':
         specifier: workspace:*
         version: link:../../packages/ui
