@@ -263,6 +263,29 @@ export class MemoryStorage implements cap.Storage {
       .filter((m) => m.workspaceId === workspaceId && m.projectExternalId === projectExternalId)
       .sort(byItemExternalId)
   }
+  async replacePlanningMemberships(scope: { readonly workspaceId: domain.WorkspaceId; readonly projectExternalId: string }, incoming: readonly cap.MembershipRecord[]): Promise<void> {
+    return this.#mutate(() => {
+      if (!this.data.workspaces.some((workspace) => workspace.id === scope.workspaceId)) throw new Error('membership workspace does not exist')
+      if (incoming.some((record) => record.workspaceId !== scope.workspaceId || record.projectExternalId !== scope.projectExternalId)) {
+        throw new Error('membership does not belong to replacement scope')
+      }
+      const incomingItems = new Set(incoming.map((record) => record.itemExternalId))
+      const staleItems = new Set(this.data.memberships
+        .filter((record) => record.workspaceId === scope.workspaceId && record.projectExternalId === scope.projectExternalId && !incomingItems.has(record.itemExternalId))
+        .map((record) => record.itemExternalId))
+      this.data.memberships = this.data.memberships.filter((record) => !(record.workspaceId === scope.workspaceId && record.projectExternalId === scope.projectExternalId && staleItems.has(record.itemExternalId)))
+      this.data.fieldValues = this.data.fieldValues.filter((value) => !(value.workspaceId === scope.workspaceId && staleItems.has(value.itemExternalId)))
+      for (const record of incoming) {
+        const key = (candidate: cap.MembershipRecord): string => JSON.stringify([candidate.workspaceId, candidate.projectExternalId, candidate.contentKind, candidate.contentExternalId])
+        const replaced = this.data.memberships.filter((candidate) => key(candidate) === key(record) && candidate.itemExternalId !== record.itemExternalId)
+        const replacedItems = new Set(replaced.map((candidate) => candidate.itemExternalId))
+        this.data.memberships = this.data.memberships.filter((candidate) => !(replacedItems.has(candidate.itemExternalId)
+          && candidate.workspaceId === record.workspaceId && candidate.projectExternalId === record.projectExternalId))
+        this.data.fieldValues = this.data.fieldValues.filter((value) => !(value.workspaceId === record.workspaceId && replacedItems.has(value.itemExternalId)))
+        upsert(this.data.memberships, structuredClone(record), (candidate) => candidate.workspaceId === record.workspaceId && candidate.itemExternalId === record.itemExternalId)
+      }
+    })
+  }
   async putFieldValue(record: cap.FieldValueRecord): Promise<void> {
     return this.#mutate(() => {
       if (!this.data.memberships.some((membership) => membership.workspaceId === record.workspaceId && membership.itemExternalId === record.itemExternalId)) throw new Error('field value membership does not exist')

@@ -209,6 +209,8 @@ export interface Storage {
   putMembership(record: MembershipRecord): Promise<void>
   getMembership(workspaceId: WorkspaceId, itemExternalId: string): Promise<MembershipRecord | undefined>
   listMemberships(workspaceId: WorkspaceId, projectExternalId: string): Promise<readonly MembershipRecord[]>
+  /** 把一个完整 Planning project 读取收敛为 incoming；只删除 scope 内缺失的成员及其字段值，保留实体与外部身份。 */
+  replacePlanningMemberships(scope: { readonly workspaceId: WorkspaceId; readonly projectExternalId: string }, incoming: readonly MembershipRecord[]): Promise<void>
   putFieldValue(record: FieldValueRecord): Promise<void>
   listFieldValues(workspaceId: WorkspaceId, itemExternalId: string): Promise<readonly FieldValueRecord[]>
 
