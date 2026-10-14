@@ -181,14 +181,23 @@ export class FakeDevelopmentProvider implements cap.DevelopmentProvider {
     if (this.knownRepository(input.repository) === undefined) return this.gate.notFound('仓库')
     if (this.faultsSwitch.isOn(FaultKind.AmbiguousCreate)) return this.gate.ambiguous('创建工作树')
     if (this.branchOf(input.repository, input.branch) === undefined) return this.gate.notFound('分支')
-    const ref = refOf(this.gate.bindingId, EntityKind.Worktree, input.path)
+    const path = input.path ?? input.worktreeKey ?? ''
+    const ref = refOf(this.gate.bindingId, EntityKind.Worktree, path)
     // 同一路径重复创建必须 conflict：静默复用会把两次"创建"折成同一条记录，调用方无法察觉第二次其实没生效。
     if (this.state.worktrees.some((w) => itemKey(w.ref) === itemKey(ref))) return providerFail(ProviderErrorCode.Conflict, `工作树路径已存在：${input.path}`)
     const record: FakeWorktreeRecord = {
-      repository: input.repository, ref, path: input.path, branch: input.branch,
+      repository: input.repository, ref, path, branch: input.branch,
     }
     this.state.worktrees.push(record)
     return cap.providerOk({ ref: record.ref, path: record.path, branch: record.branch })
+  }
+
+  async preflightWorktree(input: cap.ProviderCreateWorktreeInput): Promise<cap.ProviderResult<{ readonly path: string }>> {
+    if (!this.flags.worktreeCreate) return this.gate.unsupported(cap.CapabilityKey.DevelopmentWorktreeCreate)
+    if (this.knownRepository(input.repository) === undefined) return this.gate.notFound('仓库')
+    const path = input.path ?? input.worktreeKey ?? ''
+    if (typeof path !== 'string' || path === '') return providerFail(ProviderErrorCode.InvalidInput, '工作树目标不能为空')
+    return cap.providerOk({ path })
   }
 
   async getWorktree(input: cap.ProviderGetWorktreeInput): Promise<cap.ProviderResult<cap.ProviderWorktree>> {

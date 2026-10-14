@@ -90,7 +90,7 @@
 | 写后回读 | `worktree add` 落到别处时报 `ambiguous_result`，不把判定时的路径报成写入后的事实 |
 | 能力子集 | 只声明三个键、不实现工作树移除；`worktreeCreate: false` 时快照不可用、`not_supported`、零次 Git 调用 |
 | 默认分支 | 无 `origin/HEAD` 时按本地事实推断（唯一本地分支 → `init.defaultBranch` → 约定名），**不用当前检出分支冒充**；缺失的起点 ref 在错误信息里点名 |
-| 默认允许根 | 允许根在**仓库检出内**的分量是符号链接时一律零调用被拒——指向被跟踪目录、`.git`、仓库之外都一样（判的是写法，不是解析结果）；`/.worktrees/` 幂等写进 `info/exclude`、不动 `.gitignore`、主检出 `status` 保持干净 |
+| 默认允许根 | 默认根只给独立检出派生：checkout 根的 sibling `<checkout-name>.worktrees`；位于另一个 Git 检出之内（外层 `.git` 须是 Git 目录或 `gitdir:` 文件，空 `.git/` 不算）与 bare 仓库在任何 Git argv 之前 `invalid_input`，`repository.path` 缺席答 `unavailable` 且不借用外层检出，派生结论不缓存；checkout 内 `.worktrees` 符号链接不能改变目标；默认创建不写 `git-common-dir/info/exclude` 或 `.gitignore`；显式 `allowedRoot` 构造参数（含旧 checkout-relative root）仍受路径安全守卫 |
 | 拒绝分类 | 占用路径、被别处检出的分支（前置判定必须自己点名原因）、不可访问（mode 000）目标都结构化拒绝，不伪造成功 |
 | 读取 | 默认分支注入优先、短 sha 读回规范提交、rev 形态被拒、外来 binding 冷拒 |
 | 仓库目录一时不可达（#253 第二轮复评） | `git -C` 进不去仓库根（「cannot change to」）报 `unavailable` 而不是 `not_found`：这是「此刻读不到」，不能让 core 把完整的 Ready 当成工作树确定丢失；目录回来后照常读回 |

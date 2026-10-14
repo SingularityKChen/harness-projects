@@ -16,8 +16,9 @@
  * `development.worktree.remove` 单独声明：未声明时不要求 provider 实现它。
  *
  * 本套件只建模**能力声明**（键可用 / 不可用），不建模 `permission` 与 `degraded`：凭据权限不足时写调用答
- * `permission_denied`（core 的 `gateCommand` 把 `read_only` 翻成它）是另一种形态，不在判定范围内。五个可选
- * 方法各按**自己的** key 判定（同族读 / 写是独立键，「能建不能读」也是合法形态）；`expect.worktreeBranch` /
+ * `permission_denied`（core 的 `gateCommand` 把 `read_only` 翻成它）是另一种形态，不在判定范围内。可选
+ * 方法各按 `METHOD_KEY` 里**自己的** key 判定（同族读 / 写是独立键，「能建不能读」也是合法形态；预检与创建同键，
+ * 且预检返回的目标必须被 createWorktree 原样接受）；`expect.worktreeBranch` /
  * `worktreeRef` 是测试预置对象身份——创建能力不可用时读取与谱系用例真实读回它们，而不是跳过。objects 钩子
  * 必须每次反映已知写入（旧快照与重读不同，抓「恒定假快照」）；套件注册时把钩子包成「每次调用都
  * `structuredClone`」，比较两侧都是克隆后的数据，钩子返回内部状态引用或 class 实例也不改变判定。
@@ -41,6 +42,8 @@ const crInput = (repository, head, base) => ({ repository, head, base, title: '�
 const METHOD_KEY = {
   createBranch: CapabilityKey.DevelopmentBranchCreate,
   createWorktree: CapabilityKey.DevelopmentWorktreeCreate,
+  // 预检不是独立能力：它回答的是「这次创建会落在哪」，所以与 createWorktree 同键。
+  preflightWorktree: CapabilityKey.DevelopmentWorktreeCreate,
   getWorktree: CapabilityKey.DevelopmentWorktreeRead,
   createChangeRequest: CapabilityKey.DevelopmentChangeRequestCreate,
   getChangeRequest: CapabilityKey.DevelopmentChangeRequestRead,
@@ -177,6 +180,11 @@ async function expectOptional(provider, method, input, expected) {
   return { declared: false, result: await assertUndeclaredRejected(provider, method, input, expected) }
 }
 
+/** 预检是可选增强：声明了 worktree.create 也可以不实现（core 此时直接按调用方意图创建）；实现了就按同一个键判定。 */
+async function expectPreflight(provider, input, expected) {
+  return provider.preflightWorktree === undefined ? { declared: false, result: undefined } : expectOptional(provider, 'preflightWorktree', input, expected)
+}
+
 /** 调用一个可选方法并按能力声明解读结果：只要方法存在就**真的调用**，不做 flag 分支。 */
 async function probeOptional(provider, method, input) {
   if (await declares(provider, method)) return { declared: true, result: await implemented(provider, method)(input) }
@@ -284,13 +292,17 @@ export function developmentContractSuite(adapter) {
     // 工作树创建需要 `worktreeBranch` 指向的分支未被任何工作树检出；读取需要 `worktreeRef` 指向的预置对象。
     const createBranchName = need('worktreeBranch', '工作树创建用例需要一个未被检出的预置分支名')
     const beforeCreate = await expected.objects(provider)
-    const { declared: canCreate, result: created } = await expectOptional(
-      provider, 'createWorktree', { repository, path: expected.worktreePath, branch: createBranchName }, expected,
-    )
+    // core 的供应序列先预检、再把预检返回的目标原样交给 createWorktree：显式目标也走同一条路径。
+    const intent = { repository, worktreeKey: 'wt-contract', path: expected.worktreePath, branch: createBranchName }
+    const preflight = await expectPreflight(provider, intent, expected)
+    if (preflight.declared) assert.equal(preflight.result.ok, true, '合法的显式目标必须通过预检')
+    const aimed = preflight.declared ? preflight.result.value.path : expected.worktreePath
+    const { declared: canCreate, result: created } = await expectOptional(provider, 'createWorktree', { ...intent, path: aimed }, expected)
     if (canCreate) {
       assert.equal(created.ok, true)
       assert.equal(created.value.branch, createBranchName)
       assert.equal(created.value.path, expected.worktreePath)
+      assert.equal(created.value.path, aimed, 'createWorktree 必须落在预检返回的目标上')
       await assertFreshAfterWrite(provider, expected, beforeCreate, '工作树创建')
     }
     // 读取可用但创建不可用时读**预置**工作树：这不是跳过，而是另一种合法形态。
@@ -325,6 +337,28 @@ export function developmentContractSuite(adapter) {
     const again = await remove({ worktree: target })
     assert.equal(again.ok, false)
     assert.equal(again.error.code, 'not_found')
+  })
+
+  test(`${label}：工作树预检按 worktree.create 判定、不写任何对象，默认意图的预检目标被 createWorktree 原样接受并可读回`, async () => {
+    const provider = makeProvider({})
+    // 能建分支时用自己现建、未被检出的分支走完预检→创建；不能建时没有空闲分支可检出，只判预检本身。
+    const ownBranch = await declares(provider, 'createBranch')
+    const branch = ownBranch ? 'feature/wt-preflight' : expected.worktreeBranch
+    if (ownBranch) assert.equal((await implemented(provider, 'createBranch')({ repository, name: branch, fromRef: expected.baseBranch })).ok, true)
+    const intent = { repository, worktreeKey: 'wt-preflight', branch }
+    const before = await expected.objects(provider)
+    const preflight = await expectPreflight(provider, intent, expected)
+    if (!preflight.declared) return
+    assert.equal(preflight.result.ok, true, '默认意图（只给 worktreeKey）的预检必须给出目标')
+    const aimed = preflight.result.value.path
+    assert.ok(typeof aimed === 'string' && aimed !== '', '预检返回的目标必须是非空字符串')
+    await assertObjectsUnchanged(provider, expected, before, labelOf('preflightWorktree'))
+    if (!ownBranch) return
+    const created = await implemented(provider, 'createWorktree')({ ...intent, path: aimed })
+    assert.equal(created.ok, true, '预检返回的目标交给 createWorktree 时必须被接受')
+    assert.deepEqual([created.value.path, created.value.branch], [aimed, branch], 'createWorktree 必须落在预检返回的目标上')
+    const read = await probeOptional(provider, 'getWorktree', { worktree: created.value.ref })
+    if (read.declared) assert.deepEqual(read.result.value, created.value, '预检目标建出的工作树必须能按句柄读回')
   })
 
   test(`${label}：变更请求的每个方法按**自己**声明的能力——可用则真的走通，不可用则结构化 not_supported`, async () => {
@@ -545,7 +579,9 @@ export function developmentContractSuite(adapter) {
       [labelOf('getCommit'), { declared: true, result: await provider.getCommit({ ...foreign, objectKind: 'commit', externalId: expected.headCommit }) }],
       // 写路径串行：前一次被拒后不得留下任何能被下一次复用的对象，否则谱系会被外来 binding 污染。
       [labelOf('createBranch'), await probeOptional(provider, 'createBranch', { repository: foreign, name: 'feature/foreign', fromRef: expected.baseBranch })],
-      [labelOf('createWorktree'), await probeOptional(provider, 'createWorktree', { repository: foreign, path: expected.worktreePath, branch: expected.worktreeBranch })],
+      [labelOf('preflightWorktree'), provider.preflightWorktree === undefined ? { declared: false, result: undefined }
+        : await probeOptional(provider, 'preflightWorktree', { repository: foreign, worktreeKey: 'wt-foreign', branch: expected.worktreeBranch })],
+      [labelOf('createWorktree'), await probeOptional(provider, 'createWorktree', { repository: foreign, worktreeKey: 'wt-foreign', path: expected.worktreePath, branch: expected.worktreeBranch })],
       [labelOf('createChangeRequest'), await probeOptional(provider, 'createChangeRequest', crInput(foreign, expected.headCommit, expected.baseBranch))],
       [labelOf('getWorktree'), await probeOptional(provider, 'getWorktree', { worktree: foreignWorktree })],
       [labelOf('removeWorktree'), await probeOptional(provider, 'removeWorktree', { worktree: foreignWorktree })],
@@ -583,10 +619,11 @@ export function developmentContractSuite(adapter) {
       const created = await implemented(provider, 'createBranch')({ repository, name: duplicateBranch, fromRef: expected.baseBranch })
       assert.equal(created.ok, true, '重复创建用例自己的分支必须建得出来')
     }
-    const first = await expectOptional(provider, 'createWorktree', { repository, path: duplicatePath, branch: duplicateBranch }, expected)
+    const dupInput = { repository, worktreeKey: 'wt-dup', path: duplicatePath, branch: duplicateBranch }
+    const first = await expectOptional(provider, 'createWorktree', dupInput, expected)
     if (!first.declared) return
     assert.equal(first.result.ok, true, '重复创建的前一次必须成功（分支已就绪且未被其它用例检出）')
-    const again = await implemented(provider, 'createWorktree')({ repository, path: duplicatePath, branch: duplicateBranch })
+    const again = await implemented(provider, 'createWorktree')(dupInput)
     assert.equal(again.ok, false)
     assert.equal(again.error.code, 'conflict', '第二次创建必须报冲突，而不是把两次创建折成同一条记录')
   })

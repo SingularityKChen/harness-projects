@@ -14,7 +14,7 @@ import { EngineeringFactKind, EntityKind, ProviderErrorCode, type EntityId, type
 import { gateCommand } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
 import { contextIdFor, readExecutionContext } from './execution-context.ts'
-import { branchNameFor, worktreePathFor } from './git-provisioning.ts'
+import { branchNameFor, worktreeKeyFor } from './git-provisioning.ts'
 import { asEntityId, chainEntityId, type ChainNode } from './relations.ts'
 
 export interface CapabilityGap { readonly key: CapabilityKey; readonly reason: string }
@@ -230,7 +230,7 @@ function contextNode(context: CoreContext, scope: DeliveryScopeInput, observedId
 function worktreeNode(context: CoreContext, scope: DeliveryScopeInput, view: ChainView | undefined): ChainNode {
   const branch = view?.branchExternalId ?? branchNameFor(scope.workItemId)
   // `slot` 只是**属性**（provider 的句柄，移除工作树要用它），不参与身份——身份由 `worktreeEntityId` 唯一决定。
-  const slot = view?.worktreeExternalId ?? worktreePathFor(scope.workItemId)
+  const slot = view?.worktreeExternalId ?? worktreeKeyFor(scope.workItemId)
   const observed = view?.worktreeExternalId !== undefined
   return chainNode(worktreeEntityId(context.workspaceId, view?.repositoryId ?? scope.repositoryId ?? '', scope.workItemId),
     EntityKind.Worktree, slot, branch, observed, observed ? undefined : '工作树尚未创建')

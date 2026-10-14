@@ -63,7 +63,7 @@ export interface ProviderCreateBranchInput {
 }
 
 export interface ProviderCreateWorktreeInput {
-  readonly repository: ExternalObjectRef; readonly path: string; readonly branch: string
+  readonly repository: ExternalObjectRef; readonly path?: string; readonly worktreeKey: string; readonly branch: string
 }
 export interface ProviderGetWorktreeInput { readonly worktree: ExternalObjectRef }
 
@@ -96,6 +96,12 @@ export interface DevelopmentProvider {
   getChangeRequest(ref: ExternalObjectRef): Promise<ProviderResult<ProviderChangeRequest>>
   listChangeRequests(input: ProviderListChangeRequestsInput): Promise<ProviderResult<ProviderPage<ProviderChangeRequest>>>
   createBranch?(input: ProviderCreateBranchInput): Promise<ProviderResult<ProviderBranch>>
+  /**
+   * 写分支前的目标预检，与 `createWorktree` 同受 `development.worktree.create` 判定（未声明答 `not_supported`，
+   * 外来仓库答 `not_found`），不得执行外部写入。路径义务：返回的 `path` 连同同一 `worktreeKey` / `branch` 交给
+   * `createWorktree` 时必须被接受并落在该处——core 在 `ensureBranch` 之前调用它，之后的创建与对账读回都只用这个值。
+   */
+  preflightWorktree?(input: ProviderCreateWorktreeInput): Promise<ProviderResult<{ readonly path: string }>>
   createWorktree?(input: ProviderCreateWorktreeInput): Promise<ProviderResult<ProviderWorktree>>
   getWorktree?(input: ProviderGetWorktreeInput): Promise<ProviderResult<ProviderWorktree>>
   createChangeRequest?(input: ProviderCreateChangeRequestInput): Promise<ProviderResult<ProviderChangeRequest>>

@@ -71,7 +71,7 @@ test('R1 基线前进后换新键重试：接管既有分支、不解析 fromRef
   assert.equal(argv.some((args) => args.some((arg) => arg.includes('main^{commit}'))), false, '重试期间不得解析 fromRef')
   assert.equal(argv.some((args) => args.includes('symbolic-ref')), false, '重试期间不得探测仓库基线')
   assert.equal(await branchHead(fixture, 'work/wi-3'), before, '磁盘上的分支头仍是中断前的那个')
-  const expectedWorktree = path.join(fixture.repositoryPath, '.worktrees', 'wi-3')
+  const expectedWorktree = path.join(fixture.root, 'wi-3')
   assert.equal((await worktreePaths(fixture)).length, 2, '工作树数为主检出 + 1')
   assert.equal(
     (await git(['rev-parse', '--abbrev-ref', 'HEAD'], expectedWorktree)).trim(), 'work/wi-3',

@@ -3,14 +3,14 @@
  * 工作树移除是破坏性操作，不在本层（issue #137 的 Out of scope、issue #138 交付），所以本 provider
  * 既不实现 `removeWorktree` 也不声明 `development.worktree.remove`。 */
 import path from 'node:path'
-import { appendFile, mkdir, readFile, realpath, stat } from 'node:fs/promises'
+import { readFile, realpath, stat } from 'node:fs/promises'
 
 import * as cap from '@harness-projects/capabilities'
 import { ProviderErrorCode, newProviderBindingId, type ProviderBindingId } from '@harness-projects/domain'
 
 import { branchNameProblem } from './branch-names.ts'
 import { defaultGitRunner, type GitInvocation, type GitRunner } from './git-runner.ts'
-import { resolveWorktreePath, type WorktreePathResolution } from './paths.ts'
+import { resolveWorktreePath } from './paths.ts'
 
 export interface LocalGitRepositoryConfig {
   readonly externalId: string; readonly path: string; readonly name?: string; readonly defaultBranch?: string
@@ -42,12 +42,47 @@ const REFUSALS: readonly (readonly [RegExp, ProviderErrorCode, string])[] = [
   [/index\.lock|another git process|resource temporarily unavailable|eagain/i, ProviderErrorCode.Unavailable, 'Git 暂时不可用'],
 ]
 const CONVENTIONAL_BASES: readonly string[] = ['main', 'master', 'develop', 'trunk']
-const DEFAULT_ROOT_EXCLUDE = '/.worktrees/'
 async function occupied(target: string): Promise<boolean> {
   return stat(target).then(() => true, () => false)
 }
 const samePath = async (left: string, right: string): Promise<boolean> =>
   (await realpath(left).catch(() => left)) === (await realpath(right).catch(() => right))
+type TargetResolution = { readonly ok: true; readonly path: string } | { readonly ok: false; readonly code: ProviderErrorCode; readonly message: string }
+const statOf = (target: string) => stat(target).catch(() => undefined)
+/** 与 `is_git_directory` 同口径的 Git 目录判定：`HEAD` 文件 + `objects/` + `refs/`。 */
+const isGitDirectory = async (dir: string) => {
+  const [head, objects, refs] = await Promise.all(['HEAD', 'objects', 'refs'].map((name) => statOf(path.join(dir, name))))
+  return head?.isFile() === true && objects?.isDirectory() === true && refs?.isDirectory() === true
+}
+/** Git 认得的检出标记：`.git` 是 Git 目录，或是以 `gitdir:` 开头的 gitfile；空 `.git/`、杂项文件 Git 自己也不认。 */
+const hasGitMarker = async (dir: string) => {
+  const marker = path.join(dir, '.git')
+  const info = await statOf(marker)
+  if (info?.isDirectory() === true) return isGitDirectory(marker)
+  return info?.isFile() === true && (await readFile(marker, 'utf8').catch(() => '')).startsWith('gitdir:')
+}
+/** 默认根 `<checkout>.worktrees` 只给**独立检出**派生，只做文件系统探测：从 `repository.path` 的 realpath 起逐级先找
+ *  Git 认得的 `.git`、再看目录本身是不是 bare Git 目录（Git 仓库发现的同一顺序）。仓库目录缺席时不向上借用外层检出；
+ *  bare、找不到检出、检出位于另一个 Git 检出之内（submodule、嵌套仓库、dotfiles `$HOME` 下的仓库、另一检出里的链接
+ *  工作树）时兄弟目录会落进别人的检出或无处可放，一律 fail closed，由宿主显式注入 `allowedRoot`（#132）。 */
+async function deriveDefaultRoot(repositoryPath: string): Promise<TargetResolution> {
+  const refuse = (why: string): TargetResolution => ({ ok: false, code: ProviderErrorCode.InvalidInput, message: `${why}，拒绝派生默认工作树根；请显式注入 allowedRoot（宿主注入入口见 #132）` })
+  const start = await realpath(repositoryPath).catch(() => undefined)
+  if (start === undefined || (await statOf(start))?.isDirectory() !== true) {
+    return { ok: false, code: ProviderErrorCode.Unavailable, message: `仓库目录暂时不可达：${repositoryPath}；不借用外层检出派生默认工作树根` }
+  }
+  let checkout = start
+  while (!(await hasGitMarker(checkout))) {
+    if (await isGitDirectory(checkout)) return refuse(`${checkout} 是没有工作区的 bare 仓库`)
+    if (path.dirname(checkout) === checkout) return refuse(`${start} 之上找不到 Git checkout 根`)
+    checkout = path.dirname(checkout)
+  }
+  for (let outer = path.dirname(checkout); ; outer = path.dirname(outer)) {
+    if (await hasGitMarker(outer)) return refuse(`检出 ${checkout} 位于另一个 Git 检出 ${outer} 之内，兄弟目录会落进外层检出`)
+    if (path.dirname(outer) === outer) break
+  }
+  return { ok: true, path: path.join(path.dirname(checkout), `${path.basename(checkout)}.worktrees`) }
+}
 /** 本地 Git 的静态连接实现定义：单域实现族，key 由本实现作者声明。 */
 export const LOCAL_GIT_PROVIDER_DEFINITION: cap.ProviderDefinition = Object.freeze({
   implementationKey: 'development.local-git', domains: Object.freeze(['development'] as const),
@@ -56,16 +91,15 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
   readonly definition = LOCAL_GIT_PROVIDER_DEFINITION
   readonly bindingId: ProviderBindingId
   readonly repository: LocalGitRepositoryConfig
-  readonly allowedRoot: string
+  /** Explicit host-injected root only; undefined means derive from the real checkout marker. */
+  readonly allowedRoot: string | undefined
   readonly flags: Required<LocalGitCapabilityFlags>
   readonly observedAt: string
-  private readonly derivedRoot: boolean
   private readonly runGit: GitRunner
   constructor(options: LocalGitDevelopmentProviderOptions) {
     this.bindingId = options.bindingId ?? newProviderBindingId()
     this.repository = options.repository
-    this.derivedRoot = options.allowedRoot === undefined
-    this.allowedRoot = options.allowedRoot ?? path.join(path.resolve(options.repository.path), '.worktrees')
+    this.allowedRoot = options.allowedRoot
     this.flags = {
     branchCreate: options.capabilities?.branchCreate ?? true,
     worktreeCreate: options.capabilities?.worktreeCreate ?? true,
@@ -178,14 +212,22 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     return cap.providerOk({ ref: this.refOf('branch', input.name), name: input.name, headCommit: start.sha })
   }
 
+  async preflightWorktree(input: cap.ProviderCreateWorktreeInput): Promise<cap.ProviderResult<{ readonly path: string }>> {
+    if (!this.flags.worktreeCreate) return this.notSupported(cap.CapabilityKey.DevelopmentWorktreeCreate)
+    if (!this.ownsRepository(input.repository)) return this.notFound('仓库')
+    const resolved = await this.resolveInputTarget(input)
+    if (!resolved.ok) return this.fail(resolved.code, resolved.message)
+    return cap.providerOk({ path: resolved.path })
+  }
+
   async createWorktree(input: cap.ProviderCreateWorktreeInput): Promise<cap.ProviderResult<cap.ProviderWorktree>> {
     if (!this.flags.worktreeCreate) return this.notSupported(cap.CapabilityKey.DevelopmentWorktreeCreate)
     if (!this.ownsRepository(input.repository)) return this.notFound('仓库')
     const problem = branchNameProblem(input.branch)
     if (problem !== undefined) return this.invalidInput(problem)
     // 路径安全在**任何 Git 命令之前**：下面只做文件系统探测（stat / realpath），不调用 Git。
-    const resolved = await this.resolveTarget(input.path)
-    if (!resolved.ok) return this.invalidInput(resolved.message)
+    const resolved = await this.resolveInputTarget(input)
+    if (!resolved.ok) return this.fail(resolved.code, resolved.message)
     const target = resolved.path
     const branch = await this.branchRef(input.branch)
     if (branch.error !== undefined) return cap.providerErr(branch.error)
@@ -209,8 +251,6 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
       return this.fail(ProviderErrorCode.Conflict, `工作树路径已登记且与分支 ${input.branch} 一致：${target}`)
     }
     if (await occupied(target)) return this.invalidInput(`路径已存在但不是工作树：${target}；请更换路径`)
-    const exclusion = await this.excludeDefaultRoot()
-    if (exclusion !== undefined) return cap.providerErr(exclusion)
     const added = await this.git(['worktree', 'add', target, input.branch])
     if (added.code !== 0) return cap.providerErr(this.failureOf(added, true))
     // 判定与写入之间目标可以被换掉（TOCTOU）：报成功前回读登记，报告的必须是写入**之后**的事实
@@ -228,7 +268,7 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     if (!this.flags.worktreeRead) return this.notSupported(cap.CapabilityKey.DevelopmentWorktreeRead)
     if (input.worktree.bindingId !== this.bindingId || input.worktree.objectKind !== 'worktree') return this.notFound('工作树')
     const resolved = await this.resolveTarget(input.worktree.externalId)
-    if (!resolved.ok) return this.invalidInput(resolved.message)
+    if (!resolved.ok) return this.fail(resolved.code, resolved.message)
     const listed = await this.listWorktrees()
     if (listed.error !== undefined) return cap.providerErr(listed.error)
     const target = listed.records.find((record) => record.path === resolved.path || record.path === input.worktree.externalId)
@@ -306,26 +346,6 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     return { found: true, sha: found.sha, symbolic: found.symbolic, error: undefined }
   }
 
-  /** 默认允许根在仓库检出之内时，把 `/.worktrees/` 幂等地写进 `<git-common-dir>/info/exclude`：git 不会
-   *  自动忽略嵌套工作树，不写的话主检出的 `git add -A` 会把它们当嵌入仓库收进索引。写 `info/exclude`
-   *  而不是 `.gitignore`，不动用户的跟踪文件；宿主注入的允许根由宿主负责。 */
-  private async excludeDefaultRoot(): Promise<cap.ProviderError | undefined> {
-    if (!this.derivedRoot) return undefined
-    const located = await this.git(['rev-parse', '--git-path', 'info/exclude'])
-    if (located.code !== 0) return this.failureOf(located, false)
-    const file = path.resolve(this.repository.path, located.stdout.trim())
-    const current = await readFile(file, 'utf8').catch(() => '')
-    if (current.split('\n').includes(DEFAULT_ROOT_EXCLUDE)) return undefined
-    try {
-      await mkdir(path.dirname(file), { recursive: true })
-      await appendFile(file, `${current === '' || current.endsWith('\n') ? '' : '\n'}${DEFAULT_ROOT_EXCLUDE}\n`)
-    } catch {
-      // 不能写就**拒绝创建**，不静默继续：把工作树放进用户的检出却不让它被忽略，是这条默认值引入的危险。
-      return cap.providerError(ProviderErrorCode.Unavailable, `默认允许根在仓库检出内但写不进 ${file}；请让该文件可写，或注入仓库外的 allowedRoot`)
-    }
-    return undefined
-  }
-
   /** 正面确认「这个目录就是本仓库的链接工作树、且检出的正是请求的分支」：core 把 `conflict` 当
    *  「已创建 → 复用成功」，而登记记录只说明 git 的账本里有一条。返回 undefined 表示可以安全复用。 */
   private async reuseBlockedBy(target: string, branch: string): Promise<string | undefined> {
@@ -340,9 +360,25 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     return head === `refs/heads/${branch}` ? undefined : `目录检出的分支不是 ${branch}`
   }
 
-  private resolveTarget(rawPath: string): Promise<WorktreePathResolution> {
+  /** 默认根每次重新判定、不缓存：标记会随 `git init`、submodule 初始化出现或消失，缓存会把首次调用的结论固化。 */
+  private async allowedRootForUse(): Promise<TargetResolution> {
+    return this.allowedRoot === undefined ? deriveDefaultRoot(this.repository.path) : { ok: true, path: this.allowedRoot }
+  }
+
+  private async resolveTarget(rawPath: string | undefined, worktreeKey = ''): Promise<TargetResolution> {
     // 允许根是否落在检出内由 paths.ts 判定：检出内的分量不得是符号链接（仓库内容不可信），注入检出外由宿主负责。
-    return resolveWorktreePath(rawPath, { repositoryPath: this.repository.path, allowedRoot: this.allowedRoot })
+    const root = await this.allowedRootForUse()
+    if (!root.ok) return root
+    const resolved = await resolveWorktreePath(rawPath ?? path.join(root.path, worktreeKey), { repositoryPath: this.repository.path, allowedRoot: root.path })
+    return resolved.ok ? resolved : { ok: false, code: ProviderErrorCode.InvalidInput, message: resolved.message }
+  }
+
+  private async resolveInputTarget(input: cap.ProviderCreateWorktreeInput): Promise<TargetResolution> {
+    const worktreeKey = input.worktreeKey ?? (input.path === undefined ? '' : path.basename(input.path))
+    const invalid = (message: string): TargetResolution => ({ ok: false, code: ProviderErrorCode.InvalidInput, message })
+    if (typeof worktreeKey !== 'string' || worktreeKey.trim() === '' || worktreeKey !== worktreeKey.trim()) return invalid('工作树 key 不能为空或带首尾空白')
+    if (/[/\\]|\.\.|[\u0000-\u001f\u007f]/.test(worktreeKey)) return invalid('工作树 key 不得包含路径分隔符、.. 或控制字符')
+    return this.resolveTarget(input.path, worktreeKey)
   }
 
   private ownsRepository(ref: cap.ExternalObjectRef): boolean {

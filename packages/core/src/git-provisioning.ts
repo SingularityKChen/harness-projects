@@ -16,7 +16,7 @@ import {
 
 type Development = NonNullable<ResolvedBinding['development']>
 
-interface Names { readonly branch: string; readonly path: string }
+export interface Names { readonly branch: string; readonly path: string | undefined; readonly worktreeKey: string }
 interface StepOutcome {
   readonly report: WriteReport; readonly ok: boolean; readonly value: string | undefined
   /** 被接管分支的头提交；只有分支步产得出它，工作树步为 undefined。 */
@@ -71,8 +71,9 @@ export function namesProblem(workItemId: string): string | undefined {
 export function branchNameFor(workItemId: string): string {
   return `work/${slug(workItemId)}`
 }
-export function worktreePathFor(workItemId: string): string {
-  return `.worktrees/${slug(workItemId)}`
+/** 未观察工作树的中性句柄：稳定 key，不是 checkout 内相对路径。 */
+export function worktreeKeyFor(workItemId: string): string {
+  return slug(workItemId)
 }
 
 /** 分支名与工作树路径都可由调用方覆盖；默认值只由工作项 id 派生，不含任何本机路径。 */
@@ -80,7 +81,8 @@ export function namesFor(request: StartWorkRequest): Names {
   const path = request.worktreePath
   return {
     branch: request.branchName ?? branchNameFor(request.workItemId),
-    path: path === undefined || path.trim() === '' ? worktreePathFor(request.workItemId) : path,
+    path: path === undefined || path.trim() === '' ? undefined : path,
+    worktreeKey: slug(request.workItemId),
   }
 }
 
@@ -118,13 +120,14 @@ export async function provisionGit(
   recordStep: RecordStep = async () => {},
 ): Promise<GitOutcome> {
   const route = await routeDevelopment(context, request.repositoryId, CapabilityKey.DevelopmentWorktreeCreate, 'write')
-  if (!route.ok) return gitFailure(contextId, markFailed(beginWrite(names.path), route.error), undefined, undefined)
+  if (!route.ok) return gitFailure(contextId, markFailed(beginWrite(names.path ?? names.worktreeKey), route.error), undefined, undefined)
   const { provider, repository } = route
   const bindingId = repository.bindingId
   // 恢复：上下文里已经记录了分支步的结果就**整个跳过它**——不解析 `fromRef`，因此「基线是否
   // 前进」不进入判定。分支名是身份，我们记录的那一行是所有权（批次计划 D1 / D2）。
   const recorded = await context.storage.getExecutionContext(contextId)
   const decided = recorded?.branchExternalId
+  const intent: Names = recorded?.worktreeExternalId === undefined ? names : { ...names, path: recorded.worktreeExternalId }
   // 调用方在重放时声明一个**不同**的分支名是**矛盾**，不是新输入：序列已经决定了身份，静默采纳新名字
   // 会让「报出去的身份」与「磁盘上的事实」分叉——工作树落在新名字上、而 `branchExternalId` 报的是旧名字，
   // 与 PR #160 第二轮 P1 是同一形态。所以拒绝并点名两个名字，而不是忽略调用方的输入。
@@ -136,6 +139,11 @@ export async function provisionGit(
       bindingId, decided,
     )
   }
+  // 预检也属于同一条供应序列：恢复时分支身份已经由先前的 ack 决定，
+  // 分支敏感 provider 不得看本次请求重新推导的 names.branch。
+  const preflightIntent: Names = decided === undefined ? intent : { ...intent, branch: decided }
+  const target = await preflightWorktree(provider, repository, preflightIntent)
+  if (!target.ok) return gitFailure(contextId, target.report, bindingId, decided)
   const branch = decided === undefined
     ? await ensureBranch(provider, repository, names.branch)
     : {
@@ -150,7 +158,7 @@ export async function provisionGit(
   // 工作树步本身**故意不跳过**——它必须重跑才能保证工作树真的在（PR #160 的 F1 教训）；幂等由稳定的
   // 实体身份提供，不由跳过提供。
   await recordStep(stepRecord(contextId, branch.report, bindingId, branch.value, branch.headCommit))
-  const worktree = await ensureWorktree(provider, repository, branch.value, names.path)
+  const worktree = await ensureWorktree(provider, repository, branch.value, intent, target.path)
   if (!worktree.ok || worktree.value === undefined) {
     return gitFailure(contextId, worktree.report, bindingId, branch.value, branch.headCommit)
   }
@@ -193,36 +201,47 @@ async function ensureBranch(provider: Development, repository: ExternalObjectRef
 }
 
 async function ensureWorktree(
-  provider: Development, repository: ExternalObjectRef, branch: string, path: string,
+  provider: Development, repository: ExternalObjectRef, branch: string, names: Names, target: string | undefined,
 ): Promise<StepOutcome> {
   if (provider.createWorktree === undefined) {
-    return { report: markFailed(beginWrite(path), unsupportedCapability(CapabilityKey.DevelopmentWorktreeCreate)), ok: false, value: undefined }
+    return { report: markFailed(beginWrite(target ?? names.worktreeKey), unsupportedCapability(CapabilityKey.DevelopmentWorktreeCreate)), ok: false, value: undefined }
   }
-  const result = await provider.createWorktree({ repository, path, branch })
+  const canonicalPath = target ?? names.path
+  const result = await provider.createWorktree({ repository, worktreeKey: names.worktreeKey, branch, ...(canonicalPath === undefined ? {} : { path: canonicalPath }) })
   if (!result.ok) {
     if (result.error.code === ProviderErrorCode.Conflict) {
       if (provider.getWorktree === undefined) {
-        return { report: markFailed(beginWrite(path), projectError(ProjectErrorCode.NotSupported, '工作树冲突无法在当前 provider 上确认')), ok: false, value: undefined }
+        return { report: markFailed(beginWrite(target ?? names.worktreeKey), projectError(ProjectErrorCode.NotSupported, '工作树冲突无法在当前 provider 上确认')), ok: false, value: undefined }
       }
-      const ref = { bindingId: repository.bindingId, objectKind: 'worktree', externalId: path, url: undefined }
+      const ref = { bindingId: repository.bindingId, objectKind: 'worktree', externalId: target ?? names.path ?? names.worktreeKey, url: undefined }
       const observed = await provider.getWorktree({ worktree: ref })
       if (observed.ok && observed.value.branch === branch) {
-        return { report: confirmWrite(markWriting(beginWrite(path)), observed.value.path), ok: true, value: observed.value.path }
+        return { report: confirmWrite(markWriting(beginWrite(target ?? names.worktreeKey)), observed.value.path), ok: true, value: observed.value.path }
       }
-      return { report: markFailed(beginWrite(path), observed.ok ? projectError(ProjectErrorCode.Conflict, '工作树冲突但分支不匹配') : toProjectError(observed.error)), ok: false, value: undefined }
+      return { report: markFailed(beginWrite(target ?? names.worktreeKey), observed.ok ? projectError(ProjectErrorCode.Conflict, '工作树冲突但分支不匹配') : toProjectError(observed.error)), ok: false, value: undefined }
     }
     if (result.error.code !== ProviderErrorCode.AmbiguousResult || provider.getWorktree === undefined) {
-      return { report: markFailed(beginWrite(path), toProjectError(result.error)), ok: false, value: undefined }
+      return { report: markFailed(beginWrite(target ?? names.worktreeKey), toProjectError(result.error)), ok: false, value: undefined }
     }
     // 结果不确定：与分支步同一个对账出口（评审 P3）——读回同路径，检出同一分支即 reconciled，确定不存在才 failed，读失败仍是 unknown。
-    const unknown = markUnknown(markWriting(beginWrite(path)), toProjectError(result.error))
-    const observed = await provider.getWorktree({ worktree: { bindingId: repository.bindingId, objectKind: 'worktree', externalId: path, url: undefined } })
-    if (observed.ok && observed.value.branch !== branch) return { report: markFailed(beginWrite(path), projectError(ProjectErrorCode.Conflict, `创建结果不确定，对账读到的工作树检出 ${observed.value.branch}，不是 ${branch}`)), ok: false, value: undefined } // 与 conflict 路径同判 Failed
-    const probe = { found: observed.ok, value: observed.ok ? path : undefined, error: observed.ok || observed.error.code === ProviderErrorCode.NotFound ? undefined : toProjectError(observed.error) }
+    const handle = target ?? names.path ?? names.worktreeKey
+    const unknown = markUnknown(markWriting(beginWrite(handle)), toProjectError(result.error))
+    const observed = await provider.getWorktree({ worktree: { bindingId: repository.bindingId, objectKind: 'worktree', externalId: handle, url: undefined } })
+    if (observed.ok && observed.value.branch !== branch) return { report: markFailed(beginWrite(handle), projectError(ProjectErrorCode.Conflict, `创建结果不确定，对账读到的工作树检出 ${observed.value.branch}，不是 ${branch}`)), ok: false, value: undefined } // 与 conflict 路径同判 Failed
+    const probe = { found: observed.ok, value: observed.ok ? handle : undefined, error: observed.ok || observed.error.code === ProviderErrorCode.NotFound ? undefined : toProjectError(observed.error) }
     const report = reconcileWrite(unknown, probe)
     return report.phase === WritePhase.Reconciled && observed.ok ? { report, ok: true, value: observed.value.path } : { report, ok: false, value: undefined }
   }
-  return { report: confirmWrite(markWriting(beginWrite(path)), result.value.path), ok: true, value: result.value.path }
+  return { report: confirmWrite(markWriting(beginWrite(result.value.path)), result.value.path), ok: true, value: result.value.path }
+}
+
+async function preflightWorktree(
+  provider: Development, repository: ExternalObjectRef, names: Names,
+): Promise<{ readonly ok: true; readonly path: string | undefined } | { readonly ok: false; readonly report: WriteReport }> {
+  if (provider.preflightWorktree === undefined) return { ok: true, path: undefined }
+  const result = await provider.preflightWorktree({ repository, worktreeKey: names.worktreeKey, branch: names.branch, ...(names.path === undefined ? {} : { path: names.path }) })
+  if (result.ok) return { ok: true, path: result.value.path }
+  return { ok: false, report: markFailed(beginWrite(names.path ?? names.worktreeKey), toProjectError(result.error)) }
 }
 
 /** 基线分支读不到不是致命错误：用约定名继续，创建失败会得到结构化结果。 */
