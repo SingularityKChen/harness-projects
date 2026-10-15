@@ -7,7 +7,7 @@
  * 允许的依赖边（左侧只能依赖右侧）：
  *
  *   apps/*            -> ui, ui-model, client, domain
- *   （例外）HOST_ENTRY 列出的 apps/harness-plugin Host 入口文件另可 -> core, controller, storage/sqlite
+ *   （例外）HOST_ENTRY 列出的 apps/harness-plugin Host 入口文件另可 -> core, controller, storage/sqlite, capabilities, 目录收录的 provider 包
  *   ui                -> ui-model, client, domain
  *   ui-model          -> client, domain
  *   client            -> controller, domain
@@ -99,13 +99,14 @@ const EXPECTED = {
 }
 
 /**
- * ADR-0013（Proposed）的唯一例外：只有这些 Host 入口文件可以 import core / controller / storage，
- * 且它们不得从 client 入口经相对 import 可达；包内其它文件（含 client 与 Host 共用的 remote.ts）仍按 apps/* 的边。
+ * ADR-0013 与 ADR-0014（均为 Proposed）的唯一例外：只有这些 Host 入口文件可以 import core / controller / storage / capabilities 与目录收录的
+ * provider 包（provider-fake 不放行），且它们不得从 client 入口经相对 import 可达；包内其它文件（含 client 与 Host 共用的 remote.ts）仍按 apps/* 的边。
  */
 const HOST_ENTRY = {
   dir: 'apps/harness-plugin',
-  files: ['apps/harness-plugin/src/host.ts', 'apps/harness-plugin/src/host-composition.ts'],
-  allow: ['packages/core', 'packages/controller', 'packages/storage/sqlite'],
+  files: ['apps/harness-plugin/src/host.ts', 'apps/harness-plugin/src/host-composition.ts', 'apps/harness-plugin/src/host-providers.ts'],
+  allow: ['packages/core', 'packages/controller', 'packages/storage/sqlite', 'packages/capabilities',
+    'packages/providers/planning-github-projects', 'packages/providers/development-local-git'],
   clientEntry: 'apps/harness-plugin/src/client.ts',
 }
 
