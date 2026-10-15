@@ -88,7 +88,20 @@ const summary = (output) => {
 const PLUS = { file: 'lib.mjs', anchor: 'a + b', replacement: 'a - b' }
 const LOCAL_HOURS = { file: 'lib.mjs', anchor: 'getUTCHours', replacement: 'getHours' }
 
+/** 标记里的 pid 是一条记录 `<pid>\n`：writeFileSync 先建（截断）再写，文件存在不等于写完；等到完整记录才返回，超时为 undefined。 */
+async function readPid(flag, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const text = existsSync(flag) ? readFileSync(flag, 'utf8') : ''
+    if (/^[1-9]\d*\n$/.test(text)) return Number(text)
+    if (Date.now() >= deadline) return undefined
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+}
+
+/** pid 为 0 时 process.kill 的目标是调用者自己的进程组，所以先拒绝非正整数。 */
 const alive = (pid) => {
+  assert.ok(Number.isSafeInteger(pid) && pid > 0, `pid 必须是正整数，得到 ${pid}`)
   try {
     process.kill(pid, 0)
     return true
@@ -96,6 +109,21 @@ const alive = (pid) => {
     return false
   }
 }
+
+test('pid 标记：文件已建但记录未写完时继续等，只接受以换行结尾的正整数', async (t) => {
+  const root = fixture(t)
+  const flag = path.join(root, 'late.flag')
+  writeFileSync(flag, '')
+  const pending = readPid(flag, 5_000)
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  writeFileSync(flag, '42')
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  writeFileSync(flag, '4242\n')
+  assert.equal(await pending, 4242)
+  writeFileSync(flag, '0\n')
+  assert.equal(await readPid(flag, 200), undefined)
+  assert.throws(() => alive(0), /正整数/)
+})
 
 test('五种结论各自可区分，且结束时文件逐字节还原', async (t) => {
   const root = fixture(t)
@@ -293,7 +321,7 @@ test('EPIPE 崩溃时以 2 退出并杀死仍在变异批中的命令组', { tim
       "import { readFileSync, writeFileSync } from 'node:fs'",
       "if (readFileSync('lib.mjs', 'utf8').includes('a - b')) {",
       "  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' }); child.unref()",
-      `  writeFileSync(${JSON.stringify(flag)}, String(child.pid))`,
+      `  writeFileSync(${JSON.stringify(flag)}, String(child.pid) + '\\n')`,
       '}',
       '',
     ].join('\n'),
@@ -306,10 +334,8 @@ test('EPIPE 崩溃时以 2 退出并杀死仍在变异批中的命令组', { tim
     ],
   })
   t.after(() => run.child.kill('SIGKILL'))
-  const first = Date.now() + 20_000
-  while (!existsSync(flag) && Date.now() < first) await new Promise((resolve) => setTimeout(resolve, 25))
-  assert.ok(existsSync(flag), `变异命令没有派生子进程：\n${run.output()}`)
-  const leaked = Number(readFileSync(flag, 'utf8'))
+  const leaked = await readPid(flag)
+  assert.ok(leaked, `变异命令没有派生子进程：\n${run.output()}`)
   run.child.stdout.once('data', () => run.child.stdout.destroy())
   const outcome = await Promise.race([
     run.done,
@@ -365,7 +391,7 @@ test('三种信号中断时，包装进程下也在数秒内还原并以 130 退
     [
       "import { readFileSync, writeFileSync } from 'node:fs'",
       "if (readFileSync('lib.mjs', 'utf8').includes('a - b')) {",
-      `  writeFileSync(${JSON.stringify(flag)}, String(process.pid))`,
+      `  writeFileSync(${JSON.stringify(flag)}, String(process.pid) + '\\n')`,
       '  setTimeout(() => {}, 30_000)',
       '}',
       '',
@@ -376,14 +402,6 @@ test('三种信号中断时，包装进程下也在数秒内还原并以 130 退
     path.join(root, 'stubborn.mjs'),
     `for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(s, () => {})\n${readFileSync(path.join(root, 'sleeper.mjs'), 'utf8')}`,
   )
-  const alive = (pid) => {
-    try {
-      process.kill(pid, 0)
-      return true
-    } catch {
-      return false
-    }
-  }
   // 最后一种：命令不理会信号。第一次信号后命令还活着、夹具还在等，文件必须已经还原；
   // 第二次信号让夹具 SIGKILL 整组并立即退出。
   // SIGTERM 配不理会信号的孙进程：sh 先退出，夹具收尾时仍要结束剩下的孙进程。
@@ -398,11 +416,8 @@ test('三种信号中断时，包装进程下也在数秒内还原并以 130 退
     rmSync(flag, { force: true })
     const run = start(root, { command: ['sh', '-c', `node ${script}; true`], mutants: [{ id: 'm', ...PLUS }] })
     t.after(() => run.child.kill('SIGKILL'))
-    const deadline = Date.now() + 20_000
-    while (!existsSync(flag) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50))
-    assert.ok(existsSync(flag), `${signal}×${times}：变异期间的子进程没有启动：\n${run.output()}`)
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    const sleeper = Number(readFileSync(flag, 'utf8'))
+    const sleeper = await readPid(flag)
+    assert.ok(sleeper, `${signal}×${times}：变异期间的子进程没有启动：\n${run.output()}`)
     assert.ok(!bytesOf(root).equals(Buffer.from(LIB)), `${signal}×${times}：中断前变异应当已经施加`)
 
     run.child.kill(signal)
@@ -437,7 +452,7 @@ test('命令派生出脱离进程组的孙进程时，中断后夹具不被它�
       "import { readFileSync, writeFileSync } from 'node:fs'",
       "if (readFileSync('lib.mjs', 'utf8').includes('a - b')) {",
       "  const g = spawn(process.execPath, ['-e', \"for (const s of ['SIGINT','SIGTERM','SIGHUP']) process.on(s, () => {}); setTimeout(() => {}, 30000)\"], { detached: true, stdio: 'inherit' })",
-      `  writeFileSync(${JSON.stringify(flag)}, String(g.pid))`,
+      `  writeFileSync(${JSON.stringify(flag)}, String(g.pid) + '\\n')`,
       '  setTimeout(() => {}, 30_000)',
       '}',
       '',
@@ -445,11 +460,8 @@ test('命令派生出脱离进程组的孙进程时，中断后夹具不被它�
   )
   const run = start(root, { command: ['node', 'escape.mjs'], mutants: [{ id: 'm', ...PLUS }] })
   t.after(() => run.child.kill('SIGKILL'))
-  const deadline = Date.now() + 20_000
-  while (!existsSync(flag) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50))
-  assert.ok(existsSync(flag), `变异期间的子进程没有启动：\n${run.output()}`)
-  await new Promise((resolve) => setTimeout(resolve, 100))
-  const escaped = Number(readFileSync(flag, 'utf8'))
+  const escaped = await readPid(flag)
+  assert.ok(escaped, `变异期间的子进程没有启动：\n${run.output()}`)
   t.after(() => {
     try {
       process.kill(escaped, 'SIGKILL')
@@ -527,17 +539,15 @@ test('基线中断后即使包装进程退出也 SIGKILL 剩余进程组', { tim
       "import { spawn } from 'node:child_process'",
       "import { writeFileSync } from 'node:fs'",
       "const child = spawn(process.execPath, ['-e', \"for (const s of ['SIGINT','SIGTERM','SIGHUP']) process.on(s, () => {}); setTimeout(() => {}, 30000)\"], { stdio: 'ignore' })",
-      `writeFileSync(${JSON.stringify(flag)}, String(child.pid))`,
+      `writeFileSync(${JSON.stringify(flag)}, String(child.pid) + '\\n')`,
       'setTimeout(() => {}, 30000)',
       '',
     ].join('\n'),
   )
   const run = start(root, { command: ['sh', '-c', 'node baseline-leftover.mjs; true'], mutants: [{ id: 'm', ...PLUS }] })
   t.after(() => run.child.kill('SIGKILL'))
-  const deadline = Date.now() + 20_000
-  while (!existsSync(flag) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25))
-  assert.ok(existsSync(flag), `基线剩余进程没有启动：\n${run.output()}`)
-  const leftover = Number(readFileSync(flag, 'utf8'))
+  const leftover = await readPid(flag)
+  assert.ok(leftover, `基线剩余进程没有启动：\n${run.output()}`)
   run.child.kill('SIGINT')
   const outcome = await run.done
   assert.equal(outcome.code, 130, outcome.output)
