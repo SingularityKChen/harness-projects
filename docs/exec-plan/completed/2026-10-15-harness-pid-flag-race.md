@@ -1,6 +1,6 @@
 # 变异夹具测试的 pid 标记竞态 ExecPlan
 
-> 状态：Active
+> 状态：Completed
 > 创建：2026-10-15
 > 范围：完成 issue #347：`tests/contract/review-mutation-harness.test.js` 里四个用例从标记文件读子进程 pid 时，读到「已建未写」的空文件得到 `0`，再把 `0` 交给 `process.kill`。只改测试读写标记的协议，不改 `scripts/review-mutate.mjs`。
 > 上游输入：`AGENTS.md`、`PLANS.md`、issue #347、`docs/exec-plan/completed/2026-10-12-review-mutate-crash.md`（#302，这几个用例的来源）。
@@ -72,15 +72,19 @@
 ## Progress
 
 - [x] 2026-10-15 16:10 +08 定位根因并稳定复现：延迟写者副本下旧读法失败于「基线中断后剩余进程 0 未被 SIGKILL」。
-- [ ] Batch 1：计划与 draft PR。
-- [ ] Batch 2：记录协议、守卫与四个用例。
-- [ ] Batch 3：对抗验证、连跑与收尾。
+- [x] 2026-10-15 16:16 +08 Batch 1：计划提交 `ad2b3e40` 推送，draft PR #348 关联 #347（`closingIssuesReferences` 含 347）；计划 lint 与文档契约 18/18 通过。
+- [x] 2026-10-15 16:25 +08 Batch 2：协议用例先红（`ReferenceError: readPid is not defined`）后绿；`readPid` 与 `alive` 守卫落地，四个写者改为 `String(pid) + '\n'`，四个读者改用 `readPid`，删去两处 100 ms 睡眠与信号用例里的局部 `alive`；整文件 18/18 通过；延迟写者副本在修复后通过（修复前失败于「剩余进程 0」），副本已删除。
+- [x] 2026-10-15 16:14–16:30 +08 Batch 3：M1（读者不要求换行）、M2（去掉 `alive` 守卫）、M3（读者把空文件当 `0` 返回）均 KILLED，每次施加前断言锚点恰好一次、按内存原文逐字节还原；五个相关用例连跑 50 次 50/50 通过（565 s）；`pnpm verify` 1579 + 7、`pnpm run boundaries` 9/9、size 代码 70 / 文档 106、`git diff --check` 无输出；计划归档。
 
 ## Surprises & Discoveries
+
+- 2026-10-15：生成脚本的每一行写在外层模板字符串里，写者不能再用嵌套反引号的模板字符串（会截断外层字面量）；记录写成 `String(pid) + '\\n'`。
 
 - 2026-10-15：`escaped` 用例的清理 `process.kill(escaped, 'SIGKILL')` 在读到 `0` 时会杀掉测试运行器自己的进程组；它只靠读前 100 ms 睡眠避开竞态，比只会误报的另外三处更危险。
 
 ## Decision Log
+
+- 2026-10-15：M3 由「基线用例退回存在即读并配延迟写者」改为读者层的等价变异「空文件也返回 `Number(text)`」。理由：集成层面的同一场景已由延迟写者副本在修复前后各跑一次覆盖（修复前红、修复后绿），读者层变异能在协议用例里稳定、快速地判别。作者：协调者（Claude）。
 
 - 2026-10-15：在读者侧定义「以换行结尾的完整记录」协议，而不是只在写者侧改原子写。理由：一处读者函数覆盖全部现有与将来的用例，换行让写到一半的数字也可判别；写者只需在 pid 后加一个换行。作者：协调者（Claude）。
 
@@ -98,8 +102,9 @@
 
 ## Outcomes & Retrospective
 
-（实施完成后回填。）
+#347 的三条验收都已满足：协议用例证明空文件与半截记录不会被当成 pid，旧读法在同一输入上得 `0`；`alive()` 对非正整数直接断言失败，四个用例不再有任何路径把 `0` 或 `NaN` 交给 `process.kill`；相关用例连跑 50 次全绿，全量验证通过。改动只在一个测试文件，`scripts/review-mutate.mjs` 未改。遗留：无新的技术债。
 
 ## Bottom Change Note
 
+- Change Note (2026-10-15 16:30 +08)：回填三个批次的读数、M3 的等价替换与模板字符串的发现，计划归档。
 - Change Note (2026-10-15 16:15 +08)：创建计划——根因、以换行结尾的记录协议、三批次与验收表；补 Concrete Steps 与 Artifacts and Notes。
