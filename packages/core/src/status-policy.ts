@@ -5,9 +5,9 @@
  * `wrote` 恒为 false，incoming 状态只变成派生标记；显式状态写入命令是唯一允许改写规划状态的联动，仍受策略约束（provider 权威
  * 时拒绝）。落库只发生在 `writePlanningStatus`，也只由显式命令调用。
  */
-import { ProjectErrorCode, projectError, type ProjectError } from '@harness-projects/capabilities'
+import { ProjectErrorCode, projectError, type ProjectError, type WorkspaceRecord } from '@harness-projects/capabilities'
 import {
-  NormalizedStatus, StatusChangeSource, StatusPolicy, derivedFlagsFor, reconcilePlanningStatus,
+  ContentKind, NormalizedStatus, StatusChangeSource, StatusPolicy, derivedFlagsFor, reconcilePlanningStatus,
   type DerivedFlag, type EngineeringFact, type EntityId, type WorkspaceProjection,
 } from '@harness-projects/domain'
 import type { CoreContext } from './context.ts'
@@ -74,30 +74,33 @@ export function decideFromCommand(input: { readonly projection: WorkspaceProject
 
 export interface PlanningStatusCommand { readonly entityId: EntityId; readonly status: NormalizedStatus }
 
-async function workspacePolicy(context: CoreContext): Promise<StatusPolicy> {
-  const workspace = await context.storage.getWorkspace(context.workspaceId)
+function workspacePolicy(workspace: WorkspaceRecord | undefined): StatusPolicy {
   return workspace?.statusPolicy ?? StatusPolicy.ProviderAuthoritative
 }
 
+/** 目标对当前凭据不可见（不存在，或内容为 redacted）：reason 与错误文案共用这一句，不随 `RedactionReason` 变化，不透出撤权与删除的区别。 */
+const INVISIBLE_TARGET = '规划条目不存在或对当前凭据不可见，不写入状态'
+
 /** 规划状态的唯一写入入口：只被显式命令调用，且只在决策说 wrote 时才落库。 */
 export async function writePlanningStatus(context: CoreContext, command: PlanningStatusCommand): Promise<StatusDecision> {
-  const projection = await context.storage.getPlanningProjection(context.workspaceId, command.entityId)
-  const policy = await workspacePolicy(context)
-  if (projection === undefined) {
-    return {
-      entityId: command.entityId, status: NormalizedStatus.Unknown, derived: [], wrote: false,
-      policy, mode: modeFor(policy), reason: '没有该规划条目的投影',
-      error: projectError(ProjectErrorCode.NotFound, '没有该规划条目的投影'),
+  return context.storage.transaction(async (tx) => {
+    const projection = await tx.getPlanningProjection(context.workspaceId, command.entityId)
+    const policy = workspacePolicy(await tx.getWorkspace(context.workspaceId))
+    // 可见性先于策略：缺失与 redacted 是同一前置条件的两种失败，统一以不可重试的 not_found 拒绝
+    if (projection === undefined || projection.content.contentKind === ContentKind.Redacted) {
+      return {
+        entityId: command.entityId, status: NormalizedStatus.Unknown, derived: [], wrote: false,
+        policy, mode: modeFor(policy), reason: INVISIBLE_TARGET,
+        error: projectError(ProjectErrorCode.NotFound, INVISIBLE_TARGET),
+      }
     }
-  }
-  const decision = decideFromCommand({ projection, status: command.status, policy })
-  if (!decision.wrote) return decision
-  await context.storage.transaction(async (tx) => {
+    const decision = decideFromCommand({ projection, status: command.status, policy })
+    if (!decision.wrote) return decision
     await tx.putPlanningProjection(context.workspaceId, {
       ...projection, planningStatus: decision.status, revision: await tx.advanceRevision(context.workspaceId),
     })
+    return decision
   })
-  return decision
 }
 
 export function policyMatrix(): readonly { mode: StatusPolicyMode; policy: StatusPolicy; engineeringFactWrites: boolean; explicitCommandWrites: boolean }[] {
