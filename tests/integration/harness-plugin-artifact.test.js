@@ -19,12 +19,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { after, before, describe, it } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { DatabaseSync } from 'node:sqlite'
 import vm from 'node:vm'
 
 import { parse as parseYaml } from 'yaml'
 
 import { build } from '../../apps/harness-plugin/scripts/build.mjs'
-import { createFakeProviders } from '@harness-projects/provider-fake'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -251,10 +251,11 @@ describe('Harness 插件安装件契约', () => {
       assert.ok(clientPath.endsWith(path.join('lib', 'client.js')))
     })
 
-    it('import() 包名得到的 apply 是函数，调用后打出宿主就绪行，并经包内 migrations 完成 baseline + bootstrap 往返', async (t) => {
+    it('import() 包名得到的 apply 是函数，inject 只要 typert，没有凭据服务时也在干净数据根上打出宿主就绪行并经包内 migrations 建库迁移、零工作区', async (t) => {
       const require = createRequire(path.join(tmpRoot, 'host', 'entry.cjs'))
       const hostModule = await import(pathToFileURL(require.resolve(sourceManifest.name)).href)
       assert.equal(typeof hostModule.apply, 'function')
+      assert.deepEqual(hostModule.inject, ['typert'])
 
       const info = t.mock.method(console, 'info', () => {})
       const previousHome = process.env.DSH_HOME
@@ -265,17 +266,17 @@ describe('Harness 插件安装件契约', () => {
         effect(callback) { effects.push(callback()) },
         provide(name, value) { services.set(name, value); return () => services.delete(name) },
         typert: { register() { return async () => {} } },
-        get(name) {
-          if (name === 'credentials') return { resolve: async () => undefined }
-          if (name === 'harnessProjectsProviders') return { create: async () => createFakeProviders() }
-          return undefined
-        },
+        get() { return undefined }, // 宿主没有 credentials 服务：Host 照常加载
       }
       try {
         await hostModule.apply(context)
         const service = services.get('harnessProjects')
-        assert.ok((await service.baseline()).entities.length > 0)
-        assert.equal((await service.bootstrapWorkspace({ kind: 'agent', id: 'packaged-host' }, 'packaged-host-1')).writeState, 'local_only')
+        assert.equal((await service.baseline()).workspace, undefined, '干净数据根：零工作区')
+        assert.equal((await service.bootstrapWorkspace({ kind: 'agent', id: 'packaged-host' }, 'packaged-host-1')).writeState, 'failed', '没有工作区时命令是结构化失败')
+        const db = new DatabaseSync(path.join(process.env.DSH_HOME, 'harness-projects', 'workspace.sqlite'), { readOnly: true })
+        const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version)
+        db.close()
+        assert.deepEqual(versions, [1, 2, 3, 4, 5, 6, 7], '包内 migrations 完成迁移 1–7')
       } finally {
         if (previousHome === undefined) delete process.env.DSH_HOME
         else process.env.DSH_HOME = previousHome
@@ -287,12 +288,14 @@ describe('Harness 插件安装件契约', () => {
 
     after(async () => { await hostCleanup?.() })
 
-    it('宿主半边的模块说明符里没有工作区包、.ts 与 file:，fake provider 不在宿主输入里', () => {
+    it('宿主半边的模块说明符里没有工作区包、.ts 与 file:，目录收录的 provider 在宿主输入里而 fake provider 不在', () => {
       // 只看 import / require 形式的说明符：未压缩产物的注释与字符串里出现 `.ts` 文件名不是说明符。
       const specifiers = [...hostText.matchAll(/(?:\brequire\s*\(|\bimport\s*\(|\bfrom\s*|\bimport\s*)(["'`])([^"'`\n]+)\1/g)].map((match) => match[2])
       assert.ok(specifiers.some((specifier) => specifier.startsWith('node:')), '没有扫到任何说明符，本断言空转')
       assert.deepEqual(specifiers.filter((specifier) => /^@harness-projects\/|\.tsx?$|^file:/.test(specifier)), [])
-      assert.deepEqual(Object.keys(result.metafiles.host.inputs).filter((input) => input.startsWith('packages/providers/fake/')), [])
+      const inputs = Object.keys(result.metafiles.host.inputs)
+      for (const prefix of ['packages/providers/planning-github-projects/', 'packages/providers/development-local-git/']) assert.ok(inputs.some((input) => input.startsWith(prefix)), `宿主输入里没有目录收录的 ${prefix}`)
+      assert.deepEqual(inputs.filter((input) => input.startsWith('packages/providers/fake/')), [])
     })
   })
 

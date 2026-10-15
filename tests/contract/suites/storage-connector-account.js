@@ -91,6 +91,9 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     assert.deepEqual(await storage.getBindingConfiguration(a), stored, '被拒绝的写入不得改动旧值')
     tamper(storage) // 裸写未知字段的配置：读口必须按真实锚点的 implementationKey 复验（对抗验证 P2-3）
     await assert.rejects(async () => storage.getBindingConfiguration(a), RangeError, '读口复验被裸写改坏的配置')
+    assert.throws(() => restart(storage, policy()), RangeError, '已声明实现键的坏配置：重开仍整库拒绝')
+    const narrowed = restart(storage, { allowedSecretHandles: new Set(), configurations: new Map() })
+    await assert.rejects(async () => narrowed.getBindingConfiguration(a), RangeError, '未声明实现键的配置：重开不阻断，读口仍拒绝')
   })
   register(`${label}：trusted-handle-only`, async () => {
     const storage = makeStorage(); await storage.putConnectorAccount(account())

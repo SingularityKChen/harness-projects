@@ -96,6 +96,7 @@ export class MemoryStorage implements cap.Storage {
       if (!this.data.workspaceBindings.some((mount) => sameMount(mount, record.ref))) throw new RangeError('binding configuration references an unknown workspace mount')
       const anchor = this.data.providerBindings.find((candidate) => candidate.id === record.ref.bindingId)
       if (anchor === undefined) throw new RangeError('binding configuration references an unknown connection anchor')
+      if (!this.#policy.configurations.has(anchor.implementationKey)) continue // 未声明实现键：导入时隔离，读写口仍拒绝（#132）
       cap.parseBindingConfiguration(record, this.#policy, anchor.implementationKey)
     }
     for (const link of this.data.bindingAccounts) {

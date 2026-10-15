@@ -154,6 +154,7 @@ export class SqliteSyncSurface {
     const rows = (sql: string): Row[] => this.db.prepare(sql).all() as Row[]
     for (const row of rows('SELECT id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state FROM connector_account ORDER BY rowid')) parseConnectorAccount(rowToConnectorAccount(row), this.policy)
     for (const row of rows(`SELECT wb.workspace_id, wb.binding_id, wb.domain, wb.configuration_json, b.implementation_key FROM workspace_binding AS wb JOIN provider_binding AS b ON b.id = wb.binding_id WHERE wb.configuration_json IS NOT NULL ORDER BY wb.rowid`)) {
+      if (!this.policy.configurations.has(row.implementation_key as string)) continue // 未声明实现键：打开时隔离，读写口仍拒绝（#132）
       parseBindingConfiguration(rowToBindingConfiguration(row), this.policy, row.implementation_key as string)
     }
   }

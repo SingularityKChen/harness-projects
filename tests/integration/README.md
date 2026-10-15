@@ -165,6 +165,22 @@
 | 内容被扣下：未见过 → 可见 → 部分 / 全部 REDACTED → 映射失效 → 恢复 | 没有映射时整次 `degraded` / `permission_denied` 且 `getPlanningSync` 与 controller 快照可查（0 条时也成立）；有映射时按成员关系找回同一实体、出剥离正文的 redacted 占位，被扣下的标题与正文不出现在列表与详情里；映射失效时不建实体；恢复后实体 id 不变；3 条无映射时其余 6 行保持 fresh（`stale` 与 `degraded` 正交，H11），wire 快照不含被扣下条目的内容 node id 与种类（H12） |
 | 回放账本 | 回放未命中的请求为空，未命中不会被伪装成「离线」 |
 
+## Host 组合（#132，ADR-0014）
+
+`harness-plugin-host-providers.test.js` 以 `createHostComposition` 加生产目录 `PROVIDER_CATALOG` 组合 Host。种子经共享夹具 `fixtures/host-seed.js` 在 Host 之外用同一份 `hostStoragePolicy` 直接写库；GitHub 流量走 `replayFetch` 包装的录制回放（不触网、不需要凭据）；`dump` 只读转储全部表做逐字节比较；`fakePlanningEntry` 是只在测试里出现的 `harness.fake` 目录条目（provider-fake 不进插件的 manifest 与源码）。`fixtures/host-restart-child.mjs` 不是用例，它在子进程里组合同一个库并打印执行上下文视图。
+
+| 用例 | 保护的不变量 |
+|---|---|
+| AC1 空数据根 | 建库迁移 1–7、零工作区；没有工作区时 Core 不拿 storage，`baseline` 为空、命令结构化 `not_supported`，重启仍为零（不编造工作区） |
+| AC2 AC4 同文件重启 | I1：首次组合对身份表（含非默认状态策略的工作区、连接锚点、两个对等挂载、账号）零改写，重启只推进 `planning_sync_round` 与 `reconcile_cursor`、修订号不变；I4：每次请求带当时的凭据值，解析次数等于请求次数，`redirect: 'error'` 与超时信号逐请求存在，数据目录全部文件（含 `-wal`、`-shm`、诊断日志）不含凭据原文与 base64，同一扫描找得到库里的句柄名（阳性对照） |
+| AC3 未知实现键、域不匹配与构造抛错 | 挂载级失败只禁用该挂载并带结构化错误码，其余挂载照常；用户停用的挂载不算禁用；连接锚点与挂载表逐字节不变（I2）；构造异常原文不进禁用记录与日志 |
+| AC3 AC4 账号来源与句柄、凭据值解析不到 | 非 github.com 账号或不带凭据句柄的 github.com 账号，其规划挂载被禁用；没有凭据值时不发请求、命令结构化失败；句柄 allowlist 是宿主常量，用户环境里通用的名字进不了库 |
+| AC7 同步异常；命令拒绝与日志写不进去 | 诊断记录只含允许名单字段 `name`、`code`、`errcode`（形状不合格即丢弃），凭据、本机路径与提供方原文不进日志与 wire；command 与 query 两侧的拒绝都经 `guarded` 只露固定文案，日志写失败时也一样 |
+| AC5 AC6 新进程重启 | 子进程读回的执行上下文视图与重启前深等，实体、身份、仓库、执行上下文与谱系五张表逐字节不变；工作树在宿主数据根下、仓库检出之外，检出的 `git status` 为空 |
+| AC6 允许根落进检出（四种形状） | 数据根在检出之内时该挂载 `invalid_input`、Start Work 不就绪、检出里没有链接工作树；`repositoryPath` 取检出根或检出子目录、数据根或仓库路径经符号链接给出时守卫同样成立（I5）；只覆盖这四种形状，数据根下的 `worktrees` 或摘要分量本身是符号链接时守卫看不到，承接 #338（#132 计划 D35） |
+
+`harness-plugin-host-runtime-adapter.test.js` 经 Host 入口 `apply` 断言只有入口才能判别的事：`inject` 恰为 `typert`；宿主没有 `credentials` 服务时 Host 照常加载、往返完成、规划操作结构化失败且诊断日志记下 `CredentialServiceUnavailable`，服务出现后不重载即按句柄解析、按操作换值；卸载先排空在途调用再关闭 SQLite（I7）、只关闭一次；组合或注册失败时关闭存储且不发布。`harness-plugin-host-roundtrip.test.js` 守住输入校验先于 Controller；安装件测试的宿主半边在没有凭据服务的干净数据根上验证包内 migrations 建库迁移与零工作区。
+
 ## 约定
 
 - 每个用例使用独立的临时目录/临时数据库，测试之间不共享状态。

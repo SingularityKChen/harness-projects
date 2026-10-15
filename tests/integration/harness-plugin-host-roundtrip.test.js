@@ -5,17 +5,16 @@ import path from 'node:path'
 import { test } from 'node:test'
 
 import { newWorkspaceId } from '@harness-projects/domain'
-import { createFakeProviders } from '@harness-projects/provider-fake'
 import { createHostComposition } from '../../apps/harness-plugin/src/host-composition.ts'
 
 test('host composition rejects malformed input before the Controller and disposes once', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'harness-host-'))
   try {
-    const providers = createFakeProviders()
     const host = await createHostComposition({
       dataPath: path.join(root, 'workspace.sqlite'),
-      workspace: { id: newWorkspaceId(), name: 'Host roundtrip' },
-      providers: { ...providers, storage: undefined },
+      workspaceId: newWorkspaceId(),
+      catalog: new Map(),
+      resolveCredential: async () => undefined,
     })
     await assert.rejects(() => host.call('baseline', { extra: true }), /未知字段/)
     const polluted = Object.create({ injected: true })

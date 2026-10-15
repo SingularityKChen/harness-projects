@@ -186,7 +186,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
   }
 }
 
-function unavailableCore(reason: string): CoreApi {
+export function unavailableCore(reason: string): CoreApi {
   const error = projectError(ProjectErrorCode.NotSupported, reason)
   const queries: CoreQueries = {
     listProviderBindings: async () => [],
