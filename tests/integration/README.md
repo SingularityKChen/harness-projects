@@ -181,6 +181,21 @@
 
 `harness-plugin-host-runtime-adapter.test.js` 经 Host 入口 `apply` 断言只有入口才能判别的事：`inject` 恰为 `typert`；宿主没有 `credentials` 服务时 Host 照常加载、往返完成、规划操作结构化失败且诊断日志记下 `CredentialServiceUnavailable`，服务出现后不重载即按句柄解析、按操作换值；卸载先排空在途调用再关闭 SQLite（I7）、只关闭一次；组合或注册失败时关闭存储且不发布。`harness-plugin-host-roundtrip.test.js` 守住输入校验先于 Controller；安装件测试的宿主半边在没有凭据服务的干净数据根上验证包内 migrations 建库迁移与零工作区。
 
+## Host watch（#276）
+
+`harness-plugin-host-watch.test.js` 在真实 `createHostComposition`（`fixtures/host-seed.js` 种入工作区与一个 `harness.fake` 规划挂载，`watchIntervalMs: 5`）与真实 `installHostRemote` 服务上，经 JSON 往返的载体与 `tests/fixtures/remote-stream-double.js` 的 `RemoteStream` 替身驱动 `openWorkspaceWatch`（本机设 `HARNESS_GATEWAY_CLIENT` 指向宿主 `lib/types/client` 时换成真实类，CI 不设）。离线、无凭据，等待都有上限，清理自己也有上限，被破坏的实现只会让用例失败而不会挂住进程。
+
+| 用例 | 保护的不变量 |
+|---|---|
+| 同一句柄同一代先 baseline、规划变更后 delta | AC1 的 S2 前置与 AC3：两帧深等 controller 值的 JSON，流里没有别的东西 |
+| 载体断开的同一回调内整表 stale，重连重拉 baseline | AC2：断流那一刻断开且全部行 stale、最后已知值与时间保留；同一句柄开新一代、条目身份不变；baseline 被接受即清零重试计数 |
+| 卸载中止打开的流，SQLite 只关一次 | 卸载先中止流再排空，客户端终止并保留 stale 的最后已知值；组合关闭后 `watch` 同步拒绝，之后不再读库 |
+| Host 侧读取异常经漏斗只以固定文案终止 | 原因只进诊断日志（多一行 `operationFailed`、不含路径），非载体错误不重开 |
+| 消费者提前 return 结束内层一代 | 网关取消或提前退出不会让生成器停在下一次轮询上 |
+| 空数据根只有 r=0、无工作区的 baseline | 与 A 的空数据根兼容：`read()` 保持 `undefined`，流不终止 |
+
+客户端壳的打开与卸载在安装件测试的 e 节：假 Context 按 Cordis 4.0.4 的 fiber 语义建模（回调在微任务里运行，回调抛错时 fiber 只记日志并卸载全部 effect，`slots.inject` 的贡献随之撤回），断言 `$stream` 同步抛错时面板仍在、卸载 fiber 时流被关闭；本机设 `HARNESS_CORDIS` 指向宿主 `@deepseek-ai/cordis/lib/index.js` 时换成真实 `Context.inject`，CI 不设。
+
 ## 约定
 
 - 每个用例使用独立的临时目录/临时数据库，测试之间不共享状态。
