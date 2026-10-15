@@ -2,7 +2,7 @@
 
 > 状态：Proposed
 > 日期：2026-10-15
-> 来源：`docs/exec-plan/active/2026-10-15-host-provider-composition.md`（Decision Log D-R、D31 与 Batch 7）、issue #132、`docs/adr/ADR-0013-harness-host-composition.md`、`docs/adr/ADR-0006-connection-anchor-and-workspace-mount.md`
+> 来源：`docs/exec-plan/completed/2026-10-15-host-provider-composition.md`（Decision Log D-R、D31 与 Batch 7）、issue #132、`docs/adr/ADR-0013-harness-host-composition.md`、`docs/adr/ADR-0006-connection-anchor-and-workspace-mount.md`
 
 ## Decision
 
