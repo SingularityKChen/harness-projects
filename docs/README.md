@@ -25,6 +25,7 @@
 
 | 计划 | 范围 | 状态 |
 |---|---|---|
+| [2026-10-13-status-projection-race](exec-plan/completed/2026-10-13-status-projection-race.md) | #303 / PR #316：状态命令在一个 Storage 事务内原子读-判-写（D1）；不可见目标（缺失或 redacted）统一以不可重试的 `not_found` 拒绝且无副作用（D2）；竞态回归改为调度探索 + 串行参照预言机（D3）；已实施并经第三轮 MMP 评审与两轮修复复评（PR #316） | Completed |
 | [2026-10-15-host-provider-composition](exec-plan/completed/2026-10-15-host-provider-composition.md) | #132：Host 按实现键从已存挂载组合 provider，含 #228 转入的 S3 验收；已实施并经第一轮 MMP 评审与修复复评（PR #344） | Completed |
 | [2026-10-15-host-watch-stream](exec-plan/completed/2026-10-15-host-watch-stream.md) | #276：workspace watch 经 typed remote stream 进入 client store；断流即 stale、同句柄重拉 baseline、卸载排空；已实施并经第一轮 MMP 评审与修复复评（PR #345） | Completed |
 | [2026-10-15-harness-session-api-probe](exec-plan/completed/2026-10-15-harness-session-api-probe.md) | #280：在宿主 `0.2.0-rc.2` 上观测仓库外插件能调用哪些会话操作（启动、读状态、取消），录脱敏夹具，并按预注册规则机械给出对 #140 的结论（`implement`）；记录见 `docs/architecture/harness-session-api.md`；已在真实宿主观测并经对抗验证与独立验收（PR #343） | Completed |
