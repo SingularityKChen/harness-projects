@@ -9,7 +9,7 @@
  * 内容、头与时间，只把连接标成断开、行标成 stale。
  */
 import { WireFreshness } from '@harness-projects/controller/values'
-import type { SourceMetadata, WireEntity, WireEvent, WireGap, WireWorkspaceHeader } from '@harness-projects/controller'
+import type { SourceMetadata, WireEntity, WireEvent, WireGap, WireSnapshot, WireWorkspaceHeader } from '@harness-projects/controller'
 import { assertDeltaFrame, type EntityStore } from './store.ts'
 import type { Transport } from './transport.ts'
 import { assertHeader, readClock, type ClientWorkspaceRead } from './workspace-read.ts'
@@ -36,6 +36,11 @@ export interface WorkspaceSync {
   poll(): Promise<SyncReport>
   /** 关闭传输并标记断开；保留最后已知的内容、头与时间。 */
   disconnect(): void
+  /**
+   * 推模式（#276）：接受宿主流的一帧。baseline / delta / metadata 走与 poll 相同的接受点，拒绝时抛错且状态不变；
+   * gap（含越过本地修订的 delta）只整体标 stale、调 onGap 并回报 `kind: 'gap'`，由流的消费者重开下一代。
+   */
+  receive(frame: unknown): SyncReport
   /** 展示层的唯一输入；首个已确认的工作区 descriptor 之前是 undefined。 */
   read(): ClientWorkspaceRead | undefined
 }
@@ -125,8 +130,7 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
     }
   }
 
-  const baseline = async (): Promise<SyncReport> => {
-    const snapshot = await transport.fetchBaseline()
+  const acceptBaseline = (snapshot: WireSnapshot): SyncReport => {
     let nextGeneration: number | undefined
     try {
       nextGeneration = validateFrame(snapshot, true)
@@ -140,11 +144,13 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
     return { kind: 'baseline', revision: snapshot.revision, reason: undefined }
   }
 
-  const recover = async (gap: WireGap): Promise<SyncReport> => {
+  const baseline = async (): Promise<SyncReport> => acceptBaseline(await transport.fetchBaseline())
+
+  /** 缺口已检测：整表 stale 并调 onGap；拉模式的 poll 随后重拉基线，推模式由流的消费者重开下一代。 */
+  const markGap = (gap: WireGap): SyncReport => {
     store.markAllStale()
     options.onGap?.(gap, store)
-    const report = await baseline()
-    return { kind: 'gap', revision: report.revision, reason: gap.reason }
+    return { kind: 'gap', revision: store.revision, reason: gap.reason }
   }
 
   const reconnect = (): Promise<SyncReport> => guarded(async () => {
@@ -153,7 +159,7 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
     return baseline()
   })
 
-  return {
+  const sync: WorkspaceSync = {
     get revision(): number {
       return store.revision
     },
@@ -166,12 +172,17 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       if (!connected) return baseline()
       const event = await transport.poll(store.revision)
       if (event === undefined) return { kind: 'idle', revision: store.revision, reason: undefined }
+      const report = sync.receive(event)
+      return report.kind === 'gap' ? { ...report, revision: (await baseline()).revision } : report
+    }),
+    receive(event: unknown): SyncReport {
+      if (isRecord(event) && event.kind === 'baseline') return acceptBaseline(event.baseline as WireSnapshot)
       try {
         assertEventShape(event)
       } catch (error) {
         throw new FrameRejectedError(error instanceof Error ? error.message : 'event 不合契约')
       }
-      if (event.kind === 'gap') return recover(event.gap)
+      if (event.kind === 'gap') return markGap(event.gap)
       if (event.kind === 'metadata') {
         const { metadata } = event
         const improved = recovered(head?.source, metadata.source)
@@ -191,7 +202,7 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
         } catch (error) {
           throw new FrameRejectedError(error instanceof Error ? error.message : '帧拒绝')
         }
-        return recover({
+        return markGap({
           requestedAfter: store.revision,
           currentRevision: delta.revision,
           reason: `增量从修订 ${delta.previousRevision} 起，本地停在 ${store.revision}`,
@@ -199,7 +210,7 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       }
       accept(delta, () => store.applyDelta(delta), confirms(delta.source, delta.upserts))
       return { kind: 'delta', revision: store.revision, reason: undefined }
-    }),
+    },
     disconnect(): void {
       transport.close()
       lose()
@@ -213,4 +224,5 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       }
     },
   }
+  return sync
 }

@@ -34,6 +34,7 @@ test('真实 client factory 入口：浏览器构建触达并可执行 store/syn
   assert.ok(inputs.some((file) => file.endsWith('packages/client/src/sync.ts')))
   assert.ok(inputs.some((file) => file.endsWith('packages/client/src/transport.ts')))
   assert.ok(inputs.some((file) => file.endsWith('packages/client/src/workspace-read.ts')))
+  assert.ok(inputs.some((file) => file.endsWith('packages/client/src/stream.ts')))
   assert.ok(inputs.some((file) => file.endsWith('packages/controller/src/values.ts')))
   assert.ok(!inputs.some((file) => /packages\/(core|storage|providers)\//.test(file)))
   assert.ok(!inputs.some((file) => /packages\/controller\/src\/(index|wire|commands|queries|watch)\.ts/.test(file)))

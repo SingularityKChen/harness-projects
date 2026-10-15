@@ -86,3 +86,37 @@ export function watchWorkspace(source: WatchSource, options: WatchOptions): Work
     },
   }
 }
+
+/** 宿主流的一帧（#276）：每一代恰好一个开场 baseline，之后是 delta / metadata；gap 之后本代结束。 */
+export type WireStreamFrame = { readonly kind: 'baseline'; readonly baseline: WireSnapshot } | WireEvent
+
+export interface StreamOptions {
+  /** 本代的生命周期：中止后不再读、不再产出。 */
+  readonly signal: AbortSignal
+  readonly intervalMs: number
+  /** 可中止的等待（中止时提前 resolve）；缺省 setTimeout，测试注入手动节拍。 */
+  readonly wait?: (ms: number, signal: AbortSignal) => Promise<void>
+}
+
+const abortableDelay = (ms: number, signal: AbortSignal): Promise<void> => new Promise((resolve) => {
+  const done = (): void => { clearTimeout(timer); signal.removeEventListener('abort', done); resolve() }
+  const timer = setTimeout(done, ms)
+  signal.addEventListener('abort', done, { once: true })
+})
+
+/** 一代宿主流：先读一次基线并产出，再以它为 seed 按间隔 poll。保留窗口不设上限（ExecPlan D4）。 */
+export async function* streamWorkspace(source: WatchSource, options: StreamOptions): AsyncGenerator<WireStreamFrame, void> {
+  const { signal, wait = abortableDelay } = options
+  if (signal.aborted) return
+  const baseline = await source.baseline()
+  yield { kind: 'baseline', baseline }
+  const watch = watchWorkspace(source, { afterRevision: baseline.revision, seed: baseline, retain: Number.POSITIVE_INFINITY })
+  while (!signal.aborted) {
+    await wait(options.intervalMs, signal)
+    if (signal.aborted) return
+    const event = await watch.poll()
+    if (event === undefined) continue
+    yield event
+    if (event.kind === 'gap') return
+  }
+}
