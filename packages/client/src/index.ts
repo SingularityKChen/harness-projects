@@ -8,4 +8,5 @@ export const packageId = '@harness-projects/client' as const
 export * from './store.ts'
 export * from './transport.ts'
 export * from './sync.ts'
+export * from './stream.ts'
 export type { ClientWorkspaceRead } from './workspace-read.ts'
