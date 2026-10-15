@@ -7,6 +7,7 @@
 import { HARNESS_PANEL_TITLE, PlaceholderIcon, PlaceholderPanel } from '@harness-projects/ui'
 import type { ClientContext } from './host-surface.ts'
 import { CLIENT_REMOTE } from './remote.ts'
+import { openWorkspaceWatch } from './workspace-watch.ts'
 
 const PANEL_ID = 'harness-projects'
 
@@ -26,5 +27,14 @@ export async function apply(ctx: ClientContext): Promise<void> {
       PlaceholderIcon,
       ),
     )
+    // 面板贡献是本 fiber 的 effect，回调抛错时 Cordis 卸载 fiber 会连带撤回面板：watch 的同步打开失败（如宿主没有 $stream）就地捕获
+    let workspace: ReturnType<typeof openWorkspaceWatch>
+    try {
+      workspace = openWorkspaceWatch(child)
+    } catch (error) {
+      console.error('[harness-projects] watch open failed', error)
+      return
+    }
+    child.effect(() => () => workspace.close(), 'harness-projects: workspace watch')
   })
 }

@@ -336,27 +336,70 @@ describe('Harness 插件安装件契约', () => {
     let injectedNames
     let contextNames
     let logs
+    let watched
+
+    /**
+     * `ctx.inject` 的 fiber 按 Cordis 4.0.4 建模（`Fiber._reload` / `_unload`）：回调在微任务里运行，期间登记的 effect 都属于这个
+     * fiber；回调抛错时 fiber 只记日志（`apply` 不 reject），把 epoch 置 INACTIVE 并执行全部 disposer。`slots.inject` 的贡献是调用方
+     * fiber 的 effect（dsh-client-ui-renderer 0.2.0-rc.2 `slots.inject`），随之撤回。卸载时每个 disposer 的异常各自捕获并记日志、
+     * 不让卸载 reject（`_unload`）。`seen.fiberErrors` 是 fiber 记下的全部异常。`HARNESS_CORDIS` 指向宿主
+     * `@deepseek-ai/cordis/lib/index.js` 时改用真实 `Context.inject` 交叉核对，异常取自 Cordis logger 的缓冲区（TD-060，CI 不设）。
+     * 返回卸载函数。
+     */
+    async function openFiber(callback, seen) {
+      if (process.env.HARNESS_CORDIS) {
+        const { Context } = await import(pathToFileURL(process.env.HARNESS_CORDIS).href)
+        const root = new Context()
+        const fiber = root.inject([], callback)
+        Object.defineProperty(seen, 'fiberErrors', { get: () => root.logger.buffer.filter((message) => message.type === 'error').map((message) => message.args[0]) })
+        seen.settled = fiber.await().catch(() => undefined)
+        return () => fiber.dispose()
+      }
+      const disposers = []
+      const unload = () => Promise.all(disposers.splice(0).map(async (dispose) => {
+        try { await dispose() } catch (error) { seen.fiberErrors.push(error) }
+      }))
+      const fiberCtx = { effect: (execute) => { const dispose = execute(); disposers.push(dispose); return dispose } }
+      seen.settled = Promise.resolve().then(() => callback(fiberCtx)).catch((error) => { seen.fiberErrors.push(error); return unload() })
+      return unload
+    }
 
     /** 宿主 0.2.0-rc.2 的 unary 调用返回 RemoteResult：Host / 载体失败 resolve 成 `{ ok: false, error }`，不 reject。 */
-    async function applyClient(baseline) {
-      const seen = { registrations: [], injectedNames: [], contextNames: [], logs: [] }
+    async function applyClient(baseline, streamError) {
+      const seen = { registrations: [], live: new Set(), injectedNames: [], contextNames: [], logs: [], streams: [], fiberErrors: [] }
       const record = (level) => (...args) => seen.logs.push([level, ...args])
       const { exported } = await evaluateClientBundle(path.join(packageDir, 'lib/client.js'), { info: record('info'), error: record('error') })
       const exposed = new Set([...exported.inject])
-      const slots = {
-        inject(name, callback) {
-          seen.injectedNames.push(name)
-          callback()
+      const child = (fiberCtx) => ({
+        remote: {
+          $stream(options) { // 桩流：不交付任何项（next 永不结算），只记 options 与 dispose 次数
+            if (streamError) throw streamError
+            const stream = { options, disposed: 0, dispose: async () => { stream.disposed += 1 }, [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }) }
+            seen.streams.push(stream)
+            return stream
+          },
+          harnessProjects: { baseline: async () => baseline, watch: (signal) => signal }, // 原样返回 signal，供断言 open 转交的是同一个
         },
-        register(options, component) {
-          seen.registrations.push({ options: { ...options }, component })
+        effect: (execute, label) => fiberCtx.effect(execute, label),
+        slots: {
+          inject(name, callback) {
+            seen.injectedNames.push(name)
+            fiberCtx.effect(callback, `slots.inject(${name})`)
+          },
+          register(options, component) {
+            seen.registrations.push({ options: { ...options }, component })
+            const key = `${options.name}:${options.key ?? options.id}`
+            seen.live.add(key)
+            return () => seen.live.delete(key)
+          },
         },
-      }
+      })
+      let unload
       const root = {
         remote: { $mount: async () => async () => {} },
         inject(names, callback) {
           seen.contextNames.push(...names)
-          callback({ remote: { harnessProjects: { baseline: async () => baseline } }, slots })
+          unload = openFiber((fiberCtx) => callback(child(fiberCtx)), seen)
         },
       }
       // 复刻 M17：根 Context 只暴露模块级 `inject` 声明过的服务，读别的属性就抛错。
@@ -371,12 +414,14 @@ describe('Harness 插件安装件契约', () => {
         },
       )
       await exported.apply(ctx)
+      seen.unload = await unload
+      await seen.settled
       await new Promise((resolve) => setImmediate(resolve))
       return seen
     }
 
     before(async () => {
-      ({ registrations, injectedNames, contextNames, logs } = await applyClient({ ok: true, value: { entities: [] } }))
+      ({ registrations, injectedNames, contextNames, logs, ...watched } = await applyClient({ ok: true, value: { entities: [] } }))
     })
 
     it('slots.inject 的名字恰好是 main 与 sidebar.panellist', () => {
@@ -389,6 +434,23 @@ describe('Harness 插件安装件契约', () => {
       assert.deepEqual(logs.map(([level, line]) => [level, line]), [['info', '[harness-projects] baseline received']])
       const error = { code: 'gateway/invocation-unavailable' }
       assert.deepEqual((await applyClient({ ok: false, error })).logs, [['error', '[harness-projects] baseline failed', error]])
+    })
+
+    it('客户端经 $stream 打开 watch 一次，open 转交同一个 signal，卸载 effect 关闭它', async () => {
+      const { streams } = watched
+      const signal = new AbortController().signal
+      assert.equal(streams[0].options.open(signal), signal)
+      await watched.unload()
+      assert.deepEqual([streams.length, streams[0].disposed, watched.live.size], [1, 1, 0])
+    })
+
+    it('$stream 同步抛错也不丢面板：异常在注入回调内捕获并记日志，fiber 不卸载', async () => {
+      const boom = new Error('boom')
+      const seen = await applyClient({ ok: true, value: { entities: [] } }, boom)
+      assert.deepEqual([...seen.live].sort(), ['main:harness-projects', 'sidebar.panellist:harness-projects'])
+      assert.deepEqual([seen.fiberErrors, seen.logs.filter(([level]) => level === 'error')], [[], [['error', '[harness-projects] watch open failed', boom]]])
+      await seen.unload() // 没有登记 watch effect：卸载只撤回面板，不调用一个不存在的 close
+      assert.deepEqual([seen.live.size, seen.fiberErrors.length, seen.logs.filter(([level]) => level === 'error').length], [0, 0, 1])
     })
 
     it('main 注册的选项是 { name, key }，key 为 harness-projects', () => {

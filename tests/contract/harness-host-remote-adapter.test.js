@@ -29,12 +29,14 @@ function recordingContext() {
   return { ctx, services, registrations, events }
 }
 
-test('typed remote contribution exposes the same strict unary descriptors on Host and Client', () => {
+test('typed remote contribution exposes the same strict descriptors (two unary, one stream) on Host and Client', () => {
   assert.deepEqual([REMOTE_PACKAGE, HOST_REMOTE.package, HOST_REMOTE.face], ['@harness-projects/app-harness-plugin', '@harness-projects/app-harness-plugin', 'host'])
   assert.deepEqual(CLIENT_REMOTE, { package: REMOTE_PACKAGE, descriptors: HOST_REMOTE.invocations })
   assert.deepEqual(HOST_REMOTE.invocations.map(({ namespace, method }) => `${namespace}/${method}`), [
-    `${REMOTE_NAMESPACE}/baseline`, `${REMOTE_NAMESPACE}/bootstrapWorkspace`,
+    `${REMOTE_NAMESPACE}/baseline`, `${REMOTE_NAMESPACE}/bootstrapWorkspace`, `${REMOTE_NAMESPACE}/watch`,
   ])
+  assert.deepEqual(HOST_REMOTE.invocations.map(({ mode, cancellation, parameters }) => [mode, cancellation, parameters.length]),
+    [[undefined, undefined, 0], [undefined, undefined, 2], ['stream', { parameter: 'signal' }, 0]], 'unary 没有 mode；watch 是带 signal 取消、无业务参数的 stream')
   // Host 网关对 strict 结果只调 `encode`（参数才走 `create().parse`）：非 JSON 值必须在边界报错，而不是被序列化静默降级。
   const nonJson = [JSON.parse('{"__proto__":{"injected":true}}'), new Date(0), { at: new Map() }, [undefined], Number.NaN]
   for (const descriptor of HOST_REMOTE.invocations) {
@@ -90,4 +92,29 @@ test('host adapter drains an in-flight call before the provider service disposer
   await call
   await dispose
   assert.deepEqual([disposed, events], [true, ['remote-dispose', 'provide-dispose-start', 'provide-dispose-end']])
+})
+
+test('host adapter strictly JSON-encodes every watch frame, aborts and drains an open watch before withdrawing the service', async () => {
+  let aborted
+  const composition = {
+    call: async () => undefined,
+    watch: async function* (signal) {
+      yield { kind: 'delta', delta: { skipped: undefined, n: 1 } }
+      if (!signal.aborted) await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
+      aborted = signal.aborted
+      yield { kind: 'delta', delta: { n: Number.NaN } } // 卸载中途的坏帧：仍在边界报错，出错路径也把在途计数归零
+    },
+  }
+  const { ctx, events } = recordingContext()
+  const installed = await installHostRemote(ctx, composition)
+  const frames = installed.service.watch(new AbortController().signal)
+  const first = (await frames.next()).value
+  assert.deepEqual([first.kind, Object.entries(first.delta)], ['delta', [['n', 1]]], 'undefined 键在进程内就被删掉，与线缆形状一致')
+  const pulling = frames.next()
+  const timeout = new Promise((resolve) => setTimeout(resolve, 1000, 'timeout').unref())
+  assert.notEqual(await Promise.race([installed.dispose().then(() => 'disposed'), timeout]), 'timeout', '卸载必须先中止打开的流再排空')
+  await assert.rejects(pulling, /可传输/)
+  assert.equal(aborted, true, '组合收到的是被中止的 signal')
+  assert.deepEqual(events, ['remote-dispose', 'provide-dispose-start', 'provide-dispose-end'])
+  await assert.rejects(() => installed.service.watch(new AbortController().signal).next(), /已卸载/)
 })

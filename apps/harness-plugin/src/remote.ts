@@ -2,8 +2,8 @@
  * Harness Host/Client typed-remote seam.
  *
  * The descriptor is intentionally hand-written: #228 only needs two unary
- * JSON methods and the repository does not ship the Typert generator. Host
- * and Client must mount the exact same descriptor objects.
+ * JSON methods, #276 one stream, and the repository does not ship the Typert
+ * generator. Host and Client must mount the exact same descriptor objects.
  */
 
 export const REMOTE_PACKAGE = '@harness-projects/app-harness-plugin' as const
@@ -24,7 +24,10 @@ export interface InvocationDescriptor {
   readonly service: string
   readonly namespace: string
   readonly method: string
+  /** 缺省 = unary；`stream` 时 Host 把调用的 signal 追加为方法的最后一个参数（`cancellation`）。 */
+  readonly mode?: 'stream'
   readonly invocation: { readonly kind: 'direct' }
+  readonly cancellation?: { readonly parameter: 'signal' }
   readonly parameters: readonly {
     readonly name: string
     readonly wire: string
@@ -49,6 +52,8 @@ export interface ClientRemoteContribution {
 
 export interface HostCompositionCall {
   call(name: 'baseline' | 'bootstrapWorkspace', input: unknown): Promise<unknown>
+  /** 宿主流的帧序列；remote.ts 只透传并逐帧 JSON 化，不认识帧的类型（不 import controller）。 */
+  watch(signal: AbortSignal): AsyncIterable<unknown>
 }
 
 export interface HostRemoteContext {
@@ -140,7 +145,20 @@ const bootstrapDescriptor: InvocationDescriptor = {
   result: jsonOutput,
 }
 
-const descriptors = Object.freeze([baselineDescriptor, bootstrapDescriptor])
+const watchDescriptor: InvocationDescriptor = {
+  id: `${REMOTE_PACKAGE}#${REMOTE_NAMESPACE}/watch`,
+  service: REMOTE_SERVICE,
+  namespace: REMOTE_NAMESPACE,
+  method: 'watch',
+  mode: 'stream',
+  invocation: { kind: 'direct' },
+  parameters: [],
+  cancellation: { parameter: 'signal' },
+  result: jsonOutput,
+}
+
+/** `watch` 追加在末尾：`invocations[0]` 仍是 `baseline`。 */
+const descriptors = Object.freeze([baselineDescriptor, bootstrapDescriptor, watchDescriptor])
 
 export const HOST_REMOTE: HostRemoteContribution = Object.freeze({
   package: REMOTE_PACKAGE,
@@ -156,7 +174,11 @@ export const CLIENT_REMOTE: ClientRemoteContribution = Object.freeze({
 })
 
 export interface InstalledHostRemote {
-  readonly service: { baseline(): Promise<unknown>; bootstrapWorkspace(actor: unknown, idempotencyKey: unknown): Promise<unknown> }
+  readonly service: {
+    baseline(): Promise<unknown>
+    bootstrapWorkspace(actor: unknown, idempotencyKey: unknown): Promise<unknown>
+    watch(signal: AbortSignal): AsyncGenerator<unknown, void>
+  }
   dispose(): Promise<void>
 }
 
@@ -167,6 +189,7 @@ export async function installHostRemote(ctx: HostRemoteContext, composition: Hos
   let disposed = false
   let disposal: Promise<void> | undefined
   let activeCalls = 0
+  const lifetime = new AbortController() // 卸载时先中止所有打开的流，再等它们的 finally 把在途计数归零
   let drainResolve: (() => void) | undefined
   const drained = new Promise<void>((resolve) => { drainResolve = resolve })
   const beginCall = (): void => {
@@ -193,6 +216,13 @@ export async function installHostRemote(ctx: HostRemoteContext, composition: Hos
         return await composition.call('bootstrapWorkspace', { actorRef: normalizedActor, idempotencyKey: normalizedKey })
       } finally { endCall() }
     },
+    // beginCall 在生成器体内：网关在第一次 next() 之前取消时计数不会泄漏。toJson 是流上唯一的严格编码点（网关不编码流项）。
+    async *watch(signal: AbortSignal) {
+      beginCall()
+      try {
+        for await (const frame of composition.watch(AbortSignal.any([signal, lifetime.signal]))) yield toJson(frame)
+      } finally { endCall() }
+    },
   }
   service.typertRemote = Object.freeze({ service, serviceKey: REMOTE_SERVICE, namespace: REMOTE_NAMESPACE })
 
@@ -208,6 +238,7 @@ export async function installHostRemote(ctx: HostRemoteContext, composition: Hos
     service,
     dispose: () => disposal ??= (async () => {
       disposed = true
+      lifetime.abort()
       if (activeCalls > 0) await drained
       try { await unregisterRemote?.() } finally { await provideDispose?.() }
     })(),
