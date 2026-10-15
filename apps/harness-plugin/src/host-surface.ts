@@ -5,6 +5,8 @@
  * 组件写成 `(...args: never[]) => unknown`，任何函数组件都可赋值。
  */
 
+import type { GenerationStream } from '@harness-projects/client'
+
 export type SlotComponent = (...args: never[]) => unknown
 
 export interface MainSlotOptions {
@@ -32,6 +34,16 @@ export type RemoteResult<T> = { readonly ok: true; readonly value: T } | { reado
 export interface RemoteNamespace {
   baseline(): Promise<RemoteResult<unknown>>
   bootstrapWorkspace(actorRef: unknown, idempotencyKey: string): Promise<RemoteResult<unknown>>
+  /** stream 描述符：同步返回宿主流，项原样交付（网关不 decode 流项）。 */
+  watch(signal: AbortSignal): AsyncIterable<unknown>
+}
+
+/** 宿主 `remote.$stream` 的选项（0.2.0-rc.2）：只写本壳用到的成员。 */
+export interface RemoteStreamOptions {
+  readonly name: string
+  open(signal: AbortSignal): AsyncIterable<unknown>
+  ended(accepted: boolean): Error
+  carrierFailed?(error: Error): void
 }
 
 export interface ClientRemote {
@@ -39,8 +51,10 @@ export interface ClientRemote {
 }
 
 export interface ClientInjectedContext {
-  readonly remote: { readonly harnessProjects: RemoteNamespace }
+  readonly remote: { readonly harnessProjects: RemoteNamespace; $stream(options: RemoteStreamOptions): GenerationStream }
   readonly slots: SlotsService
+  /** Cordis Context 方法：fiber 卸载时执行 `execute()` 返回的 disposer。 */
+  effect(execute: () => () => unknown, label?: string): unknown
 }
 
 /** 根 Context 只读 `remote`；namespace 与 slots 只能在注入子 Context 里读取。 */

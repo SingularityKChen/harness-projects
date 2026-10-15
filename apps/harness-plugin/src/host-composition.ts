@@ -1,7 +1,7 @@
 import { mkdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { composeCore, unavailableCore, type CoreApi } from '@harness-projects/core'
-import { createController, type Controller } from '@harness-projects/controller'
+import { createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
 import { createSqliteStorage, type SqliteStorage } from '@harness-projects/storage-sqlite'
 import type { CommandEnvelope } from '@harness-projects/controller'
 import type { WorkspaceId } from '@harness-projects/domain'
@@ -20,12 +20,16 @@ export interface HostCompositionOptions {
   readonly migrationsDir?: string
   /** 缺省为调用时才读取的 `globalThis.fetch`（测试可替换）。 */
   readonly fetch?: (url: string, init: RequestInit) => Promise<Response>
+  /** watch 流两次 poll 之间的间隔（毫秒），缺省 1000；测试传 5。 */
+  readonly watchIntervalMs?: number
 }
 export interface HostComposition {
   readonly controller: Controller
   /** 运行期无法构造而被禁用的挂载；只在内存，不写库。 */
   readonly disabled: readonly DisabledBinding[]
   call(name: 'baseline' | 'bootstrapWorkspace', input: unknown): Promise<unknown>
+  /** 一代宿主流（#276）：每次 `next()` 都经 `guarded`；`signal` 中止即正常结束。 */
+  watch(signal: AbortSignal): AsyncIterable<WireStreamFrame>
   dispose(): void
 }
 type Handler = (input: unknown) => Promise<unknown>
@@ -88,6 +92,11 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       controller,
       disabled,
       call: async (name, input) => { if (closed) throw new Error('host 已关闭'); return handlers[name](input) },
+      watch: (signal) => {
+        if (closed) throw new Error('host 已关闭')
+        const frames = streamWorkspace(controller, { signal, intervalMs: options.watchIntervalMs ?? 1000 })
+        return { [Symbol.asyncIterator]: () => ({ next: () => guarded(() => frames.next()), return: () => frames.return() }) }
+      },
       dispose: () => { if (closed) return; closed = true; storage?.close() },
     }
   } catch (error) { storage?.close(); throw error }
