@@ -74,6 +74,9 @@ importers:
 
   apps/harness-plugin:
     dependencies:
+      '@harness-projects/capabilities':
+        specifier: workspace:*
+        version: link:../../packages/capabilities
       '@harness-projects/client':
         specifier: workspace:*
         version: link:../../packages/client
@@ -86,6 +89,12 @@ importers:
       '@harness-projects/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@harness-projects/provider-development-local-git':
+        specifier: workspace:*
+        version: link:../../packages/providers/development-local-git
+      '@harness-projects/provider-planning-github-projects':
+        specifier: workspace:*
+        version: link:../../packages/providers/planning-github-projects
       '@harness-projects/storage-sqlite':
         specifier: workspace:*
         version: link:../../packages/storage/sqlite
