@@ -8,20 +8,19 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { StatusPolicy, WriteState, newWorkspaceId } from '@harness-projects/domain'
-import { StatusPolicyMode, WritePhase, composeCore } from '@harness-projects/core'
+import { RedactionReason, StatusPolicy, WriteState, newWorkspaceId } from '@harness-projects/domain'
+import { POLICY_BY_MODE, StatusPolicyMode, WritePhase, composeCore } from '@harness-projects/core'
 import { CommandWriteState, createController, isAuthoritativeWriteState } from '@harness-projects/controller'
-import { FaultKind, createFakeProviders, exportFakeStorageState } from '@harness-projects/provider-fake'
+import { FaultKind, createFakeProviders, exportFakeStorageState, removeItem } from '@harness-projects/provider-fake'
 
 const REPOSITORY = 'repo-alpha'
 
 async function compose(mode = StatusPolicyMode.HarnessManaged) {
   const providers = createFakeProviders()
   const policy = mode === StatusPolicyMode.SourceManaged ? StatusPolicy.ProviderAuthoritative : StatusPolicy.HostAuthoritative
-  const core = await composeCore({
-    workspace: { id: newWorkspaceId(), name: 'MVP-0', statusPolicy: policy }, providers,
-  })
-  return { core, controller: createController(core, { authority: mode }) }
+  const workspace = { id: newWorkspaceId(), name: 'MVP-0', statusPolicy: policy }
+  const core = await composeCore({ workspace, providers })
+  return { core, controller: createController(core, { authority: mode }), providers, workspaceId: workspace.id }
 }
 
 const openWorkItems = (snapshot) =>
@@ -351,6 +350,46 @@ test('命令：provider 权威拒绝显式写入，宿主权威写入报 local_o
     assert.equal(result.writeState, expected, `${mode} 下的显式状态写入`)
     assert.notEqual(result.writeState, 'saved')
     assert.equal(result.authoritative, false, '本地规划写入没有 provider ack，不得报告为权威')
+  }
+})
+
+test('命令：不可见目标（缺失与四种 redacted 原因）在两种策略下统一以不可重试的 not_found 拒绝，结果不随原因变化且无写入（#303）', async () => {
+  const invisible = '规划条目不存在或对当前凭据不可见，不写入状态'
+  for (const mode of [StatusPolicyMode.HarnessManaged, StatusPolicyMode.SourceManaged]) {
+    const { core, controller, providers, workspaceId } = await compose(mode)
+    const target = openWorkItem(await controller.baseline())
+    const providerItem = providers.planning.state.items.find((item) => item.content.kind === 'work_item' && item.content.workItem.externalId === target.content.externalId)
+    assert.ok(providerItem, `${mode}：应找到与投影对应的 provider 条目`)
+    const row = () => providers.storage.getPlanningProjection(workspaceId, target.entityId)
+    const rejected = async (label, content) => {
+      assert.equal((await core.commands.bootstrapWorkspace()).ok, true, `${label}：同步必须提交`)
+      const before = await row()
+      assert.deepEqual(before?.content, content, `${label}：前置条件必须是已提交的目标投影状态`)
+      const revision = await providers.storage.currentRevision(workspaceId)
+      const result = await writeStatus(controller, target, 'done', `invisible-${label}`)
+      assert.deepEqual(await writeStatus(controller, target, 'done', `invisible-${label}-resent`), result, `${label}：换幂等键重发结果不变`)
+      assert.equal(await providers.storage.currentRevision(workspaceId), revision, `${label}：拒绝不得推进工作区 revision`)
+      assert.deepEqual(await row(), before, `${label}：拒绝不得改行`)
+      return { label, result }
+    }
+    const cases = []
+    for (const reason of Object.values(RedactionReason)) {
+      providerItem.content = { kind: 'redacted', reason }
+      cases.push(await rejected(`${mode}/redacted/${reason}`, { contentKind: 'redacted', reason }))
+    }
+    removeItem(providers.planning.state, providerItem.ref)
+    cases.push(await rejected(`${mode}/missing`, undefined))
+
+    for (const { label, result } of cases) {
+      assert.equal(result.writeState, CommandWriteState.Failed, `${label}：拒绝是失败，不是 local_only`)
+      assert.deepEqual([result.error.code, result.error.recovery, result.error.retryable], ['not_found', 'open_provider', false], `${label}：不可见不是瞬时故障，不得宣称可原样重发；可见性先于策略`)
+      assert.deepEqual([result.value.wrote, result.value.status, result.value.derived], [false, 'unknown', []], `${label}：不写入，也不透出被拒绝的状态`)
+      assert.deepEqual([result.value.policy, result.value.mode], [POLICY_BY_MODE[mode], mode], `${label}：决策如实报告工作区策略`)
+      assert.deepEqual([result.value.reason, result.error.message], [invisible, invisible], `${label}：reason 与错误文案共用固定文案`)
+    }
+    for (const { label, result } of cases.slice(1)) {
+      assert.deepEqual(result, cases[0].result, `${label}：整个 CommandResult（含 value.reason）必须与 ${cases[0].label} 深相等，不得透出撤权或删除的区别`)
+    }
   }
 })
 
