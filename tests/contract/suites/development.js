@@ -15,7 +15,7 @@
  * 快照**不得**声明该能力可用——跳过会让子集 provider 的假绿变得不可见。工作树移除是破坏性能力，由
  * `development.worktree.remove` 单独声明：未声明时不要求 provider 实现它。
  *
- * 本套件只建模**能力声明**（键可用 / 不可用），不建模 `permission` 与 `degraded`：凭据权限不足时写调用答
+ * 本套件只建模**能力声明**（键可用 / 不可用；`declares()` 只读快照的 `capability`），不建模 `permission` 与 `degraded`：凭据权限不足时写调用答
  * `permission_denied`（core 的 `gateCommand` 把 `read_only` 翻成它）是另一种形态，不在判定范围内。可选
  * 方法各按 `METHOD_KEY` 里**自己的** key 判定（同族读 / 写是独立键，「能建不能读」也是合法形态；预检与创建同键，
  * 且预检返回的目标必须被 createWorktree 原样接受）；`expect.worktreeBranch` /
@@ -86,9 +86,10 @@ function implemented(provider, method) {
 
 /** 某个可选方法是否被声明为可用。**逐方法取键**：`change_request.read` 可用而 `change_request.create`
  *  未声明（只能读、不能建的能力子集）是合法形态，用 read 当 create 的门会让这个形态过不了套件——那正是
- *  本套件要支持的那类「诚实地声明更小能力子集」的 provider。 */
+ *  本套件要支持的那类「诚实地声明更小能力子集」的 provider。声明只看 `capability`：`permission` 降级（如凭据暂时
+ *  失效、离线探针失败）的 provider 仍声明该能力，调用应得到真实结果或结构化失败，而不是 `not_supported`。 */
 async function declares(provider, method) {
-  return accessOf(await provider.describeCapabilities(), METHOD_KEY[method]) === 'available'
+  return (await provider.describeCapabilities()).capability[METHOD_KEY[method]] === 'available'
 }
 
 /** 已知写入后的 freshness 判别：调用前快照与重新读取不同，拒绝「每次返回同一份恒定假快照」。 */
