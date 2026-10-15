@@ -25,6 +25,7 @@
 
 | 计划 | 范围 | 状态 |
 |---|---|---|
+| [2026-10-15-host-provider-composition](exec-plan/active/2026-10-15-host-provider-composition.md) | #132：Host 按实现键从已存挂载组合 provider，含 #228 转入的 S3 验收 | Active |
 | [2026-10-15-harness-session-api-probe](exec-plan/completed/2026-10-15-harness-session-api-probe.md) | #280：在宿主 `0.2.0-rc.2` 上观测仓库外插件能调用哪些会话操作（启动、读状态、取消），录脱敏夹具，并按预注册规则机械给出对 #140 的结论（`implement`）；记录见 `docs/architecture/harness-session-api.md`；已在真实宿主观测并经对抗验证与独立验收（PR #343） | Completed |
 | [2026-10-13-harness-host-composition](exec-plan/completed/2026-10-13-harness-host-composition.md) | #228：Harness host 组合 Core/Controller/SQLite、strict typed remote、迁移打包、凭据句柄与卸载生命周期；验收 1、2 经人类批准转入 #132 联合验收；已实施并经第一轮 MMP 评审与两轮修复复评（PR #329） | Completed |
 | [2026-10-13-worktree-root-outside-checkout](exec-plan/completed/2026-10-13-worktree-root-outside-checkout.md) | #214：默认 worktree 落点移出独立检出、嵌套与 bare 仓库默认 fail closed、取消 info/exclude 补偿、旧默认工作树的手工移除说明；已实施并经第二轮 MMP 评审与两轮修复复评（PR #328） | Completed |
