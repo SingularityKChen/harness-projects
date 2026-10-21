@@ -64,6 +64,28 @@ const CLIENT_BASELINE = [
   '@deepseek-ai/dsh-client-ui-dockkit',
 ]
 
+/** 记录型 `createElement`：把调用还原成 `{ type, props, children }` 节点。 */
+const recordingReact = { createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }) }
+// 真实 React 取自 ui 包的解析位置（bundle 内的 `require('react')` 与渲染器必须是同一个实例）。
+const uiRequire = createRequire(path.join(repoRoot, 'packages/ui/package.json'))
+const realReact = uiRequire('react')
+const { renderToStaticMarkup } = uiRequire('react-dom/server')
+
+/** 一个合法的开场 baseline 帧：一个工作区、一条可见条目、读取能力可用。 */
+const BASELINE_FRAME = {
+  kind: 'baseline',
+  baseline: {
+    workspace: { id: 'workspace-1', name: 'Artifact workspace' },
+    capabilities: [{ key: 'planning.item.read', access: 'available' }],
+    source: { revision: 1, freshness: 'fresh', authority: 'provider', reason: undefined },
+    revision: 1,
+    entities: [{
+      entityId: 'entity-1', kind: 'work_item', planningStatus: 'todo', derived: [], source: { revision: 1, freshness: 'fresh', authority: 'provider', reason: undefined },
+      content: { contentKind: 'work_item', title: 'Artifact item', body: 'body', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1' },
+    }],
+  },
+}
+
 const PANEL_ID = 'harness-projects'
 const PANEL_TITLE = 'Harness Projects'
 const HOST_READY_LINE = '[harness-projects] host ready'
@@ -91,18 +113,16 @@ function unwrapExports(exports) {
 }
 
 /**
- * 在 `node:vm` 里执行 client bundle，模拟宿主浏览器的 `window.__ModuleLoader__.load`。
- * `require` 只回答基线键：`react` 返回记录型 `createElement`，其余基线键返回空对象，
- * 非基线一律抛出与宿主同形的错误。
+ * 在 `node:vm` 里执行 client bundle，模拟宿主浏览器的 `window.__ModuleLoader__.load`（上下文带浏览器本有的 `setTimeout` /
+ * `clearTimeout`，监督者排定重开要用）。`require` 只回答基线键：`react` 缺省返回记录型 `createElement`，传入 `react` 时返回它
+ * （真实渲染用），其余基线键返回空对象，非基线一律抛出与宿主同形的错误。
  */
-async function evaluateClientBundle(clientFile, console = globalThis.console) {
+async function evaluateClientBundle(clientFile, console = globalThis.console, { react = recordingReact, clock = globalThis } = {}) {
   const code = await readFile(clientFile, 'utf8')
   const loadCalls = []
   const requested = []
-  // 记录型 `createElement`：把调用还原成 `{ type, props, children }` 节点。
-  const react = { createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }) }
   const window = { __ModuleLoader__: { load: (descriptor) => loadCalls.push(descriptor) } }
-  vm.runInContext(code, vm.createContext({ window, console }), { filename: clientFile })
+  vm.runInContext(code, vm.createContext({ window, console, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout }), { filename: clientFile })
 
   const stubRequire = (id) => {
     requested.push(id)
@@ -335,7 +355,6 @@ describe('Harness 插件安装件契约', () => {
     let registrations
     let injectedNames
     let contextNames
-    let logs
     let watched
 
     /**
@@ -364,21 +383,29 @@ describe('Harness 插件安装件契约', () => {
       return unload
     }
 
-    /** 宿主 0.2.0-rc.2 的 unary 调用返回 RemoteResult：Host / 载体失败 resolve 成 `{ ok: false, error }`，不 reject。 */
-    async function applyClient(baseline, streamError) {
-      const seen = { registrations: [], live: new Set(), injectedNames: [], contextNames: [], logs: [], streams: [], fiberErrors: [] }
+    /**
+     * 桩流只交付 `frame`（若有）这一个开场 baseline 项，之后挂起（next 永不结算），`ends` 时改为正常结束；`streamError` 让 `$stream` 同步抛错。
+     * 页面用真实 React；监督者的计时器记入 `seen.timers`（不真等），`cancelled` 记取消。
+     */
+    async function applyClient({ frame, ends, streamError } = {}) {
+      const seen = { registrations: [], live: new Set(), injectedNames: [], contextNames: [], logs: [], streams: [], timers: [], fiberErrors: [] }
       const record = (level) => (...args) => seen.logs.push([level, ...args])
-      const { exported } = await evaluateClientBundle(path.join(packageDir, 'lib/client.js'), { info: record('info'), error: record('error') })
+      const clock = {
+        setTimeout: (_run, delayMs) => { const timer = { delayMs, cancelled: false }; seen.timers.push(timer); return timer },
+        clearTimeout: (timer) => { timer.cancelled = true },
+      }
+      const { exported } = await evaluateClientBundle(path.join(packageDir, 'lib/client.js'), { info: record('info'), error: record('error') }, { react: realReact, clock })
       const exposed = new Set([...exported.inject])
       const child = (fiberCtx) => ({
         remote: {
-          $stream(options) { // 桩流：不交付任何项（next 永不结算），只记 options 与 dispose 次数
+          $stream(options) { // 桩流：只记 options 与 dispose 次数
             if (streamError) throw streamError
-            const stream = { options, disposed: 0, dispose: async () => { stream.disposed += 1 }, [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }) }
+            const items = frame === undefined ? [] : [{ generation: 1, value: frame, accept: () => {} }]
+            const stream = { options, disposed: 0, dispose: async () => { stream.disposed += 1 }, [Symbol.asyncIterator]: () => ({ next: () => items.length > 0 ? Promise.resolve({ done: false, value: items.shift() }) : ends ? Promise.resolve({ done: true, value: undefined }) : new Promise(() => {}) }) }
             seen.streams.push(stream)
             return stream
           },
-          harnessProjects: { baseline: async () => baseline, watch: (signal) => signal }, // 原样返回 signal，供断言 open 转交的是同一个
+          harnessProjects: { watch: (signal) => signal }, // 原样返回 signal，供断言 open 转交的是同一个
         },
         effect: (execute, label) => fiberCtx.effect(execute, label),
         slots: {
@@ -421,19 +448,13 @@ describe('Harness 插件安装件契约', () => {
     }
 
     before(async () => {
-      ({ registrations, injectedNames, contextNames, logs, ...watched } = await applyClient({ ok: true, value: { entities: [] } }))
+      ({ registrations, injectedNames, contextNames, ...watched } = await applyClient({ frame: BASELINE_FRAME }))
     })
 
     it('slots.inject 的名字恰好是 main 与 sidebar.panellist', () => {
       assert.deepEqual([...contextNames].sort(), ['remote.harnessProjects', 'slots'])
       assert.deepEqual([...injectedNames].sort(), ['main', 'sidebar.panellist'])
       assert.equal(registrations.length, 2)
-    })
-
-    it('baseline 按 RemoteResult 分支：ok 记 info，{ ok: false } 记 error 而不是当作收到', async () => {
-      assert.deepEqual(logs.map(([level, line]) => [level, line]), [['info', '[harness-projects] baseline received']])
-      const error = { code: 'gateway/invocation-unavailable' }
-      assert.deepEqual((await applyClient({ ok: false, error })).logs, [['error', '[harness-projects] baseline failed', error]])
     })
 
     it('客户端经 $stream 打开 watch 一次，open 转交同一个 signal，卸载 effect 关闭它', async () => {
@@ -444,13 +465,20 @@ describe('Harness 插件安装件契约', () => {
       assert.deepEqual([streams.length, streams[0].disposed, watched.live.size], [1, 1, 0])
     })
 
-    it('$stream 同步抛错也不丢面板：异常在注入回调内捕获并记日志，fiber 不卸载', async () => {
+    it('$stream 同步抛错也不丢面板：监督者吸收并记 1 s 后重试，fiber 不卸载，卸载取消重试', async () => {
       const boom = new Error('boom')
-      const seen = await applyClient({ ok: true, value: { entities: [] } }, boom)
+      const seen = await applyClient({ streamError: boom })
+      const errorLogs = () => seen.logs.filter(([level]) => level === 'error')
       assert.deepEqual([...seen.live].sort(), ['main:harness-projects', 'sidebar.panellist:harness-projects'])
-      assert.deepEqual([seen.fiberErrors, seen.logs.filter(([level]) => level === 'error')], [[], [['error', '[harness-projects] watch open failed', boom]]])
-      await seen.unload() // 没有登记 watch effect：卸载只撤回面板，不调用一个不存在的 close
-      assert.deepEqual([seen.live.size, seen.fiberErrors.length, seen.logs.filter(([level]) => level === 'error').length], [0, 0, 1])
+      assert.deepEqual([seen.fiberErrors, errorLogs(), seen.timers.map(({ delayMs, cancelled }) => [delayMs, cancelled])], [[], [['error', '[harness-projects] watch failed', 'retry in 1000ms', boom]], [[1000, false]]])
+      await seen.unload()
+      assert.deepEqual([seen.live.size, seen.fiberErrors.length, errorLogs().length, seen.timers.map(({ cancelled }) => cancelled)], [0, 0, 1, [true]], '卸载撤回面板并取消待定重开，不再有第二行')
+    })
+
+    it('宿主没有报错就结束了流：同样排定 1 s 后重开，日志不打 undefined', async () => {
+      const seen = await applyClient({ ends: true })
+      assert.deepEqual([seen.logs, seen.timers.map(({ delayMs }) => delayMs)], [[['error', '[harness-projects] watch failed', 'retry in 1000ms', '流正常结束']], [1000]])
+      await seen.unload()
     })
 
     it('main 注册的选项是 { name, key }，key 为 harness-projects', () => {
@@ -467,14 +495,11 @@ describe('Harness 插件安装件契约', () => {
       assert.equal(typeof entry.options.order, 'number')
     })
 
-    it('main 的面板组件渲染 section[aria-label=Harness Projects]，标题为 h2；入口图标是 aria-hidden 的 svg', () => {
+    it('main 面板用真实 React 渲染：section[aria-label=Harness Projects] 里是监督者读数的工作项列表；入口图标是 aria-hidden 的 svg', () => {
       const main = registrations.find((entry) => entry.options.name === 'main')
-      const panel = main.component()
-      assert.equal(panel.type, 'section')
-      assert.equal(panel.props['aria-label'], PANEL_TITLE)
-      const heading = panel.children.find((child) => child && child.type === 'h2')
-      assert.ok(heading, '面板里没有 h2 标题')
-      assert.ok(heading.children.includes(PANEL_TITLE))
+      const markup = renderToStaticMarkup(realReact.createElement(main.component))
+      assert.ok(markup.startsWith(`<section aria-label="${PANEL_TITLE}">`), markup)
+      assert.ok(markup.includes('<a href="#/projects/workspace-1/items/entity-1">Artifact item</a>'), '标题是片段 href 的链接')
 
       const icon = registrations.find((entry) => entry.options.name === 'sidebar.panellist').component()
       assert.equal(icon.type, 'svg')

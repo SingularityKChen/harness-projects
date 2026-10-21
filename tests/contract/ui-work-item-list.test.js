@@ -77,10 +77,11 @@ function render({ entities = [], access = 'available', capabilities, connected =
 const H = Object.fromEntries(Object.entries(SCENARIOS).map(([name, input]) => [name, render(input)]))
 const cells = (html) => [...html.matchAll(/<tr>(.*?)<\/tr>/g)].map(([, tr]) => [...tr.matchAll(/<t[hd][^>]*>(.*?)<\/t[hd]>/g)].map(([, cell]) => cell.replace(/<[^>]+>/g, '')))
 
-test('出口：页面与六个共享状态组件存在，旧占位面板保留', () => {
-  for (const name of ['WorkItemListPage', 'LoadingState', 'EmptyState', 'UnavailableState', 'StaleBanner', 'SourceBadge', 'FreshnessBadge', 'PlaceholderPanel']) {
+test('出口：页面与六个共享状态组件存在，旧占位面板已删除（#229）', () => {
+  for (const name of ['WorkItemListPage', 'LoadingState', 'EmptyState', 'UnavailableState', 'StaleBanner', 'SourceBadge', 'FreshnessBadge']) {
     assert.equal(typeof ui[name], 'function', name)
   }
+  assert.equal(ui.PlaceholderPanel, undefined)
 })
 
 test('首次读取：文字加装饰 skeleton，没有行也不是 empty；读取能力未观测时说明尚未确认', () => {
