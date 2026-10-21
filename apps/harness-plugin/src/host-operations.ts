@@ -104,8 +104,11 @@ export function inputOfArguments(operation: Operation, args: readonly unknown[])
   return parseInput(operation, Object.fromEntries(operation.params.map((p, index) => [p.name, args[index]])))
 }
 
+/** `call` 收到 stream 名字或未声明名字时的固定文案：不回显调用方给的名字（运行期原文）。 */
+const NOT_UNARY_OPERATION = '操作名 必须是已声明的 unary 操作'
+
 /**
- * Host 侧 `call` 的分发：输入校验在 `guard` 之外（固定中文文案，不含运行期原文），handler 在 `guard` 之内。
+ * Host 侧 `call` 的分发：操作名与输入校验都在 `guard` 之外（固定中文文案，不含运行期原文），handler 在 `guard` 之内。
  * 装配由调用方每次传入，所以 handler 表可以放在模块级。
  */
 export function dispatchOf<O extends Operations, A>(
@@ -115,7 +118,11 @@ export function dispatchOf<O extends Operations, A>(
 ): (assembly: A, name: UnaryName<O>, input: unknown) => Promise<unknown> {
   const table = handlers as unknown as Readonly<Record<string, (assembly: A, input: JsonRecord) => Promise<unknown>>>
   return async (assembly, name, input) => {
-    const parsed = parseInput(operations[name as keyof O] as Operation, input)
+    // stream 名字、未声明名字与非字符串名字在此被拒，既不进 `guard`（不写诊断日志）也不碰 handler；原型链上的键（`toString`）没有 `mode`，同样被拒。
+    // 先判 string：非字符串的值每次转成属性键都可能不同，下面的两次查表就会看到不同的名字。
+    const operation: Operation | undefined = typeof name === 'string' ? operations[name as keyof O] : undefined
+    if (operation?.mode !== 'unary') throw new TypeError(NOT_UNARY_OPERATION)
+    const parsed = parseInput(operation, input)
     return guard(() => table[name]!(assembly, parsed))
   }
 }
