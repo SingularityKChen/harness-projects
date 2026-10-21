@@ -25,7 +25,6 @@
 
 | 计划 | 范围 | 状态 |
 |---|---|---|
-| [2026-10-21-host-operation-registry](exec-plan/active/2026-10-21-host-operation-registry.md) | #352：每个 Host 远程操作只在 `apps/harness-plugin/src/host-operations.ts` 声明一次，由它派生 descriptor、live service、Host 分发与客户端代理类型；wire 逐项不变，不新增操作 | Active |
 | [2026-10-15-harness-pid-flag-race](exec-plan/completed/2026-10-15-harness-pid-flag-race.md) | #347：变异夹具测试只在标记文件里出现以换行结尾的完整正整数 pid 后才读取，`process.kill` 不再拿到 `0`；已实施，四个受影响用例连跑 50 次全绿 | Completed |
 | [2026-10-15-github-development-read](exec-plan/completed/2026-10-15-github-development-read.md) | #231：GitHub Development 只读 provider（仓库 / 分支 / 提交 / 按 head 分支读 PR / 观察流），录制夹具上通过共享契约套件；已实施并经第一轮 MMP 评审与两轮修复复评（PR #342） | Completed |
 | [2026-10-13-status-projection-race](exec-plan/completed/2026-10-13-status-projection-race.md) | #303 / PR #316：状态命令在一个 Storage 事务内原子读-判-写（D1）；不可见目标（缺失或 redacted）统一以不可重试的 `not_found` 拒绝且无副作用（D2）；竞态回归改为调度探索 + 串行参照预言机（D3）；已实施并经第三轮 MMP 评审与两轮修复复评（PR #316） | Completed |
@@ -60,6 +59,7 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-10-21-host-operation-registry](exec-plan/completed/2026-10-21-host-operation-registry.md) | #352：每个 Host 远程操作只在 `apps/harness-plugin/src/host-operations.ts` 声明一次，由它派生 descriptor、live service、Host 分发与客户端代理类型；wire 逐项不变，不新增操作；已实施并经 MMP 评审（PR #370） | Completed |
 | [2026-10-12-controller-request-identity](exec-plan/completed/2026-10-12-controller-request-identity.md) | #306：Controller 命令请求身份绑定完整 actor、目标和参数；同键异请求在 Core 前返回 `conflict`，Start Work 保留 actor id；跨 command 与数组顺序反例经变异验证，PR #317 当前 head 已复评 APPROVE，#307 / #194 / #204 由后续 issue 承接；Completed |
 | [2026-10-12-controller-live-replay](exec-plan/completed/2026-10-12-controller-live-replay.md) | #307：Controller replay 先登记 in-flight、按完整 fingerprint 合并并发、清理 rejected Promise，Start Work Pending/Unknown 不永久缓存；rerunPipeline barrier、mutation 证据和 durable owner 边界已复评 | Completed |
 | [2026-10-12-planning-round-order](exec-plan/completed/2026-10-12-planning-round-order.md) | #305：Planning 全量同步采用持久 round token、commit-time fencing 和 latest-start-wins；Fake/SQLite、重启 takeover、失败排序及共享 provider 双 workspace 隔离均通过，PR #318 当前 head 已复评 APPROVE | Completed |
