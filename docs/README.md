@@ -63,6 +63,7 @@
 | 计划 | 结论 |
 |---|---|
 | [2026-10-21-scans-skip-build-output](exec-plan/completed/2026-10-21-scans-skip-build-output.md) | #350：源码扫描按根 `.gitignore` 裸目录规则跳过构建产物；C4 用 Git 可见文件 oracle 守卫不漏扫，明确拒绝 scopes 内 tracked symlink；I1 从 `pack:plugin` 配置推导真实产物目录；TD-086 剩余扫描约定守卫待后续实现；TD-087 迁移由 #396 承接；已实施并经 MMP 修复复评（PR #390） |
+| [2026-10-21-delivery-lineage-strip](exec-plan/completed/2026-10-21-delivery-lineage-strip.md) | #357：六位置逐跳派生、原样关系确认态、null 降级、共享年龄规则与 nextFlipAt；七条评审修复已完成本地验证，消费方 #234/#281 承接定时重派生；Completed，独立复评与最终 head 发布回读由协调者完成 |
 | [2026-10-21-repository-binding](exec-plan/completed/2026-10-21-repository-binding.md) | #353：`bindRepository` 在一个事务内登记一个仓库实体与并列的 Local Git / GitHub / Actions 引用（锚点 `primary`，其余 `alias`，ADR-0015 Accepted）；`routeDevelopment` 按操作的锚键在并列引用间路由、歧义结构化拒绝；逐仓库可用性经快照到达 client 与 ui-model；已实施并经 MMP 评审与修复复评，ADR-0015 已采纳（PR #373） | Completed |
 | [2026-10-21-workspace-binding-commands](exec-plan/completed/2026-10-21-workspace-binding-commands.md) | #127：经 `createWorkspaceSetup` / `createSetupCommands` 以自然幂等命令创建工作区、连接 GitHub 账户（只存凭据句柄）并绑定 GitHub Project 为唯一 Planning 来源；第二个启用的 Planning 绑定 `conflict`，切换 `not_supported`（待 #202）；已实施并经三轮 MMP 评审（PR #371） | Completed |
 | [2026-10-21-plugin-work-item-pages](exec-plan/completed/2026-10-21-plugin-work-item-pages.md) | #229：插件 `main` 面板挂载 `WorkItemApp`（列表与详情抽屉、唯一 scope 门、页面替换焦点）；client 的 `superviseWorkspace` 把 watch 三种终止变成有界退避的新 follower；删除占位面板；已实施并经 MMP 评审两轮与宿主内 S3（PR #372） | Completed |
