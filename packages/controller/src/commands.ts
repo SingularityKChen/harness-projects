@@ -10,11 +10,12 @@
  */
 import { ProjectErrorCode, projectError } from '@harness-projects/capabilities'
 import type { ExternalObjectRef, ProjectError } from '@harness-projects/capabilities'
-import type { EntityId, NormalizedStatus } from '@harness-projects/domain'
+import type { ConnectorAccountId, EntityId, NormalizedStatus, ProviderBindingId, WorkspaceId } from '@harness-projects/domain'
 import {
   WritePhase,
-  type BootstrapResult, type CoreApi, type DeliveryRefreshResult, type DeliveryScope, type DeliveryWriteAttempt, type RecordedEdge,
-  type RelationRef, type StartWorkResult, type StatusDecision,
+  type BindPlanningSourceRequest, type BootstrapResult, type ConnectAccountRequest, type CoreApi, type CreateWorkspaceRequest, type DeliveryRefreshResult,
+  type DeliveryScope, type DeliveryWriteAttempt, type RecordedEdge, type RelationRef, type SetupOutcome, type StartWorkResult, type StatusDecision,
+  type WorkspaceSetup,
 } from '@harness-projects/core'
 
 export const CommandWriteState = {
@@ -180,7 +181,7 @@ function canonical(value: unknown, seen = new Set<object>()): string {
   }
 }
 
-function requestPayload(input: CommandEnvelope & object): Record<string, unknown> {
+function requestPayload<T extends CommandEnvelope>(input: T): Omit<T, keyof CommandEnvelope> {
   const { actorRef: _actorRef, idempotencyKey: _idempotencyKey, ...payload } = input
   return payload
 }
@@ -257,5 +258,34 @@ export function createControllerCommands(core: CoreApi): ControllerCommands {
       const result = await core.commands.refreshDeliveryFacts(scope) // 不经 replay：每次调用都是一次真的读取
       return resultOf(result.ok ? CommandWriteState.LocalOnly : CommandWriteState.Failed, result, result.error)
     },
+  }
+}
+
+export type CreateWorkspaceInput = CommandEnvelope & CreateWorkspaceRequest
+export type ConnectAccountInput = CommandEnvelope & ConnectAccountRequest
+export type BindPlanningSourceInput = CommandEnvelope & BindPlanningSourceRequest
+
+/**
+ * 工作区设置命令（#127）：独立于 `Controller`——工作区未创建时 Host 的 Controller 建在 unavailableCore 上；由 Host 每进程建一次、跨重组持有账本（#354）。
+ * 账本只在本实例内（TD-070）：丢失后同键重发由 core 的命令按自然键找回同一结果、零写入。
+ */
+export interface SetupCommands {
+  createWorkspace(input: CreateWorkspaceInput): Promise<CommandResult<{ readonly workspaceId: WorkspaceId }>>
+  connectAccount(input: ConnectAccountInput): Promise<CommandResult<{ readonly accountId: ConnectorAccountId }>>
+  bindPlanningSource(input: BindPlanningSourceInput): Promise<CommandResult<{ readonly bindingId: ProviderBindingId }>>
+}
+
+/** 设置命令只写本地事实：成功报 local_only（没有 provider ack，不是权威）；core 的 conflict 与账本内同键异请求同报 conflict，其余报 failed。不推进修订号（快照内容没变，ADR-0012）。 */
+function setupResult<T>(outcome: SetupOutcome<T>): CommandResult<T> {
+  if (outcome.ok) return resultOf(CommandWriteState.LocalOnly, outcome.value, undefined)
+  return resultOf<T>(outcome.error.code === ProjectErrorCode.Conflict ? CommandWriteState.Conflict : CommandWriteState.Failed, undefined, outcome.error)
+}
+
+export function createSetupCommands(setup: WorkspaceSetup): SetupCommands {
+  const replay = createReplayLog()
+  return {
+    createWorkspace: (input) => replay('createWorkspace', input, requestPayload(input), async () => setupResult(await setup.createWorkspace(requestPayload(input)))),
+    connectAccount: (input) => replay('connectAccount', input, requestPayload(input), async () => setupResult(await setup.connectAccount(requestPayload(input)))),
+    bindPlanningSource: (input) => replay('bindPlanningSource', input, requestPayload(input), async () => setupResult(await setup.bindPlanningSource(requestPayload(input)))),
   }
 }
