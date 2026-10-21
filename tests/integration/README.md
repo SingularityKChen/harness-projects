@@ -183,18 +183,19 @@
 
 ## Host watch（#276）
 
-`harness-plugin-host-watch.test.js` 在真实 `createHostComposition`（`fixtures/host-seed.js` 种入工作区与一个 `harness.fake` 规划挂载，`watchIntervalMs: 5`）与真实 `installHostRemote` 服务上，经 JSON 往返的载体与 `tests/fixtures/remote-stream-double.js` 的 `RemoteStream` 替身驱动 `openWorkspaceWatch`（本机设 `HARNESS_GATEWAY_CLIENT` 指向宿主 `lib/types/client` 时换成真实类，CI 不设）。离线、无凭据，等待都有上限，清理自己也有上限，被破坏的实现只会让用例失败而不会挂住进程。
+`harness-plugin-host-watch.test.js` 在真实 `createHostComposition`（`fixtures/host-seed.js` 种入工作区与一个 `harness.fake` 规划挂载，`watchIntervalMs: 5`）与真实 `installHostRemote` 服务上，经 JSON 往返的载体与 `tests/fixtures/remote-stream-double.js` 的 `RemoteStream` 替身驱动 `openWorkspaceWatch`（本机设 `HARNESS_GATEWAY_CLIENT` 指向宿主 `lib/types/client` 时换成真实类，CI 不设）。它返回 client 的监督者：读数经 `getSnapshot()`，页面用真实 React 渲染 `WorkItemApp`；重开由手动调度的 `schedule` 驱动（`timers` 恒等于仍在等待的重开），不真等 1 s、不用全局 mock 计时器（那会冻住 controller 的轮询）。离线、无凭据，等待都有上限，清理自己也有上限，被破坏的实现只会让用例失败而不会挂住进程。
 
 | 用例 | 保护的不变量 |
 |---|---|
 | 同一句柄同一代先 baseline、规划变更后 delta | AC1 的 S2 前置与 AC3：两帧深等 controller 值的 JSON，流里没有别的东西 |
-| 载体断开的同一回调内整表 stale，重连重拉 baseline | AC2：断流那一刻断开且全部行 stale、最后已知值与时间保留；同一句柄开新一代、条目身份不变；baseline 被接受即清零重试计数 |
-| 卸载中止打开的流，SQLite 只关一次 | 卸载先中止流再排空，客户端终止并保留 stale 的最后已知值；组合关闭后 `watch` 同步拒绝，之后不再读库 |
-| Host 侧读取异常经漏斗只以固定文案终止 | 原因只进诊断日志（多一行 `operationFailed`、不含路径），非载体错误不重开 |
+| 载体断开的同一回调内整表 stale 且页面出现重连说明，重连在同一句柄上重拉 baseline | AC2 与 #229 的 A4：断流那一刻页面已读到断开、说明出现、全部行标「最后已知值」，最后已知值与时间保留；同一句柄开新一代、条目身份不变，说明消失、行回到「当前值」；监督者没有新建 follower、没有排定重开（`streams.length === 1`、`timers` 为空）；baseline 被接受即清零宿主侧重试计数 |
+| 卸载中止打开的流，客户端排定 1 s 后重开，SQLite 只关一次 | TD-058 的第一种来源（宿主结束一代）：卸载先中止流再排空，监督者排定一次 1 s 的重开并记 `watch failed` / `retry in 1000ms`，快照保留卸载前的读数但 connected 为 false、current 为 0、原因是与宿主断开；组合关闭后 `watch` 同步拒绝，之后不再读库 |
+| Host 侧读取异常经漏斗只以固定文案终止，1 s 后以新 follower 重新跟随 | TD-058 的第二种来源（`guarded`）：原因只进诊断日志（多一行 `operationFailed`、不含路径），非载体错误不在同一句柄上重开，等待期间页面保留 stale 的最后已知值；还原读取并运行排定的重开后第二个 follower 打开，行回到「当前值」 |
+| 来源降级时抽屉显示最后已知值与原确认时刻，连接仍在线 | #229 的 A2：core 自己产生的降级 metadata 帧经监督者进入详情路由的 `WorkItemApp`，抽屉说「最后已知值，当前结果尚未确认」，`<time>` 等于降级前的确认时刻（降级不推进）；传输在线，没有重连说明、没有排定重开 |
 | 消费者提前 return 结束内层一代 | 网关取消或提前退出不会让生成器停在下一次轮询上 |
-| 空数据根只有 r=0、无工作区的 baseline | 与 A 的空数据根兼容：`read()` 保持 `undefined`，流不终止 |
+| 空数据根只有 r=0、无工作区的 baseline | 与 A 的空数据根兼容：监督者的 `getSnapshot()` 保持 `undefined`，流不终止、没有排定重开 |
 
-客户端壳的打开与卸载在安装件测试的 e 节：假 Context 按 Cordis 4.0.4 的 fiber 语义建模（回调在微任务里运行，回调抛错时 fiber 只记日志并卸载全部 effect，`slots.inject` 的贡献随之撤回），断言 `$stream` 同步抛错时面板仍在、卸载 fiber 时流被关闭；本机设 `HARNESS_CORDIS` 指向宿主 `@deepseek-ai/cordis/lib/index.js` 时换成真实 `Context.inject`，CI 不设。
+客户端壳的打开与卸载在安装件测试的 e 节：假 Context 按 Cordis 4.0.4 的 fiber 语义建模（回调在微任务里运行，回调抛错时 fiber 只记日志并卸载全部 effect，`slots.inject` 的贡献随之撤回），vm 上下文注入记录型 `setTimeout` / `clearTimeout`（只记延迟与是否取消，不真等），并用真实 React 渲染面板；断言 `$stream` 同步抛错时面板仍在、监督者记 `watch failed` / `retry in 1000ms` / 原错误并排定 1 s 重开，卸载 fiber 时流被关闭、待定重开被取消、不再有第二行日志，`main` 面板渲染出 `section[aria-label=Harness Projects]` 与片段 href 的条目链接；本机设 `HARNESS_CORDIS` 指向宿主 `@deepseek-ai/cordis/lib/index.js` 时换成真实 `Context.inject`，CI 不设。
 
 ## 约定
 

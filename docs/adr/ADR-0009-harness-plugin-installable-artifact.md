@@ -75,8 +75,8 @@
   只经它取 `CapabilityKey` 与 `intersectAccess`。透传规则：只允许纯值叶子（运行时值只取 `domain/values` 或上一跳叶子，不值导入任何包根出口），
   每跳一个文件，`tests/contract/ui-work-item-list-browser.test.js` 里的 `allowed` 正则是唯一放行处。它与 `domain/values` 不同构：后者是 ui-model
   直接依赖的叶子、re-export 自己的词表；`controller/keys` 与 `client/keys` 把上游包的值透传成本包的公开面，每加一跳都要同时改 manifest 的
-  `exports` 与该正则，依赖边仍由 `tests/contract/package-boundaries.test.js` 逐跳核对。client 根出口仍不能按浏览器打包，页面接线仍待 #229。
-- **安装件的三项暂缓项**：不带 source map、`private: true`、占位面板文案未本地化，分别留给发布批次与页面批次。
+  `exports` 与该正则，依赖边仍由 `tests/contract/package-boundaries.test.js` 逐跳核对。client 根出口仍不能按浏览器打包，页面接线仍待 #229。**Superseded by #229 / PR #372（2026-10-21）**：插件 client bundle 经 client 根出口取 `superviseWorkspace`，并经 `@harness-projects/ui` 的 `bindWorkItemApp` 挂载工作项列表与详情（`apps/harness-plugin/src/client.ts`），「页面接线仍待 #229」已完成；「client 根出口仍不能按浏览器打包」更早已由 #308（2026-10-13）解决（`tests/contract/client-browser.test.js` 按 platform=browser 打包并执行 client 根出口）。原文保留。
+- **安装件的三项暂缓项**：不带 source map、`private: true`、占位面板文案未本地化，分别留给发布批次与页面批次。**Superseded by #229 / PR #372（2026-10-21）**：第三项已无对象——`PlaceholderPanel` 已删除，`main` 面板渲染工作项列表与详情（`packages/ui/src/work-item-app.ts`），`packages/ui/src/placeholder.ts` 只剩面板标题与入口图标；前两项不变，仍留给发布批次。原文保留。
 - **pnpm 打包会额外放进仓库根的 `LICENSE`。** 安装件 tarball 因此是五个条目而不是四个，`license` 字段取仓库根 manifest 的值，与随包分发的许可证一致；这是接受 pnpm 的行为，而不是绕开它。
 - **验收在真实宿主上进行，需要人类伙伴参与**（退出并重启自己的桌面应用、截图）。因此本 ADR 在宿主观测完成之前不应被改成 Accepted；观测判据一旦变化，
   安装件四个文件的 sha256 变化即整组重跑。

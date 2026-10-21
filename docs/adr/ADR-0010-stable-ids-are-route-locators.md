@@ -12,7 +12,7 @@
 
 **最小披露属性**（每条绑定到会失败的检查）：
 
-- **L1 遮蔽不可干扰**：redacted 条目的字段（标题、正文、规划状态、派生提示、reason、`bindingId`、外部身份，以及不改变其相对排序的 `entityId`）变化时，带 navigation 的列表页 HTML 与 `href` / `open` 调用不变。行序沿 entity 锚点排序（`packages/client/src/store.ts`），相对位置不视为泄露。由 R1 补。另一个可观察通道是遮蔽条目的来源新鲜度：任一条目 stale 都会让整页降级（#129 既有行为，`main` 上无 navigation 的列表同样如此）。它与行序不同：行序只重复占位行已公开的存在性（同 GitHub Projects 的 `REDACTED` 占位项），新鲜度却是遮蔽条目自身的派生状态；同类工具把这类聚合通道当作信息泄露修复（例如 GitLab CVE-2019-12429：机密 issue 的状态与计数经里程碑页泄露）。因此本 ADR 不接受它，按 #129 的人类裁决 D / E 由 #229 关闭（页级新鲜度只按可见行计算，redacted 条目不带独立 freshness）。
+- **L1 遮蔽不可干扰**：redacted 条目的字段（标题、正文、规划状态、派生提示、reason、`bindingId`、外部身份，以及不改变其相对排序的 `entityId`）变化时，带 navigation 的列表页 HTML 与 `href` / `open` 调用不变。行序沿 entity 锚点排序（`packages/client/src/store.ts`），相对位置不视为泄露。由 R1 补。另一个可观察通道是遮蔽条目的来源新鲜度：任一条目 stale 都会让整页降级（#129 既有行为，`main` 上无 navigation 的列表同样如此）。它与行序不同：行序只重复占位行已公开的存在性（同 GitHub Projects 的 `REDACTED` 占位项），新鲜度却是遮蔽条目自身的派生状态；同类工具把这类聚合通道当作信息泄露修复（例如 GitLab CVE-2019-12429：机密 issue 的状态与计数经里程碑页泄露）。因此本 ADR 不接受它，按 #129 的人类裁决 D / E 由 #229 关闭（页级新鲜度只按可见行计算，redacted 条目不带独立 freshness）。**Superseded by #366（2026-10-16）**：D / E 已由 #351 重排移交 #366，不再由 #229 关闭；本 ADR 不接受该通道的立场不变，变的只是关闭它的 issue。#366 合入前，插件里挂载的列表仍有这条通道，形态在 #382（2026-10-21，PR #372）之后是：任一 stale 条目（含 redacted）仍让整表 `stale`；可见条目全部已确认时，状态文字是「部分条目尚未确认，已显示的条目是当前值」，不出「最后已知值」横幅。表级已有原因时，这句话不随 redacted 条目变化；没有表级原因时，redacted 条目新鲜与否仍决定显示这句话还是「已读取当前快照」（仍是 1 bit，此时这句话只可能指被遮蔽的条目；`tests/contract/ui-work-item-list-view.test.js`「行新鲜度」钉住现状，由 #366 验收 1 翻转）。原文保留。
 - **L2**：navigation 只以 `kind: 'item'` 行的 key 调用 `href` / `open`。由 R1 补。
 - **L3**：locator 只出现在 `navigation.href` 产出的 href 值里，不进 `data-*`、DOM id、`aria-*`、`title`、文字、详情正文与详情 content 字段；`bindingId`、`ExternalIdentityId` 与凭据句柄在任何模式下都不出现（Provider `externalId` 只作为详情的来源身份文字出现，属 #130 既有设计）。由 R1 补。
 - **L4 locator 不是权限**：跨 scope 返回 unresolved 且 store 0 次访问；redacted 与阻断态不返回字段。已有：`tests/contract/ui-work-item-detail-view.test.js` 的 `scope-before-store`、`blocked-cache-canary`、`redacted-erases-every-field`、`撕裂读复验`。
@@ -41,5 +41,5 @@
 - locator 不是授权凭据；引入第二个主体（共享工作区、按查看者 redaction、远程访问）的那个 issue 自行承接对象级授权与统一响应。
 - 任何凭据、`bindingId`、Provider token 或可授予权限的值都不得复用 URL 位置；将来出现外链时必须带 `rel="noreferrer noopener"`。
 - `chainEntityId()` 派生的谱系 id 进入路由需要新决策。
-- #229 实施挂载时确认宿主是否存在 URL 路由面，且 `document.title` 不写条目标题（提示，不改变 #229 验收）。
+- #229 实施挂载时确认宿主是否存在 URL 路由面，且 `document.title` 不写条目标题（提示，不改变 #229 验收）。 **2026-10-21（#229）标注**：插件不读写 `location` / `history`，条目 href 是片段（`#/projects/:projectId/items/:itemId`），普通左键点击走插件内 `open`；`document.title` 未改，容器不写标题。片段不进请求路径与 referrer（计划 `docs/exec-plan/completed/2026-10-21-plugin-work-item-pages.md` D1）。宿主是否存在 URL 路由面仍未确认（`docs/architecture/harness-host-spike.md` §6.1 之后没有新观测），登记为 `docs/exec-plan/tech-debt-tracker.md` 的 TD-072；宿主内开关详情前后 `location.href` 不变，由该计划的 S3 观测记录，人类伙伴尚未完成；出现宿主 URL 路由面时按「部署事实与强度」一节重新评估本 ADR。
 - 人类伙伴批准 H1 后，`docs/exec-plan/completed/2026-10-01-work-item-list-states.md` 第 115 行的 `href` 限制与第 121 行的「详情」入口在原处标注指向本 ADR；其余最小披露约束不变。未到 MMP，不建立双路由、redirect 或兼容层。
