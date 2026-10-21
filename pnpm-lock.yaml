@@ -89,6 +89,12 @@ importers:
       '@harness-projects/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@harness-projects/provider-delivery-github-actions':
+        specifier: workspace:*
+        version: link:../../packages/providers/delivery-github-actions
+      '@harness-projects/provider-development-github':
+        specifier: workspace:*
+        version: link:../../packages/providers/development-github
       '@harness-projects/provider-development-local-git':
         specifier: workspace:*
         version: link:../../packages/providers/development-local-git

@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -17,7 +17,7 @@ import { describeError } from '../../apps/harness-plugin/src/host-diagnostics.ts
 import { PROVIDER_CATALOG, catalogOf } from '../../apps/harness-plugin/src/host-providers.ts'
 import { HOST_REMOTE } from '../../apps/harness-plugin/src/remote.ts'
 import {
-  ACCOUNT, GITHUB, HANDLE, WORKSPACE, account, dump, fakePlanningEntry, mount, projectNodeId, ref, replayFetch, seed, seedPlanning, seedWorkspace,
+  ACCOUNT, GITHUB, HANDLE, WORKSPACE, account, dump, fakePlanningEntry, mount, occurrences, projectNodeId, ref, replayFetch, seed, seedPlanning, seedWorkspace,
 } from './fixtures/host-seed.js'
 import { REPOSITORY_ID, fixtureFor, registerWorkItem, worktreePaths } from './local-git-fixture.js'
 
@@ -50,15 +50,6 @@ const bootstrap = (host, idempotencyKey) => host.call('bootstrapWorkspace', { ac
 /** 变化的表：两次转储里 JSON 不同的表名。 */
 const changedTables = (before, after) => Object.keys(after).filter((table) => before[table] !== after[table]).sort()
 const rowsOf = (dumped, table) => JSON.parse(dumped[table])
-
-/** 数据目录下所有文件（含 -wal、-shm）里 needle 的出现次数。 */
-async function occurrences(dir, needle) {
-  let count = 0
-  for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
-    if (entry.isFile() && (await readFile(path.join(entry.parentPath, entry.name))).includes(needle)) count += 1
-  }
-  return count
-}
 
 /** 宿主诊断日志：每行一个 JSON；文件不存在即没有行。 */
 async function logLines(dataDir) {
