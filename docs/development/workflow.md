@@ -46,4 +46,6 @@
 
 文档变化执行链接、命令和规模检查；包边界执行 boundaries；行为变化执行相关契约 / 集成测试；门禁、安全、并发、持久化或外部写入变化扩大到完整相关回归和人工回读。没有新的失败、风险信号或未解问题时，不机械重复更宽测试。
 
+本机跑过 `pnpm --filter @harness-projects/app-harness-plugin pack:plugin` 之后可以直接 `pnpm verify`：被 `.gitignore` 忽略的 `apps/harness-plugin/dist/` 不计入源码扫描（`tests/fixtures/source-tree.mjs`），不必先删除它。
+
 交付前至少回读当前 head、base、mergeStateStatus、所有 checks、PR issue 关联和 review threads。把未验证项写成阻塞或明确遗留，不用“应该可以”。
