@@ -6,6 +6,7 @@
  */
 
 import type { GenerationStream } from '@harness-projects/client'
+import type { ArgsOf, OPERATIONS, StreamName, UnaryName } from './host-operations.ts'
 
 export type SlotComponent = (...args: never[]) => unknown
 
@@ -31,11 +32,14 @@ export interface SlotsService {
 /** 宿主 0.2.0-rc.2 的 unary 结果（dsh-api-gateway RemoteResult）：失败 resolve 成 `{ ok: false, error }`，不 reject。 */
 export type RemoteResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown }
 
-export interface RemoteNamespace {
-  baseline(): Promise<RemoteResult<unknown>>
-  bootstrapWorkspace(actorRef: unknown, idempotencyKey: string): Promise<RemoteResult<unknown>>
+type Ops = typeof OPERATIONS
+
+/** 由 `OPERATIONS` 派生：unary 是带声明参数的 `Promise<RemoteResult>` 方法，stream 只接取消 signal。 */
+export type RemoteNamespace = {
+  readonly [K in UnaryName<Ops>]: (...args: ArgsOf<Ops[K]['params']>) => Promise<RemoteResult<unknown>>
+} & {
   /** stream 描述符：同步返回宿主流，项原样交付（网关不 decode 流项）。 */
-  watch(signal: AbortSignal): AsyncIterable<unknown>
+  readonly [K in StreamName<Ops>]: (signal: AbortSignal) => AsyncIterable<unknown>
 }
 
 /** 宿主 `remote.$stream` 的选项（0.2.0-rc.2）：只写本壳用到的成员。 */

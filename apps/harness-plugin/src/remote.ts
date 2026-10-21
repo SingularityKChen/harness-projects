@@ -1,10 +1,12 @@
 /**
  * Harness Host/Client typed-remote seam.
  *
- * The descriptor is intentionally hand-written: #228 only needs two unary
- * JSON methods, #276 one stream, and the repository does not ship the Typert
- * generator. Host and Client must mount the exact same descriptor objects.
+ * The descriptors are derived from the single declaration in `host-operations.ts`
+ * (the repository does not ship the Typert generator). Host and Client must mount
+ * the exact same descriptor objects.
  */
+
+import { inputOfArguments, OPERATIONS, plainRecord, type Operation, type Operations, type StreamName, type UnaryName } from './host-operations.ts'
 
 export const REMOTE_PACKAGE = '@harness-projects/app-harness-plugin' as const
 export const REMOTE_NAMESPACE = 'harnessProjects' as const
@@ -50,28 +52,16 @@ export interface ClientRemoteContribution {
   readonly descriptors: readonly InvocationDescriptor[]
 }
 
-export interface HostCompositionCall {
-  call(name: 'baseline' | 'bootstrapWorkspace', input: unknown): Promise<unknown>
+export type HostCompositionCall = {
+  call(name: UnaryName<typeof OPERATIONS>, input: unknown): Promise<unknown>
+} & {
   /** 宿主流的帧序列；remote.ts 只透传并逐帧 JSON 化，不认识帧的类型（不 import controller）。 */
-  watch(signal: AbortSignal): AsyncIterable<unknown>
+  readonly [K in StreamName<typeof OPERATIONS>]: (signal: AbortSignal) => AsyncIterable<unknown>
 }
 
 export interface HostRemoteContext {
   provide(name: string, value: unknown): (() => void | Promise<void>) | void
   typert: { register(contribution: HostRemoteContribution): (() => void) | (() => Promise<void>) }
-}
-
-function plainRecord(value: unknown, label: string): JsonRecord {
-  if (value === null || typeof value !== 'object') throw new TypeError(`${label} 必须是普通对象`)
-  const prototype = Object.getPrototypeOf(value)
-  if (prototype !== Object.prototype && prototype !== null) throw new TypeError(`${label} 必须是普通对象`)
-  return value as JsonRecord
-}
-
-function exactRecord(value: unknown, keys: readonly string[], label: string): JsonRecord {
-  const record = plainRecord(value, label)
-  for (const key of Object.keys(record)) if (!keys.includes(key)) throw new TypeError(`${label} 含未知字段：${key}`)
-  return record
 }
 
 function jsonValue(value: unknown, label = 'Remote 值'): unknown {
@@ -94,20 +84,6 @@ function jsonValue(value: unknown, label = 'Remote 值'): unknown {
   return output
 }
 
-function actorRef(value: unknown): JsonRecord {
-  const record = exactRecord(value, ['kind', 'id'], 'actorRef')
-  if (typeof record.kind !== 'string' || record.kind.length === 0) throw new TypeError('actorRef.kind 必须是非空字符串')
-  if (record.id !== undefined && (typeof record.id !== 'string' || record.id.length === 0)) {
-    throw new TypeError('actorRef.id 必须是非空字符串')
-  }
-  return record
-}
-
-function nonEmptyString(value: unknown, label: string): string {
-  if (typeof value !== 'string' || value.length === 0) throw new TypeError(`${label} 必须是非空字符串`)
-  return value
-}
-
 function codec(name: string, parse: (value: unknown) => unknown): StrictCodec {
   return {
     mode: 'strict',
@@ -119,71 +95,54 @@ function codec(name: string, parse: (value: unknown) => unknown): StrictCodec {
 const toJson = (value: unknown): unknown => value === undefined ? undefined : jsonValue(value)
 /** Host 网关对 strict 结果只调 `encode`；registry 仍要求每个 strict codec 带 `create()`，两者共用同一严格 JSON 化。 */
 const jsonOutput: StrictCodec = { ...codec('RemoteJsonOutput', toJson), encode: toJson }
-const actorRefCodec = codec('ActorRef', actorRef)
-const idempotencyKeyCodec = codec('IdempotencyKey', (value) => nonEmptyString(value, 'idempotencyKey'))
 
-const baselineDescriptor: InvocationDescriptor = {
-  id: `${REMOTE_PACKAGE}#${REMOTE_NAMESPACE}/baseline`,
-  service: REMOTE_SERVICE,
-  namespace: REMOTE_NAMESPACE,
-  method: 'baseline',
-  invocation: { kind: 'direct' },
-  parameters: [],
-  result: jsonOutput,
+function descriptorOf(operation: Operation): InvocationDescriptor {
+  const stream = operation.mode === 'stream'
+  return {
+    id: `${REMOTE_PACKAGE}#${REMOTE_NAMESPACE}/${operation.name}`,
+    service: REMOTE_SERVICE,
+    namespace: REMOTE_NAMESPACE,
+    method: operation.name,
+    ...(stream ? { mode: 'stream' as const } : {}),
+    invocation: { kind: 'direct' },
+    parameters: operation.params.map((p) => ({ name: p.name, wire: p.name, source: 'json' as const, codec: codec(p.type, p.parse) })),
+    ...(stream ? { cancellation: { parameter: 'signal' as const } } : {}),
+    result: jsonOutput,
+  }
 }
 
-const bootstrapDescriptor: InvocationDescriptor = {
-  id: `${REMOTE_PACKAGE}#${REMOTE_NAMESPACE}/bootstrapWorkspace`,
-  service: REMOTE_SERVICE,
-  namespace: REMOTE_NAMESPACE,
-  method: 'bootstrapWorkspace',
-  invocation: { kind: 'direct' },
-  parameters: [
-    { name: 'actorRef', wire: 'actorRef', source: 'json', codec: actorRefCodec },
-    { name: 'idempotencyKey', wire: 'idempotencyKey', source: 'json', codec: idempotencyKeyCodec },
-  ],
-  result: jsonOutput,
+/** Host 与 Client 两半共享同一冻结的 descriptor 数组；顺序即声明顺序。 */
+export function defineRemote<O extends Operations>(operations: O): { operations: O; host: HostRemoteContribution; client: ClientRemoteContribution } {
+  const descriptors = Object.freeze(Object.values(operations).map(descriptorOf))
+  return {
+    operations,
+    host: Object.freeze({
+      package: REMOTE_PACKAGE,
+      face: 'host',
+      schemas: [] as const,
+      model: { services: [] as const, events: [] as const, objects: [] as const },
+      invocations: descriptors,
+    }),
+    client: Object.freeze({ package: REMOTE_PACKAGE, descriptors }),
+  }
 }
 
-const watchDescriptor: InvocationDescriptor = {
-  id: `${REMOTE_PACKAGE}#${REMOTE_NAMESPACE}/watch`,
-  service: REMOTE_SERVICE,
-  namespace: REMOTE_NAMESPACE,
-  method: 'watch',
-  mode: 'stream',
-  invocation: { kind: 'direct' },
-  parameters: [],
-  cancellation: { parameter: 'signal' },
-  result: jsonOutput,
-}
-
-/** `watch` 追加在末尾：`invocations[0]` 仍是 `baseline`。 */
-const descriptors = Object.freeze([baselineDescriptor, bootstrapDescriptor, watchDescriptor])
-
-export const HOST_REMOTE: HostRemoteContribution = Object.freeze({
-  package: REMOTE_PACKAGE,
-  face: 'host',
-  schemas: [] as const,
-  model: { services: [] as const, events: [] as const, objects: [] as const },
-  invocations: descriptors,
-})
-
-export const CLIENT_REMOTE: ClientRemoteContribution = Object.freeze({
-  package: REMOTE_PACKAGE,
-  descriptors,
-})
+const REMOTE = defineRemote(OPERATIONS)
+export const HOST_REMOTE: HostRemoteContribution = REMOTE.host
+export const CLIENT_REMOTE: ClientRemoteContribution = REMOTE.client
 
 export interface InstalledHostRemote {
-  readonly service: {
-    baseline(): Promise<unknown>
-    bootstrapWorkspace(actor: unknown, idempotencyKey: unknown): Promise<unknown>
-    watch(signal: AbortSignal): AsyncGenerator<unknown, void>
-  }
+  /** 方法由声明派生，类型上只能是记录；唯一的消费者是测试。 */
+  readonly service: Readonly<Record<string, unknown>>
   dispose(): Promise<void>
 }
 
-/** Install the live Cordis service and its strict Typert contribution. */
-export async function installHostRemote(ctx: HostRemoteContext, composition: HostCompositionCall): Promise<InstalledHostRemote> {
+/** Install the live Cordis service and its strict Typert contribution. `remote` 缺省为生产的 `OPERATIONS`；测试可注入带夹具操作的声明。 */
+export async function installHostRemote(
+  ctx: HostRemoteContext,
+  composition: HostCompositionCall,
+  remote: { readonly operations: Operations; readonly host: HostRemoteContribution } = REMOTE,
+): Promise<InstalledHostRemote> {
   let unregisterRemote: (() => void) | (() => Promise<void>)
   let provideDispose: (() => void | Promise<void>) | undefined
   let disposed = false
@@ -201,34 +160,27 @@ export async function installHostRemote(ctx: HostRemoteContext, composition: Hos
     if (disposed && activeCalls === 0) drainResolve?.()
   }
 
-  const service = {
-    ctx,
-    typertRemote: undefined as unknown,
-    baseline: async () => {
-      beginCall()
-      try { return await composition.call('baseline', {}) } finally { endCall() }
-    },
-    bootstrapWorkspace: async (actor: unknown, idempotencyKey: unknown) => {
-      beginCall()
-      try {
-        const normalizedActor = actorRef(actor)
-        const normalizedKey = nonEmptyString(idempotencyKey, 'idempotencyKey')
-        return await composition.call('bootstrapWorkspace', { actorRef: normalizedActor, idempotencyKey: normalizedKey })
-      } finally { endCall() }
-    },
-    // beginCall 在生成器体内：网关在第一次 next() 之前取消时计数不会泄漏。toJson 是流上唯一的严格编码点（网关不编码流项）。
-    async *watch(signal: AbortSignal) {
-      beginCall()
-      try {
-        for await (const frame of composition.watch(AbortSignal.any([signal, lifetime.signal]))) yield toJson(frame)
-      } finally { endCall() }
-    },
+  const service: Record<string, unknown> = { ctx, typertRemote: undefined }
+  for (const operation of Object.values(remote.operations)) {
+    service[operation.name] = operation.mode === 'stream'
+      // beginCall 在生成器体内：网关在第一次 next() 之前取消时计数不会泄漏。toJson 是流上唯一的严格编码点（网关不编码流项）。
+      ? async function* (signal: AbortSignal) {
+        beginCall()
+        try {
+          const frames = composition[operation.name as StreamName<typeof OPERATIONS>](AbortSignal.any([signal, lifetime.signal]))
+          for await (const frame of frames) yield toJson(frame)
+        } finally { endCall() }
+      }
+      : async (...args: unknown[]) => {
+        beginCall()
+        try { return await composition.call(operation.name as UnaryName<typeof OPERATIONS>, inputOfArguments(operation, args)) } finally { endCall() }
+      }
   }
   service.typertRemote = Object.freeze({ service, serviceKey: REMOTE_SERVICE, namespace: REMOTE_NAMESPACE })
 
   try {
     provideDispose = ctx.provide(REMOTE_SERVICE, service) ?? undefined
-    unregisterRemote = ctx.typert.register(HOST_REMOTE)
+    unregisterRemote = ctx.typert.register(remote.host)
   } catch (error) {
     await provideDispose?.()
     throw error

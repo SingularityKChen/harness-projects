@@ -3,9 +3,9 @@ import path from 'node:path'
 import { composeCore, unavailableCore, type CoreApi } from '@harness-projects/core'
 import { createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
 import { createSqliteStorage, type SqliteStorage } from '@harness-projects/storage-sqlite'
-import type { CommandEnvelope } from '@harness-projects/controller'
 import type { WorkspaceId } from '@harness-projects/domain'
 import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
+import { dispatchOf, OPERATIONS, type UnaryHandlers, type UnaryName } from './host-operations.ts'
 import { hostStoragePolicy, restoreProviders, type DisabledBinding, type ProviderCatalog } from './host-providers.ts'
 
 /** Controller 失败上 wire 的唯一文案：原因只写进宿主诊断日志。 */
@@ -27,31 +27,16 @@ export interface HostComposition {
   readonly controller: Controller
   /** 运行期无法构造而被禁用的挂载；只在内存，不写库。 */
   readonly disabled: readonly DisabledBinding[]
-  call(name: 'baseline' | 'bootstrapWorkspace', input: unknown): Promise<unknown>
+  call(name: UnaryName<typeof OPERATIONS>, input: unknown): Promise<unknown>
   /** 一代宿主流（#276）：每次 `next()` 都经 `guarded`；`signal` 中止即正常结束。 */
   watch(signal: AbortSignal): AsyncIterable<WireStreamFrame>
   dispose(): void
 }
-type Handler = (input: unknown) => Promise<unknown>
 
-function plainRecord(value: unknown, label: string): Record<string, unknown> {
-  const prototype = value !== null && typeof value === 'object' ? Object.getPrototypeOf(value) : undefined
-  if (typeof value !== 'object' || value === null || (prototype !== Object.prototype && prototype !== null)) throw new TypeError(`${label} 必须是普通对象`)
-  return value as Record<string, unknown>
-}
-function exactInput(value: unknown, keys: readonly string[], label: string): Record<string, unknown> {
-  const record = plainRecord(value, label)
-  const unknown = Object.keys(record).filter((key) => !keys.includes(key))
-  if (unknown.length > 0) throw new TypeError(`${label} 含未知字段：${unknown.join(', ')}`)
-  return record
-}
-function assertEnvelope(value: unknown): CommandEnvelope {
-  const input = exactInput(value, ['actorRef', 'idempotencyKey'], 'bootstrapWorkspace')
-  const actor = exactInput(input.actorRef, ['kind', 'id'], 'actorRef')
-  if (typeof actor.kind !== 'string' || actor.kind.length === 0) throw new TypeError('actorRef.kind 必须是非空字符串')
-  if (actor.id !== undefined && (typeof actor.id !== 'string' || actor.id.length === 0)) throw new TypeError('actorRef.id 必须是非空字符串')
-  if (typeof input.idempotencyKey !== 'string' || input.idempotencyKey.length === 0) throw new TypeError('idempotencyKey 必须是非空字符串')
-  return { actorRef: { kind: actor.kind, ...(actor.id === undefined ? {} : { id: actor.id as string }) }, idempotencyKey: input.idempotencyKey }
+/** 每个 unary 操作一个 handler：只把已校验的输入透传给 Controller，结果与 `writeState` 不加工（Host 拥有权威状态）。 */
+const HANDLERS: UnaryHandlers<typeof OPERATIONS, Controller> = {
+  baseline: (controller) => controller.baseline(),
+  bootstrapWorkspace: (controller, input) => controller.commands.bootstrapWorkspace(input),
 }
 
 export async function createHostComposition(options: HostCompositionOptions): Promise<HostComposition> {
@@ -84,14 +69,11 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       diagnostics: { syncRoundFailed: (error) => log.write('syncRoundFailed', describeError(error)) },
     })
     const controller = createController(core, { workspaceRevision: () => storage!.currentRevision(options.workspaceId) })
-    const handlers: Record<'baseline' | 'bootstrapWorkspace', Handler> = {
-      baseline: async (input) => { exactInput(input, [], 'baseline'); return guarded(() => controller.baseline()) },
-      bootstrapWorkspace: async (input) => { const envelope = assertEnvelope(input); return guarded(() => controller.commands.bootstrapWorkspace(envelope)) },
-    }
+    const dispatch = dispatchOf(OPERATIONS, HANDLERS, guarded)
     return {
       controller,
       disabled,
-      call: async (name, input) => { if (closed) throw new Error('host 已关闭'); return handlers[name](input) },
+      call: async (name, input) => { if (closed) throw new Error('host 已关闭'); return dispatch(controller, name, input) },
       watch: (signal) => {
         if (closed) throw new Error('host 已关闭')
         const frames = streamWorkspace(controller, { signal, intervalMs: options.watchIntervalMs ?? 1000 })
