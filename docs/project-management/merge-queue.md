@@ -514,14 +514,14 @@ gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,baseRe
 
 ### 4.10 2026-10-22 · PR #388–#391 评审修复收尾
 
-人类本会话直接要求“继续走修复流程PR#388-#391”，延续本会话已执行的修复、独立复评、归档、提交整理、issue核对与rebase合并流程。四项初审均无P0/P1，29条P2/P3需逐项处理；Planning Status与blocked-by不在授权写入范围。#388权限AC2的具体选择另由人类确认，未确认前不关闭#355或把既有降级策略写成新批准。
+人类本会话直接要求“继续走修复流程PR#388-#391”，延续本会话已执行的修复、独立复评、归档、提交整理、issue核对与rebase合并流程。四项初审均无P0/P1，29条P2/P3需逐项处理；Planning Status与blocked-by不在授权写入范围。#388权限AC2后由人类明确确认“保留 degraded，只读尝试（推荐）”，#355 comment6333568345与所属ExecPlan D24已回读；没有以测试通过代替人类确认。
 
 | 位置 | PR / issue | 独立交付闭环 | 合并前验证与边界 |
 |---|---|---|---|
 | 1（已合并） | #390 / #350 | 源码扫描排除产物且不会静默少扫Git可见源码 | 2026-10-22 rebase合并 `2f51f13099e273eaaf1a5e14b27825e7686bb5bc`，#350 CLOSED；后续迁移#396保持OPEN |
 | 2（已合并） | #389 / #357 | 六位置谱系派生，关系态与CI状态正交，共享年龄及翻转时刻 | 2026-10-22 rebase合并 `b3bccadebe9b960eb5fca1b525adfacff7b5e6dd`，#357 CLOSED；消费义务#234/#281/#150已回读 |
-| 3 | #391 / Refs #186 | pnpm根解析前置守卫及失败指引 | #186完整直接Node/局部shadow验收保持OPEN；不得借合并关闭 |
-| 4 | #388 / #355 | Host组合GitHub研发/Actions，单请求全等待预算 | 独立预算与回滚反例；AC2权限选择须有人类明确答复后才能关闭#355 |
+| 3（已合并） | #391 / Refs #186 | pnpm根解析前置守卫及失败指引 | 2026-10-22 rebase合并 `09dd18f0c50abd851b42d0eb3db062154b980866`；#186完整验收仍OPEN |
+| 4 | #388 / #355 | Host组合GitHub研发/Actions，单请求全等待预算 | 独立预算与回滚反例；人类已明确选择保留degraded只读尝试，#355 comment6333568345；最终head门禁后按授权rebase合并 |
 
 以上仅按独立能力与收尾风险选序，不新增规划依赖。每次前项合并后，后项在真实main上重锁、rebase、核对range-diff与受影响回归，并等待新head CI和独立批准。预演不能替代真实main；技术债表和索引冲突保留双方全部事实，未来各PR合入时分别带入自己的`docs/review/pr-<n>-mmp-review.md`。合并回读使用各PR的state/headRefOid/mergeCommit及对应issue状态，本文不预写未来合并SHA。
 
@@ -623,3 +623,5 @@ gh issue reopen 4 -c "被 #108 的关闭引用自动关闭；revise 清单（R1�
 **Superseded by L1（#119，2026-09-23）**：上面这段的前提"行为 6 判 `inconclusive`"已不成立——L1 补测后**提议**行为 6 改判 `pass`（裁决 §2.6；**采纳权在人类伙伴**，采纳前不得作为事实写入 #4），因此"无法判定等同于不满足"这条理由不再适用于行为 6；#4 保持打开的理由改为 **`revise` 的 R1–R8 尚未落地**（其中行为 1 的成员关系落点仍缺模型落点）。`gh issue reopen` 的命令文案已按此订正，避免往 #4 写入"行为 6 仍为 inconclusive"这条与裁决相反的话。**回读（2026-09-23）**：`gh issue view 4 --repo SingularityKChen/harness-projects --json state,comments` → `state = OPEN`、无评论，即 #108 的关闭引用没有实际关闭 #4，这段补救文案没有被执行过。
 
 2026-10-22 最终整合补记：#393/#392/#394 已依次 rebase 合并，对应 issue #362/#297/#335 均 CLOSED。#395 在真实 `main@5f4dcbe6f080d30b9df3e1cddd4832ff03a1e9ca` 上解决既定四文件冲突，其 apps/packages/tests/scripts/workflows 产品文件集合与已通过 1808+7 的修复并集 `a4440bd45b725d7f2c398127200db765bab49c06` 的 Git blob 清单完全一致（SHA-256 `dcbd55267c3ca727ec892aef0825d965127ddd2ab515c9ba8f71b21c3d6f2807`）。#395 的最终 head/mergeCommit 及 #282 关闭结果以 `gh pr view 395 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit` 与 issue 回读为准；本段不预写未来合并 SHA。
+
+2026-10-22修复收尾整合：#390/#389/#391已按顺序rebase合并，#350/#357关闭、#186保留OPEN。#388在真实`main@09dd18f0c50abd851b42d0eb3db062154b980866`上完成最后变基，其产品Git blob清单与先pack后verify1886+7的固定修复并集完全一致，SHA-256 `4e0a28e18b93b86710c70640095cf52ff7f4df92a9430574e1bb892cc1c43e90`；权限决定仅补文档，不改变已复评的现有degraded策略。#388实际mergeCommit与#355关闭以`gh pr view 388 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit`及issue回读为准，不预写未来SHA。
