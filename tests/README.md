@@ -7,16 +7,20 @@ pnpm test              # 三层（contract + integration + e2e，node --test）
 pnpm test:contract     # 只跑契约层
 pnpm test:mvp0         # 只跑 MVP-0 进度轨道
 pnpm run boundaries    # 只跑包边界契约测试
+pnpm test:file <path>  # 单个测试文件或目录，先查解析落点
 ```
 
-**在隔离 worktree 里跑测试前必须先安装依赖。** 新建的 worktree 没有 `node_modules`，而裸包名（`@harness-projects/core`）会沿父目录向上解析到**主检出**的 `packages/`——于是测试对着未修改的源码跑，「先红」拿到的是无效证据（2026-09-24 两个并行实现者在各自 worktree 上各自撞到一次，其中一次的红基线是在主检出的代码上取得的）。正确做法：
+**在隔离 worktree 里跑测试前必须先安装依赖。** 新建的 worktree 没有 `node_modules`，而裸包名（`@harness-projects/core`）会沿父目录向上解析到**主检出**的 `packages/`——于是测试对着未修改的源码跑，「先红」拿到的是无效证据（2026-09-24 两个并行实现者在各自 worktree 上各自撞到一次，其中一次的红基线是在主检出的代码上取得的）。
+
+这条现在有机械守卫 `scripts/resolution-check.mjs`：它检查根 `package.json` 声明的每个 `@harness-projects/*` 是否解析到**本检出之内**，与怎么逃逸出去（祖先 `node_modules`、`NODE_PATH`、软链）无关。`pnpm test`、`pnpm test:contract`、`pnpm test:mvp0`、`pnpm run boundaries` 与 `pnpm test:file <path>` 都在跑任何用例之前先跑它；越界时退出 1，逐包列出 `包名 -> 实际落点`。失败时在检出根目录执行：
 
 ```bash
 pnpm install --frozen-lockfile
-ls -l node_modules/@harness-projects/core    # 期望：-> ../../packages/core（相对本 worktree）
 ```
 
-这条没有机械守卫，靠人按上面两步核对。
+单独检查用 `node scripts/resolution-check.mjs`（通过时静默退出 0）。
+
+不经 pnpm、直接用 `node` 跑测试时（`node --test <文件或目录>`，或把测试文件当脚本运行），只有运行集合里含契约测试 `tests/contract/resolution-check.test.js`（例如 `node --test tests/contract`）才会在进程内判红；其余——单个文件，以及 `tests/mvp0`、`tests/integration`、`tests/e2e` 这几个目录——**不受守卫保护**，未装依赖的嵌套检出里会对着主检出的代码给出假绿（TD-088、TD-089）。取红基线、单跑文件或目录，一律用 `pnpm test:file <path>`。已知的无标志拦截办法要么需要在检出之外放状态，要么要改近百个测试文件，代价见 TD-088。
 
 ## 1. 分层
 
