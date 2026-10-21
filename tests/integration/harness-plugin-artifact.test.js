@@ -314,7 +314,7 @@ describe('Harness 插件安装件契约', () => {
       assert.ok(specifiers.some((specifier) => specifier.startsWith('node:')), '没有扫到任何说明符，本断言空转')
       assert.deepEqual(specifiers.filter((specifier) => /^@harness-projects\/|\.tsx?$|^file:/.test(specifier)), [])
       const inputs = Object.keys(result.metafiles.host.inputs)
-      for (const prefix of ['packages/providers/planning-github-projects/', 'packages/providers/development-local-git/']) assert.ok(inputs.some((input) => input.startsWith(prefix)), `宿主输入里没有目录收录的 ${prefix}`)
+      for (const prefix of ['packages/providers/planning-github-projects/', 'packages/providers/development-local-git/', 'packages/providers/development-github/', 'packages/providers/delivery-github-actions/']) assert.ok(inputs.some((input) => input.startsWith(prefix)), `宿主输入里没有目录收录的 ${prefix}`)
       assert.deepEqual(inputs.filter((input) => input.startsWith('packages/providers/fake/')), [])
     })
   })

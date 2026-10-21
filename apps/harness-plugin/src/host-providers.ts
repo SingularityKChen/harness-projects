@@ -5,11 +5,14 @@
 import { createHash } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
-import type {
-  BindingConfigurationSchema, ConnectorAccountRecord, ProviderBindingRecord, ProviderDefinition, Storage, StorageValidationPolicy,
+import {
+  AccessLevel, CapabilityKey,
+  type BindingConfigurationSchema, type ConnectorAccountRecord, type ProviderBindingRecord, type ProviderDefinition, type Storage, type StorageValidationPolicy,
 } from '@harness-projects/capabilities'
 import type { CoreProviderTable } from '@harness-projects/core'
 import { ProjectErrorCode, projectError, type ProjectError, type WorkspaceId } from '@harness-projects/domain'
+import { GITHUB_ACTIONS_DEFINITION, createGithubActionsDeliveryProvider, type GithubActionsTransport } from '@harness-projects/provider-delivery-github-actions'
+import { GITHUB_DEVELOPMENT_DEFINITION, createGithubDevelopmentProvider } from '@harness-projects/provider-development-github'
 import { LOCAL_GIT_PROVIDER_DEFINITION, createLocalGitDevelopmentProvider } from '@harness-projects/provider-development-local-git'
 import {
   GITHUB_PROJECTS_PROVIDER_DEFINITION, createGithubProjectsPlanningProvider, type GraphqlTransport,
@@ -60,22 +63,84 @@ const text = (configuration: ProviderBuildInput['configuration'], name: string):
   return value
 }
 
-/** GitHub GraphQL 传输：每次请求先解析凭据（空值即 reject，provider 自行归类为 unavailable 且不带原文），不跟随重定向，带超时。 */
+/** 令牌只发往 `GITHUB_API`；GitHub 条目只接受来源恰为 `GITHUB_ORIGIN` 的连接账号（GHES 与其它来源禁用）。端点做成配置属 TD-067。 */
+const GITHUB_API = 'https://api.github.com'
+const GITHUB_ORIGIN = 'https://github.com'
+interface GithubResponse { readonly status: number; readonly headers: Readonly<Record<string, string>>; readonly body: unknown }
+
+/**
+ * 唯一的 GitHub 出口：每次请求从入口给凭据解析、fetch 与响应体同一个 30 s 预算，底层不响应 abort 时也结束等待；
+ * 凭据 undefined 或空串即 reject、零 fetch，provider 自行归类为 unavailable 且不带原文；不跟随重定向；
+ * provider 头名先归一为小写，宿主的 authorization 与 user-agent 最后写入、不可被覆盖；响应体不能解析时为 undefined。
+ */
+async function githubRequest(
+  fetch: HostFetch, credential: () => Promise<string | undefined>, url: URL,
+  init: { readonly method: 'GET' | 'POST'; readonly headers: Readonly<Record<string, string>>; readonly body?: string },
+): Promise<GithubResponse> {
+  const signal = AbortSignal.timeout(30_000)
+  let onAbort!: () => void
+  const deadline = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason)
+    if (signal.aborted) onAbort()
+    else signal.addEventListener('abort', onAbort, { once: true })
+  })
+  try {
+    return await Promise.race([deadline, (async () => {
+      signal.throwIfAborted()
+      const token = await credential()
+      signal.throwIfAborted() // 预算后凭据才到达：不再发送请求；race 消费这条分支的晚拒绝。
+      if (token === undefined || token === '') throw new Error('credential unavailable')
+      const headers = Object.fromEntries(Object.entries(init.headers).map(([name, value]) => [name.toLowerCase(), value]))
+      const response = await fetch(url.href, {
+        method: init.method,
+        redirect: 'error',
+        signal,
+        headers: { ...headers, authorization: `bearer ${token}`, 'user-agent': 'harness-projects' },
+        ...(init.body === undefined ? {} : { body: init.body }),
+      })
+      signal.throwIfAborted()
+      const body: unknown = await response.json().catch(() => undefined)
+      signal.throwIfAborted()
+      return { status: response.status, headers: Object.fromEntries(response.headers.entries()), body }
+    })()])
+  } finally { signal.removeEventListener('abort', onAbort) }
+}
+
+/** GitHub GraphQL 传输：规划与研发 provider 共用（两者的 GraphqlTransport 结构逐字同形）。 */
 function githubGraphqlTransport(fetch: HostFetch, credential: () => Promise<string | undefined>): GraphqlTransport {
-  return async ({ operationName, query, variables }) => {
-    const token = await credential()
-    if (token === undefined || token === '') throw new Error('credential unavailable')
-    const response = await fetch('https://api.github.com/graphql', {
-      method: 'POST',
-      redirect: 'error',
-      signal: AbortSignal.timeout(30_000),
-      headers: { authorization: `bearer ${token}`, 'content-type': 'application/json', 'user-agent': 'harness-projects' },
-      body: JSON.stringify({ operationName, query, variables }),
-    })
-    const body: unknown = await response.json().catch(() => undefined)
-    return { status: response.status, headers: Object.fromEntries(response.headers.entries()), body }
+  return ({ operationName, query, variables }) => githubRequest(fetch, credential, new URL('/graphql', GITHUB_API), {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ operationName, query, variables }),
+  })
+}
+
+/**
+ * GitHub REST 传输（Actions provider 用）：方法固定 GET；URL 以 pathname 赋值构造，origin 在结构上保持 api.github.com
+ * （拼接会把 `.evil.example/x` 拼成别的主机）；query 逐项写进 searchParams。不请求响应里给出的任何 URL。
+ */
+export function githubRestTransport(fetch: HostFetch, credential: () => Promise<string | undefined>): GithubActionsTransport {
+  return ({ path: pathname, query, headers }) => {
+    const url = new URL(GITHUB_API)
+    url.pathname = pathname
+    for (const [name, value] of Object.entries(query)) url.searchParams.set(name, String(value))
+    return githubRequest(fetch, credential, url, { method: 'GET', headers })
   }
 }
+
+/** 规划与研发条目共用：账号必须在 github.com 上且带宿主句柄，否则只禁用该挂载。 */
+function requireGithubCredential(account: ConnectorAccountRecord | undefined, role: string): void {
+  if (account?.platformOrigin !== GITHUB_ORIGIN || account.secretHandle === undefined) {
+    throw new BindingRefused(ProjectErrorCode.NotSupported, `${role}挂载需要 github.com 上带凭据句柄的连接账号`)
+  }
+}
+
+/** 研发与 Actions 条目共用的仓库配置：owner/name 与 provider 的单路径分量规则一致，坏值在写库时被拒（TD-055：已声明 schema 不宜再收紧）。 */
+const GITHUB_REPOSITORY: BindingConfigurationSchema = {
+  repositoryExternalId: { kind: 'string', required: true, pattern: '[^\\s]+', maxLength: 200 },
+  repositoryOwner: { kind: 'string', required: true, pattern: '[A-Za-z0-9][A-Za-z0-9._-]*', maxLength: 100 },
+  repositoryName: { kind: 'string', required: true, pattern: '[A-Za-z0-9][A-Za-z0-9._-]*', maxLength: 100 },
+}
+const githubRepository = (configuration: ProviderBuildInput['configuration']) =>
+  ({ externalId: text(configuration, 'repositoryExternalId'), owner: text(configuration, 'repositoryOwner'), name: text(configuration, 'repositoryName') })
 
 /** 检出根：自 `repositoryPath` 的 realpath 向上找 `.git`（目录或 gitfile），找不到就是它自己；仓库尚不存在时不向上借用外层检出。 */
 async function checkoutRootOf(repositoryPath: string): Promise<string> {
@@ -91,9 +156,7 @@ const GITHUB_PROJECTS_ENTRY: CatalogEntry = {
   definition: GITHUB_PROJECTS_PROVIDER_DEFINITION,
   configuration: { projectNodeId: { kind: 'string', required: true, pattern: 'PVT_[A-Za-z0-9_-]+', maxLength: 100 } },
   async create({ binding, configuration, account, credential, fetch }) {
-    if (account?.platformOrigin !== 'https://github.com' || account.secretHandle === undefined) {
-      throw new BindingRefused(ProjectErrorCode.NotSupported, '规划挂载需要 github.com 上带凭据句柄的连接账号')
-    }
+    requireGithubCredential(account, '规划')
     return createGithubProjectsPlanningProvider({ bindingId: binding.id, projectNodeId: text(configuration, 'projectNodeId'), transport: githubGraphqlTransport(fetch, credential) })
   },
 }
@@ -114,7 +177,34 @@ const LOCAL_GIT_ENTRY: CatalogEntry = {
   },
 }
 
-export const PROVIDER_CATALOG: ProviderCatalog = catalogOf([GITHUB_PROJECTS_ENTRY, LOCAL_GIT_ENTRY])
+/** 无账号或无句柄时禁用：provider 的组合期探针必然失败，组合只会得到误导性的 degraded（计划 D2）。 */
+const GITHUB_DEVELOPMENT_ENTRY: CatalogEntry = {
+  definition: GITHUB_DEVELOPMENT_DEFINITION,
+  configuration: GITHUB_REPOSITORY,
+  async create({ binding, configuration, account, credential, fetch }) {
+    requireGithubCredential(account, '研发')
+    return createGithubDevelopmentProvider({ bindingId: binding.id, repository: githubRepository(configuration), transport: githubGraphqlTransport(fetch, credential) })
+  },
+}
+
+/**
+ * 权限只取 Host 确知的账号事实、只在内存推导（计划 D1、D2）：github.com 账号带句柄 → degraded（未验证，照常读，逐次调用结果为准）；
+ * 无账号或无句柄 → 组合但显式 unavailable（禁用后在 wire 上与「没有挂载」不可区分）；非 github.com 账号禁用，令牌只发往 api.github.com。
+ */
+const GITHUB_ACTIONS_ENTRY: CatalogEntry = {
+  definition: GITHUB_ACTIONS_DEFINITION,
+  configuration: GITHUB_REPOSITORY,
+  async create({ binding, configuration, account, credential, fetch }) {
+    if (account !== undefined && account.platformOrigin !== GITHUB_ORIGIN) throw new BindingRefused(ProjectErrorCode.NotSupported, 'Actions 挂载的连接账号必须在 github.com 上')
+    const access = account?.secretHandle === undefined ? AccessLevel.Unavailable : AccessLevel.Degraded
+    return createGithubActionsDeliveryProvider({
+      bindingId: binding.id, repository: githubRepository(configuration), transport: githubRestTransport(fetch, credential), observedAt: new Date().toISOString(),
+      permission: { [CapabilityKey.DeliveryPipelineRead]: access, [CapabilityKey.DeliveryCheckRead]: access },
+    })
+  },
+}
+
+export const PROVIDER_CATALOG: ProviderCatalog = catalogOf([GITHUB_PROJECTS_ENTRY, LOCAL_GIT_ENTRY, GITHUB_DEVELOPMENT_ENTRY, GITHUB_ACTIONS_ENTRY])
 
 /** 存储打开期的受信策略：句柄取宿主常量，配置 schema 取目录各条目的声明。 */
 export function hostStoragePolicy(catalog: ProviderCatalog): StorageValidationPolicy {
