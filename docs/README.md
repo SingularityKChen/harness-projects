@@ -25,7 +25,6 @@
 
 | 计划 | 范围 | 状态 |
 |---|---|---|
-| [2026-10-21-repository-binding](exec-plan/active/2026-10-21-repository-binding.md) | #353（叠在 #127 上）：`bindRepository` 在一个事务内登记一个仓库实体与并列的 Local Git / GitHub / Actions 引用（锚点 `primary`，其余 `alias`，ADR-0015 Proposed）；`routeDevelopment` 按操作的锚键在并列引用间路由、歧义结构化拒绝；逐仓库可用性经快照到达 client 与 ui-model | Active |
 | [2026-10-15-harness-pid-flag-race](exec-plan/completed/2026-10-15-harness-pid-flag-race.md) | #347：变异夹具测试只在标记文件里出现以换行结尾的完整正整数 pid 后才读取，`process.kill` 不再拿到 `0`；已实施，四个受影响用例连跑 50 次全绿 | Completed |
 | [2026-10-15-github-development-read](exec-plan/completed/2026-10-15-github-development-read.md) | #231：GitHub Development 只读 provider（仓库 / 分支 / 提交 / 按 head 分支读 PR / 观察流），录制夹具上通过共享契约套件；已实施并经第一轮 MMP 评审与两轮修复复评（PR #342） | Completed |
 | [2026-10-13-status-projection-race](exec-plan/completed/2026-10-13-status-projection-race.md) | #303 / PR #316：状态命令在一个 Storage 事务内原子读-判-写（D1）；不可见目标（缺失或 redacted）统一以不可重试的 `not_found` 拒绝且无副作用（D2）；竞态回归改为调度探索 + 串行参照预言机（D3）；已实施并经第三轮 MMP 评审与两轮修复复评（PR #316） | Completed |
@@ -60,6 +59,7 @@
 
 | 计划 | 结论 |
 |---|---|
+| [2026-10-21-repository-binding](exec-plan/completed/2026-10-21-repository-binding.md) | #353：`bindRepository` 在一个事务内登记一个仓库实体与并列的 Local Git / GitHub / Actions 引用（锚点 `primary`，其余 `alias`，ADR-0015 Accepted）；`routeDevelopment` 按操作的锚键在并列引用间路由、歧义结构化拒绝；逐仓库可用性经快照到达 client 与 ui-model；已实施并经 MMP 评审与修复复评，ADR-0015 已采纳（PR #373） | Completed |
 | [2026-10-21-workspace-binding-commands](exec-plan/completed/2026-10-21-workspace-binding-commands.md) | #127：经 `createWorkspaceSetup` / `createSetupCommands` 以自然幂等命令创建工作区、连接 GitHub 账户（只存凭据句柄）并绑定 GitHub Project 为唯一 Planning 来源；第二个启用的 Planning 绑定 `conflict`，切换 `not_supported`（待 #202）；已实施并经三轮 MMP 评审（PR #371） | Completed |
 | [2026-10-21-plugin-work-item-pages](exec-plan/completed/2026-10-21-plugin-work-item-pages.md) | #229：插件 `main` 面板挂载 `WorkItemApp`（列表与详情抽屉、唯一 scope 门、页面替换焦点）；client 的 `superviseWorkspace` 把 watch 三种终止变成有界退避的新 follower；删除占位面板；已实施并经 MMP 评审两轮与宿主内 S3（PR #372） | Completed |
 | [2026-10-21-host-operation-registry](exec-plan/completed/2026-10-21-host-operation-registry.md) | #352：每个 Host 远程操作只在 `apps/harness-plugin/src/host-operations.ts` 声明一次，由它派生 descriptor、live service、Host 分发与客户端代理类型；wire 逐项不变，不新增操作；已实施并经 MMP 评审（PR #370） | Completed |

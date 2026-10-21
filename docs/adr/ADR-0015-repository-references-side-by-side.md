@@ -1,8 +1,8 @@
 # ADR-0015：一个仓库一个实体，各连接下的引用是并列身份，Development 按操作路由
 
-> 状态：Proposed
+> 状态：Accepted（人类伙伴 2026-10-21 在 PR #348、#370–#373 的评审会话中直接批准，所选答复原文「采纳，并补三条约束 (Recommended)」；问题原文与记录见来源 ExecPlan 的 Decision Log）
 > 日期：2026-10-21
-> 来源：`docs/exec-plan/active/2026-10-21-repository-binding.md`（#353）；`docs/exec-plan/completed/2026-10-08-development-repository-routing.md`（#219 的 D1、D7、D23）；`docs/architecture/gate-e1-ruling.md` §4 的 R7
+> 来源：`docs/exec-plan/completed/2026-10-21-repository-binding.md`（#353）；`docs/exec-plan/completed/2026-10-08-development-repository-routing.md`（#219 的 D1、D7、D23）；`docs/architecture/gate-e1-ruling.md` §4 的 R7
 
 ## Context
 
@@ -25,9 +25,10 @@
 4. **按操作路由，按声明选择。** 一次操作有一个锚点 key 与若干前置门，前置门在选中的同一挂载上判定。
    - 仓库只有一条现行引用时，就用它。
    - 有多条时，取唯一声明锚点 key 的那条。没有声明者报 `not_supported`，多个声明者报 `conflict`。
+   - 两种拒绝的结构化结果都带出连接 id（采纳约束③）：`conflict` 带出各声明者的连接 id，`not_supported` 带出服务该仓库的各连接 id。连接 id 是内部不透明 id，可以上 wire。
    - 角色、登记顺序、可用性与探测都不是选择的输入，绝不取第一个注册者。
    - 工作区元数据按同一选择逐仓库报告可用性。
-5. **唯一写者。** core 的 `registerRepository` 是仓库实体、引用身份与仓库挂载的唯一写者，绑定命令与开始工作的懒登记共用它。已登记的仓库只追加引用，不改指锚点。
+5. **唯一写者。** core 的 `registerRepository` 是仓库实体、引用身份与仓库挂载的唯一写者，绑定命令与开始工作的懒登记共用它。已登记的仓库只追加引用，不改指锚点。每个仓库在每个连接下至多一条现行引用（采纳约束②）：存储按 `(bindingId, repository, repositoryId)` 的自然键收拢同一连接下的身份，绑定命令对已有引用的实现换目标报 `conflict`、不改绑。追加引用只归绑定命令：懒登记只登记未登记的仓库或复用已有引用，路由之后有并发绑定登记了仓库时认领回滚。
 6. **交付来源每工作区一个。** 工作区已有启用的交付挂载时，再绑定另一个交付来源会被拒绝，不替换。
 
 ## Why
@@ -52,5 +53,5 @@
 
 - **#297。** 它把谱系的变更请求读与远端分支读改走「变更请求读」操作：锚点 `change_request.read`，前置门 `repository.read`。不得单独按 `repository.read` 路由。
 - **交付读取（TD-074）。** 交付读取仍按 key 取工作区默认的交付挂载；要按仓库路由交付，需要新的决定。
-- **解绑与改绑（M4.1）。** 解绑、改绑与引用歧义的补救都需要新的决定。在此之前，歧义是确定性的结构化拒绝。
-- **R7 的指引。** 本 ADR 采纳后，在 `docs/architecture/gate-e1-ruling.md` 的 R7 行末追加一句指向本 ADR；采纳前不改裁决文本。
+- **解绑与改绑（M4.1）。** 解绑、改绑与引用歧义的补救都需要新的决定，承接 issue 是 #387。M4.1 提供解绑 / 改绑之前，`conflict` 是终态（采纳约束①）：歧义是确定性的结构化拒绝，没有产品内的补救路径。
+- **R7 的指引。** 本 ADR 采纳后，在 `docs/architecture/gate-e1-ruling.md` 的 R7 行末追加一句指向本 ADR（已于 2026-10-21 采纳时追加）。
