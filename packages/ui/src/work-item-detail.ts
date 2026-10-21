@@ -59,8 +59,11 @@ function cycleFocus(dialog: DOMElement, shiftKey: boolean, event: { preventDefau
   if (!shiftKey && activeElement() === last) { event.preventDefault?.(); first.focus?.() }
 }
 
-/** 唯一详情抽屉：view 变化只更新内容；Escape 只走原生 cancel（preventDefault 后一次 onClose）；cleanup 不导航。 */
-export function WorkItemDetailDrawer({ view, onClose }: { view: WorkItemDetailView; onClose: () => void }): ReactElement {
+/**
+ * 唯一详情抽屉：view 变化只更新内容；Escape 只走原生 cancel（preventDefault 后一次 onClose）；cleanup 不导航。
+ * `notice` 是页面级说明（如断开重连）：模态打开时背景 inert，所以抽屉在自己稳定的状态区里再说一次，打开期间出现也会被宣告。
+ */
+export function WorkItemDetailDrawer({ view, notice, onClose }: { view: WorkItemDetailView; notice?: string | undefined; onClose: () => void }): ReactElement {
   const dialog = useRef<DOMElement | null>(null)
   const title = useRef<DOMElement | null>(null)
   const titleId = useId()
@@ -88,6 +91,7 @@ export function WorkItemDetailDrawer({ view, onClose }: { view: WorkItemDetailVi
   },
   createElement('div', { style: PANEL_STYLE },
     createElement('h2', { id: titleId, ref: title, tabIndex: -1 }, view.body.kind === 'content' ? view.body.title : '工作项详情'),
+    createElement('div', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, notice),
     panelBody(view.body),
     createElement('button', { type: 'button', onClick: onClose }, '关闭详情')))
 }

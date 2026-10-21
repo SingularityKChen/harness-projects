@@ -210,10 +210,11 @@ test('partial：整表 degraded 带原因并推进时间；已确认行经 view 
   assert.ok(store.list().length > 0 && store.list().every((entry) => !entry.stale), '本次确认的行保持 fresh')
   assert.equal(sync.read().lastUpdatedAt, T(1), 'partial 帧确有 fresh 行才更新时间')
   const shown = viewOf(sync.read())
-  assert.ok(shown.body.stale && /尚未确认/.test(shown.statusText), '整表仍显示为降级')
+  assert.deepEqual([shown.body.stale, shown.statusText], [true, '部分条目尚未确认，已显示的条目是当前值'], '整表仍降级，状态区说的是部分读取而不是最后已知值')
   assert.ok(itemRows(sync.read()).length > 0 && itemRows(sync.read()).every((row) => row.stale === false), '已确认的行不被整表原因洗成 stale')
   sync.disconnect()
   assert.ok(itemRows(sync.read()).every((row) => row.stale))
+  assert.equal(viewOf(sync.read()).statusText, '当前结果尚未确认，最后已知值不是当前值', '断网后回到整表未确认')
 })
 
 test('断网：poll / reconnect 拒绝后 connected=false，行引用、内容与旧时间保留，reason 是安全散文', async () => {

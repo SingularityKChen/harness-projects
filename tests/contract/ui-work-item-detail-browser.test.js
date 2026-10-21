@@ -15,8 +15,8 @@ import { NEGATIVE_ENTRY, buildBundle, startServer } from '../fixtures/work-item-
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const uiRequire = createRequire(path.join(repoRoot, 'packages/ui/package.json'))
 const React = uiRequire('react')
-const ALLOWED = /^packages\/(domain|ui-model|ui)\/src\/(?!ids\.ts|identity\.ts)|^packages\/(capabilities\/src\/capability-keys|controller\/src\/keys|client\/src\/keys)\.ts$|^apps\/web\/src\/(item-route|index)\.ts$/
-const REQUIRED = ['apps/web/src/item-route.ts', 'apps/web/src/index.ts', 'packages/ui-model/src/work-item-detail-view.ts', 'packages/ui-model/src/work-item-list-view.ts', 'packages/ui/src/work-item-project.ts', 'packages/ui/src/work-item-detail.ts', 'packages/ui/src/work-item-list.ts']
+const ALLOWED = /^packages\/(domain|ui-model|ui)\/src\/(?!ids\.ts|identity\.ts)|^packages\/(capabilities\/src\/capability-keys|controller\/src\/keys|client\/src\/keys)\.ts$|^apps\/web\/src\/index\.ts$/
+const REQUIRED = ['packages/ui/src/item-route.ts', 'apps/web/src/index.ts', 'packages/ui-model/src/work-item-detail-view.ts', 'packages/ui-model/src/work-item-list-view.ts', 'packages/ui/src/work-item-project.ts', 'packages/ui/src/work-item-detail.ts', 'packages/ui/src/work-item-list.ts']
 
 test('完整路径：meta 触达 adapter → 投影 → 组合页，只外置 react，禁止 node:* 与 core/controller/client 运行时', async () => {
   const result = await buildBundle()

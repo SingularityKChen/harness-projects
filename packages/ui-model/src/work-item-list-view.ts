@@ -62,6 +62,8 @@ export type WorkItemListView = {
         readonly kind: 'content'; readonly rows: readonly VisibleListRow[]
         readonly stale: boolean; readonly refreshing: boolean
         readonly lastUpdatedAt?: string; readonly notice?: string
+        /** 部分读取：整表未确认（`stale`），但每条可见条目都已确认；renderer 据此不把可见值说成最后已知值。 */
+        readonly partial?: true
       }
 }
 
@@ -157,7 +159,12 @@ export function deriveWorkItemListView(input: WorkItemListReadInput): WorkItemLi
   const stale = list.stale || degradedPage
   const refreshing = input.phase === 'received' && input.refreshing
   const rows = list.rows.map((row) => rowView(row, metadata.sourceNames, row.freshness.stale || degradedPage || refreshing))
+  // 部分读取：整表未确认（如表级 permission_denied），但每一条可见条目都已确认（整页降级时行已全部 stale）。只看可见行：表级已有
+  // 原因时，redacted 条目新鲜与否不改变这句话；没有表级原因时，它经 `list.stale`（`degradationOf`）仍决定这里是 partial 还是
+  // 「已读取当前快照」——#129 既有的 1 bit 通道（ADR-0010 L1 不接受），由 #366 验收 1 关闭，本处没有关上它。
+  const partial = stale && rows.some((row) => row.kind === 'item') && rows.every((row) => row.kind === 'redacted' || !row.stale)
   const statusText = refreshing ? '正在刷新，当前显示的是最后已知值'
+    : partial ? '部分条目尚未确认，已显示的条目是当前值'
     : stale ? '当前结果尚未确认，最后已知值不是当前值' : `已读取当前快照，共 ${rows.length} 项`
   return {
     ...shell, ...flags, statusText,
@@ -165,6 +172,7 @@ export function deriveWorkItemListView(input: WorkItemListReadInput): WorkItemLi
       kind: 'content', rows, stale, refreshing,
       ...(list.lastUpdatedAt === undefined ? {} : { lastUpdatedAt: list.lastUpdatedAt }),
       ...(metadata.safeNotice ? { notice: metadata.safeNotice } : {}),
+      ...(partial ? { partial: true } : {}),
     },
   }
 }

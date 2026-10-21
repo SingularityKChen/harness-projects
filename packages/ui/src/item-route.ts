@@ -2,6 +2,7 @@
  * 工作项深链 codec 与 History adapter（issue #130）：唯一路由为列表 `/projects/:projectId/items` 与详情
  * `/projects/:projectId/items/:itemId`。解析精确段数并拒绝空段、畸形编码、解码后的 slash/control 与多余路径，
  * 不反射错误 URL；close 用 replace 回列表而**绝不** history.back，直接深链打开时关闭不会离开应用。
+ * #229 起移入 ui 供两个壳共用；`apps/web` 只转导出。
  */
 import type { WorkItemDetailTarget } from '@harness-projects/ui-model'
 
