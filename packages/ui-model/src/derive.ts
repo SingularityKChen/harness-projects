@@ -6,6 +6,7 @@
 import { AccessLevel, ContentKind } from '@harness-projects/domain/values'
 import type { StoredEntity } from '@harness-projects/client'
 import { accessIndex, lineageEntryPoints, startWorkAvailability } from './capability-access.ts'
+import { isIsoTimestamp } from './timestamp.ts'
 import {
   WorkspaceConnectionState,
   type ActionAvailability, type ClientEntity,
@@ -14,16 +15,13 @@ import {
   type WorkItemRow, type WorkspaceHome, type WorkspaceRead,
 } from './types.ts'
 
-/** 契约是 ISO 8601，检查就必须是 ISO 8601：`Date.parse` 还接受 `'2026'` / `'09/24/2026'`。 */
-const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
-
 /**
  * 时间必须由宿主给出且可解析：展示层不读时钟，也不能把坏时间渲染成 Invalid Date。`undefined` 是合法的
  * "从未读到当前值"；给了值但解析不了是宿主接线缺陷——响亮失败，不静默降级成陈旧。
  */
 function assertTimestamp(value: string | undefined, field: string): void {
   if (value === undefined) return
-  if (!ISO_8601.test(value) || Number.isNaN(Date.parse(value))) {
+  if (!isIsoTimestamp(value)) {
     throw new TypeError(`${field} 必须是 ISO 8601 时间戳或省略，收到 ${JSON.stringify(value)}`)
   }
 }
