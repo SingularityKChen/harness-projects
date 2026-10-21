@@ -9,7 +9,7 @@ import type {
   AccessLevel, DerivedFlag, EntityId, EntityKind, ExternalIdentityKind, NormalizedStatus, PlanningFieldsSnapshot,
   ProviderBindingId, WorkspaceId,
 } from '@harness-projects/domain'
-import type { CapabilityKey } from '@harness-projects/capabilities'
+import type { CapabilityKey, EffectiveCapability } from '@harness-projects/capabilities'
 import { StatusPolicyMode } from '@harness-projects/core'
 import type { PlanningItemView, SyncSummary, WorkspaceMetadata } from '@harness-projects/core'
 import { WireAuthority, WireFreshness } from './values.ts'
@@ -58,13 +58,28 @@ export interface WireEntity {
 
 export interface WireWorkspaceDescriptor { readonly id: WorkspaceId; readonly name: string }
 
-/** 能力项只传 key / 最终 access / 原因：不带绑定、实例或凭据。 */
+/** 能力项只传 key / 最终 access / 原因：没有绑定、实例或凭据字段（仓库条目的原因文案见 `WireRepositoryEntry`）。 */
 export interface WireCapabilityEntry { readonly key: CapabilityKey; readonly access: AccessLevel; readonly reason: string | undefined }
 
-/** 每个可接受帧都带的整表头；`workspace` 为 undefined = 尚无已确认的 descriptor（没有 Storage），不是"没有工作区名"。 */
+/**
+ * 一个已登记仓库的逐操作可用性（#353）：能力项同工作区级的形状（没有 `bindingId` 字段），不下发引用。不可用项的 `reason` 是路由的拒绝文案，
+ * 可能点名仓库键、连接 id 与外部身份 id（#385；缺路由的拒绝原样带上仓库挂载指向的 `externalIdentityId`）——与开始工作结果里的文案相同；
+ * 连接 id 与外部身份 id 都是内部不透明 id、不是凭据或平台 id，实体的 `content.bindingId` 本来就下发连接 id。
+ */
+export interface WireRepositoryEntry { readonly id: string; readonly capabilities: readonly WireCapabilityEntry[] }
+
+/** 规划来源（#383）：已组合的规划挂载的绑定 id 与显示名（引导读到的项目标题）；不带账号、句柄或配置。页面没给来源名时 ui-model 用 `name`。 */
+export interface WirePlanningSource { readonly bindingId: ProviderBindingId; readonly name: string }
+
+/**
+ * 每个可接受帧都带的整表头；`workspace` 为 undefined = 尚无已确认的 descriptor（没有 Storage），不是"没有工作区名"。
+ * `repositories` 只在有已登记仓库时出现，`planningSource` 只在规划来源的名字已知时出现（没有时整个字段缺席，wire 与加入它们之前逐字相同）。
+ */
 export interface WireWorkspaceHeader {
   readonly workspace: WireWorkspaceDescriptor | undefined
   readonly capabilities: readonly WireCapabilityEntry[]
+  readonly repositories?: readonly WireRepositoryEntry[]
+  readonly planningSource?: WirePlanningSource
   readonly source: SourceMetadata
 }
 
@@ -141,11 +156,16 @@ export function toWireSnapshot(
     .map((view) => toWireEntity(view, authority))
     .sort((left, right) => (left.entityId < right.entityId ? -1 : 1))
   const revision = workspaceRevision ?? revisionOf(entities)
+  const wireCapability = ({ key, access, reason }: EffectiveCapability): WireCapabilityEntry => ({ key, access, reason })
+  const repositories = metadata.repositories.map(({ id, capabilities }) => ({ id, capabilities: capabilities.map(wireCapability) }))
+  const planning = metadata.planningSource
   return {
     revision,
     entities,
     workspace: metadata.workspace,
-    capabilities: metadata.capabilities.map(({ key, access, reason }) => ({ key, access, reason })),
+    capabilities: metadata.capabilities.map(wireCapability),
+    ...(repositories.length === 0 ? {} : { repositories }),
+    ...(planning === undefined ? {} : { planningSource: { bindingId: planning.bindingId, name: planning.name } }),
     source: {
       revision,
       authority,
@@ -163,13 +183,19 @@ export function diffSnapshots(previous: WireSnapshot, next: WireSnapshot): WireD
   const upserts = next.entities.filter((entity) => before.get(entity.entityId) !== signature(entity))
   const after = new Set(next.entities.map((entity) => entity.entityId))
   const removed = previous.entities.filter((entity) => !after.has(entity.entityId)).map((entity) => entity.entityId)
-  const { workspace, capabilities, source } = next
-  return { previousRevision: previous.revision, revision: next.revision, upserts, removed, workspace, capabilities, source }
+  const { workspace, capabilities, repositories, planningSource, source } = next
+  return {
+    previousRevision: previous.revision, revision: next.revision, upserts, removed, workspace, capabilities,
+    ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }), source,
+  }
 }
 
 export function toWireMetadata(snapshot: WireSnapshot): WireWorkspaceMetadata {
-  const { revision, workspace, capabilities, source } = snapshot
-  return { revision, workspace, capabilities, source, entities: snapshot.entities.map(({ entityId, source }) => ({ entityId, source })) }
+  const { revision, workspace, capabilities, repositories, planningSource, source } = snapshot
+  return {
+    revision, workspace, capabilities, ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }),
+    source, entities: snapshot.entities.map(({ entityId, source }) => ({ entityId, source })),
+  }
 }
 
 const byId = (left: WireEntity, right: WireEntity): number => (left.entityId < right.entityId ? -1 : 1)
@@ -182,5 +208,5 @@ export function businessSignature(snapshot: WireSnapshot): string {
 /** 整表头与逐行 source 的规范化签名（能力按 key 排序）；不含当前时钟，完全相同才 idle。 */
 export function sourceSignature(snapshot: WireSnapshot): string {
   const capabilities = [...snapshot.capabilities].sort((left, right) => (left.key < right.key ? -1 : 1))
-  return JSON.stringify([snapshot.workspace, capabilities, snapshot.source, [...snapshot.entities].sort(byId).map((entity) => [entity.entityId, entity.source])])
+  return JSON.stringify([snapshot.workspace, capabilities, snapshot.repositories, snapshot.planningSource, snapshot.source, [...snapshot.entities].sort(byId).map((entity) => [entity.entityId, entity.source])])
 }

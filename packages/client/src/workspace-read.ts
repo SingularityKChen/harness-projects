@@ -4,7 +4,7 @@
  */
 import { WireFreshness } from '@harness-projects/controller/values'
 import { AccessLevel } from '@harness-projects/domain/values'
-import type { WireCapabilityEntry, WireWorkspaceDescriptor, WireWorkspaceHeader } from '@harness-projects/controller'
+import type { WireCapabilityEntry, WirePlanningSource, WireRepositoryEntry, WireWorkspaceDescriptor, WireWorkspaceHeader } from '@harness-projects/controller'
 import type { EntityStore } from './store.ts'
 import { CapabilityKey } from './keys.ts'
 
@@ -16,6 +16,8 @@ import { CapabilityKey } from './keys.ts'
  * 内容不变的成功刷新不产生帧（#220、ADR-0012），所以不推进；
  * 同修订的 metadata 帧只在整表或某行由 degraded 恢复为 fresh 时推进，纯来源改名、能力变化与降级都不推进。
  * 省略 = 从未读到当前值，是合法的降级形态。`capabilities` 省略 = 未观测到任何能力（权限未知不得当成可用）。
+ * `repositories` 是逐仓库的能力项（#353）：省略 = 没有已登记的仓库，或最近一帧没有携带它；用法见 ui-model 的 `repositoryAccessIndex`。
+ * `planningSource` 是规划来源的绑定 id 与显示名（#383）：省略 = 名字未知（没有规划挂载、Host 启动后还没读到项目），或最近一帧没有携带它。
  * `reason`：断网优先于来源降级，来源降级必有解释。断网与「降级但无原因」是 client 的安全散文；来源降级时原样是宿主的值，
  * 可能是机器错误码（如 `unavailable` / `permission_denied`），翻译成展示文字归页面层（#229，TD-025）。
  */
@@ -25,6 +27,8 @@ export interface ClientWorkspaceRead {
   readonly connection: { readonly connected: boolean }
   readonly lastUpdatedAt?: string | undefined
   readonly capabilities?: readonly WireCapabilityEntry[] | undefined
+  readonly repositories?: readonly WireRepositoryEntry[] | undefined
+  readonly planningSource?: WirePlanningSource | undefined
   readonly reason?: string | undefined
 }
 
@@ -48,18 +52,41 @@ export function readClock(clock: () => string): string {
   return at
 }
 
-export function assertHeader(header: WireWorkspaceHeader): void {
-  if (typeof header !== 'object' || header === null) throw new TypeError('帧头不合契约：workspace / capabilities / source 形状错误')
-  const { workspace, capabilities, source } = header
-  const described = workspace === undefined || (typeof workspace.id === 'string' && workspace.id !== '' && typeof workspace.name === 'string')
+/** 能力项列表：每项闭集 `{ key, access, reason }`，key 是已知 key 且在本列表内唯一。 */
+function validCapabilityList(entries: unknown): boolean {
   const unique = new Set<string>()
-  const validCapabilities = Array.isArray(capabilities) && capabilities.every((entry) => {
+  return Array.isArray(entries) && entries.every((entry: WireCapabilityEntry) => {
     if (typeof entry !== 'object' || entry === null || !KNOWN_CAPABILITIES.has(entry.key) || !ACCESS_LEVELS.has(entry.access)
       || (entry.reason !== undefined && typeof entry.reason !== 'string') || unique.has(entry.key)) return false
     unique.add(entry.key)
     return Object.keys(entry).every((key) => key === 'key' || key === 'access' || key === 'reason')
   })
-  if (!described || !validCapabilities || !isSource(source)) {
-    throw new TypeError('帧头不合契约：workspace / capabilities / source 形状错误')
+}
+
+/** 逐仓库条目（可缺省）：每项闭集 `{ id, capabilities }`，id 非空且唯一，能力项沿用同一校验。 */
+function validRepositories(repositories: unknown): boolean {
+  const ids = new Set<string>()
+  return repositories === undefined || (Array.isArray(repositories) && repositories.every((entry: WireRepositoryEntry) => {
+    if (typeof entry !== 'object' || entry === null || typeof entry.id !== 'string' || entry.id === '' || ids.has(entry.id)
+      || !validCapabilityList(entry.capabilities)) return false
+    ids.add(entry.id)
+    return Object.keys(entry).every((key) => key === 'id' || key === 'capabilities')
+  }))
+}
+
+/** 规划来源（可缺省）：闭集 `{ bindingId, name }`，两者都是非空字符串。 */
+function validPlanningSource(planning: unknown): boolean {
+  const entry = planning as WirePlanningSource | null
+  return planning === undefined || (typeof entry === 'object' && entry !== null && typeof entry.bindingId === 'string' && entry.bindingId !== ''
+    && typeof entry.name === 'string' && entry.name !== '' && Object.keys(entry).every((key) => key === 'bindingId' || key === 'name'))
+}
+
+export function assertHeader(header: WireWorkspaceHeader): void {
+  const malformed = '帧头不合契约：workspace / capabilities / repositories / planningSource / source 形状错误'
+  if (typeof header !== 'object' || header === null) throw new TypeError(malformed)
+  const { workspace, capabilities, repositories, planningSource, source } = header
+  const described = workspace === undefined || (typeof workspace.id === 'string' && workspace.id !== '' && typeof workspace.name === 'string')
+  if (!described || !validCapabilityList(capabilities) || !validRepositories(repositories) || !validPlanningSource(planningSource) || !isSource(source)) {
+    throw new TypeError(malformed)
   }
 }

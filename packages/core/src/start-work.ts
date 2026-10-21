@@ -6,13 +6,13 @@ import {
   CapabilityKey, ProjectErrorCode, projectError, type ExecutionContextRecord, type ExecutionRunRecord, type ExternalObjectRef, type StorageTransaction,
 } from '@harness-projects/capabilities'
 import {
-  ContentKind, EntityKind, ExecutionContextStatus, ExecutionRunStatus, ExternalIdentityKind, IdentityRole, ProviderErrorCode, RelationType, asBrandedId,
+  ContentKind, EntityKind, ExecutionContextStatus, ExecutionRunStatus, ExternalIdentityKind, ProviderErrorCode, RelationType, asBrandedId,
   type EntityId, type ExecutionContextId, type ProjectError, type ProviderBindingId,
 } from '@harness-projects/domain'
 import { resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
 import { chainNode, worktreeEntityId } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
-import { routeDevelopment } from './development-route.ts'
+import { START_WORK_ROUTE, registerRepository, routeDevelopment } from './development-route.ts'
 import {
   StartWorkFallback, contextIdFor, contextRecord, fallbackOf, readyGap, reportForExisting, runIdFor, runStatusFor,
   startWorkUnavailable, toResult,
@@ -98,11 +98,6 @@ function existingRun(git: GitOutcome, existing: ExecutionRunRecord): StartWorkRe
   return toResult(git.report, outcomeOf(git, fallbackOf(existing), existing.providerRef?.externalId), undefined)
 }
 
-/** 新请求的写前准备额外要求的能力：分支创建的写门（只读即拒绝）与仓库读、工作树读两个读门，先于任何本地与外部写入；它们与路由的锚点（工作树创建的写门）都在路由选中的同一个挂载上、按这个顺序先于锚点判定（`routeDevelopment` 的 `earlier`）。 */
-const REGISTRATION_GATES = [
-  [CapabilityKey.DevelopmentBranchCreate, 'write'], [CapabilityKey.DevelopmentRepositoryRead, 'read'], [CapabilityKey.DevelopmentWorktreeRead, 'read'],
-] as const
-
 /** 写前事务里要做的登记：`claimContext` 在没有记录的分支里先调它，再写 Provisioning。 */
 type Registration = (tx: StorageTransaction) => Promise<void>
 type Prepared = { readonly ok: true; readonly register: Registration } | { readonly ok: false; readonly error: ProjectError }
@@ -117,7 +112,8 @@ async function prepareRegistration(context: CoreContext, request: StartWorkReque
   if (projection === undefined) return reject(projectError(ProjectErrorCode.NotFound, `工作项 ${request.workItemId} 不在当前工作区的规划投影里`))
   if (projection.content.contentKind === ContentKind.ChangeRequest) return reject(projectError(ProjectErrorCode.InvalidInput, '变更请求不是可开始工作的工作项'))
   if (projection.content.contentKind === ContentKind.Redacted) return reject(projectError(ProjectErrorCode.Unavailable, '工作项内容被扣下，不是可操作的规划条目'))
-  const route = await routeDevelopment(context, request.repositoryId, CapabilityKey.DevelopmentWorktreeCreate, 'write', REGISTRATION_GATES)
+  const [key, mode] = START_WORK_ROUTE.anchor
+  const route = await routeDevelopment(context, request.repositoryId, key, mode, START_WORK_ROUTE.earlier)
   if (!route.ok) return reject(route.error)
   const { provider, repository } = route
   const found = await provider.getRepository(repository)
@@ -130,23 +126,21 @@ async function prepareRegistration(context: CoreContext, request: StartWorkReque
 }
 
 /**
- * 写前登记（与 claim 同一个事务）：canonical 仓库实体与 primary 身份（已登记则复用）、工作区挂载、context 实体与 reserved worktree 实体。
+ * 写前登记（与 claim 同一个事务）：仓库经唯一写者 `registerRepository` 懒登记到路由到的连接（未登记时写 canonical 实体、primary 身份与工作区挂载；
+ * 已登记且该连接已有引用时零写入），再写 context 实体与 reserved worktree 实体。
+ * 懒登记不给已登记的仓库补引用（那只归绑定命令）：路由读到「未登记」之后、认领之前有并发绑定登记了仓库时，路由到的连接下没有它的引用——
+ * 抛错令认领回滚、结构化 unavailable 且无外部写入（风险 R5），不补出与绑定命令所写同类的第二条引用（它会让该仓库的路由永久歧义）。
  * 它们是外键父行，也是 tracks / has_worktree 的端点；放在写前而不是 final，读谱系才不会因写路径的中间态抛外键错误。
  * reserved worktree 实体只表示本地槽位，不是工作树 observed 的证据。
  */
 async function registerParents(
   tx: StorageTransaction, context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, bindingId: ProviderBindingId,
 ): Promise<void> {
-  let identity = await tx.findExternalIdentity(bindingId, ExternalIdentityKind.Repository, request.repositoryId)
-  if (identity === undefined) {
-    identity = {
-      id: context.ids.externalIdentityId(), entityId: context.ids.entityId(), bindingId,
-      externalKind: ExternalIdentityKind.Repository, externalId: request.repositoryId, role: IdentityRole.Primary,
-    }
-    await tx.putEntity({ id: identity.entityId, kind: EntityKind.Repository })
-    await tx.putExternalIdentity(identity)
+  if ((await tx.listRepositories(context.workspaceId)).some((mount) => mount.id === request.repositoryId)
+    && await tx.findExternalIdentity(bindingId, ExternalIdentityKind.Repository, request.repositoryId) === undefined) {
+    throw new Error(`仓库 ${request.repositoryId} 在路由之后已被登记，连接 ${bindingId} 下没有它的引用：开始工作不给已登记的仓库补引用`)
   }
-  await tx.putRepository({ id: asBrandedId<EntityId>(request.repositoryId), workspaceId: context.workspaceId, externalIdentityId: identity.id })
+  await registerRepository(tx, context.ids, context.workspaceId, request.repositoryId, [bindingId])
   await tx.putEntity({ id: asEntityId(contextId), kind: EntityKind.ExecutionContext })
   await tx.putEntity({ id: worktreeEntityId(context.workspaceId, request.repositoryId, request.workItemId), kind: EntityKind.Worktree })
 }

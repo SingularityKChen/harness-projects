@@ -69,6 +69,15 @@ test('producer：没有 Storage 的 core 不伪造 descriptor，来源是 degrad
   assert.ok(snapshot.source.reason, '降级必有原因')
 })
 
+test('producer：规划来源名是引导读到的项目标题；标题为空算未知，头里没有 planningSource，不让 client 拒帧（#383）', async () => {
+  const providers = createFakeProviders()
+  const { core, controller } = await compose(providers)
+  assert.deepEqual((await controller.baseline()).planningSource, { bindingId: providers.planning.bindingId, name: '项目 Alpha' })
+  providers.planning.state.projects = providers.planning.state.projects.map((project) => ({ ...project, title: '' }))
+  assert.equal((await core.commands.bootstrapWorkspace()).ok, true)
+  assert.equal('planningSource' in await controller.baseline(), false, '空标题不是名字：client 只收非空名字')
+})
+
 test('metadata：同 revision 的来源降级与恢复各发一个窄事件，业务 revision 与内容不变，重复 poll idle', async () => {
   const { providers, core, controller } = await compose()
   const base = await controller.baseline()

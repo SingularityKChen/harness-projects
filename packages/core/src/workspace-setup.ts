@@ -13,6 +13,8 @@ import {
   StatusPolicy, newConnectorAccountId, newProviderBindingId,
   type ConnectorAccountId, type ProviderBindingId, type WorkspaceId,
 } from '@harness-projects/domain'
+import { defaultIdFactory } from './context.ts'
+import { registerRepository, repositoryReferences } from './development-route.ts'
 
 export type SetupOutcome<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: ProjectError }
 export interface CreateWorkspaceRequest { readonly workspaceId: WorkspaceId; readonly name: string; readonly statusPolicy: StatusPolicy }
@@ -21,11 +23,18 @@ export interface BindPlanningSourceRequest {
   readonly workspaceId: WorkspaceId; readonly accountId: ConnectorAccountId
   readonly implementationKey: string; readonly configuration: Readonly<Record<string, string | boolean>>
 }
+/** 仓库在一条连接下的引用（#353）：挂载目标加能力域；本版本只接 Development 与交付。 */
+export interface RepositoryReferenceRequest extends MountTarget { readonly domain: Extract<CapabilityDomain, 'development' | 'delivery'> }
+export interface BindRepositoryRequest { readonly workspaceId: WorkspaceId; readonly repositoryId: string; readonly references: readonly RepositoryReferenceRequest[] }
+/** `bindingIds` 与请求的引用一一对应、同序。 */
+export interface RepositoryBinding { readonly repositoryId: string; readonly bindingIds: readonly ProviderBindingId[] }
 export interface WorkspaceSetup {
   createWorkspace(request: CreateWorkspaceRequest): Promise<SetupOutcome<{ readonly workspaceId: WorkspaceId }>>
   connectAccount(request: ConnectAccountRequest): Promise<SetupOutcome<{ readonly accountId: ConnectorAccountId }>>
   /** 工作区同一时刻只有一个启用的规划来源（不变量 1）：目标不同即 conflict；只剩停用挂载时是 #202 的切换，not_supported。 */
   bindPlanningSource(request: BindPlanningSourceRequest): Promise<SetupOutcome<{ readonly bindingId: ProviderBindingId }>>
+  /** 一个仓库实体并列持有各连接下的引用（ADR-0015）：逐引用按 `(domain, implementationKey)` create-or-verify，只追加、不改绑、不替换交付来源。 */
+  bindRepository(request: BindRepositoryRequest): Promise<SetupOutcome<RepositoryBinding>>
 }
 
 /** 设置命令的拒绝：只在 `runSetup` 的事务内抛出——异常令事务整笔回滚，`runSetup` 再把它还原成结果值。 */
@@ -99,9 +108,15 @@ const WORKSPACE_FIELDS = ['workspaceId', 'name', 'statusPolicy'] as const
 const IDENTITY_FIELDS = ['platformFamily', 'platformOrigin', 'identityKind', 'externalId'] as const
 const ACCOUNT_FIELDS = [...IDENTITY_FIELDS, 'displayName', 'secretHandle'] as const
 const BINDING_FIELDS = ['workspaceId', 'accountId', 'implementationKey', 'configuration'] as const
+const REPOSITORY_FIELDS = ['workspaceId', 'repositoryId', 'references'] as const
+const REFERENCE_FIELDS = ['domain', 'implementationKey', 'accountId', 'configuration'] as const
+const REFERENCE_DOMAINS: readonly unknown[] = [CapabilityDomain.Development, CapabilityDomain.Delivery]
 const STATUS_POLICIES: readonly unknown[] = Object.values(StatusPolicy)
 const nonBlank = (value: unknown): boolean => typeof value === 'string' && value.trim() !== ''
 const plainObject = (value: unknown): boolean => value !== null && typeof value === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(value))
+/** 一条引用的字段类型：能力域在两域内、实现键非空、账号缺省或非空、配置是普通对象（字段由存储按 schema 校验）。 */
+const referenceShaped = (reference: RepositoryReferenceRequest): boolean => REFERENCE_DOMAINS.includes(reference.domain) && nonBlank(reference.implementationKey)
+  && (reference.accountId === undefined || nonBlank(reference.accountId)) && plainObject(reference.configuration)
 
 export function createWorkspaceSetup(storage: Storage): WorkspaceSetup {
   return {
@@ -151,6 +166,48 @@ export function createWorkspaceSetup(storage: Storage): WorkspaceSetup {
       const bindingId = newProviderBindingId()
       await writeMount(tx, { id: bindingId, workspaceId: request.workspaceId, domain: CapabilityDomain.Planning, enabled: true, isDefault: true }, target)
       return { bindingId }
+    }),
+
+    // 先只读地逐引用判定（复用 / 拒绝 / 新建），全部通过才写挂载——所以拒绝零写入；挂载与账号关联写完，唯一写者再登记仓库与身份（关联须先于锚点上的身份）。
+    bindRepository: (request) => runSetup(storage, async (tx) => {
+      assertClosed(request, REPOSITORY_FIELDS)
+      const { workspaceId, repositoryId, references } = request
+      if (!nonBlank(repositoryId) || !Array.isArray(references) || references.length === 0) refuse(ProjectErrorCode.InvalidInput, '仓库键必须是非空字符串，引用必须是非空数组')
+      for (const reference of references) assertClosed(reference, REFERENCE_FIELDS)
+      const keys = new Set(references.map((reference) => `${reference.domain} ${reference.implementationKey}`))
+      if (!references.every(referenceShaped) || keys.size !== references.length || references.filter((reference) => reference.domain === CapabilityDomain.Delivery).length > 1) {
+        refuse(ProjectErrorCode.InvalidInput, '每条引用须是 Development 或交付域、实现键非空、配置是普通对象；同一实现至多一条，交付引用至多一条')
+      }
+      if (await tx.getWorkspace(workspaceId) === undefined) refuse(ProjectErrorCode.NotFound, '工作区不存在')
+      for (const { accountId } of references) if (accountId !== undefined && await tx.getConnectorAccount(accountId) === undefined) refuse(ProjectErrorCode.NotFound, '连接账号不存在')
+      const registered = (await tx.listRepositories(workspaceId)).find((mount) => mount.id === repositoryId)
+      if (registered === undefined && !references.some((reference) => reference.domain === CapabilityDomain.Development)) refuse(ProjectErrorCode.InvalidInput, '仓库尚未登记：首次绑定必须带一条 Development 引用')
+      const mounts = await tx.listProviderBindings(workspaceId)
+      const current = registered === undefined ? [] : await repositoryReferences(tx, registered, mounts.map((mount) => mount.id))
+      if (registered !== undefined && !current.some((identity) => identity.id === registered.externalIdentityId)) refuse(ProjectErrorCode.Conflict, '仓库已登记，但它的锚点不在本工作区任何挂载下：不猜实体')
+      const bindingIds: ProviderBindingId[] = []
+      const created: { readonly id: ProviderBindingId; readonly reference: RepositoryReferenceRequest; readonly target: MountTarget }[] = []
+      for (const reference of references) {
+        const target: MountTarget = { implementationKey: reference.implementationKey, accountId: reference.accountId, configuration: reference.configuration }
+        const existing = mounts.find((mount) => mount.domain === reference.domain && mount.implementationKey === reference.implementationKey && current.some((identity) => identity.bindingId === mount.id))
+        if (existing !== undefined) {
+          if (!sameMountTarget(await readMountTarget(tx, existing), target)) refuse(ProjectErrorCode.Conflict, '仓库在该实现下已有引用而目标不同：本版本不改绑')
+          bindingIds.push(existing.id)
+          continue
+        }
+        // 交付读取按 key 取工作区默认的交付挂载（TD-074）：写新默认会静默降级旧的，所以不替换交付来源。
+        if (reference.domain === CapabilityDomain.Delivery && mounts.some((mount) => mount.domain === CapabilityDomain.Delivery && mount.enabled)) refuse(ProjectErrorCode.Conflict, '工作区已有启用的交付来源：不替换')
+        const id = newProviderBindingId()
+        bindingIds.push(id)
+        created.push({ id, reference, target })
+      }
+      for (const { id, reference, target } of created) {
+        await writeMount(tx, { id, workspaceId, domain: reference.domain, enabled: true, isDefault: reference.domain === CapabilityDomain.Delivery }, target)
+      }
+      // 未登记时第一条 Development 引用成为锚点（primary），其余是 alias。
+      const anchorFirst = [...created.filter(({ reference }) => reference.domain === CapabilityDomain.Development), ...created.filter(({ reference }) => reference.domain !== CapabilityDomain.Development)]
+      await registerRepository(tx, defaultIdFactory, workspaceId, repositoryId, anchorFirst.map(({ id }) => id))
+      return { repositoryId, bindingIds }
     }),
   }
 }

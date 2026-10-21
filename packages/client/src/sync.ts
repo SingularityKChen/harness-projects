@@ -106,7 +106,8 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       const frameGeneration = validateFrame(frame, allowGenerationReset)
       const at = confirmed ? readClock(clock) : undefined
       apply()
-      head = { workspace: frame.workspace, capabilities: frame.capabilities, source: frame.source }
+      const { workspace, capabilities, repositories, planningSource, source } = frame
+      head = { workspace, capabilities, ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }), source }
       if (at !== undefined) lastUpdatedAt = at
       if (frameGeneration !== undefined) generation = frameGeneration
       connected = true
@@ -220,6 +221,8 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       const degraded = head.source.freshness === WireFreshness.Degraded
       return {
         workspace: head.workspace, store, connection: { connected }, lastUpdatedAt, capabilities: head.capabilities,
+        ...(head.repositories === undefined ? {} : { repositories: head.repositories }),
+        ...(head.planningSource === undefined ? {} : { planningSource: head.planningSource }),
         reason: !connected ? DISCONNECTED_REASON : degraded ? head.source.reason ?? NEUTRAL_REASON : undefined,
       }
     },

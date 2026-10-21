@@ -6,17 +6,19 @@ import {
   CapabilityKey,
   SyncState,
   bindingForCapability,
+  bindingsForDomain,
   singlePlanningBinding,
   type EffectiveCapability,
   type ProviderBindingRecord,
 } from '@harness-projects/capabilities'
-import { IdentityRole, type EntityId, type ExternalIdentity, type WorkspaceId } from '@harness-projects/domain'
+import { IdentityRole, type EntityId, type ExternalIdentity, type ProviderBindingId, type WorkspaceId } from '@harness-projects/domain'
 import { gateCommand } from './capabilities.ts'
 import { PLANNING_SYNC_SCOPE } from './bootstrap.ts'
 import type { CoreContext } from './context.ts'
 import {
   getDeliveryProjection, type DeliveryLineageHop, type DeliveryProjection, type DeliveryScope,
 } from './delivery.ts'
+import { CHANGE_REQUEST_READ_ROUTE, START_WORK_ROUTE, repositoryReferences, routeDevelopment } from './development-route.ts'
 import { readExecutionContext, type ExecutionContextQuery, type ExecutionContextView } from './execution-context.ts'
 import {
   toPlanningItemView,
@@ -28,6 +30,20 @@ import {
 /** 工作区读取的元数据：descriptor 来自已确认的 Storage 记录，能力来自本 Core 已确认的 registry；不含实例或凭据。 */
 export interface WorkspaceMetadata {
   readonly workspace: { readonly id: WorkspaceId; readonly name: string } | undefined
+  readonly capabilities: readonly EffectiveCapability[]
+  /** 已登记的仓库，按 id 升序；没有登记时是空数组。 */
+  readonly repositories: readonly RepositoryMetadata[]
+  /** 规划来源（#383）：已组合的规划挂载与它的显示名（引导读到的项目标题）；没有规划挂载、或名字还未知（空标题同样算未知）时 undefined。 */
+  readonly planningSource: { readonly bindingId: ProviderBindingId; readonly name: string } | undefined
+}
+
+/**
+ * 一个仓库的现行引用与逐操作的可用性（#353）：`capabilities` 的每个 key 恰好一条，来自该操作路由到的挂载（`bindingId` 即服务者）；
+ * 路由被拒（歧义、缺路由、门拒绝）时这些 key 报 unavailable，`reason` 是拒绝文案。工作区级 `capabilities` 不变。
+ */
+export interface RepositoryMetadata {
+  readonly id: string
+  readonly references: readonly { readonly bindingId: ProviderBindingId; readonly role: IdentityRole }[]
   readonly capabilities: readonly EffectiveCapability[]
 }
 
@@ -104,11 +120,38 @@ async function syncSummary(context: CoreContext): Promise<SyncSummary> {
 async function workspaceMetadata(context: CoreContext): Promise<WorkspaceMetadata> {
   const record = await context.storage.getWorkspace(context.workspaceId)
   const keys = Object.values(CapabilityKey).filter((key) => !key.startsWith(`${CapabilityDomain.Storage}.`))
+  const planning = singlePlanningBinding(context.registry)
   return {
     workspace: record === undefined ? undefined : { id: record.id, name: record.name },
     capabilities: keys.map((key) => bindingForCapability(context.registry, key)?.capabilities.find((entry) => entry.key === key)
       ?? { key, access: AccessLevel.Unavailable, reason: `没有挂载提供能力 ${key}`, bindingId: undefined, externalActionUrl: undefined }),
+    repositories: await repositoryMetadata(context),
+    planningSource: planning === undefined || !context.projectTitle ? undefined : { bindingId: planning.ref.bindingId, name: context.projectTitle },
   }
+}
+
+/**
+ * 逐仓库可用性：每个已登记仓库按两个操作各路由一次。开始工作走的是同一个 `routeDevelopment`，所以开始工作的四个 key 报告的就是命令会用的那个挂载，不另算一份；
+ * 变更请求读（`change_request.read`）的可用性只说明「这条路由可解析」：PR 谱系读取今天仍由 `chain-facts.ts` 的 `developmentReadBinding` 按 key 解析，
+ * #297 把它接到 `CHANGE_REQUEST_READ_ROUTE` 之后，谱系读取才走这条路由。
+ * 路由成功：该操作报告的 key 取被选挂载的有效能力（门已过，key 必在其中）；被拒：这些 key 逐个 unavailable，原因是拒绝文案。每个 key 只由一个操作报告。
+ */
+async function repositoryMetadata(context: CoreContext): Promise<readonly RepositoryMetadata[]> {
+  const mounts = bindingsForDomain(context.registry, CapabilityDomain.Development).map((mount) => mount.ref.bindingId)
+  const records = [...await context.storage.listRepositories(context.workspaceId)].sort((left, right) => (left.id < right.id ? -1 : 1))
+  const repositories: RepositoryMetadata[] = []
+  for (const record of records) {
+    const references = await repositoryReferences(context.storage, record, mounts)
+    const capabilities: EffectiveCapability[] = []
+    for (const { anchor, earlier, reports } of [START_WORK_ROUTE, CHANGE_REQUEST_READ_ROUTE]) {
+      const route = await routeDevelopment(context, record.id, anchor[0], anchor[1], earlier)
+      capabilities.push(...(route.ok
+        ? route.binding.capabilities.filter((entry) => reports.includes(entry.key))
+        : reports.map((key) => ({ key, access: AccessLevel.Unavailable, reason: route.error.message, bindingId: undefined, externalActionUrl: undefined }))))
+    }
+    repositories.push({ id: record.id, references: references.map(({ bindingId, role }) => ({ bindingId, role })), capabilities })
+  }
+  return repositories
 }
 
 async function primaryIdentity(context: CoreContext, entityId: EntityId): Promise<ExternalIdentity | undefined> {

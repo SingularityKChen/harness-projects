@@ -83,6 +83,8 @@ export interface CoreContext {
   readonly policy: Readonly<Partial<Record<CapabilityKey, AccessLevel>>>
   /** bootstrap 成功解析后回填；重启的实例靠 provider 观察重新发现。 */
   projectRef: ExternalObjectRef | undefined
+  /** 与 `projectRef` 同时回填的项目标题（#383），是规划来源的显示名；只在内存里，Host 启动后首轮读到项目之前未知。 */
+  projectTitle: string | undefined
   readonly planningFieldMapping: WorkspacePlanningFieldMapping | undefined
   readonly diagnostics: CoreDiagnostics | undefined
 }
@@ -146,7 +148,7 @@ export async function createContext(deps: CoreDeps): Promise<CoreContext | undef
     storage, workspaceId: workspace.id, registry: providerRegistry(prepared.bindings),
     clock: deps.clock ?? (() => new Date().toISOString()),
     ids: deps.ids ?? defaultIdFactory, policy,
-    projectRef: deps.workspace.project, planningFieldMapping, diagnostics: deps.diagnostics,
+    projectRef: deps.workspace.project, projectTitle: undefined, planningFieldMapping, diagnostics: deps.diagnostics,
   }
 }
 
@@ -194,7 +196,7 @@ export function unavailableCore(reason: string): CoreApi {
     getItemDetail: async () => undefined,
     getExecutionContext: async () => undefined,
     getPlanningSync: async () => ({ degraded: true, stale: true, reason }),
-    getWorkspaceMetadata: async () => ({ workspace: undefined, capabilities: [] }),
+    getWorkspaceMetadata: async () => ({ workspace: undefined, capabilities: [], repositories: [], planningSource: undefined }),
     getDeliveryProjection: async (scope) => ({
       ...normalizeScope(scope), hops: [], optional: [], degraded: true, error, attemptedAt: undefined, freshness: [], gaps: [],
     }),

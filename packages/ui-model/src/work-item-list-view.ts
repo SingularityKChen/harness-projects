@@ -17,6 +17,7 @@ export type ListReadFailure = {
   /** Host 独立给出的安全说明：不含原异常、堆栈或对象权限细节。 */
   readonly safeMessage?: string
 }
+/** 页面给的名字优先；页面没给时退到读取里规划来源的显示名（#383，项目标题），名字未知才显示「未提供」——绝不显示实现键或绑定 id。 */
 export type ListDisplayMetadata = {
   readonly planningSourceName?: string
   /** 来源显示名，以 bindingId 为关联键：键只用来查名，不显示、不参与权限或排序。 */
@@ -96,7 +97,7 @@ function pick(table: Readonly<Record<string, string>>, key: string): string | un
   return typeof value === 'string' ? value : undefined
 }
 
-function rowView(row: WorkItemRow, names: ListDisplayMetadata['sourceNames'], stale: boolean): VisibleListRow {
+function rowView(row: WorkItemRow, nameOf: (bindingId: string) => string | undefined, stale: boolean): VisibleListRow {
   if (row.contentKind === ContentKind.Redacted) return { kind: 'redacted', key: row.entityId }
   const primary = row.source.primary
   return {
@@ -104,7 +105,7 @@ function rowView(row: WorkItemRow, names: ListDisplayMetadata['sourceNames'], st
     identity: (primary && pick(IDENTITY, primary.externalKind)) ?? '身份未知',
     planningStatus: statusText(row),
     engineering: row.derived.map((flag) => pick(HINTS, flag) ?? '未知提示').join('、') || '无',
-    source: (primary && pick(names, primary.bindingId)) ?? '来源名称未提供',
+    source: (primary && nameOf(primary.bindingId)) ?? '来源名称未提供',
     authority: pick(AUTHORITY, row.source.authority) ?? '来源权威未知',
     iteration: row.planningFields?.iterationTitle || '—', targetDate: row.planningFields?.targetDate || '—',
     stale,
@@ -138,7 +139,9 @@ export function deriveWorkItemListView(input: WorkItemListReadInput): WorkItemLi
   if (!marksOk) throw new TypeError(`${input.phase} 的读取标记不合契约：refreshing / hasReceivedSnapshot 须为布尔，cacheVisibility 须为 authorized / unknown`)
   const list = deriveWorkItemList(read)
   const access = accessIndex(read.capabilities ?? []).get(READ_KEY)
-  const shell = { workspaceName: read.workspace.name, planningSourceName: metadata.planningSourceName || '规划来源名称未提供' }
+  const planning = read.planningSource
+  const nameOf = (bindingId: string): string | undefined => pick(metadata.sourceNames, bindingId) ?? (bindingId === planning?.bindingId ? planning.name : undefined)
+  const shell = { workspaceName: read.workspace.name, planningSourceName: metadata.planningSourceName || planning?.name || '规划来源名称未提供' }
   const flags = { readOnly: access === AccessLevel.ReadOnly, degraded: access === AccessLevel.Degraded }
   const unavailable = (reason: ListReadFailure['kind'], [message, remaining] = UNAVAILABLE[reason]): WorkItemListView => {
     const safe = failure?.safeMessage
@@ -158,7 +161,7 @@ export function deriveWorkItemListView(input: WorkItemListReadInput): WorkItemLi
   const degradedPage = input.phase === 'failed' || flags.degraded
   const stale = list.stale || degradedPage
   const refreshing = input.phase === 'received' && input.refreshing
-  const rows = list.rows.map((row) => rowView(row, metadata.sourceNames, row.freshness.stale || degradedPage || refreshing))
+  const rows = list.rows.map((row) => rowView(row, nameOf, row.freshness.stale || degradedPage || refreshing))
   // 部分读取：整表未确认（如表级 permission_denied），但每一条可见条目都已确认（整页降级时行已全部 stale）。只看可见行：表级已有
   // 原因时，redacted 条目新鲜与否不改变这句话；没有表级原因时，它经 `list.stale`（`degradationOf`）仍决定这里是 partial 还是
   // 「已读取当前快照」——#129 既有的 1 bit 通道（ADR-0010 L1 不接受），由 #366 验收 1 关闭，本处没有关上它。

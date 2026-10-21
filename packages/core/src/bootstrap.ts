@@ -125,6 +125,7 @@ async function readProject(
   const result = await planning.getProject(ref)
   if (!result.ok) return result
   context.projectRef = result.value.ref
+  context.projectTitle = result.value.title
   return providerOk(result.value.ref)
 }
 

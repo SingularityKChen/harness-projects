@@ -109,6 +109,8 @@ test('host watch：载体断开的同一回调内整表 stale 且页面出现重
   const online = h.render()
   const items = (online.match(/<a href=/g) ?? []).length
   assert.deepEqual([items > 0, online.includes(NOTICE), badges(online, '当前值'), badges(online, '最后已知值')], [true, false, items, 0], '在线：每个条目行都是当前值，没有重连说明')
+  // #383：规划来源名经 snapshot 头的 planningSource 到达真实插件页面（项目标题，不是实现键或 binding id）。
+  assert.match(online, /规划来源：<span>项目 Alpha<\/span>/)
   h.connection.setOnline(false)
   h.carrier.break()
   await until(() => h.lost.length === 1, '载体失败回调')

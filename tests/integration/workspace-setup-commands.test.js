@@ -11,10 +11,12 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { createSetupCommands } from '@harness-projects/controller'
+import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
+import { createController, createSetupCommands, toWireMetadata, watchWorkspace } from '@harness-projects/controller'
 import { composeCore, createWorkspaceSetup } from '@harness-projects/core'
 import { createFakeStorage, emptyStorageData, exportFakeStorageState } from '@harness-projects/provider-fake'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
+import { deriveWorkItemDetailView, deriveWorkItemListView } from '@harness-projects/ui-model'
 import { PROVIDER_CATALOG, hostStoragePolicy, restoreProviders } from '../../apps/harness-plugin/src/host-providers.ts'
 import { HANDLE, WORKSPACE, dump, projectNodeId, replayFetch } from './fixtures/host-seed.js'
 
@@ -36,9 +38,8 @@ const envelope = (idempotencyKey) => ({ actorRef: { kind: 'user', id: 'setup-tes
 const dirs = []
 test.after(async () => { for (const dir of dirs) await rm(dir, { recursive: true, force: true }) })
 
-/** 同一份 Host 策略下的两种存储：`reopen` 换一个实例读同一份内容，`snapshot` 是全部行的转储，`scan` 数落盘内容里 needle 的出现次数。 */
-async function openStore(kind) {
-  const policy = hostStoragePolicy(PROVIDER_CATALOG)
+/** 同一份存储策略（缺省是 Host 策略）下的两种存储：`reopen` 换一个实例读同一份内容，`snapshot` 是全部行的转储，`scan` 数落盘内容里 needle 的出现次数。 */
+async function openStore(kind, policy = hostStoragePolicy(PROVIDER_CATALOG)) {
   if (kind === 'memory') {
     const exported = (store) => JSON.stringify(exportFakeStorageState(store.storage))
     const store = {
@@ -285,3 +286,249 @@ test('AC4 账本内同键异请求：conflict 且不进 core', async () => {
   const changed = await commands.connectAccount({ ...input, externalId: 'octo-2' })
   assert.deepEqual([changed.writeState, changed.error?.code, calls], ['conflict', 'conflict', ['connectAccount']], '同键换 externalId：账本以完整请求指纹拒绝，WorkspaceSetup 只被调用过一次')
 })
+
+/*
+ * 绑定仓库（#353，ADR-0015 Accepted）：一个仓库实体并列持有各连接下的引用。AC1-353 写出 Local Git primary + GitHub alias 与各自的连接，同请求重发零写入；
+ * AC4-353 Actions 以默认 delivery 挂载加同实体 alias 加入，不替换交付来源；拒绝与原子性同 #127 的事务模式。
+ */
+const REPOSITORY = 'repo-alpha'
+/** #355 之前 Host 目录没有 `development.github` 与 `github-actions`（TD-054）：测试策略在 Host 策略上补它们的配置 schema。 */
+const GITHUB_REPOSITORY_SCHEMA = Object.fromEntries(['repositoryExternalId', 'repositoryOwner', 'repositoryName'].map((name) => [name, { kind: 'string', required: true, pattern: '[^\\s]+', maxLength: 200 }]))
+function bindingPolicy() {
+  const host = hostStoragePolicy(PROVIDER_CATALOG)
+  return { allowedSecretHandles: host.allowedSecretHandles, configurations: new Map([...host.configurations, ['development.github', GITHUB_REPOSITORY_SCHEMA], ['github-actions', GITHUB_REPOSITORY_SCHEMA]]) }
+}
+const localGit = (repositoryId = REPOSITORY, overrides = {}) => ({
+  domain: 'development', implementationKey: 'development.local-git', configuration: { repositoryPath: `/srv/git/${repositoryId}`, repositoryExternalId: repositoryId }, ...overrides,
+})
+const github = (accountId, repositoryId = REPOSITORY, overrides = {}) => ({
+  domain: 'development', implementationKey: 'development.github', accountId, configuration: { repositoryExternalId: repositoryId, repositoryOwner: 'octo', repositoryName: repositoryId }, ...overrides,
+})
+const actions = (accountId, repositoryId = REPOSITORY, overrides = {}) => github(accountId, repositoryId, { domain: 'delivery', implementationKey: 'github-actions', ...overrides })
+const repositoryRequest = (references, overrides = {}) => ({ workspaceId: WORKSPACE, repositoryId: REPOSITORY, references, ...overrides })
+const mountRows = (mounts) => mounts.map(({ id, domain, implementationKey, enabled, isDefault }) => [id, domain, implementationKey, enabled, isDefault])
+
+async function workspaceWithAccount(setup) {
+  assert.equal(codeOf(await setup.createWorkspace(workspaceRequest())), 'ok')
+  const account = await setup.connectAccount(accountRequest())
+  assert.equal(codeOf(account), 'ok')
+  return account.value.accountId
+}
+
+/** 端口没有按种类列实体的方法：内存读导出状态，SQLite 读转储的 entity 表。 */
+async function repositoryEntities(store) {
+  const snapshot = await store.snapshot()
+  return (typeof snapshot === 'string' ? JSON.parse(snapshot).entities : JSON.parse(snapshot.entity)).filter((entity) => entity.kind === 'repository').length
+}
+
+for (const kind of ['memory', 'sqlite']) {
+  test(`AC1-353 一个仓库并列持有 Local Git 与 GitHub 引用及各自连接；同请求重发零写入（${kind}）`, async (t) => {
+    const store = await openStore(kind, bindingPolicy())
+    t.after(() => store.close())
+    const accountId = await workspaceWithAccount(createWorkspaceSetup(store.storage))
+    const input = { ...envelope('repository-1'), ...repositoryRequest([localGit(), github(accountId)]) }
+    const spy = writeSpy(store.storage)
+    const commands = createSetupCommands(createWorkspaceSetup(spy.storage))
+    const first = await commands.bindRepository(input)
+    assert.deepEqual([first.writeState, first.authoritative, first.value?.repositoryId, first.value?.bindingIds.length], ['local_only', false, REPOSITORY, 2], '只写本地事实：local_only，结果按请求顺序给出两个 bindingId')
+    const [local, remote] = first.value.bindingIds
+    const { storage } = store
+    assert.deepEqual(mountRows(await storage.listProviderBindings(WORKSPACE)).sort(), [[local, 'development', 'development.local-git', true, false], [remote, 'development', 'development.github', true, false]].sort(), '两条启用、非默认的 development 挂载')
+    for (const [bindingId, reference] of [[local, localGit()], [remote, github(accountId)]]) {
+      const configuration = (await storage.getBindingConfiguration({ workspaceId: WORKSPACE, bindingId, domain: 'development' }))?.configuration
+      assert.deepEqual([await storage.getProviderBindingAccount(bindingId), configuration], [reference.accountId, reference.configuration], '连接的账号与配置等于请求')
+    }
+    const primary = await storage.findExternalIdentity(local, 'repository', REPOSITORY)
+    assert.deepEqual(await storage.listRepositories(WORKSPACE), [{ id: REPOSITORY, workspaceId: WORKSPACE, externalIdentityId: primary?.id }], '仓库挂载指向 Local Git 下的身份')
+    assert.deepEqual((await storage.listIdentitiesForEntity(primary.entityId)).map(({ bindingId, role }) => [bindingId, role]).sort(), [[local, 'primary'], [remote, 'alias']].sort(), '同一实体上恰两条身份：Local Git primary、GitHub alias')
+    assert.equal(await repositoryEntities(store), 1, '恰一个 repository 实体')
+
+    const before = await store.snapshot()
+    spy.writes.length = 0
+    assert.deepEqual([await commands.bindRepository(input), spy.writes], [first, []], '账本内同键重发：结果深等，零写入')
+    const reopened = writeSpy(store.reopen())
+    const fresh = createSetupCommands(createWorkspaceSetup(reopened.storage))
+    const replayed = [await fresh.bindRepository(input), await fresh.bindRepository({ ...input, ...envelope('repository-2') })]
+    const nullPrototype = Object.assign(Object.create(null), localGit().configuration)
+    const sameValue = await createWorkspaceSetup(reopened.storage).bindRepository(repositoryRequest([localGit(REPOSITORY, { configuration: nullPrototype }), github(accountId)]))
+    assert.deepEqual([replayed, sameValue, reopened.writes, await store.snapshot()], [[first, first], { ok: true, value: first.value }, [], before], '账本丢失后同键、新键同请求，以及同值的空原型配置（#384）：结果与首次深等，零写入，库不变')
+  })
+
+  test(`AC4-353 GitHub Actions 作为已绑定仓库的交付来源加入，不替换交付来源（${kind}）`, async (t) => {
+    const store = await openStore(kind, bindingPolicy())
+    t.after(() => store.close())
+    const spy = writeSpy(store.storage)
+    const setup = createWorkspaceSetup(spy.storage)
+    const accountId = await workspaceWithAccount(setup)
+    const [local] = (await setup.bindRepository(repositoryRequest([localGit(), github(accountId)]))).value.bindingIds
+    const mounts = await store.storage.listProviderBindings(WORKSPACE)
+    const added = await setup.bindRepository(repositoryRequest([actions(accountId)]))
+    assert.equal(codeOf(added), 'ok', '已绑定的仓库再绑 Actions 成功')
+    const [delivery] = added.value.bindingIds
+    assert.deepEqual(added.value, { repositoryId: REPOSITORY, bindingIds: [delivery] }, '结果只含本次请求的引用')
+    const newMounts = (await store.storage.listProviderBindings(WORKSPACE)).filter((mount) => !mounts.some((old) => old.id === mount.id))
+    assert.deepEqual(mountRows(newMounts), [[delivery, 'delivery', 'github-actions', true, true]], '只新增一个启用、默认的 delivery 挂载')
+    const configuration = (await store.storage.getBindingConfiguration({ workspaceId: WORKSPACE, bindingId: delivery, domain: 'delivery' }))?.configuration
+    assert.deepEqual([await store.storage.getProviderBindingAccount(delivery), configuration], [accountId, actions(accountId).configuration], '交付连接的账号与配置等于请求')
+    const primary = await store.storage.findExternalIdentity(local, 'repository', REPOSITORY)
+    const alias = await store.storage.findExternalIdentity(delivery, 'repository', REPOSITORY)
+    assert.deepEqual([alias?.entityId, alias?.role, (await store.storage.listRepositories(WORKSPACE)).map((record) => record.externalIdentityId)], [primary.entityId, 'alias', [primary.id]], '同一实体上的 alias，仓库挂载不改指')
+
+    const before = await store.snapshot()
+    spy.writes.length = 0
+    const outcomes = [
+      await setup.bindRepository(repositoryRequest([actions(accountId)])),
+      await setup.bindRepository(repositoryRequest([actions(accountId, REPOSITORY, { configuration: { ...actions(accountId).configuration, repositoryOwner: 'someone-else' } })])),
+      await setup.bindRepository(repositoryRequest([localGit('repo-beta'), actions(accountId, 'repo-beta')], { repositoryId: 'repo-beta' })),
+    ]
+    assert.deepEqual([outcomes.map(codeOf), outcomes[0].value, spy.writes, await store.snapshot()], [['ok', 'conflict', 'conflict'], added.value, [], before], '同请求重发零写入；换 Actions 配置、另一仓库绑 Actions 都 conflict：零写入，库不变')
+  })
+
+  test(`首次绑定的锚点是 Development 引用：引用按 [Actions, Local Git] 给出时，仓库挂载仍指向 Local Git 下的 primary（${kind}）`, async (t) => {
+    const store = await openStore(kind, bindingPolicy())
+    t.after(() => store.close())
+    const setup = createWorkspaceSetup(store.storage)
+    const accountId = await workspaceWithAccount(setup)
+    const bound = await setup.bindRepository(repositoryRequest([actions(accountId), localGit()]))
+    assert.equal(codeOf(bound), 'ok')
+    const [delivery, local] = bound.value.bindingIds
+    const { storage } = store
+    const primary = await storage.findExternalIdentity(local, 'repository', REPOSITORY)
+    assert.deepEqual((await storage.listRepositories(WORKSPACE)).map((record) => record.externalIdentityId), [primary?.id], '仓库挂载指向 Local Git 下的身份，不是排在前面的 Actions')
+    assert.deepEqual((await storage.listIdentitiesForEntity(primary.entityId)).map(({ bindingId, role }) => [bindingId, role]).sort(), [[local, 'primary'], [delivery, 'alias']].sort(), 'Local Git primary、Actions alias，同一实体')
+  })
+
+  test(`ADR-0015 约束②：每个仓库在每个连接下至多一条现行引用——同一实现换目标被拒、零写入（存储按自然键收拢由 tests/contract 存储套件覆盖）（${kind}）`, async (t) => {
+    const store = await openStore(kind, bindingPolicy())
+    t.after(() => store.close())
+    const spy = writeSpy(store.storage)
+    const setup = createWorkspaceSetup(spy.storage)
+    const accountId = await workspaceWithAccount(setup)
+    const [local, remote] = (await setup.bindRepository(repositoryRequest([localGit(), github(accountId)]))).value.bindingIds
+    const { storage } = store
+    const primary = await storage.findExternalIdentity(local, 'repository', REPOSITORY)
+    const references = async () => (await storage.listIdentitiesForEntity(primary.entityId)).map(({ id, bindingId, role }) => [id, bindingId, role]).sort()
+    const initial = await references()
+    const before = await store.snapshot()
+    spy.writes.length = 0
+    const elsewhere = localGit(REPOSITORY, { configuration: { repositoryPath: '/srv/git/elsewhere', repositoryExternalId: REPOSITORY } })
+    const outcomes = [
+      await setup.bindRepository(repositoryRequest([elsewhere])),
+      await setup.bindRepository(repositoryRequest([github(accountId), elsewhere])),
+      await setup.bindRepository(repositoryRequest([github(accountId, REPOSITORY, { configuration: { ...github(accountId).configuration, repositoryOwner: 'someone-else' } })])),
+    ]
+    assert.deepEqual([outcomes.map(codeOf), spy.writes, await store.snapshot()], [['conflict', 'conflict', 'conflict'], [], before], '已有引用的实现换目标（单独给或与同目标的引用同给）：conflict，零写入，库不变')
+    assert.deepEqual([(await storage.listProviderBindings(WORKSPACE)).map(({ id }) => id).sort(), await references()], [[local, remote].sort(), initial], '没有第二个同实现的连接，也没有第二条引用')
+  })
+
+  test(`绑定仓库拒绝：形状、缺失、未登记无 Development、锚点不在挂载下与改绑都结构化拒绝且零写入（${kind}）`, async (t) => {
+    const store = await openStore(kind, bindingPolicy())
+    t.after(() => store.close())
+    const spy = writeSpy(store.storage)
+    const setup = createWorkspaceSetup(spy.storage)
+    const accountId = await workspaceWithAccount(setup)
+    assert.equal(codeOf(await setup.bindRepository(repositoryRequest([localGit(), github(accountId)]))), 'ok')
+    // 生产尚无解绑（M4.1）：经端口卸载 repo-gamma 唯一的挂载，制造「已登记、锚点不在本工作区任何挂载下」。
+    const orphan = await setup.bindRepository(repositoryRequest([localGit('repo-gamma')], { repositoryId: 'repo-gamma' }))
+    await store.storage.removeProviderBinding({ workspaceId: WORKSPACE, bindingId: orphan.value.bindingIds[0], domain: 'development' })
+    const delta = (overrides) => repositoryRequest([localGit('repo-delta'), ...overrides], { repositoryId: 'repo-delta' })
+    const before = await store.snapshot()
+    spy.writes.length = 0
+    const cases = [
+      ['invalid_input', { ...repositoryRequest([localGit()]), token: CANARY }],
+      ['invalid_input', repositoryRequest([])],
+      ['invalid_input', repositoryRequest(localGit())],
+      ['invalid_input', repositoryRequest([localGit()], { repositoryId: ' ' })],
+      ['invalid_input', repositoryRequest([{ ...localGit(), token: CANARY }])],
+      ['invalid_input', repositoryRequest([{ ...localGit(), domain: 'planning' }])],
+      ['invalid_input', repositoryRequest([{ ...localGit(), implementationKey: 7 }])],
+      ['invalid_input', delta([localGit('repo-delta', { configuration: { repositoryPath: '/srv/git/delta-copy', repositoryExternalId: 'repo-delta' } })])],
+      ['invalid_input', delta([actions(accountId, 'repo-delta'), actions(accountId, 'repo-delta', { implementationKey: 'delivery.other' })])],
+      ['not_found', repositoryRequest([localGit()], { workspaceId: OTHER_WORKSPACE })],
+      ['not_found', repositoryRequest([github('00000000-0000-4000-8000-0000000000ff')])],
+      ['invalid_input', repositoryRequest([actions(accountId, 'repo-delta')], { repositoryId: 'repo-delta' })],
+      ['conflict', repositoryRequest([localGit('repo-gamma')], { repositoryId: 'repo-gamma' })],
+      ['conflict', repositoryRequest([localGit(REPOSITORY, { configuration: { repositoryPath: '/srv/git/elsewhere', repositoryExternalId: REPOSITORY } })])],
+    ]
+    const outcomes = []
+    for (const [, request] of cases) outcomes.push(await setup.bindRepository(request))
+    assert.deepEqual(outcomes.map(codeOf), cases.map(([code]) => code), '逐行对照 Design 的拒绝表')
+    assert.deepEqual([spy.writes, await store.snapshot()], [[], before], '全部在任何写之前拒绝：没有写调用，库不变')
+    assert.ok(!JSON.stringify(outcomes).includes(CANARY), '文案不回显请求值')
+  })
+
+  test(`绑定仓库原子性：后一条引用的配置不合 schema 时，已写的挂载一并回滚（${kind}）`, async (t) => {
+    const store = await openStore(kind, bindingPolicy())
+    t.after(() => store.close())
+    const spy = writeSpy(store.storage)
+    const setup = createWorkspaceSetup(spy.storage)
+    const accountId = await workspaceWithAccount(setup)
+    const before = await store.snapshot()
+    spy.writes.length = 0
+    const { configuration } = github(accountId)
+    const outcomes = [
+      await setup.bindRepository(repositoryRequest([localGit(), github(accountId, REPOSITORY, { configuration: { repositoryExternalId: REPOSITORY, repositoryOwner: 'octo' } })])),
+      await setup.bindRepository(repositoryRequest([localGit(), github(accountId, REPOSITORY, { configuration: { ...configuration, token: CANARY } })])),
+    ]
+    assert.deepEqual(outcomes.map(codeOf), ['invalid_input', 'invalid_input'])
+    assert.deepEqual(outcomes[0].error, outcomes[1].error, '存储拒绝映射成固定错误值，不回显输入')
+    assert.ok(!JSON.stringify(outcomes).includes(CANARY), '结果不回显令牌')
+    assert.ok(spy.writes.includes('putProviderBinding'), '阳性对照：Local Git 挂载在被拒之前确实写过')
+    assert.deepEqual(await store.snapshot(), before, '整笔回滚：没有挂载、账号关联、配置、身份或仓库挂载留下')
+  })
+}
+
+/*
+ * 规划来源的名字（#383）：Host 组合下插件页面不传名字（`sourceNames: {}`），列表与详情显示 wire 带来的项目标题，而不是「未提供」，也绝不是实现键；
+ * 页面给了名字仍以页面为准。Host 启动后首轮引导读到项目之前名字未知：字段缺席（wire 与加入它之前逐字相同），页面仍是「未提供」。
+ * 新字段只有绑定 id 与名字：不带账号、句柄或凭据值。
+ */
+const PROJECT_TITLE = 'E1 Project A'
+for (const kind of ['memory', 'sqlite']) {
+  test(`#383 规划来源名经 controller 快照到达列表与详情，不带账号或凭据（${kind}）`, async (t) => {
+    const store = await openStore(kind)
+    t.after(() => store.close())
+    const { accountId, bindingId } = await setupAll(createWorkspaceSetup(store.storage))
+    const replay = replayFetch()
+    let online = false
+    const { core } = await compose(store.storage, { fetch: (...args) => (online ? replay.fetch(...args) : Promise.reject(new TypeError('offline'))) }, CANARY)
+    const controller = createController(core)
+    const connected = async () => {
+      const sync = createSync(createTransport(controller), createEntityStore())
+      await sync.connect()
+      return sync
+    }
+    const input = (sync, metadata) => ({ read: sync.read(), metadata, phase: 'received', refreshing: false })
+    assert.deepEqual(Object.keys(await controller.baseline()).sort(), ['capabilities', 'entities', 'revision', 'source', 'workspace'], '首轮引导没读到项目：名字未知，头字段与加入 planningSource 之前逐字相同')
+    assert.equal(deriveWorkItemListView(input(await connected(), { sourceNames: {} })).planningSourceName, '规划来源名称未提供', '名字未知时仍是「未提供」，不退到实现键')
+    online = true
+    assert.equal((await core.commands.bootstrapWorkspace()).ok, true)
+    const snapshot = await controller.baseline()
+    assert.deepEqual(snapshot.planningSource, { bindingId, name: PROJECT_TITLE }, '闭集：只有绑定 id 与项目标题')
+    for (const needle of [CANARY, HANDLE, accountId, PLANNING]) assert.ok(!JSON.stringify(snapshot).includes(needle), `wire 不带账号、凭据或实现键：${needle.slice(0, 8)}`)
+
+    const sync = await connected()
+    const page = input(sync, { sourceNames: {} })
+    const list = deriveWorkItemListView(page)
+    const row = list.body.rows.find((candidate) => candidate.kind === 'item')
+    const target = { projectId: WORKSPACE, itemId: row.key }
+    assert.deepEqual([list.planningSourceName, row.source, deriveWorkItemDetailView(page, target).body.source], [PROJECT_TITLE, PROJECT_TITLE, PROJECT_TITLE], '插件页面不传名字：显示项目标题，不是「未提供」')
+    const named = input(sync, { planningSourceName: '规划源', sourceNames: { [bindingId]: '来源一' } })
+    assert.deepEqual([deriveWorkItemListView(named).planningSourceName, deriveWorkItemDetailView(named, target).body.source], ['规划源', '来源一'], '页面给的名字优先')
+
+    sync.receive({ kind: 'metadata', metadata: toWireMetadata(snapshot) })
+    assert.deepEqual(sync.read().planningSource, snapshot.planningSource, '同修订 metadata 帧携带 planningSource，client 接受')
+    for (const planningSource of [null, 'x', { bindingId, name: '' }, { bindingId: '', name: PROJECT_TITLE }, { bindingId, name: 7 }, { bindingId, name: PROJECT_TITLE, accountId }]) {
+      assert.throws(() => sync.receive({ kind: 'metadata', metadata: { ...toWireMetadata(snapshot), planningSource } }), /帧头不合契约/, JSON.stringify(planningSource))
+    }
+    const poll = (change) => {
+      const next = structuredClone(snapshot)
+      change(next)
+      return watchWorkspace({ baseline: async () => next }, { afterRevision: snapshot.revision, seed: snapshot }).poll()
+    }
+    const renamed = await poll((next) => { next.planningSource.name = '改名后的项目' })
+    assert.deepEqual([renamed.kind, renamed.metadata.planningSource], ['metadata', { bindingId, name: '改名后的项目' }], '只有 planningSource 变化也是来源变化，发 metadata')
+    const advanced = await poll((next) => { next.revision += 1; next.source.revision += 1 })
+    assert.deepEqual([advanced.kind, advanced.delta.planningSource], ['delta', snapshot.planningSource], 'delta 携带 planningSource')
+  })
+}
