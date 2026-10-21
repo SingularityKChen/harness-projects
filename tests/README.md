@@ -18,9 +18,11 @@ pnpm test:file <path>  # 单个测试文件或目录，先查解析落点
 pnpm install --frozen-lockfile
 ```
 
-单独检查用 `node scripts/resolution-check.mjs`（通过时静默退出 0）。
+单独检查用 `node scripts/resolution-check.mjs`（通过时静默退出 0）。当前定位使用 `require.resolve`，前提是工作区包均提供无条件根导出；契约测试保护该前提，若改成 import-only 或仅 bin 包，需要同步调整守卫定位，重新安装不能解决导出条件差异。
 
-不经 pnpm、直接用 `node` 跑测试时（`node --test <文件或目录>`，或把测试文件当脚本运行），只有运行集合里含契约测试 `tests/contract/resolution-check.test.js`（例如 `node --test tests/contract`）才会在进程内判红；其余——单个文件，以及 `tests/mvp0`、`tests/integration`、`tests/e2e` 这几个目录——**不受守卫保护**，未装依赖的嵌套检出里会对着主检出的代码给出假绿（TD-088、TD-089）。取红基线、单跑文件或目录，一律用 `pnpm test:file <path>`。已知的无标志拦截办法要么需要在检出之外放状态，要么要改近百个测试文件，代价见 TD-088。
+守卫从检出根 manifest 发起解析；它不能证明所有包内和测试子目录的解析上下文。如果子目录有残留 `node_modules` 把同名工作区包指向另一检出，根级检查可能通过而实际运行仍加载外部源码。发生过交叉安装或手工软链时，应清理该残留并重新安装；此盲区与下述原生 Node 绕过均由保持开放的 #186 / TD-088 跟踪。
+
+不经 pnpm、直接用 `node` 跑测试时（`node --test <文件或目录>`，或把测试文件当脚本运行），只有运行集合里含契约测试 `tests/contract/resolution-check.test.js`（例如 `node --test tests/contract`）才会在进程内判红；其余——单个文件、`tests/mvp0` / `tests/integration` / `tests/e2e` 目录，以及直接调用 `node scripts/run-test-layer.mjs <layer> <invariant>`——**不受守卫保护**，未装依赖的嵌套检出里会对着主检出的代码给出假绿（TD-088、TD-089）。取红基线、单跑文件或目录，一律用 `pnpm test:file <path>`。CI 单检出已显式安装依赖，可继续使用 layer runner。已知的无标志拦截候选包括外层检出在自己被忽略的 `.worktrees/node_modules` 下物化带修复指引的哨兵；它能覆盖原始直接 Node 复现，与本 PR 的前置守卫互补，维护与子目录 shadow 的剩余代价由 #186 / TD-088 跟踪。
 
 ## 1. 分层
 

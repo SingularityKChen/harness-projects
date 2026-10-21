@@ -7,8 +7,8 @@
 ## 1. 怎么跑
 
 ```bash
-pnpm test:mvp0            # 等价于 node --test tests/mvp0
-node --test tests/mvp0    # 直接跑，不需要凭据、不需要网络
+pnpm test:mvp0            # 先查本检出解析落点，再跑 node --test tests/mvp0
+node --test tests/mvp0    # 已安装的单检出或 CI 可直接跑；嵌套 worktree 用 pnpm 入口
 ```
 
 当前 7 条断言**全部通过**（链路已由切片栈实现）。当某个节点尚未实现时，标准输出是

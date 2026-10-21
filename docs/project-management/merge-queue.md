@@ -519,7 +519,7 @@ gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,baseRe
 | 位置 | PR / issue | 独立交付闭环 | 合并前验证与边界 |
 |---|---|---|---|
 | 1（已合并） | #390 / #350 | 源码扫描排除产物且不会静默少扫Git可见源码 | 2026-10-22 rebase合并 `2f51f13099e273eaaf1a5e14b27825e7686bb5bc`，#350 CLOSED；后续迁移#396保持OPEN |
-| 2 | #389 / #357 | 六位置谱系派生，关系态与CI状态正交，共享年龄及翻转时刻 | 真实Core候选E2E、日期/null/阈值反例；定时消费已交#234/#281/#150 |
+| 2（已合并） | #389 / #357 | 六位置谱系派生，关系态与CI状态正交，共享年龄及翻转时刻 | 2026-10-22 rebase合并 `b3bccadebe9b960eb5fca1b525adfacff7b5e6dd`，#357 CLOSED；消费义务#234/#281/#150已回读 |
 | 3 | #391 / Refs #186 | pnpm根解析前置守卫及失败指引 | #186完整直接Node/局部shadow验收保持OPEN；不得借合并关闭 |
 | 4 | #388 / #355 | Host组合GitHub研发/Actions，单请求全等待预算 | 独立预算与回滚反例；AC2权限选择须有人类明确答复后才能关闭#355 |
 
