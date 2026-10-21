@@ -1,7 +1,8 @@
 /**
  * 宿主流的客户端消费者（issue #276）：宿主 `RemoteStream` 拥有物理代与重连节奏，帧全部交给唯一接受点 `WorkspaceSync.receive`，
  * 本文件只负责每代协议——第一帧必须是唯一的开场 baseline，gap 之后先 `restart()` 再要下一项。载体失败的同一个回调里断开并
- * 整表 stale；协议违例、帧被拒或宿主终止本流时终止、不自动重开（重开只会热循环）；`close` 之后是吸收态。
+ * 整表 stale；协议违例、帧被拒或宿主终止本流时终止、不自动重开（立即重开只会热循环；有界退避的重开见 `supervise.ts`）；
+ * `close` 之后是吸收态。
  */
 import { createEntityStore } from './store.ts'
 import { createSync, type SyncOptions, type SyncReport } from './sync.ts'
