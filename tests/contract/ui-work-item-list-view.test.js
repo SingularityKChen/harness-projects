@@ -181,6 +181,8 @@ test('可见行：标签、缺省文字与来源权威分别显示，缺名称�
   assert.equal(new Set(authorities).size, 3)
   assert.doesNotMatch(authorities[1], /提供方|平台/, 'Host 权威不能标成平台')
   assert.equal(received({ meta: { sourceNames: {} } }).planningSourceName, '规划来源名称未提供')
+  const planned = (bindingId) => received({ entities: [wire('e1', { content: { bindingId } })], meta: { sourceNames: {} }, read: { planningSource: { bindingId: 'bind-p', name: '项目甲' } } })
+  assert.deepEqual([planned('bind-p').planningSourceName, planned('bind-p').body.rows[0].source, planned('unnamed-binding').body.rows[0].source], ['项目甲', '项目甲', '来源名称未提供'], '页面没给名字：只有规划来源自己的行退到它的显示名（#383）')
 })
 
 test('redacted 行只剩占位：输出不含任何被遮蔽字段，可见行正控存在', () => {

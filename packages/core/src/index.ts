@@ -23,4 +23,7 @@ export * from './execution-context.ts'
 export * from './git-provisioning.ts'
 export * from './start-work.ts'
 export * from './execution-run.ts'
-export { createWorkspaceSetup, type BindPlanningSourceRequest, type ConnectAccountRequest, type CreateWorkspaceRequest, type SetupOutcome, type WorkspaceSetup } from './workspace-setup.ts'
+export {
+  createWorkspaceSetup, type BindPlanningSourceRequest, type BindRepositoryRequest, type ConnectAccountRequest, type CreateWorkspaceRequest, type RepositoryBinding,
+  type RepositoryReferenceRequest, type SetupOutcome, type WorkspaceSetup,
+} from './workspace-setup.ts'

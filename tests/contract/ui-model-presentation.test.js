@@ -84,7 +84,8 @@ function fixtureSnapshot({ freshness = 'fresh', bindingId = 'binding-planning' }
     }),
   ]
   const source = { revision: 8, freshness, authority: 'provider', reason: freshness === 'degraded' ? '规划来源离线' : undefined }
-  return { revision: 8, entities, source, workspace: { id: 'ws-1', name: 'MVP-0' }, capabilities: [] }
+  // `repositories`（#353）与 `planningSource`（#383）是可选头字段，fixture 取「没有已登记仓库、没有规划来源」的形态；键必须在 wire 形状里，与 `planningFields` 同理。
+  return { revision: 8, entities, source, workspace: { id: 'ws-1', name: 'MVP-0' }, capabilities: [], repositories: undefined, planningSource: undefined }
 }
 
 /** 一次工作区读取：客户端模型 + 宿主才知道的事实。`lastUpdatedAt: undefined` 用 `in` 判定。 */

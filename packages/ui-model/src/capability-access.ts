@@ -49,6 +49,16 @@ export function accessIndex(capabilities: readonly CapabilitySnapshotEntry[]): R
 }
 
 /**
+ * 某个仓库的索引（#353）：先取工作区级索引，再由该仓库条目逐 key 覆盖——工作区级对 `development.*` 在多个连接时 fail closed，
+ * 仓库条目是 core 按该仓库的引用路由出的结果；覆盖是替换而非求交，其它仓库的条目不参与。
+ */
+export function repositoryAccessIndex(
+  workspace: readonly CapabilitySnapshotEntry[], repository: readonly CapabilitySnapshotEntry[],
+): ReadonlyMap<string, AccessLevel> {
+  return accessIndex([...workspace, ...repository])
+}
+
+/**
  * 用途：与 core 的 `gateCommand(registry, key, mode)` 同一套约定（`packages/core/src/capabilities.ts`）——
  * 只有**写**命令在 `read_only` 下被拒；**读**目标在 `read_only` 下照常可用。
  */

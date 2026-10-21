@@ -58,7 +58,7 @@ export function assertDeltaFrame(delta: WireDelta): void {
   assertFrame(delta, delta.upserts, 'delta', delta.removed)
 }
 
-const METADATA_KEYS = ['revision', 'workspace', 'capabilities', 'source', 'entities']
+const METADATA_KEYS = ['revision', 'workspace', 'capabilities', 'repositories', 'planningSource', 'source', 'entities']
 const ROW_KEYS = ['entityId', 'source']
 const onlyKeys = (value: object, allowed: readonly string[]): boolean => Object.keys(value).every((key) => allowed.includes(key))
 

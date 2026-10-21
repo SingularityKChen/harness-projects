@@ -13,8 +13,8 @@ import type { ExternalObjectRef, ProjectError } from '@harness-projects/capabili
 import type { ConnectorAccountId, EntityId, NormalizedStatus, ProviderBindingId, WorkspaceId } from '@harness-projects/domain'
 import {
   WritePhase,
-  type BindPlanningSourceRequest, type BootstrapResult, type ConnectAccountRequest, type CoreApi, type CreateWorkspaceRequest, type DeliveryRefreshResult,
-  type DeliveryScope, type DeliveryWriteAttempt, type RecordedEdge, type RelationRef, type SetupOutcome, type StartWorkResult, type StatusDecision,
+  type BindPlanningSourceRequest, type BindRepositoryRequest, type BootstrapResult, type ConnectAccountRequest, type CoreApi, type CreateWorkspaceRequest, type DeliveryRefreshResult,
+  type DeliveryScope, type DeliveryWriteAttempt, type RecordedEdge, type RelationRef, type RepositoryBinding, type SetupOutcome, type StartWorkResult, type StatusDecision,
   type WorkspaceSetup,
 } from '@harness-projects/core'
 
@@ -264,6 +264,7 @@ export function createControllerCommands(core: CoreApi): ControllerCommands {
 export type CreateWorkspaceInput = CommandEnvelope & CreateWorkspaceRequest
 export type ConnectAccountInput = CommandEnvelope & ConnectAccountRequest
 export type BindPlanningSourceInput = CommandEnvelope & BindPlanningSourceRequest
+export type BindRepositoryInput = CommandEnvelope & BindRepositoryRequest
 
 /**
  * 工作区设置命令（#127）：独立于 `Controller`——工作区未创建时 Host 的 Controller 建在 unavailableCore 上；由 Host 每进程建一次、跨重组持有账本（#354）。
@@ -273,6 +274,7 @@ export interface SetupCommands {
   createWorkspace(input: CreateWorkspaceInput): Promise<CommandResult<{ readonly workspaceId: WorkspaceId }>>
   connectAccount(input: ConnectAccountInput): Promise<CommandResult<{ readonly accountId: ConnectorAccountId }>>
   bindPlanningSource(input: BindPlanningSourceInput): Promise<CommandResult<{ readonly bindingId: ProviderBindingId }>>
+  bindRepository(input: BindRepositoryInput): Promise<CommandResult<RepositoryBinding>>
 }
 
 /** 设置命令只写本地事实：成功报 local_only（没有 provider ack，不是权威）；core 的 conflict 与账本内同键异请求同报 conflict，其余报 failed。不推进修订号（快照内容没变，ADR-0012）。 */
@@ -287,5 +289,6 @@ export function createSetupCommands(setup: WorkspaceSetup): SetupCommands {
     createWorkspace: (input) => replay('createWorkspace', input, requestPayload(input), async () => setupResult(await setup.createWorkspace(requestPayload(input)))),
     connectAccount: (input) => replay('connectAccount', input, requestPayload(input), async () => setupResult(await setup.connectAccount(requestPayload(input)))),
     bindPlanningSource: (input) => replay('bindPlanningSource', input, requestPayload(input), async () => setupResult(await setup.bindPlanningSource(requestPayload(input)))),
+    bindRepository: (input) => replay('bindRepository', input, requestPayload(input), async () => setupResult(await setup.bindRepository(requestPayload(input)))),
   }
 }
