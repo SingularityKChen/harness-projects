@@ -51,6 +51,7 @@ const SCENARIOS = {
   content: { phase: 'received', refreshing: false, entities: rows() },
   stale: { phase: 'received', refreshing: false, entities: rows('degraded') },
   gap: { phase: 'received', refreshing: false, entities: rows(), gap: true },
+  partial: { phase: 'received', refreshing: false, entities: rows(), reason: '来源读取不完整' },
   refreshing: { phase: 'received', refreshing: true, entities: rows() },
   degraded: { phase: 'received', refreshing: false, entities: rows(), access: 'degraded' },
   readOnly: { phase: 'received', refreshing: false, entities: rows(), access: 'read_only' },
@@ -63,12 +64,12 @@ const SCENARIOS = {
 }
 
 /** `lastUpdatedAt: null` 表示 Host 从未读到当前值（read 上省略该字段）。 */
-function render({ entities = [], access = 'available', capabilities, connected = true, metadata = meta, workspace = '工作区', lastUpdatedAt = T, gap = false, ...input }) {
+function render({ entities = [], access = 'available', capabilities, connected = true, metadata = meta, workspace = '工作区', lastUpdatedAt = T, gap = false, reason, ...input }) {
   const store = createEntityStore()
   store.applyBaseline({ revision: 0, entities, source: { revision: 0, freshness: 'fresh', authority: 'provider', reason: undefined } })
   if (gap) store.markAllStale()
   const read = {
-    workspace: { id: 'ws-1', name: workspace }, store, connection: { connected }, lastUpdatedAt: lastUpdatedAt ?? undefined,
+    workspace: { id: 'ws-1', name: workspace }, store, connection: { connected }, lastUpdatedAt: lastUpdatedAt ?? undefined, reason,
     capabilities: capabilities ?? [{ key: 'planning.item.read', access }],
   }
   return renderToStaticMarkup(createElement(ui.WorkItemListPage, { view: deriveWorkItemListView({ ...input, read, metadata }) }))
@@ -136,6 +137,13 @@ test('陈旧 / 刷新 / 降级 / 缺口：保行；状态区只宣告一次，�
   for (const name of ['degraded', 'gap', 'offlineKept', 'refreshing']) assert.deepEqual(freshness(name), ['最后已知值', '—', '最后已知值'], name)
   assert.match(H.refreshing, /aria-busy="true"/)
   assert.match(H.stale, /aria-busy="false"/)
+})
+
+test('部分读取（#382）：状态区说部分条目未确认；没有「最后已知值」横幅，页首与已确认的行一样是当前值并带时刻', () => {
+  assert.equal(H.partial.match(/<div role="status"[^>]*>(.*?)<\/div>/)[1], '部分条目尚未确认，已显示的条目是当前值')
+  assert.doesNotMatch(H.partial, /最后已知值/, '可见行都已确认：横幅与行都不说最后已知值')
+  assert.match(H.partial, /<p>规划来源：<span>规划源<\/span>；<span>当前值（最后读取：<time dateTime="2026-10-01T08:00:00.000Z">/, '确认时刻仍在页首给出')
+  assert.deepEqual(cells(H.partial).slice(1).map((row) => row[7]), ['当前值', '—', '当前值'])
 })
 
 test('独立标记只在为真的状态出现：degraded 与只读只在可读内容旁，loading 不带降级，不可用页都不带', () => {

@@ -131,6 +131,19 @@ test('行新鲜度 = 行自身新鲜度 或 页面级保守降级：刷新 / Hos
   assert.deepEqual([pageLevel[0].body.stale, stales(received({ entities }))], [false, [false]])
   assert.match(pageLevel[0].statusText, /刷新/)
   assert.match(mixed.statusText, /尚未确认/)
+
+  // 部分读取（#382）：整表缺口而每一条可见条目都已确认，状态区不能说「最后已知值不是当前值」；表级已有原因时，redacted 条目新鲜与否这句话都不变
+  const gapped = (entities) => received({ entities, read: { reason: '来源读取不完整' } })
+  const confirmed = gapped([wire('e1'), wire('e2')])
+  assert.deepEqual([confirmed.body.stale, stales(confirmed)], [true, [false, false]])
+  for (const view of [confirmed, gapped([wire('e1'), redacted('e2')]), gapped([wire('e1'), wire('e2', { content: { contentKind: 'redacted' } })])]) {
+    assert.deepEqual([view.statusText, view.body.partial], ['部分条目尚未确认，已显示的条目是当前值', true])
+  }
+  const unconfirmed = [mixed, partial, ...pageLevel.slice(1), received({ entities, read: { reason: '来源读取不完整', lastUpdatedAt: undefined } }), gapped([]), gapped([redacted('e1')])]
+  for (const view of unconfirmed) assert.deepEqual([view.statusText, view.body.partial], ['当前结果尚未确认，最后已知值不是当前值', undefined], '有未确认的可见行（整页降级、断网、冷启动）或没有可见行：仍是整表未确认')
+  // 现状，由 #366 翻转：没有表级原因时 redacted 条目的新鲜度经 list.stale 仍决定这句话（#129 既有的 1 bit 通道，ADR-0010 L1 不接受）
+  const hidden = (freshness) => received({ entities: [wire('e1'), wire('e2', { content: { contentKind: 'redacted' }, source: { freshness } })] }).statusText
+  assert.deepEqual([hidden('fresh'), hidden('degraded')], ['已读取当前快照，共 2 项', '部分条目尚未确认，已显示的条目是当前值'])
 })
 
 test('read_only 与 degraded 是独立标记且只在为真的状态出现：degraded 保守算陈旧，不可用页都不带，loading 不带降级', () => {

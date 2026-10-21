@@ -37,5 +37,8 @@ export function WorkItemProjectPage({ listView, detailView, navigation, onCloseD
   }
   return createElement('div', null,
     createElement('div', { ref: list }, createElement(WorkItemListPage, { view: listView, navigation: routed, headingTabIndex: -1 })),
-    detailView === undefined ? null : createElement(WorkItemDetailDrawer, { view: detailView, onClose: onCloseDetail }))
+    // 列表的页面级说明也交给抽屉：模态打开时列表 inert，说明只在列表里就既看不到也不被宣告（#379）
+    detailView === undefined ? null : createElement(WorkItemDetailDrawer, {
+      view: detailView, notice: listView.body.kind === 'content' ? listView.body.notice : undefined, onClose: onCloseDetail,
+    }))
 }

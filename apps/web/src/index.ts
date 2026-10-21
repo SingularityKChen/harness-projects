@@ -6,5 +6,5 @@
  */
 
 export const packageId = '@harness-projects/app-web' as const
-export { browserHistoryPort, createItemNavigation, itemPath, parseItemRoute } from './item-route.ts'
-export type { HistoryPort, ItemRoute } from './item-route.ts'
+export { browserHistoryPort, createItemNavigation, itemPath, parseItemRoute } from '@harness-projects/ui'
+export type { HistoryPort, ItemRoute } from '@harness-projects/ui'

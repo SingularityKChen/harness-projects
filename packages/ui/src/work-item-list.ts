@@ -54,7 +54,7 @@ function ItemTable({ rows, navigation }: { rows: readonly VisibleListRow[]; navi
 function bodyOf({ body, planningSourceName }: WorkItemListView, navigation?: ItemNavigation): ReactElement {
   if (body.kind === 'loading') return createElement(LoadingState)
   if (body.kind === 'unavailable') return createElement(UnavailableState, { message: body.message, remaining: body.remaining })
-  const notConfirmed = body.stale || body.refreshing
+  const notConfirmed = (body.stale && !body.partial) || body.refreshing // 部分读取的可见行都已确认：不出「最后已知值」横幅
   return createElement(Fragment, null,
     notConfirmed ? createElement(StaleBanner, { source: planningSourceName, at: body.lastUpdatedAt ?? null }) : null,
     body.notice === undefined ? null : createElement('p', null, body.notice),
@@ -64,8 +64,8 @@ function bodyOf({ body, planningSourceName }: WorkItemListView, navigation?: Ite
 export function WorkItemListPage({ view, navigation, headingTabIndex }: { view: WorkItemListView; navigation?: ItemNavigation | undefined; headingTabIndex?: number | undefined }): ReactElement {
   const { body } = view
   const busy = body.kind === 'loading' || (body.kind === 'content' && body.refreshing)
-  // 新鲜度只在已确认的内容旁声明；未确认时由状态区宣告、横幅点名来源与时刻，页首不再重复。
-  const confirmed = body.kind === 'content' && !body.stale && !body.refreshing
+  // 新鲜度只在已确认的内容旁声明（部分读取的可见内容也已确认）；未确认时由状态区宣告、横幅点名来源与时刻，页首不再重复。
+  const confirmed = body.kind === 'content' && (!body.stale || body.partial === true) && !body.refreshing
   return createElement('section', { 'aria-label': '工作项列表' },
     createElement('h2', { tabIndex: headingTabIndex }, view.workspaceName),
     createElement('p', null, '规划来源：', createElement(SourceBadge, { name: view.planningSourceName }),
