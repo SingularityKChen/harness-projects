@@ -22,7 +22,8 @@
  *   - 锁文件里实际解析出的版本：包括传递依赖，也是 `tsc` 真正读到的东西。
  *
  * 包集合取自锁文件的 `importers`（pnpm 自己展开 workspace 之后的结果），不在这里重新实现 glob；再与磁盘上的
- * 包根核对（找到包根就停，跳过 `node_modules` 与被忽略的构建产物 `dist/`），任何一边多出来或少了都报错，
+ * 包根核对（找到包根就停，跳过根 `.gitignore` 的裸目录规则列出的目录：`node_modules`、`dist/`、`build/` 等，名单经
+ * `tests/fixtures/source-tree.mjs` 读取，不在这里手写），任何一边多出来或少了都报错，
  * 所以不认识的 workspace 写法、陈旧的锁文件都不会让一个包悄悄逃过检查，合法的构建产物也不会让它误报。
  */
 
@@ -34,6 +35,7 @@ import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { parse as parseYaml } from 'yaml'
 import { HOST_NODE_TARGET, HOST_NODE_VERSION } from '../../apps/harness-plugin/scripts/build.mjs'
+import { ignoredDirectoryNames } from '../fixtures/source-tree.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -41,9 +43,6 @@ const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies'
 
 /** workspace 包所在的根：与 pnpm-workspace.yaml 的 packages 对应；多出来的根会让「磁盘与 importers 一一对应」那条红。 */
 const PACKAGE_ROOTS = ['apps', 'packages']
-
-/** 不是 workspace 成员的目录名：依赖，和被 .gitignore 忽略的构建产物。 */
-const NOT_PACKAGES = new Set(['node_modules', 'dist'])
 
 /** 只接受上界落在某个 minor 内的写法：`~24.13.5`、`~24.13`、`24.13.5`、`24.13`。 */
 const MINOR_BOUNDED_SPECIFIER = /^~?(\d+)\.(\d+)(?:\.(\d+))?$/
@@ -64,12 +63,14 @@ const importerDirectories = (lock) => Object.keys(lock.importers ?? {}).sort()
 
 /**
  * 磁盘上的包目录：根目录，加 apps/ 与 packages/ 下的包根。找到带 package.json 的目录就停，不再下钻（包内嵌套的
- * 清单，比如测试夹具，不是 workspace 成员）；并跳过依赖与被 .gitignore 忽略的构建产物（`node_modules`、`dist`），
- * 否则按文档跑一次 `pack:plugin` 生成的 `apps/harness-plugin/dist/package/package.json` 会被算成「磁盘上的包」。
- * 与 `package-boundaries.test.js` 的 `findPackageDirs` 一样找到包根就停；不同的是它只看两层、只跳过 `node_modules`，
- * 这里逐层递归，并按名字跳过 `node_modules` 与 `dist`。
+ * 清单，比如测试夹具，不是 workspace 成员）；并跳过依赖与被 .gitignore 忽略的构建产物（根 `.gitignore` 的裸目录规则，
+ * 如 `node_modules`、`dist`、`build`），否则按文档跑一次 `pack:plugin` 生成的
+ * `apps/harness-plugin/dist/package/package.json` 会被算成「磁盘上的包」。
+ * 与 `package-boundaries.test.js` 的 `findPackageDirs` 一样找到包根就停；不同的是它只看两层、各自手写跳过名单
+ * （ExecPlan 2026-10-21-scans-skip-build-output 的 D5 把它们留给后续 PR），这里逐层递归，跳过名单取自共享来源。
  */
 async function packageDirectoriesOnDisk(root = repoRoot) {
+  const skipped = ignoredDirectoryNames(root)
   const found = []
   const visit = async (relative) => {
     const entries = await readdir(path.join(root, relative), { withFileTypes: true })
@@ -78,7 +79,7 @@ async function packageDirectoriesOnDisk(root = repoRoot) {
       return
     }
     for (const entry of entries) {
-      if (entry.isDirectory() && !NOT_PACKAGES.has(entry.name)) await visit(path.posix.join(relative, entry.name))
+      if (entry.isDirectory() && !skipped.has(entry.name)) await visit(path.posix.join(relative, entry.name))
     }
   }
   const rootEntries = await readdir(root)
@@ -139,7 +140,7 @@ test('锁文件 importers 与磁盘上的包根一一对应：不认识的 works
   )
 })
 
-test('磁盘扫描只数包根：构建产物 dist/、node_modules 和包内嵌套的 package.json 都不算包，两个方向的真差异仍被指出', async () => {
+test('磁盘扫描只数包根：被 .gitignore 忽略的目录（dist/、build/、node_modules）和包内嵌套的 package.json 都不算包，两个方向的真差异仍被指出', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'host-node-types-'))
   try {
     const manifests = [
@@ -152,7 +153,10 @@ test('磁盘扫描只数包根：构建产物 dist/、node_modules 和包内嵌�
       'packages/providers/newpkg/package.json', // 磁盘上有、锁文件没有
       'packages/deep/er/c/package.json', // 多层嵌套的分组目录下的包
       'packages/dist/stray/package.json', // 分组层的 dist
+      'packages/build/stray/package.json', // 分组层的 build：旧的手写名单没有它，只有读 .gitignore 才知道
+      'packages/fixture-only-out/stray/package.json', // 只写在夹具的 .gitignore 里：真实仓库根不认识它，所以只有读 root 自己的 .gitignore 才剪得掉
     ]
+    await writeFile(path.join(root, '.gitignore'), 'node_modules/\ndist/\nbuild/\nfixture-only-out/\n')
     for (const file of manifests) {
       await mkdir(path.dirname(path.join(root, file)), { recursive: true })
       await writeFile(path.join(root, file), '{}\n')
