@@ -116,3 +116,25 @@ test('one declaration adds an operation to the descriptors, the Host dispatch an
   assert.deepEqual([production[0] === HOST_REMOTE, 'echoFixture' in stock.service, Object.keys(stock.service)], [true, false, ['ctx', 'typertRemote', 'baseline', 'bootstrapWorkspace', 'watch']])
   await Promise.all([installed.dispose(), stock.dispose()])
 })
+
+test('dispatch rejects stream and undeclared names with a fixed message before the guard (#374)', async () => {
+  // guard 是诊断日志的唯一写入口（`guarded`）：它与 handler 一次都没被调用，就等于没有日志增量、没有碰 Controller。
+  const calls = []
+  const handlers = { baseline: async () => { calls.push('handler') }, bootstrapWorkspace: async () => { calls.push('handler') } }
+  const dispatch = dispatchOf(OPERATIONS, handlers, (run) => { calls.push('guard'); return run() })
+  const canary = 'secret-canary-name'
+  // stream 名字（已声明但不是 unary）、未声明名字、原型链上的键（`toString` 等不是声明）：同一条固定文案，不回显调用方给的名字。
+  for (const name of ['watch', canary, 'toString', 'constructor', 'hasOwnProperty', '__proto__']) {
+    await assert.rejects(() => dispatch({}, name, {}), (error) => error instanceof TypeError && error.message === '操作名 必须是已声明的 unary 操作' && !error.message.includes(canary), name)
+  }
+  // 非字符串名字：每次转成属性键结果都可能不同（首次是 baseline、之后是 watch），或者是一个会被转成 baseline 的数组。
+  let reads = 0
+  const shifting = { toString: () => (reads++ === 0 ? 'baseline' : 'watch') }
+  for (const name of [shifting, ['baseline']]) {
+    await assert.rejects(() => dispatch({}, name, {}), (error) => error instanceof TypeError && error.message === '操作名 必须是已声明的 unary 操作')
+  }
+  assert.deepEqual(calls, [], 'guard 与 handler 都没有被触达')
+  // 对照：声明过的 unary 名字照旧先 guard 再 handler。
+  await dispatch({}, 'baseline', {})
+  assert.deepEqual(calls, ['guard', 'handler'])
+})
