@@ -54,3 +54,4 @@ ls -l node_modules/@harness-projects/core    # 期望：-> ../../packages/core�
 - 结构类约束（包边界、依赖方向）用契约测试固定，见 `tests/contract/package-boundaries.test.js`。
 - 涉及外部系统的测试必须能在无凭据环境下跑通（用 Fake Provider 或录制 fixture）；真实平台的验证属于 Gate E1 spike，不放进普通 CI。
 - 故障场景必须显式覆盖：provider 离线、权限被撤销、重复事件、乱序事件、创建结果不确定、执行失败降级。
+- 新写或改动的、遍历 `packages/`、`apps/` 找源码的扫描一律经 `tests/fixtures/source-tree.mjs`（`callSites`、`listSourceFiles`、`ignoredDirectoryNames`），不在测试里手写递归和跳过名单：什么算构建产物只由根 `.gitignore` 的裸目录规则回答。否则本机跑过 `pack:plugin` 后残留的、被忽略的 `apps/harness-plugin/dist/` 会被当成源码，扫描看到的集合与 CI 的干净检出不一致。这条没有机械守卫，靠评审核对。

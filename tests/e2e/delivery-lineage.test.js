@@ -4,7 +4,7 @@
  * 不留骨架关系（事实/观察边界）；缺可选能力报 unavailable 而不是 error；只读交付方的写尝试返回 not supported 且不改任何状态。
  */
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -17,6 +17,8 @@ import { composeCore, createContext, readDeliveryProjection, refreshDeliveryFact
 import { createController } from '@harness-projects/controller'
 import { FaultKind, createFakeProviders, createFakeStorage, exportFakeStorageState, refOf } from '@harness-projects/provider-fake'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
+
+import { callSites } from '../fixtures/source-tree.mjs'
 
 const WORKSPACE = { id: newWorkspaceId(), name: 'MVP-0' }
 // 替身按仓库种下流水线运行：负向用例必须用这个有 CI 种子的仓库——若换空仓库，无条件读取同样读不到东西，用例就没有判别力。
@@ -367,8 +369,8 @@ for (const [label, { open }] of STORAGES) {
   })
 }
 
-const sources = ['packages', 'apps'].map((name) => fileURLToPath(new URL(`../../${name}/`, import.meta.url))).flatMap((root) => readdirSync(root, { recursive: true }).filter((file) => /\.(ts|tsx|js|mjs)$/.test(file) && !file.split('/').includes('node_modules')).map((file) => [root, file]))
-const callers = (pattern) => sources.filter(([root, file]) => pattern.test(readFileSync(join(root, file), 'utf8'))).map(([root, file]) => file).sort()
+const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
+const callers = (pattern) => callSites(repoRoot, ['packages', 'apps'], pattern)
 
 test('唯一写者：交付事实与谱系边只经 refreshDeliveryFacts 在一个事务里写入；重复刷新收敛，关系、事实与修订号不变，不写游标、不改规划状态；首次刷新、标陈旧的刷新与没有锚点的刷新也都不推进修订号（#221、#222、CONTRACTS K1、K5）', async () => {
   assert.deepEqual(callers(/\.putDeliveryFacts\(/), ['core/src/delivery-facts.ts'], '交付事实只有一个写入调用点')
