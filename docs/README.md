@@ -58,12 +58,12 @@
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | epic #216 的控制计划：先把纵向路径与 R1 不变量的证据如实落账，再收敛读写权威、同步和 Client 重连，最后合并发布前 SQL、清理旧形状并重整测试与文档证据 | Batch 0（#217）已验收；纵向路径矩阵见 `docs/product/vertical-path.md` §2.1，R1 映射见 `docs/architecture/release-gates.md` §2.1.1；PR #239 状态以 GitHub 回读为准；Batch 1–7 待实施 |
 | [2026-10-22-drawer-execution-state](exec-plan/completed/2026-10-22-drawer-execution-state.md) | #282：实际插件抽屉显示 Core 已存执行状态，严格 scope/可见性/迟到响应隔离；已实施并经真实浏览器独立验收 | Completed |
 
-| [2026-10-22-lineage-refresh](exec-plan/active/2026-10-22-lineage-refresh.md) | #233：独立设计与实施验收 | Active |
 
 ### Completed
 
 | 计划 | 结论 |
 |---|---|
+| [2026-10-22-lineage-refresh](exec-plan/completed/2026-10-22-lineage-refresh.md) | #233：显式交付刷新与有界谱系分页 | Completed |
 | [2026-10-21-scans-skip-build-output](exec-plan/completed/2026-10-21-scans-skip-build-output.md) | #350：源码扫描按根 `.gitignore` 裸目录规则跳过构建产物；C4 用 Git 可见文件 oracle 守卫不漏扫，明确拒绝 scopes 内 tracked symlink；I1 从 `pack:plugin` 配置推导真实产物目录；TD-086 剩余扫描约定守卫待后续实现；TD-087 迁移由 #396 承接；已实施并经 MMP 修复复评（PR #390） |
 | [2026-10-21-delivery-lineage-strip](exec-plan/completed/2026-10-21-delivery-lineage-strip.md) | #357：六位置逐跳派生、原样关系确认态、null 降级、共享年龄规则与 nextFlipAt；七条评审修复已完成本地验证，消费方 #234/#281 承接定时重派生；Completed，独立复评与最终 head 发布回读由协调者完成 |
 | [2026-10-21-worktree-resolution-guard](exec-plan/completed/2026-10-21-worktree-resolution-guard.md) | PR #391：pnpm 测试入口在任何用例前检查工作区包的 realpath 解析落点，新增单文件与目录入口；直接 Node 绕过路径按 TD-088/089 仍由 #186 跟踪，PR 仅 Refs #186 | 已实施并经MMP评审与修复复评；pnpm根解析前置，#186完整验收保持开放（PR #391） |
