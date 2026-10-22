@@ -35,7 +35,8 @@ test('Host entry loads without the credentials service, resolves it per provider
   const references = []
   const credential = { resolve: async (reference) => { references.push(reference); return { value: canary, source: 'test' } } }
   // 回放进 globalThis.fetch：Host 的 GitHub transport 默认在调用时读取它；`hold` 让在途调用停在 provider 里。
-  const replay = replayFetch(() => hold)
+  let entered
+  const replay = replayFetch(() => { entered?.(); return hold })
   t.mock.method(globalThis, 'fetch', replay.fetch)
   const received = () => replay.requests.map((request) => request.authorization)
   await withHost(async ({ ctx, services, effects, dataDir }) => {
@@ -57,7 +58,9 @@ test('Host entry loads without the credentials service, resolves it per provider
     // 卸载先排空在途调用再关闭 SQLite：provider 挂起期间不得 close。
     let release
     hold = new Promise((resolve) => { release = resolve })
+    const started = new Promise((resolve) => { entered = resolve })
     const inFlight = service.bootstrapWorkspace({ kind: 'agent', id: 'host-entry' }, 'host-entry-2')
+    await started // stop closes admission; prove this read already reached the transport
     const unload = (async () => { for (const dispose of effects.reverse()) await dispose() })()
     await new Promise((resolve) => setImmediate(resolve))
     assert.equal(close.mock.callCount(), 0, '在途调用结束前不得关闭 SQLite')

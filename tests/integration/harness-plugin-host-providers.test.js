@@ -76,7 +76,7 @@ test('AC1 空数据根：建库迁移 1–7，零工作区，重启仍为零', a
     try {
       const [baseline, command] = [await host.call('baseline', {}), await bootstrap(host, key)]
       assert.deepEqual([baseline.workspace, baseline.entities, command.writeState, command.error.code], [undefined, [], 'failed', 'not_supported'], '没有工作区：baseline 为空而不是编造一个，命令是结构化 not_supported')
-    } finally { host.dispose() }
+    } finally { await host.dispose() }
     const dumped = dump(dataPath)
     assert.deepEqual(rowsOf(dumped, 'schema_migrations').map((row) => row.version), [1, 2, 3, 4, 5, 6, 7])
     assert.deepEqual([rowsOf(dumped, 'workspace').length, rowsOf(dumped, 'provider_binding').length], [0, 0], '空数据根不得写出任何工作区或连接锚点')
@@ -100,7 +100,7 @@ test('AC2 AC4 同文件重启：身份不变，凭据按操作解析且只以句
   for (const canary of canaries) { // 每次组合换一个凭据值：值只在当次 provider 操作内解析
     const host = await createHostComposition(options(dataPath, { fetch: replay.fetch, resolveCredential: async (handle) => { resolved.push(handle); return canary } }))
     const baseline = await host.call('baseline', {})
-    host.dispose()
+    await host.dispose()
     runs.push({ dumped: dump(dataPath), entities: baseline.entities.length, wire: JSON.stringify(HOST_REMOTE.invocations[0].result.encode(baseline)) })
   }
   const identity = ['workspace', 'provider_binding', 'workspace_binding', 'connector_account']
@@ -147,7 +147,7 @@ test('AC3 未知实现键、域不匹配与构造抛错只禁用该挂载，其�
     assert.deepEqual(host.disabled.map((item) => [item.bindingId, item.implementationKey, item.error.code]), expected, '只有无法构造的挂载被禁用；用户主动停用的挂载不算禁用')
     assert.equal(JSON.stringify(host.disabled).includes('canary'), false, '构造异常原文不进禁用记录')
     assert.ok((await host.call('baseline', {})).entities.length > 0, '其余挂载照常')
-  } finally { host.dispose() }
+  } finally { await host.dispose() }
   assert.deepEqual(mounts(dump(dataPath)), before, 'I2：连接锚点与挂载行逐字节不变，被禁用与被停用的挂载也一样')
   assert.deepEqual((await logLines(dataDir)).map(({ at, ...line }) => line), expected.map(([bindingId, implementationKey, code]) => ({ event: 'bindingDisabled', bindingId, domain: 'development', implementationKey, code })), '每个被禁用的挂载写一行、停用的不写，只含允许名单字段，构造异常原文不进日志')
 })
@@ -166,7 +166,7 @@ test('AC3 AC4 账号来源不是 github.com 或账号不带句柄的规划挂载
       assert.deepEqual(host.disabled.map((item) => [item.bindingId, item.error.code]), disabled, label)
       assert.deepEqual([(await host.call('baseline', {})).entities, (await bootstrap(host, 'ac4-nocred')).writeState], [[], 'failed'])
       assert.equal(replay.requests.length, 0, '被禁用或没有凭据值：不发请求，更不会带空 bearer')
-    } finally { host.dispose() }
+    } finally { await host.dispose() }
   })
   const { dataPath } = await dataRoot()
   await assert.rejects(() => seed(dataPath, PROVIDER_CATALOG, (storage) => storage.putConnectorAccount(account({ secretHandle: 'GITHUB_TOKEN' }))), RangeError, '句柄 allowlist 是宿主常量，用户环境里通用的名字进不了库')
@@ -190,7 +190,7 @@ test('AC7 同步异常经脱敏写入宿主诊断日志，不上 wire', async ()
     // 允许名单按形状过滤：不合格的 name、code、errcode 一律丢弃，原文不外泄。
     const shaped = (props, name = 'Error') => Object.defineProperty(Object.assign(new Error('x'), props), 'name', { value: name })
     assert.deepEqual([shaped({ code: '~/secret' }), shaped({}, 'My Error at ~'), shaped({ errcode: 1.5 })].map(describeError), Array(3).fill({ name: 'Error' }))
-  } finally { host.dispose() }
+  } finally { await host.dispose() }
 })
 
 test('AC7 命令拒绝映射为固定文案，诊断日志写不进去时也一样', async (t) => {
@@ -210,7 +210,7 @@ test('AC7 命令拒绝映射为固定文案，诊断日志写不进去时也一�
     await rm(logFile); await mkdir(logFile) // 日志路径变成目录：之后每次追加都失败，query 一侧的漏斗也只露固定文案
     t.mock.method(SqliteStorage.prototype, 'currentRevision', () => { throw new Error(`disk fault at ${dataDir}`) })
     await assert.rejects(() => host.call('baseline', {}), (error) => error.message === OPERATION_FAILED)
-  } finally { host.dispose() }
+  } finally { await host.dispose() }
 })
 
 /** 种子：工作区、指向 `repositoryPath` 的 L 挂载与一个可开始的工作项。 */
@@ -229,7 +229,7 @@ test('AC5 AC6 新进程重启恢复执行上下文与谱系，工作树在检出
   try {
     await startWork(host)
     first = await contextOf(host)
-  } finally { host.dispose() }
+  } finally { await host.dispose() }
   assert.equal(first?.status, 'ready')
   assert.ok((await realpath(first.worktreeExternalId)).startsWith(path.join(await realpath(dataDir), 'worktrees') + path.sep), '工作树在宿主数据根的 worktrees 之下，即仓库检出之外')
   assert.equal(await fixture.run(['status', '--porcelain']), '', '仓库检出里没有任何新文件')
@@ -265,6 +265,6 @@ for (const [shape, layout] of [
       assert.notEqual((await startWork(host)).value?.status, 'ready', '没有可路由的开发挂载：Start Work 不得就绪')
       assert.equal(await contextOf(host), undefined)
       assert.equal((await worktreePaths(fixture)).length, 1, '检出内没有建出任何链接工作树')
-    } finally { host.dispose() }
+    } finally { await host.dispose() }
   })
 }

@@ -104,8 +104,8 @@ dispose 缓存同一 Promise；stop 后旧 callback、保留 call/watch 不得�
 
 - [x] (2026-10-22 SGT) 独立审查设计 A/B、issue 验收与评论，以及 Host/Core/Provider 调用链。
 - [x] (2026-10-22 SGT) 核实生产构造无请求、describeCapabilities 有探测；计划覆盖首轮组合前读等待。
-- [ ] Batch 1：判别性测试、读 Promise 与 iterator 生命周期、超时后恢复。
-- [ ] Batch 2：Host 接线、query-only 自动恢复、单飞和卸载排空。
+- [x] (2026-10-22 SGT) Batch 1：先观察 scheduler 缺失、list/iterator 永久等待的失败，再实现端口预算；晚成功、晚异常、持续 yield、挂起 return 与后轮恢复通过。
+- [x] (2026-10-22 SGT) Batch 2：真实 applyHost + 生产 GitHub Provider + SQLite 证明 query-only 晚凭据与无事件变更，显式/定时共享 Core 槽；stop、remote/background drain、重复 close、注册失败通过。
 - [ ] 独立验收、产物与当前 head gates、提交清理、ready 回读。
 
 ## Surprises & Discoveries
@@ -113,6 +113,8 @@ dispose 缓存同一 Promise；stop 后旧 callback、保留 call/watch 不得�
 观察（2026-10-22，`main@d7e7bca6`）：GitHub Provider describeCapabilities 会 await 闭包 provider.getProject；包装外部 getProject 不会拦截该内部调用。
 证据：`packages/providers/planning-github-projects/src/provider.ts` 的 describeCapabilities 与 `apps/harness-plugin/src/host-providers.ts` 的 GITHUB_PROJECTS_ENTRY.create。
 现有 fetch 30秒 signal 在凭据之后建立，不能单独释放 Core await；原 remote drain 不包含 scheduled 任务，必须增加 Host 资源所有权。
+首次全仓验证发现新 helper 的 type-only capabilities import 也受应用包边界限制，导致两个边界相关测试失败；helper 改成零 import 的类型保持包装后重跑通过，不扩大 Host 例外或依赖图。
+旧 runtime 卸载夹具在读尚未进入 transport 时即 stop，新准入 fence 正确让该轮提前失败；夹具改为先等待 transport 已进入，再验证 drain 期间不能 close。
 暂缺凭据 reason 仍可能表现 not_found，属于既有 TD-056；本任务兑现自动恢复，不宣称修复所有凭据分类文案。
 
 ## Decision Log
@@ -137,10 +139,15 @@ OPERATIONS 复用 actorRef Param，只加 refreshPlanning；HOST/CLIENT descript
 
 ## Outcomes & Retrospective
 
-已完成设计收敛，尚无新生命周期实现/测试证据，不能关闭 #335 或宣称自动恢复已成立。
+在 `feature/host-planning-refresh` 检出根目录验证：目标命令（本计划 Batch 1/2 所列八个测试文件）75 项通过；`pnpm verify` 的 typecheck、1771 项 contract/integration/e2e 与 7 项 mvp0 全部通过；`pnpm run boundaries` 9 项、workflow-check 8 个文件通过。
+三条 RED 证据在实现前实际观察：scheduler 期望 1 个 timer 实为 0；list 与 iterator next 在 500ms 安全外层时限内仍未完成。GREEN 的实际 Core 端口等待已改成默认 30 秒预算，测试配置 100ms；不是整轮 race。
+测试确认最后已知内容、SQLite `reconcile_cursor` 确认时刻与修订号在失败时保留，恢复轮推进；晚值和晚异常均不覆盖恢复结果。Provider 写调用为零，凭据 canary 在 query-only 后续 tick 轮换，全部录制请求命中。
+本地实现与产物证据已成立；独立验收、最终 push 与当前远端 head gates 由交付者继续，不在本批执行外部写入。按本次交付要求保留 active，不关闭 issue，不宣称真实 Desktop 安装认证成立。
 不新增有意延期技术债；TD-056 的既有 reason 歧义保留。实现发现新的必要延期时记入既有 tracker，不能用延期删除本 issue 验收。
 全部验收完成后如实记录结果与偏差并移入 completed、更新索引；未合并状态由最终远端回读报告。
 
 ## Bottom Change Note
 
 2026-10-22 SGT：融合两份独立设计，选择最小端口等待边界、iterator绝对预算与两阶段卸载，显式核实首轮能力探测并排除 #336/#388 扩张。
+
+2026-10-22 SGT：记录实际 RED/GREEN、全仓 1771+7 测试与边界修正；保留 active 等待独立验收及远端当前 head 回读。

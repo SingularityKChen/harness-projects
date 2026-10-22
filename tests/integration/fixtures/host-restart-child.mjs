@@ -7,4 +7,4 @@ const [dataPath, workspaceId, workItemId, repositoryId] = process.argv.slice(2)
 const host = await createHostComposition({ dataPath, workspaceId, catalog: PROVIDER_CATALOG, resolveCredential: async () => undefined })
 try {
   process.stdout.write(JSON.stringify(await host.controller.queries.getExecutionContext({ workItemId, repositoryId }) ?? null))
-} finally { host.dispose() }
+} finally { await host.dispose() }
