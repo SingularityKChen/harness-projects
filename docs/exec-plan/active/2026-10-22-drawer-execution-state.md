@@ -1,6 +1,6 @@
 # 工作项抽屉执行上下文与运行状态 ExecPlan
 
-> 状态：Active · 设计收敛，尚未实施
+> 状态：Active · 实现验证完成，待独立验收
 > 创建：2026-10-22
 > 范围：#282；Host 已记录的执行事实经真实插件到达安全工作项抽屉
 > 规范：`PLANS.md`；上游依据：#282、`docs/product/vertical-path.md` §2 第 8 步
@@ -71,7 +71,7 @@ Host 是事实拥有者；本切片零 Provider 调用、零持久化写入，�
 UI 不 import Core/Controller/Provider 运行时；client 不依赖 React；浏览器产物不能包含 Node/Core/Provider。
 不实现 #142 Start Work 对话框、#215 取消、执行事件写者、自动轮询、日期验证或兼容迁移。
 一个 PR 独立验收、合并、回滚；实现加测试 additions+deletions ≤800，文档 ≤1300；不以删掉生产接线或异步隔离压规模。
-受控文件集：`packages/core/src/execution-context.ts`；`packages/client/src/execution-context.ts` 与 `packages/client/src/index.ts`；`packages/ui-model/src/work-item-detail-view.ts`、`packages/ui-model/src/execution-context.ts` 与 `packages/ui-model/src/index.ts`；`packages/ui/src/work-item-app.ts`、`packages/ui/src/work-item-project.ts`、`packages/ui/src/work-item-detail.ts`、`packages/ui/src/execution-context-section.ts`；`apps/harness-plugin/src/host-operations.ts`、`apps/harness-plugin/src/host-composition.ts`、`apps/harness-plugin/src/client.ts`。
+受控文件集：`packages/core/src/execution-context.ts`；`packages/domain/src/browser-values.ts`（既有纯值出口重导出两类执行状态）；`packages/client/src/execution-context.ts` 与 `packages/client/src/index.ts`；`packages/ui-model/src/work-item-detail-view.ts`、`packages/ui-model/src/execution-context.ts` 与 `packages/ui-model/src/index.ts`；`packages/ui/src/work-item-app.ts`、`packages/ui/src/work-item-project.ts`、`packages/ui/src/work-item-detail.ts`、`packages/ui/src/execution-context-section.ts`；`apps/harness-plugin/src/host-operations.ts`、`apps/harness-plugin/src/host-composition.ts`、`apps/harness-plugin/src/client.ts`。
 测试集：新增 `tests/integration/execution-context-run-status.test.js`、`tests/integration/harness-plugin-execution-drawer.test.js`、`tests/contract/ui-execution-context.test.js`，必要浏览器 fixture 放 `tests/fixtures/execution-drawer-browser.mjs`；既有 Host operations 与详情精确白名单测试只改受影响断言。
 正式文档限本计划、`docs/README.md`、`docs/product/vertical-path.md` 第 8 行证据；新债务才追加 `docs/exec-plan/tech-debt-tracker.md`。
 #335 实现者是 `apps/harness-plugin/src/host-operations.ts` / `apps/harness-plugin/src/host-composition.ts` 的唯一 owner，顺序完成两分支适配；本任务实现者拥有 Core/client/UI 与专用测试，准备 Host 契约后等待 owner 在本工作树集成。父任务协调，两个 PR 各从 main 验证，不依赖合并彼此。
@@ -141,9 +141,9 @@ UI 不 import Core/Controller/Provider 运行时；client 不依赖 React；浏�
 
 - [x] (2026-10-22 09:16 +08) 两份独立设计与源码交叉审查，收敛按需查询和真实 Panel 验收。
 - [x] (2026-10-22 09:16 +08) 决定 wire 空值、multi-repo、Host 可见性复验与局部请求隔离；计划落盘。
-- [ ] Batch 1：双 Storage 运行事实查询。
-- [ ] Batch 2：Host remote、decoder 与安全目标。
-- [ ] Batch 3：生产 Panel 抽屉、浏览器异步和边界验证。
+- [x] (2026-10-22 +08) Batch 1：双 Storage 查询覆盖八种运行状态、独立 fallback、无 run；四个 Provider 的所有方法换成抛错陷阱，查询前后记录、帧与修订不变。
+- [x] (2026-10-22 +08) Batch 2：Host owner 顺序集成精确 unary；nullable JSON、坏输入、枚举与 scope、PR/遮蔽、查询期间撤权和固定错误文案完成。
+- [x] (2026-10-22 +08) Batch 3：生产 Panel 接线、组件异步反例与 artifact/boundaries 已通过；真实 Chrome 浏览器已覆盖人工承接、运行成功/失败、刷新/断线/恢复、PR/遮蔽零查询、撤权后晚成功、关闭后晚拒绝、焦点与 Escape，零 pageerror。
 - [ ] Batch 4：独立验收、文档证据和 ready-but-unmerged PR。
 
 ## Surprises & Discoveries
@@ -152,6 +152,8 @@ context Ready 不是 run Running，且 fallback 是独立记录字段；证据�
 真实客户端当前只有 watch 注入；只扩 Controller 或给 Drawer 测试传 prop 会留下生产不可达缺口，证据是插件 `client.ts`。
 仓库元数据缺席不能证明未开始工作，证据是 `packages/client/src/workspace-read.ts` 的 repositories 契约。
 安全详情 identity 可省略，不能靠 identity.kind 排除 PR；证据是 `work-item-detail-view.ts` 的可选 identity。
+浏览器纯值出口原先未重导出两种执行状态；直接从 domain 根入口导入会触及 Node，所以只扩既有 `domain/values` 出口，复用同一枚举而不复制词表。
+真实浏览器在遮蔽后恢复条目时，最初 opener 已脱离文档；关闭应按现有规则回到列表标题，再次从新 anchor 打开后 Escape 回到该 anchor。该差异是夹具断言修正，没有修改焦点实现。
 
 ## Decision Log
 
@@ -179,10 +181,17 @@ remote 方法名及参数来自 OPERATIONS；decoder 类型放 client，展示�
 
 ## Outcomes & Retrospective
 
-当前结果是可执行设计与审阅记录，尚无产品实现或新增测试通过证据。
+实现已连通 Core → Controller → Host remote → 严格 client reader → 生产 apply 注册 Panel → 原生抽屉。新增查询无数据库迁移、无 Provider 调用；运行状态与 fallback 独立。
+TDD：初次 Core 双 Storage 因 `runStatus === undefined` 失败，reader/target/Section 因缺少函数或字段失败；fixture 纠正后，真实 Host operation 与生产 Panel reader 注入也观察到缺失失败。补最小实现后相关 Core/Controller/UI 回归 50 项通过，artifact 与 boundaries 32 项通过。Host owner 集成后真实 Host/Panel 两项通过；完整 `pnpm verify` 首轮 1769/1770，仅旧 `domain/values` 四项精确白名单因本次新增纯值出口失败；同步为六项并保留逐一同引用断言后重跑通过（1770 项 + MVP-0 7 项）。
+真实浏览器使用 `execution-drawer-browser.mjs` 的生产 apply Panel 与真实 Host/SQLite JSON 桥；Chrome 155.0.8059.39，11 类检查通过，10 次精确查询、零 pageerror，规划修订始终为 1。首次浏览器运行在 Host owner 尚未接线时因缺操作失败；集成后焦点夹具按实际 opener 生命周期修正。
+命令：`pnpm verify`（typecheck + 1770 tests + 7 MVP-0，exit 0）；`pnpm run boundaries`（9）；`node scripts/workflow-check.mjs`（8 个文件，无发现）；各批上述 `node --test` 命令均已运行。
 完成后记录实际命令、检出、当前 head 与偏差；重新评估债务，移入 completed 并更新索引。
 
 ## Bottom Change Note
 
 2026-10-22 09:16 +08：综合两份独立设计与生产调用链审查创建计划，固定实际插件闭环、多仓库、空值解码和撤权/乱序边界；未实施产品变更。
 2026-10-22 09:20 +08：落盘复读后补全受控文件相对路径；本仓库 13 章节为准，通用技能 linter 的额外章节要求不适用。
+
+2026-10-22 +08：按已批准设计完成 Core/client/UI 与 Host owner 顺序接线；记录实际红绿路径，扩既有 domain 纯值出口；保留 active 等待当前实现验证与独立验收。
+
+2026-10-22 +08：真实浏览器 11 类检查通过；完整 verify 1770 + MVP-0 7、boundaries 9 与 workflow-check 8 文件通过。计划保持 active，交给父任务进行独立验收、最终发布与当前 head 回读。

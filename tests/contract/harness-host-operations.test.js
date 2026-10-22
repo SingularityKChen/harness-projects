@@ -55,12 +55,12 @@ const GOLDEN = [
 ]
 
 test('generated descriptors are deep-equal to the hand-written ones they replaced (#352, ADR-0013)', () => {
-  assert.deepEqual(shape(HOST_REMOTE.invocations), GOLDEN)
+  assert.deepEqual(shape(HOST_REMOTE.invocations.filter(({ method }) => GOLDEN.some((entry) => entry.method === method))), GOLDEN)
   assert.equal(CLIENT_REMOTE.descriptors, HOST_REMOTE.invocations)
   // descriptor 数组是 Host 与客户端共用的同一个对象，冻结才能保证任何一方都改不了另一方看到的 wire。
   assert.ok(Object.isFrozen(HOST_REMOTE.invocations))
   // 声明是唯一来源：键序即 descriptor 顺序，bootstrapWorkspace 的参数 codec 用的就是声明里的 parse 函数本身。
-  assert.deepEqual(Object.keys(OPERATIONS), ['baseline', 'bootstrapWorkspace', 'refreshPlanning', 'watch'])
+  assert.deepEqual(Object.keys(OPERATIONS), HOST_REMOTE.invocations.map(({ method }) => method))
   assert.ok(Object.isFrozen(OPERATIONS) && Object.values(OPERATIONS).every((operation) => Object.isFrozen(operation)))
   const parses = HOST_REMOTE.invocations[1].parameters.map((parameter) => parameter.codec.create().parse)
   assert.equal(parses.length, OPERATIONS.bootstrapWorkspace.params.length)
@@ -83,8 +83,8 @@ test('one declaration adds an operation to the descriptors, the Host dispatch an
   const service = installed.service
 
   // descriptor：声明顺序在末尾追加，第 4 条深等于同形金样，注册的就是 remote.host，Client 挂载同一个数组。
-  assert.deepEqual(remote.client.descriptors.map(({ method }) => method), ['baseline', 'bootstrapWorkspace', 'refreshPlanning', 'watch', 'echoFixture'])
-  assert.deepEqual(shape(remote.client.descriptors[4]), {
+  assert.deepEqual(remote.client.descriptors.map(({ method }) => method), [...Object.keys(OPERATIONS), 'echoFixture'])
+  assert.deepEqual(shape(remote.client.descriptors.find(({ method }) => method === 'echoFixture')), {
     id: '@harness-projects/app-harness-plugin#harnessProjects/echoFixture',
     service: 'harnessProjects',
     namespace: 'harnessProjects',
@@ -119,7 +119,7 @@ test('one declaration adds an operation to the descriptors, the Host dispatch an
   // 生产默认不受影响：不传第三个参数时装的是 OPERATIONS 的 remote，夹具操作不在其中。
   const production = []
   const stock = await installHostRemote({ ...ctx, typert: { register: (contribution) => { production.push(contribution); return () => {} } } }, { call: async () => ({}), watch: async function* () {} })
-  assert.deepEqual([production[0] === HOST_REMOTE, 'echoFixture' in stock.service, Object.keys(stock.service)], [true, false, ['ctx', 'typertRemote', 'baseline', 'bootstrapWorkspace', 'refreshPlanning', 'watch']])
+  assert.deepEqual([production[0] === HOST_REMOTE, 'echoFixture' in stock.service, Object.keys(stock.service)], [true, false, ['ctx', 'typertRemote', ...Object.keys(OPERATIONS)]])
   await Promise.all([installed.dispose(), stock.dispose()])
 })
 
@@ -143,4 +143,11 @@ test('dispatch rejects stream and undeclared names with a fixed message before t
   // 对照：声明过的 unary 名字照旧先 guard 再 handler。
   await dispatch({}, 'baseline', {})
   assert.deepEqual(calls, ['guard', 'handler'])
+})
+
+test('execution context unary declares two explicit IDs with strict non-empty wire codecs', () => {
+  const descriptor = HOST_REMOTE.invocations.find(({ method }) => method === 'getExecutionContext')
+  assert.ok(descriptor)
+  assert.deepEqual(descriptor.parameters.map(({ name, wire }) => [name, wire]), [['workItemId', 'workItemId'], ['repositoryId', 'repositoryId']])
+  for (const parameter of descriptor.parameters) { assert.equal(parameter.codec.create().parse('id'), 'id'); for (const value of ['', null, 3]) assert.throws(() => parameter.codec.create().parse(value), TypeError) }
 })
