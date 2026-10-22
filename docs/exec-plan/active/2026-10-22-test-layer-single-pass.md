@@ -77,14 +77,17 @@
 
 - [x] (2026-10-22 SGT) 独立比较设计 A/B 与源码，收敛为复用计数的最小方案。
 - [x] (2026-10-22 SGT) 读取本轮基线日志：完整 verify 退出 0，wall 38.15 秒；执行上下文与环境由执行者在批次记录确认。
-- [ ] Batch 1：替换末尾四例、窄验证、同条件后测与发布检查。
+- [x] (2026-10-22 SGT) 末尾四例改为逐层非空计数；临时追加不存在的层后对应断言失败，移除探针后四层断言恢复通过。
+- [x] (2026-10-22 SGT) 定向套件 34/34 通过；`CI=true pnpm verify` 退出 0，wall 27.49 秒。
+- [ ] Batch 1：剩余发布检查与最终 head CI / PR 回读。
 - [ ] 最终 head 四车道、PR 关联和 review threads 回读；ready 后保持未合并。
 
 ## Surprises & Discoveries
 
-基线观察（2026-10-22，基线 `d7e7bca6`）：通过 `/bin/zsh -lc 'pnpm verify'` 得到 exit 0、wall 38.15 秒。
+基线观察（2026-10-22，基线 `d7e7bca6`）：通过 `/bin/zsh -lc 'pnpm verify'` 得到 exit 0、wall 38.15 秒。Node `v26.11.1`、pnpm `10.28.2`。
 macOS 的 pnpm 入口可能是无 shebang 的 Homebrew shim；直接由 Python argv 启动会选错运行路径，因此必须通过 shell 并确认版本。
 完整计数只是文件发现证据，不能证明实际断言执行；当前真实执行证据仍待最终 head CI 产生。
+实现后观察（2026-10-22，代码差异基于 `df361809`）：同一 Node/pnpm、工作树内 `node_modules`、串行验证条件下，`CI=true pnpm verify` exit 0、wall 27.49 秒。单次测量较基线少 10.66 秒；未重复配对，不能将差值归因于本改动或承诺固定比例。
 
 ## Decision Log
 
@@ -105,10 +108,10 @@ macOS 的 pnpm 入口可能是无 shebang 的 Homebrew shim；直接由 Python a
 
 ## Outcomes & Retrospective
 
-本次完成设计收敛和可执行计划；实现、后测与当前 head CI 尚未完成，不能宣称验收完成。
+本次完成设计收敛、最小实现、负向 guard 检查和本地验证。完整层真实执行与 PR 当前 head 验收仍由四条 Merge Gate lanes 提供，尚待最终 head CI 回读，不能宣称发布验收完成。
 没有为本任务有意延期的技术债；发现超出范围的问题时记入 `docs/exec-plan/tech-debt-tracker.md`，不把它并入本批次。
 全部验收成立后将本计划移入 completed 并更新索引；最终交付说明实际计时差与测量限制。
 
 ## Bottom Change Note
 
-2026-10-22 SGT：独立审查两份设计后建立最小 13 节计划，明确 shell 计时与最终四车道证据，消除全绿与非空混称。
+2026-10-22 SGT：独立审查两份设计后建立最小 13 节计划，明确 shell 计时与最终四车道证据，消除全绿与非空混称；实现后只保留四层非空计数，并记录单次同环境后测与测量限制。
