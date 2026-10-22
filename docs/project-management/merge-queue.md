@@ -503,7 +503,7 @@ gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,baseRe
 
 | 位置 | PR / issue | 分支 | 独立交付闭环 | 依赖与已知冲突 |
 |---|---|---|---|---|
-| 1 | #393 / #362 | `test/test-layer-single-pass` | 契约只做真实层非空检查，真实 CI lanes 仍执行 | 无能力依赖；先合并可减少后续重复测试 |
+| 1（已合并） | #393 / #362 | `test/test-layer-single-pass` | 契约只做真实层非空检查，真实 CI lanes 仍执行 | 2026-10-22 rebase 合并 `66a01cc412303eb1ba6ea5948c78c753d654bff0`，#362 CLOSED；后续重锁 main |
 | 2 | #392 / #297 | `feature/delivery-repository-routing` | 持久仓库引用选择统一的远端谱系读取 | 无能力依赖；排在 #393 后重锁 main |
 | 3 | #394 / #335 | `feature/host-planning-refresh` | Host 定时/显式刷新、有界等待与卸载排空 | 无能力依赖；C394-1 修复及独立复评后进入 |
 | 4 | #395 / #282 | `feature/drawer-execution-state` | 实际抽屉消费已存运行状态与 manual fallback | 无能力依赖；两项 P2 修复后复评；与 #394 四文件冲突须按下述方式保留两能力 |
