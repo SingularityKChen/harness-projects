@@ -39,6 +39,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+const nonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.length > 0
+
 /**
  * 完整收集一类 Delivery 页后才返回元素：任何一页失败、页值不是带数组 `items` 的对象、元素不是带 `ref.externalId` 的对象、
  * 游标成环、id 重复、页数超限，或任一元素的 `commit` 不是已观察的 `head`，都返回结构化 unavailable 并放弃**整次**集合——
@@ -74,6 +76,35 @@ async function collectDeliveryPages<T extends { readonly ref: ExternalObjectRef;
     sent.add(cursor)
   }
   return providerErr(providerError(ProviderErrorCode.Unavailable, '分页超过页数上界，本次读取不完整'))
+}
+
+/** Development 只找一个已记录锚点，不缓冲完整集合；100 个端口页不等于 100 次平台请求。 */
+async function findDevelopment<T extends { readonly ref: ExternalObjectRef }>(
+  readPage: (cursor: string | undefined) => Promise<ProviderResult<ProviderPage<T>>>,
+  valid: (item: T) => boolean, matches: (item: T) => boolean,
+): Promise<ProviderResult<readonly T[]>> {
+  const incomplete = () => providerErr(providerError(ProviderErrorCode.Unavailable, 'Development 分页不完整'))
+  const sent = new Set<string>()
+  let cursor: string | undefined
+  try {
+    for (let page = 0; page < 100; page += 1) {
+      const result = await readPage(cursor)
+      if (!result.ok) return providerErr(result.error)
+      const value: unknown = result.value
+      if (!isRecord(value) || !Array.isArray(value.items)) return incomplete()
+      for (const item of result.value.items) {
+        if (!isRecord(item) || !isRecord(item.ref) || !nonEmptyString(item.ref.bindingId)
+          || !nonEmptyString(item.ref.objectKind) || !nonEmptyString(item.ref.externalId) || !valid(item)) return incomplete()
+      }
+      const found = result.value.items.find(matches)
+      if (found !== undefined) return providerOk([found])
+      cursor = result.value.nextCursor
+      if (cursor === undefined) return providerOk([])
+      if (typeof cursor !== 'string' || cursor.length === 0 || sent.has(cursor)) return incomplete()
+      sent.add(cursor)
+    }
+  } catch { return incomplete() }
+  return incomplete()
 }
 
 /**
@@ -132,18 +163,16 @@ async function developmentReadBinding(context: CoreContext, repositoryId: string
 }
 
 /**
- * 读能力门：路由失败、provider 缺失或失败一律折成 gap。Development 的两处查找另带 `settled`（#221）：页没读完、要找的又不在这一页也是 gap，
- * 截断不得被当成"已确认不存在"，找到即完整。默认谓词只认 #295 的 `collectDeliveryPages` 交来的完整数组：单页结果不带自己的谓词就一律是缺口（fail closed）。
+ * 读能力门：路由失败、provider 缺失或失败一律折成 gap。只接收查找或完整收集函数返回的数组；截断不代表已确认不存在。
  */
 async function gated<T>(route: ReadRoute, key: CapabilityKey,
-  run: (binding: ResolvedBinding, repository: ExternalObjectRef | undefined) => Promise<ProviderResult<T>> | undefined,
-  settled: (value: T) => boolean = (value) => Array.isArray(value)): Promise<ReadResult<T>> {
+  run: (binding: ResolvedBinding, repository: ExternalObjectRef | undefined) => Promise<ProviderResult<T>> | undefined): Promise<ReadResult<T>> {
   if (!route.ok) return { value: undefined, gap: { key, reason: route.error?.message ?? '能力不可用' } }
   const pending = run(route.binding, route.repository)
   if (pending === undefined) return { value: undefined, gap: { key, reason: '绑定没有该域的 provider 实例' } }
   const result = await pending
   if (!result.ok) return { value: undefined, gap: { key, reason: result.error.message } }
-  if (!settled(result.value)) return { value: undefined, gap: { key, reason: '分页未读完' } }
+  if (!Array.isArray(result.value)) return { value: undefined, gap: { key, reason: '分页未读完' } }
   return { value: result.value, gap: undefined }
 }
 
@@ -151,10 +180,12 @@ function collect(gaps: CapabilityGap[], gap: CapabilityGap | undefined): void { 
 
 async function readHeadCommit(route: ReadRoute, branch: string, gaps: CapabilityGap[]): Promise<string | undefined> {
   const read = await gated(route, CapabilityKey.DevelopmentRepositoryRead, (binding, repository) =>
-    repository === undefined ? undefined : binding.development?.listBranches({ repository, cursor: undefined, limit: PAGE_LIMIT }),
-  (page) => page.nextCursor === undefined || page.items.some((item) => item.name === branch))
+    repository === undefined || binding.development === undefined ? undefined : findDevelopment(
+      (cursor) => binding.development!.listBranches({ repository, cursor, limit: PAGE_LIMIT }),
+      (item) => nonEmptyString(item.name) && (item.headCommit === undefined || nonEmptyString(item.headCommit)),
+      (item) => item.name === branch))
   collect(gaps, read.gap)
-  const found = read.value?.items.find((item) => item.name === branch)
+  const found = read.value?.[0]
   // 分支存在而头部提交未知，不是「没有头部提交」：不能当作锚点确认不存在，否则下游事实会被整组删除（#221 验收 3）。
   if (found !== undefined && found.headCommit === undefined) collect(gaps, { key: CapabilityKey.DevelopmentRepositoryRead, reason: '分支没有头部提交' })
   return found?.headCommit
@@ -164,10 +195,13 @@ async function readHeadCommit(route: ReadRoute, branch: string, gaps: Capability
 async function readChangeRequest(route: ReadRoute, branch: string, head: string, gaps: CapabilityGap[]): Promise<ChangeRequestFact | undefined> {
   const key = CapabilityKey.DevelopmentChangeRequestRead
   const read = await gated(route, key, (binding, repository) =>
-    repository === undefined ? undefined : binding.development?.listChangeRequests({ repository, headBranch: branch, cursor: undefined, limit: PAGE_LIMIT }),
-  (page) => Array.isArray(page.items) && (page.nextCursor === undefined || page.items.some((item) => item.sourceVersion === head)))
+    repository === undefined || binding.development === undefined ? undefined : findDevelopment(
+      (cursor) => binding.development!.listChangeRequests({ repository, headBranch: branch, cursor, limit: PAGE_LIMIT }),
+      (item) => Number.isSafeInteger(item.number) && item.number > 0 && typeof item.title === 'string'
+        && (item.sourceVersion === undefined || nonEmptyString(item.sourceVersion)),
+      (item) => item.sourceVersion === head))
   collect(gaps, read.gap)
-  const found = (read.value?.items ?? []).find((item) => item.sourceVersion === head)
+  const found = read.value?.[0]
   return found === undefined ? undefined : { ref: found.ref, label: `#${found.number} ${found.title}` }
 }
 

@@ -58,6 +58,8 @@
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | epic #216 的控制计划：先把纵向路径与 R1 不变量的证据如实落账，再收敛读写权威、同步和 Client 重连，最后合并发布前 SQL、清理旧形状并重整测试与文档证据 | Batch 0（#217）已验收；纵向路径矩阵见 `docs/product/vertical-path.md` §2.1，R1 映射见 `docs/architecture/release-gates.md` §2.1.1；PR #239 状态以 GitHub 回读为准；Batch 1–7 待实施 |
 | [2026-10-22-drawer-execution-state](exec-plan/completed/2026-10-22-drawer-execution-state.md) | #282：实际插件抽屉显示 Core 已存执行状态，严格 scope/可见性/迟到响应隔离；已实施并经真实浏览器独立验收 | Completed |
 
+| [2026-10-22-lineage-refresh](exec-plan/active/2026-10-22-lineage-refresh.md) | #233：独立设计与实施验收 | Active |
+
 ### Completed
 
 | 计划 | 结论 |

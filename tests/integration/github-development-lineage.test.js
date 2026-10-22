@@ -64,3 +64,78 @@ test('core 端到端：PR 只经 head 分支挂上谱系，标题 / fork / 大�
     assert.deepEqual([stored.includes('PR_target'), keys.filter((key) => nodes.some((node) => node.id === key))], [true, []], `${mode}：目标 node id 只作属性入库，不作任何主键`)
   }
 })
+
+// #233 只扩展现有测试正文；首个 guard import 由独立任务维护。
+import { fakeChain, offline, page } from '../fixtures/lineage-refresh.mjs'
+
+for (const [method, key, kind] of [
+  ['listBranches', 'development.repository.read', 'commit'],
+  ['listChangeRequests', 'development.change_request.read', 'change_request'],
+]) {
+  test(`${method}：第 51 项与第 100 个端口页找到即停止，保留精确分支和当前 head`, async () => {
+    for (const last of [2, 100]) {
+      const w = await fakeChain()
+      const target = method === 'listBranches' ? w.branch : w.target
+      const decoy = method === 'listBranches' ? { ...target, name: 'feature/other' } : { ...target, sourceVersion: 'old-head' }
+      const calls = []
+      w.providers.development[method] = async (input) => {
+        calls.push(input)
+        assert.equal(input.limit, 50)
+        if (method === 'listChangeRequests') assert.equal(input.headBranch, w.started.branchExternalId)
+        const index = input.cursor === undefined ? 1 : Number(input.cursor)
+        return page(index === last ? [target] : Array(50).fill(decoy), String(index + 1))
+      }
+      const result = await w.core.commands.refreshDeliveryFacts(w.scope)
+      assert.deepEqual([result.ok, result.applied, result.gaps], [true, true, []])
+      const set = (await w.snapshot()).sets.find((set) => set.kind === kind)
+      assert.equal(set.nodes[0].externalId, method === 'listBranches' ? w.branch.headCommit : w.target.ref.externalId)
+      assert.equal(calls.length, last, '命中后即使有下一页也不再读取')
+    }
+  })
+
+  test(`${method}：空中间页仍续读，只有完整终页才确认目标不存在`, async () => {
+    const w = await fakeChain()
+    const target = method === 'listBranches' ? w.branch : w.target
+    let calls = 0
+    w.providers.development[method] = async ({ cursor }) => { calls++; return cursor === undefined ? page([], 'second') : page([target]) }
+    assert.deepEqual((await w.core.commands.refreshDeliveryFacts(w.scope)).gaps, [])
+    assert.equal(calls, 2)
+    w.providers.development[method] = async () => page([])
+    assert.deepEqual((await w.core.commands.refreshDeliveryFacts(w.scope)).gaps, [])
+    const set = (await w.snapshot()).sets.find((set) => set.kind === kind)
+    assert.deepEqual([set.nodes, set.stale], [[], false], '完整空必须清空旧快照')
+  })
+
+  test(`${method}：坏页、游标、成环、二页故障和预算耗尽保留最后确认集合`, async () => {
+    for (const fault of ['null', 'items', 'row', 'empty-cursor', 'number-cursor', 'cycle', 'offline', 'throw', 'budget', ...(method === 'listBranches' ? ['no-head'] : [])]) {
+      const w = await fakeChain()
+      await w.core.commands.refreshDeliveryFacts(w.scope)
+      const before = await w.snapshot()
+      let calls = 0
+      w.providers.development[method] = async ({ cursor }) => {
+        calls++
+        if (fault === 'no-head') return page([{ ...w.branch, headCommit: undefined }])
+        if (fault === 'null') return { ok: true, value: null }
+        if (fault === 'items') return { ok: true, value: { items: 'bad' } }
+        if (fault === 'row') return page([null])
+        if (fault === 'empty-cursor') return page([], '')
+        if (fault === 'number-cursor') return page([], 7)
+        if (fault === 'cycle') return page([], cursor === 'A' ? 'B' : 'A')
+        if (fault === 'budget') return page([], String(calls))
+        if (cursor === undefined) return page([], 'second')
+        if (fault === 'throw') throw new Error('offline')
+        return offline()
+      }
+      const result = await w.core.commands.refreshDeliveryFacts(w.scope)
+      assert.equal(result.ok, true, fault)
+      assert.ok(result.gaps.some((gap) => gap.key === key), fault)
+      const after = await w.snapshot()
+      for (const old of before.sets.filter((set) => method === 'listBranches' || ['change_request', 'check_run'].includes(set.kind))) {
+        assert.deepEqual(after.sets.find((set) => set.kind === old.kind), { ...old, stale: true }, `${fault}/${old.kind}：节点、anchor、confirmedAt 不变`)
+      }
+      assert.ok(calls <= 100, fault)
+      if (fault === 'budget') assert.equal(calls, 100)
+      if (fault === 'cycle') assert.equal(calls, 3, '不得重复请求 A')
+    }
+  })
+}
