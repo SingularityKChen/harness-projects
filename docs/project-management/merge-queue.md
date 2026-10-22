@@ -504,8 +504,8 @@ gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,baseRe
 | 位置 | PR / issue | 分支 | 独立交付闭环 | 依赖与已知冲突 |
 |---|---|---|---|---|
 | 1（已合并） | #393 / #362 | `test/test-layer-single-pass` | 契约只做真实层非空检查，真实 CI lanes 仍执行 | 2026-10-22 rebase 合并 `66a01cc412303eb1ba6ea5948c78c753d654bff0`，#362 CLOSED；后续重锁 main |
-| 2 | #392 / #297 | `feature/delivery-repository-routing` | 持久仓库引用选择统一的远端谱系读取 | 无能力依赖；排在 #393 后重锁 main |
-| 3 | #394 / #335 | `feature/host-planning-refresh` | Host 定时/显式刷新、有界等待与卸载排空 | 无能力依赖；C394-1 修复及独立复评后进入 |
+| 2（已合并） | #392 / #297 | `feature/delivery-repository-routing` | 持久仓库引用选择统一的远端谱系读取 | 2026-10-22 rebase 合并 `d6840e0f9656797bdbf5fffca4f6dcd89881b6ac`，#297 CLOSED |
+| 3 | #394 / #335 | `feature/host-planning-refresh` | Host 定时/显式刷新、有界等待与卸载排空 | C394-1 已修复并独立复评 APPROVE；新 head 门禁通过后执行授权收尾 |
 | 4 | #395 / #282 | `feature/drawer-execution-state` | 实际抽屉消费已存运行状态与 manual fallback | 无能力依赖；两项 P2 修复后复评；与 #394 四文件冲突须按下述方式保留两能力 |
 
 固定输入 `main@d7e7bca6`、#393 `85fa379c`、#392 `9cfb438f`、#394 `09f33c38`、#395 `fe24c5e6` 已在仓库外 clone 按上述顺序 rebase 预演：前三项无冲突，#395 的冲突仅为两份 Host 文件和两份 Host 契约测试。解法：保留 `refreshPlanning` 与 `getExecutionContext` 两 operation，使用捕获 workspace 的 `handlersFor`，保留 scheduler start 与 stop/drain/close 顺序；契约保留 refresh 的精确参数检查并排除新增执行查询后比较原 descriptor 集合。

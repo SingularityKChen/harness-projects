@@ -1,6 +1,6 @@
 # Host 拥有 Planning 定时刷新生命周期 ExecPlan
 
-> 状态：Active；创建：2026-10-22；关联：#335，承接 #134。
+> 状态：Completed；创建：2026-10-22；关联：#335，承接 #134。
 > 按 `PLANS.md` 维护；在检出 `feature/host-planning-refresh` 的工作树根目录执行。
 
 ## Purpose / Big Picture
@@ -106,7 +106,8 @@ dispose 缓存同一 Promise；stop 后旧 callback、保留 call/watch 不得�
 - [x] (2026-10-22 SGT) 核实生产构造无请求、describeCapabilities 有探测；计划覆盖首轮组合前读等待。
 - [x] (2026-10-22 SGT) Batch 1：先观察 scheduler 缺失、list/iterator 永久等待的失败，再实现端口预算；晚成功、晚异常、持续 yield、挂起 return 与后轮恢复通过。
 - [x] (2026-10-22 SGT) Batch 2：真实 applyHost + 生产 GitHub Provider + SQLite 证明 query-only 晚凭据与无事件变更，显式/定时共享 Core 槽；stop、remote/background drain、重复 close、注册失败通过。
-- [ ] 独立验收、产物与当前 head gates、提交清理、ready 回读。
+
+- [x] (2026-10-22 09:49 SGT) 独立实现验收 PASS；实现 head `2caa1842f76a` 的 PR Fast Gate、四条 Merge Gate lane 与发布检查均通过；完成计划归档与索引同步。
 
 ## Surprises & Discoveries
 
@@ -118,6 +119,11 @@ dispose 缓存同一 Promise；stop 后旧 callback、保留 call/watch 不得�
 暂缺凭据 reason 仍可能表现 not_found，属于既有 TD-056；本任务兑现自动恢复，不宣称修复所有凭据分类文案。
 
 ## Decision Log
+
+- Decision：本次人类在 PR #392–#395 评审请求中直接授权“只有 P2 / P3，则提交评审并 APPROVE，然后进入修复流程”，并要求由评审会话“修复 → re-review → 归档 ExecPlan → … → merge_method=rebase 合并”。本 PR 初审仅 C394-1（P2），由该会话负责补强诊断断言、独立复评与当前 head 验证后 rebase 合并。Rationale：授权来自本会话，未改变 Planning Status 或 blocked-by。Date/Author：2026-10-22 / 评审协调者。
+
+
+- Decision：最终 CI/ready 是易失的 PR 属性，归档文档保留回读命令，发布时重新锁定最新 head，不把实现 head 的绿灯转移给归档 head。Rationale：避免文档静态值与远端当前状态形成第二事实源。Date/Author：2026-10-22 09:49 SGT / 交付协调者。
 
 - Decision：端口读 Promise 及 iterator lifetime 是唯一 timeout 传播边界。Rationale：直接结束 Core 的 await，晚值没有 Storage 权限，不引入整轮假取消。Date/Author：2026-10-22 SGT / 独立设计审查。
 - Decision：stop 关新读、既有轮次在预算内收尾、drain 后 close。Rationale：保持已有 Core 事务与远程排空契约，避免关库后提交。Date/Author：2026-10-22 SGT / 独立设计审查。
@@ -142,12 +148,25 @@ OPERATIONS 复用 actorRef Param，只加 refreshPlanning；HOST/CLIENT descript
 在 `feature/host-planning-refresh` 检出根目录验证：目标命令（本计划 Batch 1/2 所列八个测试文件）75 项通过；`pnpm verify` 的 typecheck、1771 项 contract/integration/e2e 与 7 项 mvp0 全部通过；`pnpm run boundaries` 9 项、workflow-check 8 个文件通过。
 三条 RED 证据在实现前实际观察：scheduler 期望 1 个 timer 实为 0；list 与 iterator next 在 500ms 安全外层时限内仍未完成。GREEN 的实际 Core 端口等待已改成默认 30 秒预算，测试配置 100ms；不是整轮 race。
 测试确认最后已知内容、SQLite `reconcile_cursor` 确认时刻与修订号在失败时保留，恢复轮推进；晚值和晚异常均不覆盖恢复结果。Provider 写调用为零，凭据 canary 在 query-only 后续 tick 轮换，全部录制请求命中。
-本地实现与产物证据已成立；独立验收、最终 push 与当前远端 head gates 由交付者继续，不在本批执行外部写入。按本次交付要求保留 active，不关闭 issue，不宣称真实 Desktop 安装认证成立。
+实现批交接记录（Superseded by 本节最终交付记录，2026-10-22）：本地实现与产物证据已成立；独立验收、最终 push 与当前远端 head gates 由交付者继续，不在本批执行外部写入。按本次交付要求保留 active，不关闭 issue，不宣称真实 Desktop 安装认证成立。
 不新增有意延期技术债；TD-056 的既有 reason 歧义保留。实现发现新的必要延期时记入既有 tracker，不能用延期删除本 issue 验收。
 全部验收完成后如实记录结果与偏差并移入 completed、更新索引；未合并状态由最终远端回读报告。
+
+最终交付记录（2026-10-22 09:49 SGT @ `2caa1842f76a`）：独立验收通过，当前实现 head 的 PR Fast Gate、Integration/E2E/MVP-0/Boundaries 四 lane 及发布检查成功。归档只改变文档，产品文件与该验收树相同。最终归档提交仍须重新执行 `gh pr checks 394 -R SingularityKChen/harness-projects`，并回读 head/base、issue 双向关联和 review threads；通过后执行 `gh pr ready 394 -R SingularityKChen/harness-projects`。ready 和合并状态只以 PR 实时结果为准，Git 回滚不撤销 Project 元数据。
+
+
+并行集成证据（2026-10-22 SGT，主线基线 `d7e7bca6`）：在 `test/iteration7-8-integration-preview` 临时检出组合本轮四个产品输入后，typecheck、1806 项测试与 7 项 MVP-0 通过；再加现有 PR #388–#391 的固定产品输入后，resolution-check、1868 项测试与 7 项 MVP-0 通过，未发现行为失败。四项输入分别为 #335 `2caa1842`、#282 `90bed211`、#297 `9cfb438f`、#362 `85fa379c`；已有四项为 #388 `6b855c41`、#389 `a8fe6d2d`、#390 `2d6547b8`、#391 `8515d8b9`，均为本次观察输入，不能视为永久远端 head。
+
+两项 Host 能力之间有四处机械冲突：`host-composition.ts` 的 factory 要同时保留捕获 workspace 的 getExecutionContext 与共享单飞的 refreshPlanning，`host-operations.ts` 要同时声明两项精确参数；两份 Host operations/remote 契约保留双方断言。`watch` 仍在末尾，stop/drain/close 与前后可见性检查保留。当前四个已有 PR 仅需保留全部文档索引/债务追加；client/ui-model 的新增出口自动合并，无新增 API/兼容层依赖。预演只写临时 worktree，未修改或合并任何 GitHub PR。
 
 ## Bottom Change Note
 
 2026-10-22 SGT：融合两份独立设计，选择最小端口等待边界、iterator绝对预算与两阶段卸载，显式核实首轮能力探测并排除 #336/#388 扩张。
 
 2026-10-22 SGT：记录实际 RED/GREEN、全仓 1771+7 测试与边界修正；保留 active 等待独立验收及远端当前 head 回读。
+
+2026-10-22 09:49 SGT：回填独立验收、实现 head 远端门、收敛提交边界并归档；最终归档 head 与 ready 使用实时回读命令，不继承旧绿。
+
+2026-10-22 SGT：补齐四/八项集成证据与机械冲突解法，就地标注实现批旧 active 口径已取代；产品文件保持原验收字节。
+
+2026-10-22：MMP 初审无 P0/P1、1 项 P2；按人类授权补强真实 Host 双故障日志断言，固定 Core 与 scheduler 各一次上报。目标 10/10；整表 M1–M4 均 KILLED（M4 初审 SURVIVED），产品文件无改动。精炼证据见 `docs/review/pr-394-mmp-review.md`；独立复评 APPROVE，Core/scheduler 两种断线变异均 KILLED；最终发布门以之后实际回读为准。
