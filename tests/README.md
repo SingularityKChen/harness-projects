@@ -14,7 +14,7 @@ pnpm test:file <path>  # 单个测试文件或目录，先查解析落点
 
 这条有机械守卫 `scripts/resolution-check.mjs`：它从自身位置锁定检出根，检查根 `package.json` 声明的每个 `@harness-projects/*` 根入口及其 canonical manifest 声明的精确子路径在相关解析边界上是否落在**本检出之内**。边界包括根、package self-reference scope，以及 `packages/`、`apps/`、`tests/`、`scripts/` 任意深度的 `node_modules` 父目录；依赖树不递归，构建输出复用 `tests/fixtures/source-tree.mjs` 的剪枝来源。缺包、坏 manifest、悬空/外指边界与不可读目录均失败闭合；源码目录和文件软链显式拒绝，避免包的子路径导出经软链逃逸。根目录别名与根内 `node_modules` 软链允许，最终落点仍取 realpath。
 
-`pnpm test`、`pnpm test:contract`、`pnpm test:mvp0`、`pnpm run boundaries` 与 `pnpm test:file <path>` 都先跑守卫。每个受管 `tests/**/*.test.js` 的第一条 import 另相对导入 `tests/fixtures/resolution-preflight.mjs`；因此 `node --test <文件或目录>`、`node <文件>` 和故意不加 `--test` 的前缀回读也在工作区模块 body 执行前受保护。新增测试遗漏首 import 会由动态发现契约判红。layer runner 在起子进程前显式断言；把 runner 当库导入时不触发整仓检查。成功只做进程内缓存，不跨命令缓存安装状态。
+`pnpm test`、`pnpm test:contract`、`pnpm test:mvp0`、`pnpm run boundaries` 与 `pnpm test:file <path>` 都先跑守卫。每个受管 `tests/**/*.test.js` 的第一条 import 另相对导入 `tests/fixtures/resolution-preflight.mjs`；因此 `node --test <文件或目录>`、`node <文件>` 和故意不加 `--test` 的前缀回读也在工作区模块 body 执行前受保护。新增测试遗漏首 import 会由动态发现契约判红；契约也覆盖 `test` 目录、`test` / `test-*` / `*[._-]test` 文件名，以及 js/mjs/cjs 和保守包含的 ts/mts/cts 扩展，排除 node_modules。layer runner 在起子进程前显式断言；把 runner 当库导入时不触发整仓检查。成功只做进程内缓存，不跨命令缓存安装状态。
 
 失败会给出 `resolution-check:` 诊断、违规包落点或边界与安装指引。先移除诊断指出的残留 shadow 或源码软链，再在检出根目录执行：
 
