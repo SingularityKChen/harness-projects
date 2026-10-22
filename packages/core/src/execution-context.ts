@@ -58,6 +58,7 @@ export interface ExecutionContextView {
   readonly worktreeExternalId: string | undefined
   readonly runExternalId: string | undefined
   readonly runId: ExecutionRunId | undefined
+  readonly runStatus: ExecutionRunStatus | undefined
   readonly fallback: StartWorkFallback | undefined
   readonly degraded: boolean
 }
@@ -154,7 +155,7 @@ export async function readExecutionContext(
     id: record.id, workspaceId: record.workspaceId, workItemId: record.workItemId, repositoryId: record.repositoryId,
     status: record.status, branchExternalId: record.branchExternalId, worktreeExternalId: record.worktreeExternalId,
     runExternalId: run?.providerRef?.externalId,
-    runId: run?.id, fallback, degraded: fallback !== undefined || gap !== undefined,
+    runId: run?.id, runStatus: run?.status, fallback, degraded: fallback !== undefined || gap !== undefined,
   }
 }
 

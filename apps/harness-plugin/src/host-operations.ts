@@ -79,6 +79,10 @@ export const OPERATIONS = defineOperations({
   baseline: { mode: 'unary', params: [] },
   bootstrapWorkspace: { mode: 'unary', params: ENVELOPE },
   refreshPlanning: { mode: 'unary', params: [ENVELOPE[0]] },
+  getExecutionContext: { mode: 'unary', params: [
+    param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId')),
+    param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId')),
+  ] },
   watch: { mode: 'stream', params: [] },
 })
 

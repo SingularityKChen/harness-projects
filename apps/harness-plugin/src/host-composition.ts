@@ -3,6 +3,7 @@ import path from 'node:path'
 import { composeCore, unavailableCore, createPlanningReconciler, type PlanningReconciler, type PlanningReconcilerTimers, type CoreApi } from '@harness-projects/core'
 import { createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
 import { createSqliteStorage, type SqliteStorage } from '@harness-projects/storage-sqlite'
+import type { ExecutionContextDTO } from '@harness-projects/client'
 import type { WorkspaceId } from '@harness-projects/domain'
 import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
 import { createPlanningLifetime } from './host-planning-lifetime.ts'
@@ -42,12 +43,27 @@ export interface HostComposition {
   dispose(): Promise<void>
 }
 
-/** 每个 unary 操作一个 handler：只把已校验的输入透传给 Controller，结果与 `writeState` 不加工（Host 拥有权威状态）。 */
-const HANDLERS: UnaryHandlers<typeof OPERATIONS, Controller> = {
+/** 工作区身份来自 Host；执行记录只在读取前后均可见的工作项上投影允许字段。 */
+const handlersFor = (workspaceId: WorkspaceId): UnaryHandlers<typeof OPERATIONS, Controller> => ({
   baseline: (controller) => controller.baseline(),
   refreshPlanning: (controller, input) => controller.commands.refreshPlanning(input),
   bootstrapWorkspace: (controller, input) => controller.commands.bootstrapWorkspace(input),
-}
+  getExecutionContext: async (controller, input) => {
+    if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') return { context: null }
+    const context = await controller.queries.getExecutionContext(input)
+    const visible = (await controller.queries.getEntity(input.workItemId))?.content.contentKind === 'work_item'
+    if (!visible || context === undefined || context.workspaceId !== workspaceId
+      || context.workItemId !== input.workItemId || context.repositoryId !== input.repositoryId) return { context: null }
+    const dto: ExecutionContextDTO = {
+      workspaceId, workItemId: context.workItemId, repositoryId: context.repositoryId, status: context.status,
+      ...(context.branchExternalId === undefined ? {} : { branchExternalId: context.branchExternalId }),
+      ...(context.worktreeExternalId === undefined ? {} : { worktreeExternalId: context.worktreeExternalId }),
+      ...(context.runStatus === undefined ? {} : { runStatus: context.runStatus }),
+      ...(context.fallback === undefined ? {} : { fallback: context.fallback }),
+    }
+    return { context: dto }
+  },
+})
 
 export async function createHostComposition(options: HostCompositionOptions): Promise<HostComposition> {
   const intervalMs = options.planningIntervalMs ?? 60_000
@@ -107,7 +123,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       })
       reconciler.start()
     }
-    const dispatch = dispatchOf(OPERATIONS, HANDLERS, guarded)
+    const dispatch = dispatchOf(OPERATIONS, handlersFor(options.workspaceId), guarded)
     return {
       controller,
       disabled,

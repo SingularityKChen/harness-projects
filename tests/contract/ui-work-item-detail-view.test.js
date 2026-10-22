@@ -47,6 +47,7 @@ test('可见内容正控：选中行显示标题、正文、状态、来源名�
     entities: [wire('ent-aa', { planningStatus: 'todo', derived: ['ci_failing', 'merged'], content: { title: 'VISIBLE-TITLE', body: 'VISIBLE-BODY', externalKind: 'change_request', externalId: 'ext-1' } })],
   })
   assert.deepEqual(shown, {
+    executionTarget: { workspaceId: 'ws-1', workItemId: 'ent-aa', repositoryIds: [] },
     kind: 'content', title: 'VISIBLE-TITLE', body: 'VISIBLE-BODY', planningStatus: '待办', source: '来源一', authority: '提供方权威',
     identity: { kind: 'PR', externalId: 'ext-1' }, derived: '派生提示：CI 失败、已合并', iteration: '—', targetDate: '—', stale: false, refreshing: false, lastUpdatedAt: T,
   }, '白名单字段面精确相等：多出 locator 或内部键即失败')
@@ -82,6 +83,7 @@ test('detail-planning-fields-match-safe-row：详情三字段逐字等于列表�
 
   const { input } = make('received', { refreshing: false, entities })
   assert.deepEqual(deriveWorkItemDetailView(input, TARGET).body, {
+    executionTarget: { workspaceId: 'ws-1', workItemId: 'ent-aa', repositoryIds: [] },
     kind: 'content', title: '标题-ent-aa', body: '正文-ent-aa', planningStatus: 'Native Stage（未映射）', source: '来源一', authority: '提供方权威',
     identity: { kind: 'Issue', externalId: 'ext-ent-aa' }, iteration: 'Iteration A', targetDate: '2026-01-01',
     stale: false, refreshing: false, lastUpdatedAt: T,
