@@ -1,6 +1,6 @@
 # Gate E1 · 写确认与事件可靠性 ExecPlan
 
-> 状态：Active
+> 状态：Completed
 > 创建：2026-09-21
 > 范围：在 E1-1 建立的沙箱上，观测规划字段写入路径的**确认语义**（写回什么、能否支撑 `Saving… → Saved`、平台有没有可比对的版本字段），以及事件投递不可靠时同步仍然收敛所需的兜底；并记录一次"创建结果不确定"的恢复路径。
 > 上游输入：issue #24（本批次）、issue #4（父门禁，六条行为中的第 4、5、6 条）、issue #22（沙箱与记录模板）、`AGENTS.md` §1.1 末段（外部写入得到 ack / reconcile 前不得显示权威 `Saved`）、`docs/architecture/README.md`（外部写入模型）
@@ -118,7 +118,7 @@
 ## Global Constraints
 
 - 本批次只改文档。**本清单是本批次文件集合的唯一权威**（`PLANS.md` §4「一个事实只写一处」）；`Plan of Work`、`Progress`、`Decision Log`、`Bottom Change Note` 要提它时写"见 `Global Constraints`"，不复述、也不另立一份：
-  - `docs/exec-plan/active/2026-09-21-gate-e1-write-and-events.md`（本计划）
+  - `docs/exec-plan/completed/2026-09-21-gate-e1-write-and-events.md`（本计划）
   - `docs/architecture/gate-e1-write-and-events.md`（本批次主文件：平台观测记录）
   - `docs/architecture/README.md`、`docs/README.md`（各一行索引）
   - `docs/architecture/gate-e1-sandbox.md`（**第二轮评审新增**：id 注册表补三类来源——E1-2 与 E1-3 观测期间创建的对象、已删除的临时对象、构造的输入；§2.1 与 §7 的措辞按 D6 校准）
@@ -150,7 +150,7 @@
 
 **验证**（实际输出，2026-09-21）：下面这一块是**当时的快照**——`origin/main` 与 base 的 SHA、每个文件的体量行数都是易失状态，此后已经变化，不要当作当前值。快照的 head **未核实**：块内给本计划记的行数是 `347` / `350`，~~比它最终落地的版本少 19–22 行~~，说明这组输出不是在最终 head 上重跑的。~~要当前值就按 `Global Constraints` 里的两条回读命令重算。~~
 
-**Superseded（2026-09-23）：`19–22` 的参照版本错了。** 它是相对**上一版**（快照产出时的那个版本）算出来的差值，不是相对本版；而写下这句话的提交自己就把本计划改长，所以在同一个提交内自相矛盾。这条差值也不该作为正文事实保留——行数属易失状态（`PLANS.md` §4 规则 3），本文件不写死。留下来的判据只有方向：块内行数明显小于本版实际行数，因此这组输出不是在最终 head 上重跑的。要当前值就在检出本批次分支 `test/e1-write-and-events` 的工作树根目录运行 `wc -l docs/exec-plan/active/2026-09-21-gate-e1-write-and-events.md`（期望：明显大于块内记录的 `347` / `350`，差 40 行以上）；体量与 base 的回读命令见 `Global Constraints`。
+**Superseded（2026-09-23）：`19–22` 的参照版本错了。** 它是相对**上一版**（快照产出时的那个版本）算出来的差值，不是相对本版；而写下这句话的提交自己就把本计划改长，所以在同一个提交内自相矛盾。这条差值也不该作为正文事实保留——行数属易失状态（`PLANS.md` §4 规则 3），本文件不写死。留下来的判据只有方向：块内行数明显小于本版实际行数，因此这组输出不是在最终 head 上重跑的。要当前值就在检出本批次分支 `test/e1-write-and-events` 的工作树根目录运行 `wc -l docs/exec-plan/completed/2026-09-21-gate-e1-write-and-events.md`（期望：明显大于块内记录的 `347` / `350`，差 40 行以上）；体量与 base 的回读命令见 `Global Constraints`。
 执行上下文：以下命令都在**检出本批次分支 `test/e1-write-and-events` 的工作树根目录**运行（从仓库根 `cd .worktrees/w5-e1-3` 进入；其它小节里内联的 `cd .worktrees/w5-e1-3` 同理）。相对路径与 `test/e1-membership-and-draft...HEAD` 都相对该目录解析——换一个目录跑同一条命令会得到不同结果。
 
 ```bash
@@ -186,7 +186,7 @@ $ node scripts/rule-checks.mjs size test/e1-membership-and-draft
 
 本 PR 贡献最多的文件：
      654  docs/architecture/gate-e1-write-and-events.md
-     347  docs/exec-plan/active/2026-09-21-gate-e1-write-and-events.md
+     347  docs/exec-plan/completed/2026-09-21-gate-e1-write-and-events.md
 exit=0
 
 $ git diff --check test/e1-membership-and-draft...HEAD
@@ -197,7 +197,7 @@ exit=0
 以上输出在记录文件与 ExecPlan 回填提交后实测。~~`size` 的 1004 行是记录文件（654）与 ExecPlan（350）
 的合计。本 PR 的 base 是 `test/e1-membership-and-draft @ 2ec8a354f4405a25410d1c89911cff2b52df6e8c`；
 `git diff --name-only` 只列出本批次的两个文档文件：`docs/architecture/gate-e1-write-and-events.md` 与
-`docs/exec-plan/active/2026-09-21-gate-e1-write-and-events.md`。~~
+`docs/exec-plan/completed/2026-09-21-gate-e1-write-and-events.md`。~~
 
 **Superseded by `Global Constraints` 与本段订正（2026-09-22）：上面这一段被本分支自己的 diff 推翻，原文保留。** 订正三点：
 
@@ -406,6 +406,8 @@ webhook URL 用保留域名 `example.invalid`。
 - **后续工作项**：E1-4（#25）读取本记录裁决 #4 的第 4、5、6 条行为；`packages/capabilities` 的写入确认契约若与本记录冲突，按记录修契约而不是反过来。
 
 ## Outcomes & Retrospective
+
+2026-10-22 归档核对：issue #24 已关闭，PR #107 已合并，原实验与反例完整保留。整体 E1 现状以 issue #4 的 2026-10-15 人类 freeze 裁决为准；本节未实测边界不改写为本实验通过。
 
 **三条实验的实际判定**（详细证据见 `docs/architecture/gate-e1-write-and-events.md`）：
 

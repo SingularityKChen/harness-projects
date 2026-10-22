@@ -114,7 +114,7 @@
 
 ### D4. 依赖边变更
 
-只有「做不了」才建边（`docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md` 的 Decision Log）。
+只有「做不了」才建边（`docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md` 的 Decision Log）。
 
 新增：
 

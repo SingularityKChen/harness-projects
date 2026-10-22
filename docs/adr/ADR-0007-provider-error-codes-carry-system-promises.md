@@ -2,7 +2,7 @@
 
 > 状态：Proposed
 > 日期：2026-09-26
-> 来源：`docs/exec-plan/active/2026-09-24-local-git-worktree.md`「系统级根因分析」（PR #160 连续五轮被打回的共性）；`AGENTS.md` §1.1 实现级硬约束；issue #200 / #206 / #211 / #212 / #213
+> 来源：`docs/exec-plan/completed/2026-09-24-local-git-worktree.md`「系统级根因分析」（PR #160 连续五轮被打回的共性）；`AGENTS.md` §1.1 实现级硬约束；issue #200 / #206 / #211 / #212 / #213
 
 ## Decision
 

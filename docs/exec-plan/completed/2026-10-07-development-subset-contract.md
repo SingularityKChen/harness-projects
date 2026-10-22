@@ -23,7 +23,7 @@
 
 `tests/integration/development-local-git.test.js` 已接入同一 suite。Local Git 理论能力可没有远端 CR 与 worktree removal；真实临时仓库、argv runner、realpath 根与对象回读在 `tests/integration/local-git-fixture.js`。
 
-上游 `docs/exec-plan/active/2026-09-24-local-git-worktree.md` 已将套件剩余验收拆到 #205；`docs/exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md` 的其它能力不由此承接。本项不改这些计划或长期 guidance。
+上游 `docs/exec-plan/completed/2026-09-24-local-git-worktree.md` 已将套件剩余验收拆到 #205；`docs/exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md` 的其它能力不由此承接。本项不改这些计划或长期 guidance。
 
 事实是普通 Local Git 子集现已通过；硬约束是 issue 明确排除改变 fake 行为，除声明新 key 以外。新 key 在主线已有，所以当前产品改动预算为零。决策是只改 suite、测试 adapter 与 fixture。
 

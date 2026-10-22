@@ -131,7 +131,7 @@ GitHub schedule 可延迟/丢弃，公开仓库60日无活动可能禁用；公�
 | `docs/exec-plan/active/2026-10-01-engineering-reconcile-coverage.md` | 本活计划 | 0 | 350 |
 | `docs/development/ci.md` | 当前来源/触发/恢复/活性边界 | 0 | 85 |
 | `docs/product/board-semantics.md` | 就地订正空引用和候选范围 | 0 | 100 |
-| `docs/exec-plan/active/2026-09-22-engineering-merged-state.md` | 旧操作入口加Superseded说明，不删历史证据 | 0 | 12 |
+| `docs/exec-plan/completed/2026-09-22-engineering-merged-state.md` | 旧操作入口加Superseded说明，不删历史证据 | 0 | 12 |
 | `docs/exec-plan/completed/2026-09-24-engineering-writer-terminal.md` | 旧per-PR runbook加Superseded说明 | 0 | 12 |
 | `docs/exec-plan/completed/2026-09-21-engineering-state-trust-boundary.md` | writer入口变更注明，不改历史信任裁决 | 0 | 8 |
 | `docs/exec-plan/tech-debt-tracker.md` | 实施owner记录容量/活性后续项 | 0 | 20 |

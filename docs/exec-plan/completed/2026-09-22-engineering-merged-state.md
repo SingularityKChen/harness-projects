@@ -30,7 +30,7 @@ node scripts/check-engineering-drift-live.mjs
 
 - **规划轴 / `Status`**：看板上由**人**拥有的字段（`Todo` / `In Progress` / `In Review` / `Done`），回答"规划所有者是否接受这个工作项完成"。定义在 `docs/product/board-semantics.md` §2。
 - **工程轴 / `Engineering`**：看板上由**自动化**拥有的字段（`PR open` / `Changes requested` / `Approved` / `Merged`），回答"代码 / PR / CI 走到哪一步"。同上一节。
-- **reconcile**：由事件唤醒、但每次都重新读取 PR 当前快照再投影 `Engineering` 的一次写入。事件只是唤醒信号，不是真值来源（`docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md` D5）。
+- **reconcile**：由事件唤醒、但每次都重新读取 PR 当前快照再投影 `Engineering` 的一次写入。事件只是唤醒信号，不是真值来源（`docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md` D5）。
 - **投影**：把 PR 快照 `(state, merged, isDraft, reviewDecision)` 映射成 `Engineering` 取值的纯函数，唯一实现在 `scripts/sync-engineering-state.mjs` 的 `stateForSnapshot`。
 
 ### 相关文件与当前状态
@@ -110,7 +110,7 @@ if (snapshot.merged) throw new Error('OPEN PR 不得同时标记为 merged')
 // ... 其余 OPEN 分支不变
 ```
 
-**为什么把 `CLOSED` + `merged: true` 从"产出 `Merged`"改成报错**：那个组合在 GraphQL 下不该出现。继续容忍它，就等于保留一条"REST 形态也能蒙对"的暗路——将来真出现枚举漂移时它会静默按 REST 语义走，而这正是本次故障的成因。让它响亮失败，与 `docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md` D5 已写下的"未知枚举一律失败，不猜测"一致。
+**为什么把 `CLOSED` + `merged: true` 从"产出 `Merged`"改成报错**：那个组合在 GraphQL 下不该出现。继续容忍它，就等于保留一条"REST 形态也能蒙对"的暗路——将来真出现枚举漂移时它会静默按 REST 语义走，而这正是本次故障的成因。让它响亮失败，与 `docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md` D5 已写下的"未知枚举一律失败，不猜测"一致。
 
 **为什么新增 `PR_STATES` 常量而不是内联数组**：它是"这个函数认识哪些 state"的唯一声明，契约测试要断言"接受集合的每个取值都有决策"，内联数组拿不到。
 
@@ -365,6 +365,8 @@ PROJECTS_TOKEN="$(gh auth token)" PROJECT_OWNER=SingularityKChen PROJECT_NUMBER=
 - **不新增**：workflow、依赖、secret、分支保护设置、`Status` 写入路径。
 
 ## Outcomes & Retrospective
+
+2026-10-22 归档核对：issue #110 已关闭，PR #111 已合并。原实测看板回填、Status/itemId 不变与代码验证记录完整保留；后续工程终态策略由 #115 与 `docs/exec-plan/completed/2026-09-24-engineering-writer-terminal.md` 承接。
 
 ### 实际结果
 

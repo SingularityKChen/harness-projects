@@ -3,7 +3,7 @@ version: 2
 # 只开 github-actions 这一个 ecosystem。
 #
 # npm 暂不开：本仓库当前的瓶颈是评审队列的合并吞吐（见
-# docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md 的
+# docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md 的
 # Surprises & Discoveries），而 npm 的更新 PR 数量远大于 actions。
 # 等 M0 队列清空、且 packages/ 下真的有运行时依赖之后再开。
 #

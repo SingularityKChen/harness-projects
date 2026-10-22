@@ -1,6 +1,6 @@
 # 本地 Git 工作树与分支 provider ExecPlan
 
-> 状态：Active
+> 状态：Completed
 > 2026-10-13：默认根、`info/exclude` 补偿与 core 路径意图已由 issue #214 / `docs/exec-plan/completed/2026-10-13-worktree-root-outside-checkout.md` 取代；本文件保留历史安全证据与旧根迁移背景。
 > 创建：2026-09-24
 > 范围：#137 —— 让本机真的出现 worktree 与 branch，且路径安全在**任何 Git 命令之前**生效；只实现 Development 能力域的本地子集。**第四轮后本计划只覆盖 provider 自身**：共享契约套件的能力驱动拆到 **#205**（PR 基线 `main`，已合入），接进 core 供应序列的验收拆到 **#207**（叠加在本层之上）。**第五轮起本计划只修路径安全的判据与文档**：三族根因里两族的根在 core，见「系统级根因分析」（#212 / #213 / #214）。
@@ -259,7 +259,7 @@ core 的 `baseRef` 回落到 `main` 只在这条链失败时才可能触发。
 - 本层改动的文件集合（**第五轮就地修订**）：`packages/providers/development-local-git/src/**`、
   `tests/contract/development-local-git-source.test.js`、`tests/integration/development-local-git.test.js`、
   `tests/integration/local-git-fixture.js`、`tests/integration/README.md`、
-  `docs/exec-plan/active/2026-09-24-local-git-worktree.md`、`docs/README.md`、
+  `docs/exec-plan/completed/2026-09-24-local-git-worktree.md`、`docs/README.md`、
   `docs/review/2026-09-23-pr-160-mvp-review.md`、`docs/review/2026-09-26-pr-160-mmp-review.md`。
   第五轮**没有**扩大它：`packages/capabilities` 的 port 义务写在 ADR-0007 与 `#212`，不在本层改。
 - 不在本层实现的：工作树移除（#138）、core 侧的工作树句柄统一（#206）、接进 core 供应序列的验收（#207）。
@@ -273,7 +273,7 @@ core 的 `baseRef` 回落到 `main` 只在这条链失败时才可能触发。
 ### Batch 1 · 计划与 draft PR
 
 **最小闭环**：ExecPlan 落地、索引更新、draft PR 建立且 issue 关联非空。
-**涉及文件**：`docs/exec-plan/active/2026-09-24-local-git-worktree.md`、`docs/README.md`。
+**涉及文件**：`docs/exec-plan/completed/2026-09-24-local-git-worktree.md`、`docs/README.md`。
 
 - [x] 写本计划（spec + plan 合一），更新 `docs/README.md` 的 Active 索引表（只插本层一行）。
 - [x] 提交 `docs(exec-plan): 为本地 Git 工作树与分支 provider 写计划` 并 `git push -u origin feat/local-git-worktree`。
@@ -553,6 +553,8 @@ core 的 `baseRef` 回落到 `main` 只在这条链失败时才可能触发。
 - 仓库设置：无（不 push、不改 CI、不改 workflow）。
 
 ## Outcomes & Retrospective
+
+2026-10-22 归档核对：issue #137 已关闭，PR #160 已合并。原多轮实测、超限订正与 #138/#200/#212/#213 的边界保持不变；默认落点后续由 #214 及 `docs/exec-plan/completed/2026-10-13-worktree-root-outside-checkout.md` 取代，本归档不重写旧设计。
 
 **在包含本行的 head 上实测**（复核：`git rev-parse HEAD` 加同一条命令；易失值不写死）：`pnpm verify` 536/536 + mvp0 7/7、`pnpm run boundaries` 7/7、聚焦三文件 37/37（integration 23 / contract 13 / source 1）；`size origin/main` 代码 **1121 / 1000（超出，见下）**、文档 721 / 1500；`disclosure` 与 `git diff --check` 均通过。第三轮评审响应的订正见「评审响应（第三轮）」。
 

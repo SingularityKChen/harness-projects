@@ -59,7 +59,7 @@ const RECORD_FILE = /^gate-e1-.+\.md$/
  * 声明与发现不一致（少一份、多一份）都响亮失败。
  */
 const DECLARED_E1_PLANS = [
-  'docs/exec-plan/active/2026-09-21-gate-e1-write-and-events.md',
+  'docs/exec-plan/completed/2026-09-21-gate-e1-write-and-events.md',
   'docs/exec-plan/completed/2026-09-23-e1-uncertain-create.md',
   'docs/exec-plan/completed/2026-09-21-gate-e1-content-identities.md',
   'docs/exec-plan/completed/2026-09-21-gate-e1-membership-and-draft.md',

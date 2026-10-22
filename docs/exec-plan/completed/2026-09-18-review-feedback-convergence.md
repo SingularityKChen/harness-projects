@@ -1,6 +1,6 @@
 # 评审反馈根因收敛 ExecPlan
 
-> 状态：Active
+> 状态：Completed
 > 创建：2026-09-18
 > 范围：把 PR #12 / #19 / #21 的 7 条行级评审意见与 2 条 PR 级意见收敛为 4 条根机制的修复；让 PR #35 对齐新引入的 workflow 不变量
 > 上游输入：GitHub 上 PR #12 / #19 / #21 的 review thread；`AGENTS.md`；`PLANS.md`
@@ -255,7 +255,7 @@ scripts/policy-check.mjs
 ### Batch A · #12：workflow 不变量成文 + 可执行检查 + `ci.yml` 对齐
 
 **最小闭环**：`pnpm verify` 里出现一条会因 workflow 加固缺失而变红的检查，且 `ci.yml` 自身满足全部 6 条不变量。
-**涉及文件**：`AGENTS.md`、`.github/workflows/ci.yml`、`scripts/workflow-check.mjs`（新）、`tests/contract/workflow-check.test.js`（新）、`package.json`、`pnpm-lock.yaml`、`docs/exec-plan/active/2026-09-18-review-feedback-convergence.md`（本文件）
+**涉及文件**：`AGENTS.md`、`.github/workflows/ci.yml`、`scripts/workflow-check.mjs`（新）、`tests/contract/workflow-check.test.js`（新）、`package.json`、`pnpm-lock.yaml`、`docs/exec-plan/completed/2026-09-18-review-feedback-convergence.md`（本文件）
 
 - [ ] 步骤 1：先写 `tests/contract/workflow-check.test.js`（合规基线 + W1..W6 各一条注入用例），运行 `node --test tests/contract/workflow-check.test.js`，确认因 `scripts/workflow-check.mjs` 不存在而失败。
 - [ ] 步骤 2：实现 `scripts/workflow-check.mjs`，运行同一条命令至全绿。
@@ -452,6 +452,8 @@ scripts/policy-check.mjs
 
 ## Outcomes & Retrospective
 
+2026-10-22 归档核对：PR #12/#19/#21/#35 均已合并，原“尚未合并而保留 active”理由已失效。上列旧引用、人工冲突与投影核对是历史遗留记录，不由合并推定全部解决；现行规则入口为 `AGENTS.md` 与 `docs/project-management/merge-queue.md`。
+
 **实际结果（2026-09-18）**
 
 四条分支的改动全部落地并验证：
@@ -477,7 +479,7 @@ scripts/policy-check.mjs
 - **#35 的 pin 埋在一个主题无关的提交里**（`901ae6b`，信息写的是看板字段改名）。改写它需要动另一个 actor 的提交，本任务不做。
 - **#12 与 #19 的 §8.x 冲突需要人工解一次**（三处，见 `Surprises`）。
 - 反向的 area 陈旧项检查（`AREAS` 里有、仓库里已不存在的名字）与两份 GitHub 侧投影的自动核对仍未做：`areas` 子命令只做离线打印，Project 字段与标签的比对需要网络。
-- 本计划仍在 `active/`：四条 PR 未经人类伙伴合并，按 `AGENTS.md` §4.2 不能移到 `completed/`。
+- 本计划仍在 `active/`：四条 PR 未经人类伙伴合并，按 `AGENTS.md` §4.2 不能移到 `completed/`。**Superseded by 本节 2026-10-22 归档核对：四条 PR 均已合并。**
 
 ---
 

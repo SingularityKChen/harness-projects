@@ -1,6 +1,6 @@
 # Rule checks 判定基线改用 PR API ExecPlan
 
-> 状态：Active
+> 状态：Completed
 > 创建：2026-09-21
 > 范围：`Rule checks` 的 `size` 与 `disclosure` 的**判定输入**（从 PR REST API 取 `base.sha`、从事件取 `head.sha`，判定固定在这一对不可变提交上）与相应契约测试、文档；不改 `ci.yml`、分支保护、预算数值、`PR Fast Gate` 名称
 > 上游输入：issue #99、issue #96、PR #98、run `35511506461`、`docs/exec-plan/completed/2026-09-20-rule-checks-pr-base.md`（被本计划订正；它在 61d6833 归档到 `completed/`）
@@ -189,7 +189,7 @@
 ### Batch 7 · 第二轮评审：证据完整性与 P3 修正
 
 **最小闭环**：head 里每一条被引用为证据的日志都能从该 head 复现；接口契约、测试计数、README 索引与实现一致；累计门控的回归被修掉；token 不与执行 PR 代码的步骤同环境。
-**涉及文件**：`docs/exec-plan/active/2026-09-21-rule-checks-api-base.md`、`docs/README.md`、`scripts/rule-checks.mjs`、`tests/contract/rule-checks.test.js`、`tests/contract/resolve-pr-base.test.js`、`.github/workflows/rule-checks.yml`
+**涉及文件**：`docs/exec-plan/completed/2026-09-21-rule-checks-api-base.md`、`docs/README.md`、`scripts/rule-checks.mjs`、`tests/contract/rule-checks.test.js`、`tests/contract/resolve-pr-base.test.js`、`.github/workflows/rule-checks.yml`
 **验证**
 
     node --test tests/contract/resolve-pr-base.test.js tests/contract/rule-checks.test.js
@@ -408,6 +408,8 @@
 - **工具**：`gh` CLI 只用于交付步骤与 workflow 内的 API 读取，不进入 `scripts/rule-checks.mjs`。
 
 ## Outcomes & Retrospective
+
+2026-10-22 归档核对：PR #100 已合并，解析器与接线已交付。验收项 5 仍未兑现，转交 `docs/exec-plan/tech-debt-tracker.md` 的 TD-090；普通 CI 与非分歧运行不能证明 stackEntry 的运行时 `github.base_ref` 与 PR API 声明 `base.ref` 分歧。归档结束本执行计划，不表示该验收已通过。
 
 实现完成，验收项 1–4 与 6–13 通过；**第 5 项（栈成员上的分歧被真实验证）未兑现**，原因与出路见遗留 2。提交序列是：控制文档 → 解析器与契约测试 → workflow 接线与接线断言 → 脚本接受显式 head → 文档与旧计划订正 → 各轮评审的修正回填。这里刻意不写提交总数：它随每轮修正变化（与 Surprises 12 同一条纪律）。
 

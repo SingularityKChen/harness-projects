@@ -1,6 +1,6 @@
 # 仓库指令与协作流程迁移 ExecPlan
 
-> 状态：Active
+> 状态：Completed
 > 创建：2026-09-20
 > 范围：精简根指令、迁移详细规则、规范开发 / 评审 / 回复评审；不改变 CI 运行行为。
 
@@ -44,7 +44,7 @@
 
 ### Batch C · 验收、整理与交付评审
 
-测量根文件字节数，检查相对链接和旧章节锚点、`CLAUDE.md` 软链接、diff 中敏感值与总规模；逐一演练三个流程的正常、阻塞、授权不足场景。运行 `pnpm verify`、`node scripts/workflow-check.mjs`、`node scripts/rule-checks.mjs disclosure origin/main`、`node scripts/rule-checks.mjs size origin/main`、`git diff --check origin/main...HEAD`、`python3 -c "from pathlib import Path; s=Path('docs/exec-plan/active/2026-09-20-repository-guidance.md').read_text(); required=['## Purpose / Big Picture','## Context and Orientation','## Plan of Work','## Concrete Steps','## Validation and Acceptance','## Progress','## Decision Log','## Bottom Change Note']; assert all(x in s for x in required); print('ExecPlan structure OK')"`，均应 exit 0。用脚本核对新增相对链接存在、旧 §8.6/§9.5/§10 锚点仍有去向。对最终 diff 做独立审读，修正冲突表述后回填并归档本计划，推送当前 head，回读 CI 与 PR 的 issue 关联，最后请求人类评审。文档中的写操作示例只校验结构，不为验证示例而执行未授权操作。
+测量根文件字节数，检查相对链接和旧章节锚点、`CLAUDE.md` 软链接、diff 中敏感值与总规模；逐一演练三个流程的正常、阻塞、授权不足场景。运行 `pnpm verify`、`node scripts/workflow-check.mjs`、`node scripts/rule-checks.mjs disclosure origin/main`、`node scripts/rule-checks.mjs size origin/main`、`git diff --check origin/main...HEAD`、`python3 -c "from pathlib import Path; s=Path('docs/exec-plan/completed/2026-09-20-repository-guidance.md').read_text(); required=['## Purpose / Big Picture','## Context and Orientation','## Plan of Work','## Concrete Steps','## Validation and Acceptance','## Progress','## Decision Log','## Bottom Change Note']; assert all(x in s for x in required); print('ExecPlan structure OK')"`，均应 exit 0。用脚本核对新增相对链接存在、旧 §8.6/§9.5/§10 锚点仍有去向。对最终 diff 做独立审读，修正冲突表述后回填并归档本计划，推送当前 head，回读 CI 与 PR 的 issue 关联，最后请求人类评审。文档中的写操作示例只校验结构，不为验证示例而执行未授权操作。
 
 ## Concrete Steps
 
@@ -98,7 +98,9 @@ Node / pnpm 版本取 `.nvmrc` 与 `package.json`。`scripts/` 的规则枚举�
 
 ## Outcomes & Retrospective
 
-实现与本地验收已完成；PR #69 保持 ready，下一道门是人类评审，不执行合并。分层 CI 的实际启用已有 #10 跟踪，审批记录机械化已有 #67 跟踪，本任务不宣称交付这些能力。
+2026-10-22 归档核对：issue #68 已关闭，PR #69 已合并，根规则导航与按需文档已交付；本节旧“等待人类评审”状态已结束。#10/#67 的原承接边界不因归档扩大。
+
+实现与本地验收已完成；PR #69 保持 ready，下一道门是人类评审，不执行合并。**Superseded by 本节 2026-10-22 归档核对：PR #69 已合并。**分层 CI 的实际启用已有 #10 跟踪，审批记录机械化已有 #67 跟踪，本任务不宣称交付这些能力。
 
 ## Bottom Change Note
 

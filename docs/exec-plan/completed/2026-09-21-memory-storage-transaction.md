@@ -1,6 +1,6 @@
 # 内存存储事务串行化 ExecPlan
 
-> 状态：Active
+> 状态：Completed
 > 创建：2026-09-21
 > 范围：修掉 PR #85 上唯一未解决的 P1 评审意见——`MemoryStorage.transaction()` 的重叠事务会丢掉已提交的写入；只改离线替身与它的契约测试。
 > 上游输入：PR #85 的评审线程 `PRRT_kwDOUekeas6kIbrf`、issue #30、`packages/capabilities/src/storage.ts` 的 Storage 契约
@@ -123,6 +123,8 @@ node scripts/rule-checks.mjs size origin/main
 - 上游：issue #30；本计划服务于 PR #85 的未解决 P1 线程。
 
 ## Outcomes & Retrospective
+
+2026-10-22 归档核对：PR #85 已合并，事务串行化和本节已记录的注入证据随其交付。后续统一写者由同日 `2026-09-21-stack-invariant-gaps.md` 承接；本节替身、嵌套事务与重启边界仍保留。
 
 - **最终实现形状**：`MemoryStorage` 增加实例私有字段 `#queue`（初始 `Promise.resolve()`）。`transaction()` 把"克隆 → 执行 work → 提交草稿"整段排进队列；返回给调用方的仍是该段自身的 promise，队列引用则用 `run.then(noop, noop)` 吸收失败。因为 `StorageTransaction` 不允许嵌套事务，队列不会自死锁。
 - **注入实验结果**：把 `transaction()` 改回"克隆后无条件替换"（保留 `#queue` 字段不用），重叠用例红，失败信息正是 `T2 已确认的写入不得被 T1 的提交覆盖`（`ws-t2` 为 `undefined`）；"失败后仍可提交"用例在旧实现下仍绿（旧实现没有队列，本来就不会阻断），说明该用例判别的确实是队列的失败吸收而不是修复本身。实验后已还原。

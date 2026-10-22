@@ -1,6 +1,6 @@
 # 交付规划与工作看板重整 ExecPlan
 
-> 状态：Active
+> 状态：Completed
 > 创建：2026-09-18
 > 范围：把上游设计输入中仍然有效的交付结论，转成本仓库可查询的工作单元——里程碑、迭代、依赖、批次粒度与看板自动化；并重述"原始交付 MVP 是什么"。不写任何 `packages/` 下的实现代码。
 > 上游输入：`AGENTS.md`、`PLANS.md`、本机只读的上游设计输入（§1.5，不可分发）
@@ -204,7 +204,7 @@ secret 边界采用两段式触发：`pull_request_review` 只运行无权限、
 
 ### Batch 1 · 盘点与 MVP 重述
 **最小闭环**：把"原始交付 MVP 是什么"从三种互相冲突的表述收敛成一个可判定的定义。
-**涉及文件**：`docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md`（本文件的 Design / Spec 章节）
+**涉及文件**：`docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md`（本文件的 Design / Spec 章节）
 - [x] 读完上游设计输入的全部文件，抽出交付相关结论
 - [x] 盘点 GitHub 侧现状（issue / PR / 看板 / 里程碑 / 工作流 / 分支保护）
 - [x] 写出 D1 的三层区分与理由
@@ -249,12 +249,12 @@ gh issue view 4 --json title --jq .title   # 父条目存在
 
 ### Batch 5 · 文档落地
 **最小闭环**：本次所有约定在仓库内自包含可读，不依赖本对话。
-**涉及文件**：`docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md`、`docs/README.md`
+**涉及文件**：`docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md`、`docs/README.md`
 - [x] 写完本 ExecPlan 全部强制章节
 - [x] 在 `docs/README.md` 的 Active 索引中登记本计划
 **验证**：
 ```bash
-grep -c '^## ' docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md
+grep -c '^## ' docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md
 # 期望：13（PLANS.md §3 的十三个强制章节）
 grep -n '2026-09-18-delivery-planning-and-board' docs/README.md
 # 期望：至少一行
@@ -272,7 +272,7 @@ grep -n '2026-09-18-delivery-planning-and-board' docs/README.md
 - [x] concurrency 不取消进行中的 reconcile；外部 actor 只限制触发面，不提供批准真值
 - [x] 用真实 token 端到端跑通 8 个 open PR 的回填
 - [x] 回填后重读 25 个条目的 `Status`，零漂移
-- [ ] 配置仓库变量 `PROJECTS_ENGINEERING_FIELD_ID`；缺失时工作流明确失败，不按字段名猜测—— **待人类执行**
+- [x] 配置仓库变量 `PROJECTS_ENGINEERING_FIELD_ID`；缺失时工作流明确失败，不按字段名猜测——原 **待人类执行** 状态 Superseded by Outcomes & Retrospective（2026-10-22）。
 - [x] 在界面关掉四条写 `Status` 的内置工作流（四条均已回读为 `enabled = false`）
 **验证**：新增脚本契约先失败（10 fail，exit 1），workflow 信任边界契约再失败（2 fail，exit 1）；实现后 `node --test tests/contract/engineering-state.test.js` 为 14 / 14、workflow checker 为 51 / 51，最终 `pnpm verify` 为 161 / 161（均 exit 0）。线上启用前必须配置真实字段 ID，本批不把未知 ID 写死进仓库。
 **回滚**：`git revert`；字段用 `deleteProjectV2Field`。
@@ -331,7 +331,7 @@ gh api graphql -f query='query{user(login:"SingularityKChen"){projectV2(number:1
 - [x] (2026-09-18) Batch 5 文档落地
 - [x] (2026-09-18) Batch 6 两个看板工作流已开启（`Item added to project` → `Todo`，`Item closed` → `Done`，均已实测）；四条写 `Status` 的内置工作流也已关掉（`enabled = false` 已回读）。**仍需人工**：view 1 设 group by `Status`、view 5 设 group by `Milestone`——分组无法经 API 回读（见本节上一条），因此只能在界面确认
 - [x] (2026-09-18) Batch 9 工程执行状态分离（PR #37）
-- [x] (2026-09-19) Batch 9 评审根因修复：snapshot 权威、可信默认分支执行、稳定字段 ID、GraphQL/ack fail closed；字段 ID 仓库变量仍待人类配置
+- [x] (2026-09-19) Batch 9 评审根因修复：snapshot 权威、可信默认分支执行、稳定字段 ID、GraphQL/ack fail closed；字段 ID 仓库变量仍待人类配置（配置状态 Superseded by Outcomes & Retrospective，2026-10-22；保留此处历史状态）
 - [x] (2026-09-18) Batch 7 Project view 重建（6 个 view，各带 filter 与列集合）
 - [x] (2026-09-18) Batch 8 §8.6 与 §8.3 可执行化（PR #35，三个检查全绿）
 
@@ -525,6 +525,10 @@ gh pr update-branch <next> --rebase
 
 ## Outcomes & Retrospective
 
+2026-10-22 归档核对：PR #35 与 #37 已合并；既有批次实测记录保留。两个 view 人工分组仍无 API 证据，未转为已验收；由 `docs/product/board-semantics.md` 的看板维护流程承接人工确认。字段 ID 配置已由只读 API 核对：仓库变量非空且等于 Project 10 的 Engineering 字段 ID，`created_at` / `updated_at` 均为 2026-09-21T06:16:39Z。
+
+回读：`gh api repos/SingularityKChen/harness-projects/actions/variables/PROJECTS_ENGINEERING_FIELD_ID --jq '{name,created_at,updated_at,has_nonempty_value:(.value|length>0)}'`，再以 Project 10 的 `fields` 查询比较 Engineering 字段 ID；只记录匹配结果，不公开变量值。Progress 的 2026-09-19 待配置说明 Superseded by 本节的配置回读（2026-10-22），历史日期和当时状态保留。
+
 本计划的 Batch 1–9 已完成（Batch 6 的两个看板工作流已在界面开启并回读确认，四条写 `Status` 的内置工作流已关闭）；Batch 8 与 Batch 9 分别交付在 PR #35 与 PR #37。剩余唯一人工项是两个 view 的分组设置，它无法经 API 回读。完成后回填本节。
 
 当前可以记录的实际结果：
@@ -541,3 +545,5 @@ gh pr update-branch <next> --rebase
 - 2026-09-19：按 PR #37 评审重写 Batch 9 的事实与权限边界。原因：原方案把 event 当状态、按字段名解析、执行 PR head 且未核对 mutation ack，无法证明“当前真值、可信代码、确认写入”三个关键条件；现改为 snapshot reconcile、稳定 ID 配置、两段 workflow 与全链路 fail closed，不纳入 #61 的看板监控范围。
 - 2026-09-19：完成前复核把 `workflow_run.pull_requests[0]` 改为官方文档采用的 inert artifact 传递，并给关联 issue/items snapshot 增加完整性证明。原因：默认分支消费者安全不等于上下文必然存在，截断查询也不等于当前完整事实；两处都必须 fail closed。
 - 2026-09-21：按 PR #37 的两条未解决 P1 订正上一行——删除 artifact 传递，PR 编号改回触发 run 自身的关联，并把「准入跳过」与「拿不到输入」显式分开（前者是有理由的 no-op，后者非零失败）。原因：artifact 不可执行但可伪造，而 run↔PR 关联由 GitHub 记录；同时 `continue-on-error: true` 会把下载失败伪装成 no-op。
+
+- 2026-10-22：MMP 归档评审 P2 修订：核对仓库变量与 Engineering 字段相等，完成配置框并在原等待状态处指向新回读；两个 view 人工验收仍未核实。

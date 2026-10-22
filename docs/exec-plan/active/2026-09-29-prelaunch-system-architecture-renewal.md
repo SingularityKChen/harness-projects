@@ -445,7 +445,7 @@ cd "$SCRATCH/export" && node --input-type=module -e "console.log(import.meta.res
 - **S-6 controller 查询面比 core 窄**：没有 `getItemDetail`、不暴露 `cancelExecutionRun`、不转发交付投影的 `degraded` / `optional`。
 - **S-7 故障注入覆盖不均**：`OutOfOrder` 从未被测试使用；`duplicateEvent` 只在 provider 契约层；`permissionDenied` 经 core 只在执行域。
 - **S-8 mvp0 节点 3 标题过强**：M1 下 chain-bootstrap 的提升用例变红而 `tests/mvp0` 仍 7/7（TD-001）。
-- **S-9 另一份 active 计划复述了 MVP-0 判定**：`docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md` 的里程碑表写 MVP-0 以 `node --test tests/mvp0` 全绿判定；它由该计划的所有者维护，本批不改，并入 H1 一起裁决。
+- **S-9 另一份 active 计划复述了 MVP-0 判定**：`docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md` 的里程碑表写 MVP-0 以 `node --test tests/mvp0` 全绿判定；它由该计划的所有者维护，本批不改，并入 H1 一起裁决。
 - **S-10 会读 active 计划的契约测试**：`e1-evidence-consistency`、`board-status-semantics`、`plan-facts-consistency`（只管 09-23/24 计划）按内容或文件名扫描计划；写计划时要避开 E1 沙箱 id 字面量与 Status 旧读法。
 - **旧迁移"版本号一致"不代表表形一致**。`packages/storage/sqlite/src/migrate.ts` 只按版本清单跳过已应用版本；四版压为一版后，旧 [1] 会被误判为已完成，新基线必须带世代标记。
 - **源码扫描也可能制造假证据**。`tests/contract/content-placement.test.js` 只检查两张表与反引号 token，不是通用链接检查；`board-status-semantics.test.js` 部分断言锁句式；`storage-contract.test.js` 有大段源码行多重集。

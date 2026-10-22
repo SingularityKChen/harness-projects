@@ -3,7 +3,7 @@
 > 状态：Completed（2026-10-14 归档，随 PR #328 收尾）
 > 创建：2026-10-13
 > 范围：完成 issue #214：将默认 worktree 落点定义为 checkout 外的 provider-owned/host-injected absolute target，删除旧 info/exclude 补偿，并提供旧根迁移说明。
-> 上游输入：AGENTS.md、PLANS.md、issue #214、docs/exec-plan/active/2026-09-24-local-git-worktree.md、packages/core/src/git-provisioning.ts、packages/providers/development-local-git/src/provider.ts。
+> 上游输入：AGENTS.md、PLANS.md、issue #214、docs/exec-plan/completed/2026-09-24-local-git-worktree.md、packages/core/src/git-provisioning.ts、packages/providers/development-local-git/src/provider.ts。
 
 ## Purpose / Big Picture
 
@@ -73,7 +73,7 @@ node_modules/.bin/tsc --noEmit
 
 最小闭环：新默认不写 info/exclude，未观察 skeleton 不传播旧假路径，旧用户有手动迁移说明。
 
-涉及文件：packages/providers/development-local-git/src/provider.ts、packages/core/src/chain-facts.ts、provider/core tests、docs/exec-plan/active/2026-09-24-local-git-worktree.md、相关用户文档。
+涉及文件：packages/providers/development-local-git/src/provider.ts、packages/core/src/chain-facts.ts、provider/core tests、docs/exec-plan/completed/2026-09-24-local-git-worktree.md、相关用户文档。
 
 - 删除 excludeDefaultRoot 及仅服务于 checkout 内根的 fixture，加入 git-common-dir/info/exclude before/after byte/hash assertion。
 - 更新旧 plan 原处 Superseded 注记，不删除历史证据。
