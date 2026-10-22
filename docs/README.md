@@ -34,6 +34,7 @@
 | [2026-10-13-harness-host-composition](exec-plan/completed/2026-10-13-harness-host-composition.md) | #228：Harness host 组合 Core/Controller/SQLite、strict typed remote、迁移打包、凭据句柄与卸载生命周期；验收 1、2 经人类批准转入 #132 联合验收；已实施并经第一轮 MMP 评审与两轮修复复评（PR #329） | Completed |
 | [2026-10-13-worktree-root-outside-checkout](exec-plan/completed/2026-10-13-worktree-root-outside-checkout.md) | #214：默认 worktree 落点移出独立检出、嵌套与 bare 仓库默认 fail closed、取消 info/exclude 补偿、旧默认工作树的手工移除说明；已实施并经第二轮 MMP 评审与两轮修复复评（PR #328） | Completed |
 | [2026-10-13-planning-refresh-scheduler](exec-plan/completed/2026-10-13-planning-refresh-scheduler.md) | #334（从 #134 拆出）：Core explicit refresh 与 bounded single-flight scheduler，复用 #305 fence；定时失败交宿主诊断出口；Host 接线与 scheduled 验收由 #335 承接；已实施并经第二轮 MMP 评审与修复复评（PR #331） | Completed |
+| [2026-10-22-host-planning-refresh](exec-plan/active/2026-10-22-host-planning-refresh.md) | #335：Host 启动 Planning 定时/显式刷新，约束真实读等待和迭代生命周期，凭据晚到自动恢复，卸载排空后关库 | Active |
 | [2026-10-13-planning-membership-reconcile](exec-plan/completed/2026-10-13-planning-membership-reconcile.md) | #332（从 #134 拆出）：Planning membership scope 收敛、删除 stale field values、保持 remove/re-add identity；已实施并经第二轮 MMP 评审与修复复评（PR #330） | Completed |
 | [2026-10-05-connector-account-storage](exec-plan/completed/2026-10-05-connector-account-storage.md) | #126 连接账号、宿主凭据引用与工作区配置：独立元数据写口、Fake/SQLite 同契约、身份保留及重启验收；已实施并经评审，等待合并回读（PR #270） | Completed |
 | [2026-09-20-mvp0-parallel-stacks](exec-plan/completed/2026-09-20-mvp0-parallel-stacks.md) | MVP-0 并行堆叠 PR 交付的**控制计划**：栈拓扑、文件所有权、模型路由、批次顺序与合并顺序 | Completed |
