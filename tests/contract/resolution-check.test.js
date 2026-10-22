@@ -373,7 +373,9 @@ test('NODE_PATH：全局搜索路径也不能为未安装内层提供外部证�
 });
 test('接线：动态发现的每个受管测试首条 import 必须相对导入 preflight', () => {
   const files = fs.readdirSync(path.join(REPO_ROOT, 'tests'), { recursive: true })
-    .filter((file) => file.endsWith('.test.js') && !file.split(path.sep).includes('node_modules'));
+    .filter((file) => !file.split(path.sep).includes('node_modules') && /\.[cm]?[jt]s$/.test(file)
+      && (file.split(path.sep).includes('test')
+        || /^(test(?:-.*)?|.*[._-]test)\.[cm]?[jt]s$/.test(path.basename(file))));
   assert.ok(files.length > 0);
   for (const file of files) {
     const source = fs.readFileSync(path.join(REPO_ROOT, 'tests', file), 'utf8');

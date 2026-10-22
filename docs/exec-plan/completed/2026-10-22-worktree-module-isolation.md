@@ -1,6 +1,6 @@
 # 原生 Node 测试的工作树解析隔离 ExecPlan
 
-> 状态：原始 #399 批次 Completed；P1 follow-up 补丁已本地验证，待独立复评与协调者整合
+> 状态：Completed；P1 follow-up 已整合发布，当前 head 的独立复评与合并门禁由协调者收尾
 > 创建：2026-10-22
 > 范围：issue #186；在直接 Node 文件、目录和 layer runner 内强制同工作树解析，并检测包内/测试内 shadow。
 > 规范：`PLANS.md`、`AGENTS.md`、`docs/development/workflow.md`；交接为 #186 的 2026-10-22 评论与 TD-088/089。
@@ -30,6 +30,8 @@
 保留根守卫 CLI，增加可复用的抛错断言；测试 preflight 只依赖 Node 内建模块及该脚本，从自身 URL 取得检出根。守卫失败必须抛错阻止模块求值，不能只设置 exitCode 后继续运行测试。CLI 捕获后按既有 `resolution-check:` 前缀、落点和安装指引退出 1；成功静默。
 
 每个受管 `tests/**/*.test.js` 的第一条实际 import 都是相对 preflight。既有注释保留，其后才导入工作区包；在现有 resolution contract 中机械检查接线，新增文件遗漏即红。`scripts/run-test-layer.mjs` 的 CLI 在启动子进程前调用同一脚本断言，作为被 import 的库时不触发整仓前置；保留空层/零断言 fail-closed 语义。
+
+动态接线契约同时检查 Node 原生发现的其他命名：`test` 目录、`test` / `test-*` / `*[._-]test` 文件名，覆盖 js/mjs/cjs 并保守包含 ts/mts/cts；排除 node_modules。不能仅按既有 `.test.js` 文件名检查新文件。
 
 扫描 root、仓内所有相关 package scopes（含 workspace 包），以及 `packages/`、`apps/`、`tests/`、`scripts/` 中每个相关 node_modules 的父目录。发现 node_modules 后登记其父解析上下文、不递归依赖树；包含任意深度 package/src、tests 子目录与 node_modules 软链。其余源码遍历遵循现有 source-tree 的构建产物边界，不另抄剪枝名单；相关源码目录软链必须明确拒绝或规范化后有界遍历，不得因 dirent 非 Directory 静默跳过。
 
@@ -99,6 +101,12 @@ P1 follow-up 仅在 `fix/native-export-resolution` 分支、以 `f85568ff340763e
 
 验证：`node --test --test-name-pattern='已消费 shadow' tests/contract/resolution-check.test.js`；`node --test tests/contract/resolution-check.test.js tests/contract/run-test-layer.test.js`；`pnpm --filter @harness-projects/app-harness-plugin pack:plugin` 生成 ignored `apps/harness-plugin/dist` 后运行 `node scripts/resolution-check.mjs` 与 `pnpm verify`。回滚只撤销此 batch 在守卫、contract 与本计划中的修改；原 PR 分支与 base 不变。
 
+### Batch 5 · 复评 P2 的原生测试命名覆盖
+
+最小闭环：把接线契约的 `.test.js` 过滤扩展到 Design 声明的原生发现模式。独占临时布局复制真实守卫、preflight、source-tree 与 resolution contract，分别放置 `probe-test.js`、`test-probe.js`、`probe_test.mjs`、`test.js`、`test/helper.js`、`probe.test.ts`。执行 `node --test --test-name-pattern='接线：动态发现' tests/contract/resolution-check.test.js`：未接线必须失败且诊断含该文件名；补上正确相对 preflight 后必须通过。子 runner 清除 `NODE_TEST_CONTEXT` / `NODE_TEST_WORKER_ID`，避免递归 runner 跳过测试，且不匹配其他接线用例。
+
+验证：六种布局均完成拒绝/允许对照；`review-mutate.mjs` 的最终两项表分别回退包内全扫描、回退命名过滤，要求由三个 shadow 用例和六个命名用例归因 KILLED，字节恢复后基线通过；再运行 `pnpm verify`。回滚只撤销本批契约与对应文档，不改变运行时守卫、产品包或规划状态。
+
 ## Validation and Acceptance
 
 | 验收项 | 判定证据 |
@@ -123,7 +131,9 @@ P1 follow-up 仅在 `fix/native-export-resolution` 分支、以 `f85568ff340763e
 - [x] (2026-10-22 SGT) Batch 3 交付准备：独立验收与归档完成；最终 head 的外部 CI、关联和 ready 按 Outcomes 的命令回读。
 - [x] (2026-10-22 SGT) P1 repair TDD：根 export、精确 subpath 与 src→dist 传递导入三例在旧遍历上 3/3 红，均观察到外层 marker 执行；实际 packageRoot 遍历后 3/3 绿、外层 marker 未执行、本地 marker 执行。
 - [x] (2026-10-22 SGT) P1 repair 验证：定向 contract + runner 56/56；真实 plugin pack 生成 dist 后 resolution-check 成功，完整 verify 1914/1914 + MVP-0 7/7；node_modules 依赖树未展开。
-- [ ] P1 repair 后续：交由另一评审者独立复评；由协调者整合回 #399 并在真实新 main 上复锁所有门禁。本 proposal 尚未发布。
+- [x] (2026-10-22 SGT) P1 repair 整合：已发布到 #399 的 `bf3e15b3`，基于真实 `main@8b742977`；本轮重跑 `pnpm verify` 为 1927 + 7、零失败。原“proposal 尚未发布”状态已被本项取代。
+- [x] (2026-10-22 SGT) 独立复评：`bf3e15b3` 无 P0/P1，定向 56/56、109 个非 owner 正文独立核对通过；唯一 P2 已按 Batch 5 修复并独立复评。最终发布 SHA 的批准、作者线程回复及合并前后结果按本计划回读，规划 Status 保持原值。
+- [x] (2026-10-22 SGT) Batch 5：六类新命名未接线拒绝、同形接线允许；最终两项变异归因 KILLED 且原字节恢复；本分支完整 `pnpm verify` 再次为 1927 + 7、零失败。
 
 ## Surprises & Discoveries
 
@@ -165,6 +175,8 @@ P1 follow-up 仅在 `fix/native-export-resolution` 分支、以 `f85568ff340763e
 
 2026-10-22 / 协调者整合：原分支对 #397/#398 已合入的真实 main 变基，仅 README 冲突；保留短索引和本计划行。110 个测试保持首 preflight，109 个非 owner 正文逐字等于新 base。原守卫、同根因 P1 修复与评审证据整理为一个可独立验收和回滚的能力提交；整理前保留原远端、变基后守卫与 proposal 恢复 ref，推送使用精确 old-head lease。
 
+2026-10-22 / 复评收尾：保留已发布的能力提交；用另一个可独立理解和回滚的 test 提交交付命名契约 P2 及其验收记录，不为补记证据改写共享历史。独立复评的无 P0/P1 结论不转移到后继 SHA，最终发布后仍须取得对应 head 的 CI、批准和全部线程回读。
+
 ## Idempotence and Recovery
 
 接线按已有首 import 判断，不重复添加；包名单继续来自根 manifest。临时夹具由各测试的独占目录拥有并清理；从不删除真实工作树或安装。P1 follow-up 的恢复点是独立本地分支修复提交；失败时只撤销该提交，不改旧 #399 工作树。静态 root visit 的 source-tree 剪枝不变，不用跨进程缓存掩盖安装变化。
@@ -183,7 +195,7 @@ P1 follow-up 仅在 `fix/native-export-resolution` 分支、以 `f85568ff340763e
 
 证据边界：实跑 Node 26；Node 22 未安装或实跑，代码只使用 Node 22 已有内建 API。根入口定位继续依赖无条件根导出；条件、数组与通配子路径在 canonical 和实际命中 shadow 包上均明确拒绝；不枚举未声明的第三方 bare specifier 或递归其依赖树。源码软链拒绝是显式维护约束，错误须先按诊断移除残留，重装不能把外指软链自动变成本地源码。
 
-P1 follow-up 证据：本地 proposal 基于 `f85568ff340763e83171888f00d2ea48032be2af`。三条红例在原遍历上均 `node --test` exit 0 且外层 marker=true；修复后 outer link 三例均由 preflight exit 1、marker=false，local link 三例 exit 0、inner marker=true。`node --test tests/contract/resolution-check.test.js tests/contract/run-test-layer.test.js` 为 56/56。以 Node 26.12.0 / pnpm 10.28.2 运行真实 `pack:plugin`，成功生成 ignored dist；随后守卫 exit 0，`pnpm verify` exit 0，typecheck + 1914 个 contract/integration/e2e 测试 + 7 个 MVP-0 测试全通过。总 code churn 为 789，严格小于 800；未运行 mutation harness、Node 22 未实跑；等待另一评审者复评。
+P1 follow-up proposal 阶段证据（发布状态及变异结论 Superseded by 本节的协调者整合记录，2026-10-22）：本地 proposal 基于 `f85568ff340763e83171888f00d2ea48032be2af`。三条红例在原遍历上均 `node --test` exit 0 且外层 marker=true；修复后 outer link 三例均由 preflight exit 1、marker=false，local link 三例 exit 0、inner marker=true。`node --test tests/contract/resolution-check.test.js tests/contract/run-test-layer.test.js` 为 56/56。以 Node 26.12.0 / pnpm 10.28.2 运行真实 `pack:plugin`，成功生成 ignored dist；随后守卫 exit 0，`pnpm verify` exit 0，typecheck + 1914 个 contract/integration/e2e 测试 + 7 个 MVP-0 测试全通过。总 code churn 为 789，严格小于 800；未运行 mutation harness、Node 22 未实跑；等待另一评审者复评。
 
 ### 归档与交付回读
 
@@ -194,6 +206,8 @@ P1 follow-up 证据：本地 proposal 基于 `f85568ff340763e83171888f00d2ea4803
 守卫、runner、全部首 import 和其判别验收共同组成一个可独立回滚的能力提交；临时设计/修复内容收拢，整理前保留本地恢复 ref，最终文件树必须相同，使用精确 old-head lease 发布。
 
 2026-10-22 / 协调者在真实 `main@8b742977` 的整合检出验证：真实 plugin pack 后守卫成功，`pnpm verify` 为 1927 + 7、零失败；110 个首 import 与 109 个非 owner 正文并集保持。Active 1 / Completed 104，README 18,933 字节、集合和相对链接有效。使用 `review-mutate.mjs` 将包内复扫的 true 改回 false，M399-1 由三条“已消费 shadow”失败名归因 KILLED；原字节哈希相同、还原后基线通过。该表只在最终产品源码上运行一次，之后仅整理文档和提交，不改产品源码。
+
+2026-10-22 / 复评后续：上一段“仅整理文档”边界 Superseded by Batch 5；仅接线契约增加原生命名覆盖，运行时守卫未再改动。独立复评确认该修复；六种未接线/接线对照通过。最终两项变异表在本分支修复树运行，M399-1 由三条构建目录 shadow 用例、M399-2 由六条命名用例归因 KILLED，守卫与契约字节均恢复；完整验证再次通过 1927 + 7。最终远端证据归属于发布后的 head，不据此预写合并结果。
 
 ## Bottom Change Note
 
@@ -214,3 +228,7 @@ P1 follow-up 证据：本地 proposal 基于 `f85568ff340763e83171888f00d2ea4803
 2026-10-22 SGT：根据人类 owner “本会话接手 #399（推荐）”授权，新增本地 P1 follow-up batch。静态 source pruning 保持不变，实际消费 workspace packageRoot 全量登记包内解析上下文；根出口、精确 subpath、src→dist 传递红绿与真实 pack 后 1914 + 7 verify 均已记录。补丁等待独立复评，未发布。
 
 2026-10-22：协调者按人类改派整合 P1 修复并对真实 main 变基，补记包内扫描边界、提交整理、独立复评与发布回读规则。
+
+2026-10-22 SGT：延续原评审聊天的直接授权，核对已发布 P1 修复并重跑完整验证；就地更新旧 proposal 状态，独立复评和交付结果按当前 SHA 回读。
+
+2026-10-22 SGT：独立复评后修复 P2 的原生测试命名遗漏，补记六类对照、最终两项归因变异与完整回归；保留能力提交和命名契约提交的独立边界。
