@@ -231,7 +231,7 @@ test('只读交付方：改流水线请求返回 not supported 且不改任何�
 const DELIVERY_SETS = ['change_request', 'check_run', 'commit', 'pipeline_run']
 const CI_SETS = ['check_run', 'pipeline_run']
 // 完整性（`completeSets`）：在线确认一次后注入一种情形，再刷新、读、重启。`stale` 是应当逐跳标陈旧的集合；没有 `ci` / `kinds` 时，已确认的 CI 事实与六种跳原样保留。
-// 查找（分支、变更请求）目标在第一页即完整，不在第一页且还有下一页才是缺口（TD-040），变更请求先按本分支过滤（#287）；Delivery 读不完与页形非法由 #295 的完整分页报成该集合的缺口，变更请求页形非法由查找谓词先要求 items 是数组；路由失败没有任何 provider 调用，同样是「没看到」（K3）。
+// 查找（分支、变更请求）在 100 个端口页内找到即完整（#233）；后页可读是正控，目标被推后且游标成环才是缺口。变更请求仍先按本分支过滤（#287）；Delivery 完整集合与 Development 查找都将坏页降级，路由失败没有 Provider 调用（K3）。
 const COMPLETENESS = [
   ['Delivery 离线', (providers) => { providers.delivery.faultsSwitch.set(FaultKind.Offline, true) }, { stale: CI_SETS }],
   ['Delivery 权限被拒', (providers) => { providers.delivery.faultsSwitch.set(FaultKind.PermissionDenied, true) }, { stale: CI_SETS }],
@@ -239,9 +239,11 @@ const COMPLETENESS = [
   ['检查分页读不完', (providers) => endless(providers.delivery, 'listChecks'), { stale: ['check_run'] }],
   ['流水线页形非法', (providers) => stub(providers.delivery, 'listPipelineRuns', async () => ({ ok: true, value: { items: null, nextCursor: undefined } })), { stale: ['pipeline_run'] }],
   ['分支查找，目标在第一页', (providers) => flood(providers.development.state.branches, 'zz-', (n) => ({ name: `zz-${n}` })), { stale: [] }],
-  ['分支查找，目标不在第一页', (providers) => flood(providers.development.state.branches, 'aa-', (n) => ({ name: `aa-${n}` })), { stale: DELIVERY_SETS }],
+  ['分支查找，目标不在第一页', (providers) => flood(providers.development.state.branches, 'aa-', (n) => ({ name: `aa-${n}` })), { stale: [] }],
+  ['分支查找，目标在后页但游标成环', (providers) => { flood(providers.development.state.branches, 'aa-', (n) => ({ name: `aa-${n}` })); endless(providers.development, 'listBranches') }, { stale: DELIVERY_SETS }],
   ['变更请求查找，目标在第一页', (providers) => flood(providers.development.state.changeRequests, 'zz-', (n) => ({ sourceVersion: `other-${n}` })), { stale: [] }],
-  ['变更请求查找，目标不在第一页', (providers) => flood(providers.development.state.changeRequests, 'aa-', (n) => ({ sourceVersion: `other-${n}` })), { stale: ['change_request', 'check_run'] }],
+  ['变更请求查找，目标不在第一页', (providers) => flood(providers.development.state.changeRequests, 'aa-', (n) => ({ sourceVersion: `other-${n}` })), { stale: [] }],
+  ['变更请求查找，目标在后页但游标成环', (providers) => { flood(providers.development.state.changeRequests, 'aa-', (n) => ({ sourceVersion: `other-${n}` })); endless(providers.development, 'listChangeRequests') }, { stale: ['change_request', 'check_run'] }],
   ['变更请求查找，别的分支的 60 条排在前面', (providers) => flood(providers.development.state.changeRequests, 'aa-', (n) => ({ headBranch: `other-${n}`, sourceVersion: `other-${n}` })), { stale: [] }],
   ['变更请求页形非法', (providers) => stub(providers.development, 'listChangeRequests', async () => ({ ok: true, value: { items: null, nextCursor: undefined } })), { stale: ['change_request', 'check_run'] }],
   // 分支存在而头部提交未知：不是「没有头部提交」，不能当作锚点确认不存在。
