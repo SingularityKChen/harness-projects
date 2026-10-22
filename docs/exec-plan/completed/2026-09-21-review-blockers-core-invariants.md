@@ -1,6 +1,6 @@
 # 核心不变量执行缺口 ExecPlan
 
-> 状态：Active
+> 状态：Completed
 > 创建：2026-09-21
 > 范围：修掉 PR #93 与 PR #94 上各一条未解决的 P1 评审意见。两条都属于同一类缺陷——**不变量只被顺序场景满足，没有被执行点强制**；本计划把强制点前移到缺陷发生处，并把 #94 的修复从上层 PR 下移回引入它的 PR。
 > 上游输入：issue #77、#78；评审线程 `PRRT_kwDOUekeas6kIwjJ`（#93 竞态）与 `PRRT_kwDOUekeas6kIwjI`（#94 骨架进谱系）；证据归档 `docs/review/pr-93-mvp-review.md`、`docs/review/pr-94-mvp-review.md`；`AGENTS.md` §1.1
@@ -70,7 +70,7 @@ node --test tests/mvp0                          # 两个分支上都应保持 7/
 
 ## Global Constraints
 
-- #93 只改 `packages/core/src/**`、`tests/e2e/**`、`docs/exec-plan/active/2026-09-21-review-blockers-core-invariants.md`；#94 只改 `packages/core/src/delivery.ts`、`tests/e2e/**`、`docs/review/pr-94-mvp-review.md` 与本文件。
+- #93 只改 `packages/core/src/**`、`tests/e2e/**`、`docs/exec-plan/completed/2026-09-21-review-blockers-core-invariants.md`；#94 只改 `packages/core/src/delivery.ts`、`tests/e2e/**`、`docs/review/pr-94-mvp-review.md` 与本文件。
 - 不新增运行时依赖；单文件 ≤ 200 行、单函数 ≤ 40 行；core 不得 import provider 或 storage 实现。
 - 每个 PR 代码 ≤ 1000 行、文档 ≤ 1500 行（按各自声明的 base 度量）。
 - 只允许 rebase merge；不自行合并 PR。
@@ -158,7 +158,9 @@ node --test tests/mvp0                          # 两个分支上都应保持 7/
 
 ## Outcomes & Retrospective
 
-完成后填写：并发用例的构造方式、两次注入实验的结果、#95 变基后是否干净地丢弃了重复补丁、以及"还有哪些不变量只在顺序场景下成立"的剩余清单。
+2026-10-22 归档核对：PR #93/#94/#95 均已合并。已记录的 #93 并发复现与串行化、#94 两笔修复随原 PR 交付；本计划缺少两次注入和级联过程的独立实测记录，相关 checkbox 保持未勾，不凭合并补造证据。历史执行已结束；并发、谱系拒绝与持久修订号的后续保障见 `docs/exec-plan/completed/2026-09-21-stack-invariant-gaps.md` 及现行 core 契约与 E2E。
+
+本节没有可补录的两次注入实测或 #95 级联日志；保留上述未核实边界。
 
 ## Bottom Change Note
 

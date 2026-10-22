@@ -36,7 +36,7 @@
 
 ### 1.2 当前门禁
 
-Gate E1（跨 Provider 对象身份与同步幂等性）通过前，不冻结本地数据模型 v1。当前优先交付不依赖真实 GitHub 的纵向切片。Gate R1 是 MVP 发布门禁。
+Gate E1 已获 2026-10-15 人类 `freeze` 裁决，权威记录见 [issue #4 裁决评论](https://github.com/SingularityKChen/harness-projects/issues/4#issuecomment-6190872256)；物理 v1 基线由 #223 承担。Gate R1 仍是 MVP 发布门禁。
 
 ## 2. 仓库地图与依赖
 

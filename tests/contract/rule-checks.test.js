@@ -203,12 +203,12 @@ test('误报收窄：dotenv/本地配置文件名、已知系统账户、CI 缓�
 })
 
 test('误报收窄：协调者复现的真实案例——ExecPlan 检查清单行描述模式，不是泄露', () => {
-  // 这一行来自本仓库 docs/exec-plan/active/2026-09-18-rule-semantics-and-checker-convergence.md
+  // 这一行来自本仓库 docs/exec-plan/completed/2026-09-18-rule-semantics-and-checker-convergence.md
   // 第 205 行（Batch E 自己的验收清单），在加固前会被自己命中——机械扫描
   // 的强度不能靠「排除这份文档」来凑，必须靠模式本身足够精确。
   const line =
     '- [ ] disclosure：收窄误报（`.env.local`、`*.local.json`、`/home/node`、`/root/.cache`）'
-  const diff = mkDiff('docs/exec-plan/active/2026-09-18-rule-semantics-and-checker-convergence.md', [line])
+  const diff = mkDiff('docs/exec-plan/completed/2026-09-18-rule-semantics-and-checker-convergence.md', [line])
 
   assert.deepEqual(scanDiff(diff), [])
 })

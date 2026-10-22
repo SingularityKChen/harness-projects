@@ -13,7 +13,7 @@
 //   解析出**当时**的 `origin/<base.ref>`，判定就依赖一个会移动的 ref。三点差异
 //   `git diff B...H` 的正确性只相对于**给定的对象对**成立：base 被 force-push 到
 //   无关历史时 merge-base 会移动，结果会纳入不属于本 PR 的提交（评审 P1，回归测试
-//   见 docs/exec-plan/active/2026-09-21-rule-checks-api-base.md）。
+//   见 docs/exec-plan/completed/2026-09-21-rule-checks-api-base.md）。
 //
 // 契约：stdin 是 PR API 响应，stdout 是**判定输入本身**——`base_sha` 与 `head_sha`
 // 两行 GITHUB_OUTPUT 格式。`base.ref` 不在契约里：它只是来源说明（provenance），

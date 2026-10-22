@@ -1,6 +1,6 @@
 # Merge Gate 车道 ExecPlan
 
-> 状态：Active
+> 状态：Completed
 > 创建：2026-09-21
 > 范围：把 integration、包边界、MVP-0 与 E2E 四层测试放上一条独立的 `Merge Gate` 车道，空层必须失败、失败必须点名被保护的不变量；`PR Fast Gate` 保持分支保护唯一必需检查。
 > 上游输入：issue #10、`AGENTS.md` §9、`docs/architecture/release-gates.md` §2 第 5 条与 §2.2、`docs/development/ci.md`（"合并后的演进"）、`tests/README.md` §1、`docs/product/vertical-path.md` §3
@@ -107,7 +107,7 @@ mkdir -p /tmp/empty-layer && node scripts/run-test-layer.mjs /tmp/empty-layer "�
 
 ## Global Constraints
 
-- 新增/改动文件限定为：`.github/workflows/merge-gate.yml`（新建）、`scripts/run-test-layer.mjs`（新建）、`tests/contract/merge-gate-workflow.test.js`（新建）、`tests/contract/run-test-layer.test.js`（新建）、`docs/development/ci.md`、`docs/architecture/release-gates.md`、`docs/product/vertical-path.md`（第二轮评审加入：该文件仍写 `tests/mvp0/` 尚不存在，与本车道自相矛盾）、`tests/README.md`、`tests/mvp0/README.md`（评审回复轮加入：它当时与新建的车道自相矛盾）、`docs/exec-plan/active/2026-09-21-merge-gate-layers.md`、`docs/README.md`。
+- 新增/改动文件限定为：`.github/workflows/merge-gate.yml`（新建）、`scripts/run-test-layer.mjs`（新建）、`tests/contract/merge-gate-workflow.test.js`（新建）、`tests/contract/run-test-layer.test.js`（新建）、`docs/development/ci.md`、`docs/architecture/release-gates.md`、`docs/product/vertical-path.md`（第二轮评审加入：该文件仍写 `tests/mvp0/` 尚不存在，与本车道自相矛盾）、`tests/README.md`、`tests/mvp0/README.md`（评审回复轮加入：它当时与新建的车道自相矛盾）、`docs/exec-plan/completed/2026-09-21-merge-gate-layers.md`、`docs/README.md`。
 - 不改 `.github/workflows/ci.yml`、`package.json` 的既有脚本语义、分支保护设置、体量预算与 `rule-checks` 的任何判定。
 - workflow 必须满足 W1–W7：job 级 `timeout-minutes` 为 1–15 的整数、checkout 固定到 40 位提交且 `persist-credentials: false`、外部 action 固定到 40 位提交、顶层 `permissions` 最小、声明 `concurrency` 时必须显式给出取消策略。
 - 不新增运行时依赖；单文件 ≤ 200 行、单函数 ≤ 40 行。
@@ -300,6 +300,8 @@ git diff --check origin/main...HEAD                        # 期望：无输出
 - **下游**：`#73`（R1 发布门禁）的第 5 条判定证据由本车道提供；`docs/architecture/release-gates.md` §2.2 的过期结论在本批次订正。
 
 ## Outcomes & Retrospective
+
+2026-10-22 归档核对：PR #104 已合并，已交付的层运行器、车道及注入记录保留。后续层扫描演进由 #362 承接；真实 CI 连续运行和分支保护配置仍须各自回读，不能用合并代替。
 
 **四个层的实测（Node v26.9.0，`node --test <layer>`）**
 

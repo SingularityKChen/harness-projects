@@ -1,6 +1,6 @@
 # 看板语义：Status、规划轴与工程轴
 
-> 本文档是 `Status` 字段与十条内置看板工作流开关状态的仓库内权威定义（issue #55 的验收产物；第十条 `Auto-add to project` 由 issue #248 补入）。`docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md` 早于本文档的三处相关表述已改写为与本文档一致（术语表、D2 表、D4 表；见该文件的 Decision Log）。两者若仍有出入，以本文档为准。
+> 本文档是 `Status` 字段与十条内置看板工作流开关状态的仓库内权威定义（issue #55 的验收产物；第十条 `Auto-add to project` 由 issue #248 补入）。`docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md` 早于本文档的三处相关表述已改写为与本文档一致（术语表、D2 表、D4 表；见该文件的 Decision Log）。两者若仍有出入，以本文档为准。
 > 依据 `AGENTS.md` §3（文档与事实源）：本文档自包含，结论不依赖任何不随仓库分发的外部输入；引用的证据均可在本仓库或 GitHub 上复核。
 
 ## 1. 结论
@@ -16,7 +16,7 @@
 | | 规划轴 | 工程轴 |
 |---|---|---|
 | 回答的问题 | 规划所有者是否**接受**这个工作项完成 | 代码 / PR / CI 走到哪一步 |
-| 看板字段 | `Status`（`Todo` / `In Progress` / `In Review` / `Done`） | `Engineering`（`PR open` / `Changes requested` / `Approved` / `Merged`，见 `docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md` Batch 9） |
+| 看板字段 | `Status`（`Todo` / `In Progress` / `In Review` / `Done`） | `Engineering`（`PR open` / `Changes requested` / `Approved` / `Merged`，见 `docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md` Batch 9） |
 | 谁写 | 人（协作者在看板上手动设置） | 自动化：响应 PR / issue 生命周期事件的同步机制（同上 Batch 9），无人参与 |
 | 唯一的机械例外 | `Item added to project` 把 `Status` 写成 `Todo` —— 见 §4 | 无 |
 
@@ -99,7 +99,7 @@
 
 **从表里数「关闭」得到 7 条，不是 6 条。**
 
-控制本文档所属批次的 ExecPlan（`docs/exec-plan/active/2026-09-18-rule-semantics-and-checker-convergence.md`，`Surprises & Discoveries`）在总结句里写的是「六条」——那个数字只统计了写 `Status` 的六个，没有把 `Auto-close issue` 计入，尽管同一条记录紧接着承认它「同样关闭（第七条）」。本文档的裁决表是该清单的唯一权威来源，计数为 7。
+控制本文档所属批次的 ExecPlan（`docs/exec-plan/completed/2026-09-18-rule-semantics-and-checker-convergence.md`，`Surprises & Discoveries`）在总结句里写的是「六条」——那个数字只统计了写 `Status` 的六个，没有把 `Auto-close issue` 计入，尽管同一条记录紧接着承认它「同样关闭（第七条）」。本文档的裁决表是该清单的唯一权威来源，计数为 7。
 
 **十行全部只用 §4 的四步规则求值；除第十行登记、并经规划所有者接受的「更新即加入」残余路径外，没有例外行。** 最容易看成例外的是 `Auto-close issue`：它写的不是 `Status`，而是 issue 自己的 open/closed 状态。但 §4 第 2 步已经把该状态归入工程轴，第 3 步把「人在看板上手动改字段」归入规划轴——而这条工作流的触发条件恰恰是 `Status` 被改成 `Done`，按本表其余九行，`Status` 的唯一合法写入点是人。于是它和其余六条一样，是一次两轴不一致的跨轴写入，只是方向相反（规划 → 工程，并与 `Item closed` 首尾相接构成回环）。方向不影响判定：§4 问的是两轴是否一致，不是谁写谁。
 

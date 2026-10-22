@@ -125,7 +125,7 @@ node scripts/rule-checks.mjs size origin/main
 
 ## Surprises & Discoveries
 
-- **Observation**：实现改对之后，**计划文档本身变成了不一致源**——`docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md` 的 D5 段落、一条 Surprise 的 Evidence、一条 Decision Log 与一条 Bottom Change Note 仍在描述「用 inert artifact 传递 PR 编号」。
+- **Observation**：实现改对之后，**计划文档本身变成了不一致源**——`docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md` 的 D5 段落、一条 Surprise 的 Evidence、一条 Decision Log 与一条 Bottom Change Note 仍在描述「用 inert artifact 传递 PR 编号」。
   **Evidence**：对抗验证者用 `grep -nE 'artifact.*PR|PR.*artifact|inert artifact'` 命中 5 处；其中 D5 是设计正文。
   **Decision impact**：这正是 `PLANS.md` 把 spec 与 plan 合进一份文件要消灭的失败模式（计划变了、设计说明还在描述旧世界）。处置：D5 正文改写为当前设计；历史记录（Observation / Decision / Bottom Change Note）**保留原文并追加「订正（2026-09-21）」**，不静默改写历史。
 

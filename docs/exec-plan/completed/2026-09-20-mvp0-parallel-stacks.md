@@ -3,7 +3,7 @@
 > 状态：Active
 > 创建：2026-09-20
 > 范围：把 MVP-0（fake provider 纵向切片）拆成多条并行的堆叠 PR，逐条给出闭环、验收、回滚与文件所有权；包含本次交付的拓扑决策、模型路由与合并顺序。本文件是本次交付的**控制计划**，各栈的细节计划见 `Interfaces and Dependencies` 列出的四份栈计划。
-> 上游输入：`AGENTS.md`、`PLANS.md`、`docs/development/workflow.md`、`docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md`、本机只读的上游设计输入（不随仓库分发）
+> 上游输入：`AGENTS.md`、`PLANS.md`、`docs/development/workflow.md`、`docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md`、本机只读的上游设计输入（不随仓库分发）
 
 ## Purpose / Big Picture
 

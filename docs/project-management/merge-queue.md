@@ -105,7 +105,7 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 ## 4. 当前队列
 
-五个 PR 属于同一份 ExecPlan（`docs/exec-plan/active/2026-09-18-rule-semantics-and-checker-convergence.md`）的五个批次，另有两个来自**其它会话**的 PR 与它们交织。
+五个 PR 属于同一份 ExecPlan（`docs/exec-plan/completed/2026-09-18-rule-semantics-and-checker-convergence.md`）的五个批次，另有两个来自**其它会话**的 PR 与它们交织。
 
 顺序在 2026-09-18 的验收阶段按实测修订过一次，修订理由见位置 1 那一行——它是本文件第 6 节那条新增教训的来源。
 
@@ -116,12 +116,12 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 | 3 | #57（Batch B，本 PR） | `docs/process-records` | Closes #46 #47——本文件与 `AGENTS.md` §10 的 agent 写入边界 | 无硬依赖 | 改 `AGENTS.md` §10，与 PR-C 的 §9.5 相邻，预期「两边都保留」 |
 | 4 | #58（Batch C） | `fix/workflow-check-false-greens` | Closes #38——六类假绿收敛，新增 W7 | 无硬依赖 | 改 `AGENTS.md` §9.5，同上 |
 | 5 | #59（Batch D） | `fix/policy-check-hardening` | Closes #39——入口守卫与取值加固 | 无硬依赖 | 改 `AGENTS.md` §8.7，与 §8.6 相邻 |
-| 6 | #63（另一会话） | `fix/link-context-stripping` | Closes #62——剥离不生效上下文 | **5**（分支直接叠在 #59 之上） | 叠加分支，#59 之前不可合并；按当前顺序实测变基到此位置时，`docs/exec-plan/active/2026-09-18-rule-semantics-and-checker-convergence.md` 冲突（两处 hunk：`Progress`/执行期间的偏差起、`Bottom Change Note` 起）——原因是 #56 相对共享种子已经改了同一份文件（87 行新增、16 行删除，非纯追加，详见下文关于种子提交的说明），先于 #63 进入 queue-tip；#63 自己也在同一带追加了内容（41 行）。**解法**：两边都保留；`Progress` 的勾选与「执行期间的偏差」条目以**已经记录完成的一侧**为准，不得被对方带来的旧版本静默覆盖回未完成 |
+| 6 | #63（另一会话） | `fix/link-context-stripping` | Closes #62——剥离不生效上下文 | **5**（分支直接叠在 #59 之上） | 叠加分支，#59 之前不可合并；按当前顺序实测变基到此位置时，`docs/exec-plan/completed/2026-09-18-rule-semantics-and-checker-convergence.md` 冲突（两处 hunk：`Progress`/执行期间的偏差起、`Bottom Change Note` 起）——原因是 #56 相对共享种子已经改了同一份文件（87 行新增、16 行删除，非纯追加，详见下文关于种子提交的说明），先于 #63 进入 queue-tip；#63 自己也在同一带追加了内容（41 行）。**解法**：两边都保留；`Progress` 的勾选与「执行期间的偏差」条目以**已经记录完成的一侧**为准，不得被对方带来的旧版本静默覆盖回未完成 |
 | 本轮不合并 | #61（另一会话） | `chore/board-invariants` | #45 的运行时半边 | **2**（判定逻辑已并入 #56） | 与 #56 在 `scripts/board-workflow-check.mjs` 上曾是 add/add 冲突（同一 issue #45 的两种切法，见 §6.2 第 1 条），#56 已吸收 #61 的判定逻辑；按此前裁决，#61 需缩成只剩运行时取数与接线两部分并 rebase 到 #56 之后，缩减完成前不进入本轮排队。所需 `PROJECTS_TOKEN` 已存在（`gh secret list -R SingularityKChen/harness-projects` → 创建于 2026-09-18T06:13:44Z；以该命令的实时结果为准，不要假设这个日期不变），不再是阻塞项 |
 
 **为什么位置 1 是 E 而不是 A。** 原计划把 E 排最后。实测发现：五个分支都带着那份 ExecPlan，而未加固的扫描器把计划里**列举误报字面量的那一行**判成真实泄漏——于是在 E 合并之前，另外四个完全合规的 PR 都挂着一个红的 `Disclosure scan`。E 与其余四个没有内容依赖，提前零成本。
 
-本计划文件的**种子提交**在相关分支上逐字节相同——用 `git rev-parse <分支>:docs/exec-plan/active/2026-09-18-rule-semantics-and-checker-convergence.md` 逐分支比对可重新核实这一点（期望：共享种子提交的分支返回同一个 blob hash），下文只是某一时刻的快照，结论应以重新执行该命令为准，不要假设它长期成立。种子相同是每个 PR 单独看时 ExecPlan 链接都不悬空的原因——这与第 1 节描述的「悬空链接」问题不同；rebase 时 git 按 patch-id 把这个共同的种子提交识别为已应用并跳过。但**不是所有分支都停在种子提交上**：#56（位置 2）相对种子有 87 行新增、16 行删除（净增 71 行，307→378 行，非纯追加）；#63（位置 6）相对它所叠的 #59（同为 307 行的种子）有 41 行纯新增、零删除（307→348 行）——`git diff --stat <分支A> <分支B> -- <上面那条路径>` 可重验这组数字，同样应以重新执行为准。这部分改动都落在这份 ExecPlan 本身，不参与 patch-id 去重。实测结果是 #56 在自己的位置干净变基，真正的冲突出现在更晚的 #63——它的纯追加落进了 #56 已经动过的同一片区域（`Progress`/`Bottom Change Note`），具体冲突点与解法见位置 6 那一行。
+本计划文件的**种子提交**在相关分支上逐字节相同——用 `git rev-parse <分支>:docs/exec-plan/completed/2026-09-18-rule-semantics-and-checker-convergence.md` 逐分支比对可重新核实这一点（期望：共享种子提交的分支返回同一个 blob hash），下文只是某一时刻的快照，结论应以重新执行该命令为准，不要假设它长期成立。种子相同是每个 PR 单独看时 ExecPlan 链接都不悬空的原因——这与第 1 节描述的「悬空链接」问题不同；rebase 时 git 按 patch-id 把这个共同的种子提交识别为已应用并跳过。但**不是所有分支都停在种子提交上**：#56（位置 2）相对种子有 87 行新增、16 行删除（净增 71 行，307→378 行，非纯追加）；#63（位置 6）相对它所叠的 #59（同为 307 行的种子）有 41 行纯新增、零删除（307→348 行）——`git diff --stat <分支A> <分支B> -- <上面那条路径>` 可重验这组数字，同样应以重新执行为准。这部分改动都落在这份 ExecPlan 本身，不参与 patch-id 去重。实测结果是 #56 在自己的位置干净变基，真正的冲突出现在更晚的 #63——它的纯追加落进了 #56 已经动过的同一片区域（`Progress`/`Bottom Change Note`），具体冲突点与解法见位置 6 那一行。
 
 这张表由每个批次自己维护：谁最终改了 `AGENTS.md` 的哪个小节，只有该批次的执行者知道确切结果；合并前请按 2.2 的步骤把「预期」验证成「实测」，并按 2.3 的模板记录实际解法与合并后的 commit SHA。
 
@@ -531,8 +531,8 @@ gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,baseRe
 
 | 位置 | PR / issue | 独立闭环 | 已知冲突与下一门 |
 |---|---|---|---|
-| 1 | #397 / #233 | 有界谱系锚点查找与持久化验收 | 初审无缺陷并 APPROVE；证据提交后重锁 head/base/CI/threads，再合并。 |
-| 2 | #398 / #363 | 完成计划归档、路径与短索引 | 独立矩阵结束后处理非阻塞意见；README 保留三个完成计划短行的并集，债务引用指向各自完成态。 |
+| 1（已合并） | #397 / #233 | 有界谱系锚点查找与持久化验收 | 2026-10-22 rebase 合并 `97f54ebbe8389acc1e603721eece5847c886f3c4`；树等于独立批准 head，#233 CLOSED。 |
+| 2 | #398 / #363 | 完成计划归档、路径与短索引 | 初审两条 P2 已据直接 API 证据修正，按归档闭环整理；在真实 #397 后继 main 上解决 README 冲突，保留完成计划短行并集与债务完成态引用。新 head 门禁及复评后合并。 |
 | 本轮暂不合并 | #399 / #186 | 原生测试解析隔离 | 初审一条 P1：被静态剪枝的 dist 导出上下文仍可执行外层 workspace 包。review 5611492593 已 REQUEST_CHANGES，并完整交回原实现会话；修复后重新取得当前 head 批准，再确定入队位置。 |
 
 初审输入为 `main@6aa6592`，#397 `81c989e`、#398 `9cbaf6f`、#399 `f85568f`；既有顺序并集 `test/lineage-controls-acceptance@7824aaac` 经协调者独立重跑 `pnpm verify` 为 1924 + 7、零失败。关键实现 blob 与三个输入 head 相同，110 个受管测试的正文和首 import 并集均保持。该绿色没有消除 #399 的真实 marker 反例。索引预演为 Active 1 / Completed 104、18,930 字节；实际合并时重新核对，不用预演代替真实 main。

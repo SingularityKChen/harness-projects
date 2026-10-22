@@ -3,7 +3,7 @@
 > 状态：Completed（第二轮 MMP 评审无 P0 / P1，随 PR #159 以 rebase merge 合入并归档；合并后的真实事件回读见 Progress 最后一条）
 > 创建：2026-09-24
 > 范围：`scripts/` 的两个工程轴脚本、两个契约测试与三份文档；不改 `Status`、不改产品代码
-> 上游输入：`docs/exec-plan/active/2026-09-22-engineering-merged-state.md`（其「遗留问题」第 1 条把本层登记为 follow-up，评审 [1] 的处置就是本计划）、`docs/product/board-semantics.md` §2.1、`docs/development/ci.md`、`docs/project-management/merge-queue.md` §4.4 与 §7
+> 上游输入：`docs/exec-plan/completed/2026-09-22-engineering-merged-state.md`（其「遗留问题」第 1 条把本层登记为 follow-up，评审 [1] 的处置就是本计划）、`docs/product/board-semantics.md` §2.1、`docs/development/ci.md`、`docs/project-management/merge-queue.md` §4.4 与 §7
 > 载体 issue：<https://github.com/SingularityKChen/harness-projects/issues/115>
 
 > **Superseded by** `docs/development/ci.md`「Engineering state：全域重算与独立唤醒」（2026-10-02，issue #249）：本计划中 `loadTriggerPullRequest`、「触发 PR 必须在引用集合里」的断言与逐 PR 补救入口都已随唯一全域 writer `scripts/reconcile-engineering-project.mjs` 删除；`expectedFor` 的选择策略与「写入口、观察者共用一份策略」保留。下文按原样保留当时的设计与证据。
@@ -69,7 +69,7 @@ node --test tests/contract/engineering-state.test.js
 
 ### 上游依据与批次上下文
 
-`docs/exec-plan/active/2026-09-22-engineering-merged-state.md` 的「遗留问题与技术债务」第 1 条与「评审响应」表第 1 行把本层登记为 follow-up（issue #115）：观察者报得对、写入口写得错，所以不能反过来把观察者改窄。本计划是那次登记的执行层。
+`docs/exec-plan/completed/2026-09-22-engineering-merged-state.md` 的「遗留问题与技术债务」第 1 条与「评审响应」表第 1 行把本层登记为 follow-up（issue #115）：观察者报得对、写入口写得错，所以不能反过来把观察者改窄。本计划是那次登记的执行层。
 
 本次交付属于 **MVP-1 三交付批次**（2026-09-24 起，五个 PR / 三个交付），批次队列写在 `docs/project-management/merge-queue.md` §4.7，本层是位置 1：它的红是「别人造成的红」那一类——先合并它，后续各层的 advisory 红才不会被误读。批次内另有两条在飞栈（#121 → #122 → #157，另一条独立栈），与本层在 `docs/README.md` 的 Active ExecPlan 索引表上必然冲突。
 

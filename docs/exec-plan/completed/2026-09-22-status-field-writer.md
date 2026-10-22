@@ -40,9 +40,9 @@ grep -rn "与 PR 生命周期对齐" docs/
 | `docs/project-management/README.md` §1 | 「与 PR 生命周期对齐：`In Review` = PR 已提交待评审；`Done` = 已合并或已验收」 | 工程 |
 | `docs/project-management/README.md` §2 | `Todo ──开始实现──▶ In Progress ──提交 PR──▶ In Review ──合并/验收──▶ Done` | 工程 |
 
-第一份自我声明为该字段的权威定义（issue #55 的验收产物），并且 `docs/exec-plan/active/2026-09-18-rule-semantics-and-checker-convergence.md` D1 记录了 2026-09-18 的人类伙伴裁决支持它。第二份是它推翻的那个读法，**至今没有被改**。
+第一份自我声明为该字段的权威定义（issue #55 的验收产物），并且 `docs/exec-plan/completed/2026-09-18-rule-semantics-and-checker-convergence.md` D1 记录了 2026-09-18 的人类伙伴裁决支持它。第二份是它推翻的那个读法，**至今没有被改**。
 
-D1 的「要改三处」表只列了 `docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md` 的术语表、D2 表与 D4 表三处，`docs/project-management/README.md` 不在其中。issue #55 的验收标准是 `grep -rn '开发做完没' docs/` 输出为空——它通过了，因为活下来的那份定义用的是「与 PR 生命周期对齐」这组**不同的词**。这正是本仓库反复警惕的那类假绿：检查看得见的字面量，看不见同一个断言的另一种写法。
+D1 的「要改三处」表只列了 `docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md` 的术语表、D2 表与 D4 表三处，`docs/project-management/README.md` 不在其中。issue #55 的验收标准是 `grep -rn '开发做完没' docs/` 输出为空——它通过了，因为活下来的那份定义用的是「与 PR 生命周期对齐」这组**不同的词**。这正是本仓库反复警惕的那类假绿：检查看得见的字面量，看不见同一个断言的另一种写法。
 
 ### 这个字段今天没有写入口
 
@@ -263,7 +263,7 @@ node --test tests/contract/board-status-semantics.test.js
 
 - **不新增**：workflow、依赖、secret、分支保护设置、`Status` 写入路径。
 - **依赖的既有规则**：`AGENTS.md` §7、`docs/development/repository-rules.md` §3（代理写入需点名批准 + Decision Log 留痕）。
-- **依赖的既有事实**：`docs/product/board-semantics.md` §2/§5、`docs/exec-plan/active/2026-09-18-rule-semantics-and-checker-convergence.md` D1。
+- **依赖的既有事实**：`docs/product/board-semantics.md` §2/§5、`docs/exec-plan/completed/2026-09-18-rule-semantics-and-checker-convergence.md` D1。
 - **命名契约**：四个取值名 `Todo` / `In Progress` / `In Review` / `Done` 与字段 ID `PVTSSF_lAHOAY1ahM4BjzAQzhimAjM` 不变（GitHub 内置字段）。
 
 ## Outcomes & Retrospective

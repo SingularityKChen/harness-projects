@@ -76,7 +76,7 @@ $ echo $?
 
 **选定方案 A：解耦准入与基线**
 
-1. `.github/workflows/rule-checks.yml` 的 `on.pull_request` 去掉 `branches: [main]`，保留 `types: [opened, synchronize, reopened, edited]`。**订正（2026-09-21）**：本条原写"触发器不再约束 base，`github.base_ref` 恢复成 PR 自己声明的 base"，这个因果是错的。过滤器只是准入谓词，它**不会改写** `github.base_ref`；对 GitHub 原生 stack 的成员 PR，运行时 base 本来就是**栈的 base 分支**（`main`），去掉过滤器也改变不了它。实测见 run `35511506461`：PR #94 的 API `base.ref=feat/core-start-work`，而该 run 的 job 日志回显 `BASE_REF: main`。因此去掉过滤器只修好了"非 `main` 的普通 PR 完全不触发"那一半；基线来源问题由 `docs/exec-plan/active/2026-09-21-rule-checks-api-base.md`（issue #99）接手。
+1. `.github/workflows/rule-checks.yml` 的 `on.pull_request` 去掉 `branches: [main]`，保留 `types: [opened, synchronize, reopened, edited]`。**订正（2026-09-21）**：本条原写"触发器不再约束 base，`github.base_ref` 恢复成 PR 自己声明的 base"，这个因果是错的。过滤器只是准入谓词，它**不会改写** `github.base_ref`；对 GitHub 原生 stack 的成员 PR，运行时 base 本来就是**栈的 base 分支**（`main`），去掉过滤器也改变不了它。实测见 run `35511506461`：PR #94 的 API `base.ref=feat/core-start-work`，而该 run 的 job 日志回显 `BASE_REF: main`。因此去掉过滤器只修好了"非 `main` 的普通 PR 完全不触发"那一半；基线来源问题由 `docs/exec-plan/completed/2026-09-21-rule-checks-api-base.md`（issue #99）接手。
 2. `edited` 已经在 `types` 里（原本是为 `disclosure` 读 PR 描述而加）。它顺带成为**改 base 时重算**的机制：栈向上 retarget（子 PR 的 base 从栈内上一层改成 `main`）会触发一次重算，判定自愈，不需要额外机制。
 3. `size()` 与 `disclosure()` 在输出首行打印 `基线：<ref> @ <sha>`。
 4. `size()` 在 base 不是 `main` 时额外打印一行栈累计，措辞显式排除判定：`栈累计（相对 origin/main，仅记录，不计入判定）：…`。

@@ -1,6 +1,6 @@
 # 规则语义收敛与检查器加固 ExecPlan
 
-> 状态：Active
+> 状态：Completed
 > 创建：2026-09-18
 > 范围：把 2026-09-18 MVP 交付评审留下的 9 个 issue（#38 #39 #40 #41 #45 #46 #47 #48 #55）收敛掉。前五个 PR 收敛规则语义与离线检查器，第六个 PR（#61）补齐 #45 的运行时观察闭环；六者都可独立验收、合并、回滚。不写 `packages/` 下任何实现代码。
 > 控制文档：本文件是这 6 个 PR 的唯一 ExecPlan。合并顺序见 `Interfaces and Dependencies`。
@@ -72,7 +72,7 @@ grep -q 'agent 可以写' AGENTS.md && echo OK
 1. `Status` 是 Planning provider（GitHub Projects）的原生字段。不变量 3 要求规划与工程正交，因此规划轴必须在看板上有落脚点；如果 `Status` 是工程轴，看板上就没有任何字段承担规划，而 Planning 正是本产品要卖的能力域。
 2. 人类伙伴已经关掉 `Item closed`。在「`Status` = 工程事实」的读法下那条工作流是**正确**的、不该关——这个动作本身证伪了读法 A。
 
-**因此要改三处现有表述**（它们都在 `docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md`）：
+**因此要改三处现有表述**（它们都在 `docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md`）：
 
 | 位置 | 现在 | 改成 |
 |---|---|---|
@@ -158,7 +158,7 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 
 ### Batch A · 看板语义定义（PR-A，`docs/board-planning-semantics`）
 **最小闭环**：`Status` 在仓库里只有一个定义，九条内置工作流的裁决可从它推导。
-**涉及文件**：`docs/product/board-semantics.md`（新建）、`docs/exec-plan/active/2026-09-18-delivery-planning-and-board.md`（改三处）、`docs/README.md`（索引行）、`scripts/board-workflow-check.mjs`（新建，D4 的纯函数）、`tests/contract/board-workflow.test.js`（新建）
+**涉及文件**：`docs/product/board-semantics.md`（新建）、`docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md`（改三处）、`docs/README.md`（索引行）、`scripts/board-workflow-check.mjs`（新建，D4 的纯函数）、`tests/contract/board-workflow.test.js`（新建）
 **交付**：Closes #55、Closes #48；Refs #45（范围收窄）
 - [ ] `docs/product/board-semantics.md`：规划轴/工程轴的定义、谁写、不变量 3 在看板上如何满足、D2 的推导规则与九行裁决表、对 `Closes #N` 辩护的回答
 - [ ] 改 `delivery-planning-and-board.md` 的三处表述（术语表、D2 表、D4 表）
@@ -269,11 +269,11 @@ D1 一旦成立，D4 那张表就不该是九次独立判断，而应当是一�
 | F4 | #56 | `Auto-close` 推导、`PROJECTS_TOKEN` | RC1 + RC3 |
 | F5 | #57 | 机械可执行过度承诺、逐字节相同 | RC1 + RC3 |
 
-- [ ] F1 #60
-- [ ] F2 #59 + #63
-- [ ] F3 #58
-- [ ] F4 #56
-- [ ] F5 #57
+- [x] F1 #60
+- [x] F2 #59 + #63
+- [x] F3 #58
+- [x] F4 #56
+- [x] F5 #57
 - [ ] 整理提交、推送、逐条回复并 resolve 评审 thread
 
 **验证**：每条意见的复现命令在修复前后各跑一次；四个检查器对仓库现有文件仍全绿；五路合并顺序重测。
@@ -441,7 +441,11 @@ C / D / E 三者之间**无依赖**，可任意顺序；但都改 `AGENTS.md`，
 
 ## Outcomes & Retrospective
 
+2026-10-22 归档核对：PR #56/#57/#58/#59/#60/#61/#63 均已合并，F1–F5 批次据对应 PR 的 `state=MERGED` 与非空 `merged_at` 标为完成。交付边界仍以本节批次表为准；#48 的剩余规划选择没有由本归档宣称完成。整理提交、逐条复现与历史评审线程的过程框未据合并状态推断为已逐项复核，仍保留原记录。
+
 前五个规则收敛批次与 Batch G 运行时观察均已执行完毕，等待人类伙伴评审——**本计划不合并任何 PR**。
+
+> Superseded by 本节「2026-10-22 归档核对」（2026-10-22）：所列 PR 均已合并；上句“等待评审”为历史状态，“本计划不合并”保留当时的执行权限边界。
 
 **交付结果**
 
@@ -475,3 +479,5 @@ C / D / E 三者之间**无依赖**，可任意顺序；但都改 `AGENTS.md`，
 - 2026-09-18 14:03 CST：新建本文件。范围是 2026-09-18 MVP 交付评审留下的 9 个 issue，分五个 PR 收敛。三个设计决定（`Status` 的读法、PR 切分、#45 的切半）在开工前由人类伙伴裁决，记在 `Decision Log`。
 - 2026-09-18 16:05 CST：五个批次执行完毕后回填。改动原因：(1) `Progress` 勾选五个批次并补「执行期间的偏差」一节（Batch E 被用量上限打断、两次独立撞到 `cp` 静默失败）；(2) `Validation and Acceptance` 第 1 项的判定范围排除本文件自身，理由是自指——与 `AGENTS.md` 被 `SCAN_EXCLUDES` 排除同一类；(3) `Decision Log` 增三条（吸收 #61 的模型、合并顺序改 E 第一、`Closes #48` 收回成 `Refs`）；(4) `Surprises` 增两条（本文件被自己的扫描器命中；三会话并行产出冲突产物）；(5) `Outcomes & Retrospective` 回填，含对 D6 写得过于笼统的自我批评。
 - 2026-09-19：加入并完成 Batch G。原因是 #61 rebase 后暴露了真正根因：纯判定模块已经成为唯一权威，但旧 workflow 仍把它当 CLI，且 PR/手动触发让 PAT 执行面超出观察所需。新增 D7、运行时验收项、红→绿 Progress、两条 Surprise 与三层边界 Decision；实现收敛为独立 live adapter + schedule-only workflow，不引入 Provider 或分页框架。
+
+- 2026-10-22：MMP 归档评审 P2 修订：回读七个 PR 合并结果，标明原等待状态被取代并补 F1–F5 完成框；不推断未核实的历史实验或线程操作。
