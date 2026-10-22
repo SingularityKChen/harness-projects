@@ -505,8 +505,8 @@ gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,baseRe
 |---|---|---|---|---|
 | 1（已合并） | #393 / #362 | `test/test-layer-single-pass` | 契约只做真实层非空检查，真实 CI lanes 仍执行 | 2026-10-22 rebase 合并 `66a01cc412303eb1ba6ea5948c78c753d654bff0`，#362 CLOSED；后续重锁 main |
 | 2（已合并） | #392 / #297 | `feature/delivery-repository-routing` | 持久仓库引用选择统一的远端谱系读取 | 2026-10-22 rebase 合并 `d6840e0f9656797bdbf5fffca4f6dcd89881b6ac`，#297 CLOSED |
-| 3 | #394 / #335 | `feature/host-planning-refresh` | Host 定时/显式刷新、有界等待与卸载排空 | C394-1 已修复并独立复评 APPROVE；新 head 门禁通过后执行授权收尾 |
-| 4 | #395 / #282 | `feature/drawer-execution-state` | 实际抽屉消费已存运行状态与 manual fallback | 无能力依赖；两项 P2 修复后复评；与 #394 四文件冲突须按下述方式保留两能力 |
+| 3（已合并） | #394 / #335 | `feature/host-planning-refresh` | Host 定时/显式刷新、有界等待与卸载排空 | 2026-10-22 rebase 合并 `5f4dcbe6f080d30b9df3e1cddd4832ff03a1e9ca`，#335 CLOSED；C394-1 已回复/resolve |
+| 4 | #395 / #282 | `feature/drawer-execution-state` | 实际抽屉消费已存运行状态与 manual fallback | 两项 P2 已修复并独立复评 APPROVE；四文件冲突保留两能力，最终 head 门禁通过后按人类授权 rebase 合并，结果回读 PR #395 |
 
 固定输入 `main@d7e7bca6`、#393 `85fa379c`、#392 `9cfb438f`、#394 `09f33c38`、#395 `fe24c5e6` 已在仓库外 clone 按上述顺序 rebase 预演：前三项无冲突，#395 的冲突仅为两份 Host 文件和两份 Host 契约测试。解法：保留 `refreshPlanning` 与 `getExecutionContext` 两 operation，使用捕获 workspace 的 `handlersFor`，保留 scheduler start 与 stop/drain/close 顺序；契约保留 refresh 的精确参数检查并排除新增执行查询后比较原 descriptor 集合。
 
@@ -608,3 +608,5 @@ gh issue reopen 4 -c "被 #108 的关闭引用自动关闭；revise 清单（R1�
 ```
 
 **Superseded by L1（#119，2026-09-23）**：上面这段的前提"行为 6 判 `inconclusive`"已不成立——L1 补测后**提议**行为 6 改判 `pass`（裁决 §2.6；**采纳权在人类伙伴**，采纳前不得作为事实写入 #4），因此"无法判定等同于不满足"这条理由不再适用于行为 6；#4 保持打开的理由改为 **`revise` 的 R1–R8 尚未落地**（其中行为 1 的成员关系落点仍缺模型落点）。`gh issue reopen` 的命令文案已按此订正，避免往 #4 写入"行为 6 仍为 inconclusive"这条与裁决相反的话。**回读（2026-09-23）**：`gh issue view 4 --repo SingularityKChen/harness-projects --json state,comments` → `state = OPEN`、无评论，即 #108 的关闭引用没有实际关闭 #4，这段补救文案没有被执行过。
+
+2026-10-22 最终整合补记：#393/#392/#394 已依次 rebase 合并，对应 issue #362/#297/#335 均 CLOSED。#395 在真实 `main@5f4dcbe6f080d30b9df3e1cddd4832ff03a1e9ca` 上解决既定四文件冲突，其 apps/packages/tests/scripts/workflows 产品文件集合与已通过 1808+7 的修复并集 `a4440bd45b725d7f2c398127200db765bab49c06` 的 Git blob 清单完全一致（SHA-256 `dcbd55267c3ca727ec892aef0825d965127ddd2ab515c9ba8f71b21c3d6f2807`）。#395 的最终 head/mergeCommit 及 #282 关闭结果以 `gh pr view 395 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit` 与 issue 回读为准；本段不预写未来合并 SHA。

@@ -1,6 +1,6 @@
 # 工作项抽屉执行上下文与运行状态 ExecPlan
 
-> 状态：Active · 实现验证完成，待独立验收
+> 状态：Completed · 两项 P2 修复已获独立复评 APPROVE；新提交门禁由协调者回读
 > 创建：2026-10-22
 > 范围：#282；Host 已记录的执行事实经真实插件到达安全工作项抽屉
 > 规范：`PLANS.md`；上游依据：#282、`docs/product/vertical-path.md` §2 第 8 步
@@ -123,6 +123,14 @@ UI 不 import Core/Controller/Provider 运行时；client 不依赖 React；浏�
 精确 head 的必需 checks、issue 关联和独立审阅均通过才 ready，保持未合并；更换 head 后全部重新锁定。
 回滚：审阅阶段保留 draft 并修复；需要撤销能力时整体 revert 本 PR，已有记录不变。
 
+### 评审修订 · 同目标读取恢复与判别性回归
+
+初审 F1/F2 均为 P2：仅修改 `packages/ui/src/execution-context-section.ts`、`tests/contract/ui-execution-context.test.js` 及本 PR 文档。
+同 key、同 repository 保留最后成功结果（包括 null），refreshing/error 与已读事实独立；成功替换该仓库，失败保留并标最后已读。目标/仓库集合变化清空，撤权/断线旧响应仍失效，不增加持久缓存、Provider 调用或公共接口。
+先补回归并看到旧实现丢路径的失败，再实现；新目标完成后排除旧 canary，逐仓库唯一断言，同目标两次刷新逆序与断线/重连反例。
+验证：`node --test tests/contract/ui-execution-context.test.js`（旧实现 5/6，修复后 6/6）；三份目标文件 10/10；`pnpm verify`（1772 + MVP-0 7）；统一六项变异全 KILLED 并字节恢复；生产 Panel/Host/SQLite 浏览器覆盖先成功后失败仍保留四项、换目标/PR/撤权/断线晚响应和重连，规划 revision 1→1。
+回滚：仅撤回本次 Section 与测试修订；已有存储与规划状态不变。实现 owner 不批准自己的修复，由协调者另派独立复评后整合提交。
+
 ## Validation and Acceptance
 
 | 验收 | 判定证据 |
@@ -139,14 +147,19 @@ UI 不 import Core/Controller/Provider 运行时；client 不依赖 React；浏�
 
 ## Progress
 
+- [x] (2026-10-22 SGT) 初审两项 P2 已按授权完成 TDD 修复、最终变异和浏览器自验；当前 owner 不自批；另派独立复评已 APPROVE，交协调者整合。
+
 - [x] (2026-10-22 09:16 +08) 两份独立设计与源码交叉审查，收敛按需查询和真实 Panel 验收。
 - [x] (2026-10-22 09:16 +08) 决定 wire 空值、multi-repo、Host 可见性复验与局部请求隔离；计划落盘。
 - [x] (2026-10-22 +08) Batch 1：双 Storage 查询覆盖八种运行状态、独立 fallback、无 run；四个 Provider 的所有方法换成抛错陷阱，查询前后记录、帧与修订不变。
 - [x] (2026-10-22 +08) Batch 2：Host owner 顺序集成精确 unary；nullable JSON、坏输入、枚举与 scope、PR/遮蔽、查询期间撤权和固定错误文案完成。
 - [x] (2026-10-22 +08) Batch 3：生产 Panel 接线、组件异步反例与 artifact/boundaries 已通过；真实 Chrome 浏览器已覆盖人工承接、运行成功/失败、刷新/断线/恢复、PR/遮蔽零查询、撤权后晚成功、关闭后晚拒绝、焦点与 Escape，零 pageerror。
-- [ ] Batch 4：独立验收、文档证据和 ready-but-unmerged PR。
+
+- [x] (2026-10-22 09:54 SGT) 独立实现验收 PASS；实现 head `90bed2110e9f` 的 PR Fast Gate、四条 Merge Gate lane 与发布检查均通过；完成计划归档与索引同步。
 
 ## Surprises & Discoveries
+
+2026-10-22 评审修订：初审 R3 迟到成功保护变异存活；补强后的跨目标完成断言在实施前已将其杀死，最终 R3 由同目标逆序用例归因，新增 last-success/null 两项变异也被杀死。初审刷新失败会清空已读路径的反例已先红后绿。
 
 context Ready 不是 run Running，且 fallback 是独立记录字段；证据是 `readExecutionContext`、`fallbackOf` 与 domain 的八种运行状态。
 真实客户端当前只有 watch 注入；只扩 Controller 或给 Drawer 测试传 prop 会留下生产不可达缺口，证据是插件 `client.ts`。
@@ -156,6 +169,10 @@ context Ready 不是 run Running，且 fallback 是独立记录字段；证据�
 真实浏览器在遮蔽后恢复条目时，最初 opener 已脱离文档；关闭应按现有规则回到列表标题，再次从新 anchor 打开后 Escape 回到该 anchor。该差异是夹具断言修正，没有修改焦点实现。
 
 ## Decision Log
+
+- Decision（2026-10-22，协调者转录根会话收到的人类原始授权，覆盖 PR #392–#395）：『如果没有且无 P0 / P1，或只有 P2/P3 → **你负责后续**：三思后修复 → re-review → 归档 ExecPlan → 按 Conventional Commits 与可独立理解、回滚、审阅的交付边界整合 commit → 核对并处理对应 issue → `merge_method=rebase` 合并。』Rationale：初审只有两项 P2，按此授权由当前 owner 修复、独立 reviewer 复评；收到直接人类授权的根协调会话负责提交整合、外部写入与实际合并。本子任务不执行这些动作；Planning Status 仍归人类，不作变更。
+
+- Decision：最终 CI/ready 是易失的 PR 属性，归档文档保留回读命令，发布时重新锁定最新 head，不把实现 head 的绿灯转移给归档 head。Rationale：避免文档静态值与远端当前状态形成第二事实源。Date/Author：2026-10-22 09:54 SGT / 交付协调者。
 
 D1（2026-10-22 +08，设计审阅）：采用 unary query；Rationale：复用本地查询，避免扩大 Planning stream 与路径披露面。
 D2（同日，设计审阅）：选择 `{context:null|dto}` 与严格 decoder；Rationale：空值可稳定传输，坏scope不能靠类型断言进入 UI。
@@ -181,11 +198,20 @@ remote 方法名及参数来自 OPERATIONS；decoder 类型放 client，展示�
 
 ## Outcomes & Retrospective
 
+2026-10-22 评审修订已自验：完整 `pnpm verify` 为 typecheck + 1772 测试 + 7 MVP-0，全部 exit 0；最终六项已归因变异全 KILLED，字节恢复；真实生产 Panel/Host/SQLite 浏览器显示失败后保留路径、分支、运行状态和人工处理并标最后已读，目标/撤权/断线晚响应不泄露、重连读新状态，规划 revision 1→1。修复仍是未提交工作树，独立复评和新 head 门禁交由协调者，不能沿用旧 head 批准。
+
 实现已连通 Core → Controller → Host remote → 严格 client reader → 生产 apply 注册 Panel → 原生抽屉。新增查询无数据库迁移、无 Provider 调用；运行状态与 fallback 独立。
 TDD：初次 Core 双 Storage 因 `runStatus === undefined` 失败，reader/target/Section 因缺少函数或字段失败；fixture 纠正后，真实 Host operation 与生产 Panel reader 注入也观察到缺失失败。补最小实现后相关 Core/Controller/UI 回归 50 项通过，artifact 与 boundaries 32 项通过。Host owner 集成后真实 Host/Panel 两项通过；完整 `pnpm verify` 首轮 1769/1770，仅旧 `domain/values` 四项精确白名单因本次新增纯值出口失败；同步为六项并保留逐一同引用断言后重跑通过（1770 项 + MVP-0 7 项）。
 真实浏览器使用 `execution-drawer-browser.mjs` 的生产 apply Panel 与真实 Host/SQLite JSON 桥；Chrome 155.0.8059.39，11 类检查通过，10 次精确查询、零 pageerror，规划修订始终为 1。首次浏览器运行在 Host owner 尚未接线时因缺操作失败；集成后焦点夹具按实际 opener 生命周期修正。
 命令：`pnpm verify`（typecheck + 1770 tests + 7 MVP-0，exit 0）；`pnpm run boundaries`（9）；`node scripts/workflow-check.mjs`（8 个文件，无发现）；各批上述 `node --test` 命令均已运行。
 完成后记录实际命令、检出、当前 head 与偏差；重新评估债务，移入 completed 并更新索引。
+
+最终交付记录（2026-10-22 09:54 SGT @ `90bed2110e9f`）：独立验收通过，当前实现 head 的 PR Fast Gate、Integration/E2E/MVP-0/Boundaries 四 lane 及发布检查成功。归档只改变文档，产品文件与该验收树相同。最终归档提交仍须重新执行 `gh pr checks 395 -R SingularityKChen/harness-projects`，并回读 head/base、issue 双向关联和 review threads；通过后执行 `gh pr ready 395 -R SingularityKChen/harness-projects`。ready 和合并状态只以 PR 实时结果为准，Git 回滚不撤销 Project 元数据。
+
+
+并行集成证据（2026-10-22 SGT，主线基线 `d7e7bca6`）：在 `test/iteration7-8-integration-preview` 临时检出组合本轮四个产品输入后，typecheck、1806 项测试与 7 项 MVP-0 通过；再加现有 PR #388–#391 的固定产品输入后，resolution-check、1868 项测试与 7 项 MVP-0 通过，未发现行为失败。四项输入分别为 #335 `2caa1842`、#282 `90bed211`、#297 `9cfb438f`、#362 `85fa379c`；已有四项为 #388 `6b855c41`、#389 `a8fe6d2d`、#390 `2d6547b8`、#391 `8515d8b9`，均为本次观察输入，不能视为永久远端 head。
+
+两项 Host 能力之间有四处机械冲突：`host-composition.ts` 的 factory 要同时保留捕获 workspace 的 getExecutionContext 与共享单飞的 refreshPlanning，`host-operations.ts` 要同时声明两项精确参数；两份 Host operations/remote 契约保留双方断言。`watch` 仍在末尾，stop/drain/close 与前后可见性检查保留。当前四个已有 PR 仅需保留全部文档索引/债务追加；client/ui-model 的新增出口自动合并，无新增 API/兼容层依赖。预演只写临时 worktree，未修改或合并任何 GitHub PR。
 
 ## Bottom Change Note
 
@@ -195,3 +221,11 @@ TDD：初次 Core 双 Storage 因 `runStatus === undefined` 失败，reader/targ
 2026-10-22 +08：按已批准设计完成 Core/client/UI 与 Host owner 顺序接线；记录实际红绿路径，扩既有 domain 纯值出口；保留 active 等待当前实现验证与独立验收。
 
 2026-10-22 +08：真实浏览器 11 类检查通过；完整 verify 1770 + MVP-0 7、boundaries 9 与 workflow-check 8 文件通过。计划保持 active，交给父任务进行独立验收、最终发布与当前 head 回读。
+
+2026-10-22 09:54 SGT：回填独立验收、实现 head 远端门、收敛提交边界并归档；最终归档 head 与 ready 使用实时回读命令，不继承旧绿。
+
+2026-10-22 SGT：按初审 F1/F2 完成两文件最小修复与先红后绿，记录人类原始授权转录、1772+7 验证、六项变异和真实浏览器恢复证据；评审记录收敛，保留独立复评与新 head 回读门。
+
+2026-10-22 SGT：协调者转录独立复评 APPROVE，无新增问题；组件/详情30/30，独立三反例共9/9，四项变异全KILLED并按归因恢复。复评锁定的 Section SHA256 与本地实算一致；当前仍不提交或外部写入，新 head 由根协调会话整合后重锁。
+
+2026-10-22 最终整合：在真实 `main@5f4dcbe6f080d30b9df3e1cddd4832ff03a1e9ca` 上保留 #394 refreshPlanning 及生命周期边界，并保留本 PR 的 workspace 绑定 getExecutionContext。四文件冲突已解，产品 Git blob 清单与1808+7通过的修复并集 `a4440bd45b725d7f2c398127200db765bab49c06` 完全一致；当前 head 的独立复核及远端门禁不沿用旧批准。证据见 `docs/review/pr-395-mmp-review.md`。
