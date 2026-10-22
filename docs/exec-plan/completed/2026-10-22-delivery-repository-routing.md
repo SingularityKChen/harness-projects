@@ -1,6 +1,6 @@
 # 交付谱系按仓库与操作路由 ExecPlan
 
-> 状态：Active，实施与本地验收完成，等待独立实现审读及最终远端门禁。
+> 状态：Completed，实施与本地验收完成，等待独立实现审读及最终远端门禁。
 > 创建：2026-10-22；关联：#297（#216 的独立闭环，解除 #233 的此项读路由阻塞）。
 > 依据：根 `PLANS.md`、`AGENTS.md`、`docs/adr/ADR-0015-repository-references-side-by-side.md`。
 
@@ -141,7 +141,8 @@ push 后用 `gh pr view --repo SingularityKChen/harness-projects --json number,h
 - [x] (2026-10-22 09:22 SGT) Batch 2：覆盖缺引用、historical、同名其他实体、首次拒绝、三类 gate 拒绝及 unavailable 声明者冲突、恢复、部分失败、重开和查询纯读；四文件回归 84/84。
 - [x] (2026-10-22 09:22 SGT) `pnpm verify`：typecheck 通过，完整三层 1787/1787、MVP-0 7/7；本地产品验收完成。
 - [x] (2026-10-22 09:22 SGT) Batch 3 本地判别：M1–M4 均 KILLED，按字节还原后基线绿；五文件回归 130/130，boundaries 9/9，workflow-check 无发现。
-- [ ] Batch 3 交付门：独立实现审读、最终 push、当前 head 远端 checks / issue / threads 回读、draft→ready 与计划归档由总 owner 继续；此实施批不 push、不改 PR 或看板。
+
+- [x] (2026-10-22 09:37 SGT) 独立实现验收 PASS；实现 head `59ceff8696f3` 的 PR Fast Gate、四条 Merge Gate lane 与发布检查均通过；完成计划归档与索引同步。
 
 ## Surprises & Discoveries
 
@@ -152,6 +153,11 @@ push 后用 `gh pr view --repo SingularityKChen/harness-projects --json number,h
 - 2026-10-22 实施后首次相关回归为 79/82：两种 Storage 的旧 completeness 行与 GitHub 夹具各失败，恰为设计已识别的三处期待/前提；按 D1 / D3 修正后 82/82，追加首次拒绝的两用例后为 84/84。未改生产路由来兼容夹具。
 
 ## Decision Log
+
+- Decision：人类本次直接授权 PR #392–#395 在无 P0/P1 或仅 P2/P3 时，由评审会话负责“修复 → re-review → 归档 ExecPlan → … → merge_method=rebase 合并”。本 PR 全矩阵及独立复核无新增 finding，保持计划、实现、验收三个可独立审阅提交边界，补入评审证据并重锁最终 head 后执行授权收尾。Rationale：授权来自本会话，不改变 Planning Status 或 blocked-by。Date/Author：2026-10-22 / 评审协调者。
+
+
+- Decision：最终 CI/ready 是易失的 PR 属性，归档文档保留回读命令，发布时重新锁定最新 head，不把实现 head 的绿灯转移给归档 head。Rationale：避免文档静态值与远端当前状态形成第二事实源。Date/Author：2026-10-22 09:37 SGT / 交付协调者。
 
 - D1 / Decision：采纳完整 CR 操作门，CR 不可用或未声明时四集合 stale；只对 provider 读取失败保留原部分降级。Rationale：ADR-0015 已将远端 head 与 PR 定为同一操作，预发布可直接简化，无需为旧期待另建半授权协议。Date/Author：2026-10-22 09:07 SGT / 独立设计综合审读 agent；本裁决不授予任何规划字段/关系写权限。
 - D2 / Decision：同次刷新只路由一次并传递原返回值。Rationale：排除两跳选择漂移与自行拼引用，保持工作树身份从执行上下文派生；不声称跨 Storage/provider 的快照事务。Date/Author：2026-10-22 09:07 SGT / 独立设计综合审读 agent。
@@ -206,10 +212,18 @@ Node ≥22，pnpm 10.28.2；现有 `@harness-projects/core`、Fake 与 SQLite wo
 | M3 选对连接却拼 Local ref | `AC297 side-by-side-local-github-operation (local primary, Fake)` | `AssertionError: 两跳都使用完整远端引用`；bindingId 是 Local，expected 是 GitHub 型连接。 |
 | M4 拒绝只记 CR gap | `AC297 missing-current-reference (missing, Fake)` | `AssertionError: 路由拒绝保留四集合节点、锚点与 confirmedAt，全部 stale`；错误 key 导致已确认集合被清空或更新。 |
 
-提交前人工核对凭据、本机路径与身份、账号与个人信息、内部系统、保密字样五类发布面，无发现；机械检查须覆盖最终提交范围。本批交回后仍需独立实现审读及最终远端门禁，因此计划尚未归档。真实 GitHub 权限、Harness 安装和完整 demo 仍由 #233 验收；本地离线替身与脚本化平台不能证明这些外部条件。
+提交前人工核对凭据、本机路径与身份、账号与个人信息、内部系统、保密字样五类发布面，无发现；机械检查须覆盖最终提交范围。本批交回后已由本节最终交付记录取代（Superseded by 本节最终交付记录，2026-10-22）。真实 GitHub 权限、Harness 安装和完整 demo 仍由 #233 验收；本地离线替身与脚本化平台不能证明这些外部条件。
+
+最终交付记录（2026-10-22 09:37 SGT @ `59ceff8696f3`）：独立验收通过，当前实现 head 的 PR Fast Gate、Integration/E2E/MVP-0/Boundaries 四 lane 及发布检查成功。归档只改变文档，产品文件与该验收树相同。最终归档提交仍须重新执行 `gh pr checks 392 -R SingularityKChen/harness-projects`，并回读 head/base、issue 双向关联和 review threads；通过后执行 `gh pr ready 392 -R SingularityKChen/harness-projects`。ready 和合并状态只以 PR 实时结果为准，Git 回滚不撤销 Project 元数据。
+
+独立验收仅发现索引仍写“尚未实施”的 P3，本次归档已同步；无额外生产重构需要。
 
 ## Bottom Change Note
 
 Change Note (2026-10-22 09:07 SGT)：首次整合 #297 两份独立设计与源码证据；明确完整操作门裁决、合法 alias 夹具、双 Storage TDD、变异归因、尺寸与当前 head 交付门。
 
 Change Note (2026-10-22 09:22 SGT)：记录真实 TDD、拒绝/恢复、公共 alias、相关回归与四项 mutation 结果，明确实施批与最终远端交付的分工；保留 Active 等待独立实现审读。
+
+2026-10-22 09:37 SGT：回填独立验收、实现 head 远端门、收敛提交边界并归档；最终归档 head 与 ready 使用实时回读命令，不继承旧绿。
+
+2026-10-22：MMP 初审与独立复核未发现 P0/P1/P2/P3；证据归档于 `docs/review/pr-392-mmp-review.md`。本计划维持 completed；最终 push 后重新核对 head/base、checks、issue 关联和 review threads，再按本次人类直接授权以 rebase 合并。没有用代码测试替代真实产品走查。
