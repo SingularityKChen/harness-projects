@@ -81,7 +81,7 @@ async function open(t, { seed: seeded = true } = {}) {
   t.after(async () => { // 清理自己有上限：被破坏的实现下流关不掉，兜底的卸载中止让轮询计时器退出，进程不挂住
     await within(workspace.close(), 2000).catch(() => undefined)
     await within(installed.dispose(), 2000).catch(() => undefined)
-    host.dispose()
+    await host.dispose()
     await rm(root, { recursive: true, force: true })
   })
   const baselineAt = (generation) => logs.some((line) => new RegExp(`^\\[harness-projects\\] watch baseline r=\\d+ gen=${generation}$`).test(line))
@@ -142,7 +142,7 @@ test('host watch：卸载中止打开的流，客户端排定 1 s 后重开并�
   assert.equal(h.timers[0].delayMs, 1000)
   assert.deepEqual(retries(h.errors), [['[harness-projects] watch failed', 'retry in 1000ms', 'harness-projects watch 在 gap 之外结束']])
   assert.deepEqual(readout(h.workspace.getSnapshot()), { ...before, connected: false, current: 0, reason: DISCONNECTED })
-  h.host.dispose()
+  await h.host.dispose()
   assert.equal(close.mock.callCount(), 1)
   assert.throws(() => h.host.watch(new AbortController().signal), /已关闭/)
   const count = reads.mock.callCount()

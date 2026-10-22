@@ -1,10 +1,11 @@
 import { mkdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
-import { composeCore, unavailableCore, type CoreApi } from '@harness-projects/core'
+import { composeCore, unavailableCore, createPlanningReconciler, type PlanningReconciler, type PlanningReconcilerTimers, type CoreApi } from '@harness-projects/core'
 import { createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
 import { createSqliteStorage, type SqliteStorage } from '@harness-projects/storage-sqlite'
 import type { WorkspaceId } from '@harness-projects/domain'
 import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
+import { createPlanningLifetime } from './host-planning-lifetime.ts'
 import { dispatchOf, OPERATIONS, type UnaryHandlers, type UnaryName } from './host-operations.ts'
 import { hostStoragePolicy, restoreProviders, type DisabledBinding, type ProviderCatalog } from './host-providers.ts'
 
@@ -22,6 +23,11 @@ export interface HostCompositionOptions {
   readonly fetch?: (url: string, init: RequestInit) => Promise<Response>
   /** watch 流两次 poll 之间的间隔（毫秒），缺省 1000；测试传 5。 */
   readonly watchIntervalMs?: number
+  /** 全量读取默认/最低 60 秒；测试只替换 timers，不放宽速率。 */
+  readonly planningIntervalMs?: number
+  /** 每个 Promise 读、每次 reconcile 迭代的绝对预算；默认 30 秒。 */
+  readonly planningReadTimeoutMs?: number
+  readonly planningTimers?: PlanningReconcilerTimers
 }
 export interface HostComposition {
   readonly controller: Controller
@@ -30,16 +36,23 @@ export interface HostComposition {
   call(name: UnaryName<typeof OPERATIONS>, input: unknown): Promise<unknown>
   /** 一代宿主流（#276）：每次 `next()` 都经 `guarded`；`signal` 中止即正常结束。 */
   watch(signal: AbortSignal): AsyncIterable<WireStreamFrame>
-  dispose(): void
+  /** 同步撤销读准入；Host 在 remote drain 前调用。 */
+  stop(): void
+  /** 等已登记任务完成后关闭 Storage；重复调用共享同一 Promise。 */
+  dispose(): Promise<void>
 }
 
 /** 每个 unary 操作一个 handler：只把已校验的输入透传给 Controller，结果与 `writeState` 不加工（Host 拥有权威状态）。 */
 const HANDLERS: UnaryHandlers<typeof OPERATIONS, Controller> = {
   baseline: (controller) => controller.baseline(),
+  refreshPlanning: (controller, input) => controller.commands.refreshPlanning(input),
   bootstrapWorkspace: (controller, input) => controller.commands.bootstrapWorkspace(input),
 }
 
 export async function createHostComposition(options: HostCompositionOptions): Promise<HostComposition> {
+  const intervalMs = options.planningIntervalMs ?? 60_000
+  if (!Number.isFinite(intervalMs) || intervalMs < 60_000 || intervalMs > 2_147_483_647) throw new RangeError('Planning refresh interval is invalid')
+  const lifetime = createPlanningLifetime(options.planningReadTimeoutMs)
   const dataDir = path.dirname(options.dataPath)
   await mkdir(dataDir, { recursive: true })
   const worktreesDir = path.join(await realpath(dataDir), 'worktrees')
@@ -53,33 +66,64 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   }
   let storage: SqliteStorage | undefined
   let closed = false
+  let reconciler: PlanningReconciler | undefined
+  let disposal: Promise<void> | undefined
+  const pending = new Set<Promise<unknown>>()
+  const track = <T>(task: Promise<T>): Promise<T> => {
+    pending.add(task)
+    void task.then(() => pending.delete(task), () => pending.delete(task))
+    return task
+  }
+  const stop = (): void => { closed = true; lifetime.stop(); reconciler?.dispose() }
+  const dispose = (): Promise<void> => disposal ??= (async () => {
+    stop()
+    await Promise.allSettled([...pending])
+    storage?.close()
+  })()
+  const diagnostics = { syncRoundFailed: (error: unknown) => log.write('syncRoundFailed', describeError(error)) }
   try {
     storage = createSqliteStorage(options.dataPath, hostStoragePolicy(options.catalog), options.migrationsDir === undefined ? {} : { migrationsDir: options.migrationsDir })
     const workspace = await storage.getWorkspace(options.workspaceId)
     const { table, disabled } = workspace === undefined ? { table: {}, disabled: [] } : await restoreProviders(storage, workspace.id, options.catalog, {
       // 解析失败（例如宿主凭据服务缺席）只留允许名单字段；provider 随后把它归类为结构化 unavailable，不带原文。
-      resolveCredential: (handle) => options.resolveCredential(handle).catch((error: unknown) => { log.write('credentialFailed', describeError(error)); throw error }),
-      worktreesDir, fetch: options.fetch ?? ((url, init) => globalThis.fetch(url, init)),
+      resolveCredential: async (handle) => {
+        lifetime.assertActive()
+        try { const value = await options.resolveCredential(handle); lifetime.assertActive(); return value }
+        catch (error) { log.write('credentialFailed', describeError(error)); throw error }
+      },
+      worktreesDir, fetch: (url, init) => { lifetime.assertActive(); return (options.fetch ?? globalThis.fetch)(url, init) },
     })
     for (const item of disabled) log.write('bindingDisabled', { bindingId: item.bindingId, domain: item.domain, implementationKey: item.implementationKey, code: item.error.code })
+    const providers = { ...table, ...(table.planning === undefined ? {} : { planning: lifetime.wrap(table.planning) }), storage }
     // 空数据根：不向 Core 传 storage，不写任何行；工作区的创建属于挂载写者（#127、#131）。
     const core: CoreApi = workspace === undefined ? unavailableCore('工作区尚未创建') : await composeCore({
       workspace: { id: workspace.id, name: workspace.name, statusPolicy: workspace.statusPolicy },
-      providers: { ...table, storage },
-      diagnostics: { syncRoundFailed: (error) => log.write('syncRoundFailed', describeError(error)) },
+      providers, diagnostics,
     })
     const controller = createController(core, { workspaceRevision: () => storage!.currentRevision(options.workspaceId) })
+    if (table.planning !== undefined) {
+      reconciler = createPlanningReconciler(() => { lifetime.assertActive(); return track(core.commands.refreshPlanning()) }, {
+        intervalMs, diagnostics, ...(options.planningTimers === undefined ? {} : { timers: options.planningTimers }),
+      })
+      reconciler.start()
+    }
     const dispatch = dispatchOf(OPERATIONS, HANDLERS, guarded)
     return {
       controller,
       disabled,
-      call: async (name, input) => { if (closed) throw new Error('host 已关闭'); return dispatch(controller, name, input) },
+      call: async (name, input) => { if (closed) throw new Error('host 已关闭'); return track(dispatch(controller, name, input)) },
       watch: (signal) => {
         if (closed) throw new Error('host 已关闭')
         const frames = streamWorkspace(controller, { signal, intervalMs: options.watchIntervalMs ?? 1000 })
-        return { [Symbol.asyncIterator]: () => ({ next: () => guarded(() => frames.next()), return: () => frames.return() }) }
+        return { [Symbol.asyncIterator]: () => ({
+          next: () => {
+            if (closed) return Promise.reject(new Error('host 已关闭'))
+            return track(guarded(() => frames.next()))
+          },
+          return: () => frames.return(),
+        }) }
       },
-      dispose: () => { if (closed) return; closed = true; storage?.close() },
+      stop, dispose,
     }
-  } catch (error) { storage?.close(); throw error }
+  } catch (error) { await dispose(); throw error }
 }

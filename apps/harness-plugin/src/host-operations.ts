@@ -78,6 +78,7 @@ export function defineOperations<const T extends Record<string, Body>>(bodies: T
 export const OPERATIONS = defineOperations({
   baseline: { mode: 'unary', params: [] },
   bootstrapWorkspace: { mode: 'unary', params: ENVELOPE },
+  refreshPlanning: { mode: 'unary', params: [ENVELOPE[0]] },
   watch: { mode: 'stream', params: [] },
 })
 

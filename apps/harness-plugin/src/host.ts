@@ -50,11 +50,13 @@ export async function apply(ctx: HostRemoteContext & { effect(callback: () => ((
     const installedRemote = remote
     // I7：先撤回 remote 并等在途调用排空，再关闭 SQLite；两者不得交换。
     ctx.effect(() => async () => {
-      try { await installedRemote.dispose() } finally { composition.dispose() }
+      composition.stop()
+      try { await installedRemote.dispose() } finally { await composition.dispose() }
     }, 'harness-projects: host composition')
     console.info('[harness-projects] host ready')
   } catch (error) {
-    try { await remote?.dispose() } finally { composition.dispose() }
+    composition.stop()
+    try { await remote?.dispose() } finally { await composition.dispose() }
     throw error
   }
 }
