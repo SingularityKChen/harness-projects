@@ -48,6 +48,7 @@
 | [2026-09-18-delivery-planning-and-board](exec-plan/active/2026-09-18-delivery-planning-and-board.md) | 交付规划与工作看板重整：重述原始交付 MVP、建立里程碑与迭代、拆分过大工作项、收敛看板自动化 | Batch 1–9 已完成；剩余人工项为两个 view 的分组设置（无法经 API 回读） |
 | [2026-09-21-rule-checks-api-base](exec-plan/active/2026-09-21-rule-checks-api-base.md) | 判定输入改用 PR API 的对象对：判定固定到 `(base_sha, head_sha)` 两个不可变提交，含解析器失败策略与检查 job 的一致性 | Active |
 | [2026-09-21-merge-gate-layers](exec-plan/active/2026-09-21-merge-gate-layers.md) | Merge Gate 车道：integration / 包边界 / MVP-0 / E2E 四层各自成为一条 lane，空层与零用例层响亮失败 | Active |
+| [2026-10-22-test-layer-single-pass](exec-plan/active/2026-10-22-test-layer-single-pass.md) | #362：契约套件只检查真实四层非空，保留 runner fixture，由原 Merge Gate lanes 提供真实执行证据，并记录同条件 verify 前后计时 | Active |
 | [2026-09-22-engineering-merged-state](exec-plan/active/2026-09-22-engineering-merged-state.md) | 让合并事件真正写进 `Engineering`：修正 GraphQL 枚举误用导致的合并投影不可达，并补上按日的字段漂移观察 | Active |
 | [2026-09-22-content-placement](exec-plan/completed/2026-09-22-content-placement.md) | 流程知识的四桶归属（机械 / 技法 / 约定 / 一次性）与判定规则：给 §0 路由表的每个入口一个可机械核对的桶 | Completed |
 | [2026-09-22-status-field-writer](exec-plan/completed/2026-09-22-status-field-writer.md) | 给 `Status` 一个定义、一个写入口、一个防漂移的检查：语义收敛到 `board-semantics.md` 单一事实源、写入口写进交付流程、契约测试按「行 + 子句」设防 | Completed |
