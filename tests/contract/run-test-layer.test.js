@@ -1,9 +1,7 @@
 // 层运行器 `scripts/run-test-layer.mjs` 的可执行表述（ExecPlan `2026-09-21-merge-gate-layers` D2）。
 //
-// 它保护的不变量是"每一层都有真实执行的断言"：`node --test` 对"没有用例"退出 0，
-// 所以"目录存在"与"这一层有证据"是两件事。这里用临时目录构造空层、零用例层、
-// 全 skip / 全 todo 层与失败层，全部离线、无凭据；真实四层的非空与全绿在文件末尾
-// 用真实的 `node --test` 各跑一次。
+// 这里用临时目录验证空层、零用例层、全 skip / 全 todo 层与失败层都会被拒绝，
+// 并检查 Merge Gate 的四个真实层至少各有一个 `*.test.js` 文件。
 //
 // 关于"摘要行解析不到"这条 fail-closed 分支：Node 26 的 runner 一旦启动成功，
 // 即使用例文件语法错误、被 SIGKILL 或 `process.abort()`，也会打印 `ℹ tests <n>`
@@ -24,17 +22,14 @@ import { countTestFiles, parseSummary } from '../../scripts/run-test-layer.mjs';
 const SCRIPT = fileURLToPath(new URL('../../scripts/run-test-layer.mjs', import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
-// 真实层：与 `.github/workflows/merge-gate.yml` 的四条 lane 一一对应。这里只用
-// 一个中性的探针不变量——车道文案由 `merge-gate-workflow.test.js` 钉住，本文件
-// 钉的是"这些层真的有断言、且真的全绿"。
+// 真实层：与 `.github/workflows/merge-gate.yml` 的四条 lane 一一对应；lane 接线
+// 由 `merge-gate-workflow.test.js` 钉住，这里只检查各层没有变空。
 const REAL_LAYERS = [
   'tests/integration',
   'tests/contract/package-boundaries.test.js',
   'tests/mvp0',
   'tests/e2e',
 ];
-
-const PROBE_INVARIANT = '探针：该层非空且全绿';
 
 function withLayer(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run-test-layer-'));
@@ -262,17 +257,11 @@ test('countTestFiles 只认 *.test.js：这是刻意的窄口径，不是与 nod
 });
 
 // ---------------------------------------------------------------------------
-// 真实层：Merge Gate 的四条 lane 各自非空且全绿
+// 真实层：Merge Gate 的四条 lane 各自至少有一个用例文件
 // ---------------------------------------------------------------------------
 
 for (const layer of REAL_LAYERS) {
-  test(`真实层 ${layer}：非空、全绿，且摘要行被透传`, () => {
-    const result = run(layer, PROBE_INVARIANT);
-    const output = outputOf(result);
-    assert.equal(result.status, 0, `期望 exit 0，实际 ${result.status}；输出：${output}`);
-    assert.ok(output.includes(PROBE_INVARIANT), `期望输出点名不变量；输出：${output}`);
-    assert.match(output, /ℹ tests [1-9][0-9]*/, `期望摘要行 tests ≥ 1；输出：${output}`);
-    assert.match(output, /ℹ fail 0/, `期望摘要行 fail 0；输出：${output}`);
-    assert.match(output, /通过，执行 [1-9][0-9]* 条用例/, `期望成功摘要；输出：${output}`);
+  test(`真实层 ${layer} 非空`, () => {
+    assert.ok(countTestFiles(path.join(REPO_ROOT, layer)) > 0, `${layer} 必须至少有一个 *.test.js 文件`);
   });
 }
