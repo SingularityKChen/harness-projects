@@ -107,7 +107,7 @@ for (const [method, key, kind] of [
   })
 
   test(`${method}：坏页、游标、成环、二页故障和预算耗尽保留最后确认集合`, async () => {
-    for (const fault of ['null', 'items', 'row', 'empty-cursor', 'number-cursor', 'cycle', 'offline', 'throw', 'budget', ...(method === 'listBranches' ? ['no-head'] : [])]) {
+    for (const fault of ['null', 'items', 'row', 'empty-id', 'missing-binding', 'missing-kind', 'empty-cursor', 'number-cursor', 'cycle', 'offline', 'throw', 'budget', ...(method === 'listBranches' ? ['no-head', 'empty-head'] : ['empty-source', 'invalid-number'])]) {
       const w = await fakeChain()
       await w.core.commands.refreshDeliveryFacts(w.scope)
       const before = await w.snapshot()
@@ -115,6 +115,13 @@ for (const [method, key, kind] of [
       w.providers.development[method] = async ({ cursor }) => {
         calls++
         if (fault === 'no-head') return page([{ ...w.branch, headCommit: undefined }])
+        if (fault === 'empty-head') return page([{ ...w.branch, headCommit: '' }])
+        if (fault === 'empty-source') return page([{ ...w.target, sourceVersion: '' }])
+        if (fault === 'invalid-number') return page([{ ...w.target, number: NaN }])
+        if (['empty-id', 'missing-binding', 'missing-kind'].includes(fault)) {
+          const target = method === 'listBranches' ? w.branch : w.target
+          return page([{ ...target, ref: { ...target.ref, ...({ 'empty-id': { externalId: '' }, 'missing-binding': { bindingId: undefined }, 'missing-kind': { objectKind: undefined } }[fault]) } }])
+        }
         if (fault === 'null') return { ok: true, value: null }
         if (fault === 'items') return { ok: true, value: { items: 'bad' } }
         if (fault === 'row') return page([null])
@@ -139,3 +146,107 @@ for (const [method, key, kind] of [
     }
   })
 }
+
+import { GAMMA_BRANCH, GAMMA_HEAD, RECORDED_PR, RECORDED_REPOSITORY_ID, recordedChain, sqlRows } from '../fixtures/lineage-refresh.mjs'
+const planningBytes = (w) => JSON.stringify(['workspace_projection', 'external_identity', 'project_item_membership', 'planning_field_value'].map((name) => sqlRows(w.storage.location, name)))
+const graphKeys = async (w) => ({ entities: sqlRows(w.storage.location, 'entity').map((row) => row.id).sort(),
+  relations: (await w.storage.listRelations(w.workspace.id)).map(({ from, type, to }) => [from, type, to].join('|')).sort() })
+const refresh = async (w) => {
+  const result = await w.core.commands.refreshDeliveryFacts(w.scope)
+  assert.deepEqual([result.ok, result.anchored, result.applied, result.gaps], [true, true, true, []])
+  return w.core.queries.getDeliveryProjection(w.scope)
+}
+
+test('录制 Development + 真实双 adapter + SQLite：概念链逐字段可追溯、身份稳定、重开纯查询零 Provider 调用', async (t) => {
+  const w = await recordedChain(t)
+  const before = planningBytes(w)
+  const projection = await refresh(w)
+  assert.deepEqual(projection.gaps, [])
+  const byKind = (kind) => projection.hops.find((hop) => hop.entityKind === kind)
+  const context = byKind('execution_context'), worktree = byKind('worktree'), commit = byKind('commit'), cr = byKind('change_request')
+  assert.equal(context.externalId, w.started.executionContextId)
+  assert.deepEqual([worktree.label, w.started.branchExternalId, commit.externalId, cr.externalId, cr.label],
+    [GAMMA_BRANCH, GAMMA_BRANCH, GAMMA_HEAD, RECORDED_PR.id, `#5 ${RECORDED_PR.title}`])
+  assert.deepEqual(projection.hops.map(({ entityKind, relationType, externalId, label, fact }) => [entityKind, relationType, externalId, label, fact]).slice(4),
+    [['pipeline_run', 'runs_on', '9101', 'completed: success', 'ci_passed'], ['check_run', 'runs_on', '9201', 'build: success', 'ci_passed']])
+  assert.deepEqual([context.from, context.to, worktree.from, commit.to, cr.to, byKind('pipeline_run').to, byKind('check_run').to],
+    [w.scope.workItemId, w.started.executionContextId, w.started.executionContextId, worktree.to, worktree.to, commit.from, cr.from])
+  assert.deepEqual(projection.hops.map((hop) => hop.relationType), ['tracks', 'has_worktree', 'derived_from', 'produced_by', 'runs_on', 'runs_on'])
+  assert.ok(projection.hops.every((hop) => hop.observed && !hop.stale && hop.source === 'lineage'))
+  const keys = await graphKeys(w)
+  const primaryKeys = [...keys.entities, ...(await w.storage.listRelations((await w.snapshot()).workspaceId)).flatMap(({ from, to }) => [from, to]), ...sqlRows(w.storage.location, 'repository').map((row) => row.id)]
+  assert.deepEqual(primaryKeys.filter((id) => [RECORDED_PR.id, RECORDED_REPOSITORY_ID].includes(id)), [])
+  await refresh(w)
+  assert.deepEqual(await graphKeys(w), keys, '重复刷新不得增加实体或关系三元组')
+  assert.equal(planningBytes(w), before)
+  const committed = await w.core.queries.getDeliveryProjection(w.scope)
+  await w.reopen()
+  w.calls.length = 0
+  const replayCalls = w.replay.calls.length, actionsCalls = w.actions.calls.length
+  assert.deepEqual(await w.core.queries.getDeliveryProjection(w.scope), committed)
+  assert.deepEqual(await w.core.queries.getDeliveryLineage(w.scope), committed.hops)
+  assert.deepEqual([w.calls, w.replay.calls.length, w.actions.calls.length, w.reconcileCalls, w.replay.misses], [[], replayCalls, actionsCalls, 0, []])
+})
+
+test('录制双 adapter / SQLite：成功→离线保留 anchor 与确认时间→恢复清除陈旧', async (t) => {
+  const w = await recordedChain(t)
+  await refresh(w)
+  const before = await w.snapshot()
+  w.offline = true
+  const failed = await w.core.commands.refreshDeliveryFacts(w.scope)
+  assert.equal(failed.ok, true)
+  assert.ok(failed.gaps.some((gap) => gap.key === 'development.repository.read'))
+  assert.deepEqual((await w.snapshot()).sets, before.sets.map((set) => ({ ...set, stale: true })))
+  assert.equal((await w.core.queries.getDeliveryProjection(w.scope)).degraded, true)
+  await w.reopen()
+  assert.deepEqual((await w.snapshot()).sets, before.sets.map((set) => ({ ...set, stale: true })))
+  w.offline = false
+  const restored = await refresh(w)
+  assert.equal(restored.degraded, false)
+  assert.deepEqual(restored.hops.map(({ from, to }) => [from, to]), (await w.core.queries.getDeliveryLineage(w.scope)).map(({ from, to }) => [from, to]))
+  assert.ok((await w.snapshot()).sets.every((set) => !set.stale && set.confirmedAt !== before.sets.find((old) => old.kind === set.kind).confirmedAt))
+  assert.deepEqual([w.reconcileCalls, w.replay.misses], [0, []])
+})
+
+test('录制双 adapter / SQLite：显式刷新反向完成时晚完成旧快照不得覆盖新失败事实', async (t) => {
+  const w = await recordedChain(t)
+  await refresh(w)
+  let entered, release
+  const waiting = new Promise((resolve) => { entered = resolve })
+  const held = new Promise((resolve) => { release = resolve })
+  t.after(() => release())
+  w.hold = (response) => { w.hold = undefined; entered(); return held.then(() => response) }
+  const old = w.core.commands.refreshDeliveryFacts(w.scope)
+  await waiting
+  w.conclusion = 'failure'
+  const latest = await refresh(w)
+  const snapshot = await w.snapshot()
+  release()
+  assert.equal((await old).applied, false)
+  assert.deepEqual(await w.snapshot(), snapshot)
+  assert.deepEqual(latest.hops.filter((hop) => hop.fact).map((hop) => hop.fact), ['ci_failed', 'ci_failed'])
+  assert.deepEqual([w.reconcileCalls, w.replay.misses], [0, []])
+})
+
+for (const policy of Object.values(StatusPolicy)) {
+  test(`录制双 adapter / SQLite：${policy} 下 CI failure 不写 Planning 存储`, async (t) => {
+    const w = await recordedChain(t, policy)
+    const before = planningBytes(w)
+    w.conclusion = 'failure'
+    const projection = await refresh(w)
+    assert.deepEqual(projection.hops.filter((hop) => hop.fact).map((hop) => hop.fact), ['ci_failed', 'ci_failed'])
+    assert.equal(planningBytes(w), before)
+    assert.deepEqual([w.reconcileCalls, w.replay.misses], [0, []])
+  })
+}
+
+test('SQLite 默认策略：合成 merged PR 经真实 Development adapter 刷新不写 Planning 存储', async (t) => {
+  const w = await recordedChain(t)
+  const before = planningBytes(w)
+  w.merged = true
+  assert.equal((await w.development.listChangeRequests({ repository: w.repositoryRef, headBranch: GAMMA_BRANCH, limit: 50 })).value.items[0].state, 'merged')
+  const projection = await refresh(w)
+  assert.equal(projection.hops.find((hop) => hop.entityKind === 'change_request').externalId, RECORDED_PR.id)
+  assert.equal(planningBytes(w), before)
+  assert.deepEqual([w.reconcileCalls, w.replay.misses], [0, []])
+})

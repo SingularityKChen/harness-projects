@@ -1,6 +1,6 @@
 # 显式交付刷新与可追溯谱系 ExecPlan
 
-> 状态：Active
+> 状态：Completed
 > 创建：2026-10-22
 > 范围：issue #233；补齐 Development 锚点分页，使用录制 Development、真实双 adapter 与 SQLite 验证显式刷新闭环。
 > 规范：`PLANS.md`、`AGENTS.md`、`docs/development/workflow.md`；公开需求为同仓 issue #233 及其 2026-10-15 交接评论。
@@ -43,7 +43,7 @@ SQLite 整合保持原 Development JSON 不变，使用其 `fixture/gamma` 和�
 
 工作分支 `feature/lineage-refresh`，隔离位置 `.worktrees/lineage-refresh`。下述命令均在该分支工作树根目录运行；GitHub 命令必须带 `-R SingularityKChen/harness-projects`。
 
-唯一改动集合：`packages/core/src/chain-facts.ts`；现有 `tests/integration/github-development-lineage.test.js` 的测试正文；`tests/e2e/delivery-lineage.test.js` 的既有完整性矩阵与相邻注释；必要的新建 `tests/fixtures/lineage-refresh.mjs`；本计划及其完成态路径；`docs/README.md` 的本计划短行；`docs/exec-plan/tech-debt-tracker.md` 的 TD-040/063/068 行。不新增 `*.test.js`，已有测试首个 guard import 归 #186 所有，本任务只追加正文。
+唯一改动集合：`packages/core/src/chain-facts.ts`；现有 `tests/integration/github-development-lineage.test.js` 的测试正文；`tests/e2e/delivery-lineage.test.js` 的 COMPLETENESS 矩阵及紧邻注释；必要的新建 `tests/fixtures/lineage-refresh.mjs`；本计划及其完成态路径；`docs/README.md` 的本计划短行；`docs/exec-plan/tech-debt-tracker.md` 的 TD-040/063/068 行。不新增 `*.test.js`，已有测试首个 guard import 归 #186 所有，本任务只追加正文。
 
 每 PR 代码及测试 churn 严格小于 800 行、文档小于 1300 行；不依赖另两 PR、不修改 UI、公共图契约、schema、Provider 实现或 Planning 写策略。仅在证据充分时解决 TD-040/068，TD-063 不关闭。不得推 main、合并 PR 或代写 In Review / Done。
 
@@ -97,16 +97,25 @@ SQLite 整合保持原 Development JSON 不变，使用其 `fixture/gamma` 和�
 - [x] (2026-10-22 SGT) 两份独立设计和独立 reviewer 已核对现有机制，收敛本计划。
 - [x] (2026-10-22 SGT) Batch 0：协调者已提交计划并回读 draft #397、双向 issue 关联与元数据。
 - [x] (2026-10-22 SGT) Batch 1：现有整合文件初跑 1 pass / 6 fail；有界查找后 7 pass / 0 fail。只读首页变异退出 1，恢复后重跑全绿。
-- [ ] Batch 2：双 adapter、SQLite、Planning 与乱序验收。
-- [ ] Batch 3：独立验收、整理提交、当前 head 门禁及 ready。
+- [x] (2026-10-22 SGT) Batch 2：所列五文件回归 86 pass / 0 fail；typecheck 与 boundaries 均退出 0。原始 Development replay 无 miss，SQLite 重开查询无 Provider 调用，Development reconcile 探针为 0。
+- [x] (2026-10-22 SGT) Batch 3 本地独立验收：新增坏目标反例先红（12 pass / 2 fail），收紧查找守卫后 14 pass；另有 10 个分页边界探针通过。独立 `pnpm verify` 通过（1899 + 7，0 fail），boundaries 9 pass，workflow-check 无发现。
+- [x] (2026-10-22 SGT) Batch 3 交付准备：独立验收与归档完成；最终 head 的外部 CI、关联和 ready 按 Outcomes 的命令回读。
 
 ## Surprises & Discoveries
+
+2026-10-22：组合回归首跑 84 pass / 2 fail，分别为 Fake 与 SQLite 的离线保留矩阵；两者把后页可读目标仍预期为 stale。新查找使其 fresh，推翻旧的“首页即读取预算”假设。协调者批准只改相邻矩阵与注释：后页可读为正控，再加分支和 PR 的游标循环负控，保留持久陈旧断言。
 
 2026-10-22：实际投影以 Worktree.label 表达分支，且 PR 与 Commit 同锚 Worktree；证据是 `delivery.ts` 的 `readDeliveryProjection` 与 `delivery-facts.ts` 的 `setOf`。因此采用逐字段概念链验收，不写不存在的独立 Branch hop。
 
 2026-10-22：Actions helper 的注释说明合成协议，不能与 Development 的真实录制 JSON 混称全真实录制；两种来源在 Design 中已分开说明。
 
+2026-10-22：独立验收在 `feature/lineage-refresh` 工作树用公共刷新入口发现，空 head 会被确认成空标识提交并清空旧 PR，空 sourceVersion 会将旧 PR 确认不存在，空 PR 引用也会替换最后确认的身份；原先的字符串类型守卫不足以证明目标有效。现有坏页矩阵追加空锚点、空标识、缺失引用字段和非法编号后先红，再以非空标识与正安全整数守卫修复；节点、anchor、confirmedAt 保留断言通过。
+
 ## Decision Log
+
+2026-10-22 / 独立验收者：将坏目标拒绝纳入原有 Development 查找完整性边界，只收紧已消费的引用、锚点及编号字段；不要求 GitHub SHA 格式，因为 Development 端口允许不透明提交标识。继续复用唯一 writer，不扩 schema、Provider 或 Planning 写路径。
+
+2026-10-22 / 协调者范围裁决：允许 Global Constraints 所列 E2E 矩阵最小调整；理由是新增完整分页行为必然使旧的首页截断缺口断言失效，不得靠删掉离线负控获得绿色。
 
 2026-10-22 / 协调者回执：actor 为 repository owner via gh；目标为 Project 10 的 #233 条目及 draft #397。幂等键采用 `233:<field>:<value>`（assignee、ExecPlan、Batch、Status、Kind、Area）与 `233:pr-readback`、`233:issue-readback`，均 ack；PR 与 issue 双向关联已读回。本实现者不执行外部写入，最终 push 后仍需重新回读当前 head。
 
@@ -124,7 +133,13 @@ SQLite 整合保持原 Development JSON 不变，使用其 `fixture/gamma` 和�
 
 ## Outcomes & Retrospective
 
-设计与独立审查已完成，实现和验收尚未执行。最终记录实际 red/green、来源边界、当前 head 证据与遗留；若不消费观察流，TD-063 继续开放，不能因本 PR ready 推导其解决。
+Batch 1/2 实现与本地接缝验收已执行：分页 red/green 与只读首页变异均具判别力，真实 Development 严格 replay、合成 Actions 与 SQLite 的概念链、重开、重复、离线、反向完成及 Planning 隔离通过。CI failure 为合成 Actions 的三策略矩阵，merged 为单独标明的合成 Development 响应变异；不是同一次真实平台全链录制。TD-040/068 在本分支证据下标 Resolved；TD-063 仍 Open。独立验收已修复坏目标被确认为事实的问题并重跑完整验证；最终 push、远端当前 head checks、归档与 ready 由协调者继续，计划保持 Active。Superseded by 本节“归档与交付回读”（2026-10-22）。
+
+### 归档与交付回读
+
+2026-10-22，在分支 `feature/lineage-refresh` 完成本地独立验收后归档。判别性修复与完整测试均通过，TD-063 保持开放。最终 push 后执行 `gh pr view 397 -R SingularityKChen/harness-projects --json headRefOid,baseRefOid,isDraft,closingIssuesReferences,mergeStateStatus`、`gh pr checks 397 -R SingularityKChen/harness-projects` 并读取全部 review threads；期望关闭引用含 #233、当前 head 的有效 checks 通过、无未解决阻塞，再由协调者 ready，保持未合并。实时值不固化进计划。
+
+提交按有界查找与已有图回归、录制持久化验收两个职责整理；临时设计/修复内容折入相应提交。整理前先保留完整本地恢复 ref，整体文件树必须相同，发布使用精确 old-head lease；首提交另以独立检出验证其可测试性。
 
 ## Bottom Change Note
 
@@ -132,4 +147,14 @@ SQLite 整合保持原 Development JSON 不变，使用其 `fixture/gamma` 和�
 
 2026-10-22 SGT：记录 Batch 0 回执与 Batch 1 的 red/green、只读首页变异；开发查找只保留当前页和游标，未修改完整 Delivery 集合算法。
 
-2026-10-22 SGT：整理分页交付提交时将后页可达正控与真正不完整负控纳入同批 E2E 边界；录制持久化验收由后续提交完成。
+2026-10-22 SGT：按协调者裁决扩大到现有 E2E 完整性矩阵，校正后页可达正控并保留真实不完整负控；没有增加测试文件或依赖兄弟 PR。
+
+2026-10-22 SGT：记录 Batch 2 的 86 条回归、来源边界及 SQLite / Planning 证据；TD-040/068 在本分支解决，TD-063 明确保留。
+
+2026-10-22 SGT：本地完整验证 `pnpm verify` 通过三层 1899 条及 MVP-0 7 条；workflow-check 无发现。此证据不替代独立验收或最终远端 head CI。
+
+2026-10-22 SGT：独立验收追加坏目标先红后绿证据、100 页边界探针与本地全验证结果；修复仅收紧原查找守卫，远端交付由协调者继续。
+
+2026-10-22 SGT：独立验收后归档，明确两个可审阅提交职责、恢复锚点与最终交付回读规则。
+
+2026-10-22 SGT：归档回读发现 TD-040/068 的证据引用仍指 active，且仅改状态字段未迁入 Resolved 分区；同步路径与分区，保留原历史正文和解决证据。
