@@ -1,3 +1,5 @@
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import path from 'node:path'

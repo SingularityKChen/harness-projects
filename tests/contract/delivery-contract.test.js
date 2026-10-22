@@ -4,6 +4,8 @@
  * 检查按 repository + commit 过滤，删掉任一过滤都有用例变红。把写操作改成静默成功后，"写尝试返回
  * not_supported 且不改动任何状态"用例必然失败。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import test from 'node:test'
 

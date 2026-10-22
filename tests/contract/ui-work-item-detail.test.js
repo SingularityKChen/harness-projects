@@ -2,6 +2,8 @@
  * renderer 契约（issue #130）：真实 ReactDOM 静态渲染断言实际 HTML；列表入口与深链必须显示**同一个**导出组件
  * （组合页输出包含直接渲染抽屉的输出）。真实 focus/showModal/history 由 fixture 与浏览器验收做。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { test } from 'node:test'

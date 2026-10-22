@@ -2,6 +2,8 @@
  * 完整浏览器路径契约（issue #130）：esbuild 以 platform=browser 打包真实 adapter→投影→组合页，只外置 react；
  * 入口必须真调用归约路径，产物在隔离 vm 执行后做真实 SSR。焦点/showModal/真实 history 由 fixture 真实浏览器验。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import path from 'node:path'

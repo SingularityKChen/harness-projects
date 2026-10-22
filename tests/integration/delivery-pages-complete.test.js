@@ -5,6 +5,8 @@
  * native 状态只有 completed+success 产 CiPassed；三种 StatusPolicy 下规划存储逐字不变；未观察锚点零请求；
  * 首屏 429/5xx 也走真实 core 查询。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import test from 'node:test'
 

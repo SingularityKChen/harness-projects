@@ -5,6 +5,8 @@
  * retryable 与 recovery 语义，且与 domain 的判定一致；3) provider 结果的成功/失败分支可判别；
  * 4) 11 个调用方错误码全部被覆盖——8 个由 provider 码到达，3 个显式注明不可达。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

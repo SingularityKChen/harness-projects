@@ -1,6 +1,8 @@
 // 全域 reconcile 的行为契约：只经唯一 writer 的 `main`，注入 fetch。
 // 「世界」按 GitHub 的形态答对 Project 页、写前复读与 mutation，并真实改写字段，使写后再读看到写后状态。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'

@@ -2,6 +2,8 @@
 // 两份存储，改一边不改另一边不会让现有用例变红（评审实测）。三条断言钉死两边：枚举值都能插入、哨兵值被
 // **CHECK** 拒绝、字面量集合恰好相等。绑定表**逐列手写**：新增受 CHECK 约束的列就要加一行绑定。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

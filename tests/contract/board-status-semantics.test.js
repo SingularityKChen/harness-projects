@@ -9,6 +9,8 @@
 // 因此本文件按**断言**而不是按**文件清单**设防，并且把「历史记录」与「活定义」分开：
 // 只有显式白名单里的文件可以引用旧读法，新文件命中即红。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'

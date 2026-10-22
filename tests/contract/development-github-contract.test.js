@@ -7,6 +7,8 @@
  * (5) 失去读权限：五个读方法结构化失败（固定文案、不回显正文），快照降级为 degraded，恢复后回到 available；
  * (6) 观察：sourceVersion 是定宽规范载体而不是 sha，全有或全无。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'

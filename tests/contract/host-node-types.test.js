@@ -27,6 +27,8 @@
  * 所以不认识的 workspace 写法、陈旧的锁文件都不会让一个包悄悄逃过检查，合法的构建产物也不会让它误报。
  */
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

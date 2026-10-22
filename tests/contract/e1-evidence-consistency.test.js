@@ -29,6 +29,8 @@
  *
  * 离线：只读仓库内的文档，不触网、不读凭据、不调用 gh。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'

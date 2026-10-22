@@ -5,6 +5,8 @@
  * 命令位置与提交 / 变更请求位置的降级（A9）。
  * 每组都带正对照（会派生出 passed 的那一行），防「全部不是 passed」的空绿。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'

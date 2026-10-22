@@ -1,4 +1,6 @@
 // L3 集成层：003 控制事实 schema、R4/R5/R6/R8 与 D8 出处映射。
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

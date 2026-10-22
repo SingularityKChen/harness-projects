@@ -1,4 +1,6 @@
 /** #297：公开刷新按持久仓库引用与完整 CR 操作选连接；所有 provider 均离线。 */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

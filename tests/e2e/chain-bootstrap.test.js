@@ -3,6 +3,8 @@
  * 用例名说明它保护哪条不变量：一个外部对象一个内部实体（tests/README §2.1）、同步幂等与重启恢复
  * （§2.4）、provider 离线时局部降级（ExecPlan D5）、工程事实不改写规划状态（不变量 3）。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

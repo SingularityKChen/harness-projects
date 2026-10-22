@@ -4,6 +4,8 @@
  * 认拼写，别名导入 / `require` / 括号访问 / `shell: <非 true>` 都能绕过（第四轮 P3 实测 7 种写法全部
  * `pass 1 / fail 0`）；正向规则只限定两件事：谁可以引用 `child_process`，以及那个文件长什么样。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'

@@ -1,4 +1,6 @@
 /** 连接账号与工作区配置的共享契约装配（#126）：6 条共享用例在 Fake 与 SQLite 上同形运行；条数守卫独立写死 6，删掉一条 register(...) 或整组不再装配都会变红。 */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

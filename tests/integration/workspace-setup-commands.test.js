@@ -5,6 +5,8 @@
  * 原子性：被拒绝的命令不留任何行（#353 继承同一事务模式），只有存储写口的 RangeError 映射成 invalid_input（#376）；AC4 controller 的 `createSetupCommands` 账本丢失后同键重发，由命令按自然键找回同一结果、零写入，
  * 拒绝只在账本存活期间重放（账本丢失后按当时状态重判），账本内同键异请求以 conflict 拒绝且不进 core。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

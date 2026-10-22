@@ -2,6 +2,8 @@
  * 领域词汇契约测试：枚举取值、错误码与关系规则。保护的不变量：1) 枚举取值是跨层契约，成员名、取值与顺序全部钉死；2) provider 层 8 个错误码、调用方层 11 个、恢复动作 7 个，且每个 provider 码都有映射；3) 每个关系类型恰好属于一个类别，lineage 不与 system_fact 混同；4) 确定性发现只能进入候选态，依赖环检测只在 blocks / depends_on 上生效。
  */
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

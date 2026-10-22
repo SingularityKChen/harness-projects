@@ -6,6 +6,8 @@
  * 本机残留的被忽略目录不会被算成源码，被跟踪的源码里的第二个调用点也不会被漏掉。
  * 用例各自在 mkdtemp 里造夹具，自带 `.gitignore`，不依赖本机是否跑过构建。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'

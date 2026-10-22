@@ -5,6 +5,8 @@
  * `historical` 身份不是现行引用，锚点所在连接未组合时 alias 仍是现行引用。元数据逐仓库报告引用与按路由得到的 `development.*` 能力（AC5），
  经 controller 快照、client 同步到达 ui-model 的 `repositoryAccessIndex`，key 级 fail closed 盖不住它（AC3）。两种存储：替身 Storage 与 SQLite 文件。全部离线：无凭据、无网络。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

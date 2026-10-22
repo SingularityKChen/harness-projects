@@ -4,6 +4,8 @@
  * （不触网、不需要真实凭据）。保护的不变量：
  * 已存挂载在启动时组合且身份只来自存储；权限只按账号事实推导；凭据值只出现在单次请求的 authorization 头里；配置在写库时按 schema 闭集校验。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

@@ -134,6 +134,7 @@
 | [2026-10-22-host-planning-refresh](exec-plan/completed/2026-10-22-host-planning-refresh.md) | Host 拥有 Planning 定时刷新生命周期 |
 | [2026-10-22-lineage-refresh](exec-plan/completed/2026-10-22-lineage-refresh.md) | 显式交付刷新与有界谱系分页 |
 | [2026-10-22-test-layer-single-pass](exec-plan/completed/2026-10-22-test-layer-single-pass.md) | 契约套件去除真实层重复执行 |
+| [2026-10-22-worktree-module-isolation](exec-plan/completed/2026-10-22-worktree-module-isolation.md) | 原生 Node 测试的工作树解析隔离 |
 
 ## 3. 上游设计输入
 

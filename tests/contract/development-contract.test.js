@@ -9,6 +9,8 @@
  * 把 `tests/fixtures/development-suite-adapters.mjs` 的每个 adapter 放进独立 `node --test` 子进程：
  * 合法子集零退出，坏 adapter 非零退出且失败消息命中预期片段——隔离避免预期红污染本文件的绿色。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import test from 'node:test'

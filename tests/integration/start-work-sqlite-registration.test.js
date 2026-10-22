@@ -4,6 +4,8 @@
  * 写前事务失败整笔回滚、零外部写入；ack 之后 Ready、关系与 Git 的 attempt 在同一个事务里同生共死，本地写失败是 Unknown 而不是半提交；残缺的 Ready（run 缺失或状态未知、必需边缺失）在重放与 Query 上都不报健康。断言业务结果（外部增量、context 对应的 run、边与 attempt），SQL 的 FK=[] 不当作闭环证据。
  * 失败注入走测试侧的 Storage 包装，每个注入点都有命中计数与无故障正控；不用 SQLite TRIGGER（`RAISE(ABORT)` 的回滚会把触发器自己写的命中记录一并回滚）。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

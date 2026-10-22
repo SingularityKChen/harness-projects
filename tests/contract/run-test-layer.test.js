@@ -9,6 +9,8 @@
 // fixture，它的判据由 `parseSummary` 的单元断言钉住，CLI 侧的收尾由"层路径不存在"
 // 与"空层"两条用例覆盖。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';

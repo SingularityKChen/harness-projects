@@ -6,6 +6,8 @@
  * 变化判定不依赖端口没有承诺的行序与键序（ADR-0012 第 2 条）。
  * 全部离线替身，SQLite 用 `:memory:`。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { inspect } from 'node:util'

@@ -18,6 +18,8 @@
  *
  * 用例全部使用离线替身（`tests/integration/README.md` §约定：外部依赖一律用 Fake Provider）。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

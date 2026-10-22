@@ -1,4 +1,6 @@
 /** 读取保值集成（issue #130）：真实 composeCore→controller→transport→createSync/read()，固定时钟与受控 transport。 */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

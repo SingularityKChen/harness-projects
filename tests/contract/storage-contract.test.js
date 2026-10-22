@@ -1,4 +1,6 @@
 /** 内存 Storage 替身的契约套件装配，外加实现专属的判别性用例。`restart` 用导出/导入内部状态模拟重启——删掉导出实现后，套件里"换一个实例读同一份内容"必然失败。事务隔离（未提交的写入不得被事务外的读看到）与写者路径语义（重叠事务串行提交、在途事务不吞直接写入）对两个实现都成立，因此钉在共享地基组里（`suites/storage.js`），不在本文件重复。SQLite 专属的用例是 `close()`、"事务 work 里调外层实例"与结算令牌三条（都不是端口面）（内存替身没有 close，它的队列在 work 里调外层实例同样静默挂起——见本层计划遗留「跨实例自等的共享用例缺另一半」）。 */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

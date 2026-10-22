@@ -5,6 +5,8 @@
  * 刷新没能重新确认的集合是 stale、其余集合不受牵连（E2）。「年龄只认 confirmedAt、不认 attemptedAt」不在这里证明：真实写者不会产出
  * 「集合没标陈旧、attemptedAt 新而 confirmedAt 旧」的投影，端到端无从区分两个年龄来源，由合约测试 A4 的合成投影钉住（E2 里 attemptedAt 领先只是前置观察）。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

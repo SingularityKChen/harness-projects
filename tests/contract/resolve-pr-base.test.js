@@ -11,6 +11,8 @@
 //
 // 纯函数直接 import；CLI 用 spawnSync 喂 stdin（不联网、不调用 gh）。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'

@@ -9,6 +9,8 @@
 // scratchpad 里的真实 fixture 单独验证过（见 Batch E 的验收证据），不在这
 // 里重复——这里验证的是 disclosure() 面对这两类场景时的纯函数契约。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'

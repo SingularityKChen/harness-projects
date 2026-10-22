@@ -8,6 +8,8 @@
  * 从未启动、由测试按同一签发者配置独立签出的运行）；**来源闸门**与签发者配置 fail closed；发出的引用一定往返；
  * 一次性输入不进引用。运行身份级的取消收敛在集成用例里钉住。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import test from 'node:test'

@@ -12,6 +12,8 @@
  * capabilities 各 port 的动词。后续批次若不采用某个名字，必须显式改这条断言并说明原因，不允许改成
  * skip 或删除。完整说明见 tests/mvp0/README.md 与 ExecPlan Batch C1。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

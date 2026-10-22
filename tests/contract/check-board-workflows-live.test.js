@@ -1,6 +1,8 @@
 // 看板工作流运行时 adapter 的契约：只负责取一份完整快照、调用唯一的纯函数判定，
 // 并把任何不可信输入或 finding 变成非零退出码。测试全程注入 fetch，不访问网络。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'

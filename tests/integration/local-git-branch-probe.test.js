@@ -6,6 +6,8 @@
  * 的对账（P2）。成功判据用 `status` / `confirmed` / 磁盘事实，不用 `result.error`：夹具没有执行 provider，
  * 所以 `error` 恒为 `not_supported`（见 `local-git-core-provisioning.test.js` 的约定）。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

@@ -1,6 +1,8 @@
 /** 本地 Git provider **自身**的行为：路径安全、分支身份、能力子集、写后回读、默认根与读面。`argv-only`
  * 由 tests/contract/development-local-git-source.test.js 的源码扫描保证；夹具见 local-git-fixture.js。
  * 接进 core 供应序列的系统验收不在本层（#209 交付）。 */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'

@@ -6,6 +6,8 @@
  * 用 `status` / `confirmed`，不用 `error`（见 local-git-core-provisioning.test.js 的同一约定）。
  * 分页与探测在 `local-git-branch-probe.test.js`；SQLite 与重启归 #141。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { realpath } from 'node:fs/promises'
 import path from 'node:path'

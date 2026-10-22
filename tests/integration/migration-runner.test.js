@@ -3,6 +3,8 @@
 // 每个用例使用自己的临时目录与数据库文件，用例之间不共享任何状态；
 // 断言说明它在保护哪条不变量，而不是说明它调用了哪个函数。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

@@ -1,4 +1,6 @@
 /** 深链 codec 与 History adapter 契约（issue #130）：唯一路由 `/projects/:projectId/items[/:itemId]`；记录型 port 断言调用次序。 */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

@@ -6,6 +6,8 @@
  * provider node id 不成为实体、关系端点或仓库行的主键。provider 层的形状与失败矩阵在
  * tests/contract/development-github-contract.test.js，录制夹具上的完整谱系属 #233。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import test from 'node:test'
 

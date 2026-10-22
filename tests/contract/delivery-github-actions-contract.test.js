@@ -4,6 +4,8 @@
  * 整页 fail-closed、suite 计数保护与只读写尝试零请求。
  * 判别力来自 fixture 的严格 replay：未录制的请求会让 transport 抛错，因此「请求定位错误」不可能伪装成通过。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import test from 'node:test'
 

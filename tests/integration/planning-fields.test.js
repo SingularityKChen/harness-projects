@@ -5,6 +5,8 @@
  * 与 E1-2 实验 1 的读回合成（`docs/architecture/gate-e1-sandbox.md`、`docs/architecture/gate-e1-membership-and-draft.md`）。
  * SQLite 文件库关闭重开后，规范状态与三列展示事实逐字读回；回放账本没有未命中。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

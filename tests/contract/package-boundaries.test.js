@@ -21,6 +21,8 @@
  * 外部运行时依赖同样受约束：react / react-dom 只允许出现在 ui 与 apps/*。
  */
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import path from 'node:path'

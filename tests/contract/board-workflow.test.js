@@ -3,6 +3,8 @@
 // 这一层测纯函数，不调用 gh、不联网：裁决表对不对与仓库当前的真实看板状态无关——
 // 真实看板的运行时核对留给 PR #61（见 scripts/board-workflow-check.mjs 头部注释）。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'

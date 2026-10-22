@@ -2,6 +2,8 @@
  * 工作项列表页面投影契约（issue #129）：Host 明确给出的读取过程 → 只读列表的安全展示结构。fixture 全是合成数据，
  * 不触网、不读时钟。保护：首次读取 / 真空快照 / 陈旧保行 / 不可用隐藏缓存互不混淆；规划状态与工程提示正交；redacted 行只剩占位。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
