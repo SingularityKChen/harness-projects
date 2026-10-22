@@ -43,9 +43,11 @@ SQLite 整合保持原 Development JSON 不变，使用其 `fixture/gamma` 和�
 
 工作分支 `feature/lineage-refresh`，隔离位置 `.worktrees/lineage-refresh`。下述命令均在该分支工作树根目录运行；GitHub 命令必须带 `-R SingularityKChen/harness-projects`。
 
-唯一改动集合：`packages/core/src/chain-facts.ts`；现有 `tests/integration/github-development-lineage.test.js` 的测试正文；`tests/e2e/delivery-lineage.test.js` 的 COMPLETENESS 矩阵及紧邻注释；必要的新建 `tests/fixtures/lineage-refresh.mjs`；本计划及其完成态路径；`docs/README.md` 的本计划短行；`docs/exec-plan/tech-debt-tracker.md` 的 TD-040/063/068 行。不新增 `*.test.js`，已有测试首个 guard import 归 #186 所有，本任务只追加正文。
+唯一改动集合：`packages/core/src/chain-facts.ts`；现有 `tests/integration/github-development-lineage.test.js` 的测试正文；`tests/e2e/delivery-lineage.test.js` 的 COMPLETENESS 矩阵及紧邻注释；必要的新建 `tests/fixtures/lineage-refresh.mjs`；本计划及其完成态路径；`docs/README.md` 的本计划短行；`docs/exec-plan/tech-debt-tracker.md` 的 TD-040/063/068 行；评审收尾的 `docs/review/pr-397-mmp-review.md` 与 `docs/project-management/merge-queue.md`。不新增 `*.test.js`，已有测试首个 guard import 归 #186 所有，本任务只追加正文。
 
 每 PR 代码及测试 churn 严格小于 800 行、文档小于 1300 行；不依赖另两 PR、不修改 UI、公共图契约、schema、Provider 实现或 Planning 写策略。仅在证据充分时解决 TD-040/068，TD-063 不关闭。不得推 main、合并 PR 或代写 In Review / Done。
+
+> 合并限制 Superseded by Decision Log「MMP 评审收尾授权」（2026-10-22）：后续人类授权允许完成本 PR 的受控 rebase merge；禁止直接推 main、代写规划状态与阻塞关系仍有效。
 
 ## Plan of Work
 
@@ -113,6 +115,8 @@ SQLite 整合保持原 Development JSON 不变，使用其 `fixture/gamma` 和�
 
 ## Decision Log
 
+2026-10-22 / MMP 评审收尾授权：人类在本次评审会话直接要求，无 P0/P1 或只有 P2/P3 的 #397–#399，由评审会话完成修复、独立复评、归档、按交付边界整理提交、核对 issue 后以 rebase 合并。#397 独立初审无缺陷并已 APPROVE；本次收尾只补评审与队列证据，不改产品行为。任何最终 head/base 变化均重取 CI、issue 关联和 threads，不能使用旧批准代替当前批准。
+
 2026-10-22 / 独立验收者：将坏目标拒绝纳入原有 Development 查找完整性边界，只收紧已消费的引用、锚点及编号字段；不要求 GitHub SHA 格式，因为 Development 端口允许不透明提交标识。继续复用唯一 writer，不扩 schema、Provider 或 Planning 写路径。
 
 2026-10-22 / 协调者范围裁决：允许 Global Constraints 所列 E2E 矩阵最小调整；理由是新增完整分页行为必然使旧的首页截断缺口断言失效，不得靠删掉离线负控获得绿色。
@@ -158,3 +162,5 @@ Batch 1/2 实现与本地接缝验收已执行：分页 red/green 与只读首�
 2026-10-22 SGT：独立验收后归档，明确两个可审阅提交职责、恢复锚点与最终交付回读规则。
 
 2026-10-22 SGT：归档回读发现 TD-040/068 的证据引用仍指 active，且仅改状态字段未迁入 Resolved 分区；同步路径与分区，保留原历史正文和解决证据。
+
+2026-10-22 SGT：补记 MMP 评审后的人类收尾授权及其适用范围，新增评审与队列证据；原两个产品提交保持各自可审阅职责，评审证据作为独立文档提交。
