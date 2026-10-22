@@ -497,6 +497,21 @@ gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,baseRe
 
 命令在本仓库检出根目录运行，`gh`使用`-R SingularityKChen/harness-projects`。每步只使用`merge_method=rebase`并锁精确head；顺序中的前项合并后，下一项重新fetch、必要时rebase、验证新base/head/CI/threads，并取得当前head批准。合并回读期望state为MERGED、issue关闭；#4、#226及后续transport issue仍保持原范围。
 
+### 4.9 2026-10-22 · PR #392–#395 人类授权收尾
+
+人类在本次评审会话直接授权这四个 PR：无 P0/P1 或仅 P2/P3 时，由评审会话完成修复、独立复评、归档、提交整理、issue 验收后，以 rebase 合并。初审四项均无 P0/P1；#394 有 1 项 P2、#395 有 2 项 P2，修复和新 head 复评是各自合并前置门。Planning Status 和 blocked-by 不在本次写入范围。
+
+| 位置 | PR / issue | 分支 | 独立交付闭环 | 依赖与已知冲突 |
+|---|---|---|---|---|
+| 1 | #393 / #362 | `test/test-layer-single-pass` | 契约只做真实层非空检查，真实 CI lanes 仍执行 | 无能力依赖；先合并可减少后续重复测试 |
+| 2 | #392 / #297 | `feature/delivery-repository-routing` | 持久仓库引用选择统一的远端谱系读取 | 无能力依赖；排在 #393 后重锁 main |
+| 3 | #394 / #335 | `feature/host-planning-refresh` | Host 定时/显式刷新、有界等待与卸载排空 | 无能力依赖；C394-1 修复及独立复评后进入 |
+| 4 | #395 / #282 | `feature/drawer-execution-state` | 实际抽屉消费已存运行状态与 manual fallback | 无能力依赖；两项 P2 修复后复评；与 #394 四文件冲突须按下述方式保留两能力 |
+
+固定输入 `main@d7e7bca6`、#393 `85fa379c`、#392 `9cfb438f`、#394 `09f33c38`、#395 `fe24c5e6` 已在仓库外 clone 按上述顺序 rebase 预演：前三项无冲突，#395 的冲突仅为两份 Host 文件和两份 Host 契约测试。解法：保留 `refreshPlanning` 与 `getExecutionContext` 两 operation，使用捕获 workspace 的 `handlersFor`，保留 scheduler start 与 stop/drain/close 顺序；契约保留 refresh 的精确参数检查并排除新增执行查询后比较原 descriptor 集合。
+
+原始输入并集 `6e482caa` 的 `CI=true pnpm verify` 为 1806/1806 + MVP-0 7/7。该观察不涵盖之后的 P2 修复和评审文档，实际合并每一步仍须针对新 main 和新 head 验证。各 PR 的完整风险/反例与修复证据保存在自己的 `docs/review/pr-<n>-mmp-review.md`；合并结论以远端回读为准。
+
 ## 5. 历史：2026-09-18 那一轮的实测结果
 
 以下是 2026-09-18 完成的上一轮评审（9 个开放 PR：#12 #19 #21 #3 #11 #13 #33 #35 #37）的**实测记录**，不是当前队列的一部分，也不是可以直接套用的模板——它作为一个已经发生过的具体案例，说明第 2 节的流程为什么长这个样子。来源：`docs/review/2026-09-18-mvp-delivery-review.md`。

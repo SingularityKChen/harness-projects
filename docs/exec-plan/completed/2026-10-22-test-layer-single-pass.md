@@ -1,6 +1,6 @@
 # 契约套件去除真实层重复执行 ExecPlan
 
-> 状态：Active；创建：2026-10-22；关联：#362。
+> 状态：Completed；创建：2026-10-22；关联：#362。
 > 维护规范：`PLANS.md`；执行检出：`test/test-layer-single-pass` 工作树根目录。
 
 ## Purpose / Big Picture
@@ -79,17 +79,22 @@
 - [x] (2026-10-22 SGT) 读取本轮基线日志：完整 verify 退出 0，wall 38.15 秒；执行上下文与环境由执行者在批次记录确认。
 - [x] (2026-10-22 SGT) 末尾四例改为逐层非空计数；临时追加不存在的层后对应断言失败，移除探针后四层断言恢复通过。
 - [x] (2026-10-22 SGT) 定向套件 34/34 通过；`CI=true pnpm verify` 退出 0，wall 27.49 秒。
-- [ ] Batch 1：剩余发布检查与最终 head CI / PR 回读。
-- [ ] 最终 head 四车道、PR 关联和 review threads 回读；ready 后保持未合并。
+
+- [x] (2026-10-22 09:37 SGT) 独立实现验收 PASS；实现 head `179dcce1e547` 的 PR Fast Gate、四条 Merge Gate lane 与发布检查均通过；完成计划归档与索引同步。
 
 ## Surprises & Discoveries
 
 基线观察（2026-10-22，基线 `d7e7bca6`）：通过 `/bin/zsh -lc 'pnpm verify'` 得到 exit 0、wall 38.15 秒。Node `v26.11.1`、pnpm `10.28.2`。
 macOS 的 pnpm 入口可能是无 shebang 的 Homebrew shim；直接由 Python argv 启动会选错运行路径，因此必须通过 shell 并确认版本。
-完整计数只是文件发现证据，不能证明实际断言执行；当前真实执行证据仍待最终 head CI 产生。
+完整计数只是文件发现证据，不能证明实际断言执行；Superseded by Outcomes & Retrospective 最终交付记录（2026-10-22）：真实执行证据已按实现 head 四条 CI lane 核对，最终归档 head 仍须重新回读。
 实现后观察（2026-10-22，代码差异基于 `df361809`）：同一 Node/pnpm、工作树内 `node_modules`、串行验证条件下，`CI=true pnpm verify` exit 0、wall 27.49 秒。单次测量较基线少 10.66 秒；未重复配对，不能将差值归因于本改动或承诺固定比例。
 
 ## Decision Log
+
+- Decision：人类本次直接授权 PR #392–#395 在无 P0/P1 或仅 P2/P3 时，由评审会话负责“修复 → re-review → 归档 ExecPlan → … → merge_method=rebase 合并”。本 PR 全矩阵及独立复核无新增 finding，保持计划、实现、验收三个可独立审阅提交边界，补入评审证据并重锁最终 head 后执行授权收尾。Rationale：授权来自本会话，不改变 Planning Status 或 blocked-by。Date/Author：2026-10-22 / 评审协调者。
+
+
+- Decision：最终 CI/ready 是易失的 PR 属性，归档文档保留回读命令，发布时重新锁定最新 head，不把实现 head 的绿灯转移给归档 head。Rationale：避免文档静态值与远端当前状态形成第二事实源。Date/Author：2026-10-22 09:37 SGT / 交付协调者。
 
 - Decision：采用两份设计共有的直接计数方案，保留 fixture 子进程。Rationale：复用既有能力，变更边界与 issue 一致。Date/Author：2026-10-22 SGT / 独立设计审查。
 - Decision：不增加反射测试、mock 框架或单独执行模式。Rationale：原有计数 fixture、workflow 契约与真实 lanes 已提供分层证据。Date/Author：2026-10-22 SGT / 独立设计审查。
@@ -108,10 +113,18 @@ macOS 的 pnpm 入口可能是无 shebang 的 Homebrew shim；直接由 Python a
 
 ## Outcomes & Retrospective
 
-本次完成设计收敛、最小实现、负向 guard 检查和本地验证。完整层真实执行与 PR 当前 head 验收仍由四条 Merge Gate lanes 提供，尚待最终 head CI 回读，不能宣称发布验收完成。
+本次完成设计收敛、最小实现、负向 guard 检查和本地验证。完整层真实执行与 PR 当前 head 验收仍由四条 Merge Gate lanes 提供，原待验收结论已被本节最终交付记录取代（Superseded by 本节最终交付记录，2026-10-22）。
 没有为本任务有意延期的技术债；发现超出范围的问题时记入 `docs/exec-plan/tech-debt-tracker.md`，不把它并入本批次。
 全部验收成立后将本计划移入 completed 并更新索引；最终交付说明实际计时差与测量限制。
+
+最终交付记录（2026-10-22 09:37 SGT @ `179dcce1e547`）：独立验收通过，当前实现 head 的 PR Fast Gate、Integration/E2E/MVP-0/Boundaries 四 lane 及发布检查成功。归档只改变文档，产品文件与该验收树相同。最终归档提交仍须重新执行 `gh pr checks 393 -R SingularityKChen/harness-projects`，并回读 head/base、issue 双向关联和 review threads；通过后执行 `gh pr ready 393 -R SingularityKChen/harness-projects`。ready 和合并状态只以 PR 实时结果为准，Git 回滚不撤销 Project 元数据。
+
+独立运行时探针确认 17/17 通过、8 次 fixture/参数拒绝子进程、0 次真实层执行；缺 invariant 的 fixture 仍保留参数拒绝验证。计时为单次观察，未作因果性能承诺。
 
 ## Bottom Change Note
 
 2026-10-22 SGT：独立审查两份设计后建立最小 13 节计划，明确 shell 计时与最终四车道证据，消除全绿与非空混称；实现后只保留四层非空计数，并记录单次同环境后测与测量限制。
+
+2026-10-22 09:37 SGT：回填独立验收、实现 head 远端门、收敛提交边界并归档；最终归档 head 与 ready 使用实时回读命令，不继承旧绿。
+
+2026-10-22：MMP 初审与独立复核未发现 P0/P1/P2/P3；证据归档于 `docs/review/pr-393-mmp-review.md`。本计划维持 completed；最终 push 后重新核对 head/base、checks、issue 关联和 review threads，再按本次人类直接授权以 rebase 合并。没有用代码测试替代真实产品走查。
