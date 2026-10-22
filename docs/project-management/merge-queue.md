@@ -525,6 +525,20 @@ gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,baseRe
 
 以上仅按独立能力与收尾风险选序，不新增规划依赖。每次前项合并后，后项在真实main上重锁、rebase、核对range-diff与受影响回归，并等待新head CI和独立批准。预演不能替代真实main；技术债表和索引冲突保留双方全部事实，未来各PR合入时分别带入自己的`docs/review/pr-<n>-mmp-review.md`。合并回读使用各PR的state/headRefOid/mergeCommit及对应issue状态，本文不预写未来合并SHA。
 
+### 4.11 2026-10-22 · PR #397–#399 MMP 评审收尾
+
+人类在本次评审会话直接授权：无 P0/P1 或只有 P2/P3 的 PR，由评审会话修复、独立复评、归档、整理交付提交、核对 issue 后 rebase merge；有 P0/P1 且已有实现会话则完整交回修复，完成后再复评。本授权逐项覆盖 #397/#398/#399，不包含代写 Planning Status 或阻塞关系。
+
+| 位置 | PR / issue | 独立闭环 | 已知冲突与下一门 |
+|---|---|---|---|
+| 1 | #397 / #233 | 有界谱系锚点查找与持久化验收 | 初审无缺陷并 APPROVE；证据提交后重锁 head/base/CI/threads，再合并。 |
+| 2 | #398 / #363 | 完成计划归档、路径与短索引 | 独立矩阵结束后处理非阻塞意见；README 保留三个完成计划短行的并集，债务引用指向各自完成态。 |
+| 本轮暂不合并 | #399 / #186 | 原生测试解析隔离 | 初审一条 P1：被静态剪枝的 dist 导出上下文仍可执行外层 workspace 包。review 5611492593 已 REQUEST_CHANGES，并完整交回原实现会话；修复后重新取得当前 head 批准，再确定入队位置。 |
+
+初审输入为 `main@6aa6592`，#397 `81c989e`、#398 `9cbaf6f`、#399 `f85568f`；既有顺序并集 `test/lineage-controls-acceptance@7824aaac` 经协调者独立重跑 `pnpm verify` 为 1924 + 7、零失败。关键实现 blob 与三个输入 head 相同，110 个受管测试的正文和首 import 并集均保持。该绿色没有消除 #399 的真实 marker 反例。索引预演为 Active 1 / Completed 104、18,930 字节；实际合并时重新核对，不用预演代替真实 main。
+
+每次前项合并后，后项重新 fetch、必要时 rebase 并核对 range-diff、受影响测试和公开面检查；备份 ref 与精确 lease 防止覆盖并发推送。每个 PR 的全矩阵保存在其自身的 `docs/review/pr-<n>-mmp-review.md`。可选 `Create review session` 的当前失败已逐项核对为端点连接失败，由 #364 承接；唯一保护必需检查是 `PR Fast Gate`。最终结果以 `gh pr view <n> -R SingularityKChen/harness-projects --json state,headRefOid,baseRefOid,mergeCommit,reviews,closingIssuesReferences`、`gh pr checks <n> -R SingularityKChen/harness-projects` 和对应 issue 回读为准，不预写未来 SHA。
+
 ## 5. 历史：2026-09-18 那一轮的实测结果
 
 以下是 2026-09-18 完成的上一轮评审（9 个开放 PR：#12 #19 #21 #3 #11 #13 #33 #35 #37）的**实测记录**，不是当前队列的一部分，也不是可以直接套用的模板——它作为一个已经发生过的具体案例，说明第 2 节的流程为什么长这个样子。来源：`docs/review/2026-09-18-mvp-delivery-review.md`。
