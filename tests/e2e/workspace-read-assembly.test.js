@@ -5,6 +5,8 @@
  * 用例名说明它保护哪条不变量：六个字段都有真实生产者、同 revision 的来源变化可达、断网保值保时间、
  * 部分成功不洗白整表、单一接受点。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

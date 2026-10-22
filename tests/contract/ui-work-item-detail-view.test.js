@@ -3,6 +3,8 @@
  * 保护：scope 先于 store、阻断态不借缓存、redacted 字段全消、选中行新鲜度不随整表 partial 漂移、缺项只报未确认。
  * 每个场景配可见内容正控，防“全部隐藏”空绿。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

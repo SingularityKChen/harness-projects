@@ -7,6 +7,8 @@
  * (5) reconcile 全有或全无、忽略 scope.cursor、任何失败都不抛错（M4、M22）；(6) 能力自述只声明已实现的读取（条目、迭代）；
  * (7) 原生字段（#133）：值以 project field id 为键、不认 option id，一页读全否则整次失败，REDACTED 不读字段值。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { inspect } from 'node:util'

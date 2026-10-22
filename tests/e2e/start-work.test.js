@@ -3,6 +3,8 @@
  * 用例名说明它保护哪条不变量：不合法输入不落上下文、git 失败不启动执行、执行失败降级而不丢上下文、
  * 重复开始幂等、重启后仍可恢复（tests/README §2.3、§2.5）。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

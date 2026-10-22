@@ -15,6 +15,8 @@
  * 「进程死在两步之间」用**抛出**模拟：`provision` 的最终 `saveContext` 因此不会执行，
  * 存储里留下的只有分步回填写的那一次——这正是本层要断言的东西。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

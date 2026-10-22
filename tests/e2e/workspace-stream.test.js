@@ -4,6 +4,8 @@
  * 一代 = 开场 baseline + 净 delta / metadata，gap 之后本代结束，中止之后不再读取。
  * 读取面是脚本化的快照序列，节拍由测试放行，不依赖真实 sleep。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

@@ -3,6 +3,8 @@
  * `tests/contract/suites/storage-execution.js`；本文件钉住契约套件管不到的三类事实：类型化拒绝**没有吞掉**别的失败（总 catch 变异的判别点）、
  * 拒绝之后同一实例的队列仍可用、零 BEGIN 与整笔回滚（SQLite 专属，经计数包装观察）。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

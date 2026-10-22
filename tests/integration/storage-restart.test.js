@@ -2,6 +2,8 @@
 // "rollback on failed transaction"）。"重启"是真的关掉句柄再打开同一个文件，不是内存导出/导入——
 // #5 的重启判据只有在文件上才成立。每个用例一个临时目录，用例之间不共享状态。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

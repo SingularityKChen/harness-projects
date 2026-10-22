@@ -4,6 +4,8 @@
  * 一半用纯函数状态机逐条钉死 D3；一半用离线替身的 ambiguous_create 开关证明"结果不确定时必须先
  * reconcile、禁止盲目重试创建"在真实 provider 交互上同样成立。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

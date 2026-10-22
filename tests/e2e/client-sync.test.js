@@ -4,6 +4,8 @@
  * 用例名说明它保护哪条不变量：基线修订 N 之后按序应用增量、实体身份稳定、错过增量必须检测缺口并重拉
  * 基线、重连后的投影与全新客户端一致、陈旧值永远不被当成当前值。全部使用离线替身：无凭据、无网络。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

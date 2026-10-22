@@ -5,6 +5,8 @@
  * 不可达 / 从未读到都不返回"看起来正常的空列表"；首页与列表对同一份读取给出同一结论；谱系入口的
  * 必需 key 等于 core 真实的读门；四态求交与 capabilities 逐格一致；展示层不读时钟。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'

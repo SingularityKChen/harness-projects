@@ -3,6 +3,8 @@
  * 每个场景都带一条可见行正控与一条恶意 redacted 行（canary 只出现在被遮蔽字段里），所以"全部隐藏"不会让泄漏断言空绿。
  * 它不证明真实 DOM、布局、焦点与动态播报；设置 UI_FIXTURE_OUT 会写出全部状态的静态 HTML 供人工视觉验收。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'

@@ -5,6 +5,8 @@
  * provider 确认前不得报告为"已保存"（AGENTS.md §1.1 硬约束）、同键重放返回原结果（D3）、落后太多时发
  * 缺口而不是静默续传（issue #79 验收）。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

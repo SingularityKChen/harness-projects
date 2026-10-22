@@ -9,6 +9,8 @@
 // "仓库当前的所有 workflow 满足全部不变量"已经覆盖本文件（新增 workflow 自动进入
 // 那份检查）。这里补的是 workflow-check 判不了的语义：lane 集合、命令与不变量文案。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';

@@ -4,6 +4,8 @@
  * 第二页故障不残留第一页成功；anchor 未观察时 adapter 收到零请求；已观察提交后请求精确落在该提交。
  * core 自身的分页/状态/策略矩阵由 Batch A2 的 core 级集成（内联 stub）单独固定，这里不重复。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import test from 'node:test'
 

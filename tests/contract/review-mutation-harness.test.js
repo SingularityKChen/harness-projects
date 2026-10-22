@@ -22,6 +22,8 @@
  *     node scripts/review-mutate.mjs tests/contract/fixtures/review-mutate-self.json
  */
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'

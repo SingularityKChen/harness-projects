@@ -1,4 +1,6 @@
 /** 离线 Planning 替身的契约套件装配，外加两条判别性用例。判别性用例保护的不变量：(1) draft→issue 提升只改外部 id 与内容身份，成员关系 id 保持不变，内部实体 id 由调用方保持（不变量 1；E1-2 实验 2）；(2) 过期 source version 的字段写必须报 conflict 且不得改动对象（ack 前不得显示权威已保存）。 */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { promoteDraftToIssue } from '@harness-projects/domain'

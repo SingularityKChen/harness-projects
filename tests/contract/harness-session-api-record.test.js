@@ -12,6 +12,8 @@
  * 边界：块里的 §2.3 推导规则是散文，由 deriveConsequence 逐条手抄，测试不解析它；块自预注册提交以来是否被改，
  * 由计划 Validation and Acceptance 第 4 行对预注册提交的逐字节 diff 判定（离线测试不跑 git），不由本文件判定。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'

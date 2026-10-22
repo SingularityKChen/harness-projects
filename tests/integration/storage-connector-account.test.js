@@ -1,4 +1,6 @@
 /** 连接账号与工作区配置的集成验收（#126）：重启/重开逐字段相等、空库迁移可重复、旧 002 形状在 migrate 之前被拒绝，以及 canary 不出现在任何发布面。共享 6 条用例由 `tests/contract/storage-connector-account.test.js` 在两个适配器上执行。 */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

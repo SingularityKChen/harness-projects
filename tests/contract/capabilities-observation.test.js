@@ -5,6 +5,8 @@
  * 字段的哈希确定——相同输入得到同一键，重复观察只处理一次；不稳定 payload（如原始报文）不得影响
  * 去重键，否则同一事件会因报文抖动被重复处理。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

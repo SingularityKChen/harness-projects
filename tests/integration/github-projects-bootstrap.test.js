@@ -8,6 +8,8 @@
  * (7) #133：录制的原生字段经映射走完 controller → client → ui-model → 真实列表 HTML；未映射只显示原生名；规范状态只有一个来源，
  *     Host 的权威写入在再同步之前随即反映到列表（再同步仍按原生字段整行覆盖它：同步尚不尊重 StatusPolicy，Refs #273）。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import test from 'node:test'

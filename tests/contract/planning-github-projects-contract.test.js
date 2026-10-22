@@ -7,6 +7,8 @@
  * (6) 原生字段（#133）：定义、迭代与条目值逐字来自录制，值以 project field id 为键，成员关系观察带着值（使同秒字段变化改变
  *     去重键；不足以作为写入确认，同秒 A→B→A 回退不留新行，R3 的写入确认读回归 #71）。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'

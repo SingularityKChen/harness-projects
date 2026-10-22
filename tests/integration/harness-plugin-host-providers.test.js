@@ -3,6 +3,8 @@
  * 种子直接写库，GitHub 流量走录制回放（不触网、不需要真实凭据）。保护的不变量：
  * I1 身份只来自存储（重启不变）、I2 运行期失效不写库、I3 宿主级失败整体关闭、挂载级失败局部隔离、I4 凭据值只存在于一次 provider 操作内。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises'

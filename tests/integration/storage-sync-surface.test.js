@@ -8,6 +8,8 @@
 // （L3 的 003）：观察只带内容引用，落点就是端口主体本身，**不解析成员关系**——对账先到、成员关系后到也能记账。
 // 本层钉的是端口面：`recordObservation` 的 true / false、账本行数与 003 重写后的库自检。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

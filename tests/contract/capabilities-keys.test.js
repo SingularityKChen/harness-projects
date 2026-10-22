@@ -6,6 +6,8 @@
  * （类型级检查见 packages/capabilities/src/capability-keys.ts 的 AccessLevelIsolationCheck）；
  * 3) intersectAccess 满足“任一 unavailable → unavailable、任一 read_only → read_only”。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

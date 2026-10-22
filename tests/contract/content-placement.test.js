@@ -12,6 +12,8 @@
 // `docs/development/content-placement.md` 的**归属表**（缺口表不参与，它是观察
 // 记录，不是路由分类）。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'

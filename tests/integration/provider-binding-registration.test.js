@@ -4,6 +4,8 @@
  * 校验、快照与 Storage 的任何失败都整批回滚（不留工作区、孤儿锚点或半批挂载）；
  * 写命令、链读与取消落到提供该能力的那个挂载，取消回到签发它的 Execution 挂载。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 

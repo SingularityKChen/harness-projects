@@ -7,6 +7,8 @@
 // 传输与结构故障用**表驱动**覆盖：这个 adapter 的契约是「任何结构异常都抛错而不是
 // 跳过」，逐条写测试会把同一件事重复十几遍，而漏掉一条就等于给假绿留一扇门。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'

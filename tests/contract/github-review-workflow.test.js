@@ -15,6 +15,8 @@
  * 这些性质都是结构性的，所以用契约测试固定，而不是靠 review 时的记忆。
  */
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'

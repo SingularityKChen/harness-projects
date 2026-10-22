@@ -2,6 +2,8 @@
  * 领域状态契约测试（tests/README.md §2 优先级 2；ExecPlan A1 不变量 3、4）。保护的不变量：1) 归一化是纯函数，未知取值一律 unknown，不得猜测；2) 工程事实（CI 失败 / 执行完成 / PR 合并）在任何状态策略下都不改写规划状态；3) 派生标记只是投影，永远不能写回权威状态。
  */
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

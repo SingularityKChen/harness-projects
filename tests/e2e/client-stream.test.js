@@ -2,6 +2,8 @@
  * Batch 2 端到端：客户端对宿主流的每代协议（issue #276）与监督者的有界退避重开（#229）。
  * 流用宿主 RemoteStream 的替身（本机交叉核对时是真实类）驱动；离线、无凭据。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

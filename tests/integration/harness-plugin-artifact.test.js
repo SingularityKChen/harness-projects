@@ -12,6 +12,8 @@
  * 不 import 构建脚本的常量，否则构建与测试会一起错。
  */
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'

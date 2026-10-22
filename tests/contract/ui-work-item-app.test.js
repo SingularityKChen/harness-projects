@@ -3,6 +3,8 @@
  * （先例 ui-work-item-detail.test.js）——按调用序号持久化 useState / useRef，按依赖变化收集 effect，再调一次
  * `WorkItemApp` 即重渲染。真实 focus / showModal 在宿主里由 Batch 4 的观测证明。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { test } from 'node:test'

@@ -3,6 +3,8 @@
  * 对应领域枚举的 provider_authoritative / host_authoritative / manual_only；三种策略下 CI 失败、执行完成、PR 合并都不得改写规划状态，
  * 唯一允许的联动是显式命令。每条负向用例都断言"存储里的规划状态原值不变"，而不只是看一眼决策函数的返回值。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { test } from 'node:test'

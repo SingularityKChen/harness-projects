@@ -3,6 +3,8 @@
  * 只外置 react。只打包接受 type-only view 的 renderer 会漏掉实际归约路径（类型在构建时被擦除），所以入口必须真调用它们，
  * 并在隔离 vm 里执行产物再做真实 SSR。它不证明真实 DOM 或真实 Host 装配（client.store 与 transport 由 #178 / #229 验证）。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import path from 'node:path'

@@ -3,6 +3,8 @@
  * 一个工作区的同步结算不得覆盖另一个工作区的健康度。全部走真实的 `composeCore` + `bootstrapWorkspace` + controller 查询，
  * 在内存替身与 `:memory:` SQLite 上同形运行；用例名说明它保护哪条不变量，不重复共享契约套件已证明的键语义。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

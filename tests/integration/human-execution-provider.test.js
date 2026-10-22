@@ -5,6 +5,8 @@
  * 运行 `running` 且引用由签发者签出；执行起不来时上下文保留、fallback 只在主执行确定起不来时承接并受写门约束；
  * 重启后上下文、运行记录、引用与交接快照不变；取消按运行身份收敛，签发者配置变了 fail closed（ADR-0008）。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'

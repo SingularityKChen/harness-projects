@@ -5,6 +5,8 @@
  * 分层：provider 自身的行为（路径安全、分支身份、能力子集、写后回读）在
  * `tests/integration/development-local-git.test.js`；夹具见 `tests/integration/local-git-fixture.js`。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdir, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'

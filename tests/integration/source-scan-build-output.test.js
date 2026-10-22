@@ -6,6 +6,8 @@
  * 两个对照让断言有判别力：阳性对照证明产物里确实有调用点模式（否则「扫不到」可能只是构建没产出）；
  * 阴性对照证明去掉输出目录的忽略规则后产物就成为第二个调用点（否则「只剩一处」可能只是模式没命中）。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

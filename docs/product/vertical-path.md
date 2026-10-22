@@ -26,6 +26,8 @@ node --test tests/mvp0
 
 失败形态仍然有效：删掉任一节点的实现后，该节点会以 `✖ 节点 N · …` 加 `AssertionError` 点名"节点「X」尚未实现"的形状失败，而**不是**以导入错误失败（`tests/mvp0/README.md` §2）。`Merge Gate · MVP-0` 车道在 PR 上跑这条轨道并点名它保护的不变量，但该车道目前是 advisory，不是分支保护里的必需检查（`docs/development/ci.md`）。
 
+这些原生 Node 命令由每个受管测试首 import 的解析 preflight 保护：未安装嵌套检出、包内或测试内 shadow 会先于工作区模块 body 失败，并给出安装指引。先移除诊断指出的残留边界，再执行 `pnpm install --frozen-lockfile`。普通单文件或目录取证也可用 `pnpm test:file <path>`；下面的前缀回读继续保留不加 `--test` 的正反对照。守卫边界见 [测试说明](../../tests/README.md)。
+
 ## 2. 纵向链路步骤枚举
 
 每一步都用三个观察面描述：用户做什么、成功时看到什么、失败时看到什么。步骤表本身与 provider 无关；最后两列把"这一步由谁完成"写清楚——MVP-0 的每一行都由 `packages/providers/fake` 的离线替身完成，不需要真实平台；MVP-1 只替换外部平台那一端的 provider，步骤、观察面与失败形态都不改写。

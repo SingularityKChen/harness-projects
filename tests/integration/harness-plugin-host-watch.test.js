@@ -5,6 +5,8 @@
  * 先 baseline 后 delta、断流即 stale 且同句柄重拉、卸载与 Host 异常之后排定 1 s 重开（Host 异常的重开以新 follower 跟随）、来源降级时
  * 抽屉显示最后已知值、卸载先中止流再关库、Host 异常只上固定文案、提前 return 结束内层一代、空数据根不终止。种子只经 A 的共享夹具 `host-seed.js` 写入。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'

@@ -5,6 +5,8 @@
 // 计划 R1 步骤 7 的一次性对照证明，因此不依赖 `origin/main`，在浅克隆的 CI 上也承重。新名字一律经 `sqlite.*` 引用：
 // 文件在 base 上也能加载，每条用例各自变红，而不是整个文件加载失败。
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'

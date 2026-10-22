@@ -12,17 +12,17 @@ pnpm test:file <path>  # 单个测试文件或目录，先查解析落点
 
 **在隔离 worktree 里跑测试前必须先安装依赖。** 新建的 worktree 没有 `node_modules`，而裸包名（`@harness-projects/core`）会沿父目录向上解析到**主检出**的 `packages/`——于是测试对着未修改的源码跑，「先红」拿到的是无效证据（2026-09-24 两个并行实现者在各自 worktree 上各自撞到一次，其中一次的红基线是在主检出的代码上取得的）。
 
-这条现在有机械守卫 `scripts/resolution-check.mjs`：它检查根 `package.json` 声明的每个 `@harness-projects/*` 是否解析到**本检出之内**，与怎么逃逸出去（祖先 `node_modules`、`NODE_PATH`、软链）无关。`pnpm test`、`pnpm test:contract`、`pnpm test:mvp0`、`pnpm run boundaries` 与 `pnpm test:file <path>` 都在跑任何用例之前先跑它；越界时退出 1，逐包列出 `包名 -> 实际落点`。失败时在检出根目录执行：
+这条有机械守卫 `scripts/resolution-check.mjs`：它从自身位置锁定检出根，检查根 `package.json` 声明的每个 `@harness-projects/*` 根入口及其 canonical manifest 声明的精确子路径在相关解析边界上是否落在**本检出之内**。边界包括根、package self-reference scope，以及 `packages/`、`apps/`、`tests/`、`scripts/` 任意深度的 `node_modules` 父目录；依赖树不递归，构建输出复用 `tests/fixtures/source-tree.mjs` 的剪枝来源。缺包、坏 manifest、悬空/外指边界与不可读目录均失败闭合；源码目录和文件软链显式拒绝，避免包的子路径导出经软链逃逸。根目录别名与根内 `node_modules` 软链允许，最终落点仍取 realpath。
+
+`pnpm test`、`pnpm test:contract`、`pnpm test:mvp0`、`pnpm run boundaries` 与 `pnpm test:file <path>` 都先跑守卫。每个受管 `tests/**/*.test.js` 的第一条 import 另相对导入 `tests/fixtures/resolution-preflight.mjs`；因此 `node --test <文件或目录>`、`node <文件>` 和故意不加 `--test` 的前缀回读也在工作区模块 body 执行前受保护。新增测试遗漏首 import 会由动态发现契约判红。layer runner 在起子进程前显式断言；把 runner 当库导入时不触发整仓检查。成功只做进程内缓存，不跨命令缓存安装状态。
+
+失败会给出 `resolution-check:` 诊断、违规包落点或边界与安装指引。先移除诊断指出的残留 shadow 或源码软链，再在检出根目录执行：
 
 ```bash
 pnpm install --frozen-lockfile
 ```
 
-单独检查用 `node scripts/resolution-check.mjs`（通过时静默退出 0）。当前定位使用 `require.resolve`，前提是工作区包均提供无条件根导出；契约测试保护该前提，若改成 import-only 或仅 bin 包，需要同步调整守卫定位，重新安装不能解决导出条件差异。
-
-守卫从检出根 manifest 发起解析；它不能证明所有包内和测试子目录的解析上下文。如果子目录有残留 `node_modules` 把同名工作区包指向另一检出，根级检查可能通过而实际运行仍加载外部源码。发生过交叉安装或手工软链时，应清理该残留并重新安装；此盲区与下述原生 Node 绕过均由保持开放的 #186 / TD-088 跟踪。
-
-不经 pnpm、直接用 `node` 跑测试时（`node --test <文件或目录>`，或把测试文件当脚本运行），只有运行集合里含契约测试 `tests/contract/resolution-check.test.js`（例如 `node --test tests/contract`）才会在进程内判红；其余——单个文件、`tests/mvp0` / `tests/integration` / `tests/e2e` 目录，以及直接调用 `node scripts/run-test-layer.mjs <layer> <invariant>`——**不受守卫保护**，未装依赖的嵌套检出里会对着主检出的代码给出假绿（TD-088、TD-089）。取红基线、单跑文件或目录，一律用 `pnpm test:file <path>`。CI 单检出已显式安装依赖，可继续使用 layer runner。已知的无标志拦截候选包括外层检出在自己被忽略的 `.worktrees/node_modules` 下物化带修复指引的哨兵；它能覆盖原始直接 Node 复现，与本 PR 的前置守卫互补，维护与子目录 shadow 的剩余代价由 #186 / TD-088 跟踪。
+单独检查用 `node scripts/resolution-check.mjs`（通过时静默退出 0）。解析使用 `createRequire(...).resolve`，现有工作区包的精确无条件导出由契约保护。现有 `domain/values`、`capabilities/keys`、`controller/keys`、`controller/values`、`client/keys`、`client/delivery` 子路径全部按解析上下文取 realpath；根内复制 shadow 包的子路径外指同样拒绝。根绑定的 canonical manifest 及各上下文实际命中的 workspace 包均检查导出形状，条件、数组或通配导出明确失败闭合。引入这些形状或改变源码边界前，应同步更新守卫与反例，不能靠重新安装消除 import/require 条件差异。守卫不遍历第三方依赖树。具体 direct/shadow 与 marker 证据见 [本次 ExecPlan](../docs/exec-plan/completed/2026-10-22-worktree-module-isolation.md)。
 
 ## 1. 分层
 

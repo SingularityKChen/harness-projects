@@ -2,6 +2,8 @@
  * 领域身份契约测试（tests/README.md §2 优先级 1）。保护的不变量：1) 内部实体 id 不透明且永久——Draft→Issue 提升后 id 不变，旧身份 historical、新身份 primary；2) 同一实体任一时刻只有一个 active primary，且 activePrimary 必须按 entity 过滤；3) 同一外部对象在两个工作区时身份一份、投影两份，提升前必须查重并在被别的实体占用时给出占用者；4) 不同实体种类的 id 在类型上不可混用（由 tsc 执行）；5) 外部身份种类在运行时边界被显式拒绝（`parseExternalIdentityKind` 对未知值与非字符串抛 RangeError），repository 与 branch 的同名字面量是两个对象（种类是自然键的分量），repository 与成员关系 ref（ProjectV2Item）都不是规划内容种类（`planningContentKind`）。
  */
 
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'

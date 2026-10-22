@@ -13,6 +13,7 @@
  * 纯 Node、无网络、无凭据：只用 `fs` 与 `node:child_process` 起本机的
  * `node --test`，不读任何 secret，因此可以离线契约测试。
  */
+import { assertLocalResolutions } from './resolution-check.mjs';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -105,6 +106,11 @@ function runLayer(layer) {
 }
 
 function main() {
+  try { assertLocalResolutions(); } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+    return;
+  }
   const [layer, invariant] = process.argv.slice(2);
   if (layer === undefined || invariant === undefined) {
     console.error(`run-test-layer: 缺少 <layer> 或 <invariant>。${USAGE}`);

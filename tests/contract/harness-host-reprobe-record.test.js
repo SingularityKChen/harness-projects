@@ -9,6 +9,8 @@
  * ORIGINAL_SHA256 = 基线文件「截到 `## 11.` 之前、去掉尾部空白、补一个换行」的 sha256。重算命令：
  *   git show f6a33d2:docs/architecture/harness-host-spike.md | node -e "const s=require('fs').readFileSync(0,'utf8');console.log(require('crypto').createHash('sha256').update(s.trimEnd()+'\n').digest('hex'))"
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'

@@ -3,6 +3,8 @@
  * 不变量：每一跳都是带显式 provenance 的关系且沿谱系传播（不变量 6）；确定性发现的关系先进候选、只有显式确认才升级；未观察过的链路读回 0 跳且本地
  * 不留骨架关系（事实/观察边界）；缺可选能力报 unavailable 而不是 error；只读交付方的写尝试返回 not supported 且不改任何状态。
  */
+import '../fixtures/resolution-preflight.mjs';
+
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
