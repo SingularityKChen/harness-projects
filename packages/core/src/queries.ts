@@ -132,8 +132,7 @@ async function workspaceMetadata(context: CoreContext): Promise<WorkspaceMetadat
 
 /**
  * 逐仓库可用性：每个已登记仓库按两个操作各路由一次。开始工作走的是同一个 `routeDevelopment`，所以开始工作的四个 key 报告的就是命令会用的那个挂载，不另算一份；
- * 变更请求读（`change_request.read`）的可用性只说明「这条路由可解析」：PR 谱系读取今天仍由 `chain-facts.ts` 的 `developmentReadBinding` 按 key 解析，
- * #297 把它接到 `CHANGE_REQUEST_READ_ROUTE` 之后，谱系读取才走这条路由。
+ * 变更请求读（`change_request.read`）与 PR 谱系的远端分支头读取共用完整 `CHANGE_REQUEST_READ_ROUTE`。
  * 路由成功：该操作报告的 key 取被选挂载的有效能力（门已过，key 必在其中）；被拒：这些 key 逐个 unavailable，原因是拒绝文案。每个 key 只由一个操作报告。
  */
 async function repositoryMetadata(context: CoreContext): Promise<readonly RepositoryMetadata[]> {

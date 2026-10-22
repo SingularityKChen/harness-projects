@@ -1,6 +1,6 @@
 # 交付谱系按仓库与操作路由 ExecPlan
 
-> 状态：Active，设计已独立综合审读，尚未实施。
+> 状态：Active，实施与本地验收完成，等待独立实现审读及最终远端门禁。
 > 创建：2026-10-22；关联：#297（#216 的独立闭环，解除 #233 的此项读路由阻塞）。
 > 依据：根 `PLANS.md`、`AGENTS.md`、`docs/adr/ADR-0015-repository-references-side-by-side.md`。
 
@@ -16,7 +16,7 @@
 
 `packages/core/src/development-route.ts` 的 `routeDevelopment` 已实现此选择；`CHANGE_REQUEST_READ_ROUTE` 以 `DevelopmentChangeRequestRead` 的声明选连接，在该连接先过 `DevelopmentRepositoryRead` 读门，再过 CR 读门。多声明者 conflict，无声明者 not_supported；角色、顺序与可用性均不参与选择。
 
-`packages/core/src/chain-facts.ts` 的 `developmentReadBinding` 仍以工作区 capability key 解析，多个 Development 连接时安全拒绝。`readChainFacts` 先读分支头，再由 `readChangeRequest` 第二次解析连接，因此只替换 PR 调用不足以完成接线。两个真实实现均声明 repository.read，按它选择并列引用恒歧义。
+实施前 `packages/core/src/chain-facts.ts` 的 `developmentReadBinding` 以工作区 capability key 解析，多个 Development 连接时安全拒绝。`readChainFacts` 先读分支头，再由 `readChangeRequest` 第二次解析连接，因此只替换 PR 调用不足以完成接线。两个真实实现均声明 repository.read，按它选择并列引用恒歧义。该旧接缝的状态已由 Outcomes & Retrospective 的实施结果取代（2026-10-22）。
 
 `packages/core/src/delivery-facts.ts` 的 `completeSets` 以 gap 能力键判定集合完整性：RepositoryRead gap 使 commit、change_request、pipeline_run、check_run 四集合均不完整，保留最后确认事实及 confirmedAt 并标 stale。CR provider 失败则只影响 PR 与检查。查询只消费持久快照，刷新是交付事实唯一写者。
 
@@ -115,7 +115,7 @@
 
 全部检查期望 exit 0；人工分类汇总代码测试 ≤800、文档 ≤1300（锁文件/生成目录按仓库规则），并核对发布面五类目。只有新失败或边界风险再扩大验证；不把本地绿等同真实 demo 闭环。
 
-实施开始前依 `docs/development/workflow.md` 建仅含计划的 draft PR 并用 Closes #297 建同仓 issue 关联；本次计划审读不执行外部写入。最终 push 前收敛 debug/fixup，提交格式 `feat(core): <中文摘要>`、正文说明原因且末尾 `Closes #297`。已推分支需改写时走 expert 流程建 backup ref 与精确 lease。
+实施开始前依 `docs/development/workflow.md` 建仅含计划的 draft PR 并用 Closes #297 建同仓 issue 关联；本次计划审读不执行外部写入。最终 push 前收敛 debug/fixup，提交格式 `feat(core): <中文摘要>`、正文说明原因；本次实施提交按委派范围使用 `Refs #297`，PR 的 `Closes #297` 关联由最终交付 owner 回读。已推分支需改写时走 expert 流程建 backup ref 与精确 lease。
 
 push 后用 `gh pr view --repo SingularityKChen/harness-projects --json number,headRefOid,baseRefOid,isDraft,mergeStateStatus,closingIssuesReferences,reviewDecision,statusCheckRollup` 定位并回读本分支 PR，再用 `gh pr checks --repo SingularityKChen/harness-projects` 检查本分支最新 head；所有 review threads 通过 `docs/review/README.md` 的命令回读。只有当前 head 验证通过才 `gh pr ready --repo SingularityKChen/harness-projects`；不沿用旧 checks / review。完成后移计划到 completed 并更新索引。
 
@@ -137,21 +137,29 @@ push 后用 `gh pr view --repo SingularityKChen/harness-projects --json number,h
 
 - [x] (2026-10-22 09:07 SGT) 完成两份独立设计与源码综合审读，确认 CR gate 语义张力及夹具身份缺口；五文件基线 130/130。
 - [x] (2026-10-22 09:07 SGT) 保存自包含设计/实施计划与文档索引；文件集合见 Global Constraints。
-- [ ] Batch 1：先得到判别性 red，再完成最小接线及双 Storage green。
-- [ ] Batch 2：拒绝/恢复、部分失败、合法 GitHub alias 与持久性验收。
-- [ ] Batch 3：M1–M4、相关回归、发布面、提交整理、draft→当前 head ready 与计划归档。
+- [x] (2026-10-22 09:22 SGT) Batch 1：未接线起点的 6 个正例全部因 repository gap 断言变红；最小接线后 6/6，扩展后专用双 Storage 26/26。
+- [x] (2026-10-22 09:22 SGT) Batch 2：覆盖缺引用、historical、同名其他实体、首次拒绝、三类 gate 拒绝及 unavailable 声明者冲突、恢复、部分失败、重开和查询纯读；四文件回归 84/84。
+- [x] (2026-10-22 09:22 SGT) `pnpm verify`：typecheck 通过，完整三层 1787/1787、MVP-0 7/7；本地产品验收完成。
+- [x] (2026-10-22 09:22 SGT) Batch 3 本地判别：M1–M4 均 KILLED，按字节还原后基线绿；五文件回归 130/130，boundaries 9/9，workflow-check 无发现。
+- [ ] Batch 3 交付门：独立实现审读、最终 push、当前 head 远端 checks / issue / threads 回读、draft→ready 与计划归档由总 owner 继续；此实施批不 push、不改 PR 或看板。
 
 ## Surprises & Discoveries
 
 - 旧 completeness 表在 CR key 被摘掉时只 stale PR / checks；完整 CR operation 在分支读取前就会拒绝。这是有意行为调整，不能把改期待掩饰成无回归；见 Decision Log D1。
 - GitHub 集成夹具由 Fake Start Work 登记仓库后直接换硬编码 GitHub binding，Storage 没有其现行引用。旧 key seam 掩盖了缺失前提，新路由应拒绝；见 Batch 2 的公共绑定修复。
-- 专用双挂载正例仍缺失；现有 #197 的未登记仓库拒绝用例只能证明安全拒绝，不能证明接线。两份设计报告的基线均是调查证据；本计划独立重跑 130/130，不把未执行的 mutation 写成结果。
+- 实施前专用双挂载正例缺失（已由新专用集成测试取代，2026-10-22）；现有 #197 的未登记仓库拒绝用例只能证明安全拒绝，不能证明接线。两份设计报告的基线均是调查证据；本计划独立重跑 130/130，不把未执行的 mutation 写成结果。
+
+- 2026-10-22 实施后首次相关回归为 79/82：两种 Storage 的旧 completeness 行与 GitHub 夹具各失败，恰为设计已识别的三处期待/前提；按 D1 / D3 修正后 82/82，追加首次拒绝的两用例后为 84/84。未改生产路由来兼容夹具。
 
 ## Decision Log
 
 - D1 / Decision：采纳完整 CR 操作门，CR 不可用或未声明时四集合 stale；只对 provider 读取失败保留原部分降级。Rationale：ADR-0015 已将远端 head 与 PR 定为同一操作，预发布可直接简化，无需为旧期待另建半授权协议。Date/Author：2026-10-22 09:07 SGT / 独立设计综合审读 agent；本裁决不授予任何规划字段/关系写权限。
 - D2 / Decision：同次刷新只路由一次并传递原返回值。Rationale：排除两跳选择漂移与自行拼引用，保持工作树身份从执行上下文派生；不声称跨 Storage/provider 的快照事务。Date/Author：2026-10-22 09:07 SGT / 独立设计综合审读 agent。
 - D3 / Decision：合法 alias 通过 bindRepository 补入测试，不放宽生产路由。Rationale：测试必须满足已登记仓库的身份前提，保留原 adapter 判别力；无解绑/改绑范围。Date/Author：2026-10-22 09:07 SGT / 独立设计综合审读 agent。
+
+- D4 / Decision：实施批保留计划 Active，只提交本地实现与证据，交回独立审读。Rationale：用户授权的执行分工明确要求实施者不得 push / 外部写入，最终远端门禁与归档属于总 owner；不把本地测试通过当成全部交付完成。Date/Author：2026-10-22 09:22 SGT / 实施 agent。
+
+- D5 / Decision：只同步 `queries.ts` 的过期说明，不改元数据算法或投影接口。Rationale：元数据原已按完整 CR 操作报告可用性；本批接通事实读取后，旧注释所称“尚未接线”不再属实。该文件在 Global Constraints 既有集合内。Date/Author：2026-10-22 09:22 SGT / 实施 agent。
 
 ## Idempotence and Recovery
 
@@ -175,8 +183,33 @@ Node ≥22，pnpm 10.28.2；现有 `@harness-projects/core`、Fake 与 SQLite wo
 
 ## Outcomes & Retrospective
 
-本轮只完成计划与独立综合审读；没有产品实现、mutation、提交、push 或外部写入。已实跑相关基线 130/130；功能完成结论必须由各批新证据替换此段。主要风险为混用本地 head、把 route 拒绝误当空集合以及修夹具时篡改锚点；新命名用例与 M1–M4 分别提供反证。
+最小实现已将 Development 两跳接到同一次完整 CR 操作路由；成功参数与引用不再重算，Delivery 域的 key 路由保持原职责。专用集成测试为 26 例，两种 Storage 均经过关闭重开 / export 重建；真实 GitHub adapter 夹具经公共绑定命令建立 alias，原标题、fork、大小写、分页与 node-id 主键反例保持不变。CR gate 拒绝四集合 stale 是 D1 的有意调整，PR provider 结构化失败仍保留部分降级粒度。没有新技术债务。
+
+以下均在检出 `feature/delivery-repository-routing` 的工作树根目录执行，实施起点为计划提交 `ee5350060e211062e967dac00af2876ec2b53c1e`；2026-10-22 09:22 SGT 记录。验证命令按 Batch 1–3 可复跑，不依赖运行态报告：
+
+| 证据 | 实际结果 |
+|---|---|
+| Batch 1 专用测试，修改生产代码前 | 6 tests / 0 pass / 6 fail；`AC297 registered-repository-multi-development-read (Fake)` 与四个 side-by-side、SQLite registered 同因 `AssertionError: 公开刷新必须经已登记仓库的唯一操作路由成功，无 capability gap` 失败，actual gap 为 `development.repository.read`。不是 import 或夹具异常。 |
+| Batch 1 最小接线后同命令 | 6/6；补齐负向、持久性后同命令 26/26。 |
+| Batch 2 四文件回归 | 84 tests / 84 pass / 0 fail，exit 0。 |
+| Batch 3 五文件相关回归 | 130 tests / 130 pass / 0 fail，exit 0。 |
+| `pnpm verify`（shell 入口） | typecheck 通过；contract / integration / e2e 为 1787/1787，MVP-0 为 7/7，exit 0。 |
+| `pnpm run boundaries` / `node scripts/workflow-check.mjs` | 9/9 / no findings，exit 0。 |
+| 提交前 `scanDiff(git diff --cached -U0 origin/main)` / `scanText(提交信息)` | 两项均零命中；代码测试 332 行，小于本计划 800 行；文档小于本计划 1300 行。 |
+
+`node scripts/review-mutate.mjs .superpowers/297-route-mutants.json --root .` 的四项真实变异均为 KILLED，exit 0；基线与还原后基线均绿，源码字节一致。另用 `node --test --test-name-pattern=<下表用例前缀> tests/integration/delivery-repository-routing.test.js` 在各变异施加期间取出断言原因，随后立即按字节还原：
+
+| 变异 | 失败用例（Fake / SQLite 同因） | 实际断言错误 |
+|---|---|---|
+| M1 恢复 key 级 seam | `AC297 registered-repository-multi-development-read (Fake)` | `AssertionError: 公开刷新必须经已登记仓库的唯一操作路由成功，无 capability gap`。 |
+| M2 改用 repository.read 锚点 | `AC297 side-by-side-local-github-operation (local primary, Fake)` | 同上：actual 为 repository gap，未观察远端两跳。 |
+| M3 选对连接却拼 Local ref | `AC297 side-by-side-local-github-operation (local primary, Fake)` | `AssertionError: 两跳都使用完整远端引用`；bindingId 是 Local，expected 是 GitHub 型连接。 |
+| M4 拒绝只记 CR gap | `AC297 missing-current-reference (missing, Fake)` | `AssertionError: 路由拒绝保留四集合节点、锚点与 confirmedAt，全部 stale`；错误 key 导致已确认集合被清空或更新。 |
+
+提交前人工核对凭据、本机路径与身份、账号与个人信息、内部系统、保密字样五类发布面，无发现；机械检查须覆盖最终提交范围。本批交回后仍需独立实现审读及最终远端门禁，因此计划尚未归档。真实 GitHub 权限、Harness 安装和完整 demo 仍由 #233 验收；本地离线替身与脚本化平台不能证明这些外部条件。
 
 ## Bottom Change Note
 
 Change Note (2026-10-22 09:07 SGT)：首次整合 #297 两份独立设计与源码证据；明确完整操作门裁决、合法 alias 夹具、双 Storage TDD、变异归因、尺寸与当前 head 交付门。
+
+Change Note (2026-10-22 09:22 SGT)：记录真实 TDD、拒绝/恢复、公共 alias、相关回归与四项 mutation 结果，明确实施批与最终远端交付的分工；保留 Active 等待独立实现审读。

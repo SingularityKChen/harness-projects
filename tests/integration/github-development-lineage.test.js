@@ -10,8 +10,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { StatusPolicy, newWorkspaceId } from '@harness-projects/domain'
-import { composeCore } from '@harness-projects/core'
-import { createFakeProviders, exportFakeStorageState } from '@harness-projects/provider-fake'
+import { composeCore, createWorkspaceSetup } from '@harness-projects/core'
+import { createFakeProviders, createFakeStorage, exportFakeStorageState } from '@harness-projects/provider-fake'
 import { createGithubDevelopmentProvider } from '@harness-projects/provider-development-github'
 
 /** 离线替身播种的仓库键：Start Work 把它写成仓库主键，GitHub provider 的 `repository.externalId` 必须与它相同。 */
@@ -25,7 +25,9 @@ const pr = (id, number, headRefName, overrides = {}) => ({
 
 test('core 端到端：PR 只经 head 分支挂上谱系，标题 / fork / 大小写诱饵不入库，provider node id 不作任何主键', async () => {
   for (const mode of ['精确', '忽略']) {
-    const providers = createFakeProviders()
+    const policy = { allowedSecretHandles: new Set(), configurations: new Map([['development.github', {}]]) }
+    const storage = createFakeStorage(undefined, policy)
+    const providers = { ...createFakeProviders(), storage }
     const workspace = { id: newWorkspaceId(), name: `github-development/${mode}`, statusPolicy: StatusPolicy.ManualOnly }
     const first = await composeCore({ workspace, providers })
     const item = (await first.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item')
@@ -41,8 +43,12 @@ test('core 端到端：PR 只经 head 分支挂上谱系，标题 / fork / 大�
       const offset = variables.after === null ? 0 : Number(variables.after.slice(1))
       return ok({ repository: { pullRequests: { pageInfo: { hasNextPage: offset + variables.first < listed.length, endCursor: `C${offset + variables.first}` }, nodes: listed.slice(offset, offset + variables.first) } } })
     }
+    // 通过公共命令把同一仓库实体补上 GitHub alias，保留 Start Work 的 Fake 锚点。
+    const bound = await createWorkspaceSetup(storage).bindRepository({ workspaceId: workspace.id, repositoryId: REPOSITORY,
+      references: [{ domain: 'development', implementationKey: 'development.github', configuration: {} }] })
+    assert.equal(bound.ok, true, '前置：公共仓库绑定为 GitHub 建合法 alias')
     const development = createGithubDevelopmentProvider({
-      bindingId: 'binding-github-development', repository: { externalId: REPOSITORY, owner: 'sandbox-owner', name: 'sandbox' }, transport: async (request) => platform(request),
+      bindingId: bound.value.bindingIds[0], repository: { externalId: REPOSITORY, owner: 'sandbox-owner', name: 'sandbox' }, transport: async (request) => platform(request),
     })
     const core = await composeCore({ workspace, providers: { ...providers, development }, storage: providers.storage })
     const scope = { workItemId: item.entityId, repositoryId: REPOSITORY }
