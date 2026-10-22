@@ -249,7 +249,8 @@ const COMPLETENESS = [
   ['Development 读能力被摘掉', undefined, { policy: CapabilityKey.DevelopmentRepositoryRead, stale: DELIVERY_SETS }],
   ['流水线读能力被摘掉', undefined, { policy: CapabilityKey.DeliveryPipelineRead, stale: ['pipeline_run'], unavailable: ['pipeline_run'] }],
   ['检查读能力被摘掉', undefined, { policy: CapabilityKey.DeliveryCheckRead, stale: ['check_run'], unavailable: ['check_run'] }],
-  ['变更请求读能力被摘掉', undefined, { policy: CapabilityKey.DevelopmentChangeRequestRead, stale: ['change_request', 'check_run'] }],
+  // 完整 CR 操作门在远端 head 读取前拒绝（#297）：四集合均不能重新确认。
+  ['完整操作门拒绝：变更请求读能力被摘掉', undefined, { policy: CapabilityKey.DevelopmentChangeRequestRead, stale: DELIVERY_SETS }],
   // 命令事实（tracks / has_worktree）不随上下文状态隐藏（TD-009）。
   ['上下文 Failed', async (providers, chain, storage) => { const record = await storage.getExecutionContext(chain.started.executionContextId); await storage.putExecutionContext({ ...record, status: 'failed', provisioningStartedAt: undefined }) }, { stale: [] }],
   // 正控：完整读到的空集合才删除；锚点被完整读到并确认不存在时，下游一并删除。
