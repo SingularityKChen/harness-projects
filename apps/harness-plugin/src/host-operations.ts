@@ -99,6 +99,7 @@ export const OPERATIONS = defineOperations({
   connectAccount: { mode: 'unary', params: ENVELOPE },
   bindPlanningSource: { mode: 'unary', params: [...ENVELOPE, param('accountId', 'AccountId', (value) => nonEmptyString(value, 'accountId')), param('projectNodeId', 'ProjectNodeId', (value) => nonEmptyString(value, 'projectNodeId'))] },
   bindRepository: { mode: 'unary', params: [...ENVELOPE, param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId')), param('references', 'RepositoryReferences', repositoryReferences)] },
+  getWorkspaceSetup: { mode: 'unary', params: [] },
   watch: { mode: 'stream', params: [] },
 })
 

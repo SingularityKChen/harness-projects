@@ -4,7 +4,7 @@ import path from 'node:path'
 import { createWorkspaceSetup, composeCore, unavailableCore, createPlanningReconciler, type PlanningReconciler, type PlanningReconcilerTimers, type CoreApi } from '@harness-projects/core'
 import { createSetupCommands, type CommandResult, createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
 import { createSqliteStorage, type SqliteStorage } from '@harness-projects/storage-sqlite'
-import type { ExecutionContextDTO } from '@harness-projects/client'
+import type { ExecutionContextDTO, WorkspaceSetupDTO } from '@harness-projects/client'
 import { StatusPolicy, ProjectErrorCode, projectError, type ProjectError, type ConnectorAccountId, type WorkspaceId, type WorkspacePlanningFieldMapping } from '@harness-projects/domain'
 import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
 import { createPlanningLifetime } from './host-planning-lifetime.ts'
@@ -104,15 +104,16 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     void task.finally(() => assembly.leases.delete(task)).catch(() => undefined)
     return track(task)
   }
-  const source = { baseline: async () => {
+  const read = async <T>(load: (assembly: Assembly) => Promise<T>): Promise<T> => {
     for (;;) {
       while (barrier) await barrier
       if (closed) throw new Error('host 已关闭')
       const assembly = current, version = epoch
-      const result = await lease(assembly, () => assembly.controller.baseline())
+      const result = await lease(assembly, () => load(assembly))
       if (version === epoch && assembly === current) return result
     }
-  } }
+  }
+  const source = { baseline: () => read((assembly) => assembly.controller.baseline()) }
 
   const dispose = (): Promise<void> => disposal ??= (async () => {
     stop()
@@ -195,7 +196,33 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       })
       tail = task.catch(() => undefined); return track(task)
     }
-    const dispatch = dispatchOf<typeof OPERATIONS, Controller>(OPERATIONS, { ...handlersFor(options.workspaceId), baseline: () => source.baseline(),
+    const getWorkspaceSetup = () => read(async (assembly): Promise<WorkspaceSetupDTO> => {
+      let workspace: WorkspaceSetupDTO['workspace'] = null, bindingId: string | undefined, projectNodeId: string | undefined
+      const activation = activationError === undefined ? {} : { activationError: projectError(activationError.code, '本地配置已提交，装配尚未激活') }
+      const failure = (reason?: string) => projectError(Object.values(ProjectErrorCode).some((code) => code === reason) ? reason as ProjectErrorCode : ProjectErrorCode.Unavailable, '规划项目尚未确认，请按恢复动作重试')
+      try {
+        const stored = await storage!.getWorkspace(options.workspaceId)
+        workspace = stored === undefined ? null : { id: stored.id, name: stored.name }
+        if (workspace === null) return { workspace, planning: { state: 'unbound' }, ...activation }
+        const mount = (await storage!.listProviderBindings(options.workspaceId)).find((mount) => mount.enabled && mount.domain === 'planning')
+        if (mount === undefined) return { workspace, planning: { state: 'unbound' }, ...activation }
+        bindingId = mount.id
+        const configuration = await storage!.getBindingConfiguration({ workspaceId: options.workspaceId, bindingId: mount.id, domain: 'planning' })
+        const target = configuration?.configuration.projectNodeId
+        if (typeof target === 'string' && target !== '') projectNodeId = target
+        const mapping = await storage!.getWorkspacePlanningMapping(options.workspaceId)
+        const mappingOrigin = mapping?.bindingId === bindingId && mapping.projectExternalId === projectNodeId ? mapping.origin : undefined
+        const active = await fingerprint() === activeFingerprint
+        const snapshot = active ? await assembly.controller.baseline() : undefined
+        const state = !active ? 'configured' : projectNodeId !== undefined && snapshot?.source.freshness === 'fresh' ? 'confirmed' : 'degraded'
+        return { workspace, planning: { state, bindingId, ...(projectNodeId === undefined ? {} : { projectNodeId }) }, ...activation,
+          ...(mappingOrigin === undefined ? {} : { mappingOrigin }), ...(state === 'degraded' ? { error: failure(snapshot?.source.reason) } : {}) }
+      } catch (error) {
+        log.write('setupReadFailed', describeError(error))
+        return { workspace, planning: workspace === null ? { state: 'unbound' } : { state: 'degraded', ...(bindingId === undefined ? {} : { bindingId }), ...(projectNodeId === undefined ? {} : { projectNodeId }) }, ...activation, error: failure() }
+      }
+    })
+    const dispatch = dispatchOf<typeof OPERATIONS, Controller>(OPERATIONS, { ...handlersFor(options.workspaceId), baseline: () => source.baseline(), getWorkspaceSetup,
       createWorkspace: (_controller, input) => configure(() => setup.createWorkspace({ ...input, workspaceId: options.workspaceId, statusPolicy: StatusPolicy.ProviderAuthoritative })),
       connectAccount: (_controller, input) => configure(async () => {
         const viewer = await githubViewer(options.fetch ?? globalThis.fetch, () => options.resolveCredential(HOST_SECRET_HANDLES[0]))
@@ -209,7 +236,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       get controller() { return current.controller }, get disabled() { return current.disabled }, get activationError() { return activationError },
       call: async (name, input) => {
         if (closed) throw new Error('host 已关闭')
-        if (['baseline', 'createWorkspace', 'connectAccount', 'bindPlanningSource', 'bindRepository'].includes(name)) return track(dispatch(current.controller, name, input))
+        if (['baseline', 'getWorkspaceSetup', 'createWorkspace', 'connectAccount', 'bindPlanningSource', 'bindRepository'].includes(name)) return track(dispatch(current.controller, name, input))
         while (barrier) await barrier
         if (closed) throw new Error('host 已关闭')
         const assembly = current; return lease(assembly, () => dispatch(assembly.controller, name, input))

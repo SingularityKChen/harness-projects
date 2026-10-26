@@ -17,3 +17,4 @@ export { EmptyState, FreshnessBadge, LoadingState, SourceBadge, StaleBanner, Una
 export { browserHistoryPort, createItemNavigation, itemPath, parseItemRoute } from './item-route.ts'
 export type { HistoryPort, ItemRoute } from './item-route.ts'
 export { ExecutionContextSection } from './execution-context-section.ts'
+export { WorkspaceSetupGate, bindWorkspaceSetupApp } from './workspace-setup.ts'
