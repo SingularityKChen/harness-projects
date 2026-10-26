@@ -91,10 +91,10 @@ test('C1 已存研发与 Actions 挂载在启动时组合并经宿主出口读�
   const env = { fetch: github.fetch, resolveCredential: async (handle) => { resolved.push(handle); return CANARY } }
   const { disabled, wire } = await compose(dataPath, env)
   assert.deepEqual(disabled, [], '两个挂载都被组合，没有挂载被禁用')
-  assert.deepEqual(entriesOf(wire, DEVELOPMENT_KEYS), accessAll(DEVELOPMENT_KEYS, 'available'), '研发两 key 经组合期探针确认为 available')
+  assert.deepEqual(entriesOf(wire, DEVELOPMENT_KEYS), accessAll(DEVELOPMENT_KEYS, 'degraded'), 'lazy 研发两 key 初始 degraded，尚无真实权限确认')
   assert.deepEqual(entriesOf(wire, DELIVERY_KEYS), accessAll(DELIVERY_KEYS, 'degraded'), '交付两 key 是 Host 传入的 degraded：有句柄但未验证')
-  assert.deepEqual([github.requests.filter((request) => request.operationName === 'DevelopmentRepository').length, github.requests.filter((request) => request.path !== '/graphql').length], [1, 0],
-    '组合期研发只发一次仓库探针，Actions 不触网')
+  assert.deepEqual([github.requests.filter((request) => request.operationName === 'DevelopmentRepository').length, github.requests.filter((request) => request.path !== '/graphql').length], [0, 0],
+    '组合期研发不探针，Actions 不触网')
   const identity = ['workspace', 'provider_binding', 'workspace_binding', 'connector_account']
   const composed = dump(dataPath)
   assert.deepEqual(identity.map((table) => composed[table]), identity.map((table) => seeded[table]), '身份只来自存储：首次组合不改写四张身份表')
@@ -254,7 +254,7 @@ test('C7 宿主出口的失败经真实端口安全映射，故障解除后同�
     const readActions = () => ports.table.delivery.listPipelineRuns({ repository: repositoryOf('github-actions'), commit: COMMIT, limit: 1 })
     const results = await Promise.all([readDevelopment(), readActions()])
     assert.deepEqual(results.map((result) => [result.ok, result.error?.code]), [[false, developmentCode], [false, actionsCode]])
-    assert.equal(fetches, ['credential', 'abort'].includes(failure) ? 0 : 3, '凭据失败或入口预算已中止时零 fetch；其余恰为组合探针与两次读取，无重试或重定向请求')
+    assert.equal(fetches, ['credential', 'abort'].includes(failure) ? 0 : 2, '凭据失败或入口预算已中止时零 fetch；其余恰为两次真实读取，无启动探针、重试或重定向请求')
     assert.equal(JSON.stringify([disabled, wire, results]).includes(CANARY), false, '错误正文、异常与伪 request id 均不上 wire 或端口结果')
     assert.equal(await occurrences(dataDir, CANARY), 0, '失败路径的库文件与宿主诊断日志均不含凭据')
     st.mock.restoreAll()
@@ -284,7 +284,7 @@ test('C8 仓库绑定写者按生产目录策略写入后，Host 重启恢复并
   const env = { fetch: github.fetch, resolveCredential: async () => CANARY }
   const { disabled, wire } = await compose(dataPath, env)
   assert.deepEqual(disabled, [])
-  assert.deepEqual(entriesOf(wire, DEVELOPMENT_KEYS), accessAll(DEVELOPMENT_KEYS, 'available'))
+  assert.deepEqual(entriesOf(wire, DEVELOPMENT_KEYS), accessAll(DEVELOPMENT_KEYS, 'degraded'))
   assert.deepEqual(entriesOf(wire, DELIVERY_KEYS), accessAll(DELIVERY_KEYS, 'degraded'))
   const ports = await restored(dataPath, env)
   const ref = (index) => ({ bindingId: bindingIds[index], objectKind: 'repository', externalId: repositoryId, url: undefined })
@@ -301,17 +301,18 @@ test('C8 仓库绑定写者按生产目录策略写入后，Host 重启恢复并
   assert.deepEqual(github.misses, [])
 })
 
-test('C9 只挂研发且凭据永不返回时，Host 组合在请求预算后结束且零 fetch', async (t) => {
+test('C9 lazy 组合不等凭据；真实读取仍在入口预算后结束且零 fetch', async (t) => {
   const { dataDir, dataPath } = await dataRoot(), entered = deferred(), deadlines = []
   t.mock.method(AbortSignal, 'timeout', (ms) => { assert.equal(ms, 30_000); const controller = new AbortController(); deadlines.push(controller); return controller.signal })
   await seed(dataPath, PROVIDER_CATALOG, async (storage) => { await seedWorkspace(storage); await storage.putConnectorAccount(account()); await seedRepositoryMount(storage, DEV, 'development.github') })
   let fetches = 0
-  const pending = compose(dataPath, { resolveCredential: () => { entered.resolve(); return new Promise(() => {}) }, fetch: async () => { fetches++; throw new Error('不能到 fetch') } })
-  await bounded(entered.promise)
-  assert.equal(deadlines.length, 1, '请求必须在等待凭据之前建立 30 s 预算')
-  deadlines[0].abort(new Error(CANARY))
-  const { disabled, wire } = await bounded(pending)
-  assert.deepEqual(disabled, []); assert.deepEqual(entriesOf(wire, DEVELOPMENT_KEYS), accessAll(DEVELOPMENT_KEYS, 'degraded'))
+  const env = { resolveCredential: () => { entered.resolve(); return new Promise(() => {}) }, fetch: async () => { fetches++; throw new Error('不能到 fetch') } }
+  const { disabled, wire } = await bounded(compose(dataPath, env))
+  assert.deepEqual(disabled, []); assert.deepEqual(entriesOf(wire, DEVELOPMENT_KEYS), accessAll(DEVELOPMENT_KEYS, 'degraded')); assert.equal(deadlines.length, 0)
+  const ports = await restored(dataPath, env)
+  const pending = ports.table.development[0].getRepository(repositoryOf('development.github'))
+  await bounded(entered.promise); assert.equal(deadlines.length, 1, '真实读取在等待凭据之前建立 30 s 预算')
+  deadlines[0].abort(new Error(CANARY)); assert.equal((await bounded(pending)).error.code, 'unavailable')
   assert.equal(fetches, 0); assert.equal(JSON.stringify([disabled, wire]).includes(CANARY), false); assert.equal(await occurrences(dataDir, CANARY), 0)
 })
 
@@ -357,7 +358,7 @@ test('C11 配置仓库键与绑定 repositoryId 不一致时 Host 端口拒绝�
   const result = await ports.table.delivery.listPipelineRuns({ repository: { bindingId: bindingIds[1], objectKind: 'repository', externalId: repositoryId, url: undefined }, commit: COMMIT, limit: 1 })
   assert.deepEqual([result.ok, result.error?.code, result.error?.rawClass], [false, 'not_found', 'foreign_ref'])
   assert.equal(github.requests.length, before, '绑定键不一致在 provider 输入闸门被拒，读本身零 REST')
-  assert.deepEqual(github.requests.map((request) => request.operationName), ['DevelopmentRepository'])
+  assert.deepEqual(github.requests.map((request) => request.operationName), [])
 })
 
 test('C12 回滚目录只禁用未收录挂载并保留库行，重新收录后按原身份恢复', async () => {
@@ -373,7 +374,32 @@ test('C12 回滚目录只禁用未收录挂载并保留库行，重新收录后�
   assert.equal(wire.capabilities.find((entry) => entry.key === 'planning.item.read').access, 'available')
   for (const table of ['provider_binding', 'workspace_binding', 'connector_account']) assert.equal(dump(dataPath)[table], before[table], table)
   const restored = await compose(dataPath, env)
-  assert.deepEqual(restored.disabled, []); assert.deepEqual(entriesOf(restored.wire, DEVELOPMENT_KEYS), accessAll(DEVELOPMENT_KEYS, 'available'))
+  assert.deepEqual(restored.disabled, []); assert.deepEqual(entriesOf(restored.wire, DEVELOPMENT_KEYS), accessAll(DEVELOPMENT_KEYS, 'degraded'))
   assert.deepEqual(entriesOf(restored.wire, DELIVERY_KEYS), accessAll(DELIVERY_KEYS, 'degraded'))
   for (const table of ['provider_binding', 'workspace_binding', 'connector_account']) assert.equal(dump(dataPath)[table], before[table], table)
+})
+
+test('Development cache keys preserve confirmation only for the same target/account and isolate late old reads', async () => {
+  const { dataPath } = await dataRoot(), cache = new Map(), github = githubFetch()
+  await seed(dataPath, PROVIDER_CATALOG, async (storage) => { await seedWorkspace(storage); await storage.putConnectorAccount(account()); await seedRepositoryMount(storage, DEV, 'development.github') })
+  let gate
+  const fetch = async (...args) => { await gate; return github.fetch(...args) }
+  const restore = async () => {
+    const storage = createSqliteStorage(dataPath, hostStoragePolicy(PROVIDER_CATALOG))
+    try { return (await restoreProviders(storage, WORKSPACE, PROVIDER_CATALOG, { worktreesDir: path.dirname(dataPath), fetch, resolveCredential: async () => CANARY, development: { cache, fetch, resolveCredential: async () => CANARY } })).table.development?.[0] }
+    finally { storage.close() }
+  }
+  const first = await restore(); await first.getRepository(repositoryOf('development.github'))
+  const confirmed = await first.describeCapabilities(); assert.equal(await restore(), first)
+  const deferredRead = deferred(); gate = deferredRead.promise
+  const late = first.getRepository(repositoryOf('development.github'))
+  await seed(dataPath, PROVIDER_CATALOG, (storage) => storage.putBindingConfiguration({ ref: ref(DEV, 'development'), configuration: { ...REPOSITORY_MOUNTS['development.github'][1], repositoryName: 'changed-target' } }))
+  const changed = await restore(), initial = await changed.describeCapabilities()
+  assert.notEqual(changed, first); assert.deepEqual(initial.permission, Object.fromEntries(DEVELOPMENT_KEYS.map((key) => [key, 'degraded'])))
+  deferredRead.resolve(); await late; assert.deepEqual(await changed.describeCapabilities(), initial); assert.equal(cache.size, 1)
+  await seed(dataPath, PROVIDER_CATALOG, (storage) => storage.putConnectorAccount(account({ secretHandle: undefined })))
+  assert.equal(await restore(), undefined); assert.equal(cache.size, 0)
+  await seed(dataPath, PROVIDER_CATALOG, (storage) => storage.putConnectorAccount(account()))
+  assert.notEqual(await restore(), changed)
+  assert.deepEqual(confirmed.permission, Object.fromEntries(DEVELOPMENT_KEYS.map((key) => [key, 'available'])))
 })

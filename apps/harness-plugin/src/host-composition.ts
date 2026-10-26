@@ -1,15 +1,15 @@
 import type { ExternalObjectRef, PlanningProvider, ProviderPlanningFieldDefinition, Storage, WorkspacePlanningMappingRecord } from '@harness-projects/capabilities'
 import { mkdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
-import { composeCore, unavailableCore, createPlanningReconciler, type PlanningReconciler, type PlanningReconcilerTimers, type CoreApi } from '@harness-projects/core'
-import { createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
+import { createWorkspaceSetup, composeCore, unavailableCore, createPlanningReconciler, type PlanningReconciler, type PlanningReconcilerTimers, type CoreApi } from '@harness-projects/core'
+import { createSetupCommands, type CommandResult, createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
 import { createSqliteStorage, type SqliteStorage } from '@harness-projects/storage-sqlite'
 import type { ExecutionContextDTO } from '@harness-projects/client'
-import type { WorkspaceId, WorkspacePlanningFieldMapping } from '@harness-projects/domain'
+import { StatusPolicy, ProjectErrorCode, projectError, type ProjectError, type ConnectorAccountId, type WorkspaceId, type WorkspacePlanningFieldMapping } from '@harness-projects/domain'
 import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
 import { createPlanningLifetime } from './host-planning-lifetime.ts'
 import { dispatchOf, OPERATIONS, type UnaryHandlers, type UnaryName } from './host-operations.ts'
-import { hostStoragePolicy, restoreProviders, type DisabledBinding, type ProviderCatalog } from './host-providers.ts'
+import { githubViewer, HOST_SECRET_HANDLES, hostStoragePolicy, restoreProviders, type DisabledBinding, type ProviderCatalog } from './host-providers.ts'
 
 /** Controller 失败上 wire 的唯一文案：原因只写进宿主诊断日志。 */
 const OPERATION_FAILED = 'harness-projects：操作失败，原因已写入宿主诊断日志'
@@ -33,6 +33,8 @@ export interface HostCompositionOptions {
 }
 export interface HostComposition {
   readonly controller: Controller
+  /** 本地配置已提交但候选未激活；与命令的持久化结果分开。 */
+  readonly activationError: ProjectError | undefined
   /** 运行期无法构造而被禁用的挂载；只在内存，不写库。 */
   readonly disabled: readonly DisabledBinding[]
   call(name: UnaryName<typeof OPERATIONS>, input: unknown): Promise<unknown>
@@ -45,7 +47,7 @@ export interface HostComposition {
 }
 
 /** 工作区身份来自 Host；执行记录只在读取前后均可见的工作项上投影允许字段。 */
-const handlersFor = (workspaceId: WorkspaceId): UnaryHandlers<typeof OPERATIONS, Controller> => ({
+const handlersFor = (workspaceId: WorkspaceId): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext'>, Controller> => ({
   baseline: (controller) => controller.baseline(),
   refreshPlanning: (controller, input) => controller.commands.refreshPlanning(input),
   bootstrapWorkspace: (controller, input) => controller.commands.bootstrapWorkspace(input),
@@ -69,7 +71,6 @@ const handlersFor = (workspaceId: WorkspaceId): UnaryHandlers<typeof OPERATIONS,
 export async function createHostComposition(options: HostCompositionOptions): Promise<HostComposition> {
   const intervalMs = options.planningIntervalMs ?? 60_000
   if (!Number.isFinite(intervalMs) || intervalMs < 60_000 || intervalMs > 2_147_483_647) throw new RangeError('Planning refresh interval is invalid')
-  const lifetime = createPlanningLifetime(options.planningReadTimeoutMs)
   const dataDir = path.dirname(options.dataPath)
   await mkdir(dataDir, { recursive: true })
   const worktreesDir = path.join(await realpath(dataDir), 'worktrees')
@@ -83,7 +84,12 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   }
   let storage: SqliteStorage | undefined
   let closed = false
-  let reconciler: PlanningReconciler | undefined
+  type Assembly = { controller: Controller; disabled: readonly DisabledBinding[]; lifetime: ReturnType<typeof createPlanningLifetime>; reconciler?: PlanningReconciler; leases: Set<Promise<unknown>>; retired?: boolean; cache: Map<string, object> }
+  let developmentCache = new Map<string, object>()
+  let current: Assembly
+  let barrier: Promise<void> | undefined, epoch = 0, tail: Promise<unknown> = Promise.resolve(), activeFingerprint = ''
+  let activationError: ProjectError | undefined
+  const watches = new AbortController()
   let disposal: Promise<void> | undefined
   const pending = new Set<Promise<unknown>>()
   const track = <T>(task: Promise<T>): Promise<T> => {
@@ -91,7 +97,23 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     void task.then(() => pending.delete(task), () => pending.delete(task))
     return task
   }
-  const stop = (): void => { closed = true; lifetime.stop(); reconciler?.dispose() }
+  const retire = (assembly: Assembly): void => { if (assembly.retired) return; assembly.retired = true; assembly.lifetime.stop(); assembly.reconciler?.dispose() }
+  const stop = (): void => { closed = true; watches.abort(); if (current) retire(current) }
+  const lease = <T>(assembly: Assembly, work: () => Promise<T>): Promise<T> => {
+    const task = Promise.resolve().then(work); assembly.leases.add(task)
+    void task.finally(() => assembly.leases.delete(task)).catch(() => undefined)
+    return track(task)
+  }
+  const source = { baseline: async () => {
+    for (;;) {
+      while (barrier) await barrier
+      if (closed) throw new Error('host 已关闭')
+      const assembly = current, version = epoch
+      const result = await lease(assembly, () => assembly.controller.baseline())
+      if (version === epoch && assembly === current) return result
+    }
+  } }
+
   const dispose = (): Promise<void> => disposal ??= (async () => {
     stop()
     await Promise.allSettled([...pending])
@@ -100,46 +122,102 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   const diagnostics = { syncRoundFailed: (error: unknown) => log.write('syncRoundFailed', describeError(error)) }
   try {
     storage = createSqliteStorage(options.dataPath, hostStoragePolicy(options.catalog), options.migrationsDir === undefined ? {} : { migrationsDir: options.migrationsDir })
-    const workspace = await storage.getWorkspace(options.workspaceId)
-    const { table, disabled } = workspace === undefined ? { table: {}, disabled: [] } : await restoreProviders(storage, workspace.id, options.catalog, {
-      // 解析失败（例如宿主凭据服务缺席）只留允许名单字段；provider 随后把它归类为结构化 unavailable，不带原文。
-      resolveCredential: async (handle) => {
-        lifetime.assertActive()
-        try { const value = await options.resolveCredential(handle); lifetime.assertActive(); return value }
-        catch (error) { log.write('credentialFailed', describeError(error)); throw error }
-      },
-      worktreesDir, fetch: (url, init) => { lifetime.assertActive(); return (options.fetch ?? globalThis.fetch)(url, init) },
-    })
-    for (const item of disabled) log.write('bindingDisabled', { bindingId: item.bindingId, domain: item.domain, implementationKey: item.implementationKey, code: item.error.code })
-    const providers = { ...table, ...(table.planning === undefined ? {} : { planning: lifetime.wrap(table.planning) }), storage }
-    const mapping = workspace === undefined ? {} : await loadPlanningMapping(storage, workspace.id, providers.planning, (event) => log.write(event, {}))
-    // 空数据根：不向 Core 传 storage，不写任何行；工作区的创建属于挂载写者（#127、#131）。
-    const core: CoreApi = workspace === undefined ? unavailableCore('工作区尚未创建') : await composeCore({
-      workspace: { id: workspace.id, name: workspace.name, statusPolicy: workspace.statusPolicy, ...mapping },
-      providers, diagnostics,
-    })
-    const controller = createController(core, { workspaceRevision: () => storage!.currentRevision(options.workspaceId) })
-    if (table.planning !== undefined) {
-      reconciler = createPlanningReconciler(() => { lifetime.assertActive(); return track(core.commands.refreshPlanning()) }, {
-        intervalMs, diagnostics, ...(options.planningTimers === undefined ? {} : { timers: options.planningTimers }),
-      })
-      reconciler.start()
+    const setup = createSetupCommands(createWorkspaceSetup(storage))
+    const fingerprint = async () => JSON.stringify([await storage!.getWorkspace(options.workspaceId), await Promise.all((await storage!.listProviderBindings(options.workspaceId)).map(async (mount) => {
+      const accountId = await storage!.getProviderBindingAccount(mount.id)
+      const configuration = options.catalog.has(mount.implementationKey) ? await storage!.getBindingConfiguration({ workspaceId: options.workspaceId, bindingId: mount.id, domain: mount.domain }) : undefined
+      return [[mount.id, mount.domain, mount.implementationKey, mount.enabled], configuration, accountId === undefined ? undefined : await storage!.getConnectorAccount(accountId)]
+    }))])
+    const assemble = async (): Promise<Assembly> => {
+      const lifetime = createPlanningLifetime(options.planningReadTimeoutMs)
+      const assembly: Assembly = { controller: undefined!, disabled: [], lifetime, leases: new Set(), cache: new Map(developmentCache) }
+      try {
+        const workspace = await storage!.getWorkspace(options.workspaceId)
+        const { table, disabled } = workspace === undefined ? { table: {}, disabled: [] } : await restoreProviders(storage!, workspace.id, options.catalog, {
+          // 解析失败（例如宿主凭据服务缺席）只留允许名单字段；provider 随后把它归类为结构化 unavailable，不带原文。
+          resolveCredential: async (handle) => {
+            lifetime.assertActive()
+            try { const value = await options.resolveCredential(handle); lifetime.assertActive(); return value }
+            catch (error) { log.write('credentialFailed', describeError(error)); throw error }
+          },
+          development: { cache: assembly.cache, resolveCredential: async (handle) => { if (closed) throw new Error('host 已关闭'); return options.resolveCredential(handle) }, fetch: (url, init) => { if (closed) throw new Error('host 已关闭'); return (options.fetch ?? globalThis.fetch)(url, init) } },
+          worktreesDir, fetch: (url, init) => { lifetime.assertActive(); return (options.fetch ?? globalThis.fetch)(url, init) },
+        })
+        for (const item of disabled) log.write('bindingDisabled', { bindingId: item.bindingId, domain: item.domain, implementationKey: item.implementationKey, code: item.error.code })
+        const providers = { ...table, ...(table.planning === undefined ? {} : { planning: lifetime.wrap(table.planning) }), storage: storage! }
+        const mapping = workspace === undefined ? {} : await loadPlanningMapping(storage!, workspace.id, providers.planning, (event) => log.write(event, {}))
+        // 空数据根：不向 Core 传 storage，不写任何行；工作区的创建属于挂载写者（#127、#131）。
+        const core: CoreApi = workspace === undefined ? unavailableCore('工作区尚未创建') : await composeCore({
+          workspace: { id: workspace.id, name: workspace.name, statusPolicy: workspace.statusPolicy, ...mapping },
+          providers, diagnostics,
+        })
+        const controller = createController(core, { workspaceRevision: () => storage!.currentRevision(options.workspaceId) })
+        assembly.controller = controller; assembly.disabled = disabled
+        if (table.planning !== undefined) {
+          assembly.reconciler = createPlanningReconciler(async () => { while (barrier) await barrier; lifetime.assertActive(); return lease(assembly, () => core.commands.refreshPlanning()) }, {
+            intervalMs, diagnostics, ...(options.planningTimers === undefined ? {} : { timers: options.planningTimers }),
+          })
+        }
+        return assembly
+      } catch (error) { retire(assembly); throw error }
     }
-    const dispatch = dispatchOf(OPERATIONS, handlersFor(options.workspaceId), guarded)
+    current = await assemble(); developmentCache = current.cache; activeFingerprint = await fingerprint(); current.reconciler?.start()
+    const configure = <T>(run: () => Promise<CommandResult<T>>, activate = true): Promise<CommandResult<T> & { activationError?: ProjectError }> => {
+      const task = tail.then(async () => {
+        if (closed) throw new Error('host 已关闭')
+        let release!: () => void; barrier = new Promise<void>((resolve) => { release = resolve }); epoch++
+        const old = current
+        try {
+          await Promise.allSettled([...old.leases])
+          if (closed) throw new Error('host 已关闭')
+          const result = await run()
+          if (result.writeState === 'local_only' && activate) {
+            try {
+              const desired = await fingerprint()
+              if (desired !== activeFingerprint) {
+                old.reconciler?.stop()
+                const candidate = await assemble()
+                if (closed) { retire(candidate); throw new Error('host 已关闭') }
+                try { candidate.reconciler?.start() } catch (error) { retire(candidate); throw error }
+                current = candidate; developmentCache = candidate.cache; activeFingerprint = desired; retire(old)
+              }
+              activationError = undefined
+            } catch (error) {
+              log.write('activationFailed', describeError(error)); activationError = projectError(ProjectErrorCode.Unavailable, '本地配置已提交，装配尚未激活')
+              return { ...result, activationError }
+            }
+          }
+          return result
+        } finally {
+          if (!closed) try { current.reconciler?.start() } catch (error) { log.write('schedulerResumeFailed', describeError(error)) }
+          barrier = undefined; release()
+        }
+      })
+      tail = task.catch(() => undefined); return track(task)
+    }
+    const dispatch = dispatchOf<typeof OPERATIONS, Controller>(OPERATIONS, { ...handlersFor(options.workspaceId), baseline: () => source.baseline(),
+      createWorkspace: (_controller, input) => configure(() => setup.createWorkspace({ ...input, workspaceId: options.workspaceId, statusPolicy: StatusPolicy.ProviderAuthoritative })),
+      connectAccount: (_controller, input) => configure(async () => {
+        const viewer = await githubViewer(options.fetch ?? globalThis.fetch, () => options.resolveCredential(HOST_SECRET_HANDLES[0]))
+        return viewer.ok ? setup.connectAccount({ ...input, platformFamily: 'github', platformOrigin: 'https://github.com', identityKind: 'account', externalId: viewer.value.nodeId, displayName: viewer.value.login, secretHandle: HOST_SECRET_HANDLES[0] })
+          : { writeState: 'failed', saving: false, authoritative: false, value: undefined, error: viewer.error }
+      }, false),
+      bindPlanningSource: (_controller, { projectNodeId, accountId, ...input }) => configure(() => setup.bindPlanningSource({ ...input, accountId: accountId as ConnectorAccountId, workspaceId: options.workspaceId, implementationKey: 'planning.github-projects', configuration: { projectNodeId } })),
+      bindRepository: (_controller, input) => configure(() => setup.bindRepository({ ...input, references: input.references.map((ref) => ({ ...ref, accountId: ref.accountId as ConnectorAccountId | undefined })), workspaceId: options.workspaceId })),
+    }, guarded)
     return {
-      controller,
-      disabled,
-      call: async (name, input) => { if (closed) throw new Error('host 已关闭'); return track(dispatch(controller, name, input)) },
+      get controller() { return current.controller }, get disabled() { return current.disabled }, get activationError() { return activationError },
+      call: async (name, input) => {
+        if (closed) throw new Error('host 已关闭')
+        if (['baseline', 'createWorkspace', 'connectAccount', 'bindPlanningSource', 'bindRepository'].includes(name)) return track(dispatch(current.controller, name, input))
+        while (barrier) await barrier
+        if (closed) throw new Error('host 已关闭')
+        const assembly = current; return lease(assembly, () => dispatch(assembly.controller, name, input))
+      },
       watch: (signal) => {
         if (closed) throw new Error('host 已关闭')
-        const frames = streamWorkspace(controller, { signal, intervalMs: options.watchIntervalMs ?? 1000 })
-        return { [Symbol.asyncIterator]: () => ({
-          next: () => {
-            if (closed) return Promise.reject(new Error('host 已关闭'))
-            return track(guarded(() => frames.next()))
-          },
-          return: () => frames.return(),
-        }) }
+        const frames = streamWorkspace(source, { signal: AbortSignal.any([signal, watches.signal]), intervalMs: options.watchIntervalMs ?? 1000 })
+        return { [Symbol.asyncIterator]: () => ({ next: () => guarded(() => frames.next()), return: () => frames.return() }) }
       },
       stop, dispose,
     }

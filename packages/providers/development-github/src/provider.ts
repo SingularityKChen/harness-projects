@@ -1,6 +1,6 @@
 /**
  * GitHub 只读 Development provider（#231）。失败一律是结构化 `ProviderResult`，任何路径都不抛错（core 的交付刷新把裸异常折成整次失败，逐跳缺口原因随之丢失）；唯一的例外是宿主注入的时钟违约（见 `now` 选项）。
- * 只读：仓库 / 分支 / 提交 / 变更请求，不实现任何写方法与工作树方法（省略，不是返回 `not_supported` 的桩）。无状态：不缓存、不重试、不退避、
+ * 只读：仓库 / 分支 / 提交 / 变更请求，不实现任何写方法与工作树方法（省略，不是返回 `not_supported` 的桩）。权限快照仅保留最近真实仓库读取；不缓存业务内容、不重试、不退避、
  * 不持有凭据；鉴权、超时与重试属于宿主注入的 transport（ADR-0013 第 3 条）。输入闸门全部在发请求之前，闸门拒绝时 transport 调用次数为 0。
  */
 import {
@@ -22,6 +22,7 @@ export interface GithubDevelopmentProviderOptions {
   readonly transport: GraphqlTransport
   /** 毫秒时钟，缺省 Date.now；必须返回有限的毫秒数（否则 describeCapabilities 在构造 observedAt 时抛 RangeError，reconcile 则一条不产出）。只用于快照的 observedAt、观察的 receivedTime 与限流等待换算。 */
   readonly now?: () => number
+  readonly permissionMode?: 'eager' | 'lazy'
 }
 
 /** 平台单页上限（`first: 101` 报 EXCESSIVE_PAGINATION）；调用方给的 limit 钳位到这里。观察流至多扫描 MAX_SCAN_PAGES 页（1 万个 PR）。 */
@@ -31,7 +32,7 @@ const notFound = (): ProviderResult<never> => providerErr(failure(ProviderErrorC
 
 export const GITHUB_DEVELOPMENT_DEFINITION: ProviderDefinition = Object.freeze({ implementationKey: 'development.github', domains: Object.freeze(['development'] as const) })
 
-export function createGithubDevelopmentProvider({ bindingId, repository, transport, now = Date.now }: GithubDevelopmentProviderOptions): DevelopmentProvider {
+export function createGithubDevelopmentProvider({ bindingId, repository, transport, now = Date.now, permissionMode = 'eager' }: GithubDevelopmentProviderOptions): DevelopmentProvider {
   const nonEmpty = (value: unknown): boolean => typeof value === 'string' && value !== ''
   if (![repository?.externalId, repository?.owner, repository?.name].every(nonEmpty) || typeof transport !== 'function') {
     throw new TypeError('repository.externalId / owner / name 必须是非空字符串，transport 必须是函数')
@@ -106,23 +107,27 @@ export function createGithubDevelopmentProvider({ bindingId, repository, transpo
     return cursor === undefined ? providerOk(rows) : providerErr(failure(ProviderErrorCode.Unavailable, undefined, 'malformed_response'))
   }
 
+  let permission: AccessLevel = AccessLevel.Degraded, observedAt: string | undefined
   const getRepository: DevelopmentProvider['getRepository'] = async (ref) => {
     if (!isRepository(ref)) return notFound()
-    return call(ask('DevelopmentRepository', {}), (data) => decodeRepository(data, repositoryRef))
+    const result = await call(ask('DevelopmentRepository', {}), (data) => decodeRepository(data, repositoryRef))
+    permission = result.ok ? AccessLevel.Available : AccessLevel.Degraded; observedAt = new Date(now()).toISOString()
+    return result
   }
 
   const provider: DevelopmentProvider = {
     definition: GITHUB_DEVELOPMENT_DEFINITION,
     /**
-     * 每次调用用 `getRepository` 的同一路径探测一次，不缓存：成功 → available；任何结构化失败（权限、不可见、限流、不可用）→ degraded。
+     * eager 每次用 `getRepository` 探测；lazy 只报告最近真实读取，初值 degraded。成功 → available；结构化失败 → degraded。
      * 选 degraded 而不是 unavailable：core 对 unavailable 的读门直接拒绝（`NotSupported`），degraded 仍放行读，缺口原因来自单次调用的结构化错误，
      * 补授权后无需重新组合就恢复。只声明已实现的两个读 key（评审结论是变更请求快照的字段，不是独立能力）。
      */
     async describeCapabilities() {
-      const probe = await getRepository(repositoryRef)
+      if (permissionMode === 'eager') await getRepository(repositoryRef)
+      observedAt ??= new Date(now()).toISOString()
       const keys = [CapabilityKey.DevelopmentRepositoryRead, CapabilityKey.DevelopmentChangeRequestRead]
       const level = (access: AccessLevel) => Object.fromEntries(keys.map((key) => [key, access]))
-      return { bindingId, capability: level(AccessLevel.Available), permission: level(probe.ok ? AccessLevel.Available : AccessLevel.Degraded), observedAt: new Date(now()).toISOString() }
+      return { bindingId, capability: level(AccessLevel.Available), permission: level(permission), observedAt }
     },
     getRepository,
     async listBranches({ repository: ref, cursor, limit }) {

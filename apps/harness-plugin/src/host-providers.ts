@@ -106,6 +106,21 @@ async function githubRequest(
   } finally { signal.removeEventListener('abort', onAbort) }
 }
 
+/** 连接设置只接受真实 viewer 的两个必要身份字段，不保存响应或凭据值。 */
+export async function githubViewer(fetch: HostFetch, credential: () => Promise<string | undefined>) {
+  let code: ProjectErrorCode = ProjectErrorCode.Unavailable
+  try {
+    const response = await githubRequest(fetch, credential, new URL('/user', GITHUB_API), { method: 'GET', headers: { accept: 'application/vnd.github+json' } })
+    if (response.status === 200 && typeof response.body === 'object' && response.body !== null) {
+      const body = response.body as Record<string, unknown>
+      if (typeof body.node_id === 'string' && body.node_id !== '' && typeof body.login === 'string' && body.login !== '') return { ok: true as const, value: { nodeId: body.node_id, login: body.login } }
+    }
+    code = response.status === 429 || (response.status === 403 && response.headers['x-ratelimit-remaining'] === '0') ? ProjectErrorCode.RateLimited
+      : response.status === 401 || response.status === 403 ? ProjectErrorCode.PermissionDenied : response.status === 404 ? ProjectErrorCode.NotFound : ProjectErrorCode.Unavailable
+  } catch { /* 固定错误不暴露凭据服务和响应原文 */ }
+  return { ok: false as const, error: projectError(code, 'GitHub 账号身份尚未确认') }
+}
+
 /** GitHub GraphQL 传输：规划与研发 provider 共用（两者的 GraphqlTransport 结构逐字同形）。 */
 function githubGraphqlTransport(fetch: HostFetch, credential: () => Promise<string | undefined>): GraphqlTransport {
   return ({ operationName, query, variables }) => githubRequest(fetch, credential, new URL('/graphql', GITHUB_API), {
@@ -177,13 +192,13 @@ const LOCAL_GIT_ENTRY: CatalogEntry = {
   },
 }
 
-/** 无账号或无句柄时禁用：provider 的组合期探针必然失败，组合只会得到误导性的 degraded（计划 D2）。 */
+/** github.com 账号和宿主句柄是 GitHub transport 的构造前提；lazy 模式不在组合期探针。 */
 const GITHUB_DEVELOPMENT_ENTRY: CatalogEntry = {
   definition: GITHUB_DEVELOPMENT_DEFINITION,
   configuration: GITHUB_REPOSITORY,
   async create({ binding, configuration, account, credential, fetch }) {
     requireGithubCredential(account, '研发')
-    return createGithubDevelopmentProvider({ bindingId: binding.id, repository: githubRepository(configuration), transport: githubGraphqlTransport(fetch, credential) })
+    return createGithubDevelopmentProvider({ bindingId: binding.id, repository: githubRepository(configuration), transport: githubGraphqlTransport(fetch, credential), permissionMode: 'lazy' })
   },
 }
 
@@ -220,10 +235,11 @@ export function hostStoragePolicy(catalog: ProviderCatalog): StorageValidationPo
  */
 export async function restoreProviders(
   storage: Storage, workspaceId: WorkspaceId, catalog: ProviderCatalog,
-  env: Pick<ProviderBuildInput, 'worktreesDir' | 'fetch'> & { readonly resolveCredential: (handle: string) => Promise<string | undefined> },
+  env: Pick<ProviderBuildInput, 'worktreesDir' | 'fetch'> & { readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly development?: { readonly cache: Map<string, object>; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly fetch: HostFetch } },
 ): Promise<{ table: CoreProviderTable; disabled: readonly DisabledBinding[] }> {
   const slots: Record<string, unknown> = {}
   const disabled: DisabledBinding[] = []
+  const used = new Set<string>()
   for (const binding of await storage.listProviderBindings(workspaceId)) {
     if (!binding.enabled) continue
     const refuse = (code: ProjectErrorCode, message: string): void => {
@@ -238,10 +254,13 @@ export async function restoreProviders(
     const handle = account?.secretHandle
     let port: object
     try {
-      port = await entry.create({
-        binding, configuration, account, worktreesDir: env.worktreesDir, fetch: env.fetch,
-        credential: async () => (handle === undefined ? undefined : env.resolveCredential(handle)),
+      const cache = binding.implementationKey === 'development.github' ? env.development : undefined
+      const key = JSON.stringify([binding.id, binding.implementationKey, Object.entries(configuration).sort(([a], [b]) => a.localeCompare(b)), account?.id, account?.platformFamily, account?.platformOrigin, account?.identityKind, account?.externalId, handle])
+      port = cache?.cache.get(key) ?? await entry.create({
+        binding, configuration, account, worktreesDir: env.worktreesDir, fetch: cache?.fetch ?? env.fetch,
+        credential: async () => (handle === undefined ? undefined : (cache ?? env).resolveCredential(handle)),
       })
+      if (cache) { cache.cache.set(key, port); used.add(key) }
     } catch (error) {
       if (error instanceof BindingRefused) refuse(error.code, error.message)
       else refuse(ProjectErrorCode.Unavailable, '实现构造失败')
@@ -252,5 +271,6 @@ export async function restoreProviders(
     else if (slots[binding.domain] === undefined) slots[binding.domain] = port
     else refuse(ProjectErrorCode.Conflict, '同一能力域的槽位已被占用')
   }
+  if (env.development) for (const key of env.development.cache.keys()) if (!used.has(key)) env.development.cache.delete(key)
   return { table: slots as CoreProviderTable, disabled }
 }
