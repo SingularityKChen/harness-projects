@@ -35,10 +35,10 @@ test('typed remote contribution exposes the same strict descriptors (settings un
   assert.deepEqual([REMOTE_PACKAGE, HOST_REMOTE.package, HOST_REMOTE.face], ['@harness-projects/app-harness-plugin', '@harness-projects/app-harness-plugin', 'host'])
   assert.deepEqual(CLIENT_REMOTE, { package: REMOTE_PACKAGE, descriptors: HOST_REMOTE.invocations })
   assert.deepEqual(HOST_REMOTE.invocations.filter(({ method }) => method !== 'getExecutionContext').map(({ namespace, method }) => `${namespace}/${method}`), [
-    `${REMOTE_NAMESPACE}/baseline`, `${REMOTE_NAMESPACE}/bootstrapWorkspace`, `${REMOTE_NAMESPACE}/refreshPlanning`, `${REMOTE_NAMESPACE}/createWorkspace`, `${REMOTE_NAMESPACE}/connectAccount`, `${REMOTE_NAMESPACE}/bindPlanningSource`, `${REMOTE_NAMESPACE}/bindRepository`, `${REMOTE_NAMESPACE}/watch`,
+    `${REMOTE_NAMESPACE}/baseline`, `${REMOTE_NAMESPACE}/bootstrapWorkspace`, `${REMOTE_NAMESPACE}/refreshPlanning`, `${REMOTE_NAMESPACE}/createWorkspace`, `${REMOTE_NAMESPACE}/connectAccount`, `${REMOTE_NAMESPACE}/bindPlanningSource`, `${REMOTE_NAMESPACE}/bindRepository`, `${REMOTE_NAMESPACE}/getWorkspaceSetup`, `${REMOTE_NAMESPACE}/watch`,
   ])
   assert.deepEqual(HOST_REMOTE.invocations.filter(({ method }) => method !== 'getExecutionContext').map(({ mode, cancellation, parameters }) => [mode, cancellation, parameters.length]),
-    [[undefined, undefined, 0], [undefined, undefined, 2], [undefined, undefined, 1], [undefined, undefined, 3], [undefined, undefined, 2], [undefined, undefined, 4], [undefined, undefined, 4], ['stream', { parameter: 'signal' }, 0]], 'unary 没有 mode；watch 是带 signal 取消、无业务参数的 stream')
+    [[undefined, undefined, 0], [undefined, undefined, 2], [undefined, undefined, 1], [undefined, undefined, 3], [undefined, undefined, 2], [undefined, undefined, 4], [undefined, undefined, 4], [undefined, undefined, 0], ['stream', { parameter: 'signal' }, 0]], 'unary 没有 mode；watch 是带 signal 取消、无业务参数的 stream')
   // Host 网关对 strict 结果只调 `encode`（参数才走 `create().parse`）：非 JSON 值必须在边界报错，而不是被序列化静默降级。
   const nonJson = [JSON.parse('{"__proto__":{"injected":true}}'), new Date(0), { at: new Map() }, [undefined], Number.NaN]
   for (const descriptor of HOST_REMOTE.invocations) {

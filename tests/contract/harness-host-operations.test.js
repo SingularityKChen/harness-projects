@@ -161,3 +161,9 @@ test('settings expose only the four exact positional contracts', () => {
   const parse = OPERATIONS.bindRepository.params.at(-1).parse
   for (const value of [null, [{}], [{ domain: 'planning', implementationKey: 'x', configuration: {} }], [{ domain: 'development', implementationKey: 'x', configuration: {}, workspaceId: 'foreign' }]]) assert.throws(() => parse(value), TypeError)
 })
+
+
+test('setup read is a strict no-argument unary operation', () => {
+  const descriptor = HOST_REMOTE.invocations.find(({ method }) => method === 'getWorkspaceSetup')
+  assert.deepEqual([descriptor.mode, descriptor.parameters], [undefined, []])
+})

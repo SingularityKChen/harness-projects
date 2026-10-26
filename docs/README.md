@@ -161,3 +161,4 @@
 | [board-semantics.md](product/board-semantics.md) | `Status` 与 `Engineering` 字段分别属于规划轴还是工程轴、谁写、不变量 3 在看板上如何被满足、全部内置工作流该开该关、`Size` 为什么是信号而不是控制 |
 | [vertical-path.md](product/vertical-path.md) | 纵向链路的步骤枚举、MVP-0 / MVP-1 / 首发范围各自的判定方式、MVP-0 的非目标 |
 | [2026-10-26-host-recomposition](exec-plan/completed/2026-10-26-host-recomposition.md) | 提交设置即时重组、同流连续读取与延迟权限探测（#354） |
+| [2026-10-26-plugin-workspace-setup](exec-plan/completed/2026-10-26-plugin-workspace-setup.md) | 插件单工作区创建/连接与真实 Harness Web 沙箱验收（#131） |

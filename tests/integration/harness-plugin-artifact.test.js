@@ -124,7 +124,8 @@ async function evaluateClientBundle(clientFile, console = globalThis.console, { 
   const loadCalls = []
   const requested = []
   const window = { __ModuleLoader__: { load: (descriptor) => loadCalls.push(descriptor) } }
-  vm.runInContext(code, vm.createContext({ window, console, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout }), { filename: clientFile })
+  const context = vm.createContext({ window, console, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout })
+  vm.runInContext(code, context, { filename: clientFile })
 
   const stubRequire = (id) => {
     requested.push(id)
@@ -135,7 +136,7 @@ async function evaluateClientBundle(clientFile, console = globalThis.console, { 
   assert.equal(loadCalls.length, 1, 'client bundle 必须恰好调用一次 window.__ModuleLoader__.load')
   const [descriptor] = loadCalls
   assert.equal(typeof descriptor.factory, 'function')
-  return { code, descriptor, exported: unwrapExports(descriptor.factory(stubRequire)), requested }
+  return { code, descriptor, exported: unwrapExports(descriptor.factory(stubRequire)), requested, json: vm.runInContext('(text) => JSON.parse(text)', context) }
 }
 
 describe('Harness 插件安装件契约', () => {
@@ -389,14 +390,14 @@ describe('Harness 插件安装件契约', () => {
      * 桩流只交付 `frame`（若有）这一个开场 baseline 项，之后挂起（next 永不结算），`ends` 时改为正常结束；`streamError` 让 `$stream` 同步抛错。
      * 页面用真实 React；监督者的计时器记入 `seen.timers`（不真等），`cancelled` 记取消。
      */
-    async function applyClient({ frame, ends, streamError } = {}) {
+    async function applyClient({ frame, ends, streamError, setup } = {}) {
       const seen = { registrations: [], live: new Set(), injectedNames: [], contextNames: [], logs: [], streams: [], timers: [], fiberErrors: [] }
       const record = (level) => (...args) => seen.logs.push([level, ...args])
       const clock = {
         setTimeout: (_run, delayMs) => { const timer = { delayMs, cancelled: false }; seen.timers.push(timer); return timer },
         clearTimeout: (timer) => { timer.cancelled = true },
       }
-      const { exported } = await evaluateClientBundle(path.join(packageDir, 'lib/client.js'), { info: record('info'), error: record('error') }, { react: realReact, clock })
+      const { exported, json } = await evaluateClientBundle(path.join(packageDir, 'lib/client.js'), { info: record('info'), error: record('error') }, { react: realReact, clock })
       const exposed = new Set([...exported.inject])
       const child = (fiberCtx) => ({
         remote: {
@@ -407,7 +408,8 @@ describe('Harness 插件安装件契约', () => {
             seen.streams.push(stream)
             return stream
           },
-          harnessProjects: { watch: (signal) => signal }, // 原样返回 signal，供断言 open 转交的是同一个
+          harnessProjects: { watch: (signal) => signal, // 原样返回 signal，供断言 open 转交的是同一个；Gateway JSON解码属于bundle所在realm
+            getWorkspaceSetup: async () => json(JSON.stringify({ ok: true, value: setup ?? (frame ? { workspace: frame.baseline.workspace, planning: { state: 'confirmed', bindingId: 'binding-1', projectNodeId: 'PVT_artifact' } } : { workspace: null, planning: { state: 'unbound' } }) })) },
         },
         effect: (execute, label) => fiberCtx.effect(execute, label),
         slots: {
@@ -506,6 +508,16 @@ describe('Harness 插件安装件契约', () => {
       const icon = registrations.find((entry) => entry.options.name === 'sidebar.panellist').component()
       assert.equal(icon.type, 'svg')
       assert.equal(String(icon.props['aria-hidden']), 'true')
+    })
+
+    it('新构建入口即使已有watch也受setup gate约束：空库可创建，local_only配置不伪报已连接', async () => {
+      for (const [setup, text] of [[{ workspace: null, planning: { state: 'unbound' } }, '工作区名称'], [{ workspace: BASELINE_FRAME.baseline.workspace, planning: { state: 'configured', bindingId: 'binding-1', projectNodeId: 'PVT_artifact' } }, '配置已记录，正在读取项目']]) {
+        const seen = await applyClient({ frame: BASELINE_FRAME, setup })
+        try {
+          const markup = renderToStaticMarkup(realReact.createElement(seen.registrations.find((entry) => entry.options.name === 'main').component))
+          assert.ok(markup.includes(text)); assert.doesNotMatch(markup, /Saved|已连接|Artifact item/)
+        } finally { await seen.unload() }
+      }
     })
   })
 
