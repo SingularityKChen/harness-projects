@@ -266,6 +266,7 @@ async function recordStartFacts(context: RelationStore, request: StartWorkReques
 async function startExecution(
   context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, git: GitOutcome,
 ): Promise<StartWorkResult> {
+  if (git.worktreeExternalId === undefined) return unknownRun(git, '缺少 Git ack 的工作目录，不能启动执行', undefined)
   const target = resolveWriteTarget(context.registry, CapabilityKey.ExecutionRunStart)
   const provider = target.binding?.execution
   if (provider === undefined || target.binding === undefined) {
@@ -276,6 +277,7 @@ async function startExecution(
     return existingRun(git, existing)
   }
   const run = await provider.startRun({
+    workingDirectory: git.worktreeExternalId,
     context: { bindingId: target.binding.ref.bindingId, objectKind: 'execution_context', externalId: contextId, url: undefined },
     // 分支身份由序列决定，不由本次请求重新推导：重放时调用方可以省略 `branchName`，那时
     // `namesFor(request).branch` 是默认名，而序列已经决定的是记录里的那个名字。用错会让 run command
@@ -304,9 +306,11 @@ async function manualFallback(
     await localWrite(git, () => recordRun(context, contextId, ExecutionRunStatus.Unknown))
     return unknownRun(git, `startRun 的结果不确定：${error.message}`, undefined)
   }
+  if (git.worktreeExternalId === undefined) return unknownRun(git, '缺少 Git ack 的工作目录，不能人工接管', undefined)
   const fallback = resolveWriteTarget(context.registry, CapabilityKey.ExecutionRunFallback).binding
   if (fallback?.execution !== undefined) {
     const run = await fallback.execution.startRun({
+      workingDirectory: git.worktreeExternalId,
       context: { bindingId: fallback.ref.bindingId, objectKind: 'execution_context', externalId: contextId, url: undefined },
       command: `manual fallback ${git.branchExternalId ?? ''}`.trim(), environment: {},
     })

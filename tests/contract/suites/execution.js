@@ -19,7 +19,7 @@ const runRef = (context, externalId) => ({ ...context, objectKind: 'execution_ru
 export function executionContractSuite(adapter) {
   const { label, makeProvider, expect: expected } = adapter
   const context = expected.context
-  const start = (provider) => provider.startRun({ context, command: 'task verify --probe cmd-7f3a', environment: { CI: 'true', PROBE: 'env-7f3a' } })
+  const start = (provider) => provider.startRun({ context, command: 'task verify --probe cmd-7f3a', environment: { CI: 'true', PROBE: 'env-7f3a' }, workingDirectory: '/workspace/contract', ...adapter.startInput })
 
   test(`${label}：启动后可读回同一运行`, async () => {
     const provider = makeProvider({})
@@ -78,7 +78,8 @@ export function executionContractSuite(adapter) {
 
   test(`${label}：声明的取消能力真的能结束运行，且读到的是权威新状态`, async () => {
     const provider = makeProvider({})
-    if (typeof provider.cancelRun !== 'function') return
+    if (accessOf(await provider.describeCapabilities(), CapabilityKey.ExecutionRunCancel) !== 'available') return
+    assert.equal(typeof provider.cancelRun, 'function', '声明的取消能力必须提供实现')
     const canceled = await provider.cancelRun({ ...runRef(context, expected.runningRunExternalId), url: 'https://evil.example/c', bogus: 1 })
     assert.equal(canceled.ok, true)
     assert.equal(canceled.value.status, 'canceled')
