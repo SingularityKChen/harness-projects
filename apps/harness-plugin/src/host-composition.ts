@@ -1,10 +1,11 @@
+import type { ExternalObjectRef, PlanningProvider, ProviderPlanningFieldDefinition, Storage, WorkspacePlanningMappingRecord } from '@harness-projects/capabilities'
 import { mkdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { composeCore, unavailableCore, createPlanningReconciler, type PlanningReconciler, type PlanningReconcilerTimers, type CoreApi } from '@harness-projects/core'
 import { createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
 import { createSqliteStorage, type SqliteStorage } from '@harness-projects/storage-sqlite'
 import type { ExecutionContextDTO } from '@harness-projects/client'
-import type { WorkspaceId } from '@harness-projects/domain'
+import type { WorkspaceId, WorkspacePlanningFieldMapping } from '@harness-projects/domain'
 import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
 import { createPlanningLifetime } from './host-planning-lifetime.ts'
 import { dispatchOf, OPERATIONS, type UnaryHandlers, type UnaryName } from './host-operations.ts'
@@ -111,9 +112,10 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     })
     for (const item of disabled) log.write('bindingDisabled', { bindingId: item.bindingId, domain: item.domain, implementationKey: item.implementationKey, code: item.error.code })
     const providers = { ...table, ...(table.planning === undefined ? {} : { planning: lifetime.wrap(table.planning) }), storage }
+    const mapping = workspace === undefined ? {} : await loadPlanningMapping(storage, workspace.id, providers.planning, (event) => log.write(event, {}))
     // 空数据根：不向 Core 传 storage，不写任何行；工作区的创建属于挂载写者（#127、#131）。
     const core: CoreApi = workspace === undefined ? unavailableCore('工作区尚未创建') : await composeCore({
-      workspace: { id: workspace.id, name: workspace.name, statusPolicy: workspace.statusPolicy },
+      workspace: { id: workspace.id, name: workspace.name, statusPolicy: workspace.statusPolicy, ...mapping },
       providers, diagnostics,
     })
     const controller = createController(core, { workspaceRevision: () => storage!.currentRevision(options.workspaceId) })
@@ -142,4 +144,58 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       stop, dispose,
     }
   } catch (error) { await dispose(); throw error }
+}
+
+type MappingInput = { readonly project?: ExternalObjectRef; readonly planningFieldMapping?: WorkspacePlanningFieldMapping; readonly planningMappingOrigin?: 'derived' | 'user' }
+/** 默认词表是产品策略；歧义与错 kind 均不猜，Core 仍只消费显式 ID。 */
+function derive(fields: readonly ProviderPlanningFieldDefinition[]): WorkspacePlanningFieldMapping {
+  const unique = (names: readonly string[], kind: string) => {
+    const candidates = fields.filter((field) => names.includes(field.name))
+    return candidates.length === 1 && candidates[0]?.kind === kind ? candidates[0] : undefined
+  }
+  const status = unique(['Status'], 'single_select')
+  const iteration = unique(['Iteration'], 'iteration')
+  const targetDate = unique(['Target date', 'Target Date'], 'date')
+  const options = status?.kind === 'single_select' ? status.options : []
+  const targets = [['Todo', 'todo'], ['In Progress', 'in_progress'], ['Done', 'done']] as const
+  return {
+    ...(status === undefined ? {} : { status: { projectFieldId: status.id, options: Object.fromEntries(targets.flatMap(([name, target]) => {
+      const matches = options.filter((option) => option.name === name)
+      return matches.length === 1 ? [[matches[0]!.id, target]] : []
+    })) } }),
+    ...(iteration === undefined ? {} : { iterationFieldId: iteration.id }),
+    ...(targetDate === undefined ? {} : { targetDateFieldId: targetDate.id }),
+  }
+}
+
+/** 发现请求经 Host lifetime 包装；提交前事务内重查，迟到派生不得覆盖用户配置。 */
+async function loadPlanningMapping(storage: Storage, workspaceId: WorkspaceId, planning: PlanningProvider | undefined,
+  diagnostic: (event: string) => void): Promise<MappingInput> {
+  if (planning === undefined) return {}
+  const binding = (await storage.listProviderBindings(workspaceId)).find((mount) => mount.enabled && mount.domain === 'planning')
+  if (binding === undefined) return {}
+  const configured = await storage.getBindingConfiguration({ workspaceId, bindingId: binding.id, domain: 'planning' })
+  const projectExternalId = configured?.configuration.projectNodeId
+  if (typeof projectExternalId !== 'string' || projectExternalId === '') return {}
+  const project: ExternalObjectRef = { bindingId: binding.id, objectKind: 'project', externalId: projectExternalId, url: undefined }
+  const use = (record: WorkspacePlanningMappingRecord): MappingInput => {
+    if (record.bindingId !== binding.id || record.projectExternalId !== projectExternalId) { diagnostic('planningMappingScopeMismatch'); return { project } }
+    return { project, planningFieldMapping: record.mapping, planningMappingOrigin: record.origin }
+  }
+  const saved = await storage.getWorkspacePlanningMapping(workspaceId)
+  if (saved !== undefined) return use(saved)
+  let mapping: WorkspacePlanningFieldMapping
+  try {
+    const result = await planning.listFieldDefinitions(project)
+    if (!result.ok) { diagnostic('planningMappingDiscoveryFailed'); return { project } }
+    mapping = derive(result.value)
+  } catch { diagnostic('planningMappingDiscoveryFailed'); return { project } }
+  if (Object.keys(mapping).length === 0) return { project }
+  return storage.transaction(async (tx) => {
+    const current = await tx.getWorkspacePlanningMapping(workspaceId)
+    if (current !== undefined) return use(current)
+    const record = { workspaceId, bindingId: binding.id, projectExternalId, origin: 'derived' as const, mapping }
+    await tx.putWorkspacePlanningMapping(record)
+    return use(record)
+  })
 }

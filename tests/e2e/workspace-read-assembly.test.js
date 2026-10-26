@@ -547,3 +547,19 @@ test('端到端：sync.read 直达 derive / view；断网保行并整体 stale�
   await sync.poll()
   assert.ok(itemRows(sync.read()).every((row) => !row.stale), '重新拉基线后回到当前值')
 })
+
+
+test('字段映射来源闭集：baseline 接受 derived/user，拒绝未知 origin 而不污染旧读取', async () => {
+  const { controller } = await compose()
+  const snapshot = await controller.baseline()
+  const sync = createSync(createTransport(controller), createEntityStore())
+  for (const mappingOrigin of ['derived', 'user']) {
+    sync.receive({ kind: 'baseline', baseline: { ...snapshot, planningSource: { ...snapshot.planningSource, mappingOrigin } } })
+    assert.equal(sync.read().planningSource.mappingOrigin, mappingOrigin)
+    assert.equal(viewOf(sync.read()).mappingSourceText, mappingOrigin === 'derived' ? '字段映射：自动派生' : '字段映射：用户配置')
+  }
+  for (const mappingOrigin of ['guessed', null, 1, {}]) {
+    assert.throws(() => sync.receive({ kind: 'baseline', baseline: { ...snapshot, planningSource: { ...snapshot.planningSource, mappingOrigin } } }), /帧头不合契约/)
+    assert.equal(sync.read().planningSource.mappingOrigin, 'user')
+  }
+})

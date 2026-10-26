@@ -5,7 +5,7 @@
  * 按工作区映射把状态选项归一到投影的 `planningStatus`——那是唯一的规划状态事实源（不变量 1）；其余角色只取展示事实。
  * 映射没有列出的选项一律不归一，绝不按字段名或选项名猜测。
  */
-import type { NormalizedStatus } from './enums.ts'
+import { NormalizedStatus } from './enums.ts'
 
 /** 平台原生字段值。日期是严格的 `YYYY-MM-DD`；迭代保留 title 与 date-only 起始日、工期天数，不推算末日。 */
 export type NativePlanningFieldValue =
@@ -30,4 +30,34 @@ export interface PlanningFieldsSnapshot {
   readonly statusName?: string
   readonly iterationTitle?: string
   readonly targetDate?: string
+}
+
+const MAPPABLE: ReadonlySet<unknown> = new Set(Object.values(NormalizedStatus).filter((status) => status !== NormalizedStatus.Unknown))
+const ROLES: ReadonlySet<string> = new Set(['status', 'iterationFieldId', 'targetDateFieldId'])
+const isPlain = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype
+function fieldId(value: unknown, path: string): void {
+  if (typeof value !== 'string' || value === '') throw new TypeError(`planningFieldMapping.${path} 必须是非空字符串`)
+}
+
+/**
+ * 组装输入的闸门：先深拷贝再校验并冻结，调用方事后改自己的对象不影响已校验的映射。只校验形状——角色键是闭集、字段 id
+ * 是非空字符串、映射与 options 是普通对象、option 只能映射到确定的规范状态（unknown 是缺失哨兵，不是人工目标）；不合法即
+ * 注册前以 TypeError 拒绝。不拿字段定义校验存在性：引用不存在的字段或 option 降级为 unknown。
+ */
+export function planningFieldMappingSnapshot(mapping: WorkspacePlanningFieldMapping): WorkspacePlanningFieldMapping {
+  const copy: unknown = structuredClone(mapping)
+  if (!isPlain(copy)) throw new TypeError('planningFieldMapping 必须是普通对象')
+  for (const key of Object.keys(copy)) if (!ROLES.has(key)) throw new TypeError(`planningFieldMapping.${key} 不是字段角色`)
+  for (const key of ['iterationFieldId', 'targetDateFieldId']) if (copy[key] !== undefined) fieldId(copy[key], key)
+  const { status } = copy
+  if (status !== undefined) {
+    if (!isPlain(status) || !isPlain(status.options)) throw new TypeError('planningFieldMapping.status 与其 options 必须是普通对象')
+    fieldId(status.projectFieldId, 'status.projectFieldId')
+    for (const [optionId, target] of Object.entries(status.options)) {
+      if (!MAPPABLE.has(target)) throw new TypeError(`planningFieldMapping.status.options.${optionId} 的 ${String(target)} 不是可映射的规范状态`)
+    }
+    Object.freeze(Object.freeze(status).options)
+  }
+  return Object.freeze(copy) as WorkspacePlanningFieldMapping
 }

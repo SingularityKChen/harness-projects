@@ -69,6 +69,7 @@ export function WorkItemListPage({ view, navigation, headingTabIndex }: { view: 
   return createElement('section', { 'aria-label': '工作项列表' },
     createElement('h2', { tabIndex: headingTabIndex }, view.workspaceName),
     createElement('p', null, '规划来源：', createElement(SourceBadge, { name: view.planningSourceName }),
+      ...(view.mappingSourceText === undefined ? [] : ['；', view.mappingSourceText]),
       ...(confirmed ? ['；', createElement(FreshnessBadge, { stale: false, at: body.lastUpdatedAt ?? null })] : [])),
     view.readOnly ? createElement('p', null, '只读：规划来源只允许读取，此处不提供编辑或开始工作入口。') : null,
     view.degraded ? createElement('p', null, '读取能力降级：显示的是保守的最后已知值。') : null,

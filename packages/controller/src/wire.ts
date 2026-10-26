@@ -69,7 +69,7 @@ export interface WireCapabilityEntry { readonly key: CapabilityKey; readonly acc
 export interface WireRepositoryEntry { readonly id: string; readonly capabilities: readonly WireCapabilityEntry[] }
 
 /** 规划来源（#383）：已组合的规划挂载的绑定 id 与显示名（引导读到的项目标题）；不带账号、句柄或配置。页面没给来源名时 ui-model 用 `name`。 */
-export interface WirePlanningSource { readonly bindingId: ProviderBindingId; readonly name: string }
+export interface WirePlanningSource { readonly bindingId: ProviderBindingId; readonly name: string; readonly mappingOrigin?: 'derived' | 'user' }
 
 /**
  * 每个可接受帧都带的整表头；`workspace` 为 undefined = 尚无已确认的 descriptor（没有 Storage），不是"没有工作区名"。
@@ -165,7 +165,7 @@ export function toWireSnapshot(
     workspace: metadata.workspace,
     capabilities: metadata.capabilities.map(wireCapability),
     ...(repositories.length === 0 ? {} : { repositories }),
-    ...(planning === undefined ? {} : { planningSource: { bindingId: planning.bindingId, name: planning.name } }),
+    ...(planning === undefined ? {} : { planningSource: { ...planning } }),
     source: {
       revision,
       authority,

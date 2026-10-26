@@ -78,7 +78,8 @@ function validRepositories(repositories: unknown): boolean {
 function validPlanningSource(planning: unknown): boolean {
   const entry = planning as WirePlanningSource | null
   return planning === undefined || (typeof entry === 'object' && entry !== null && typeof entry.bindingId === 'string' && entry.bindingId !== ''
-    && typeof entry.name === 'string' && entry.name !== '' && Object.keys(entry).every((key) => key === 'bindingId' || key === 'name'))
+    && typeof entry.name === 'string' && entry.name !== '' && (entry.mappingOrigin === undefined || entry.mappingOrigin === 'derived' || entry.mappingOrigin === 'user')
+    && Object.keys(entry).every((key) => key === 'bindingId' || key === 'name' || key === 'mappingOrigin'))
 }
 
 export function assertHeader(header: WireWorkspaceHeader): void {

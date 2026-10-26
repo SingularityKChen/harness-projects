@@ -26,6 +26,32 @@ export function storageFoundationSuite(adapter, register = test) {
     }))
     assert.equal(await storage.getWorkspace('ws-rolled-back'), undefined)
   })
+  register(`${label}：规划映射独立保存、深拷贝、回滚并跨重启保留`, async () => {
+    let storage = makeStorage(); await seedWorkspace(storage); await storage.putProviderBinding(binding('binding-1'))
+    const record = { workspaceId: WORKSPACE, bindingId: 'binding-1', projectExternalId: 'project-1', origin: 'user', mapping: { status: { projectFieldId: 'status', options: { done: 'done' } } } }
+    const expected = structuredClone(record)
+    await storage.putWorkspacePlanningMapping(record); record.mapping.status.options.done = 'todo'
+    const read = await storage.getWorkspacePlanningMapping(WORKSPACE); read.mapping.status.options.done = 'blocked'
+    await storage.putWorkspace(workspace(WORKSPACE, '新名称'))
+    await assert.rejects(storage.transaction(async (tx) => { await tx.putWorkspacePlanningMapping({ ...expected, origin: 'derived' }); throw new Error('rollback') }), /rollback/)
+    assert.deepEqual(await storage.getWorkspacePlanningMapping(WORKSPACE), expected)
+    assert.equal(await storage.currentRevision(WORKSPACE), 0)
+    storage = await adapter.restart(storage)
+    assert.deepEqual(await storage.getWorkspacePlanningMapping(WORKSPACE), expected)
+    await storage.removeProviderBinding({ workspaceId: WORKSPACE, bindingId: 'binding-1', domain: 'planning' })
+    assert.equal(await storage.getWorkspacePlanningMapping(WORKSPACE), undefined)
+    storage.close?.()
+  })
+  register(`${label}：规划映射拒绝非法形状与不存在的 planning 挂载`, async () => {
+    const storage = makeStorage(); await seedWorkspace(storage); await storage.putProviderBinding(binding('binding-1'))
+    const record = { workspaceId: WORKSPACE, bindingId: 'binding-1', projectExternalId: 'project-1', origin: 'derived', mapping: { iterationFieldId: 'iteration' } }
+    await storage.putProviderBinding(developmentBinding('dev'))
+    for (const patch of [{ bindingId: 'dev' }, { origin: 'other' }, { extra: true }, { projectExternalId: '' }, { mapping: { guess: 'status' } }, { mapping: { status: { projectFieldId: 's', options: { o: 'unknown' } } } }, { workspaceId: 'missing' }, { bindingId: 'missing' }]) {
+      await assert.rejects(storage.putWorkspacePlanningMapping({ ...record, ...patch }))
+    }
+    assert.equal(await storage.getWorkspacePlanningMapping(WORKSPACE), undefined)
+    storage.close?.()
+  })
   const overlapGate = () => {
     let release; const gate = new Promise((resolve) => { release = resolve })
     let mark; const suspended = new Promise((resolve) => { mark = resolve })
@@ -189,7 +215,7 @@ export const PRE_SPLIT_CASE_COUNT = 18
  * 由 L6 新增 10 条（执行面的读隔离、原子性、悬空父边与枚举等），合计 16；再加同步组 +1（#203 规范载体定序），合计 17；再加执行组 +2（#187 / #188 的仓库挂载契约），合计 19；再加执行组 +1（#196 的工作项父边共享拒绝），合计 20；再加执行组 +2（#221 的交付事实整行往返与读隔离；父行与关系端点的拒绝并入已有的悬空父边用例），合计 22。
  * 逐组账见 `tests/contract/storage-contract.test.js` 的 `CASE_LEDGER`；"新增"一旦跨组增长，写成单个标量就只能在账上写假数。
  */
-export const ADDED_CASE_COUNT = 22
+export const ADDED_CASE_COUNT = 24
 /** 三组各自从切分前继承的条数：foundation 7 + sync 8 + execution 3 = 18。 */
 export const INHERITED_CASE_COUNTS = { foundation: 7, sync: 8, execution: 3 }
 /** 组名 → suite：守卫与组合入口共用同一张表，组名不再以字符串形式散落在两处。 */

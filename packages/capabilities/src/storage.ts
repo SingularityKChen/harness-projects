@@ -1,6 +1,7 @@
 /**
  *
  */
+import { planningFieldMappingSnapshot, type WorkspacePlanningFieldMapping } from '@harness-projects/domain'
 import type {
   EngineeringFactKind,
   Entity,
@@ -45,6 +46,19 @@ export class StorageInputError extends Error {
   static unregisteredWorkItem(): StorageInputError {
     return new StorageInputError(projectError(ProjectErrorCode.InvalidInput, '执行上下文引用的工作项未登记'))
   }
+}
+
+/** 工作区确认的字段配置，与投影修订号和外部写确认独立。 */
+export interface WorkspacePlanningMappingRecord {
+  readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId; readonly projectExternalId: string
+  readonly origin: 'derived' | 'user'; readonly mapping: WorkspacePlanningFieldMapping
+}
+export function planningMappingRecordSnapshot(record: WorkspacePlanningMappingRecord): WorkspacePlanningMappingRecord {
+  if (typeof record !== 'object' || record === null || Object.getPrototypeOf(record) !== Object.prototype
+    || Object.keys(record).some((key) => !['workspaceId', 'bindingId', 'projectExternalId', 'origin', 'mapping'].includes(key))
+    || [record.workspaceId, record.bindingId, record.projectExternalId].some((value) => typeof value !== 'string' || value === '')
+    || !['derived', 'user'].includes(record.origin)) throw new TypeError('invalid workspace planning mapping')
+  return { ...record, mapping: planningFieldMappingSnapshot(record.mapping) }
 }
 
 export interface WorkspaceRecord {
@@ -174,6 +188,8 @@ export interface Storage {
   transaction<T>(work: (tx: StorageTransaction) => Promise<T>): Promise<T>
 
   // ── 工作区与绑定 ──
+  getWorkspacePlanningMapping(workspaceId: WorkspaceId): Promise<WorkspacePlanningMappingRecord | undefined>
+  putWorkspacePlanningMapping(record: WorkspacePlanningMappingRecord): Promise<void>
   putWorkspace(record: WorkspaceRecord): Promise<void>
   getWorkspace(id: WorkspaceId): Promise<WorkspaceRecord | undefined>
   putProviderBinding(record: ProviderBindingRecord): Promise<void>
