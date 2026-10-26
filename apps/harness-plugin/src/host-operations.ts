@@ -74,6 +74,18 @@ export function defineOperations<const T extends Record<string, Body>>(bodies: T
   return Object.freeze(Object.fromEntries(entries)) as { readonly [K in keyof T & string]: Operation<K, T[K]> }
 }
 
+function repositoryReferences(value: unknown) {
+  if (!Array.isArray(value)) throw new TypeError('references 必须是数组')
+  return value.map((value) => {
+    const ref = exactRecord(value, ['domain', 'implementationKey', 'accountId', 'configuration'], 'reference')
+    if (ref.domain !== 'development' && ref.domain !== 'delivery') throw new TypeError('reference.domain 不合法')
+    const configuration = plainRecord(ref.configuration, 'reference.configuration')
+    if (Object.values(configuration).some((value) => typeof value !== 'string' && typeof value !== 'boolean')) throw new TypeError('reference.configuration 值不合法')
+    return { domain: ref.domain as 'development' | 'delivery', implementationKey: nonEmptyString(ref.implementationKey, 'implementationKey'),
+      accountId: ref.accountId === undefined ? undefined : nonEmptyString(ref.accountId, 'accountId'), configuration: configuration as Readonly<Record<string, string | boolean>> }
+  })
+}
+
 /** `watch` 追加在末尾：descriptor 的 `invocations[0]` 仍是 `baseline`。 */
 export const OPERATIONS = defineOperations({
   baseline: { mode: 'unary', params: [] },
@@ -83,6 +95,10 @@ export const OPERATIONS = defineOperations({
     param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId')),
     param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId')),
   ] },
+  createWorkspace: { mode: 'unary', params: [...ENVELOPE, param('name', 'WorkspaceName', (value) => nonEmptyString(value, 'name'))] },
+  connectAccount: { mode: 'unary', params: ENVELOPE },
+  bindPlanningSource: { mode: 'unary', params: [...ENVELOPE, param('accountId', 'AccountId', (value) => nonEmptyString(value, 'accountId')), param('projectNodeId', 'ProjectNodeId', (value) => nonEmptyString(value, 'projectNodeId'))] },
+  bindRepository: { mode: 'unary', params: [...ENVELOPE, param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId')), param('references', 'RepositoryReferences', repositoryReferences)] },
   watch: { mode: 'stream', params: [] },
 })
 

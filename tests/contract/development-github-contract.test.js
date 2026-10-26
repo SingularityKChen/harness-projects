@@ -417,3 +417,16 @@ test('replay-ledger：本文件所有回放都没有未命中的请求', () => {
   assert.ok(replays.length > 0, '至少有一个回放，否则「没有未命中」是空话')
   assert.deepEqual(replays.flatMap((replay) => replay.misses), [])
 })
+
+test('lazy permission never probes in describe, preserves real observation time, and degrades on a failed real read', async () => {
+  let calls = 0, time = Date.parse('2026-10-26T00:00:00Z'), fail = false
+  const replay = replayTransport()
+  const provider = createGithubDevelopmentProvider({ bindingId, repository: { externalId: LOCAL_REPOSITORY_KEY, owner: OWNER, name: NAME }, permissionMode: 'lazy', now: () => time,
+    transport: (request) => { calls++; return fail ? Promise.resolve({ status: 403, headers: {}, body: {} }) : replay(request) } })
+  assert.deepEqual((await provider.describeCapabilities()).permission, bothAre('degraded')); assert.equal(calls, 0)
+  time += 1000; assert.equal((await provider.getRepository(repositoryRef)).ok, true)
+  const confirmed = await provider.describeCapabilities(); time += 1000
+  assert.deepEqual(confirmed.permission, bothAre('available')); assert.deepEqual(await provider.describeCapabilities(), confirmed); assert.equal(calls, 1)
+  fail = true; await provider.getRepository(repositoryRef)
+  assert.deepEqual((await provider.describeCapabilities()).permission, bothAre('degraded')); assert.equal(calls, 2)
+})

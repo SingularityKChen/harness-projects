@@ -153,3 +153,11 @@ test('execution context unary declares two explicit IDs with strict non-empty wi
   assert.deepEqual(descriptor.parameters.map(({ name, wire }) => [name, wire]), [['workItemId', 'workItemId'], ['repositoryId', 'repositoryId']])
   for (const parameter of descriptor.parameters) { assert.equal(parameter.codec.create().parse('id'), 'id'); for (const value of ['', null, 3]) assert.throws(() => parameter.codec.create().parse(value), TypeError) }
 })
+
+test('settings expose only the four exact positional contracts', () => {
+  for (const [name, names] of Object.entries({ createWorkspace: ['actorRef', 'idempotencyKey', 'name'], connectAccount: ['actorRef', 'idempotencyKey'], bindPlanningSource: ['actorRef', 'idempotencyKey', 'accountId', 'projectNodeId'], bindRepository: ['actorRef', 'idempotencyKey', 'repositoryId', 'references'] })) {
+    assert.deepEqual(HOST_REMOTE.invocations.find((entry) => entry.method === name).parameters.map((parameter) => parameter.name), names)
+  }
+  const parse = OPERATIONS.bindRepository.params.at(-1).parse
+  for (const value of [null, [{}], [{ domain: 'planning', implementationKey: 'x', configuration: {} }], [{ domain: 'development', implementationKey: 'x', configuration: {}, workspaceId: 'foreign' }]]) assert.throws(() => parse(value), TypeError)
+})
