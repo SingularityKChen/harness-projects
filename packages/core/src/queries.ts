@@ -34,7 +34,7 @@ export interface WorkspaceMetadata {
   /** 已登记的仓库，按 id 升序；没有登记时是空数组。 */
   readonly repositories: readonly RepositoryMetadata[]
   /** 规划来源（#383）：已组合的规划挂载与它的显示名（引导读到的项目标题）；没有规划挂载、或名字还未知（空标题同样算未知）时 undefined。 */
-  readonly planningSource: { readonly bindingId: ProviderBindingId; readonly name: string } | undefined
+  readonly planningSource: { readonly bindingId: ProviderBindingId; readonly name: string; readonly mappingOrigin?: 'derived' | 'user' } | undefined
 }
 
 /**
@@ -126,7 +126,7 @@ async function workspaceMetadata(context: CoreContext): Promise<WorkspaceMetadat
     capabilities: keys.map((key) => bindingForCapability(context.registry, key)?.capabilities.find((entry) => entry.key === key)
       ?? { key, access: AccessLevel.Unavailable, reason: `没有挂载提供能力 ${key}`, bindingId: undefined, externalActionUrl: undefined }),
     repositories: await repositoryMetadata(context),
-    planningSource: planning === undefined || !context.projectTitle ? undefined : { bindingId: planning.ref.bindingId, name: context.projectTitle },
+    planningSource: planning === undefined || !context.projectTitle ? undefined : { bindingId: planning.ref.bindingId, name: context.projectTitle, ...(context.planningMappingOrigin === undefined ? {} : { mappingOrigin: context.planningMappingOrigin }) },
   }
 }
 

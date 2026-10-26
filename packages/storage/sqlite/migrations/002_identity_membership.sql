@@ -140,3 +140,19 @@ CREATE TABLE workspace_projection (
   -- ADR-0005 的内容三态：redacted 内容没有标题，调用方必须显示占位，不得回退到缓存标题。
   CHECK (content_kind <> 'redacted' OR content_title IS NULL)
 );
+
+-- workspace_planning_mapping：issue #277，独立的本地配置，挂载删除时随其配置一起移除。
+CREATE TABLE workspace_planning_mapping (
+  -- issue #277：每工作区一份配置，所属工作区必须存在。
+  workspace_id TEXT PRIMARY KEY REFERENCES workspace(id),
+  binding_id TEXT NOT NULL,
+  -- issue #277：配置只属于 planning 挂载。
+  domain TEXT NOT NULL DEFAULT 'planning' CHECK (domain = 'planning'),
+  -- issue #277：显式项目 scope，禁止空身份。
+  project_external_id TEXT NOT NULL CHECK (length(project_external_id) > 0),
+  -- issue #277：来源闭集，不把猜测当用户配置。
+  origin TEXT NOT NULL CHECK (origin IN ('derived', 'user')),
+  mapping_json TEXT NOT NULL,
+  -- issue #277：禁止悬空挂载，卸载清除其配置。
+  FOREIGN KEY (workspace_id, binding_id, domain) REFERENCES workspace_binding(workspace_id, binding_id, domain) ON DELETE CASCADE
+);

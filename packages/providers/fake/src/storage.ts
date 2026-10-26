@@ -13,6 +13,7 @@ export interface FakeWorkspaceBindingMount {
   isDefault: boolean
 }
 export interface FakeStorageData {
+  planningMappings: cap.WorkspacePlanningMappingRecord[]
   workspaces: cap.WorkspaceRecord[]
   providerBindings: FakeProviderBindingAnchor[]
   workspaceBindings: FakeWorkspaceBindingMount[]
@@ -37,7 +38,7 @@ export interface FakeStorageData {
   deliveryFacts: cap.DeliveryFactsRecord[]
 }
 export function emptyStorageData(): FakeStorageData {
-  return { workspaces: [], providerBindings: [], workspaceBindings: [], accounts: [], bindingAccounts: [], bindingConfigurations: [],
+  return { planningMappings: [], workspaces: [], providerBindings: [], workspaceBindings: [], accounts: [], bindingAccounts: [], bindingConfigurations: [],
     entities: [], identities: [], projections: [], repositories: [],
     contexts: [], runs: [], relations: [], observations: [], cursors: [], planningSyncRounds: [], reconcileCursors: [], attempts: [], revisions: [], memberships: [], fieldValues: [], deliveryFacts: [] }
 }
@@ -89,6 +90,14 @@ export class MemoryStorage implements cap.Storage {
     this.#policy = cap.snapshotPolicy(policy)
     this.data = data
     this.data.planningSyncRounds ??= []
+    this.data.planningMappings ??= []
+    const mappingWorkspaces = new Set<domain.WorkspaceId>()
+    for (const record of this.data.planningMappings) {
+      if (mappingWorkspaces.has(record.workspaceId)) throw new RangeError('workspace planning mapping is already registered')
+      mappingWorkspaces.add(record.workspaceId)
+      cap.planningMappingRecordSnapshot(record)
+      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId) || !this.data.workspaceBindings.some((mount) => mount.workspaceId === record.workspaceId && mount.bindingId === record.bindingId && mount.domain === 'planning')) throw new RangeError('planning mapping mount does not exist')
+    }
     this.#transactionScope = transactionScope
     // 导入时校验已存元数据与引用完整性（对抗验证 P3-2）：配置必须有挂载、账号关联必须指向存在的账号，否则孤儿状态会被导入。
     for (const record of this.data.accounts) cap.parseConnectorAccount(record, this.#policy)
@@ -116,6 +125,16 @@ export class MemoryStorage implements cap.Storage {
       const result = await work(new MemoryStorage(draft, true, this.#policy))
       this.data = draft
       return result
+    })
+  }
+  async getWorkspacePlanningMapping(workspaceId: domain.WorkspaceId): Promise<cap.WorkspacePlanningMappingRecord | undefined> {
+    return structuredClone(this.data.planningMappings.find((record) => record.workspaceId === workspaceId))
+  }
+  async putWorkspacePlanningMapping(record: cap.WorkspacePlanningMappingRecord): Promise<void> {
+    const parsed = cap.planningMappingRecordSnapshot(record)
+    return this.#mutate(() => {
+      if (!this.data.workspaceBindings.some((mount) => mount.workspaceId === parsed.workspaceId && mount.bindingId === parsed.bindingId && mount.domain === 'planning')) throw new RangeError('planning mapping mount does not exist')
+      upsert(this.data.planningMappings, structuredClone(parsed), (item) => item.workspaceId === parsed.workspaceId)
     })
   }
   async putWorkspace(record: cap.WorkspaceRecord): Promise<void> {
@@ -154,6 +173,7 @@ export class MemoryStorage implements cap.Storage {
       if (!this.data.workspaceBindings.some((mount) => sameMount(mount, parsed))) return
       this.data.workspaceBindings = this.data.workspaceBindings.filter((mount) => !sameMount(mount, parsed))
       this.data.bindingConfigurations = this.data.bindingConfigurations.filter((record) => !sameMount(record.ref, parsed))
+      if (parsed.domain === 'planning') this.data.planningMappings = this.data.planningMappings.filter((record) => record.workspaceId !== parsed.workspaceId || record.bindingId !== parsed.bindingId)
     })
   }
   /** 账号自然键：数组序列化，避免分隔符碰撞；显示名不参与去重。 */

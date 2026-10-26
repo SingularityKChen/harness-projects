@@ -49,6 +49,7 @@ export type VisibleListRow =
     }
 export type WorkItemListView = {
   readonly workspaceName: string
+  readonly mappingSourceText?: string
   readonly planningSourceName: string
   readonly statusText: string
   readonly readOnly: boolean
@@ -141,7 +142,8 @@ export function deriveWorkItemListView(input: WorkItemListReadInput): WorkItemLi
   const access = accessIndex(read.capabilities ?? []).get(READ_KEY)
   const planning = read.planningSource
   const nameOf = (bindingId: string): string | undefined => pick(metadata.sourceNames, bindingId) ?? (bindingId === planning?.bindingId ? planning.name : undefined)
-  const shell = { workspaceName: read.workspace.name, planningSourceName: metadata.planningSourceName || planning?.name || '规划来源名称未提供' }
+  const mappingSourceText = planning?.mappingOrigin === 'derived' ? '字段映射：自动派生' : planning?.mappingOrigin === 'user' ? '字段映射：用户配置' : undefined
+  const shell = { ...(mappingSourceText === undefined ? {} : { mappingSourceText }), workspaceName: read.workspace.name, planningSourceName: metadata.planningSourceName || planning?.name || '规划来源名称未提供' }
   const flags = { readOnly: access === AccessLevel.ReadOnly, degraded: access === AccessLevel.Degraded }
   const unavailable = (reason: ListReadFailure['kind'], [message, remaining] = UNAVAILABLE[reason]): WorkItemListView => {
     const safe = failure?.safeMessage

@@ -5,6 +5,8 @@
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
+import { WorkItemListPage } from '@harness-projects/ui'
 import { test } from 'node:test'
 
 import { CapabilityKey } from '@harness-projects/capabilities'
@@ -228,4 +230,16 @@ test('#133 双层剥离：toWireEntity 不把 redacted 行的字段事实发出 
   const json = JSON.stringify(deriveWorkItemListView(input))
   assert.match(json, /Sprint 1/, '可见行正控')
   for (const canary of Object.values(fields)) assert.ok(!json.includes(canary), canary)
+})
+
+
+test('字段映射来源在真实列表来源旁渲染，未配置时缺席', () => {
+  const require = createRequire(new URL('../../packages/ui/package.json', import.meta.url))
+  const { createElement } = require('react'), { renderToStaticMarkup } = require('react-dom/server')
+  for (const [mappingOrigin, text] of [['derived', '字段映射：自动派生'], ['user', '字段映射：用户配置'], [undefined, undefined]]) {
+    const result = received({ read: { planningSource: { bindingId: 'bind-1', name: '项目', ...(mappingOrigin === undefined ? {} : { mappingOrigin }) } } })
+    assert.equal(result.mappingSourceText, text)
+    const markup = renderToStaticMarkup(createElement(WorkItemListPage, { view: result }))
+    if (text) assert.ok(markup.includes(text)); else assert.doesNotMatch(markup, /字段映射/)
+  }
 })

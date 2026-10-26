@@ -3,7 +3,7 @@
  * 读写路径：每个方法都经过基类的唯一入口（`read` / `mutate` / `write`），因此外部读拿到**结算后**的值、看不到未提交的写入；事务在队列内从 BEGIN IMMEDIATE 持有到 COMMIT / ROLLBACK，重叠事务串行提交，在途事务期间的直接写入等到结算后才执行。多语句写入只有一个原子入口 `atomic`。代价也相同：事务的 work 里必须用 `tx.*`（队列内自等，用 AsyncLocalStorage 标记事务作用域）；嵌套事务在运行时被拒绝，抛错后 ROLLBACK、重开句柄读不到半写行（L3 计划遗留「嵌套事务在运行时静默吞写」）。快速失败文本由基类持有，这里只把它们转出包外；约定文本的整串断言在 `tests/contract/suites/storage.js`。列表顺序：端口未承诺顺序；本实现各列表的排序见各方法（地基面与同步面按 rowid / 业务键，执行面按主键序），调用方不得依赖。
  */
 import type { BindingConfigurationRecord, ConnectorAccountRecord, ProviderBindingRecord, RepositoryRecord, Storage, StorageTransaction, StorageValidationPolicy, WorkspaceRecord } from '@harness-projects/capabilities'
-import { EMPTY_POLICY, bindingRefOf, parseBindingConfiguration, parseBindingRef, parseConnectorAccount, snapshotPolicy } from '@harness-projects/capabilities'
+import { planningMappingRecordSnapshot, type WorkspacePlanningMappingRecord, EMPTY_POLICY, bindingRefOf, parseBindingConfiguration, parseBindingRef, parseConnectorAccount, snapshotPolicy } from '@harness-projects/capabilities'
 import { parseExternalIdentityKind, type ConnectorAccountId, type Entity, type EntityId, type ExternalIdentity, type ProviderBindingId, type WorkspaceId, type WorkspaceProjection } from '@harness-projects/domain'
 import { openDatabase } from './db.ts'
 import { migrate } from './migrate.ts'
@@ -28,6 +28,16 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   /** 作用域实例就是本类的一个 `scoped` 副本：同一个连接、同一条队列、**共用**的关闭标记与本事务的令牌（见基类的 `transaction()`），并传同一份受信策略。 */
   protected override scopedInstance(state: { closed: boolean }, token: TransactionToken): StorageTransaction { return new SqliteStorage(this.location, this.db, true, state, token, this.policy) }
 
+  getWorkspacePlanningMapping(workspaceId: WorkspaceId): Promise<WorkspacePlanningMappingRecord | undefined> {
+    return this.read(() => optional(this.db.prepare('SELECT workspace_id, binding_id, project_external_id, origin, mapping_json FROM workspace_planning_mapping WHERE workspace_id = ?').get(workspaceId), (row) => structuredClone(planningMappingRecordSnapshot({
+      workspaceId: row.workspace_id as WorkspaceId, bindingId: row.binding_id as ProviderBindingId, projectExternalId: row.project_external_id as string,
+      origin: row.origin as WorkspacePlanningMappingRecord['origin'], mapping: JSON.parse(row.mapping_json as string),
+    }))))
+  }
+  async putWorkspacePlanningMapping(record: WorkspacePlanningMappingRecord): Promise<void> {
+    const parsed = planningMappingRecordSnapshot(record)
+    return this.write('INSERT INTO workspace_planning_mapping (workspace_id, binding_id, project_external_id, origin, mapping_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT (workspace_id) DO UPDATE SET binding_id = excluded.binding_id, project_external_id = excluded.project_external_id, origin = excluded.origin, mapping_json = excluded.mapping_json', parsed.workspaceId, parsed.bindingId, parsed.projectExternalId, parsed.origin, JSON.stringify(parsed.mapping))
+  }
   putWorkspace(record: WorkspaceRecord): Promise<void> {
     return this.write('INSERT INTO workspace (id, name, status_policy) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET name = excluded.name, status_policy = excluded.status_policy', record.id, record.name, record.statusPolicy)
   }

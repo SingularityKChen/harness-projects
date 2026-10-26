@@ -136,6 +136,7 @@
 | [2026-10-22-lineage-refresh](exec-plan/completed/2026-10-22-lineage-refresh.md) | 显式交付刷新与有界谱系分页 |
 | [2026-10-22-test-layer-single-pass](exec-plan/completed/2026-10-22-test-layer-single-pass.md) | 契约套件去除真实层重复执行 |
 | [2026-10-22-worktree-module-isolation](exec-plan/completed/2026-10-22-worktree-module-isolation.md) | 原生 Node 测试的工作树解析隔离 |
+| [2026-10-26-planning-field-mapping](exec-plan/completed/2026-10-26-planning-field-mapping.md) | 规划字段映射持久化、有限默认与来源展示（#277） |
 
 ## 3. 上游设计输入
 

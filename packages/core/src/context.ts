@@ -6,7 +6,7 @@ import {
   type AccessLevel, type CapabilityKey, type ExternalObjectRef, type ProviderRegistry, type Storage, type WorkspaceRecord,
 } from '@harness-projects/capabilities'
 import {
-  NormalizedStatus, StatusPolicy, WriteState, newEntityId, newExternalIdentityId, newRelationId,
+  planningFieldMappingSnapshot, NormalizedStatus, StatusPolicy, WriteState, newEntityId, newExternalIdentityId, newRelationId,
   newWorkspaceId, type EntityId, type ExternalIdentityId, type RelationId, type WorkspaceId, type WorkspacePlanningFieldMapping,
 } from '@harness-projects/domain'
 import { bootstrapWorkspace, type BootstrapResult } from './bootstrap.ts'
@@ -15,7 +15,6 @@ import { refreshDeliveryFacts, type DeliveryRefreshResult } from './delivery-fac
 import { reportSyncRoundFailure } from './diagnostics.ts'
 import { startWorkUnavailable, type ExecutionContextQuery, type StartWorkRequest, type StartWorkResult } from './execution-context.ts'
 import { cancelExecutionRun, type CancelExecutionRunResult } from './execution-run.ts'
-import { planningFieldMappingSnapshot } from './planning-fields.ts'
 import { createQueries, type CoreQueries } from './queries.ts'
 import { collectBindings, type CoreProviderTable } from './registry.ts'
 import { confirmRelation, type RecordedEdge, type RelationRef } from './relations.ts'
@@ -45,6 +44,7 @@ export interface CoreWorkspaceInput {
    * 字段角色映射（#133）：与 `project` 一样是每次组装的输入，不持久化——它是 Host 自己的配置，不是外部写入，没有待确认态。
    * 省略即不归一任何原生状态（规划状态为 unknown），绝不按名称猜。
    */
+  readonly planningMappingOrigin?: 'derived' | 'user'
   readonly planningFieldMapping?: WorkspacePlanningFieldMapping
 }
 
@@ -85,6 +85,7 @@ export interface CoreContext {
   projectRef: ExternalObjectRef | undefined
   /** 与 `projectRef` 同时回填的项目标题（#383），是规划来源的显示名；只在内存里，Host 启动后首轮读到项目之前未知。 */
   projectTitle: string | undefined
+  readonly planningMappingOrigin: 'derived' | 'user' | undefined
   readonly planningFieldMapping: WorkspacePlanningFieldMapping | undefined
   readonly diagnostics: CoreDiagnostics | undefined
 }
@@ -148,7 +149,7 @@ export async function createContext(deps: CoreDeps): Promise<CoreContext | undef
     storage, workspaceId: workspace.id, registry: providerRegistry(prepared.bindings),
     clock: deps.clock ?? (() => new Date().toISOString()),
     ids: deps.ids ?? defaultIdFactory, policy,
-    projectRef: deps.workspace.project, projectTitle: undefined, planningFieldMapping, diagnostics: deps.diagnostics,
+    projectRef: deps.workspace.project, projectTitle: undefined, planningFieldMapping, planningMappingOrigin: planningFieldMapping === undefined ? undefined : deps.workspace.planningMappingOrigin, diagnostics: deps.diagnostics,
   }
 }
 

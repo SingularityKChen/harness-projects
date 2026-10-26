@@ -110,7 +110,7 @@ test('身份面守卫：两组用例条数与台账一致，断言集合不低�
 // `assert.deepEqual(a, b)` 改成 `assert.deepEqual(a, a)` 同样全绿。断言层因此比对三组文件里 `assert.` 语句的
 // **多重集**（去掉空白后的整行文本）：基线里任何一条文本在当前文件里少出现一次即失败。新增断言不受影响；
 // 要放宽必须**有意**从基线里删掉对应文本，并在提交信息里写明放宽了哪一条。
-const CASE_LEDGER = { foundation: { inherited: INHERITED_CASE_COUNTS.foundation, added: 6 }, sync: { inherited: INHERITED_CASE_COUNTS.sync, added: 1 }, execution: { inherited: INHERITED_CASE_COUNTS.execution, added: 15 } }
+const CASE_LEDGER = { foundation: { inherited: INHERITED_CASE_COUNTS.foundation, added: 8 }, sync: { inherited: INHERITED_CASE_COUNTS.sync, added: 1 }, execution: { inherited: INHERITED_CASE_COUNTS.execution, added: 15 } }
 const SUITE_FILES = { foundation: 'storage.js', sync: 'storage-sync.js', execution: 'storage-execution.js' }
 /** 切分完成时三组 `assert.` 语句的多重集基线（2026-09-24 实测）：元素是语句**去掉空白后的整行文本**，同一文本出现几次就写几项。 */
 const ASSERTION_BASELINE = {
@@ -362,3 +362,29 @@ function sharedSyncSuite({ label, makeStorage, inject }, test) {
     assert.ok(!Object.values(found ?? {}).includes(null), '端口记录里不得出现 null')
   })
 }
+
+
+test('内存映射快照导入拒绝非法来源或悬空挂载', async () => {
+  const storage = createFakeStorage(); await seedSync(storage)
+  await storage.putWorkspacePlanningMapping({ workspaceId: 'ws-1', bindingId: 'binding-1', projectExternalId: 'p', origin: 'user', mapping: {} })
+  const state = exportFakeStorageState(storage)
+  for (const patch of [{ origin: 'guessed' }, { bindingId: 'missing' }]) {
+    const invalid = structuredClone(state); Object.assign(invalid.planningMappings[0], patch)
+    assert.throws(() => createFakeStorage(invalid))
+  }
+  const missingWorkspace = structuredClone(state); missingWorkspace.workspaces = []
+  assert.throws(() => createFakeStorage(missingWorkspace))
+})
+
+
+test('内存映射快照导入拒绝同一工作区的第二份权威配置', async () => {
+  const storage = createFakeStorage(); await seedSync(storage)
+  const record = { workspaceId: 'ws-1', bindingId: 'binding-1', projectExternalId: 'p', origin: 'derived', mapping: {} }
+  await storage.putWorkspacePlanningMapping(record)
+  const state = exportFakeStorageState(storage)
+  for (const duplicate of [record, { ...record, origin: 'user', mapping: { iterationFieldId: 'iteration' } }]) {
+    const invalid = structuredClone(state); invalid.planningMappings.push(duplicate)
+    assert.throws(() => createFakeStorage(invalid), { name: 'RangeError', message: 'workspace planning mapping is already registered' })
+  }
+  assert.deepEqual(await createFakeStorage(state).getWorkspacePlanningMapping('ws-1'), record)
+})
