@@ -29,6 +29,7 @@ export interface ProviderExecutionRun {
 }
 
 export interface ProviderStartRunInput {
+  readonly workingDirectory: string
   readonly context: ExternalObjectRef; readonly command: string; readonly environment: Readonly<Record<string, string>>
 }
 

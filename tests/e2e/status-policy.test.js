@@ -333,3 +333,27 @@ test('交付谱系里的 CI 失败只进 derived 块：planningStatus 与内容�
   assert.ok(folded.engineering.derived.includes(DerivedFlag.Attention))
   assert.equal(await statusOf(core, workItemId), view.planningStatus, '存储中的规划状态不变')
 })
+
+test('Harness 所属 turn completed/error：三种状态政策均不写规划，保存真实 execution 终态', async () => {
+  const { createHarnessExecutionProvider } = await import('@harness-projects/provider-execution-harness')
+  for (const { policy } of MODES) for (const [kind, want] of [['completed', 'succeeded'], ['error', 'failed']]) {
+    const providers = createFakeProviders()
+    let rpcId, writes = 0
+    providers.execution = createHarnessExecutionProvider({ bindingId: 'harness-policy', sessions: {
+      create: async () => ({ sessionId: 'policy-session' }), prompt: async (input) => { rpcId = input.requestId; return { accepted: true } },
+      inspect: async () => ({ events: [{ seq: 1, type: 'turn/start', turn: 1 }, { seq: 2, type: 'user/message', rpcId },
+        { seq: 3, type: 'turn/end', turn: 1, reason: { kind } }] }), list: async () => ({ items: [{ sessionId: 'policy-session', running: false }] }),
+    } })
+    const core = await composeCore({ workspace: { id: newWorkspaceId(), name: 'Harness policy', statusPolicy: policy }, providers })
+    const workItemId = await workItemIdOf(core)
+    const before = await statusOf(core, workItemId)
+    const original = providers.planning.updatePlanningFields.bind(providers.planning)
+    providers.planning.updatePlanningFields = async (...args) => { writes++; return original(...args) }
+    const result = await core.commands.startWork({ repositoryId: REPOSITORY, workItemId, actor: { kind: 'agent' }, idempotencyKey: `${policy}-${kind}`, worktreePath: '/workspace/policy-tree' })
+    const stored = await core.queries.getExecutionContext({ repositoryId: REPOSITORY, workItemId })
+    assert.equal(result.confirmed, true)
+    assert.equal(stored.runStatus, want)
+    assert.equal(await statusOf(core, workItemId), before)
+    assert.equal(writes, 0)
+  }
+})

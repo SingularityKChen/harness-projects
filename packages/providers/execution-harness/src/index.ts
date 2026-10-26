@@ -6,3 +6,5 @@
  */
 
 export const packageId = '@harness-projects/provider-execution-harness' as const
+export { createHarnessExecutionProvider, HARNESS_EXECUTION_PROVIDER_DEFINITION } from './provider.ts'
+export type { SessionPort, SessionEvent } from './session-port.ts'
