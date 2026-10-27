@@ -1,6 +1,6 @@
 {
   "name": "@harness-projects/app-harness-plugin",
-  "version": "0.0.0",
+  "version": "0.1.0-demo.1",
   "private": true,
   "type": "module",
   "description": "Harness 外壳适配",

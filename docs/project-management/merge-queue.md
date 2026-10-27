@@ -641,3 +641,16 @@ gh issue reopen 4 -c "被 #108 的关闭引用自动关闭；revise 清单（R1�
 2026-10-22 最终整合补记：#393/#392/#394 已依次 rebase 合并，对应 issue #362/#297/#335 均 CLOSED。#395 在真实 `main@5f4dcbe6f080d30b9df3e1cddd4832ff03a1e9ca` 上解决既定四文件冲突，其 apps/packages/tests/scripts/workflows 产品文件集合与已通过 1808+7 的修复并集 `a4440bd45b725d7f2c398127200db765bab49c06` 的 Git blob 清单完全一致（SHA-256 `dcbd55267c3ca727ec892aef0825d965127ddd2ab515c9ba8f71b21c3d6f2807`）。#395 的最终 head/mergeCommit 及 #282 关闭结果以 `gh pr view 395 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit` 与 issue 回读为准；本段不预写未来合并 SHA。
 
 2026-10-22修复收尾整合：#390/#389/#391已按顺序rebase合并，#350/#357关闭、#186保留OPEN。#388在真实`main@09dd18f0c50abd851b42d0eb3db062154b980866`上完成最后变基，其产品Git blob清单与先pack后verify1886+7的固定修复并集完全一致，SHA-256 `4e0a28e18b93b86710c70640095cf52ff7f4df92a9430574e1bb892cc1c43e90`；权限决定仅补文档，不改变已复评的现有degraded策略。#388实际mergeCommit与#355关闭以`gh pr view 388 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit`及issue回读为准，不预写未来SHA。
+
+## 2026-10-27 · PR #406–#409 授权收尾
+
+本轮人类直接授权条件见 `docs/exec-plan/completed/2026-10-27-pr406-pr409-review-followup.md` 的 Decision Log；只在无P0/P1、非阻塞修复独立复评且当前版本门禁通过后执行。完整前序已在一次性clone预演，观察基线为2026-10-27 `main@f6ea9713`，候选`f49334fb`；预演是已命名版本的事实，不替代真实main逐步回读。
+
+| 顺序 | PR / issue | 接合点与处置 | 合并结果回读 |
+|---|---|---|---|
+| 1 | #406 / #230 | 安装包、两P2不涉及的构建字节与既有S3相同；承载本批持久控制/评审索引。 | `gh pr view 406 -R SingularityKChen/harness-projects --json state,mergeCommit,headRefOid` |
+| 2 | #407 / #356 | 与#406的Completed索引冲突，两行保留；自身四门激活确认P2已复评。 | `gh pr view 407 -R SingularityKChen/harness-projects --json state,mergeCommit,headRefOid` |
+| 3 | #408 / #142 | 六文件：保留绑定和StartWork两个命名选项、完整消费者测试与Completed索引；不得丢默认可省略branchName。 | `gh pr view 408 -R SingularityKChen/harness-projects --json state,mergeCommit,headRefOid` |
+| 4 | #409 / #234 | 十一文件：合并Host操作与UI prop链，保留全部三命名选项、scope门、execution refresh token及remote名单测试；索引全保留。 | `gh pr view 409 -R SingularityKChen/harness-projects --json state,mergeCommit,headRefOid` |
+
+每条合入后fetch真实main，再变基下一条；共享历史先backup再精确lease。最终产品blob必须与已独立验证的完整前序对应版本相同，变动则重审重测。只执行rebase merge，issue验收与规划Status分离。跨PR证据见 `docs/review/2026-10-27-pr406-pr409-mmp-review.md`。

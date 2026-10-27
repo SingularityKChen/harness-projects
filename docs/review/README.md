@@ -132,6 +132,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 | [2026-10-07-pr268-pr269-mvp-review](2026-10-07-pr268-pr269-mvp-review.md) | #268（GitHub Project 原生字段只读与映射归一，#133，精简重写）与 #269（统一只读详情与 canonical 深链，#130，ADR-0010）第二轮评审：两种顺序的并集预演与自动合并语义核对、上一轮 P1 按原条件复核、P2 行为缺陷的 base / head 对照复现、17 条行级意见；第一轮的跨 PR 并集记录见 `pr-268-270-cross-review.md` 与 `pr-269-mmp-review.md` | 两条都无 P0 / P1，均 APPROVE；#268 四条 P2（含 Host 写入被同步覆盖的承接、可空 `optionId`）、#269 一条 P2（fixture 列表路由无 scope 门）；两条修复本身各经独立复评后再修 P3；经人类批准按 #269 → #268 rebase merge，合并后 main 树与批准的 head 相同，#130 / #133 关闭，承接 #71 / #229 / #273 / #274 |
 | [2026-10-09-pr286-pr295-mmp-review](2026-10-09-pr286-pr295-mmp-review.md) | #286、#288、#295 → #289、#287、#290、#291、#292、#293 九个 PR 的 MMP 交付评审：四组并集预演、栈底只写自己事实的 P1 三点对照、UTC-only 判别力与相对 base 的判别力回退、修复本身的独立复评、人类指定 owner 后由评审会话整合与合并 | #295 一条 P1（修复后合并），其余无 P0 / P1；九个全部 rebase merge，#274 / #205 / #279 / #232 / #199 / #220 / #219 / #221 / #222 关闭，接线承接 #297；夹具、约定与经验的沉淀由 #298 跟踪 |
 | [2026-10-26-pr401-pr404-mmp-review](2026-10-26-pr401-pr404-mmp-review.md) | #401/#402/#403/#404 四能力 MMP 评审与收尾 | 首轮无 P0/P1；两条 P2、两条 P3，修复、独立复评与最终整合证据见记录 |
+| [2026-10-27-pr406-pr409-mmp-review](2026-10-27-pr406-pr409-mmp-review.md) | 安装包、仓库绑定、Start Work、谱系四能力 MMP 评审 | 初审无P0/P1，两P2与两P3；修复、独立复评、组合验证及授权整合见记录 |
 
 单 PR 的记录（`pr-NN-mvp-review.md`、现行的 `pr-NN-mmp-review.md` 与 `2026-09-21-pr-NN-risk-matrix.md`）同样放在本目录，但不进上表——判据就是上面那条：**跨多个 PR、且删掉之后接手的人会缺失决策依据**的才登记。
 
