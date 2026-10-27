@@ -13,3 +13,5 @@ export * from './supervise.ts'
 export type { ClientWorkspaceRead } from './workspace-read.ts'
 export * from './execution-context.ts'
 export * from './workspace-setup.ts'
+
+export * from './repository-binding.ts'

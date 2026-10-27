@@ -33,6 +33,7 @@
 |---|---|
 | [2026-10-27-pr406-pr409-review-followup](exec-plan/completed/2026-10-27-pr406-pr409-review-followup.md) | PR #406–#409 MMP 评审、非阻塞修复、独立复评与授权合并 |
 | [2026-10-26-plugin-demo-artifact](exec-plan/completed/2026-10-26-plugin-demo-artifact.md) | 版本化 tarball 与干净 Web profile 安装、打开、卸载验收（#230）；[安装指南](product/demo-install.md) |
+| [2026-10-26-repository-binding-ui](exec-plan/completed/2026-10-26-repository-binding-ui.md) | 仓库选择、只读预检与三引用绑定（#356） |
 | [2026-10-26-harness-execution](exec-plan/completed/2026-10-26-harness-execution.md) | Harness 会话启动与读取、取消安全拒绝及工作树目录通路（#140） |
 | [2026-09-17-disclosure-audit-and-license](exec-plan/completed/2026-09-17-disclosure-audit-and-license.md) | 上游输入包下架与许可证落地 |
 | [2026-09-17-issue-convention](exec-plan/completed/2026-09-17-issue-convention.md) | Issue 约定：模板、标签与 PR 关联 |

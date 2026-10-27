@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createRequire } from 'node:module'
 import { apply } from '../../apps/harness-plugin/src/client.ts'
+import { bindWorkspaceSetupApp } from '../../packages/ui/src/workspace-setup.ts'
 const require = createRequire(new URL('../../packages/ui/package.json', import.meta.url)), React = require('react'), { renderToStaticMarkup } = require('react-dom/server')
 const tick = () => new Promise((resolve) => setImmediate(resolve))
 const empty = { workspace: null, planning: { state: 'unbound' } }
@@ -61,4 +62,15 @@ test('actual client rejects outer failure and unknown DTO keys, and unmount abso
   const read = f.source.refresh(); await tick(); const before = changed; await f.close()
   resolve({ ok: true, value: configured() }); await read
   assert.equal(changed, before); assert.equal(f.source.getSnapshot().setup, undefined)
+})
+
+test('named repositoryBindingSource option delegates through the real mount while legacy three-argument binding remains readonly', async () => {
+  const f = await mount()
+  try {
+    const Panel = bindWorkspaceSetupApp(f.source, f.props.source, f.props.executionReader, { repositoryBindingSource: f.props.repositoryBindingSource })
+    await Panel().props.repositoryBindingSource.bind({ localPath: '', owner: '', name: '' })
+    assert.equal(Panel().props.repositoryBindingSource.getSnapshot().error.code, 'invalid_input')
+    assert.ok(!f.calls.some(([kind]) => kind === 'account'), 'invalid selection must stay local')
+    assert.equal(bindWorkspaceSetupApp(f.source, f.props.source, f.props.executionReader)().props.repositoryBindingSource, undefined)
+  } finally { await f.close() }
 })

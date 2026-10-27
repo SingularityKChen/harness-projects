@@ -1,3 +1,4 @@
+export type { DevelopmentProvider, Storage } from '@harness-projects/capabilities'
 /**
  * Host 的 provider 组合（ADR-0014）：编译期封闭目录（实现键 → 配置 schema + 构造函数）与按已存挂载恢复。
  * 唯一 import provider 包的文件；provider-fake 不得出现在这里。凭据只以句柄存在，值在每次 provider 操作内才经宿主解析。
@@ -13,7 +14,7 @@ import type { CoreProviderTable } from '@harness-projects/core'
 import { ProjectErrorCode, projectError, type ProjectError, type WorkspaceId } from '@harness-projects/domain'
 import { GITHUB_ACTIONS_DEFINITION, createGithubActionsDeliveryProvider, type GithubActionsTransport } from '@harness-projects/provider-delivery-github-actions'
 import { GITHUB_DEVELOPMENT_DEFINITION, createGithubDevelopmentProvider } from '@harness-projects/provider-development-github'
-import { LOCAL_GIT_PROVIDER_DEFINITION, createLocalGitDevelopmentProvider } from '@harness-projects/provider-development-local-git'
+import { LOCAL_GIT_PROVIDER_DEFINITION, createLocalGitDevelopmentProvider, resolveWorktreePath } from '@harness-projects/provider-development-local-git'
 import {
   GITHUB_PROJECTS_PROVIDER_DEFINITION, createGithubProjectsPlanningProvider, type GraphqlTransport,
 } from '@harness-projects/provider-planning-github-projects'
@@ -184,9 +185,11 @@ const LOCAL_GIT_ENTRY: CatalogEntry = {
   },
   async create({ binding, configuration, worktreesDir }) {
     const repositoryPath = text(configuration, 'repositoryPath')
-    // 允许根是数据根与 binding id 的纯函数（I5）：数据根被放进仓库检出（含 repositoryPath 是检出子目录、数据根或仓库路径经符号链接给出）时，允许根随之落进检出，禁用该挂载；数据根下的 worktrees 或摘要分量本身是符号链接时守卫看不到（#132 计划 D35）。
+    // 允许根是数据根与 binding id 的纯函数（I5）：数据根被放进仓库检出（含 repositoryPath 是检出子目录、数据根或仓库路径经符号链接给出）时，允许根随之落进检出，禁用该挂载；worktrees 或摘要分量经既有路径守卫规范化后仍须留在检出之外。
     const allowedRoot = path.join(worktreesDir, createHash('sha256').update(binding.id).digest('hex').slice(0, 16))
-    const relative = path.relative(await checkoutRootOf(repositoryPath), allowedRoot)
+    const resolved = await resolveWorktreePath(allowedRoot, { repositoryPath, allowedRoot })
+    if (!resolved.ok) throw new BindingRefused(ProjectErrorCode.InvalidInput, '工作树输出根不可用')
+    const relative = path.relative(await checkoutRootOf(repositoryPath), resolved.path)
     if (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) throw new BindingRefused(ProjectErrorCode.InvalidInput, '工作树允许根落在仓库检出之内')
     return createLocalGitDevelopmentProvider({ bindingId: binding.id, repository: { externalId: text(configuration, 'repositoryExternalId'), path: repositoryPath }, allowedRoot })
   },

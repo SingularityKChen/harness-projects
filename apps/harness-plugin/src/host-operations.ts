@@ -82,7 +82,7 @@ function repositoryReferences(value: unknown) {
     const configuration = plainRecord(ref.configuration, 'reference.configuration')
     if (Object.values(configuration).some((value) => typeof value !== 'string' && typeof value !== 'boolean')) throw new TypeError('reference.configuration 值不合法')
     return { domain: ref.domain as 'development' | 'delivery', implementationKey: nonEmptyString(ref.implementationKey, 'implementationKey'),
-      accountId: ref.accountId === undefined ? undefined : nonEmptyString(ref.accountId, 'accountId'), configuration: configuration as Readonly<Record<string, string | boolean>> }
+      ...(ref.accountId === undefined ? {} : { accountId: nonEmptyString(ref.accountId, 'accountId') }), configuration: configuration as Readonly<Record<string, string | boolean>> }
   })
 }
 

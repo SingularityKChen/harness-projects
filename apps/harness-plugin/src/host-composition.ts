@@ -1,3 +1,4 @@
+export type { BindRepositoryInput, CommandResult } from '@harness-projects/controller'
 import type { ExternalObjectRef, PlanningProvider, ProviderPlanningFieldDefinition, Storage, WorkspacePlanningMappingRecord } from '@harness-projects/capabilities'
 import { mkdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
@@ -9,6 +10,7 @@ import { StatusPolicy, ProjectErrorCode, projectError, type ProjectError, type C
 import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
 import { createPlanningLifetime } from './host-planning-lifetime.ts'
 import { dispatchOf, OPERATIONS, type UnaryHandlers, type UnaryName } from './host-operations.ts'
+import { preflightRepositoryBinding } from './host-repository-binding.ts'
 import { githubViewer, HOST_SECRET_HANDLES, hostStoragePolicy, restoreProviders, type DisabledBinding, type ProviderCatalog } from './host-providers.ts'
 
 /** Controller 失败上 wire 的唯一文案：原因只写进宿主诊断日志。 */
@@ -230,7 +232,10 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
           : { writeState: 'failed', saving: false, authoritative: false, value: undefined, error: viewer.error }
       }, false),
       bindPlanningSource: (_controller, { projectNodeId, accountId, ...input }) => configure(() => setup.bindPlanningSource({ ...input, accountId: accountId as ConnectorAccountId, workspaceId: options.workspaceId, implementationKey: 'planning.github-projects', configuration: { projectNodeId } })),
-      bindRepository: (_controller, input) => configure(() => setup.bindRepository({ ...input, references: input.references.map((ref) => ({ ...ref, accountId: ref.accountId as ConnectorAccountId | undefined })), workspaceId: options.workspaceId })),
+      bindRepository: async (_controller, input) => {
+        const checked = await preflightRepositoryBinding({ ...input, references: input.references.map((ref) => ({ ...ref, accountId: ref.accountId as ConnectorAccountId | undefined })), workspaceId: options.workspaceId }, storage!, options.catalog, { worktreesDir, fetch: options.fetch ?? globalThis.fetch, resolveCredential: options.resolveCredential })
+        return 'writeState' in checked ? checked : configure(() => setup.bindRepository(checked))
+      },
     }, guarded)
     return {
       get controller() { return current.controller }, get disabled() { return current.disabled }, get activationError() { return activationError },

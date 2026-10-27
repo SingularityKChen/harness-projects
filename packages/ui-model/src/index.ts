@@ -15,3 +15,5 @@ export * from './work-item-list-view.ts'
 export * from './work-item-detail-view.ts'
 export * from './execution-context.ts'
 export * from './workspace-setup.ts'
+
+export * from './repository-binding.ts'
