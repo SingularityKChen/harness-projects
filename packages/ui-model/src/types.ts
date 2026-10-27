@@ -151,6 +151,6 @@ export interface PlanningSection {
 /** 统一详情；工程段与交付段不在本增量范围内（#128 Out of scope）。 */
 export interface WorkItemDetail {
   readonly entityId: EntityId; readonly planning: PlanningSection; readonly source: SourcePresentation
-  readonly lineage: readonly LineageEntryPoint[]; readonly freshness: FreshnessPresentation
+  readonly freshness: FreshnessPresentation
   readonly actions: readonly ActionAvailability[]
 }

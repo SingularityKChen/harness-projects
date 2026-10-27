@@ -48,8 +48,14 @@ export interface HostComposition {
   dispose(): Promise<void>
 }
 
+/** 读取前后检查可见性与当前绑定仓库，避免读取期间撤权仍返回历史节点。 */
+async function assertDeliveryScope(controller: Controller, scope: { workItemId: string; repositoryId: string }): Promise<void> {
+  if ((await controller.queries.getEntity(scope.workItemId))?.content.contentKind !== 'work_item'
+    || !(await controller.baseline()).repositories?.some((repository) => repository.id === scope.repositoryId)) throw new Error('谱系作用域不可用')
+}
+
 /** 工作区身份来自 Host；执行记录只在读取前后均可见的工作项上投影允许字段。 */
-const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness'): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'getStartWorkOptions' | 'startWork'>, Controller> => ({
+const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness'): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts'>, Controller> => ({
   getStartWorkOptions: async (controller, input) => {
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
     return { workspaceId, workItemId: input.workItemId, executionMode: mode() }
@@ -62,6 +68,19 @@ const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness')
     const result = await controller.commands.startWork({ ...request, ...(branchName === undefined ? {} : { branchName }) })
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
     return { ...result, ...(result.error === undefined ? {} : { error: projectError(result.error.code, '开始工作未确认，请按恢复动作处理') }) }
+  },
+  getDeliveryProjection: async (controller, input) => {
+    await assertDeliveryScope(controller, input)
+    const projection = await controller.queries.getDeliveryProjection(input)
+    await assertDeliveryScope(controller, input)
+    if (projection.workItemId !== input.workItemId || projection.repositoryId !== input.repositoryId) throw new Error('谱系作用域不可用')
+    return { workspaceId, ...input, projection, now: new Date().toISOString() }
+  },
+  refreshDeliveryFacts: async (controller, { actorRef, ...scope }) => {
+    await assertDeliveryScope(controller, scope)
+    const result = await controller.commands.refreshDeliveryFacts(scope, { actorRef })
+    await assertDeliveryScope(controller, scope)
+    return result
   },
   baseline: (controller) => controller.baseline(),
   refreshPlanning: (controller, input) => controller.commands.refreshPlanning(input),

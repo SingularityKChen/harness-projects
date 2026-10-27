@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { CapabilityKey, intersectAccess } from '@harness-projects/capabilities'
 import { createEntityStore } from '@harness-projects/client'
 import {
-  LineageTarget,
+  LineageTarget, accessIndex, lineageEntryPoints,
   deriveProjectsHome,
   deriveWorkItemDetail,
   deriveWorkItemList,
@@ -217,7 +217,7 @@ test('不变量：来源标识不影响任何结论——对抗性 bindingId 下
       `${where}：首页结论必须逐字相同（来源列表除外）`,
     )
     assert.deepEqual(withoutIdentityEcho(detail), baseline.detail, `${where}：详情结论必须逐字相同`)
-    assert.deepEqual(detail.lineage, baselineDetail.lineage, `${where}：谱系入口必须逐字相同`)
+    assert.equal(Object.hasOwn(detail, 'lineage'), false, '详情不再提供竞争谱系')
     assert.deepEqual(actionIds(row), ['start_work'], where)
     assert.equal(row.actions[0].available, true, `${where}：能力齐全时开始工作必须可用`)
   }
@@ -259,8 +259,9 @@ test('不变量：只读凭据下谱系入口仍然可用——读目标不被 r
   })
   const detail = deriveWorkItemDetail(readOnlyRead, 'entity-work-item')
 
-  assert.equal(detail.lineage.length, 4)
-  for (const entry of detail.lineage) {
+  const lineage = lineageEntryPoints(accessIndex(readOnlyRead.capabilities))
+  assert.equal(lineage.length, 4)
+  for (const entry of lineage) {
     assert.equal(entry.available, true, `${entry.target} 是只读导航，read_only 不得阻断它`)
     if (entry.requiredKeys.length === 0) {
       assert.equal(entry.access, 'available', `${entry.target} 没有读门，没有任何能力能约束它的级别`)
@@ -276,7 +277,7 @@ test('不变量：只读凭据下谱系入口仍然可用——读目标不被 r
   const unavailableRead = readFor({
     capabilities: Object.values(KEY).map((key) => ({ key, access: 'unavailable' })),
   })
-  for (const entry of deriveWorkItemDetail(unavailableRead, 'entity-work-item').lineage) {
+  for (const entry of lineageEntryPoints(accessIndex(unavailableRead.capabilities))) {
     const gated = entry.requiredKeys.length > 0
     assert.equal(entry.available, !gated, `${entry.target}：只有真有读门的入口才被能力不可用关掉`)
   }
@@ -403,14 +404,13 @@ test('展示：统一详情给出规划段、来源身份与谱系入口，不�
   assert.equal(detail.source.primary.externalId, '101')
   assert.deepEqual(detail.source.identities.map((identity) => identity.externalKind), ['issue'])
   assert.deepEqual(
-    detail.lineage.map((entry) => entry.target).sort(),
+    lineageEntryPoints(accessIndex(read.capabilities)).map((entry) => entry.target).sort(),
     Object.values(LineageTarget).sort(),
     '谱系入口给出全部稳定 target，文案归页面',
   )
-  assert.ok(detail.lineage.every((entry) => entry.available === true), '能力齐全时入口都可用')
+  assert.ok(lineageEntryPoints(accessIndex(read.capabilities)).every((entry) => entry.available === true), '能力齐全时入口都可用')
 
-  const withoutCapabilities = deriveWorkItemDetail(readFor({ capabilities: [] }), 'entity-work-item')
-  for (const entry of withoutCapabilities.lineage) {
+  for (const entry of lineageEntryPoints(accessIndex([]))) {
     const gated = entry.requiredKeys.length > 0
     assert.equal(entry.available, !gated, `${entry.target}：未观测到能力只关掉真有读门的入口`)
     if (gated) assert.match(entry.reason, /^capability /, '不可用原因点名缺失的 capability key')
@@ -456,7 +456,7 @@ test('不变量：本层输出的每个 capability key 都在 CapabilityKey 表�
   const known = new Set(Object.values(CapabilityKey))
   const emitted = [
     ...deriveWorkItemList(readFor()).rows.flatMap((row) => row.actions.flatMap((action) => action.requiredKeys)),
-    ...deriveWorkItemDetail(readFor(), 'entity-work-item').lineage.flatMap((entry) => entry.requiredKeys),
+    ...lineageEntryPoints(accessIndex(readFor().capabilities)).flatMap((entry) => entry.requiredKeys),
   ]
 
   assert.ok(emitted.length >= 6, '必须覆盖开始工作与三个有读门的谱系入口的必需 key')
@@ -516,7 +516,7 @@ test('不变量：同一份读取在首页与列表给出同一个降级原因�
 /** 根因组 B（评审 P2-2）：谱系入口的必需 key 必须等于 core 读该事实时真正经过的门。 */
 test('不变量：谱系入口的必需 key 精确等于 core 真实的读门', () => {
   const entryOf = (capabilities, target) =>
-    deriveWorkItemDetail(readFor({ capabilities }), 'entity-work-item').lineage.find((e) => e.target === target)
+    lineageEntryPoints(accessIndex(capabilities)).find((e) => e.target === target)
 
   assert.deepEqual(entryOf(allAvailable(), 'execution_context').requiredKeys, [],
     'execution_context 由 core 直接读本地存储，没有任何读门')

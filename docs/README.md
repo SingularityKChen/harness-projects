@@ -35,6 +35,7 @@
 | [2026-10-26-plugin-demo-artifact](exec-plan/completed/2026-10-26-plugin-demo-artifact.md) | 版本化 tarball 与干净 Web profile 安装、打开、卸载验收（#230）；[安装指南](product/demo-install.md) |
 | [2026-10-26-repository-binding-ui](exec-plan/completed/2026-10-26-repository-binding-ui.md) | 仓库选择、只读预检与三引用绑定（#356） |
 | [2026-10-26-start-work-drawer](exec-plan/completed/2026-10-26-start-work-drawer.md) | 详情显式开始工作、默认分支与人工降级恢复（#142） |
+| [2026-10-26-delivery-lineage-drawer](exec-plan/completed/2026-10-26-delivery-lineage-drawer.md) | 交付谱系抽屉、缺口与时间核对（#234） |
 | [2026-10-26-harness-execution](exec-plan/completed/2026-10-26-harness-execution.md) | Harness 会话启动与读取、取消安全拒绝及工作树目录通路（#140） |
 | [2026-09-17-disclosure-audit-and-license](exec-plan/completed/2026-09-17-disclosure-audit-and-license.md) | 上游输入包下架与许可证落地 |
 | [2026-09-17-issue-convention](exec-plan/completed/2026-09-17-issue-convention.md) | Issue 约定：模板、标签与 PR 关联 |

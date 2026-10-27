@@ -107,6 +107,8 @@ export const OPERATIONS = defineOperations({
   bindPlanningSource: { mode: 'unary', params: [...ENVELOPE, param('accountId', 'AccountId', (value) => nonEmptyString(value, 'accountId')), param('projectNodeId', 'ProjectNodeId', (value) => nonEmptyString(value, 'projectNodeId'))] },
   bindRepository: { mode: 'unary', params: [...ENVELOPE, param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId')), param('references', 'RepositoryReferences', repositoryReferences)] },
   getWorkspaceSetup: { mode: 'unary', params: [] },
+  getDeliveryProjection: { mode: 'unary', params: [param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId')), param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId'))] },
+  refreshDeliveryFacts: { mode: 'unary', params: [ENVELOPE[0], param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId')), param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId'))] },
   watch: { mode: 'stream', params: [] },
 })
 

@@ -6,6 +6,8 @@
 
 ## Context and Orientation
 
+下文矩阵与原意见是初审快照；其回传P3现已由#124评论6435452681关闭，最终状态见Outcomes & Retrospective。
+
 2026-10-27 13:45 +08 观察；分支 `feature/repository-binding-ui`，检出 `.worktrees/repository-binding-ui`。head `8d9f8a374c4a5660a5b3714de062c16c85e70103`；base `main` @ `f6ea9713c04e2011bf2023d312c659d0be5c8b4d`。提交为 `36f766f`（计划）与 `8d9f8a3`（能力），PR 非 draft，`Closes #356`、`Refs #124`。锁定快照无 review/comments/threads，#356 评论为空。评审账号 `Singularity-AI-Bot`，开发账号 `SingularityKChen`；本分评审没有 GitHub 写入。当前远端 CI/CodeQL 与可选转发失败由协调评审方统一核对，不把本地测试当作远端事实。
 
 依据：#356、PR 正文、`docs/exec-plan/completed/2026-10-26-repository-binding-ui.md`、`docs/product/vertical-path.md`、`docs/review/mvp-review.md`。使用 Superpowers 评审/调试/完成前验证、Qian Systems Router 的系统综合和 First Principles Development 的 audit：区分事实、约束、作者证据，优先验证“仓库行存在是否证明激活”。
@@ -130,6 +132,8 @@ JS
 
 初审原提交实跑：source active、bind local_only、activationError 缺省、Local Git disabled invalid_input，Start Work 的 branch.create/worktree.create/worktree.read 均 unavailable；外部修复后重试仍 active/disabled 1，重启后 disabled 0。需要成功绑定后的外部目录变化，未在全新绑定正常路径触发；没有越界写或数据丢失。当前修复状态见上述 Superseded 指向。
 
+Superseded by Outcomes & Retrospective（2026-10-27）：#124评论6435452681已发布并回读，指定位置的回传缺口关闭。原初审证据如下。
+
 F2 的独立回读命令为 `gh api repos/SingularityKChen/harness-projects/issues/124/comments --paginate --jq '.[] | {id,created_at,body}'`。2026-10-27 的输出只有早期 spike、更正、#372 与 #404 S3；最新为 2026-10-26T10:58:47Z（comment id 6414353137），没有 #407 或本轮组合证据。#356 明确要求 recorded on #124，PR 的 Refs #124 不是这条验收的实际回传。
 
 ## Decision Log
@@ -156,11 +160,15 @@ UI 只消费 client source；client 只调用 typed port；Host 持 storage/cata
 
 ## Outcomes & Retrospective
 
+2026-10-27 +08 / 最终外部回读：本PR最终已审head `6462d9925913dc51e0b3457874c3a62b7baf8758`，复评review id `5663237098`；原thread均已作者回复并resolve（如适用），当前头CI与两类CodeQL通过、双向issue关联确认后以rebase合并为`d310a06c933e8801462962b3a4feedf5e79ec400`，issue #356 CLOSED。该结果替代上文仍待最终push/复评的工作流状态；初审与未提交差异的历史身份保留。
+
 2026-10-27 +08 / 协调者补充：完整初审已由评审账号提交，review id `5662813233`。两P2经独立复评和新组合官方Web实测关闭，#124评论`6435452681`已回读，P3回传尾项完成（如本PR适用）。新组合源`f49334fb`、tgz SHA-256 `448a05de2a64c761146cdddf99f9bb5290e3c565a889ee23d46cb4fd5b332d95`；共享实证完整边界见 `docs/review/2026-10-27-pr406-pr409-mmp-review.md`，不冒充各单PR独立新产物S3。最终head/base/checks/threads与合并结果在整理发布后重新锁定。
 
 ### 全部已确认 findings
 
 **F1 · [P2] 以实际挂载状态确认恢复，再发布 active。** 最小新增行：`packages/client/src/repository-binding.ts:73`。baseline 仓库存在性只证明持久登记；实际 Local 输出根失效被 disabled 时仍显示“仓库已连接”，而 Start Work 三能力 unavailable。建议核对该目标所需的实际挂载/能力再发布 active，否则保留 configured 与可操作恢复提示，并让恢复动作重新验证/装配已有 disabled 目标。证据及用户恢复边界见 Surprises & Discoveries。没有同问题的专门 issue；#155/#340/#341 仅相关。**Superseded by 本节“F1 修复独立复评”（2026-10-27）：在锁定的未提交修复差异上关闭；最终提交/push 后仍须重锁远端 head。**
+
+Superseded by本节最终外部回读（2026-10-27）：P3已由#124评论6435452681关闭。
 
 **F2 · [P3] 将本轮宿主绑定及组合验收回传 #124。** PR 级意见，无源码锚点。#356 要求 Host 绑定后 Start Work 可选并 recorded on #124；当前正文只 Refs #124，实时分页没有本轮证据。建议按冻结 source/tarball/runtime 分别回传本 PR 绑定/read-back 和组合 Start Work 的实际边界，不把组合证明写成单 PR 或 R1。已由 #356 追踪，无须新 issue。
 
@@ -201,3 +209,5 @@ UI 只消费 client source；client 只调用 typed port；Host 持 storage/cata
 2026-10-27：追加 F1 方案 A 的独立修复复评及未提交 diff 身份，在原 finding/原复现处标注 Superseded，记录 32/32、边界 9/9、类型及独立 12 组反例；不改产品、不提交、不向外部写入。
 
 2026-10-27 +08：记录初审发布、独立修复复评、新组合Web与#124回传；最终远端状态仍以当前头回读为准。
+
+2026-10-27 +08：在原回传/等待处标注Superseded，保留初审快照并追加已发生的最终版本事实。

@@ -21,3 +21,4 @@ export { WorkspaceSetupGate, bindWorkspaceSetupApp } from './workspace-setup.ts'
 
 export * from './repository-binding.ts'
 export { StartWorkSection } from './start-work-section.ts'
+export { DeliveryLineageSection } from './delivery-lineage-section.ts'

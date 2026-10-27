@@ -5,7 +5,7 @@
  */
 import { AccessLevel, ContentKind } from '@harness-projects/domain/values'
 import type { StoredEntity } from '@harness-projects/client'
-import { accessIndex, lineageEntryPoints, startWorkAvailability } from './capability-access.ts'
+import { accessIndex, startWorkAvailability } from './capability-access.ts'
 import { isIsoTimestamp } from './timestamp.ts'
 import {
   WorkspaceConnectionState,
@@ -140,7 +140,6 @@ export function deriveWorkItemDetail(read: WorkspaceRead, entityId: string): Wor
     entityId: entry.entity.entityId,
     planning: planningSectionOf(entry),
     source: sourceOf(entry.entity),
-    lineage: lineageEntryPoints(access),
     freshness: freshnessOf(entry, read, degradationOf(read, read.store.list())),
     actions: actionsFor(entry.entity, access),
   }
