@@ -1,6 +1,7 @@
 import '../fixtures/resolution-preflight.mjs'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { mkdtemp, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -12,20 +13,29 @@ import { PROVIDER_CATALOG } from '../../apps/harness-plugin/src/host-providers.t
 import { installHostRemote } from '../../apps/harness-plugin/src/remote.ts'
 import { WORKSPACE, account, fakePlanningEntry, mount, seed, seedWorkspace, githubFetch, projectNodeId, REPOSITORY_MOUNTS } from './fixtures/host-seed.js'
 const actor = { kind: 'user', id: 'setup-test' }, envelope = (idempotencyKey) => ({ actorRef: actor, idempotencyKey })
+const selected = REPOSITORY_MOUNTS['development.github'][1], repositoryKey = `github.com/${selected.repositoryOwner.toLowerCase()}/${selected.repositoryName.toLowerCase()}`
+const references = (h, accountId) => [
+  { domain: 'development', implementationKey: 'development.local-git', configuration: { repositoryExternalId: repositoryKey, repositoryPath: h.repo } },
+  ...['development.github', 'github-actions'].map((implementationKey) => ({ domain: implementationKey === 'github-actions' ? 'delivery' : 'development', implementationKey, accountId, configuration: { repositoryExternalId: repositoryKey, repositoryOwner: selected.repositoryOwner.toLowerCase(), repositoryName: selected.repositoryName.toLowerCase() } })),
+]
 const gate = () => { let resolve; const promise = new Promise((yes) => { resolve = yes }); return { promise, resolve } }
 const turn = () => new Promise((resolve) => setImmediate(resolve))
 function timers() { const live = new Set(), stopped = []; return { live, stopped, setInterval(run) { live.add(run); return run }, clearInterval(run) { assert.ok(live.delete(run)); stopped.push(run) } } }
 async function open(t, overrides = {}, build) {
   const dir = await mkdtemp(path.join(tmpdir(), 'host-recompose-')), dataPath = path.join(dir, 'workspace.sqlite'), clock = timers()
+  const repo = path.join(dir, 'repository'); await mkdir(repo)
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]); execFileSync('git', ['-C', repo, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture'])
   let login = 'tester', node = 'U_test'; const replay = githubFetch()
   const fetch = async (url, init) => url.endsWith('/user') ? new Response(JSON.stringify({ login, node_id: node }), { status: 200 }) : replay.fetch(url, init)
   if (build) await seed(dataPath, overrides.catalog ?? PROVIDER_CATALOG, build)
-  const host = await createHostComposition({ dataPath, workspaceId: WORKSPACE, catalog: PROVIDER_CATALOG, resolveCredential: async () => 'canary-token', fetch, watchIntervalMs: 1, planningTimers: clock, ...overrides })
+  const requestedFetch = overrides.fetch ?? fetch
+  const normalizedFetch = (url, init) => { if (url.endsWith('/graphql')) { const body = JSON.parse(init.body); if (body.operationName === 'DevelopmentRepository') { body.variables.owner = selected.repositoryOwner; return requestedFetch(url, { ...init, body: JSON.stringify(body) }) } } return requestedFetch(url, init) }
+  const host = await createHostComposition({ dataPath, workspaceId: WORKSPACE, catalog: PROVIDER_CATALOG, resolveCredential: async () => 'canary-token', fetch, watchIntervalMs: 1, planningTimers: clock, ...overrides, fetch: normalizedFetch })
   const events = [], installed = await installHostRemote({ provide: () => () => { events.push('withdraw') }, typert: { register: () => () => {} } }, host)
   const streams = [], watch = installed.service.watch
   installed.service.watch = (...args) => { const stream = watch(...args); streams.push(stream); return stream }
   t.after(async () => { host.stop(); await Promise.allSettled(streams.map((stream) => stream.return())); await installed.dispose(); await host.dispose(); await rm(dir, { recursive: true, force: true }) })
-  return { host, service: installed.service, installed, clock, dataPath, events, identity: (value) => { login = value; node = `U_${value}` } }
+  return { repo, host, service: installed.service, installed, clock, dataPath, events, identity: (value) => { login = value; node = `U_${value}` } }
 }
 
 test('same remote creates/connects/binds and the original stream delivers only one baseline without gaps', async (t) => {
@@ -50,10 +60,10 @@ test('same remote creates/connects/binds and the original stream delivers only o
   assert.deepEqual(await h.service.bindPlanningSource(actor, 'planning', linked.value.accountId, projectNodeId), bound)
   assert.equal(h.clock.live.values().next().value, first)
   h.identity('changed'); assert.equal((await h.service.connectAccount(actor, 'connect')).writeState, 'conflict')
-  const repository = await h.service.bindRepository(actor, 'repository', 'repo-one', [{ domain: 'development', implementationKey: 'development.github', accountId: linked.value.accountId, configuration: REPOSITORY_MOUNTS['development.github'][1] }])
-  assert.equal(repository.writeState, 'local_only'); assert.equal(repository.value.bindingIds.length, 1)
+  const repository = await h.service.bindRepository(actor, 'repository', repositoryKey, references(h, linked.value.accountId))
+  assert.equal(repository.writeState, 'local_only'); assert.equal(repository.value.bindingIds.length, 3)
   const active = h.host.controller, scheduled = h.clock.live.values().next().value
-  await h.service.bindRepository(actor, 'repository', 'repo-one', [{ domain: 'development', implementationKey: 'development.github', accountId: linked.value.accountId, configuration: REPOSITORY_MOUNTS['development.github'][1] }])
+  await h.service.bindRepository(actor, 'repository', repositoryKey, references(h, linked.value.accountId))
   assert.equal(h.host.controller, active); assert.equal(h.clock.live.values().next().value, scheduled)
   await follower.close()
 })
@@ -149,7 +159,7 @@ test('old scheduled rounds drain before reassembly; stop cancels watch waits and
 
 test('two never-settling Development probes do not block readiness or replacement; cached real confirmation survives', async (t) => {
   const created = [], entry = PROVIDER_CATALOG.get('development.github')
-  const catalog = new Map(PROVIDER_CATALOG); catalog.set('development.github', { ...entry, create: async (input) => { const port = await entry.create(input); created.push(port); return port } })
+  const catalog = new Map(PROVIDER_CATALOG); catalog.set('development.github', { ...entry, create: async (input) => { const port = await entry.create(input); if (input.binding.id !== 'repository-binding-probe') created.push(port); return port } })
   let probes = 0, never = true; const replay = githubFetch()
   const fetch = (url, init) => { if (url.endsWith('/user')) return Promise.resolve(new Response(JSON.stringify({ login: 'new-viewer', node_id: 'U_new' }), { status: 200 })); if (JSON.parse(init.body).operationName === 'DevelopmentRepository') { probes++; if (never) return new Promise(() => {}) } return replay.fetch(url, init) }
   const { seedRepositoryMount } = await import('./fixtures/host-seed.js')
@@ -164,12 +174,12 @@ test('two never-settling Development probes do not block readiness or replacemen
   assert.equal((await created[0].getRepository(repository)).ok, true)
   const confirmation = await created[0].describeCapabilities()
   const linked = await h.service.connectAccount(actor, 'new-account')
-  const reference = [{ domain: 'development', implementationKey: 'development.github', accountId: linked.value.accountId, configuration: REPOSITORY_MOUNTS['development.github'][1] }]
-  assert.equal((await h.service.bindRepository(actor, 'new-repository', 'another-repo', reference)).writeState, 'local_only')
-  assert.equal(created.length, 3); assert.equal(probes, 1)
+  const reference = references(h, linked.value.accountId)
+  assert.equal((await h.service.bindRepository(actor, 'new-repository', repositoryKey, reference)).writeState, 'local_only')
+  assert.equal(created.length, 3); assert.equal(probes, 2)
   assert.deepEqual(await created[0].describeCapabilities(), confirmation)
   assert.equal((await created[0].getRepository(repository)).ok, true, 'cached provider uses host lifetime after retiring its old assembly')
-  assert.equal(probes, 2)
+  assert.equal(probes, 3)
 })
 
 
@@ -182,7 +192,7 @@ test('a tick admitted during the barrier never joins its drain and never writes 
   const oldController = h.host.controller, put = SqliteStorage.prototype.putPlanningSyncRound; let lateRounds = 0
   t.mock.method(SqliteStorage.prototype, 'putPlanningSyncRound', function (...args) { if (h.host.controller !== oldController) lateRounds++; return put.apply(this, args) })
   const oldTick = h.clock.live.values().next().value
-  const request = h.service.bindRepository(actor, 'barrier', 'repo-extra', [{ domain: 'development', implementationKey: 'development.github', accountId: account().id, configuration: REPOSITORY_MOUNTS['development.github'][1] }])
+  const request = h.service.bindRepository(actor, 'barrier', repositoryKey, references(h, account().id))
   await entered.promise; oldTick(); await turn(); assert.equal(oldReads, 0)
   release.resolve(); const result = await request; assert.equal(result.writeState, 'local_only'); assert.equal(result.activationError, undefined); await turn()
   assert.equal(oldReads, 0); assert.equal(h.clock.live.size, 1); assert.equal(h.clock.stopped.length, 1)
@@ -196,11 +206,11 @@ test('a failed replacement keeps a nonempty old assembly and restarts its schedu
   // Failure is injected in candidate Core registration, after settings commit.
   const all = SqliteStorage.prototype.putWorkspace; let fail = true
   t.mock.method(SqliteStorage.prototype, 'putWorkspace', function (...args) { if (fail) { fail = false; return Promise.reject(new Error('candidate failed')) } return all.apply(this, args) })
-  const references = [{ domain: 'development', implementationKey: 'development.github', accountId: account().id, configuration: REPOSITORY_MOUNTS['development.github'][1] }]
-  const result = await h.service.bindRepository(actor, 'recover', 'repo-recover', references)
+  const reference = references(h, account().id)
+  const result = await h.service.bindRepository(actor, 'recover', repositoryKey, reference)
   assert.equal(result.writeState, 'local_only'); assert.equal(result.activationError.code, 'unavailable'); assert.equal(h.host.controller, oldController); assert.equal(h.clock.live.size, 1)
   assert.equal((await h.service.baseline()).entities.length, (await create()).entities.length)
-  const retry = await h.service.bindRepository(actor, 'recover', 'repo-recover', references)
+  const retry = await h.service.bindRepository(actor, 'recover', repositoryKey, reference)
   assert.equal(retry.activationError, undefined); assert.notEqual(h.host.controller, oldController); assert.equal(h.clock.live.size, 1)
 })
 

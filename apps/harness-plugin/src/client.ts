@@ -4,7 +4,7 @@
  * 先在根 Context 上挂载 Remote，再在 `ctx.inject` 子 Context 中同时读取
  * `remote.harnessProjects` 与 `slots`；根 Context 不直接读取 namespace（M17）。
  */
-import { createExecutionContextReader, createWorkspaceSetupSource } from '@harness-projects/client'
+import { createExecutionContextReader, createWorkspaceSetupSource, createRepositoryBindingSource } from '@harness-projects/client'
 import { HARNESS_PANEL_TITLE, PlaceholderIcon, bindWorkspaceSetupApp } from '@harness-projects/ui'
 import type { ClientContext, RemoteResult } from './host-surface.ts'
 import { CLIENT_REMOTE } from './remote.ts'
@@ -48,7 +48,12 @@ export async function apply(ctx: ClientContext): Promise<void> {
       if (!result.ok) throw new Error('暂时无法读取执行状态')
       return result.value
     })
-    const Panel = bindWorkspaceSetupApp(setup, workspace, reader)
+    const repositoryBinding = createRepositoryBindingSource({ connectAccount: (...args) => unwrap(remote.connectAccount(...args)),
+      bindRepository: (actor, key, id, refs) => unwrap(remote.bindRepository(actor, key, id, refs.map((ref) => ({ ...ref })))),
+      baseline: () => unwrap(remote.baseline()),
+    }, { actorRef: { kind: 'user' } })
+    child.effect(() => () => repositoryBinding.dispose(), 'harness-projects: repository binding')
+    const Panel = bindWorkspaceSetupApp(setup, workspace, reader, { repositoryBindingSource: repositoryBinding })
     child.slots.inject('main', () => child.slots.register({ name: 'main', key: PANEL_ID }, Panel))
     child.slots.inject('sidebar.panellist', () =>
       child.slots.register(
