@@ -85,6 +85,8 @@ export interface CoreContext {
   projectRef: ExternalObjectRef | undefined
   /** 与 `projectRef` 同时回填的项目标题（#383），是规划来源的显示名；只在内存里，Host 启动后首轮读到项目之前未知。 */
   projectTitle: string | undefined
+  /** composeCore 本代所需的最小提交轮次；Infinity 表示 begin 尚未得到 Storage ack。直接 createContext 的离线读不启用此门。 */
+  planningReadBaseline?: number
   readonly planningMappingOrigin: 'derived' | 'user' | undefined
   readonly planningFieldMapping: WorkspacePlanningFieldMapping | undefined
   readonly diagnostics: CoreDiagnostics | undefined
@@ -157,6 +159,7 @@ export async function createContext(deps: CoreDeps): Promise<CoreContext | undef
 export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
   const context = await createContext(deps)
   if (context === undefined) return unavailableCore('没有可用的 storage 绑定')
+  context.planningReadBaseline = Number.POSITIVE_INFINITY
   try {
     await bootstrapWorkspace(context)
   } catch (error) {

@@ -27,3 +27,5 @@ export {
   createWorkspaceSetup, type BindPlanningSourceRequest, type BindRepositoryRequest, type ConnectAccountRequest, type CreateWorkspaceRequest, type RepositoryBinding,
   type RepositoryReferenceRequest, type SetupOutcome, type WorkspaceSetup,
 } from './workspace-setup.ts'
+
+export type { SetPlanningMappingRequest } from './planning-mapping.ts'

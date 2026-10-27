@@ -8,6 +8,7 @@ import { createSqliteStorage, type SqliteStorage } from '@harness-projects/stora
 import type { ExecutionContextDTO, WorkspaceSetupDTO } from '@harness-projects/client'
 import { StatusPolicy, ProjectErrorCode, projectError, type ProjectError, type ConnectorAccountId, type WorkspaceId, type WorkspacePlanningFieldMapping } from '@harness-projects/domain'
 import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
+import { createHostPlanningMapping } from './host-planning-mapping.ts'
 import { createPlanningLifetime } from './host-planning-lifetime.ts'
 import { dispatchOf, OPERATIONS, type UnaryHandlers, type UnaryName } from './host-operations.ts'
 import { preflightRepositoryBinding } from './host-repository-binding.ts'
@@ -118,7 +119,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   }
   let storage: SqliteStorage | undefined
   let closed = false
-  type Assembly = { controller: Controller; disabled: readonly DisabledBinding[]; lifetime: ReturnType<typeof createPlanningLifetime>; reconciler?: PlanningReconciler; leases: Set<Promise<unknown>>; retired?: boolean; cache: Map<string, object>; executionMode: 'manual' | 'harness' }
+  type Assembly = { mapping?: ReturnType<typeof createHostPlanningMapping>; controller: Controller; disabled: readonly DisabledBinding[]; lifetime: ReturnType<typeof createPlanningLifetime>; reconciler?: PlanningReconciler; leases: Set<Promise<unknown>>; retired?: boolean; cache: Map<string, object>; executionMode: 'manual' | 'harness' }
   let developmentCache = new Map<string, object>()
   let current: Assembly
   let barrier: Promise<void> | undefined, epoch = 0, tail: Promise<unknown> = Promise.resolve(), activeFingerprint = ''
@@ -147,7 +148,12 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       if (version === epoch && assembly === current) return result
     }
   }
-  const source = { baseline: () => read((assembly) => assembly.controller.baseline()) }
+  const source = { baseline: () => read(async (assembly) => {
+    const snapshot = await assembly.controller.baseline()
+    if (!activationError) return snapshot
+    const stale = { freshness: 'degraded' as const, reason: activationError.code }
+    return { ...snapshot, source: { ...snapshot.source, ...stale }, entities: snapshot.entities.map((entity) => ({ ...entity, source: { ...entity.source, ...stale } })) }
+  }) }
 
   const dispose = (): Promise<void> => disposal ??= (async () => {
     stop()
@@ -158,7 +164,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   try {
     storage = createSqliteStorage(options.dataPath, hostStoragePolicy(options.catalog), options.migrationsDir === undefined ? {} : { migrationsDir: options.migrationsDir })
     const setup = createSetupCommands(createWorkspaceSetup(storage))
-    const fingerprint = async () => JSON.stringify([await storage!.getWorkspace(options.workspaceId), await Promise.all((await storage!.listProviderBindings(options.workspaceId)).map(async (mount) => {
+    const fingerprint = async () => JSON.stringify([await storage!.getWorkspacePlanningMapping(options.workspaceId), await storage!.getWorkspace(options.workspaceId), await Promise.all((await storage!.listProviderBindings(options.workspaceId)).map(async (mount) => {
       const accountId = await storage!.getProviderBindingAccount(mount.id)
       const configuration = options.catalog.has(mount.implementationKey) ? await storage!.getBindingConfiguration({ workspaceId: options.workspaceId, bindingId: mount.id, domain: mount.domain }) : undefined
       return [[mount.id, mount.domain, mount.implementationKey, mount.enabled], configuration, accountId === undefined ? undefined : await storage!.getConnectorAccount(accountId)]
@@ -180,6 +186,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         })
         for (const item of disabled) log.write('bindingDisabled', { bindingId: item.bindingId, domain: item.domain, implementationKey: item.implementationKey, code: item.error.code })
         const providers = { ...table, ...(table.planning === undefined ? {} : { planning: lifetime.wrap(table.planning) }), storage: storage! }
+        assembly.mapping = createHostPlanningMapping(storage!, options.workspaceId, providers.planning)
         const mapping = workspace === undefined ? {} : await loadPlanningMapping(storage!, workspace.id, providers.planning, (event) => log.write(event, {}))
         // 空数据根：不向 Core 传 storage，不写任何行；工作区的创建属于挂载写者（#127、#131）。
         const core: CoreApi = workspace === undefined ? unavailableCore('工作区尚未创建') : await composeCore({
@@ -199,7 +206,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       } catch (error) { retire(assembly); throw error }
     }
     current = await assemble(); developmentCache = current.cache; activeFingerprint = await fingerprint(); current.reconciler?.start()
-    const configure = <T>(run: () => Promise<CommandResult<T>>, activate = true): Promise<CommandResult<T> & { activationError?: ProjectError }> => {
+    const configure = <T>(run: () => Promise<CommandResult<T>>, activate = true, confirmPlanning = false): Promise<CommandResult<T> & { activationError?: ProjectError }> => {
       const task = tail.then(async () => {
         if (closed) throw new Error('host 已关闭')
         let release!: () => void; barrier = new Promise<void>((resolve) => { release = resolve }); epoch++
@@ -215,8 +222,9 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
                 old.reconciler?.stop()
                 const candidate = await assemble()
                 if (closed) { retire(candidate); throw new Error('host 已关闭') }
-                try { candidate.reconciler?.start() } catch (error) { retire(candidate); throw error }
-                current = candidate; developmentCache = candidate.cache; activeFingerprint = desired; retire(old)
+                let activatedFingerprint: string
+                try { activatedFingerprint = await fingerprint(); candidate.reconciler?.start() } catch (error) { retire(candidate); throw error }
+                current = candidate; developmentCache = candidate.cache; activeFingerprint = activatedFingerprint; retire(old)
               }
               activationError = undefined
             } catch (error) {
@@ -224,6 +232,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
               return { ...result, activationError }
             }
           }
+          if (confirmPlanning && result.writeState === 'local_only' && old === current && !activationError) await current.controller.commands.refreshPlanning({ actorRef: { kind: 'user' } })
           return result
         } finally {
           if (!closed) try { current.reconciler?.start() } catch (error) { log.write('schedulerResumeFailed', describeError(error)) }
@@ -259,6 +268,11 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       }
     })
     const dispatch = dispatchOf<typeof OPERATIONS, Controller>(OPERATIONS, { ...handlersFor(options.workspaceId, () => current.executionMode), baseline: () => source.baseline(), getWorkspaceSetup,
+      getPlanningMapping: () => read(async (assembly) => ({ ...await assembly.mapping!.load(), confirmed: await fingerprint() === activeFingerprint && (await assembly.controller.baseline()).source.freshness === 'fresh' })),
+      setPlanningMapping: (_controller, input) => configure(async () => {
+        const error = await current.mapping!.validate(input.expectedBindingId, input.expectedProjectExternalId, input.mapping)
+        return error ? { writeState: error.code === 'conflict' ? 'conflict' : 'failed', saving: false, authoritative: false, value: undefined, error } : setup.setPlanningMapping({ ...input, workspaceId: options.workspaceId })
+      }, true, true),
       createWorkspace: (_controller, input) => configure(() => setup.createWorkspace({ ...input, workspaceId: options.workspaceId, statusPolicy: StatusPolicy.ProviderAuthoritative })),
       connectAccount: (_controller, input) => configure(async () => {
         const viewer = await githubViewer(options.fetch ?? globalThis.fetch, () => options.resolveCredential(HOST_SECRET_HANDLES[0]))
@@ -275,7 +289,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       get controller() { return current.controller }, get disabled() { return current.disabled }, get activationError() { return activationError },
       call: async (name, input) => {
         if (closed) throw new Error('host 已关闭')
-        if (['baseline', 'getWorkspaceSetup', 'createWorkspace', 'connectAccount', 'bindPlanningSource', 'bindRepository'].includes(name)) return track(dispatch(current.controller, name, input))
+        if (['baseline', 'getWorkspaceSetup', 'getPlanningMapping', 'setPlanningMapping', 'createWorkspace', 'connectAccount', 'bindPlanningSource', 'bindRepository'].includes(name)) return track(dispatch(current.controller, name, input))
         while (barrier) await barrier
         if (closed) throw new Error('host 已关闭')
         const assembly = current; return lease(assembly, () => dispatch(assembly.controller, name, input))

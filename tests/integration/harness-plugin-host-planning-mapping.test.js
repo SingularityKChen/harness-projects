@@ -4,9 +4,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { createSqliteStorage, openDatabase } from '@harness-projects/storage-sqlite'
+import { createSqliteStorage, openDatabase, SqliteStorage } from '@harness-projects/storage-sqlite'
 import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
-import { deriveWorkItemListView } from '@harness-projects/ui-model'
+import { deriveWorkItemListView, deriveWorkItemDetailView } from '@harness-projects/ui-model'
 import { createHostComposition } from '../../apps/harness-plugin/src/host-composition.ts'
 import { catalogOf, hostStoragePolicy, PROVIDER_CATALOG } from '../../apps/harness-plugin/src/host-providers.ts'
 import { WORKSPACE, GITHUB, fakePlanningEntry, mount, projectNodeId, replayFetch, seed, seedPlanning, seedWorkspace } from './fixtures/host-seed.js'
@@ -28,11 +28,12 @@ async function view(host) {
   const sync = createSync(createTransport(host.controller), createEntityStore()); await sync.connect()
   return deriveWorkItemListView({ read: sync.read(), metadata: { sourceNames: {} }, phase: 'received', refreshing: false })
 }
-async function fake(t, definitions, saved) {
+async function fake(t, definitions, saved, prepare) {
   const env = await sandbox(t); let reads = 0, writeCount = 0
   const entry = fakePlanningEntry((provider) => {
     for (const project of provider.state.projects) project.ref = { ...project.ref, externalId: projectNodeId }
-    provider.state.items = [] // Empty Project still discovers definitions via its stored projectNodeId.
+    if (prepare) prepare(provider)
+    else provider.state.items = [] // Empty Project still discovers definitions via its stored projectNodeId.
     provider.listFieldDefinitions = async () => { reads++; return definitions() }
     for (const method of writes) provider[method] = () => { writeCount++; throw new Error('forbidden provider write') }
     return provider
@@ -142,4 +143,96 @@ test('definition reads obey the Host lifetime and a timeout stores no empty mapp
   const host = await open(env.dataPath, env.catalog, { planningReadTimeoutMs: 5 })
   assert.equal(await saved(env), undefined); await host.dispose()
   assert.deepEqual([env.reads(), env.writes()], [1, 0])
+})
+
+test('remote mapping changes activate once and reject stale or nonexistent choices without provider writes', async (t) => {
+  const env = await fake(t, () => ({ ok: true, value: fields }), record())
+  const host = await open(env.dataPath, env.catalog); t.after(() => host.dispose())
+  const dto = await host.call('getPlanningMapping', {})
+  assert.equal(dto.scope.bindingId, GITHUB); assert.equal(dto.fields[2].options[0].id, 'x')
+  const input = { actorRef: { kind: 'user' }, idempotencyKey: 'change', expectedBindingId: GITHUB, expectedProjectExternalId: projectNodeId, mapping: { status: { projectFieldId: 's', options: { x: 'done' } } } }
+  for (const change of [{ expectedBindingId: 'other' }, { expectedProjectExternalId: 'other' }, { mapping: { targetDateFieldId: 's' } }, { mapping: { status: { projectFieldId: 's', options: { removed: 'done' } } } }]) {
+    const result = await host.call('setPlanningMapping', { ...input, ...change, idempotencyKey: JSON.stringify(change) })
+    assert.ok(['conflict', 'invalid_input'].includes(result.error.code)); assert.deepEqual(await saved(env), record())
+  }
+  assert.equal((await host.call('setPlanningMapping', input)).writeState, 'local_only')
+  assert.equal((await host.call('getPlanningMapping', {})).confirmed, true)
+  assert.deepEqual((await saved(env)).mapping, input.mapping); assert.equal(env.writes(), 0)
+})
+
+test('same Host watch updates list and open drawer once; failed read retains configuration and retries, restart restores user IDs', async (t) => {
+  let itemReads = 0, fail = false
+  const env = await fake(t, () => ({ ok: true, value: fields }), record(), (provider) => {
+    for (const item of provider.state.items) { item.project = provider.state.projects[0].ref; item.fields.nativeValues = { s: { kind: 'single_select', optionId: 'x', name: 'Native unknown' } } }
+    const list = provider.listPlanningItems.bind(provider)
+    provider.listPlanningItems = (...args) => { itemReads++; return fail ? { ok: false, error: { code: 'unavailable', message: 'offline' } } : list(...args) }
+  })
+  let host = await open(env.dataPath, env.catalog)
+  const sync = createSync(createTransport(host.controller), createEntityStore()), abort = new AbortController()
+  const stream = host.watch(abort.signal)[Symbol.asyncIterator](); t.after(() => { abort.abort(); return stream.return() })
+  sync.receive((await stream.next()).value); const itemId = sync.read().store.list().find((item) => item.entity.content.contentKind === 'work_item').entityId
+  const read = () => ({ read: sync.read(), metadata: { sourceNames: {} }, phase: 'received', refreshing: false })
+  const target = { projectId: WORKSPACE, itemId }
+  assert.match(deriveWorkItemDetailView(read(), target).body.planningStatus, /未映射/)
+  const input = { actorRef: { kind: 'user' }, idempotencyKey: 'live', expectedBindingId: GITHUB, expectedProjectExternalId: projectNodeId, mapping: { status: { projectFieldId: 's', options: { x: 'done' } } } }
+  const before = itemReads; await host.call('setPlanningMapping', input)
+  sync.receive((await stream.next()).value)
+  assert.equal(itemReads, before + 1)
+  assert.equal(deriveWorkItemListView(read()).body.rows.find((row) => row.key === itemId).planningStatus, '已完成')
+  assert.equal(deriveWorkItemDetailView(read(), target).body.planningStatus, '已完成')
+  fail = true
+  await host.call('setPlanningMapping', { ...input, idempotencyKey: 'failed-read', mapping: {} })
+  assert.equal((await host.call('getPlanningMapping', {})).confirmed, false)
+  assert.equal((await host.controller.baseline()).source.freshness, 'degraded')
+  assert.deepEqual((await saved(env)).mapping, {})
+  fail = false; await host.call('setPlanningMapping', { ...input, idempotencyKey: 'failed-read', mapping: {} })
+  assert.equal((await host.call('getPlanningMapping', {})).confirmed, true)
+  await host.dispose(); host = await open(env.dataPath, env.catalog)
+  assert.equal((await host.call('getPlanningMapping', {})).origin, 'user'); await host.dispose(); assert.equal(env.writes(), 0)
+})
+
+test('activation failure keeps the acknowledged mapping, marks old Host content stale and retries activation', async (t) => {
+  const env = await fake(t, () => ({ ok: true, value: fields }), record())
+  const host = await open(env.dataPath, env.catalog); t.after(() => host.dispose())
+  const original = SqliteStorage.prototype.getWorkspacePlanningMapping; let fail = true
+  t.mock.method(SqliteStorage.prototype, 'getWorkspacePlanningMapping', async function (...args) {
+    const value = await original.apply(this, args)
+    if (fail && value?.mapping.status?.options.x === 'done') { fail = false; throw new Error('activation-canary') }
+    return value
+  })
+  const input = { actorRef: { kind: 'user' }, idempotencyKey: 'activation', expectedBindingId: GITHUB, expectedProjectExternalId: projectNodeId, mapping: { status: { projectFieldId: 's', options: { x: 'done' } } } }
+  const result = await host.call('setPlanningMapping', input)
+  assert.equal(result.writeState, 'local_only'); assert.equal(result.activationError.code, 'unavailable')
+  assert.deepEqual((await saved(env)).mapping, input.mapping)
+  assert.equal((await host.call('baseline', {})).source.freshness, 'degraded')
+  await host.call('setPlanningMapping', input); assert.equal((await host.call('getPlanningMapping', {})).confirmed, true)
+})
+
+test('new mapping requires this Core generation commit proof after read/cursor or begin/cursor double failure', async (t) => {
+  for (const stage of ['read', 'begin']) await t.test(stage, async (t) => {
+    let armed = false, itemReads = 0
+    const env = await fake(t, () => ({ ok: true, value: fields }), { ...record(), mapping: { status: { projectFieldId: 's', options: { x: 'todo' } } } }, (provider) => {
+      for (const item of provider.state.items) { item.project = provider.state.projects[0].ref; item.fields.nativeValues = { s: { kind: 'single_select', optionId: 'x', name: 'Native' } } }
+      const list = provider.listPlanningItems.bind(provider)
+      provider.listPlanningItems = (...args) => { itemReads++; return armed ? { ok: false, error: { code: 'unavailable' } } : list(...args) }
+    })
+    const host = await open(env.dataPath, env.catalog, { watchIntervalMs: 5 }); t.after(() => host.dispose())
+    const sync = createSync(createTransport(host.controller), createEntityStore()), abort = new AbortController(), stream = host.watch(abort.signal)[Symbol.asyncIterator]()
+    t.after(() => { abort.abort(); return stream.return() }); sync.receive((await stream.next()).value)
+    assert.ok((await host.call('baseline', {})).entities.some((entity) => entity.planningStatus === 'todo'))
+    for (const method of ['putSyncCursor', ...(stage === 'begin' ? ['putPlanningSyncRound'] : [])]) {
+      const original = SqliteStorage.prototype[method]
+      t.mock.method(SqliteStorage.prototype, method, function (...args) { if (armed) throw new Error('storage unavailable'); return original.apply(this, args) })
+    }
+    armed = true
+    const input = { actorRef: { kind: 'user' }, idempotencyKey: 'proof', expectedBindingId: GITHUB, expectedProjectExternalId: projectNodeId, mapping: { status: { projectFieldId: 's', options: { x: 'done' } } } }
+    assert.equal((await host.call('setPlanningMapping', input)).writeState, 'local_only')
+    assert.equal((await saved(env)).mapping.status.options.x, 'done')
+    assert.equal((await host.call('getPlanningMapping', {})).confirmed, false)
+    const retained = await host.call('baseline', {}); assert.equal(retained.source.freshness, 'degraded'); assert.ok(retained.entities.some((entity) => entity.planningStatus === 'todo'))
+    sync.receive((await stream.next()).value); assert.ok(sync.read().store.list().every((row) => row.stale))
+    armed = false; const reads = itemReads; await host.call('setPlanningMapping', input)
+    assert.equal(itemReads, reads + 1); assert.equal((await host.call('getPlanningMapping', {})).confirmed, true)
+    const healed = await host.call('baseline', {}); assert.equal(healed.source.freshness, 'fresh'); assert.ok(healed.entities.some((entity) => entity.planningStatus === 'done'))
+  })
 })

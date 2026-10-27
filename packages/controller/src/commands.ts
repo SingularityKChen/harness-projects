@@ -15,7 +15,7 @@ import {
   WritePhase,
   type BindPlanningSourceRequest, type BindRepositoryRequest, type BootstrapResult, type ConnectAccountRequest, type CoreApi, type CreateWorkspaceRequest, type DeliveryRefreshResult,
   type DeliveryScope, type DeliveryWriteAttempt, type RecordedEdge, type RelationRef, type RepositoryBinding, type SetupOutcome, type StartWorkResult, type StatusDecision,
-  type WorkspaceSetup,
+  type WorkspaceSetup, type SetPlanningMappingRequest,
 } from '@harness-projects/core'
 
 export const CommandWriteState = {
@@ -264,6 +264,7 @@ export function createControllerCommands(core: CoreApi): ControllerCommands {
 export type CreateWorkspaceInput = CommandEnvelope & CreateWorkspaceRequest
 export type ConnectAccountInput = CommandEnvelope & ConnectAccountRequest
 export type BindPlanningSourceInput = CommandEnvelope & BindPlanningSourceRequest
+export type SetPlanningMappingInput = CommandEnvelope & SetPlanningMappingRequest
 export type BindRepositoryInput = CommandEnvelope & BindRepositoryRequest
 
 /**
@@ -271,6 +272,7 @@ export type BindRepositoryInput = CommandEnvelope & BindRepositoryRequest
  * 账本只在本实例内（TD-070）：丢失后同键重发由 core 的命令按自然键找回同一结果、零写入。
  */
 export interface SetupCommands {
+  setPlanningMapping(input: SetPlanningMappingInput): Promise<CommandResult<{ readonly bindingId: ProviderBindingId }>>
   createWorkspace(input: CreateWorkspaceInput): Promise<CommandResult<{ readonly workspaceId: WorkspaceId }>>
   connectAccount(input: ConnectAccountInput): Promise<CommandResult<{ readonly accountId: ConnectorAccountId }>>
   bindPlanningSource(input: BindPlanningSourceInput): Promise<CommandResult<{ readonly bindingId: ProviderBindingId }>>
@@ -286,6 +288,7 @@ function setupResult<T>(outcome: SetupOutcome<T>): CommandResult<T> {
 export function createSetupCommands(setup: WorkspaceSetup): SetupCommands {
   const replay = createReplayLog()
   return {
+    setPlanningMapping: (input) => replay('setPlanningMapping', input, requestPayload(input), async () => setupResult(await setup.setPlanningMapping(requestPayload(input)))),
     createWorkspace: (input) => replay('createWorkspace', input, requestPayload(input), async () => setupResult(await setup.createWorkspace(requestPayload(input)))),
     connectAccount: (input) => replay('connectAccount', input, requestPayload(input), async () => setupResult(await setup.connectAccount(requestPayload(input)))),
     bindPlanningSource: (input) => replay('bindPlanningSource', input, requestPayload(input), async () => setupResult(await setup.bindPlanningSource(requestPayload(input)))),

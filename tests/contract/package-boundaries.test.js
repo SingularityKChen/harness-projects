@@ -106,7 +106,7 @@ const EXPECTED = {
  */
 const HOST_ENTRY = {
   dir: 'apps/harness-plugin',
-  files: ['apps/harness-plugin/src/host.ts', 'apps/harness-plugin/src/host-composition.ts', 'apps/harness-plugin/src/host-providers.ts'],
+  files: ['apps/harness-plugin/src/host.ts', 'apps/harness-plugin/src/host-composition.ts', 'apps/harness-plugin/src/host-providers.ts', 'apps/harness-plugin/src/host-planning-mapping.ts'],
   allow: ['packages/core', 'packages/controller', 'packages/storage/sqlite', 'packages/capabilities',
     'packages/providers/planning-github-projects', 'packages/providers/development-local-git', 'packages/providers/development-github',
     'packages/providers/delivery-github-actions'],

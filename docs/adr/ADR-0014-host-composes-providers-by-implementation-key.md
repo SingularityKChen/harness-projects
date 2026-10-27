@@ -43,3 +43,5 @@
 - 启动竞态（Desktop 0.2.0-rc.2 上已观测）：`credentials` 不再是必需注入后，Host 可能在凭据提供方激活之前完成组合。这时组合期的首轮水合每次解析都失败，诊断日志各记一行 `credentialFailed`（`CredentialServiceUnavailable`），首个 `baseline` 只有库里已有的实体、新鲜度为 degraded（新库上为 0 个实体）；下一次命令重新水合即恢复。degraded 的原因是 `not_found`（「没有可发现的规划项目」），会把「凭据服务尚未就绪」误报成「项目不存在」；只读路径（`baseline`）不会自愈，要等命令或 Host 重载才重新水合。这是「凭据缺席时 Host 照常加载」的代价。自动恢复已由 #132 的评审会话登记为 #335 的拟加验收：https://github.com/SingularityKChen/harness-projects/issues/335#issuecomment-6188668898 ——凭据服务晚于 Host 组合激活时，服务可用后的第一次定时刷新重新水合 degraded / `not_found` 的 baseline，客户端无需发命令即恢复；见 TD-056。
 - 凭据服务缺席时没有 Host 级 fail closed：不需要凭据的挂载（Local Git）照常工作，规划挂载的操作结构化失败，原因只在宿主诊断日志里。
 - 采纳权在人类伙伴；采纳前保持 Proposed。`Status`、Project Status、`blocked-by` / `blocking` 与 ADR Accepted 状态不由 agent 写入。
+
+2026-10-27：精确增加 `apps/harness-plugin/src/host-planning-mapping.ts` 为 Host-only 边界例外；它只读取当代 lifetime 包装的 Planning port 与本地映射，不可从 client 入口到达。

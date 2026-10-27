@@ -167,3 +167,10 @@ test('setup read is a strict no-argument unary operation', () => {
   const descriptor = HOST_REMOTE.invocations.find(({ method }) => method === 'getWorkspaceSetup')
   assert.deepEqual([descriptor.mode, descriptor.parameters], [undefined, []])
 })
+
+test('mapping command exposes expected scope and shape only, never workspace or secret authority', () => {
+  assert.deepEqual(OPERATIONS.setPlanningMapping.params.map((parameter) => parameter.name), ['actorRef', 'idempotencyKey', 'expectedBindingId', 'expectedProjectExternalId', 'mapping'])
+  assert.equal(OPERATIONS.getPlanningMapping.params.length, 0)
+  const parse = OPERATIONS.setPlanningMapping.params.at(-1).parse
+  for (const value of [null, [], 'mapping']) assert.throws(() => parse(value), TypeError)
+})
