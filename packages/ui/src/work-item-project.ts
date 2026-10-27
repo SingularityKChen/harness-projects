@@ -3,14 +3,14 @@
  * 打开时记下 `document.activeElement` 与当时的列表容器，关闭后仅当 opener 仍是该容器成员才回焦，否则聚焦列表标题；
  * 用打开时的容器做包含检查，因为 React 重渲染可能替换容器节点。撤权只更新 content，不关闭重开。
  */
-import type { ExecutionContextReader, StartWork } from '@harness-projects/client'
+import type { ExecutionContextReader, StartWork, DeliveryLineageReader } from '@harness-projects/client'
 import { createElement, useEffect, useRef } from 'react'
 import type { ReactElement } from 'react'
 import type { WorkItemDetailView, WorkItemListView } from '@harness-projects/ui-model'
 import { WorkItemDetailDrawer, activeElement, type DOMElement } from './work-item-detail.ts'
 import { WorkItemListPage, type ItemNavigation } from './work-item-list.ts'
 
-export function WorkItemProjectPage({ listView, detailView, navigation, onCloseDetail, executionReader, connected, startWork, onBindRepository }: {
+export function WorkItemProjectPage({ listView, detailView, navigation, onCloseDetail, executionReader, connected, startWork, onBindRepository, deliveryReader }: { readonly deliveryReader?: DeliveryLineageReader | undefined;
   readonly startWork?: StartWork | undefined
   readonly onBindRepository?: (() => void) | undefined
   readonly executionReader?: ExecutionContextReader | undefined
@@ -44,6 +44,6 @@ export function WorkItemProjectPage({ listView, detailView, navigation, onCloseD
     createElement('div', { ref: list }, createElement(WorkItemListPage, { view: listView, navigation: routed, headingTabIndex: -1 })),
     // 列表的页面级说明也交给抽屉：模态打开时列表 inert，说明只在列表里就既看不到也不被宣告（#379）
     detailView === undefined ? null : createElement(WorkItemDetailDrawer, {
-      view: detailView, executionReader, connected, startWork, onBindRepository, notice: listView.body.kind === 'content' ? listView.body.notice : undefined, onClose: onCloseDetail,
+      view: detailView, executionReader, deliveryReader, connected, startWork, onBindRepository, notice: listView.body.kind === 'content' ? listView.body.notice : undefined, onClose: onCloseDetail,
     }))
 }

@@ -381,7 +381,7 @@ test('唯一写者：交付事实与谱系边只经 refreshDeliveryFacts 在一�
   assert.deepEqual(callers(/(?<!function )\brecordEdges\(/), ['core/src/delivery-facts.ts', 'core/src/start-work.ts'], '谱系边只由开始工作与交付写者记录')
   assert.deepEqual(callers(/\.putRelation\(/), ['core/src/relations.ts'], '关系只经 recordEdges 与 confirmRelation 写入：没有第二个谱系写者绕过它们直接写关系（ADR-0011 第 4 条）')
   assert.deepEqual(callers(/\brefreshDeliveryFacts\(context,/), ['core/src/context.ts'], '摄入只经刷新命令，查询不调用写者（#222）')
-  assert.deepEqual(callers(/\.refreshDeliveryFacts\(/), ['controller/src/commands.ts'], '刷新命令只有 controller 的命令一个转发调用点；core 与 controller 的查询都不调用它（#222）')
+  assert.deepEqual(callers(/\.refreshDeliveryFacts\(/), ['controller/src/commands.ts', 'harness-plugin/src/client.ts', 'harness-plugin/src/host-composition.ts'], '显式刷新沿 client → Host → controller 命令转发；core 与 controller 查询不调用写者（#222、#234）')
   const { providers, core, chain } = await chainOf('lineage-single-writer', { ingested: false })
   const revision = () => providers.storage.currentRevision(WORKSPACE.id)
   const state = async () => [(await providers.storage.listRelations(WORKSPACE.id)).length, await revision()]

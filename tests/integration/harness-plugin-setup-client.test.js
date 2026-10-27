@@ -83,3 +83,14 @@ test('named startWork option delegates through the real mount while legacy three
     assert.equal(bindWorkspaceSetupApp(f.source, f.props.source, f.props.executionReader)().props.startWork, undefined)
   } finally { await f.close() }
 })
+
+test('named deliveryReader option delegates through the real mount while legacy three-argument binding remains readonly', async () => {
+  let calls = []
+  const f = await mount({ refreshDeliveryFacts: async (...args) => { calls.push(args); return { ok: true, value: {} } } })
+  try {
+    const Panel = bindWorkspaceSetupApp(f.source, f.props.source, f.props.executionReader, { deliveryReader: f.props.deliveryReader })
+    await Panel().props.deliveryReader.refresh({ workspaceId: 'ws-1', workItemId: 'item-1', repositoryId: 'repo-1' })
+    assert.deepEqual(calls, [[{ kind: 'user' }, 'item-1', 'repo-1']])
+    assert.equal(bindWorkspaceSetupApp(f.source, f.props.source, f.props.executionReader)().props.deliveryReader, undefined)
+  } finally { await f.close() }
+})

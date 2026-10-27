@@ -654,3 +654,5 @@ gh issue reopen 4 -c "被 #108 的关闭引用自动关闭；revise 清单（R1�
 | 4 | #409 / #234 | 十一文件：合并Host操作与UI prop链，保留全部三命名选项、scope门、execution refresh token及remote名单测试；索引全保留。 | `gh pr view 409 -R SingularityKChen/harness-projects --json state,mergeCommit,headRefOid` |
 
 每条合入后fetch真实main，再变基下一条；共享历史先backup再精确lease。最终产品blob必须与已独立验证的完整前序对应版本相同，变动则重审重测。只执行rebase merge，issue验收与规划Status分离。跨PR证据见 `docs/review/2026-10-27-pr406-pr409-mmp-review.md`。
+
+2026-10-27 +08 本批逐步回读：#406已rebase合并为`f60236748e7aa34713342c4361cfc034f50aaae7`、#230CLOSED；#407已rebase合并为`d310a06c933e8801462962b3a4feedf5e79ec400`、#356CLOSED；#408已rebase合并为`6a335358458afe83c1af9bc33227a0aaffd06406`、#142CLOSED。#409继续按上表当前头门禁及回读命令执行，未在记录中预写成功。
