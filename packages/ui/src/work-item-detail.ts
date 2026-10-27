@@ -41,6 +41,7 @@ function contentPanel(body: Extract<WorkItemDetailView['body'], { kind: 'content
     createElement('p', null, '目标日期：', body.targetDate),
     createElement('p', null, '来源身份：', createElement(SourceBadge, { name: body.source, authority: body.authority }),
       body.identity === undefined ? '（来源身份尚未提供）' : `（${body.identity.kind} ${body.identity.externalId}）`),
+    createElement('p', null, '规划来源最后确认：', body.reconciledAt === undefined ? '未知' : createElement('time', { dateTime: body.reconciledAt }, body.reconciledAt)),
     createElement('p', { style: ROW_STYLE }, body.body),
     createElement('p', null, body.derived ?? '无派生提示'),
     createElement('p', null, body.stale || body.refreshing ? '最后已知值，当前结果尚未确认' : '当前值', '（工作区最后接收确认帧：', at, '）'))
@@ -67,7 +68,7 @@ function cycleFocus(dialog: DOMElement, shiftKey: boolean, event: { preventDefau
  * 唯一详情抽屉：view 变化只更新内容；Escape 只走原生 cancel（preventDefault 后一次 onClose）；cleanup 不导航。
  * `notice` 是页面级说明（如断开重连）：模态打开时背景 inert，所以抽屉在自己稳定的状态区里再说一次，打开期间出现也会被宣告。
  */
-export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, connected, startWork, onBindRepository, deliveryReader }: { readonly deliveryReader?: DeliveryLineageReader | undefined; startWork?: StartWork | undefined; onBindRepository?: (() => void) | undefined; executionReader?: ExecutionContextReader | undefined; connected?: boolean | undefined; view: WorkItemDetailView; notice?: string | undefined; onClose: () => void }): ReactElement {
+export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, connected, startWork, onBindRepository, deliveryReader, refresh }: { readonly refresh?: { readonly pending: boolean; readonly disabled: boolean; readonly run: () => void } | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; startWork?: StartWork | undefined; onBindRepository?: (() => void) | undefined; executionReader?: ExecutionContextReader | undefined; connected?: boolean | undefined; view: WorkItemDetailView; notice?: string | undefined; onClose: () => void }): ReactElement {
   const dialog = useRef<DOMElement | null>(null)
   const title = useRef<DOMElement | null>(null)
   const titleId = useId()
@@ -98,6 +99,7 @@ export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, c
   createElement('div', { style: PANEL_STYLE },
     createElement('h2', { id: titleId, ref: title, tabIndex: -1 }, view.body.kind === 'content' ? view.body.title : '工作项详情'),
     createElement('div', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, notice),
+    ...(refresh === undefined ? [] : [createElement('button', { type: 'button', disabled: refresh.disabled, 'aria-busy': refresh.pending, onClick: refresh.run }, refresh.pending ? '正在刷新规划' : '刷新规划')]),
     panelBody(view.body),
     target === undefined || deliveryReader === undefined ? null
       : target.repositoryIds.length === 0 ? createElement('p', null, '仓库信息尚未提供')

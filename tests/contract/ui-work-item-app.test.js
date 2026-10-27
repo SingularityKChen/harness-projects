@@ -45,7 +45,7 @@ function host(props) {
   const slot = (make) => { const index = cursor++; return (slots[index] ??= make()) }
   const dispatcher = {
     useSyncExternalStore: (subscribe, getSnapshot, getServerSnapshot) => {
-      assert.deepEqual([subscribe, getServerSnapshot], [props.source.subscribe, props.source.getSnapshot], '订阅与服务端快照都取自注入的 source')
+      assert.equal(getSnapshot, getServerSnapshot, '服务端与客户端使用同一快照函数')
       return getSnapshot()
     },
     useState: (initial) => { const cell = slot(() => ({ value: initial })); return [cell.value, (next) => { cell.value = next }] },

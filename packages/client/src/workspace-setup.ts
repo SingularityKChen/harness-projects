@@ -75,7 +75,7 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
   let createIntent: Intent | undefined, connectIntent: Intent | undefined
   let executionIntent: { key: string; acknowledged: boolean } | undefined
   let executionAttempt = 0
-  let mutationPending: Promise<void> | undefined, readPending: Promise<void> | undefined
+  let mutationPending: Promise<void> | undefined, readPending: Promise<void> | undefined, reconcilePending: Promise<void> | undefined
   const listeners = new Set<() => void>(), key = options.key ?? (() => globalThis.crypto.randomUUID())
   const finishExecutionIntent = (intent: NonNullable<typeof executionIntent>): void => {
     if (executionIntent !== intent) return
@@ -157,11 +157,25 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
     return promise
   }
   const refresh = (reconcile = false): Promise<void> => {
-    if (mutationPending) return reconcile ? mutationPending.then(() => refresh(true)) : mutationPending
-    if (readPending) return reconcile ? readPending.then(() => refresh(true)) : readPending
-    const promise = run(reconcile ? 'reconcile' : 'read', async () => reconcile ? command(await port.refreshPlanning(options.actorRef)).error : undefined)
+    if (reconcile && reconcilePending) return reconcilePending
+    const waiting = mutationPending ?? readPending
+    if (waiting && !reconcile) return waiting
+    // 先占任务槽，再发布 pending；同步订阅回调与普通重复调用都只能加入同一轮。
+    let settle!: (task: Promise<void>) => void
+    const promise = new Promise<void>((resolve) => { settle = resolve })
+    if (reconcile) reconcilePending = promise
     readPending = promise
-    void promise.then(() => { if (readPending === promise) readPending = undefined })
+    const clear = (): void => {
+      if (readPending === promise) readPending = undefined
+      if (reconcilePending === promise) reconcilePending = undefined
+    }
+    void promise.then(clear, clear)
+    const start = async (): Promise<void> => {
+      // 等待期间可能加入了新的 mutation；不能让旧 read 的结算授权越过它。
+      while (mutationPending) await mutationPending
+      return run(reconcile ? 'reconcile' : 'read', async () => reconcile ? command(await port.refreshPlanning(options.actorRef)).error : undefined)
+    }
+    settle(waiting ? waiting.then(start) : start())
     return promise
   }
   return { subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } }, getSnapshot: () => snapshot,

@@ -19,7 +19,7 @@ export * from './watch.ts'
 export interface ControllerOptions {
   /** 工作区的状态策略；wire 层的权威归属由它决定（source_managed / harness_managed / manual）。 */
   readonly authority?: StatusPolicyMode
-  /** 持久化的工作区级单调修订号；实体修订仅用于实体元数据。 */
+  /** @deprecated Planning snapshot 的修订号由 Core 原子读取；兼容保留但不调用此回调。 */
   readonly workspaceRevision?: () => Promise<number>
 }
 

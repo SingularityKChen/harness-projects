@@ -20,13 +20,11 @@ export interface ControllerQueries {
 }
 
 export function createControllerQueries(
-  core: CoreApi, authority: WireAuthority, workspaceRevision?: () => Promise<number>,
+  core: CoreApi, authority: WireAuthority, _workspaceRevision?: () => Promise<number>,
 ): ControllerQueries {
   return {
     async snapshot(): Promise<WireSnapshot> {
-      const views = await core.queries.listPlanningItems()
-      const revision = workspaceRevision === undefined ? undefined : await workspaceRevision()
-      const sync = await core.queries.getPlanningSync()
+      const { views, revision, sync } = await core.queries.getPlanningSnapshot()
       return toWireSnapshot(views, authority, revision, sync, await core.queries.getWorkspaceMetadata())
     },
     async getEntity(entityId: string): Promise<WireEntity | undefined> {

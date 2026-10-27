@@ -90,7 +90,7 @@ for (const [label, makeStorage] of [['替身 Storage', createFakeStorage], ['SQL
     const { core, views, replay, switchTransport } = await assemble(storage, (transport) => redacting(transport, all))
     const wire = () => createControllerQueries(core, 'provider').snapshot()
     const state = async () => [await core.queries.getPlanningSync(), (await wire()).source.freshness]
-    assert.deepEqual([await views(), ...await state()], [[], { degraded: true, stale: false, reason: 'permission_denied' }, 'degraded'], '没有映射：整次不完整，0 条时也可查询')
+    assert.deepEqual([await views(), ...await state()], [[], { reconciledAt: (await storage.getReconcileCursor((await core.queries.getWorkspaceMetadata()).workspace.id)).lastReconciledAt, degraded: true, stale: false, reason: 'permission_denied' }, 'degraded'], '没有映射：整次不完整，0 条时也可查询')
     switchTransport(replay)
     assert.equal((await core.commands.bootstrapWorkspace()).ok, true)
     const firstIds = (await views()).map((view) => view.entityId).sort()
@@ -116,12 +116,12 @@ for (const [label, makeStorage] of [['替身 Storage', createFakeStorage], ['SQL
     const visible = (await wire()).entities
     assert.deepEqual([partial.ok, partial.degraded, partial.unanchored, partial.error?.code, rows.length], [true, true, 3, 'permission_denied', 6], 'H11：3 条无映射，其余 6 条照常提交')
     assert.deepEqual([rows.map((view) => view.freshness.degraded), visible.map((entity) => entity.source.freshness)], [Array(6).fill(false), Array(6).fill('fresh')], 'H11：本次读取刚确认的可见行不得标 stale')
-    assert.deepEqual(await state(), [{ degraded: true, stale: false, reason: 'permission_denied' }, 'degraded'], 'H11：读取层仍 degraded')
+    assert.deepEqual(await state(), [{ reconciledAt: (await storage.getReconcileCursor((await core.queries.getWorkspaceMetadata()).workspace.id)).lastReconciledAt, degraded: true, stale: false, reason: 'permission_denied' }, 'degraded'], 'H11：读取层仍 degraded')
     assert.ok(visible.every((entity) => entity.content.externalId !== undefined), '可见条目的身份仍给界面回指来源')
     switchTransport(replay)
     assert.equal((await core.commands.bootstrapWorkspace()).ok, true)
     assert.deepEqual((await views()).map((view) => view.entityId).sort(), firstIds, '恢复后解析回同一批实体')
-    assert.deepEqual(await state(), [{ degraded: false, stale: false, reason: undefined }, 'fresh'])
+    assert.deepEqual(await state(), [{ reconciledAt: (await storage.getReconcileCursor((await core.queries.getWorkspaceMetadata()).workspace.id)).lastReconciledAt, degraded: false, stale: false, reason: undefined }, 'fresh'])
     storage.close?.()
   })
 

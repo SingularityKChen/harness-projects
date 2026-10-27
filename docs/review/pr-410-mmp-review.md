@@ -58,7 +58,7 @@ git diff --check b164a211b0b0d9669724dc794c2fe32896c4eed0...HEAD
 - [x] 2026-10-27 先矩阵后全层初审，根独立复现，唯一 P2 一次提交。
 - [x] 2026-10-27 RED→GREEN、最终产品树变异、完整验证、修复独立复评。
 - [x] 原 ExecPlan 在 `docs/exec-plan/completed/2026-10-27-planning-mapping-chooser.md`，已补修复批次与授权；原索引仍有效。
-- [ ] 最终远端回读、作者回复与授权整合；本批最终状态见批次评审记录。
+- [x] 2026-10-27 当前head门禁、作者回复、issue验收与授权整合完成，已rebase merge为 `eaaee2a9`，#358关闭；最终状态见批次记录。
 
 ## Surprises & Discoveries
 旧 origin 说明已有配置的来源，不能证明当前 intent 获得 ack。只换文案缺少恢复动作，失败时清 intent 会丢草稿，故采用 source 状态表达。全量开放 issue 76 条未见本问题重复项；#278 只涵盖 connect/bind 分型。原非原子规划快照由 #361/PR #412 承接，晚 baseline 由 #218 承接，不重复报新增。

@@ -196,6 +196,7 @@ export function unavailableCore(reason: string): CoreApi {
   const error = projectError(ProjectErrorCode.NotSupported, reason)
   const queries: CoreQueries = {
     listProviderBindings: async () => [],
+    getPlanningSnapshot: async () => ({ views: [], revision: 0, sync: { degraded: true, stale: true, reason } }),
     listPlanningItems: async () => [],
     getItemDetail: async () => undefined,
     getExecutionContext: async () => undefined,

@@ -230,6 +230,7 @@ for (const [label, makeStorage] of STORAGES) {
     const older = await oldRound
     assert.equal(older.ok, false, `${label}：旧轮必须失败`)
 
+    storage.getPlanningSyncRound = originalRoundRead // 后续 summary 的成功轮次读不属于失败结算探针。
     const sync = await createQueries(context).getPlanningSync()
     assert.ok(transactionRoundReads >= 3, `${label}：begin/commit 的 round 读取必须经 transaction scope`)
     assert.equal(rootRoundReads.length, 0, `${label}：失败结算不得在 transaction 外读取 round`)

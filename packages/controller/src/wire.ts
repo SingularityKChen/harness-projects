@@ -29,6 +29,8 @@ export function authorityFor(mode: StatusPolicyMode): WireAuthority {
 
 /** 新鲜度与权威归属的唯一说明面；degraded 时值只能是"最后已知"，不能当作当前值。 */
 export interface SourceMetadata {
+  /** 仅整表 source 携带：最后成功提交的来源确认时刻。 */
+  readonly reconciledAt?: string
   readonly revision: number
   readonly freshness: WireFreshness
   readonly authority: WireAuthority
@@ -170,6 +172,7 @@ export function toWireSnapshot(
       revision,
       authority,
       freshness: sync.degraded ? WireFreshness.Degraded : WireFreshness.Fresh,
+      ...(sync.reconciledAt === undefined ? {} : { reconciledAt: sync.reconciledAt }),
       reason: sync.reason,
     },
   }

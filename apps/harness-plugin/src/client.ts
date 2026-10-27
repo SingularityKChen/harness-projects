@@ -4,7 +4,7 @@
  * 先在根 Context 上挂载 Remote，再在 `ctx.inject` 子 Context 中同时读取
  * `remote.harnessProjects` 与 `slots`；根 Context 不直接读取 namespace（M17）。
  */
-import { createPlanningMappingSource, createExecutionContextReader, createWorkspaceSetupSource, createRepositoryBindingSource, createStartWork, createDeliveryLineageReader } from '@harness-projects/client'
+import { createPlanningMappingSource, createPlanningRefreshSource, createExecutionContextReader, createWorkspaceSetupSource, createRepositoryBindingSource, createStartWork, createDeliveryLineageReader } from '@harness-projects/client'
 import { HARNESS_PANEL_TITLE, PlaceholderIcon, bindWorkspaceSetupApp } from '@harness-projects/ui'
 import type { ClientContext, RemoteResult } from './host-surface.ts'
 import { CLIENT_REMOTE } from './remote.ts'
@@ -26,13 +26,15 @@ export async function apply(ctx: ClientContext): Promise<void> {
     const workspace = openWorkspaceWatch(child)
     child.effect(() => () => workspace.close(), 'harness-projects: workspace watch')
     const remote = child.remote.harnessProjects
+    const planningRefresh = createPlanningRefreshSource({ source: workspace, refreshPlanning: () => unwrap(remote.refreshPlanning({ kind: 'user' })) })
+    child.effect(() => () => planningRefresh.dispose(), 'harness-projects: planning refresh')
     const setup = createWorkspaceSetupSource({
       getWorkspaceSetup: () => unwrap(remote.getWorkspaceSetup()),
       createWorkspace: (...args) => unwrap(remote.createWorkspace(...args)),
       connectAccount: (...args) => unwrap(remote.connectAccount(...args)),
       bindPlanningSource: (...args) => unwrap(remote.bindPlanningSource(...args)),
       installExecutionBindings: (...args) => unwrap(remote.installExecutionBindings(...args)),
-      refreshPlanning: (...args) => unwrap(remote.refreshPlanning(...args)),
+      refreshPlanning: () => planningRefresh.refresh(),
     }, { actorRef: { kind: 'user' } })
     child.effect(() => {
       let connected = false, seen = false
@@ -64,7 +66,7 @@ export async function apply(ctx: ClientContext): Promise<void> {
       read: ({ workItemId, repositoryId }) => unwrap(remote.getDeliveryProjection(workItemId, repositoryId)),
       refresh: ({ workItemId, repositoryId }) => unwrap(remote.refreshDeliveryFacts({ kind: 'user' }, workItemId, repositoryId)),
     })
-    const Panel = bindWorkspaceSetupApp(setup, workspace, reader, { repositoryBindingSource: repositoryBinding, startWork, deliveryReader, mappingSource: mapping })
+    const Panel = bindWorkspaceSetupApp(setup, workspace, reader, { repositoryBindingSource: repositoryBinding, startWork, deliveryReader, mappingSource: mapping, refreshSource: planningRefresh })
     child.slots.inject('main', () => child.slots.register({ name: 'main', key: PANEL_ID }, Panel))
     child.slots.inject('sidebar.panellist', () =>
       child.slots.register(

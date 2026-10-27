@@ -179,7 +179,7 @@ test('身份：没有内容身份的条目不登记外部身份（裁决 R1）',
   const { identities } = exportFakeStorageState(providers.storage)
   assert.equal(identities.some((identity) => identity.externalId === 'm-orphan'), false, '成员关系 id 不得进外部身份表')
   assert.deepEqual((await core.queries.listPlanningItems()).map((view) => [view.freshness.degraded, view.freshness.reason]), Array(3).fill([false, undefined]), '本次读取确认的可见行保持 fresh（H11）')
-  assert.deepEqual(await core.queries.getPlanningSync(), { degraded: true, stale: false, reason: 'permission_denied' })
+  assert.deepEqual(await core.queries.getPlanningSync(), { reconciledAt: (await providers.storage.getReconcileCursor(WORKSPACE.id)).lastReconciledAt, degraded: true, stale: false, reason: 'permission_denied' })
 })
 
 const revisionOf = (providers) => providers.storage.currentRevision(WORKSPACE.id)

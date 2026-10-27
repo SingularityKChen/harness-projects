@@ -40,6 +40,7 @@ async function mount(providers, storage, id) {
   return { id, knob, core, controller: createController(core, { workspaceRevision: () => storage.currentRevision(id) }) }
 }
 
+const confirmedAt = async (storage, id) => ({ reconciledAt: (await storage.getReconcileCursor(id)).lastReconciledAt })
 const cursorOf = (storage, providers, id) => storage.getSyncCursor(id, providers.planning.bindingId, PLANNING_SYNC_SCOPE)
 /** 行的身份与规划状态：同步失败与另一个工作区的结算都不得改写它们，只有 freshness 随本工作区的游标变化。 */
 const facts = (views) => views.map((row) => [row.entityId, row.planningStatus])
@@ -57,7 +58,7 @@ for (const [label, makeStorage] of STORAGES) {
       const failed = await f.core.commands.bootstrapWorkspace()
       assert.equal(failed.ok, false)
       assert.equal(await storage.currentRevision(failing), revision, '失败结算不推进业务修订号')
-      const stale = { degraded: true, stale: true, reason: 'unavailable' }
+      const stale = { ...await confirmedAt(storage, failing), degraded: true, stale: true, reason: 'unavailable' }
       assert.deepEqual(await f.core.queries.getPlanningSync(), stale)
 
       const ok = await h.core.commands.bootstrapWorkspace()
@@ -77,7 +78,7 @@ for (const [label, makeStorage] of STORAGES) {
       const healthyCursor = await cursorOf(storage, providers, healthy)
       f.knob.down = false
       assert.equal((await f.core.commands.bootstrapWorkspace()).ok, true)
-      assert.deepEqual(await f.core.queries.getPlanningSync(), { degraded: false, stale: false, reason: undefined }, '只有自己成功才恢复自己')
+      assert.deepEqual(await f.core.queries.getPlanningSync(), { ...await confirmedAt(storage, failing), degraded: false, stale: false, reason: undefined }, '只有自己成功才恢复自己')
       assert.deepEqual(await cursorOf(storage, providers, healthy), healthyCursor, '恢复 A 不改变 B 的完整游标')
     })
 
@@ -119,7 +120,7 @@ for (const [label, makeStorage] of STORAGES) {
     const refreshed = await b.core.commands.bootstrapWorkspace()
     assert.deepEqual([refreshed.ok, refreshed.entities, refreshed.degraded], [true, rows.length, false], 'ws-b 再次刷新完整且不降级')
     assert.deepEqual(facts(await b.core.queries.listPlanningItems()), facts(rows))
-    assert.deepEqual(await b.core.queries.getPlanningSync(), { degraded: false, stale: false, reason: undefined })
+    assert.deepEqual(await b.core.queries.getPlanningSync(), { ...await confirmedAt(storage, b.id), degraded: false, stale: false, reason: undefined })
     assert.equal((await b.controller.baseline()).source.freshness, 'fresh')
   })
 }
