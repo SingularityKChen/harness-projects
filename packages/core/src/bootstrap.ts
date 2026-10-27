@@ -72,6 +72,7 @@ export async function bootstrapWorkspace(context: CoreContext): Promise<Bootstra
   let round: PlanningSyncRoundRecord | undefined
   try {
     round = await beginSyncRound(context, bindingId)
+    if (context.planningReadBaseline === Number.POSITIVE_INFINITY) context.planningReadBaseline = round.latestStartedRound - 1
     result = await syncRound(context, bindingId, planning, round)
   } catch (error) {
     reportSyncRoundFailure(context, error)

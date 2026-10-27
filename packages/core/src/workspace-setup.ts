@@ -4,6 +4,7 @@
  * 写出的正是 Host 恢复时读取的行集（工作区、启用的规划挂载、挂载配置、锚点→账号关联、账号句柄）。幂等不靠持久回执：每个目标都有
  * 存储强制的自然键，已提交的行就是结果（ExecPlan D2）。模式辅助函数供 core 内后续的设置命令（#353）以相对路径复用，不进包入口。
  */
+import { setPlanningMapping, type SetPlanningMappingRequest } from './planning-mapping.ts'
 import { isDeepStrictEqual } from 'node:util'
 import {
   CapabilityDomain, ConnectorConnectionState, ProjectErrorCode, projectError,
@@ -29,6 +30,7 @@ export interface BindRepositoryRequest { readonly workspaceId: WorkspaceId; read
 /** `bindingIds` 与请求的引用一一对应、同序。 */
 export interface RepositoryBinding { readonly repositoryId: string; readonly bindingIds: readonly ProviderBindingId[] }
 export interface WorkspaceSetup {
+  setPlanningMapping(request: SetPlanningMappingRequest): Promise<SetupOutcome<{ readonly bindingId: ProviderBindingId }>>
   createWorkspace(request: CreateWorkspaceRequest): Promise<SetupOutcome<{ readonly workspaceId: WorkspaceId }>>
   connectAccount(request: ConnectAccountRequest): Promise<SetupOutcome<{ readonly accountId: ConnectorAccountId }>>
   /** 工作区同一时刻只有一个启用的规划来源（不变量 1）：目标不同即 conflict；只剩停用挂载时是 #202 的切换，not_supported。 */
@@ -120,6 +122,7 @@ const referenceShaped = (reference: RepositoryReferenceRequest): boolean => REFE
 
 export function createWorkspaceSetup(storage: Storage): WorkspaceSetup {
   return {
+    setPlanningMapping: (request) => setPlanningMapping(storage, request),
     // 先读后写：SQLite 的 putWorkspace 是 upsert，盲写会静默改名或改策略。
     createWorkspace: (request) => runSetup(storage, async (tx) => {
       assertClosed(request, WORKSPACE_FIELDS)

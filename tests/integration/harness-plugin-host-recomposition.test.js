@@ -129,7 +129,9 @@ test('precommit barrier drains an old baseline, discards its epoch, and resumes 
   h.instances[0].addItem(h.instances[0].state.projects[0].ref, 'issue', 'New', 'body')
   release.resolve(); await setup
   await h.host.call('refreshPlanning', { actorRef: actor })
-  const frame = (await pending).value; assert.equal(frame.kind, 'delta'); assert.equal(frame.delta.upserts.some((row) => row.content.title === 'New'), true)
+  let frame = (await pending).value
+  if (frame.kind === 'metadata') { assert.equal(frame.metadata.source.freshness, 'degraded'); frame = (await frames.next()).value }
+  assert.equal(frame.kind, 'delta'); assert.equal(frame.delta.upserts.some((row) => row.content.title === 'New'), true)
   await frames.return()
 })
 

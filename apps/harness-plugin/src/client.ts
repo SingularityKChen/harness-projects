@@ -4,7 +4,7 @@
  * 先在根 Context 上挂载 Remote，再在 `ctx.inject` 子 Context 中同时读取
  * `remote.harnessProjects` 与 `slots`；根 Context 不直接读取 namespace（M17）。
  */
-import { createExecutionContextReader, createWorkspaceSetupSource, createRepositoryBindingSource, createStartWork, createDeliveryLineageReader } from '@harness-projects/client'
+import { createPlanningMappingSource, createExecutionContextReader, createWorkspaceSetupSource, createRepositoryBindingSource, createStartWork, createDeliveryLineageReader } from '@harness-projects/client'
 import { HARNESS_PANEL_TITLE, PlaceholderIcon, bindWorkspaceSetupApp } from '@harness-projects/ui'
 import type { ClientContext, RemoteResult } from './host-surface.ts'
 import { CLIENT_REMOTE } from './remote.ts'
@@ -43,6 +43,8 @@ export async function apply(ctx: ClientContext): Promise<void> {
       void setup.refresh()
       return () => { stop(); setup.dispose() }
     }, 'harness-projects: workspace setup')
+    const mapping = createPlanningMappingSource({ getPlanningMapping: () => unwrap(remote.getPlanningMapping()), setPlanningMapping: (actor, key, binding, project, mapping) => unwrap(remote.setPlanningMapping(actor, key, binding, project, { ...mapping })) }, { actorRef: { kind: 'user' } })
+    child.effect(() => () => mapping.dispose(), 'harness-projects: planning mapping')
     const reader = createExecutionContextReader(async ({ workItemId, repositoryId }) => {
       const result = await child.remote.harnessProjects.getExecutionContext(workItemId, repositoryId)
       if (!result.ok) throw new Error('暂时无法读取执行状态')
@@ -61,7 +63,7 @@ export async function apply(ctx: ClientContext): Promise<void> {
       read: ({ workItemId, repositoryId }) => unwrap(remote.getDeliveryProjection(workItemId, repositoryId)),
       refresh: ({ workItemId, repositoryId }) => unwrap(remote.refreshDeliveryFacts({ kind: 'user' }, workItemId, repositoryId)),
     })
-    const Panel = bindWorkspaceSetupApp(setup, workspace, reader, { repositoryBindingSource: repositoryBinding, startWork, deliveryReader })
+    const Panel = bindWorkspaceSetupApp(setup, workspace, reader, { repositoryBindingSource: repositoryBinding, startWork, deliveryReader, mappingSource: mapping })
     child.slots.inject('main', () => child.slots.register({ name: 'main', key: PANEL_ID }, Panel))
     child.slots.inject('sidebar.panellist', () =>
       child.slots.register(

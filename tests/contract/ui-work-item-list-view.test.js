@@ -210,8 +210,8 @@ test('接线：坏时间 / 非法 phase / 缺失或非法 failure / 非布尔或
   for (const refreshing of [undefined, 'false']) assert.throws(() => view('received', { entities, refreshing }), TypeError, '缺刷新标记不能让行冒充当前值')
 })
 
-test('契约：./values 只 re-export 六个既有词表（同一引用），读门 key 等于 CapabilityKey', () => {
-  assert.deepEqual(Object.keys(leaf).sort(), ['AccessLevel', 'ContentKind', 'DerivedFlag', 'ExecutionContextStatus', 'ExecutionRunStatus', 'NormalizedStatus'])
+test('契约：./values 只 re-export 既有词表与纯校验（同一引用），读门 key 等于 CapabilityKey', () => {
+  assert.deepEqual(Object.keys(leaf).sort(), ['AccessLevel', 'ContentKind', 'DerivedFlag', 'ExecutionContextStatus', 'ExecutionRunStatus', 'NormalizedStatus', 'planningFieldMappingSnapshot'])
   for (const name of Object.keys(leaf)) assert.equal(leaf[name], domain[name], name)
   assert.equal(READ, CapabilityKey.PlanningItemRead, '各用例的读门 key 就是 CapabilityKey，首个用例的 received → content 因此钉住实现的读门')
 })
