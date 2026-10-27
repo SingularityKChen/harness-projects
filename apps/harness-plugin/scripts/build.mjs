@@ -1,13 +1,13 @@
 /**
  * Harness 插件安装件构建（ADR-0009、ExecPlan 2026-09-29-harness-plugin-package）。
  *
- * 一次调用产出 `<outDir>/package/` 下的四个文件：
- *   package.json（生成的安装件 manifest）、cordis.patch.yml、lib/index.js（宿主半边）、lib/client.js（客户端半边）。
+ * 一次调用产出 `<outDir>/package/` 下的安装文件：
+ *   package.json（生成的安装件 manifest）、cordis.patch.yml、lib/index.js（宿主半边）、lib/client.js（客户端半边）、LICENSE 与 migrations/*.sql。
  * 任何一道构建闸门不满足就抛错，此时 `<outDir>/package` 不存在（先清空，闸门通过后才写盘）。
  *
  * 命令行：node apps/harness-plugin/scripts/build.mjs [--out <dir>]，缺省 outDir 为 apps/harness-plugin/dist。
  */
-import { builtinModules } from 'node:module'
+import { isBuiltin } from 'node:module'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
 import path from 'node:path'
@@ -77,15 +77,12 @@ const MIGRATION_FILES = [
   '005_source_version_carrier.sql', '006_delivery_facts.sql', '007_planning_sync_round.sql',
 ]
 
-const NODE_BUILTINS = new Set(builtinModules.map((name) => name.replace(/^node:/, '')))
-
 async function readJson(file) {
   return JSON.parse(await readFile(file, 'utf8'))
 }
 
-function isNodeBuiltin(specifier) {
-  const bare = specifier.replace(/^node:/, '')
-  return NODE_BUILTINS.has(bare) || NODE_BUILTINS.has(bare.split('/')[0])
+export function isNodeBuiltin(specifier) {
+  return isBuiltin(specifier)
 }
 
 /** 只有一个输出文件（不出 source map），取它的 metafile 记录与文本。 */
@@ -155,7 +152,7 @@ function createManifest({ source, rootManifest }) {
       './package.json': './package.json',
       './cordis.patch.yml': './cordis.patch.yml',
     },
-    files: ['lib/index.js', 'lib/client.js', 'cordis.patch.yml', ...MIGRATION_FILES.map((file) => `migrations/${file}`)],
+    files: ['LICENSE', 'lib/index.js', 'lib/client.js', 'cordis.patch.yml', ...MIGRATION_FILES.map((file) => `migrations/${file}`)],
     peerDependencies: { ...HOST_PEERS },
     dsh: {
       manifestVersion: 1,
@@ -238,6 +235,7 @@ export async function build({ outDir = DEFAULT_OUT_DIR } = {}) {
     path.join(packageDir, 'cordis.patch.yml'),
     await readFile(path.join(APP_DIR, 'cordis.patch.yml')),
   )
+  await writeFile(path.join(packageDir, 'LICENSE'), await readFile(path.join(REPO_ROOT, 'LICENSE')))
   await writeFile(path.join(packageDir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 
   return {
