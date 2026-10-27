@@ -107,7 +107,9 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       const at = confirmed ? readClock(clock) : undefined
       apply()
       const { workspace, capabilities, repositories, planningSource, source } = frame
+      const changedScope = head?.workspace?.id !== workspace?.id || head?.planningSource?.bindingId !== planningSource?.bindingId
       head = { workspace, capabilities, ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }), source }
+      if (changedScope) lastUpdatedAt = undefined
       if (at !== undefined) lastUpdatedAt = at
       if (frameGeneration !== undefined) generation = frameGeneration
       connected = true
@@ -186,8 +188,12 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       if (event.kind === 'gap') return markGap(event.gap)
       if (event.kind === 'metadata') {
         const { metadata } = event
-        const improved = recovered(head?.source, metadata.source)
-          || metadata.entities.some((row) => recovered(store.get(row.entityId)?.entity.source, row.source))
+        const sameScope = head?.workspace?.id === metadata.workspace?.id && head?.planningSource?.bindingId === metadata.planningSource?.bindingId
+        const confirmedAt = metadata.source.reconciledAt
+        const advanced = sameScope && isFresh(metadata.source) && confirmedAt !== undefined
+          && (head?.source.reconciledAt === undefined || Date.parse(confirmedAt) > Date.parse(head.source.reconciledAt))
+        const improved = advanced || (sameScope && recovered(head?.source, metadata.source))
+          || (sameScope && metadata.entities.some((row) => recovered(store.get(row.entityId)?.entity.source, row.source)))
         accept(metadata, () => store.applyMetadata(metadata), improved)
         return { kind: 'metadata', revision: store.revision, reason: undefined }
       }
@@ -220,7 +226,8 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       if (head?.workspace === undefined) return undefined
       const degraded = head.source.freshness === WireFreshness.Degraded
       return {
-        workspace: head.workspace, store, connection: { connected }, lastUpdatedAt, capabilities: head.capabilities,
+        workspace: head.workspace, store, connection: { connected }, lastUpdatedAt,
+        ...(head.source.reconciledAt === undefined ? {} : { reconciledAt: head.source.reconciledAt }), capabilities: head.capabilities,
         ...(head.repositories === undefined ? {} : { repositories: head.repositories }),
         ...(head.planningSource === undefined ? {} : { planningSource: head.planningSource }),
         reason: !connected ? DISCONNECTED_REASON : degraded ? head.source.reason ?? NEUTRAL_REASON : undefined,

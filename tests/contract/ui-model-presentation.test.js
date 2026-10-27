@@ -61,7 +61,7 @@ function wireEntity({
     // undefined = 没有可展示的字段值（#133）；键必须在 wire 形状里。
     planningFields: undefined,
     derived,
-    source: { revision, freshness, authority: 'provider', reason: freshness === 'degraded' ? '规划来源离线' : undefined },
+    source: { revision, freshness, reconciledAt: undefined, authority: 'provider', reason: freshness === 'degraded' ? '规划来源离线' : undefined },
   }
 }
 

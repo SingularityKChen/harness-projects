@@ -116,7 +116,7 @@
 - [x] (2026-10-27 17:03 +08) 三能力本地并集验收通过，完成归档和索引；发布与 ready 的易失状态由本计划末尾的 GitHub 命令控制，不把工程验收当作人类规划接受。
 
 - [x] (2026-10-27 +08) Batch 2 复核 F410-1 根因并比较三种方案；新增两项明确 RED，修复后组件测试 9/9、最窄相关回归 47/47 通过。首次 typecheck 发现 exactOptionalPropertyTypes 不接受显式 error=undefined，改为从 data 发布清洁 pending 快照；修正后 `npx --yes pnpm@10.28.2 typecheck` exit 0；在本批最终产品树一次整表施加 M410-1–M410-8，全部 KILLED 且 killedBy 正确归因、字节还原及还原后基线绿。详见 `docs/review/pr-410-mmp-review.md` 修复批次。
-- [ ] Batch 2 根会话的独立交叉复评及最终组合验证；未 commit/push，不把原组合树的证据当作修复后结果。
+- [x] 2026-10-27：Batch 2 修复已由未参与实现的子评审独立复评，最终组合2157+7、pack与28项变异通过；当前证据见 `docs/review/pr-410-mmp-review.md` 和批次记录。
 
 ## Surprises & Discoveries
 
@@ -150,6 +150,8 @@
 最终推送后由交付者回读当前 head/base/checks、issue 关联和全部 review threads，验证当前 head 后才 ready；本计划不授权合并。计划完成后迁入 completed 并更新索引。
 
 ## Outcomes & Retrospective
+
+2026-10-27 MMP 修复收口：独立复评和最终重组已完成，未发现 P0/P1；本批产品与最终验证组合逐字一致。 PR #410 已按当前 head 门禁 rebase merge 为 `eaaee2a9aceef131cc84962f0a96e471effe0a7b`，对应验收 issue 已关闭。 本段替代下列历史阶段的等待状态，不替代 #143 的真实宿主走查或人类规划接受。
 
 
 最终本地结果：字段定义选择、本地映射确认、同 Host 激活与失败意图保留（#358）已通过独立验收、修复复评与组合验证。历史阶段记录如下，其“待验收/未提交”描述仅指当时观察，Superseded by 本段（2026-10-27 17:03 +08）。
@@ -194,3 +196,5 @@ PR #410 的最终发布状态必须重新回读，预期为当前 head/base 正�
 - 2026-10-27 +08：依据 F410-1 独立复现及人类 P2 修复授权，在已归档计划增加 Batch 2、根因与三方案比较、真实 RED/GREEN 和独立复评门；原 head 的验收结论仅对其锁定版本成立，不能外推到本批未提交修复树。
 
 - 2026-10-27 +08：补齐修复后最终产品树的 typecheck 通过与八项整表变异结果；独立交叉复评和重组验证仍保留未完成，不引用原组合候选替代。
+
+- 2026-10-27：修复文档P3，原处收口Batch 2 Progress并为历史等待结论标注Superseded；独立复评与组合验证证据见对应review记录。

@@ -9,10 +9,9 @@ import {
   bindingsForDomain,
   singlePlanningBinding,
   type EffectiveCapability,
-  type ProviderBindingRecord,
-  type StorageTransaction,
+  type ProviderBindingRecord, type StorageTransaction,
 } from '@harness-projects/capabilities'
-import { IdentityRole, type EntityId, type ExternalIdentity, type ProviderBindingId, type WorkspaceId } from '@harness-projects/domain'
+import { IdentityRole, type EntityId, type ProviderBindingId, type WorkspaceId } from '@harness-projects/domain'
 import { gateCommand } from './capabilities.ts'
 import { PLANNING_SYNC_SCOPE } from './bootstrap.ts'
 import type { CoreContext } from './context.ts'
@@ -50,6 +49,7 @@ export interface RepositoryMetadata {
 
 export interface CoreQueries {
   listProviderBindings(): Promise<readonly ProviderBindingRecord[]>
+  getPlanningSnapshot(): Promise<{ readonly views: readonly PlanningItemView[]; readonly sync: SyncSummary; readonly revision: number }>
   listPlanningItems(): Promise<readonly PlanningItemView[]>
   getItemDetail(entityId: EntityId): Promise<PlanningItemDetail | undefined>
   getExecutionContext(query: ExecutionContextQuery): Promise<ExecutionContextView | undefined>
@@ -66,16 +66,8 @@ export function createQueries(context: CoreContext): CoreQueries {
   return {
     listProviderBindings: () => context.storage.listProviderBindings(context.workspaceId),
 
-    async listPlanningItems(): Promise<readonly PlanningItemView[]> {
-      const sync = await syncSummary(context)
-      const projections = await context.storage.listPlanningProjections(context.workspaceId)
-      const views: PlanningItemView[] = []
-      for (const projection of projections) {
-        const identity = await primaryIdentity(context, projection.entityId)
-        if (identity !== undefined) views.push(toPlanningItemView(projection, identity, sync))
-      }
-      return views.sort((left, right) => (left.entityId < right.entityId ? -1 : 1))
-    },
+    getPlanningSnapshot: () => planningSnapshot(context),
+    listPlanningItems: async () => (await planningSnapshot(context)).views,
 
     async getItemDetail(entityId: EntityId): Promise<PlanningItemDetail | undefined> {
       const projection = await context.storage.getPlanningProjection(context.workspaceId, entityId)
@@ -98,24 +90,40 @@ export function createQueries(context: CoreContext): CoreQueries {
   }
 }
 
-/** freshness 的唯一来源：能力门 + 最近一次同步游标；composeCore 还要求本代既有轮次账本已确认一次提交，旧 healthy 游标不能充当新映射的读取成功证明；degraded / failed 表示什么都没提交（行 stale），healthy 加错误码表示提交了但有缺口；游标缺失或 state 为 idle（从未写进过任何结果、没有成功证据）即陈旧。 */
+/** Planning triple 的一致读作用域；tx 内仅访问本地存储，不调用 Provider 或根 Storage。 */
+async function planningSnapshot(context: CoreContext) {
+  return context.storage.transaction(async (tx) => {
+    const sync = await syncSummary(context, tx)
+    const projections = await tx.listPlanningProjections(context.workspaceId)
+    const views: PlanningItemView[] = []
+    for (const projection of projections) {
+      const identity = (await tx.listIdentitiesForEntity(projection.entityId)).find((entry) => entry.role === IdentityRole.Primary)
+      if (identity !== undefined) views.push(toPlanningItemView(projection, identity, sync))
+    }
+    return { views: views.sort((left, right) => left.entityId < right.entityId ? -1 : 1), sync, revision: await tx.currentRevision(context.workspaceId) }
+  })
+}
+
+/** 能力门与当前绑定的同步状态决定 freshness；已提交轮次才允许暴露 workspace 确认时间；composeCore 还要求本代轮次已提交，旧 healthy cursor 不能充当新映射成功证明。 */
 async function syncSummary(context: CoreContext, storage: StorageTransaction = context.storage): Promise<SyncSummary> {
   const gate = gateCommand(context.registry, CapabilityKey.PlanningItemRead, 'read')
   if (!gate.allowed) return { degraded: true, stale: true, reason: gate.error?.message ?? '规划读取能力不可用' }
   const binding = singlePlanningBinding(context.registry)
   if (binding === undefined) return { degraded: true, stale: true, reason: '没有默认 Planning 绑定' }
+  const round = await storage.getPlanningSyncRound(context.workspaceId, binding.ref.bindingId, PLANNING_SYNC_SCOPE)
+  const reconciledAt = round?.latestCommittedRound === undefined ? undefined : (await storage.getReconcileCursor(context.workspaceId))?.lastReconciledAt
+  const confirmation = reconciledAt === undefined ? {} : { reconciledAt }
   const cursor = await storage.getSyncCursor(context.workspaceId, binding.ref.bindingId, PLANNING_SYNC_SCOPE)
   // syncing（一轮在途）今天没有写者，读侧语义待 #134 的调度器定义（TD-034）；这里只让「没有成功证据」的两种形态一致地读作陈旧。
-  if (cursor === undefined || cursor.state === SyncState.Idle) return { degraded: true, stale: true, reason: SyncState.Idle }
+  if (cursor === undefined || cursor.state === SyncState.Idle) return { ...confirmation, degraded: true, stale: true, reason: SyncState.Idle }
   if (cursor.state === SyncState.Degraded || cursor.state === SyncState.Failed) {
-    return { degraded: true, stale: true, reason: cursor.lastErrorCode ?? cursor.state }
+    return { ...confirmation, degraded: true, stale: true, reason: cursor.lastErrorCode ?? cursor.state }
   }
   if (context.planningReadBaseline !== undefined) {
-    const round = await storage.getPlanningSyncRound(context.workspaceId, binding.ref.bindingId, PLANNING_SYNC_SCOPE)
-    if (round?.latestCommittedRound === undefined || round.latestCommittedRound <= context.planningReadBaseline || round.latestCommittedRound !== round.latestStartedRound) return { degraded: true, stale: true, reason: 'unavailable' }
+    if (round?.latestCommittedRound === undefined || round.latestCommittedRound <= context.planningReadBaseline || round.latestCommittedRound !== round.latestStartedRound) return { ...confirmation, degraded: true, stale: true, reason: 'unavailable' }
   }
   // 提交成功但有缺口：healthy 加 lastErrorCode，读取层 degraded，本次确认的行不 stale（D23）。
-  return { degraded: cursor.lastErrorCode !== undefined, stale: false, reason: cursor.lastErrorCode }
+  return { ...confirmation, degraded: cursor.lastErrorCode !== undefined, stale: false, reason: cursor.lastErrorCode }
 }
 
 /**
@@ -156,9 +164,4 @@ async function repositoryMetadata(context: CoreContext): Promise<readonly Reposi
     repositories.push({ id: record.id, references: references.map(({ bindingId, role }) => ({ bindingId, role })), capabilities })
   }
   return repositories
-}
-
-async function primaryIdentity(context: CoreContext, entityId: EntityId): Promise<ExternalIdentity | undefined> {
-  const identities = await context.storage.listIdentitiesForEntity(entityId)
-  return identities.find((identity) => identity.role === IdentityRole.Primary)
 }

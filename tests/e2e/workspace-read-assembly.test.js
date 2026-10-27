@@ -158,6 +158,7 @@ const stateOf = (sync) => {
     capabilities: read?.capabilities,
     connected: read?.connection.connected,
     lastUpdatedAt: read?.lastUpdatedAt,
+    reconciledAt: read?.reconciledAt,
     revision: read?.store.revision,
     rows: read?.store.list().map((entry) => ({ ...entry, current: read.store.isCurrent(entry.entityId) })),
   })
@@ -257,8 +258,8 @@ test('断网：poll / reconnect 拒绝后 connected=false，行引用、内容�
 })
 
 const hiddenStale = (read) => deriveWorkItemList(read).rows.filter((row) => row.contentKind === 'redacted').map((row) => row.freshness.stale)
-test('metadata：同 revision 降级 / 恢复同时更新整表与每行 source（含 Fake 唯一的 redacted 条目），时间只在恢复确认时推进', async () => {
-  const { providers, core, controller } = await compose()
+test('metadata：同 revision 降级 / 恢复同时更新整表与每行 source（含 Fake 唯一的 redacted 条目），时间在恢复或来源确认前进时推进', async () => {
+  const { providers, core, controller } = await compose(createFakeProviders(), { clock: clockOf('2026-10-27T01:00:01Z', '2026-10-27T01:00:02Z', '2026-10-27T01:00:03Z') })
   const { store, sync } = await client(controller)
   await sync.connect()
   const rows = store.list()
@@ -282,7 +283,7 @@ test('metadata：同 revision 降级 / 恢复同时更新整表与每行 source�
   assert.ok(itemRows(sync.read()).every((row) => !row.stale), '来源恢复后行回到 fresh')
 
   await core.commands.bootstrapWorkspace()
-  assert.deepEqual([(await sync.poll()).kind, sync.revision, sync.read().lastUpdatedAt], ['idle', rows[0].revision, T(2)], '内容不变的成功刷新不产生帧，也不推进 lastUpdatedAt（#220 决定）')
+  assert.deepEqual([(await sync.poll()).kind, sync.revision, sync.read().lastUpdatedAt], ['metadata', rows[0].revision, T(3)], '内容不变的成功刷新经来源确认 metadata 推进接收时间')
 })
 
 /** 同 revision 的 metadata：整表 fresh 与否、第 i 行 fresh 与否各自指定。 */
@@ -561,5 +562,52 @@ test('字段映射来源闭集：baseline 接受 derived/user，拒绝未知 ori
   for (const mappingOrigin of ['guessed', null, 1, {}]) {
     assert.throws(() => sync.receive({ kind: 'baseline', baseline: { ...snapshot, planningSource: { ...snapshot.planningSource, mappingOrigin } } }), /帧头不合契约/)
     assert.equal(sync.read().planningSource.mappingOrigin, 'user')
+  }
+})
+
+test('same revision confirmation advances client receive time; malformed source time never partially applies', async () => {
+  let hostAt = '2026-10-27T01:00:01.000Z', receives = 0
+  const { core, controller } = await compose(createFakeProviders(), { clock: () => hostAt })
+  const sync = createSync(createTransport(controller), createEntityStore(), { clock: () => { receives++; return T(Math.min(receives, 9)) } })
+  await sync.connect()
+  const before = sync.read(), revision = sync.revision
+  hostAt = '2026-10-27T01:00:02.000Z'
+  await core.commands.refreshPlanning()
+  assert.equal((await sync.poll()).kind, 'metadata')
+  assert.equal(sync.revision, revision)
+  assert.equal(sync.read().reconciledAt, hostAt)
+  assert.notEqual(sync.read().lastUpdatedAt, before.lastUpdatedAt)
+  const frame = toWireMetadata(await controller.baseline()), accepted = stateOf(sync), calls = receives
+  for (const reconciledAt of [null, 5, 'bad', '2026-02-30T01:00:00Z', '2026-10-27T25:00:00Z']) {
+    const source = { ...frame.source, reconciledAt }
+    const frames = [
+      { kind: 'metadata', metadata: { ...frame, source } },
+      { kind: 'baseline', baseline: { ...await controller.baseline(), source } },
+      { kind: 'delta', delta: { ...frame, source, previousRevision: revision, revision: revision + 1, upserts: [], removed: [] } },
+    ]
+    for (const bad of frames) {
+      assert.throws(() => sync.receive(bad), /契约/)
+      assert.deepEqual(stateOf(sync), accepted)
+      assert.equal(receives, calls, 'invalid frame cannot call receive clock')
+    }
+  }
+  sync.receive({ kind: 'metadata', metadata: frame })
+  assert.equal(receives, calls, 'duplicate confirmation cannot manufacture receive time')
+})
+
+test('source scope replacement clears inherited confirmation; fresh metadata advances only its own source time', async () => {
+  const { controller } = await compose(), base = await controller.baseline()
+  let calls = 0
+  const sync = createSync(createTransport(controller), createEntityStore(), { clock: () => { calls++; return T(Math.min(calls, 9)) } })
+  sync.receive({ kind: 'baseline', baseline: base })
+  const frame = toWireMetadata(base), { reconciledAt: _oldTime, ...unconfirmed } = frame.source
+  sync.receive({ kind: 'metadata', metadata: { ...frame, source: unconfirmed, planningSource: { ...frame.planningSource, bindingId: 'replacement' } } })
+  assert.equal(sync.read().reconciledAt, undefined)
+  assert.equal(sync.read().lastUpdatedAt, undefined)
+  assert.equal(calls, 1)
+  for (const reconciledAt of [undefined, '2024-02-29T23:59:59+08:00']) {
+    const received = createSync(createTransport(controller), createEntityStore())
+    received.receive({ kind: 'baseline', baseline: { ...base, source: { ...base.source, reconciledAt } } })
+    assert.equal(received.read().reconciledAt, reconciledAt)
   }
 })

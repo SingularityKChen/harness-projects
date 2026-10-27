@@ -37,6 +37,7 @@ async function setup(storage, { clock = clockOf(T(1), T(2), T(3)), workspace = {
   return { id, providers, storage, open, cursor, revision: () => storage.currentRevision(id), reconciled: async () => (await storage.getReconcileCursor(id))?.lastReconciledAt }
 }
 
+const confirmationOf = async (world) => { const reconciledAt = await world.reconciled(); return reconciledAt === undefined ? {} : { reconciledAt } }
 const SECRET = 'credential-material-never-forwarded'
 const rowRevisions = async (world) => (await world.storage.listPlanningProjections(world.id)).map((row) => `${row.entityId}@${row.revision}`).sort()
 /** 每行的实体、行修订号与标题：行内容与行修订号必须一起前进或一起回滚。 */
@@ -77,7 +78,7 @@ async function assertRoundFailed(world, core, forbidden, label) {
   }
   const cursor = await world.cursor()
   assert.deepEqual([cursor.state, cursor.lastErrorCode], ['degraded', 'unavailable'], `${label}：游标 degraded 带错误码`)
-  assert.deepEqual(await core.queries.getPlanningSync(), { degraded: true, stale: true, reason: 'unavailable' }, `${label}：读侧陈旧`)
+  assert.deepEqual(await core.queries.getPlanningSync(), { ...await confirmationOf(world), degraded: true, stale: true, reason: 'unavailable' }, `${label}：读侧陈旧`)
   const after = await core.queries.listPlanningItems()
   assert.deepEqual(after.map((view) => view.entityId), ids, `${label}：最后已知值保留`)
   assert.ok(after.every((view) => view.freshness.degraded), `${label}：每一行都标陈旧`)
@@ -245,7 +246,7 @@ for (const [label, make] of STORAGES) {
     const result = await core.commands.bootstrapWorkspace()
     assert.deepEqual([result.ok, result.degraded, result.error?.code, result.unanchored, result.revision], [true, true, 'permission_denied', 1, revision], '可锚定部分照常提交、带缺口码，内容没变不推进')
     assert.deepEqual([await world.revision(), await rowRevisions(world), await world.reconciled()], [revision, rows, T(2)], '缺口不是内容变化；提交成功的一轮仍记对账时刻')
-    assert.deepEqual(await core.queries.getPlanningSync(), { degraded: true, stale: false, reason: 'permission_denied' })
+    assert.deepEqual(await core.queries.getPlanningSync(), { ...await confirmationOf(world), degraded: true, stale: false, reason: 'permission_denied' })
   })
 
   test(`观察顺序：经 core 先投递新观察再投递旧观察，旧观察不落账本，投影与修订号不变（R1 第 8 条，${label}）`, async () => {
@@ -267,9 +268,9 @@ for (const [label, make] of STORAGES) {
   test(`新鲜度：游标 state=idle（从未成功）与游标缺失同样读作陈旧，不读作新鲜（fail closed，${label}）`, async () => {
     const world = await setup(make())
     const core = await world.open()
-    assert.deepEqual(await core.queries.getPlanningSync(), { degraded: false, stale: false, reason: undefined }, '对照：成功提交后读作新鲜')
+    assert.deepEqual(await core.queries.getPlanningSync(), { ...await confirmationOf(world), degraded: false, stale: false, reason: undefined }, '对照：成功提交后读作新鲜')
     await world.storage.putSyncCursor({ workspaceId: world.id, bindingId: world.providers.planning.bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined, state: 'idle', lastErrorCode: undefined })
-    assert.deepEqual(await core.queries.getPlanningSync(), { degraded: true, stale: true, reason: 'idle' })
+    assert.deepEqual(await core.queries.getPlanningSync(), { ...await confirmationOf(world), degraded: true, stale: true, reason: 'idle' })
   })
 
   test(`存储拒绝：被拒绝的观察让同步结构化失败，游标 degraded 带错误码、读侧陈旧、修订号与对账时刻不动（#199，${label}）`, async () => {
@@ -282,7 +283,7 @@ for (const [label, make] of STORAGES) {
 
     heal(world.providers.planning)
     assert.deepEqual([(await core.commands.bootstrapWorkspace()).ok, await world.revision(), await world.reconciled()], [true, revision, T(2)], '恢复后内容不变：只记对账时刻')
-    assert.deepEqual(await core.queries.getPlanningSync(), { degraded: false, stale: false, reason: undefined })
+    assert.deepEqual(await core.queries.getPlanningSync(), { ...await confirmationOf(world), degraded: false, stale: false, reason: undefined })
   })
 
   test(`结构化失败：provider 离线的一轮同样不推进修订号、不记对账时刻，游标 degraded 带码（ADR-0012 第 7 条，${label}）`, async () => {
@@ -303,7 +304,7 @@ for (const [label, make] of STORAGES) {
       messages.add(await assertRoundFailed(world, core, new RegExp(SECRET), name))
       world.providers.planning[method] = original
       assert.equal((await core.commands.bootstrapWorkspace()).ok, true, `${name}：恢复后的一轮照常提交`)
-      assert.deepEqual(await core.queries.getPlanningSync(), { degraded: false, stale: false, reason: undefined }, `${name}：恢复后读作新鲜`)
+      assert.deepEqual(await core.queries.getPlanningSync(), { ...await confirmationOf(world), degraded: false, stale: false, reason: undefined }, `${name}：恢复后读作新鲜`)
     }
     assert.equal(messages.size, 1, '固定文案：与抛出的值无关，四种触发给出同一句话')
   })
@@ -325,7 +326,7 @@ for (const [label, make] of STORAGES) {
       assert.equal((await core.commands.bootstrapWorkspace()).revision, revision + 1, '对照：同一份改动在注入撤掉后提交并恰好推进一次，前面的失败只能来自被拒绝的那一笔写入')
       assert.notDeepEqual(await rowStates(world), rows)
       assert.notEqual(await world.reconciled(), reconciled)
-      assert.deepEqual(await core.queries.getPlanningSync(), { degraded: false, stale: false, reason: undefined })
+      assert.deepEqual(await core.queries.getPlanningSync(), { ...await confirmationOf(world), degraded: false, stale: false, reason: undefined })
     })
   }
 
@@ -451,7 +452,7 @@ for (const [label, make] of STORAGES) {
     assert.notEqual(result, HUNG, '显式命令：钩子的返回值不挂住这一轮')
     assert.deepEqual([result.ok, result.degraded, result.error?.code], [false, true, 'unavailable'])
     assert.equal(seen.length, 2)
-    assert.deepEqual(await opened.queries.getPlanningSync(), { degraded: true, stale: true, reason: 'unavailable' })
+    assert.deepEqual(await opened.queries.getPlanningSync(), { ...await confirmationOf(world), degraded: true, stale: true, reason: 'unavailable' })
   })
 
   test(`诊断出口：组合期记录失败本身也被拒绝时，那个拒绝在被吞掉之前交给宿主；显式命令的同一拒绝仍直接到调用方（TD-030、TD-031，${label}）`, async () => {
@@ -467,7 +468,7 @@ for (const [label, make] of STORAGES) {
     assert.equal(probe.seen.length, 1, '组合期：provider 的结构化失败本身不调用钩子，记录它时被拒绝的那个异常调用一次')
     assert.strictEqual(probe.seen[0], diskFull, '交给宿主的是被拒绝的那个异常本身')
     assert.equal(await world.cursor(), undefined, '前提：一个游标都没写进去')
-    assert.deepEqual(await core.queries.getPlanningSync(), { degraded: true, stale: true, reason: 'idle' }, '读侧：游标缺失读作陈旧')
+    assert.deepEqual(await core.queries.getPlanningSync(), { ...await confirmationOf(world), degraded: true, stale: true, reason: 'idle' }, '读侧：游标缺失读作陈旧')
 
     await assert.rejects(core.commands.bootstrapWorkspace(), (error) => error === diskFull, '显式命令：同一拒绝直接到调用方（TD-031 不变）')
     assert.equal(probe.seen.length, 1, '显式命令的拒绝已在调用方手里，不再另交钩子')
@@ -560,7 +561,7 @@ test('双重故障：连失败都记不下时命令拒绝，从未成功的工�
   const world = await setup(broken, { diagnostics: probe.diagnostics })
   const core = await world.open()
   assert.equal(await world.cursor(), undefined, '前提：一个游标都没写进去')
-  assert.deepEqual(await core.queries.getPlanningSync(), { degraded: true, stale: true, reason: 'idle' })
+  assert.deepEqual(await core.queries.getPlanningSync(), { ...await confirmationOf(world), degraded: true, stale: true, reason: 'idle' })
   await assert.rejects(core.commands.bootstrapWorkspace(), /disk full/, '记不下降级时不假装已记录')
   // 组合期：轮次的原异常（事务被拒）先于 fail 交给宿主，记录失败本身的拒绝被 composeCore 吞掉之前再交一次；显式命令：只有轮次的原异常，记录失败的拒绝直接到调用方。
   assert.equal(probe.seen.length, 3, '诊断出口先于 fail，不因记录失败而丢原因；组合期被吞掉的拒绝也交出去（TD-030）')

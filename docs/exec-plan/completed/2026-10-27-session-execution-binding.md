@@ -120,7 +120,7 @@ execution owner 独占新增适配/安装模块及 host-providers、host.ts；�
 - [x] (2026-10-27 +08) Batch 2：先写真实 Host/SQLite `read-recovered-pair` 回归，未改实现时 `executionInstalled` 实际 undefined、期望 true，退出码 1；同时 activationError 后干净读取结算回归失败，29 测试中 27 pass / 2 fail。
 - [x] (2026-10-27 +08) Batch 2：引入 source 级 acknowledged 安装意图，以对象身份、当前 revision、命令/激活/读取错误栅栏结算；GREEN 为 Host execution + adapter + UI setup 49/49，`pnpm typecheck` 通过。
 - [x] (2026-10-27 +08) Batch 2：最终产品树统一 9 项变异整表全部归因 KILLED，退出码 0，基线及还原后基线均通过且按字节还原；未再修改产品树。
-- [ ] Batch 2：根会话交另一评审者独立复评，重组最终候选并按当前 head 回读门禁后整合发布。
+- [x] 2026-10-27：Batch 2 修复已由未参与实现的子评审独立复评，最终组合2157+7、pack与28项变异通过；当前证据见 `docs/review/pr-411-mmp-review.md` 和批次记录。
 
 - [x] (2026-10-27 15:33 +08) 复核双独立研究、session/raw 记录、catalog/Core/secret 所有权。
 - [x] (2026-10-27 15:33 +08) 收敛为唯一显式安装链，写入本计划；尚未实现。
@@ -162,7 +162,9 @@ Batch 2：初审 59 个窄测试全绿仍遗漏“安装 ack 后首次读回失�
 
 ## Outcomes & Retrospective
 
-2026-10-27 Batch 2 当前修复结果：F411-1 的真实 Host/SQLite 回归由 RED 转 GREEN，重新安装使用新 key、实际生成两条新 binding。新增 unknown/pending 旧配置读数保护、activationError 恢复与旧读取版本保护。49 个相关测试与 typecheck 通过，9 个最终变异全部 KILLED。外部 APPROVE review id `5665061275` 由根会话回报，修复尚待另一评审者独立复评；本执行者未 commit/push 或操作 GitHub。下面的“独立验收通过”仅指修复前候选，Superseded by 本段对当前修复树的阶段判断（2026-10-27）。
+2026-10-27 MMP 修复收口：独立复评和最终重组已完成，未发现 P0/P1；本批产品与最终验证组合逐字一致。 PR #411 已按当前 head 门禁 rebase merge 为 `26e8d05abd71b674b23e9ec64e0b026fabf7a7e0`，对应验收 issue 已关闭。 本段替代下列历史阶段的等待状态，不替代 #143 的真实宿主走查或人类规划接受。
+
+2026-10-27 Batch 2 当前修复结果：F411-1 的真实 Host/SQLite 回归由 RED 转 GREEN，重新安装使用新 key、实际生成两条新 binding。新增 unknown/pending 旧配置读数保护、activationError 恢复与旧读取版本保护。49 个相关测试与 typecheck 通过，9 个最终变异全部 KILLED。外部 APPROVE review id `5665061275` 由根会话回报，修复尚待另一评审者独立复评；本执行者未 commit/push 或操作 GitHub。下面的“独立验收通过”仅指修复前候选，Superseded by 本段对当前修复树的阶段判断（2026-10-27）。 此为历史阶段观察，Superseded by `docs/review/pr-411-mmp-review.md` 的最终独立复评与 `docs/review/2026-10-27-pr410-pr412-mmp-review.md` 的组合证据（2026-10-27）。
 
 
 最终本地结果：显式执行绑定、会话适配、稳定人工回退与安装重试（#359）已通过独立验收、修复复评与组合验证。历史阶段记录如下，其“待验收/未提交”描述仅指当时观察，Superseded by 本段（2026-10-27 17:03 +08）。
@@ -195,3 +197,5 @@ PR #411 的最终发布状态必须重新回读，预期为当前 head/base 正�
 - 2026-10-27：收到 F411-1 APPROVE 评审后的修复任务，在既有 completed 计划追加 Batch 2、三方案比较与窄验证；未另建计划。
 
 - 2026-10-27：记录 Batch 2 的真实 RED/GREEN、49 窄测试、typecheck、9 项最终变异和待独立复评边界；原计划保持 completed 路径，不另建计划。
+
+- 2026-10-27：修复文档P3，原处收口Batch 2 Progress并为历史等待结论标注Superseded；独立复评与组合验证证据见对应review记录。

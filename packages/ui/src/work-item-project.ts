@@ -10,7 +10,8 @@ import type { WorkItemDetailView, WorkItemListView } from '@harness-projects/ui-
 import { WorkItemDetailDrawer, activeElement, type DOMElement } from './work-item-detail.ts'
 import { WorkItemListPage, type ItemNavigation } from './work-item-list.ts'
 
-export function WorkItemProjectPage({ listView, detailView, navigation, onCloseDetail, executionReader, connected, startWork, onBindRepository, deliveryReader }: { readonly deliveryReader?: DeliveryLineageReader | undefined;
+export function WorkItemProjectPage({ listView, detailView, navigation, onCloseDetail, executionReader, connected, startWork, onBindRepository, deliveryReader, refresh }: {
+  readonly refresh?: { readonly pending: boolean; readonly disabled: boolean; readonly run: () => void } | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined;
   readonly startWork?: StartWork | undefined
   readonly onBindRepository?: (() => void) | undefined
   readonly executionReader?: ExecutionContextReader | undefined
@@ -41,9 +42,10 @@ export function WorkItemProjectPage({ listView, detailView, navigation, onCloseD
     open: (itemId) => { opener.current = activeElement(); openerContainer.current = list.current; navigation.open(itemId) },
   }
   return createElement('div', null,
+    ...(refresh === undefined ? [] : [createElement('button', { type: 'button', disabled: refresh.disabled, 'aria-busy': refresh.pending, onClick: refresh.run }, refresh.pending ? '正在刷新规划' : '刷新规划')]),
     createElement('div', { ref: list }, createElement(WorkItemListPage, { view: listView, navigation: routed, headingTabIndex: -1 })),
     // 列表的页面级说明也交给抽屉：模态打开时列表 inert，说明只在列表里就既看不到也不被宣告（#379）
     detailView === undefined ? null : createElement(WorkItemDetailDrawer, {
-      view: detailView, executionReader, deliveryReader, connected, startWork, onBindRepository, notice: listView.body.kind === 'content' ? listView.body.notice : undefined, onClose: onCloseDetail,
+      view: detailView, refresh, executionReader, deliveryReader, connected, startWork, onBindRepository, notice: listView.body.kind === 'content' ? listView.body.notice : undefined, onClose: onCloseDetail,
     }))
 }

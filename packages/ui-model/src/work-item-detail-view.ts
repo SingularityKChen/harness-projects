@@ -28,6 +28,7 @@ export type WorkItemDetailContent = {
   readonly stale: boolean
   readonly refreshing: boolean
   readonly lastUpdatedAt?: string
+  readonly reconciledAt?: string
 }
 
 export type WorkItemDetailView = {
@@ -74,6 +75,7 @@ export function deriveWorkItemDetailView(input: WorkItemListReadInput, target: W
       ...(derived === undefined ? {} : { derived }),
       stale: row.stale, refreshing: view.body.refreshing,
       ...(view.body.lastUpdatedAt === undefined ? {} : { lastUpdatedAt: view.body.lastUpdatedAt }),
+      ...(view.body.reconciledAt === undefined ? {} : { reconciledAt: view.body.reconciledAt }),
     },
   }
 }

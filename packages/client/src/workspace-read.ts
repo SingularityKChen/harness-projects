@@ -13,8 +13,8 @@ import { CapabilityKey } from './keys.ts'
  *
  * `lastUpdatedAt` = client 接受一帧「宿主判定为当前值」的帧的时刻（ISO 8601），不是 provider 的更新时间；真伪跟随宿主的
  * freshness（宿主误报 fresh 时也推进；#199 之后只剩双重故障会误报，见 TD-031）。idle poll 不推进，reconnect / gap 重拉的基线被判定为当前值就推进，即使数据未变；
- * 内容不变的成功刷新不产生帧（#220、ADR-0012），所以不推进；
- * 同修订的 metadata 帧只在整表或某行由 degraded 恢复为 fresh 时推进，纯来源改名、能力变化与降级都不推进。
+ * 内容不变的成功刷新经 metadata 携带来源确认时刻；整表 fresh 且该时刻前进时推进；
+ * 同修订 metadata 在来源确认前进或整表 / 某行由 degraded 恢复为 fresh 时推进，纯来源改名、能力变化与降级都不推进。
  * 省略 = 从未读到当前值，是合法的降级形态。`capabilities` 省略 = 未观测到任何能力（权限未知不得当成可用）。
  * `repositories` 是逐仓库的能力项（#353）：省略 = 没有已登记的仓库，或最近一帧没有携带它；用法见 ui-model 的 `repositoryAccessIndex`。
  * `planningSource` 是规划来源的绑定 id 与显示名（#383）：省略 = 名字未知（没有规划挂载、Host 启动后还没读到项目），或最近一帧没有携带它。
@@ -26,6 +26,8 @@ export interface ClientWorkspaceRead {
   readonly store: EntityStore
   readonly connection: { readonly connected: boolean }
   readonly lastUpdatedAt?: string | undefined
+  /** Host 最后成功提交的规划来源确认时间；不是客户端时钟。 */
+  readonly reconciledAt?: string | undefined
   readonly capabilities?: readonly WireCapabilityEntry[] | undefined
   readonly repositories?: readonly WireRepositoryEntry[] | undefined
   readonly planningSource?: WirePlanningSource | undefined
@@ -33,20 +35,31 @@ export interface ClientWorkspaceRead {
 }
 
 /** 契约是 ISO 8601（与 ui-model 的展示校验同口径）。 */
-const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
+const ISO_8601 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/
+function validTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const match = ISO_8601.exec(value)
+  if (!match || Number.isNaN(Date.parse(value))) return false
+  const [, year, month, day, hour, minute, second, offsetHour = '0', offsetMinute = '0'] = match
+  const y = Number(year), leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][Number(month) - 1] ?? 0
+  return Number(month) >= 1 && Number(month) <= 12 && Number(day) >= 1 && Number(day) <= days
+    && Number(hour) < 24 && Number(minute) < 60 && Number(second) < 60 && Number(offsetHour) < 24 && Number(offsetMinute) < 60
+}
 const KNOWN_CAPABILITIES = new Set(Object.values(CapabilityKey))
 const ACCESS_LEVELS = new Set(Object.values(AccessLevel))
 
 export function isSource(value: unknown): boolean {
-  const source = value as { revision?: unknown; freshness?: unknown } | null
+  const source = value as { revision?: unknown; freshness?: unknown; reconciledAt?: unknown } | null
   return typeof source === 'object' && source !== null && Number.isInteger(source.revision)
+    && (source.reconciledAt === undefined || validTimestamp(source.reconciledAt))
     && (source.freshness === WireFreshness.Fresh || source.freshness === WireFreshness.Degraded)
 }
 
 /** 先读并校验时钟，再改任何状态：坏时间不能先推进头再失败。 */
 export function readClock(clock: () => string): string {
   const at = clock()
-  if (typeof at !== 'string' || !ISO_8601.test(at) || Number.isNaN(Date.parse(at))) {
+  if (!validTimestamp(at)) {
     throw new TypeError(`clock 必须返回 ISO 8601 时间戳，收到 ${JSON.stringify(at)}`)
   }
   return at

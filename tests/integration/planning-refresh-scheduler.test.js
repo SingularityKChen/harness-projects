@@ -87,7 +87,7 @@ test('explicit refresh reads current provider state without invoking provider wr
 })
 
 test('same-state refresh keeps the workspace revision unchanged', async () => {
-  const { core, providers } = await setup()
+  const { core, providers, workspace } = await setup()
   const before = await providers.storage.currentRevision((await core.queries.getWorkspaceMetadata()).workspace.id)
   const result = await core.commands.refreshPlanning()
   const after = await providers.storage.currentRevision((await core.queries.getWorkspaceMetadata()).workspace.id)
@@ -97,17 +97,17 @@ test('same-state refresh keeps the workspace revision unchanged', async () => {
 })
 
 test('failed refresh retains last-known rows as stale and the next success clears stale', async () => {
-  const { core, providers } = await setup()
+  const { core, providers, workspace } = await setup()
   const before = await core.queries.listPlanningItems()
   providers.planning.setFault(FaultKind.Offline, true)
   const failed = await core.commands.refreshPlanning()
   assert.deepEqual([failed.ok, failed.error?.code], [false, ProviderErrorCode.Unavailable])
-  assert.deepEqual(await core.queries.getPlanningSync(), { degraded: true, stale: true, reason: 'unavailable' })
+  assert.deepEqual(await core.queries.getPlanningSync(), { reconciledAt: (await providers.storage.getReconcileCursor(workspace.id)).lastReconciledAt, degraded: true, stale: true, reason: 'unavailable' })
   assert.deepEqual((await core.queries.listPlanningItems()).map((row) => row.entityId), before.map((row) => row.entityId))
 
   providers.planning.setFault(FaultKind.Offline, false)
   assert.equal((await core.commands.refreshPlanning()).ok, true)
-  assert.deepEqual(await core.queries.getPlanningSync(), { degraded: false, stale: false, reason: undefined })
+  assert.deepEqual(await core.queries.getPlanningSync(), { reconciledAt: (await providers.storage.getReconcileCursor(workspace.id)).lastReconciledAt, degraded: false, stale: false, reason: undefined })
 })
 
 test('controller refresh is local-only and never replays an earlier provider read', async () => {

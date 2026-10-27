@@ -63,7 +63,7 @@ export type WorkItemListView = {
     | {
         readonly kind: 'content'; readonly rows: readonly VisibleListRow[]
         readonly stale: boolean; readonly refreshing: boolean
-        readonly lastUpdatedAt?: string; readonly notice?: string
+        readonly lastUpdatedAt?: string; readonly reconciledAt?: string; readonly notice?: string
         /** 部分读取：整表未确认（`stale`），但每条可见条目都已确认；renderer 据此不把可见值说成最后已知值。 */
         readonly partial?: true
       }
@@ -176,6 +176,7 @@ export function deriveWorkItemListView(input: WorkItemListReadInput): WorkItemLi
     body: {
       kind: 'content', rows, stale, refreshing,
       ...(list.lastUpdatedAt === undefined ? {} : { lastUpdatedAt: list.lastUpdatedAt }),
+      ...(read.reconciledAt === undefined ? {} : { reconciledAt: read.reconciledAt }),
       ...(metadata.safeNotice ? { notice: metadata.safeNotice } : {}),
       ...(partial ? { partial: true } : {}),
     },
