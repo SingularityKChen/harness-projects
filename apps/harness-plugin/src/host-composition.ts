@@ -49,7 +49,20 @@ export interface HostComposition {
 }
 
 /** 工作区身份来自 Host；执行记录只在读取前后均可见的工作项上投影允许字段。 */
-const handlersFor = (workspaceId: WorkspaceId): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext'>, Controller> => ({
+const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness'): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'getStartWorkOptions' | 'startWork'>, Controller> => ({
+  getStartWorkOptions: async (controller, input) => {
+    if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
+    return { workspaceId, workItemId: input.workItemId, executionMode: mode() }
+  },
+  startWork: async (controller, input) => {
+    if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item'
+      || !(await controller.baseline()).repositories?.some((repository) => repository.id === input.repositoryId)) throw new Error('开始工作范围无效')
+    if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
+    const { branchName, ...request } = input
+    const result = await controller.commands.startWork({ ...request, ...(branchName === undefined ? {} : { branchName }) })
+    if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
+    return { ...result, ...(result.error === undefined ? {} : { error: projectError(result.error.code, '开始工作未确认，请按恢复动作处理') }) }
+  },
   baseline: (controller) => controller.baseline(),
   refreshPlanning: (controller, input) => controller.commands.refreshPlanning(input),
   bootstrapWorkspace: (controller, input) => controller.commands.bootstrapWorkspace(input),
@@ -86,7 +99,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   }
   let storage: SqliteStorage | undefined
   let closed = false
-  type Assembly = { controller: Controller; disabled: readonly DisabledBinding[]; lifetime: ReturnType<typeof createPlanningLifetime>; reconciler?: PlanningReconciler; leases: Set<Promise<unknown>>; retired?: boolean; cache: Map<string, object> }
+  type Assembly = { controller: Controller; disabled: readonly DisabledBinding[]; lifetime: ReturnType<typeof createPlanningLifetime>; reconciler?: PlanningReconciler; leases: Set<Promise<unknown>>; retired?: boolean; cache: Map<string, object>; executionMode: 'manual' | 'harness' }
   let developmentCache = new Map<string, object>()
   let current: Assembly
   let barrier: Promise<void> | undefined, epoch = 0, tail: Promise<unknown> = Promise.resolve(), activeFingerprint = ''
@@ -133,7 +146,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     }))])
     const assemble = async (): Promise<Assembly> => {
       const lifetime = createPlanningLifetime(options.planningReadTimeoutMs)
-      const assembly: Assembly = { controller: undefined!, disabled: [], lifetime, leases: new Set(), cache: new Map(developmentCache) }
+      const assembly: Assembly = { controller: undefined!, disabled: [], lifetime, leases: new Set(), cache: new Map(developmentCache), executionMode: 'manual' }
       try {
         const workspace = await storage!.getWorkspace(options.workspaceId)
         const { table, disabled } = workspace === undefined ? { table: {}, disabled: [] } : await restoreProviders(storage!, workspace.id, options.catalog, {
@@ -156,6 +169,8 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         })
         const controller = createController(core, { workspaceRevision: () => storage!.currentRevision(options.workspaceId) })
         assembly.controller = controller; assembly.disabled = disabled
+        const start = (await controller.baseline()).capabilities.find((entry) => entry.key === 'execution.run.start')
+        assembly.executionMode = table.execution?.definition.implementationKey === 'execution.harness' && ['available', 'degraded'].includes(start?.access ?? '') ? 'harness' : 'manual'
         if (table.planning !== undefined) {
           assembly.reconciler = createPlanningReconciler(async () => { while (barrier) await barrier; lifetime.assertActive(); return lease(assembly, () => core.commands.refreshPlanning()) }, {
             intervalMs, diagnostics, ...(options.planningTimers === undefined ? {} : { timers: options.planningTimers }),
@@ -224,7 +239,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         return { workspace, planning: workspace === null ? { state: 'unbound' } : { state: 'degraded', ...(bindingId === undefined ? {} : { bindingId }), ...(projectNodeId === undefined ? {} : { projectNodeId }) }, ...activation, error: failure() }
       }
     })
-    const dispatch = dispatchOf<typeof OPERATIONS, Controller>(OPERATIONS, { ...handlersFor(options.workspaceId), baseline: () => source.baseline(), getWorkspaceSetup,
+    const dispatch = dispatchOf<typeof OPERATIONS, Controller>(OPERATIONS, { ...handlersFor(options.workspaceId, () => current.executionMode), baseline: () => source.baseline(), getWorkspaceSetup,
       createWorkspace: (_controller, input) => configure(() => setup.createWorkspace({ ...input, workspaceId: options.workspaceId, statusPolicy: StatusPolicy.ProviderAuthoritative })),
       connectAccount: (_controller, input) => configure(async () => {
         const viewer = await githubViewer(options.fetch ?? globalThis.fetch, () => options.resolveCredential(HOST_SECRET_HANDLES[0]))

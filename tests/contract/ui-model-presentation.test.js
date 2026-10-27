@@ -44,7 +44,7 @@ const KEY = {
   repositoryRead: 'development.repository.read', worktreeRead: 'development.worktree.read',
 }
 
-const START_WORK_KEYS = [KEY.branchCreate, KEY.worktreeCreate, KEY.runStart]
+const START_WORK_KEYS = [KEY.branchCreate, KEY.worktreeCreate]
 /** core 写前预检的两个读门：只按读判定，下面的写动作差分里固定为可用。 */
 const START_WORK_READS = [{ key: KEY.repositoryRead, access: 'available' }, { key: KEY.worktreeRead, access: 'available' }]
 
@@ -234,7 +234,7 @@ test('不变量：四态映射——read_only / unavailable 阻断，degraded �
   assert.equal(readOnly.access, 'read_only')
   assert.match(readOnly.reason, /development\.worktree\.create/, '原因必须点名 capability key')
 
-  const unavailable = withAccess(KEY.runStart, 'unavailable')
+  const unavailable = withAccess(KEY.worktreeCreate, 'unavailable')
   assert.equal(unavailable.available, false)
   assert.equal(unavailable.access, 'unavailable')
 
@@ -532,20 +532,20 @@ test('不变量：谱系入口的必需 key 精确等于 core 真实的读门', 
 })
 
 /** 根因组 C（评审 P3-5）：四态求交不是第二个权威源——与 capabilities 的 `intersectAccess` 逐格差分。 */
-test('不变量：四态求交与 capabilities 的 intersectAccess 逐格一致（4×4×4）', () => {
+test('不变量：四态求交与 capabilities 的 intersectAccess 逐格一致（4×4）', () => {
   const LEVELS = ['available', 'read_only', 'degraded', 'unavailable']
   const seen = []
-  for (const a of LEVELS) for (const b of LEVELS) for (const c of LEVELS) {
-    const levels = [a, b, c]
+  for (const a of LEVELS) for (const b of LEVELS) {
+    const levels = [a, b]
     const action = deriveWorkItemList(readFor({
       capabilities: [...START_WORK_KEYS.map((key, index) => ({ key, access: levels[index] })), ...START_WORK_READS],
     })).rows.find((row) => row.entityId === 'entity-work-item').actions[0]
-    assert.equal(action.access, intersectAccess(a, b, c), `求交(${levels.join(', ')})`)
+    assert.equal(action.access, intersectAccess(a, b, 'available'), `求交(${levels.join(', ')})`)
     assert.equal(action.available, levels.every((level) => level !== 'read_only' && level !== 'unavailable'),
       `写动作在 ${levels.join('/')} 下的可用性`)
     seen.push(action.access)
   }
-  assert.equal(seen.length, 64, '必须逐格覆盖 4×4×4')
+  assert.equal(seen.length, 16, '必须逐格覆盖两个写门的 4×4')
 })
 
 /** 评审 P3-3：不可用说明逐 key 给出**它自己的**级别，合成级别不等于任何单个 key 的级别。 */

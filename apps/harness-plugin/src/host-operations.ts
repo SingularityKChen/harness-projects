@@ -49,6 +49,7 @@ function actorRef(value: unknown): ActorRefWire {
 export interface Param<N extends string = string, T = unknown> {
   readonly name: N
   readonly type: string
+  readonly acceptsUndefined?: true
   readonly parse: (value: unknown) => T
 }
 
@@ -95,6 +96,12 @@ export const OPERATIONS = defineOperations({
     param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId')),
     param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId')),
   ] },
+  getStartWorkOptions: { mode: 'unary', params: [param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId'))] },
+  startWork: { mode: 'unary', params: [...ENVELOPE,
+    param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId')),
+    param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId')),
+    { ...param('branchName', 'BranchName', (value) => value === undefined ? undefined : nonEmptyString(value, 'branchName')), acceptsUndefined: true },
+  ] },
   createWorkspace: { mode: 'unary', params: [...ENVELOPE, param('name', 'WorkspaceName', (value) => nonEmptyString(value, 'name'))] },
   connectAccount: { mode: 'unary', params: ENVELOPE },
   bindPlanningSource: { mode: 'unary', params: [...ENVELOPE, param('accountId', 'AccountId', (value) => nonEmptyString(value, 'accountId')), param('projectNodeId', 'ProjectNodeId', (value) => nonEmptyString(value, 'projectNodeId'))] },
@@ -123,6 +130,7 @@ export function parseInput(operation: Operation, input: unknown): JsonRecord {
 
 /** live service 方法的位置参数 → 校验过的输入记录（与 Host 侧是同一套校验）。 */
 export function inputOfArguments(operation: Operation, args: readonly unknown[]): JsonRecord {
+  if (operation.name === 'startWork' && (args.length < 4 || args.length > 5)) throw new TypeError('startWork 参数数量不合契约')
   return parseInput(operation, Object.fromEntries(operation.params.map((p, index) => [p.name, args[index]])))
 }
 

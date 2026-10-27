@@ -1,7 +1,8 @@
 /** 唯一只读详情抽屉（issue #130）：原生 `<dialog>` showModal 承担焦点进入/背景 inert/焦点限制/Escape（W3C H102）。 */
-import type { ExecutionContextReader } from '@harness-projects/client'
+import type { ExecutionContextReader, StartWork } from '@harness-projects/client'
+import { StartWorkSection } from './start-work-section.ts'
 import { ExecutionContextSection } from './execution-context-section.ts'
-import { createElement, useEffect, useId, useRef } from 'react'
+import { createElement, useEffect, useId, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { WorkItemDetailView } from '@harness-projects/ui-model'
 import { LoadingState, SourceBadge, UnavailableState } from './list-states.ts'
@@ -65,10 +66,11 @@ function cycleFocus(dialog: DOMElement, shiftKey: boolean, event: { preventDefau
  * 唯一详情抽屉：view 变化只更新内容；Escape 只走原生 cancel（preventDefault 后一次 onClose）；cleanup 不导航。
  * `notice` 是页面级说明（如断开重连）：模态打开时背景 inert，所以抽屉在自己稳定的状态区里再说一次，打开期间出现也会被宣告。
  */
-export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, connected }: { executionReader?: ExecutionContextReader | undefined; connected?: boolean | undefined; view: WorkItemDetailView; notice?: string | undefined; onClose: () => void }): ReactElement {
+export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, connected, startWork, onBindRepository }: { startWork?: StartWork | undefined; onBindRepository?: (() => void) | undefined; executionReader?: ExecutionContextReader | undefined; connected?: boolean | undefined; view: WorkItemDetailView; notice?: string | undefined; onClose: () => void }): ReactElement {
   const dialog = useRef<DOMElement | null>(null)
   const title = useRef<DOMElement | null>(null)
   const titleId = useId()
+  const [executionRefresh, setExecutionRefresh] = useState(0)
 
   useEffect(() => {
     const element = dialog.current
@@ -96,6 +98,7 @@ export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, c
     createElement('div', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, notice),
     panelBody(view.body),
     view.body.kind !== 'content' || view.body.executionTarget === undefined || executionReader === undefined ? null
-      : createElement(ExecutionContextSection, { key: JSON.stringify(view.body.executionTarget), target: view.body.executionTarget, reader: executionReader, connected: connected === true }),
+      : createElement(ExecutionContextSection, { key: JSON.stringify(view.body.executionTarget), target: view.body.executionTarget, reader: executionReader, connected: connected === true, refreshToken: executionRefresh }),
+    view.body.kind !== 'content' || !view.body.executionTarget || !startWork ? null : createElement(StartWorkSection, { key: JSON.stringify(view.body.executionTarget), target: view.body.executionTarget, repositories: view.body.startWorkRepositories ?? [], startWork, connected: connected === true, onStarted: () => setExecutionRefresh((value) => value + 1), onBindRepository }),
     createElement('button', { type: 'button', onClick: onClose }, '关闭详情')))
 }

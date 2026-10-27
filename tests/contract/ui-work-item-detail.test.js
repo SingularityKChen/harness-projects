@@ -148,7 +148,7 @@ test('事件回调机械判据：Escape 只有 cancel 单次关闭；Tab 接受 
   const previous = internals.ReactCurrentDispatcher.current
   const previousDocument = globalThis.document
   const refs = []
-  internals.ReactCurrentDispatcher.current = { useRef: (value) => { const ref = { current: value }; refs.push(ref); return ref }, useId: () => ':r:', useEffect: () => undefined }
+  internals.ReactCurrentDispatcher.current = { useState: (value) => [value, () => undefined], useRef: (value) => { const ref = { current: value }; refs.push(ref); return ref }, useId: () => ':r:', useEffect: () => undefined }
   try {
     let closes = 0, prevented = 0
     const escape = ui.WorkItemDetailDrawer({ view: views([wire('ent-aa')]).detailView, onClose: () => { closes += 1 } })

@@ -34,6 +34,7 @@ export interface InvocationDescriptor {
     readonly name: string
     readonly wire: string
     readonly source: 'json'
+    readonly acceptsUndefined?: true
     readonly codec: StrictCodec
   }[]
   readonly result: StrictCodec
@@ -105,7 +106,7 @@ function descriptorOf(operation: Operation): InvocationDescriptor {
     method: operation.name,
     ...(stream ? { mode: 'stream' as const } : {}),
     invocation: { kind: 'direct' },
-    parameters: operation.params.map((p) => ({ name: p.name, wire: p.name, source: 'json' as const, codec: codec(p.type, p.parse) })),
+    parameters: operation.params.map((p) => ({ name: p.name, wire: p.name, source: 'json' as const, ...(p.acceptsUndefined ? { acceptsUndefined: true as const } : {}), codec: codec(p.type, p.parse) })),
     ...(stream ? { cancellation: { parameter: 'signal' as const } } : {}),
     result: jsonOutput,
   }

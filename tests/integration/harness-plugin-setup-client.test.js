@@ -74,3 +74,12 @@ test('named repositoryBindingSource option delegates through the real mount whil
     assert.equal(bindWorkspaceSetupApp(f.source, f.props.source, f.props.executionReader)().props.repositoryBindingSource, undefined)
   } finally { await f.close() }
 })
+
+test('named startWork option delegates through the real mount while legacy three-argument binding remains readonly', async () => {
+  const f = await mount({ getStartWorkOptions: async (id) => { return { ok: true, value: { workspaceId: 'ws-1', workItemId: id, executionMode: 'manual' } } } })
+  try {
+    const Panel = bindWorkspaceSetupApp(f.source, f.props.source, f.props.executionReader, { startWork: f.props.startWork })
+    assert.equal((await Panel().props.startWork.options({ workspaceId: 'ws-1', workItemId: 'item-1' })).executionMode, 'manual')
+    assert.equal(bindWorkspaceSetupApp(f.source, f.props.source, f.props.executionReader)().props.startWork, undefined)
+  } finally { await f.close() }
+})

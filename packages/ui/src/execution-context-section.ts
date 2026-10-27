@@ -5,7 +5,7 @@ import { executionContextText, type ExecutionTarget } from '@harness-projects/ui
 type Result = { readonly repositoryId: string; readonly context?: ExecutionContextDTO | null; readonly refreshing: boolean; readonly unavailable: boolean }
 type State = { readonly key: string; readonly results: readonly Result[] }
 const FAILED = '暂时无法读取执行状态'
-export function ExecutionContextSection({ target, reader, connected }: { readonly target: ExecutionTarget; readonly reader: ExecutionContextReader; readonly connected: boolean }) {
+export function ExecutionContextSection({ target, reader, connected, refreshToken }: { readonly target: ExecutionTarget; readonly reader: ExecutionContextReader; readonly connected: boolean; readonly refreshToken?: number | undefined }) {
   const repositories = [...target.repositoryIds].sort(), key = JSON.stringify([target.workspaceId, target.workItemId, repositories])
   const [state, setState] = useState<State>({ key, results: [] })
   const [refresh, setRefresh] = useState(0)
@@ -26,7 +26,7 @@ export function ExecutionContextSection({ target, reader, connected }: { readonl
       )
     }
     return () => { current = false }
-  }, [key, connected, reader, refresh])
+  }, [key, connected, reader, refresh, refreshToken])
   const results = state.key === key ? state.results : []
   const content = repositories.length === 0 ? createElement('p', null, '仓库信息尚未提供')
     : repositories.map((repositoryId) => {

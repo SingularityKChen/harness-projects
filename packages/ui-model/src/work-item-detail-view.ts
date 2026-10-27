@@ -1,15 +1,19 @@
 /** 唯一安全投影（issue #130）：scope → 既有列表门 → 安全行 → 白名单 content；次序固定、阻断态不借缓存、纯函数。 */
+import { repositoryAccessIndex, startWorkAvailability } from './capability-access.ts'
 import { ContentKind } from '@harness-projects/domain/values'
 import { deriveWorkItemDetail } from './derive.ts'
 import { deriveWorkItemListView, type VisibleListRow, type WorkItemListReadInput } from './work-item-list-view.ts'
 
 export interface ExecutionTarget { readonly workspaceId: string; readonly workItemId: string; readonly repositoryIds: readonly string[] }
 
+export interface StartWorkRepository { readonly id: string; readonly available: boolean; readonly access: string }
+
 export type WorkItemDetailTarget = { readonly projectId: string; readonly itemId: string }
 
 /** 安全详情的精确字段面；`identity` / `derived` / `lastUpdatedAt` 可省略，其余恒有。 */
 export type WorkItemDetailContent = {
   readonly executionTarget?: ExecutionTarget
+  readonly startWorkRepositories?: readonly StartWorkRepository[]
   readonly kind: 'content'
   readonly title: string
   readonly body: string
@@ -55,7 +59,14 @@ export function deriveWorkItemDetailView(input: WorkItemListReadInput, target: W
   const derived = row.engineering === '无' ? undefined : `派生提示：${row.engineering}`
   return {
     body: {
-      ...(detail.planning.contentKind === ContentKind.WorkItem ? { executionTarget: { workspaceId: target.projectId, workItemId: target.itemId, repositoryIds: [...new Set(input.read.repositories?.map((repository) => repository.id) ?? [])].sort() } } : {}),
+      ...(detail.planning.contentKind === ContentKind.WorkItem ? {
+        ...(input.read.repositories?.length ? { startWorkRepositories: input.read.repositories.map((repository) => {
+          // Development 四门必须来自选中仓库的路由；缺少元数据时不能借工作区里另一个连接放行。
+          const { available, access } = startWorkAvailability(repositoryAccessIndex([], repository.capabilities ?? []))
+          return { id: repository.id, available, access }
+        }) } : {}),
+        executionTarget: { workspaceId: target.projectId, workItemId: target.itemId, repositoryIds: [...new Set(input.read.repositories?.map((repository) => repository.id) ?? [])].sort() },
+      } : {}),
       kind: 'content', title: row.title, body: detail.planning.body || '正文未提供',
       planningStatus: row.planningStatus, iteration: row.iteration, targetDate: row.targetDate,
       source: row.source, authority: row.authority,

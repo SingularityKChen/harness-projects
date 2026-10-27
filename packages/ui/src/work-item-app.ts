@@ -3,7 +3,7 @@
  * 路由，片段 href）与页面被替换时的焦点。数据只经注入的 `WorkspaceSource`（形状与 client 监督者一致，ui 只引类型、不 import
  * client 运行时）；容器不持 store 副本，不写颜色、字体与 `document.title`，主题经继承，`<dialog>` 用 UA 的 Canvas / CanvasText。
  */
-import type { ExecutionContextReader } from '@harness-projects/client'
+import type { ExecutionContextReader, StartWork } from '@harness-projects/client'
 import { createElement, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
 import { deriveWorkItemDetailView, deriveWorkItemListView, type WorkItemListReadInput, type WorkspaceRead } from '@harness-projects/ui-model'
@@ -31,7 +31,7 @@ const heading = (text: string): ReactElement => createElement('h2', { tabIndex: 
  * 唯一 scope 门：路由的 `projectId` 必须等于当前快照的工作区 id，否则只出中性 unresolved（不回显路由、不读 store、不 derive、
  * 无 anchor）；href 只用过门的 `projectId`。宿主里没有地址栏与 Back，所以 unresolved 屏自带回到列表的按钮。
  */
-function screenOf(read: WorkspaceRead | undefined, path: string | undefined, setPath: (path: string | undefined) => void, executionReader?: ExecutionContextReader): Screen {
+function screenOf(read: WorkspaceRead | undefined, path: string | undefined, setPath: (path: string | undefined) => void, executionReader?: ExecutionContextReader, startWork?: StartWork, onBindRepository?: () => void): Screen {
   if (read === undefined) return { key: 'loading', children: [heading(HARNESS_PANEL_TITLE), createElement('p', null, '正在连接宿主并读取工作项。'), createElement(LoadingState)] }
   const route = path === undefined ? { projectId: read.workspace.id } : parseItemRoute(path)
   if (route === undefined || route.projectId !== read.workspace.id) {
@@ -47,7 +47,7 @@ function screenOf(read: WorkspaceRead | undefined, path: string | undefined, set
       listView: deriveWorkItemListView(input),
       detailView: itemId === undefined ? undefined : deriveWorkItemDetailView(input, { projectId, itemId }),
       navigation: { href: (id) => `#${itemPath({ projectId, itemId: id })}`, open: (id) => setPath(itemPath({ projectId, itemId: id })) },
-      onCloseDetail: () => setPath(undefined), executionReader, connected: read.connection.connected,
+      onCloseDetail: () => setPath(undefined), executionReader, startWork, onBindRepository, connected: read.connection.connected,
     })],
   }
 }
@@ -60,12 +60,12 @@ function focusLost(): boolean {
 }
 
 /** `initialPath` 只在挂载时读一次（`undefined` = 当前工作区列表）；之后路由是容器自己的局部状态，不是事实。 */
-export function WorkItemApp({ source, initialPath, executionReader }: { readonly source: WorkspaceSource; readonly initialPath?: string | undefined; readonly executionReader?: ExecutionContextReader | undefined }): ReactElement {
+export function WorkItemApp({ source, initialPath, executionReader, startWork, onBindRepository }: { readonly startWork?: StartWork | undefined; readonly onBindRepository?: (() => void) | undefined; readonly source: WorkspaceSource; readonly initialPath?: string | undefined; readonly executionReader?: ExecutionContextReader | undefined }): ReactElement {
   const read = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot)
   const [path, setPath] = useState(initialPath)
   const root = useRef<DOMElement | null>(null)
   const shown = useRef<string | undefined>(undefined)
-  const { key, children } = screenOf(read, path, setPath, executionReader)
+  const { key, children } = screenOf(read, path, setPath, executionReader, startWork, onBindRepository)
   // 首挂（含 StrictMode 的二次挂载）与同一屏内的变化都不动焦点；抽屉关闭后的回焦仍归 WorkItemProjectPage。
   useEffect(() => {
     const previous = shown.current

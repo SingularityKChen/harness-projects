@@ -11,9 +11,9 @@ import {
   type ActionAvailability, type CapabilityDecision, type CapabilitySnapshotEntry, type LineageEntryPoint,
 } from './types.ts'
 
-/** 开始工作的必需 key：建分支、建工作树、启动执行，以及 core 写前预检经过的仓库读、工作树读两个读门，缺一不可。 */
+/** 开始工作的必需 key：建分支、建工作树，以及 core 写前预检经过的仓库读、工作树读两个读门，缺一不可。 */
 const START_WORK_KEYS = [
-  CapabilityKey.DevelopmentBranchCreate, CapabilityKey.DevelopmentWorktreeCreate, CapabilityKey.ExecutionRunStart,
+  CapabilityKey.DevelopmentBranchCreate, CapabilityKey.DevelopmentWorktreeCreate,
   CapabilityKey.DevelopmentRepositoryRead, CapabilityKey.DevelopmentWorktreeRead,
 ] as const
 /** 读门只按读判定（与 core 的 `gateCommand(..., 'read')` 一致）：`read_only` 对读来说就是可用，只有 `unavailable` 挡住开始工作。 */
