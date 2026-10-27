@@ -155,7 +155,7 @@ test('execution context unary declares two explicit IDs with strict non-empty wi
 })
 
 test('settings expose only the four exact positional contracts', () => {
-  for (const [name, names] of Object.entries({ createWorkspace: ['actorRef', 'idempotencyKey', 'name'], connectAccount: ['actorRef', 'idempotencyKey'], bindPlanningSource: ['actorRef', 'idempotencyKey', 'accountId', 'projectNodeId'], bindRepository: ['actorRef', 'idempotencyKey', 'repositoryId', 'references'] })) {
+  for (const [name, names] of Object.entries({ installExecutionBindings: ['actorRef', 'idempotencyKey'], createWorkspace: ['actorRef', 'idempotencyKey', 'name'], connectAccount: ['actorRef', 'idempotencyKey'], bindPlanningSource: ['actorRef', 'idempotencyKey', 'accountId', 'projectNodeId'], bindRepository: ['actorRef', 'idempotencyKey', 'repositoryId', 'references'] })) {
     assert.deepEqual(HOST_REMOTE.invocations.find((entry) => entry.method === name).parameters.map((parameter) => parameter.name), names)
   }
   const parse = OPERATIONS.bindRepository.params.at(-1).parse
