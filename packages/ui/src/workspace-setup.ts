@@ -1,12 +1,12 @@
 import { createElement as h, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
-import type { WorkspaceSetupSource, ExecutionContextReader, RepositoryBindingSource } from '@harness-projects/client'
+import type { WorkspaceSetupSource, ExecutionContextReader, RepositoryBindingSource, StartWork } from '@harness-projects/client'
 import { workspaceSetupView } from '@harness-projects/ui-model'
 import { RepositoryBindingForm } from './repository-binding.ts'
 import { WorkItemApp, type WorkspaceSource } from './work-item-app.ts'
 import type { DOMElement } from './work-item-detail.ts'
 /** 唯一工作区设置门：仅持草稿与导航；确认状态和工作区 identity 全部来自 Host。 */
-export function WorkspaceSetupGate({ setupSource, source, executionReader, repositoryBindingSource }: { readonly repositoryBindingSource?: RepositoryBindingSource | undefined; readonly setupSource: WorkspaceSetupSource; readonly source: WorkspaceSource; readonly executionReader?: ExecutionContextReader | undefined }): ReactElement {
+export function WorkspaceSetupGate({ setupSource, source, executionReader, repositoryBindingSource, startWork }: { readonly repositoryBindingSource?: RepositoryBindingSource | undefined; readonly startWork?: StartWork | undefined; readonly setupSource: WorkspaceSetupSource; readonly source: WorkspaceSource; readonly executionReader?: ExecutionContextReader | undefined }): ReactElement {
   const snapshot = useSyncExternalStore(setupSource.subscribe, setupSource.getSnapshot, setupSource.getSnapshot)
   const read = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot)
   const [name, setName] = useState(''), [project, setProject] = useState<string | undefined>(undefined), [settings, setSettings] = useState(false), [connecting, setConnecting] = useState(false)
@@ -32,7 +32,7 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   }
   const button = (label: string, action: () => void): ReactElement => h('button', { type: 'button', disabled: snapshot.pending, onClick: action }, label)
   const children: ReactElement[] = [h('h2', { tabIndex: -1, key: 'heading' }, list ? '工作项' : stage === 'create' ? '创建工作区' : '连接设置')]
-  if (list) children.push(button('连接设置', () => setSettings(true)), h(WorkItemApp, { source, executionReader }))
+  if (list) children.push(button('连接设置', () => setSettings(true)), h(WorkItemApp, { source, executionReader, startWork, onBindRepository: () => setSettings(true) }))
   else if (!setup) { if (!view.error) children.push(h('p', null, '正在读取工作区设置。')) }
   else if (confirmed && !settings) children.push(h('p', { role: 'status' }, '正在等待工作项。'))
   else {
@@ -54,6 +54,6 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   if (snapshot.pending) children.push(h('p', { role: 'status', 'aria-live': 'polite' }, '正在处理，请稍候。'))
   return h('section', { 'aria-label': 'Harness Projects', ref: root }, ...children)
 }
-export function bindWorkspaceSetupApp(setupSource: WorkspaceSetupSource, source: WorkspaceSource, executionReader?: ExecutionContextReader, options: { readonly repositoryBindingSource?: RepositoryBindingSource | undefined } = {}): () => ReactElement {
-  return () => h(WorkspaceSetupGate, { setupSource, source, executionReader, repositoryBindingSource: options.repositoryBindingSource })
+export function bindWorkspaceSetupApp(setupSource: WorkspaceSetupSource, source: WorkspaceSource, executionReader?: ExecutionContextReader, options: { readonly repositoryBindingSource?: RepositoryBindingSource | undefined; readonly startWork?: StartWork | undefined } = {}): () => ReactElement {
+  return () => h(WorkspaceSetupGate, { setupSource, source, executionReader, repositoryBindingSource: options.repositoryBindingSource, startWork: options.startWork })
 }

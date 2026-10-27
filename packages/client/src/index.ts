@@ -15,3 +15,4 @@ export * from './execution-context.ts'
 export * from './workspace-setup.ts'
 
 export * from './repository-binding.ts'
+export * from './start-work.ts'

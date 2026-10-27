@@ -20,3 +20,4 @@ export { ExecutionContextSection } from './execution-context-section.ts'
 export { WorkspaceSetupGate, bindWorkspaceSetupApp } from './workspace-setup.ts'
 
 export * from './repository-binding.ts'
+export { StartWorkSection } from './start-work-section.ts'

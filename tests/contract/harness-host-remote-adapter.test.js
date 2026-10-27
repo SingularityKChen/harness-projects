@@ -35,10 +35,10 @@ test('typed remote contribution exposes the same strict descriptors (settings un
   assert.deepEqual([REMOTE_PACKAGE, HOST_REMOTE.package, HOST_REMOTE.face], ['@harness-projects/app-harness-plugin', '@harness-projects/app-harness-plugin', 'host'])
   assert.deepEqual(CLIENT_REMOTE, { package: REMOTE_PACKAGE, descriptors: HOST_REMOTE.invocations })
   assert.deepEqual(HOST_REMOTE.invocations.filter(({ method }) => method !== 'getExecutionContext').map(({ namespace, method }) => `${namespace}/${method}`), [
-    `${REMOTE_NAMESPACE}/baseline`, `${REMOTE_NAMESPACE}/bootstrapWorkspace`, `${REMOTE_NAMESPACE}/refreshPlanning`, `${REMOTE_NAMESPACE}/createWorkspace`, `${REMOTE_NAMESPACE}/connectAccount`, `${REMOTE_NAMESPACE}/bindPlanningSource`, `${REMOTE_NAMESPACE}/bindRepository`, `${REMOTE_NAMESPACE}/getWorkspaceSetup`, `${REMOTE_NAMESPACE}/watch`,
+    `${REMOTE_NAMESPACE}/baseline`, `${REMOTE_NAMESPACE}/bootstrapWorkspace`, `${REMOTE_NAMESPACE}/refreshPlanning`, `${REMOTE_NAMESPACE}/getStartWorkOptions`, `${REMOTE_NAMESPACE}/startWork`, `${REMOTE_NAMESPACE}/createWorkspace`, `${REMOTE_NAMESPACE}/connectAccount`, `${REMOTE_NAMESPACE}/bindPlanningSource`, `${REMOTE_NAMESPACE}/bindRepository`, `${REMOTE_NAMESPACE}/getWorkspaceSetup`, `${REMOTE_NAMESPACE}/watch`,
   ])
   assert.deepEqual(HOST_REMOTE.invocations.filter(({ method }) => method !== 'getExecutionContext').map(({ mode, cancellation, parameters }) => [mode, cancellation, parameters.length]),
-    [[undefined, undefined, 0], [undefined, undefined, 2], [undefined, undefined, 1], [undefined, undefined, 3], [undefined, undefined, 2], [undefined, undefined, 4], [undefined, undefined, 4], [undefined, undefined, 0], ['stream', { parameter: 'signal' }, 0]], 'unary 没有 mode；watch 是带 signal 取消、无业务参数的 stream')
+    [[undefined, undefined, 0], [undefined, undefined, 2], [undefined, undefined, 1], [undefined, undefined, 1], [undefined, undefined, 5], [undefined, undefined, 3], [undefined, undefined, 2], [undefined, undefined, 4], [undefined, undefined, 4], [undefined, undefined, 0], ['stream', { parameter: 'signal' }, 0]], 'unary 没有 mode；watch 是带 signal 取消、无业务参数的 stream')
   // Host 网关对 strict 结果只调 `encode`（参数才走 `create().parse`）：非 JSON 值必须在边界报错，而不是被序列化静默降级。
   const nonJson = [JSON.parse('{"__proto__":{"injected":true}}'), new Date(0), { at: new Map() }, [undefined], Number.NaN]
   for (const descriptor of HOST_REMOTE.invocations) {
@@ -119,4 +119,22 @@ test('host adapter strictly JSON-encodes every watch frame, aborts and drains an
   assert.equal(aborted, true, '组合收到的是被中止的 signal')
   assert.deepEqual(events, ['remote-dispose', 'provide-dispose-start', 'provide-dispose-end'])
   await assert.rejects(() => installed.service.watch(new AbortController().signal).next(), /已卸载/)
+})
+
+test('optional Start Work branch survives descriptor-derived named JSON serialization and strict live Host decoding', async () => {
+  const descriptor = CLIENT_REMOTE.descriptors.find(({ method }) => method === 'startWork')
+  const supplied = [{ kind: 'user' }, 'default-branch', 'work-item', 'repository', undefined]
+  const wire = JSON.parse(JSON.stringify(Object.fromEntries(descriptor.parameters.map((parameter, index) => [parameter.wire, supplied[index]]))))
+  assert.equal(Object.hasOwn(wire, 'branchName'), false, 'JSON omits undefined optional positional values')
+  const required = descriptor.parameters.filter((parameter) => parameter.acceptsUndefined !== true).map(({ wire }) => wire).sort()
+  assert.deepEqual(Object.keys(wire).sort(), required, 'every omitted strict wire argument must be declared acceptsUndefined')
+  assert.equal(descriptor.parameters.find(({ name }) => name === 'branchName').acceptsUndefined, true)
+  assert.ok(descriptor.parameters.filter(({ name }) => name !== 'branchName').every((parameter) => parameter.acceptsUndefined === undefined), 'required identity/envelope inputs stay required')
+  const calls = [], { ctx } = recordingContext(), installed = await installHostRemote(ctx, { call: async (name, input) => { calls.push([name, input]); return {} } })
+  try {
+    const decode = (args) => descriptor.parameters.map((parameter) => parameter.codec.create().parse(args[parameter.wire]))
+    await installed.service.startWork(...decode(wire)); assert.equal(calls[0][1].branchName, undefined)
+    await installed.service.startWork(...decode({ ...wire, branchName: ' work/verbatim ' })); assert.equal(calls[1][1].branchName, ' work/verbatim ')
+    for (const branchName of [null, '', 1, {}]) assert.throws(() => decode({ ...wire, branchName }), TypeError)
+  } finally { await installed.dispose() }
 })
