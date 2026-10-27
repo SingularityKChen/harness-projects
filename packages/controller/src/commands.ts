@@ -15,7 +15,7 @@ import {
   WritePhase,
   type BindPlanningSourceRequest, type BindRepositoryRequest, type BootstrapResult, type ConnectAccountRequest, type CoreApi, type CreateWorkspaceRequest, type DeliveryRefreshResult,
   type DeliveryScope, type DeliveryWriteAttempt, type RecordedEdge, type RelationRef, type RepositoryBinding, type SetupOutcome, type StartWorkResult, type StatusDecision,
-  type WorkspaceSetup, type SetPlanningMappingRequest,
+  type WorkspaceSetup, type SetPlanningMappingRequest, type ExecutionBindingPair, type InstallExecutionRequest,
 } from '@harness-projects/core'
 
 export const CommandWriteState = {
@@ -273,6 +273,7 @@ export type BindRepositoryInput = CommandEnvelope & BindRepositoryRequest
  */
 export interface SetupCommands {
   setPlanningMapping(input: SetPlanningMappingInput): Promise<CommandResult<{ readonly bindingId: ProviderBindingId }>>
+  installExecutionBindings(input: CommandEnvelope & InstallExecutionRequest): Promise<CommandResult<ExecutionBindingPair>>
   createWorkspace(input: CreateWorkspaceInput): Promise<CommandResult<{ readonly workspaceId: WorkspaceId }>>
   connectAccount(input: ConnectAccountInput): Promise<CommandResult<{ readonly accountId: ConnectorAccountId }>>
   bindPlanningSource(input: BindPlanningSourceInput): Promise<CommandResult<{ readonly bindingId: ProviderBindingId }>>
@@ -292,6 +293,7 @@ export function createSetupCommands(setup: WorkspaceSetup): SetupCommands {
     createWorkspace: (input) => replay('createWorkspace', input, requestPayload(input), async () => setupResult(await setup.createWorkspace(requestPayload(input)))),
     connectAccount: (input) => replay('connectAccount', input, requestPayload(input), async () => setupResult(await setup.connectAccount(requestPayload(input)))),
     bindPlanningSource: (input) => replay('bindPlanningSource', input, requestPayload(input), async () => setupResult(await setup.bindPlanningSource(requestPayload(input)))),
+    installExecutionBindings: (input) => replay('installExecutionBindings', input, requestPayload(input), async () => setupResult(await setup.installExecutionBindings(requestPayload(input)))),
     bindRepository: (input) => replay('bindRepository', input, requestPayload(input), async () => setupResult(await setup.bindRepository(requestPayload(input)))),
   }
 }

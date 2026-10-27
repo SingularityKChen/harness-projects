@@ -26,7 +26,8 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   }, [stage])
   const submit = (): void => { if (setup?.workspace === null) void setupSource.create(name); else void setupSource.connect(project ?? setup?.planning.projectNodeId ?? '') }
   const recovery = (): void => {
-    if (snapshot.failure === 'read') void setupSource.refresh()
+    if (snapshot.failure === 'install') void setupSource.installExecution()
+    else if (snapshot.failure === 'read') void setupSource.refresh()
     else if (view.recovery?.action === 'refresh') void setupSource.refresh(setup?.planning.state === 'degraded')
     else if (snapshot.failure === 'create') void setupSource.create(name)
     else if (snapshot.failure === 'connect') void setupSource.connect(project ?? setup?.planning.projectNodeId ?? '')
@@ -50,6 +51,7 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
         h('button', { type: 'submit', disabled: snapshot.pending }, creating ? '创建工作区' : '连接项目')))
     }
     if (setup.workspace && setup.planning.bindingId && mappingSource) children.push(h(PlanningMappingForm, { source: mappingSource }))
+    if (setup.workspace) children.push(setup.executionInstalled ? h('p', { role: 'status' }, 'Harness 执行绑定已启用') : button('启用 Harness 执行', () => { void setupSource.installExecution() }))
     if (setup.workspace && repositoryBindingSource) children.push(h(RepositoryBindingForm, { source: repositoryBindingSource }))
     if (confirmed) children.push(button('回到工作项', () => setSettings(false)))
     if (view.notice) children.push(h('p', { role: 'status', 'aria-live': 'polite' }, view.notice))

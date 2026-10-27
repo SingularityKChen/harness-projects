@@ -45,3 +45,5 @@
 - 采纳权在人类伙伴；采纳前保持 Proposed。`Status`、Project Status、`blocked-by` / `blocking` 与 ADR Accepted 状态不由 agent 写入。
 
 2026-10-27：精确增加 `apps/harness-plugin/src/host-planning-mapping.ts` 为 Host-only 边界例外；它只读取当代 lifetime 包装的 Planning port 与本地映射，不可从 client 入口到达。
+
+2026-10-27：目录显式收录 `execution.harness` 与 `execution.human`，按默认/备用角色分别组成 `execution` / `executionFallback`；角色冲突时禁用整个冲突槽。精确增加 `host-execution.ts` 与 `host-session-adapter.ts` 的 Host-only 依赖例外；稳定人工签发密钥仅经固定 secret 句柄按操作解析。安装由带 actor/key 的显式本地命令触发，不在启动时播种挂载。

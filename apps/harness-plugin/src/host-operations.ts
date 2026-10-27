@@ -106,6 +106,7 @@ export const OPERATIONS = defineOperations({
   connectAccount: { mode: 'unary', params: ENVELOPE },
   bindPlanningSource: { mode: 'unary', params: [...ENVELOPE, param('accountId', 'AccountId', (value) => nonEmptyString(value, 'accountId')), param('projectNodeId', 'ProjectNodeId', (value) => nonEmptyString(value, 'projectNodeId'))] },
   bindRepository: { mode: 'unary', params: [...ENVELOPE, param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId')), param('references', 'RepositoryReferences', repositoryReferences)] },
+  installExecutionBindings: { mode: 'unary', params: ENVELOPE },
   getWorkspaceSetup: { mode: 'unary', params: [] },
   getPlanningMapping: { mode: 'unary', params: [] },
   setPlanningMapping: { mode: 'unary', params: [...ENVELOPE, param('expectedBindingId', 'BindingId', (value) => nonEmptyString(value, 'bindingId')), param('expectedProjectExternalId', 'ProjectExternalId', (value) => nonEmptyString(value, 'projectExternalId')), param('mapping', 'PlanningMapping', (value) => plainRecord(value, 'mapping'))] },

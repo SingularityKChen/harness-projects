@@ -98,6 +98,12 @@ importers:
       '@harness-projects/provider-development-local-git':
         specifier: workspace:*
         version: link:../../packages/providers/development-local-git
+      '@harness-projects/provider-execution-harness':
+        specifier: workspace:*
+        version: link:../../packages/providers/execution-harness
+      '@harness-projects/provider-execution-human':
+        specifier: workspace:*
+        version: link:../../packages/providers/execution-human
       '@harness-projects/provider-planning-github-projects':
         specifier: workspace:*
         version: link:../../packages/providers/planning-github-projects

@@ -19,7 +19,9 @@
     "@harness-projects/provider-development-github": "workspace:*",
     "@harness-projects/provider-delivery-github-actions": "workspace:*",
     "@harness-projects/ui-model": "workspace:*",
-    "@harness-projects/ui": "workspace:*"
+    "@harness-projects/ui": "workspace:*",
+    "@harness-projects/provider-execution-harness": "workspace:*",
+    "@harness-projects/provider-execution-human": "workspace:*"
   },
   "scripts": {
     "build": "node scripts/build.mjs",

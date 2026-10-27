@@ -31,6 +31,7 @@ export async function apply(ctx: ClientContext): Promise<void> {
       createWorkspace: (...args) => unwrap(remote.createWorkspace(...args)),
       connectAccount: (...args) => unwrap(remote.connectAccount(...args)),
       bindPlanningSource: (...args) => unwrap(remote.bindPlanningSource(...args)),
+      installExecutionBindings: (...args) => unwrap(remote.installExecutionBindings(...args)),
       refreshPlanning: (...args) => unwrap(remote.refreshPlanning(...args)),
     }, { actorRef: { kind: 'user' } })
     child.effect(() => {

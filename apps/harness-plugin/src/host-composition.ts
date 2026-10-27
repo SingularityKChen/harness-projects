@@ -23,6 +23,8 @@ export interface HostCompositionOptions {
   readonly catalog: ProviderCatalog
   /** 句柄 → 凭据值；每次 provider 操作才调用，Host 不缓存。 */
   readonly resolveCredential: (handle: string) => Promise<string | undefined>
+  readonly sessionController?: () => unknown
+  readonly forceSessionStartFailure?: boolean
   readonly migrationsDir?: string
   /** 缺省为调用时才读取的 `globalThis.fetch`（测试可替换）。 */
   readonly fetch?: (url: string, init: RequestInit) => Promise<Response>
@@ -176,6 +178,8 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         const workspace = await storage!.getWorkspace(options.workspaceId)
         const { table, disabled } = workspace === undefined ? { table: {}, disabled: [] } : await restoreProviders(storage!, workspace.id, options.catalog, {
           // 解析失败（例如宿主凭据服务缺席）只留允许名单字段；provider 随后把它归类为结构化 unavailable，不带原文。
+          sessionController: () => { lifetime.assertActive(); return options.sessionController?.() },
+          forceSessionStartFailure: options.forceSessionStartFailure,
           resolveCredential: async (handle) => {
             lifetime.assertActive()
             try { const value = await options.resolveCredential(handle); lifetime.assertActive(); return value }
@@ -243,11 +247,13 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     }
     const getWorkspaceSetup = () => read(async (assembly): Promise<WorkspaceSetupDTO> => {
       let workspace: WorkspaceSetupDTO['workspace'] = null, bindingId: string | undefined, projectNodeId: string | undefined
-      const activation = activationError === undefined ? {} : { activationError: projectError(activationError.code, '本地配置已提交，装配尚未激活') }
+      let activation: Pick<WorkspaceSetupDTO, 'activationError' | 'executionInstalled'> = activationError === undefined ? {} : { activationError: projectError(activationError.code, '本地配置已提交，装配尚未激活') }
       const failure = (reason?: string) => projectError(Object.values(ProjectErrorCode).some((code) => code === reason) ? reason as ProjectErrorCode : ProjectErrorCode.Unavailable, '规划项目尚未确认，请按恢复动作重试')
       try {
         const stored = await storage!.getWorkspace(options.workspaceId)
         workspace = stored === undefined ? null : { id: stored.id, name: stored.name }
+        const executions = (await storage!.listProviderBindings(options.workspaceId)).filter((mount) => mount.domain === 'execution')
+        if (executions.length === 2 && executions.some((mount) => mount.isDefault) && executions.some((mount) => !mount.isDefault) && executions.every((mount) => mount.enabled && mount.implementationKey === (mount.isDefault ? 'execution.harness' : 'execution.human'))) activation = { ...activation, executionInstalled: true }
         if (workspace === null) return { workspace, planning: { state: 'unbound' }, ...activation }
         const mount = (await storage!.listProviderBindings(options.workspaceId)).find((mount) => mount.enabled && mount.domain === 'planning')
         if (mount === undefined) return { workspace, planning: { state: 'unbound' }, ...activation }
@@ -280,6 +286,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
           : { writeState: 'failed', saving: false, authoritative: false, value: undefined, error: viewer.error }
       }, false),
       bindPlanningSource: (_controller, { projectNodeId, accountId, ...input }) => configure(() => setup.bindPlanningSource({ ...input, accountId: accountId as ConnectorAccountId, workspaceId: options.workspaceId, implementationKey: 'planning.github-projects', configuration: { projectNodeId } })),
+      installExecutionBindings: (_controller, input) => configure(() => setup.installExecutionBindings({ ...input, workspaceId: options.workspaceId })),
       bindRepository: async (_controller, input) => {
         const checked = await preflightRepositoryBinding({ ...input, references: input.references.map((ref) => ({ ...ref, accountId: ref.accountId as ConnectorAccountId | undefined })), workspaceId: options.workspaceId }, storage!, options.catalog, { worktreesDir, fetch: options.fetch ?? globalThis.fetch, resolveCredential: options.resolveCredential })
         return 'writeState' in checked ? checked : configure(() => setup.bindRepository(checked))
@@ -289,7 +296,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       get controller() { return current.controller }, get disabled() { return current.disabled }, get activationError() { return activationError },
       call: async (name, input) => {
         if (closed) throw new Error('host 已关闭')
-        if (['baseline', 'getWorkspaceSetup', 'getPlanningMapping', 'setPlanningMapping', 'createWorkspace', 'connectAccount', 'bindPlanningSource', 'bindRepository'].includes(name)) return track(dispatch(current.controller, name, input))
+        if (['baseline', 'getWorkspaceSetup', 'getPlanningMapping', 'setPlanningMapping', 'createWorkspace', 'connectAccount', 'bindPlanningSource', 'bindRepository', 'installExecutionBindings'].includes(name)) return track(dispatch(current.controller, name, input))
         while (barrier) await barrier
         if (closed) throw new Error('host 已关闭')
         const assembly = current; return lease(assembly, () => dispatch(assembly.controller, name, input))

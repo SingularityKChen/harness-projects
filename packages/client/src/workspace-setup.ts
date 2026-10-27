@@ -4,6 +4,7 @@ import type { ProjectError, ProjectErrorCode, Recovery } from '@harness-projects
 export interface WorkspaceSetupDTO {
   readonly workspace: null | { readonly id: string; readonly name: string }
   readonly planning: { readonly state: 'unbound' | 'configured' | 'confirmed' | 'degraded'; readonly bindingId?: string; readonly projectNodeId?: string }
+  readonly executionInstalled?: boolean
   readonly mappingOrigin?: 'derived' | 'user'
   readonly activationError?: ProjectError
   readonly error?: ProjectError
@@ -14,12 +15,14 @@ export interface WorkspaceSetupPort {
   createWorkspace(actor: ActorRef, key: string, name: string): Promise<unknown>
   connectAccount(actor: ActorRef, key: string): Promise<unknown>
   bindPlanningSource(actor: ActorRef, key: string, accountId: string, projectNodeId: string): Promise<unknown>
+  installExecutionBindings(actor: ActorRef, key: string): Promise<unknown>
   refreshPlanning(actor: ActorRef): Promise<unknown>
 }
-export interface WorkspaceSetupSnapshot { readonly setup?: WorkspaceSetupDTO; readonly pending: boolean; readonly error?: ProjectError; readonly failure?: 'read' | 'reconcile' | 'create' | 'connect' }
+export interface WorkspaceSetupSnapshot { readonly setup?: WorkspaceSetupDTO; readonly pending: boolean; readonly error?: ProjectError; readonly failure?: 'read' | 'reconcile' | 'create' | 'connect' | 'install' }
 export interface WorkspaceSetupSource {
   subscribe(listener: () => void): () => void
   getSnapshot(): WorkspaceSetupSnapshot
+  installExecution(): Promise<void>
   create(name: string): Promise<void>
   connect(projectNodeId: string): Promise<void>
   refresh(reconcile?: boolean): Promise<void>
@@ -41,7 +44,7 @@ function parseError(value: unknown): ProjectError | undefined {
   return safeError(dto.code)
 }
 export function parseWorkspaceSetup(value: unknown): WorkspaceSetupDTO {
-  const dto = record(value, ['workspace', 'planning', 'mappingOrigin', 'activationError', 'error'])
+  const dto = record(value, ['workspace', 'planning', 'executionInstalled', 'mappingOrigin', 'activationError', 'error'])
   const workspace = dto.workspace === null ? null : record(dto.workspace, ['id', 'name'])
   const planning = record(dto.planning, ['state', 'bindingId', 'projectNodeId'])
   const state = planning.state
@@ -50,10 +53,11 @@ export function parseWorkspaceSetup(value: unknown): WorkspaceSetupDTO {
   const binding = planning.bindingId === undefined ? {} : { bindingId: text(planning.bindingId) }
   const project = planning.projectNodeId === undefined ? {} : { projectNodeId: text(planning.projectNodeId) }
   if (state === 'confirmed' && (!binding.bindingId || !project.projectNodeId)) throw new TypeError('设置绑定缺失')
+  if (dto.executionInstalled !== undefined && typeof dto.executionInstalled !== 'boolean') throw new TypeError('执行绑定状态不合契约')
   if (dto.mappingOrigin !== undefined && dto.mappingOrigin !== 'derived' && dto.mappingOrigin !== 'user') throw new TypeError('映射来源不合契约')
   const activationError = parseError(dto.activationError), error = parseError(dto.error)
   return Object.freeze({ workspace: workspace === null ? null : Object.freeze({ id: text(workspace.id), name: text(workspace.name) }), planning: Object.freeze({ state, ...binding, ...project }),
-    ...(dto.mappingOrigin === undefined ? {} : { mappingOrigin: dto.mappingOrigin }), ...(activationError ? { activationError } : {}), ...(error ? { error } : {}) })
+    ...(dto.executionInstalled === undefined ? {} : { executionInstalled: dto.executionInstalled as boolean }), ...(dto.mappingOrigin === undefined ? {} : { mappingOrigin: dto.mappingOrigin }), ...(activationError ? { activationError } : {}), ...(error ? { error } : {}) })
 }
 function command(value: unknown, valueKey?: string): { id?: string; error?: ProjectError; definitive?: boolean } {
   const dto = record(value, ['writeState', 'saving', 'authoritative', 'value', 'error', 'activationError'])
@@ -62,18 +66,24 @@ function command(value: unknown, valueKey?: string): { id?: string; error?: Proj
   const id = valueKey === undefined || dto.value === undefined ? undefined : text(record(dto.value, [valueKey])[valueKey])
   if (valueKey && dto.writeState !== 'local_only') return { error: commandError ?? safeError(dto.writeState === 'unknown' || dto.writeState === 'pending' ? 'result_unknown' : dto.writeState === 'conflict' ? 'conflict' : 'unavailable'), definitive: commandError !== undefined && (dto.writeState === 'failed' || dto.writeState === 'conflict') }
   if (!commandError && valueKey && !id) throw new TypeError('设置命令缺少结果')
-  return { ...(id ? { id } : {}), ...(error ? { error } : {}) }
+  return { ...(id ? { id } : {}), ...(error ? { error } : {}), definitive: commandError !== undefined && activationError === undefined && (dto.writeState === 'failed' || dto.writeState === 'conflict') }
 }
 type Stage = 'create' | 'account' | 'bind'
 type Intent = { payload: string; key: string; attempts: Partial<Record<Stage, number>> }
 export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { readonly actorRef: ActorRef; readonly key?: () => string }): WorkspaceSetupSource {
   let snapshot: WorkspaceSetupSnapshot = Object.freeze({ pending: false }), disposed = false, revision = 0
   let createIntent: Intent | undefined, connectIntent: Intent | undefined
+  let executionIntent: { key: string; acknowledged: boolean } | undefined
+  let executionAttempt = 0
   let mutationPending: Promise<void> | undefined, readPending: Promise<void> | undefined
   const listeners = new Set<() => void>(), key = options.key ?? (() => globalThis.crypto.randomUUID())
+  const finishExecutionIntent = (intent: NonNullable<typeof executionIntent>): void => {
+    if (executionIntent !== intent) return
+    executionIntent = undefined; executionAttempt++
+  }
   const publish = (next: WorkspaceSetupSnapshot): void => { if (!disposed) { snapshot = Object.freeze(next); listeners.forEach((listener) => listener()) } }
   const read = async (): Promise<WorkspaceSetupDTO> => parseWorkspaceSetup(await port.getWorkspaceSetup())
-  const run = (kind: 'read' | 'reconcile' | 'create' | 'connect', action: () => Promise<ProjectError | undefined>): Promise<void> => {
+  const run = (kind: 'read' | 'reconcile' | 'create' | 'connect' | 'install', action: () => Promise<ProjectError | undefined>): Promise<void> => {
     if (disposed) return Promise.resolve()
     const current = ++revision
     publish({ ...(snapshot.setup ? { setup: snapshot.setup } : {}), pending: true })
@@ -83,10 +93,15 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
         const error = await action()
         if (disposed || current !== revision) return
         failure = 'read'
+        const confirmation = executionIntent?.acknowledged ? executionIntent : undefined
         const setup = await read()
         if (current === revision) {
           if (setup.workspace === null && setup.error) publish({ ...(snapshot.setup ? { setup: snapshot.setup } : {}), pending: false, error: setup.error, failure: 'read' })
-          else publish({ setup, pending: false, ...(error ? { error, failure: kind } : {}) })
+          else {
+            // 只用已 ack 意图之后开始且仍属当前版本的读数结算；普通 refresh 也能完成读回恢复。
+            if (!error && confirmation && setup.executionInstalled && !setup.activationError && !setup.error) finishExecutionIntent(confirmation)
+            publish({ setup, pending: false, ...(error ? { error, failure: kind } : {}) })
+          }
         }
       } catch { if (current === revision) publish({ ...(snapshot.setup ? { setup: snapshot.setup } : {}), pending: false, error: safeError(), failure }) }
     })()
@@ -119,6 +134,28 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
     void promise.then(() => { if (mutationPending === promise) mutationPending = undefined })
     return promise
   }
+  const installExecution = (): Promise<void> => {
+    if (disposed) return Promise.resolve()
+    if (mutationPending) return mutationPending
+    const active = executionIntent ??= { key: `${key()}:execution${executionAttempt ? `:attempt-${executionAttempt + 1}` : ''}`, acknowledged: false }
+    readPending = undefined
+    const promise = run('install', async () => {
+      const value = await port.installExecutionBindings(options.actorRef, active.key), dto = record(value, ['writeState', 'saving', 'authoritative', 'value', 'error', 'activationError'])
+      const checked = command(value)
+      if (checked.definitive) finishExecutionIntent(active)
+      if (dto.writeState === 'local_only' && dto.error === undefined) {
+        const pair = record(dto.value, ['bindingIds']).bindingIds
+        if (!Array.isArray(pair) || pair.length !== 2 || pair.some((id) => typeof id !== 'string' || !id.trim()) || pair[0] === pair[1]) throw new TypeError('执行绑定响应不合契约')
+        active.acknowledged = true
+      }
+      if (checked.error) return checked.error
+      if (dto.writeState !== 'local_only') return safeError(dto.writeState === 'unknown' || dto.writeState === 'pending' ? 'result_unknown' : 'unavailable')
+      return undefined
+    })
+    mutationPending = promise
+    void promise.then(() => { if (mutationPending === promise) mutationPending = undefined })
+    return promise
+  }
   const refresh = (reconcile = false): Promise<void> => {
     if (mutationPending) return reconcile ? mutationPending.then(() => refresh(true)) : mutationPending
     if (readPending) return reconcile ? readPending.then(() => refresh(true)) : readPending
@@ -129,6 +166,6 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
   }
   return { subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } }, getSnapshot: () => snapshot,
     create: (name) => submit('create', name), connect: (project) => submit('connect', project),
-    refresh,
+    refresh, installExecution,
     dispose: () => { disposed = true; revision += 1; listeners.clear() } }
 }

@@ -10,6 +10,10 @@ import {
   AccessLevel, CapabilityKey,
   type BindingConfigurationSchema, type ConnectorAccountRecord, type ProviderBindingRecord, type ProviderDefinition, type Storage, type StorageValidationPolicy,
 } from '@harness-projects/capabilities'
+import { createHarnessExecutionProvider, HARNESS_EXECUTION_PROVIDER_DEFINITION, type SessionPort } from '@harness-projects/provider-execution-harness'
+import { HUMAN_EXECUTION_PROVIDER_DEFINITION } from '@harness-projects/provider-execution-human'
+import { createHostHumanExecution, MANUAL_ISSUER_HANDLE } from './host-execution.ts'
+import { createHostSessionPort } from './host-session-adapter.ts'
 import type { CoreProviderTable } from '@harness-projects/core'
 import { ProjectErrorCode, projectError, type ProjectError, type WorkspaceId } from '@harness-projects/domain'
 import { GITHUB_ACTIONS_DEFINITION, createGithubActionsDeliveryProvider, type GithubActionsTransport } from '@harness-projects/provider-delivery-github-actions'
@@ -20,7 +24,7 @@ import {
 } from '@harness-projects/provider-planning-github-projects'
 
 /** 宿主允许存进库的凭据句柄：宿主常量，不随目录收缩（带命名空间，避免误用用户环境里通用的 GITHUB_TOKEN）。 */
-export const HOST_SECRET_HANDLES = ['HARNESS_PROJECTS_GITHUB_TOKEN'] as const
+export const HOST_SECRET_HANDLES = ['HARNESS_PROJECTS_GITHUB_TOKEN', MANUAL_ISSUER_HANDLE] as const
 
 type HostFetch = (url: string, init: RequestInit) => Promise<Response>
 
@@ -31,6 +35,8 @@ export interface ProviderBuildInput {
   readonly account: ConnectorAccountRecord | undefined
   /** 只绑定该账号的句柄；无账号或无句柄时 resolve `undefined`。每次调用都重新解析，不缓存。 */
   readonly credential: () => Promise<string | undefined>
+  readonly sessions?: SessionPort
+  readonly resolveCredential?: (handle: string) => Promise<string | undefined>
   readonly worktreesDir: string
   readonly fetch: HostFetch
 }
@@ -222,7 +228,16 @@ const GITHUB_ACTIONS_ENTRY: CatalogEntry = {
   },
 }
 
-export const PROVIDER_CATALOG: ProviderCatalog = catalogOf([GITHUB_PROJECTS_ENTRY, LOCAL_GIT_ENTRY, GITHUB_DEVELOPMENT_ENTRY, GITHUB_ACTIONS_ENTRY])
+const HARNESS_ENTRY: CatalogEntry = {
+  definition: HARNESS_EXECUTION_PROVIDER_DEFINITION, configuration: {},
+  async create({ binding, sessions }) { return createHarnessExecutionProvider({ bindingId: binding.id, sessions: sessions ?? createHostSessionPort(() => undefined) }) },
+}
+const HUMAN_ENTRY: CatalogEntry = {
+  definition: HUMAN_EXECUTION_PROVIDER_DEFINITION, configuration: {},
+  async create({ binding, resolveCredential }) { return createHostHumanExecution(binding.id, resolveCredential ?? (async () => undefined)) },
+}
+
+export const PROVIDER_CATALOG: ProviderCatalog = catalogOf([GITHUB_PROJECTS_ENTRY, LOCAL_GIT_ENTRY, GITHUB_DEVELOPMENT_ENTRY, GITHUB_ACTIONS_ENTRY, HARNESS_ENTRY, HUMAN_ENTRY])
 
 /** 存储打开期的受信策略：句柄取宿主常量，配置 schema 取目录各条目的声明。 */
 export function hostStoragePolicy(catalog: ProviderCatalog): StorageValidationPolicy {
@@ -238,16 +253,20 @@ export function hostStoragePolicy(catalog: ProviderCatalog): StorageValidationPo
  */
 export async function restoreProviders(
   storage: Storage, workspaceId: WorkspaceId, catalog: ProviderCatalog,
-  env: Pick<ProviderBuildInput, 'worktreesDir' | 'fetch'> & { readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly development?: { readonly cache: Map<string, object>; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly fetch: HostFetch } },
+  env: Pick<ProviderBuildInput, 'worktreesDir' | 'fetch'> & { readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly sessionController?: () => unknown; readonly forceSessionStartFailure?: boolean | undefined; readonly development?: { readonly cache: Map<string, object>; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly fetch: HostFetch } },
 ): Promise<{ table: CoreProviderTable; disabled: readonly DisabledBinding[] }> {
   const slots: Record<string, unknown> = {}
   const disabled: DisabledBinding[] = []
   const used = new Set<string>()
-  for (const binding of await storage.listProviderBindings(workspaceId)) {
+  const bindings = await storage.listProviderBindings(workspaceId)
+  const executionSlot = (binding: ProviderBindingRecord) => binding.isDefault ? 'execution' : 'executionFallback'
+  const conflicts = new Set(['execution', 'executionFallback'].filter((slot) => bindings.filter((binding) => binding.enabled && binding.domain === 'execution' && executionSlot(binding) === slot).length > 1))
+  for (const binding of bindings) {
     if (!binding.enabled) continue
     const refuse = (code: ProjectErrorCode, message: string): void => {
       disabled.push({ bindingId: binding.id, domain: binding.domain, implementationKey: binding.implementationKey, error: projectError(code, message) })
     }
+    if (binding.domain === 'execution' && conflicts.has(executionSlot(binding))) { refuse(ProjectErrorCode.Conflict, '同一执行角色有多个启用挂载'); continue }
     const entry = catalog.get(binding.implementationKey)
     if (entry === undefined) { refuse(ProjectErrorCode.NotSupported, '宿主目录里没有这个实现'); continue }
     if (!(entry.definition.domains as readonly string[]).includes(binding.domain)) { refuse(ProjectErrorCode.InvalidInput, '实现不提供这个挂载的能力域'); continue }
@@ -260,7 +279,7 @@ export async function restoreProviders(
       const cache = binding.implementationKey === 'development.github' ? env.development : undefined
       const key = JSON.stringify([binding.id, binding.implementationKey, Object.entries(configuration).sort(([a], [b]) => a.localeCompare(b)), account?.id, account?.platformFamily, account?.platformOrigin, account?.identityKind, account?.externalId, handle])
       port = cache?.cache.get(key) ?? await entry.create({
-        binding, configuration, account, worktreesDir: env.worktreesDir, fetch: cache?.fetch ?? env.fetch,
+        binding, configuration, account, sessions: createHostSessionPort(env.sessionController ?? (() => undefined), env.forceSessionStartFailure), resolveCredential: env.resolveCredential, worktreesDir: env.worktreesDir, fetch: cache?.fetch ?? env.fetch,
         credential: async () => (handle === undefined ? undefined : (cache ?? env).resolveCredential(handle)),
       })
       if (cache) { cache.cache.set(key, port); used.add(key) }
@@ -269,8 +288,9 @@ export async function restoreProviders(
       else refuse(ProjectErrorCode.Unavailable, '实现构造失败')
       continue
     }
-    // development 可挂多个（Core 按仓库路由）；其余能力域一个槽位，已占即冲突。执行回退槽位随目录收录执行实现再加（TD-054）。
+    // development 按仓库路由；execution 按持久角色恢复两个独立槽，冲突槽整体拒绝。
     if (binding.domain === 'development') ((slots.development ??= []) as object[]).push(port)
+    else if (binding.domain === 'execution') slots[executionSlot(binding)] = port
     else if (slots[binding.domain] === undefined) slots[binding.domain] = port
     else refuse(ProjectErrorCode.Conflict, '同一能力域的槽位已被占用')
   }

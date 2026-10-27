@@ -41,6 +41,8 @@ export async function apply(ctx: HostRemoteContext & { effect(callback: () => ((
     dataPath: dataPath(),
     workspaceId: WORKSPACE_ID,
     catalog: PROVIDER_CATALOG,
+    sessionController: () => ctx.get?.('sessionController'),
+    forceSessionStartFailure: process.env.HARNESS_PROJECTS_FORCE_SESSION_START_FAILURE === '1',
     resolveCredential: credentialResolverOf(ctx),
     migrationsDir: migrationsDir(),
   })
