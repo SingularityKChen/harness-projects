@@ -16,7 +16,7 @@ const entity = (revision, title) => ({
   derived: [],
   source: sourceMetadata(revision),
 })
-const header = (revision) => ({
+const header = (revision) => ({ generation: 'host-a',
   workspace: { id: 'workspace-browser', name: 'Browser workspace' },
   capabilities: [{ key: 'planning.item.read', access: 'available', reason: undefined }],
   source: sourceMetadata(revision),

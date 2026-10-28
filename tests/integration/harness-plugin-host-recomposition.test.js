@@ -38,7 +38,7 @@ async function open(t, overrides = {}, build) {
   return { repo, host, service: installed.service, installed, clock, dataPath, events, identity: (value) => { login = value; node = `U_${value}` } }
 }
 
-test('same remote creates/connects/binds and the original stream delivers only one baseline without gaps', async (t) => {
+test('same remote follows new Core generations after create/connect/bind on the same follower', async (t) => {
   const h = await open(t), seen = []
   const { RemoteStream, RemoteStreamCarrierError } = await loadRemoteStream(), carrier = createCarrier(RemoteStreamCarrierError)
   let opens = 0
@@ -47,15 +47,19 @@ test('same remote creates/connects/binds and the original stream delivers only o
   void follower.done.catch(() => undefined)
   const until = async (ready) => { for (let i = 0; i < 200 && !ready(); i++) await new Promise((resolve) => setTimeout(resolve, 5)); assert.ok(ready()) }
   await until(() => seen.length > 0); assert.equal(follower.read(), undefined)
+  const initial = h.host.controller, initialToken = (await h.host.call('baseline', {})).generation
   const created = await h.service.createWorkspace(actor, 'create', 'Live workspace')
   assert.equal(created.writeState, 'local_only'); assert.deepEqual(created.value, { workspaceId: WORKSPACE })
   await until(() => follower.read()?.workspace.name === 'Live workspace')
+  const createdController = h.host.controller, createdToken = (await h.host.call('baseline', {})).generation
+  assert.notEqual(createdController, initial); assert.notEqual(createdToken, initialToken)
   const linked = await h.service.connectAccount(actor, 'connect'); assert.equal(linked.writeState, 'local_only')
   const bound = await h.service.bindPlanningSource(actor, 'planning', linked.value.accountId, projectNodeId)
   assert.equal(bound.writeState, 'local_only'); await until(() => follower.read()?.store.list().length > 0)
   const baseline = await h.host.call('baseline', {})
   assert.deepEqual(follower.read().store.list().map((row) => row.entityId).sort(), baseline.entities.map((row) => row.entityId).sort())
-  assert.deepEqual(seen, [['baseline', 1], ['metadata', 1], ['delta', 1]]); assert.equal(opens, 1); assert.equal(h.clock.live.size, 1)
+  assert.notEqual(h.host.controller, createdController); assert.notEqual(baseline.generation, createdToken)
+  assert.deepEqual(seen, [['baseline', 1], ['gap', 1], ['baseline', 2], ['gap', 2], ['baseline', 3]]); assert.equal(opens, 3); assert.equal(h.clock.live.size, 1)
   const first = h.clock.live.values().next().value
   assert.deepEqual(await h.service.bindPlanningSource(actor, 'planning', linked.value.accountId, projectNodeId), bound)
   assert.equal(h.clock.live.values().next().value, first)

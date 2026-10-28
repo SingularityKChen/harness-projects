@@ -53,12 +53,6 @@ const isFresh = (source: SourceMetadata): boolean => source.freshness === WireFr
 /** baseline / delta 确认了当前值：整表 fresh（含真实空集），或 partial 帧确有 fresh 行。 */
 const confirms = (source: SourceMetadata, rows: readonly WireEntity[]): boolean => isFresh(source) || rows.some((row) => isFresh(row.source))
 const recovered = (before: SourceMetadata | undefined, after: SourceMetadata): boolean => before?.freshness === WireFreshness.Degraded && isFresh(after)
-type GenerationFrame = { readonly generation?: unknown }
-const generationOf = (frame: GenerationFrame): number | undefined => {
-  if (frame.generation === undefined) return undefined
-  if (typeof frame.generation !== 'number' || !Number.isInteger(frame.generation) || frame.generation < 0) throw new TypeError('generation 必须是非负整数')
-  return frame.generation
-}
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 function assertEventShape(event: unknown): asserts event is WireEvent {
@@ -88,17 +82,18 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
   /** 最近一次被接受帧的整表头：整体替换，不跨帧拼字段（宿主不再确认 descriptor 时 read 回到 undefined）。 */
   let head: WireWorkspaceHeader | undefined
   let lastUpdatedAt: string | undefined
-  let generation: number | undefined
+  let generation: string | undefined
+  let operation = 0
+  let polling: Promise<SyncReport> | undefined
+  const invalidate = (): number => { polling = undefined; return ++operation }
+  const idle = (): SyncReport => ({ kind: 'idle', revision: store.revision, reason: undefined })
 
-  const validateFrame = (frame: WireWorkspaceHeader, allowGenerationReset = false): number | undefined => {
+  const validateFrame = (frame: WireWorkspaceHeader, allowGenerationReset = false): string => {
     assertHeader(frame)
-    const frameGeneration = generationOf(frame as GenerationFrame)
-    if (generation !== undefined && frameGeneration === undefined) throw new TypeError('generation evidence 缺失')
-    if (frameGeneration !== undefined && generation !== undefined && frameGeneration !== generation
-      && !(allowGenerationReset && frameGeneration > generation)) {
+    if (generation !== undefined && frame.generation !== generation && !allowGenerationReset) {
       throw new TypeError('frame generation 与当前连接不一致')
     }
-    return frameGeneration
+    return frame.generation
   }
 
   const accept = (frame: WireWorkspaceHeader, apply: () => void, confirmed: boolean, allowGenerationReset = false): void => {
@@ -108,10 +103,10 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       apply()
       const { workspace, capabilities, repositories, planningSource, source } = frame
       const changedScope = head?.workspace?.id !== workspace?.id || head?.planningSource?.bindingId !== planningSource?.bindingId
-      head = { workspace, capabilities, ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }), source }
+      head = { generation: frameGeneration, workspace, capabilities, ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }), source }
       if (changedScope) lastUpdatedAt = undefined
       if (at !== undefined) lastUpdatedAt = at
-      if (frameGeneration !== undefined) generation = frameGeneration
+      generation = frameGeneration
       connected = true
     } catch (error) {
       throw new FrameRejectedError(error instanceof Error ? error.message : '帧拒绝')
@@ -123,10 +118,12 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
     store.markAllStale()
   }
 
-  const guarded = async <T>(run: () => Promise<T>): Promise<T> => {
+  const guarded = async (ticket: number, run: () => Promise<SyncReport>): Promise<SyncReport> => {
     try {
-      return await run()
+      const report = await run()
+      return ticket === operation ? report : idle()
     } catch (error) {
+      if (ticket !== operation) return idle()
       if (error instanceof FrameRejectedError) throw error
       lose()
       throw error
@@ -134,20 +131,23 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
   }
 
   const acceptBaseline = (snapshot: WireSnapshot): SyncReport => {
-    let nextGeneration: number | undefined
+    let nextGeneration: string
     try {
       nextGeneration = validateFrame(snapshot, true)
     } catch (error) {
       throw new FrameRejectedError(error instanceof Error ? error.message : 'generation 不合契约')
     }
-    if (store.revision > snapshot.revision && (nextGeneration === undefined || nextGeneration === generation)) {
+    if (store.revision > snapshot.revision && nextGeneration === generation) {
       throw new FrameRejectedError(`baseline revision ${snapshot.revision} 低于本地 ${store.revision}，没有新的 generation evidence`)
     }
     accept(snapshot, () => store.applyBaseline(snapshot), confirms(snapshot.source, snapshot.entities), true)
     return { kind: 'baseline', revision: snapshot.revision, reason: undefined }
   }
 
-  const baseline = async (): Promise<SyncReport> => acceptBaseline(await transport.fetchBaseline())
+  const baseline = async (ticket: number): Promise<SyncReport> => {
+    const snapshot = await transport.fetchBaseline()
+    return ticket === operation ? acceptBaseline(snapshot) : idle()
+  }
 
   /** 缺口已检测：整表 stale 并调 onGap；拉模式的 poll 随后重拉基线，推模式由流的消费者重开下一代。 */
   const markGap = (gap: WireGap): SyncReport => {
@@ -156,69 +156,83 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
     return { kind: 'gap', revision: store.revision, reason: gap.reason }
   }
 
-  const reconnect = (): Promise<SyncReport> => guarded(async () => {
+  const reconnect = (): Promise<SyncReport> => {
+    const ticket = invalidate()
     connected = false
     store.markAllStale()
-    return baseline()
-  })
+    return guarded(ticket, () => baseline(ticket))
+  }
+
+  const applyEvent = (event: unknown): SyncReport => {
+    if (isRecord(event) && event.kind === 'baseline') return acceptBaseline(event.baseline as WireSnapshot)
+    try {
+      assertEventShape(event)
+    } catch (error) {
+      throw new FrameRejectedError(error instanceof Error ? error.message : 'event 不合契约')
+    }
+    if (event.kind === 'gap') return markGap(event.gap)
+    if (event.kind === 'metadata') {
+      const { metadata } = event
+      const sameScope = head?.workspace?.id === metadata.workspace?.id && head?.planningSource?.bindingId === metadata.planningSource?.bindingId
+      const confirmedAt = metadata.source.reconciledAt
+      const advanced = sameScope && isFresh(metadata.source) && confirmedAt !== undefined
+        && (head?.source.reconciledAt === undefined || Date.parse(confirmedAt) > Date.parse(head.source.reconciledAt))
+      const improved = advanced || (sameScope && recovered(head?.source, metadata.source))
+        || (sameScope && metadata.entities.some((row) => recovered(store.get(row.entityId)?.entity.source, row.source)))
+      accept(metadata, () => store.applyMetadata(metadata), improved)
+      return { kind: 'metadata', revision: store.revision, reason: undefined }
+    }
+    const { delta } = event
+    if (!Number.isInteger(delta.previousRevision) || !Number.isInteger(delta.revision)
+      || delta.revision <= delta.previousRevision || delta.previousRevision < store.revision) {
+      throw new FrameRejectedError(`delta 必须从本地修订 ${store.revision} 严格前进`)
+    }
+    if (delta.previousRevision > store.revision) {
+      try {
+        validateFrame(delta)
+        assertDeltaFrame(delta)
+      } catch (error) {
+        throw new FrameRejectedError(error instanceof Error ? error.message : '帧拒绝')
+      }
+      return markGap({
+        requestedAfter: store.revision,
+        currentRevision: delta.revision,
+        reason: `增量从修订 ${delta.previousRevision} 起，本地停在 ${store.revision}`,
+      })
+    }
+    accept(delta, () => store.applyDelta(delta), confirms(delta.source, delta.upserts))
+    return { kind: 'delta', revision: store.revision, reason: undefined }
+  }
 
   const sync: WorkspaceSync = {
-    get revision(): number {
-      return store.revision
-    },
-    get connected(): boolean {
-      return connected
-    },
+    get revision(): number { return store.revision },
+    get connected(): boolean { return connected },
     connect: reconnect,
     reconnect,
-    poll: () => guarded(async () => {
-      if (!connected) return baseline()
-      const event = await transport.poll(store.revision)
-      if (event === undefined) return { kind: 'idle', revision: store.revision, reason: undefined }
-      const report = sync.receive(event)
-      return report.kind === 'gap' ? { ...report, revision: (await baseline()).revision } : report
-    }),
+    poll(): Promise<SyncReport> {
+      if (polling !== undefined) return polling
+      const ticket = ++operation
+      const pending = guarded(ticket, async () => {
+        if (!connected) return baseline(ticket)
+        const event = await transport.poll(store.revision)
+        if (ticket !== operation || event === undefined) return idle()
+        const report = applyEvent(event)
+        if (ticket !== operation) return idle()
+        if (report.kind !== 'gap') return report
+        const recovered = await baseline(ticket)
+        return ticket === operation ? { ...report, revision: recovered.revision } : idle()
+      }).finally(() => { if (polling === pending) polling = undefined })
+      polling = pending
+      return pending
+    },
     receive(event: unknown): SyncReport {
-      if (isRecord(event) && event.kind === 'baseline') return acceptBaseline(event.baseline as WireSnapshot)
-      try {
-        assertEventShape(event)
-      } catch (error) {
-        throw new FrameRejectedError(error instanceof Error ? error.message : 'event 不合契约')
-      }
-      if (event.kind === 'gap') return markGap(event.gap)
-      if (event.kind === 'metadata') {
-        const { metadata } = event
-        const sameScope = head?.workspace?.id === metadata.workspace?.id && head?.planningSource?.bindingId === metadata.planningSource?.bindingId
-        const confirmedAt = metadata.source.reconciledAt
-        const advanced = sameScope && isFresh(metadata.source) && confirmedAt !== undefined
-          && (head?.source.reconciledAt === undefined || Date.parse(confirmedAt) > Date.parse(head.source.reconciledAt))
-        const improved = advanced || (sameScope && recovered(head?.source, metadata.source))
-          || (sameScope && metadata.entities.some((row) => recovered(store.get(row.entityId)?.entity.source, row.source)))
-        accept(metadata, () => store.applyMetadata(metadata), improved)
-        return { kind: 'metadata', revision: store.revision, reason: undefined }
-      }
-      const { delta } = event
-      if (!Number.isInteger(delta.previousRevision) || !Number.isInteger(delta.revision)
-        || delta.revision <= delta.previousRevision || delta.previousRevision < store.revision) {
-        throw new FrameRejectedError(`delta 必须从本地修订 ${store.revision} 严格前进`)
-      }
-      if (delta.previousRevision > store.revision) {
-        try {
-          validateFrame(delta)
-          assertDeltaFrame(delta)
-        } catch (error) {
-          throw new FrameRejectedError(error instanceof Error ? error.message : '帧拒绝')
-        }
-        return markGap({
-          requestedAfter: store.revision,
-          currentRevision: delta.revision,
-          reason: `增量从修订 ${delta.previousRevision} 起，本地停在 ${store.revision}`,
-        })
-      }
-      accept(delta, () => store.applyDelta(delta), confirms(delta.source, delta.upserts))
-      return { kind: 'delta', revision: store.revision, reason: undefined }
+      const report = applyEvent(event)
+      invalidate()
+      transport.close()
+      return report
     },
     disconnect(): void {
+      invalidate()
       transport.close()
       lose()
     },

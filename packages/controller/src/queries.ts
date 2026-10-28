@@ -19,13 +19,18 @@ export interface ControllerQueries {
   getDeliveryProjection(scope: DeliveryScope): Promise<DeliveryProjection>
 }
 
+const generations = new WeakMap<CoreApi, string>()
+
 export function createControllerQueries(
   core: CoreApi, authority: WireAuthority, _workspaceRevision?: () => Promise<number>,
 ): ControllerQueries {
+  let generation = generations.get(core)
+  if (generation === undefined) { generation = globalThis.crypto.randomUUID(); generations.set(core, generation) }
+  const token = generation
   return {
     async snapshot(): Promise<WireSnapshot> {
-      const { views, revision, sync } = await core.queries.getPlanningSnapshot()
-      return toWireSnapshot(views, authority, revision, sync, await core.queries.getWorkspaceMetadata())
+      const { views, revision, sync, metadata } = await core.queries.getPlanningSnapshot()
+      return toWireSnapshot(views, authority, revision, sync, metadata, token)
     },
     async getEntity(entityId: string): Promise<WireEntity | undefined> {
       const views = await core.queries.listPlanningItems()

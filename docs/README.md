@@ -113,6 +113,7 @@
 | [2026-10-09-review-technique-absorb](exec-plan/completed/2026-10-09-review-technique-absorb.md) | 评审变异夹具、评审约定与评审记录的吸收 |
 | [2026-10-12-client-browser-wire](exec-plan/completed/2026-10-12-client-browser-wire.md) | Client 浏览器安全依赖图 |
 | [2026-10-12-client-frame-validation](exec-plan/completed/2026-10-12-client-frame-validation.md) | Client Frame Ordering 与 Capability Identity |
+| [2026-10-28-client-snapshot-ordering](exec-plan/completed/2026-10-28-client-snapshot-ordering.md) | 异步快照隔离、真实 Host 代际与 descriptor/引用一致读（#218） |
 | [2026-10-12-controller-live-replay](exec-plan/completed/2026-10-12-controller-live-replay.md) | Controller in-flight 重放与 Pending 收敛 |
 | [2026-10-12-controller-request-identity](exec-plan/completed/2026-10-12-controller-request-identity.md) | Controller 请求身份与重放冲突 |
 | [2026-10-12-identity-conflict](exec-plan/completed/2026-10-12-identity-conflict.md) | Identity 双键冲突一致性 |

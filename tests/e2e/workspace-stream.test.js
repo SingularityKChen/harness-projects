@@ -19,7 +19,7 @@ const scripted = (...snapshots) => {
 }
 /** 一个修订上的快照：两条工作项的标题与整表来源可变，其余固定。 */
 const snapshot = (revision, title, freshness = 'fresh', reason = undefined) => ({
-  revision, capabilities: [], workspace: { id: 'workspace-1', name: '脚本化' }, source: { revision, freshness, authority: 'host', reason },
+  generation: 'host-a', revision, capabilities: [], workspace: { id: 'workspace-1', name: '脚本化' }, source: { revision, freshness, authority: 'host', reason },
   entities: ['ent-a', 'ent-b'].map((id) => wire(id, { content: { title }, source: { revision } })),
 })
 
@@ -76,4 +76,11 @@ test('stream：缺省等待可中止，停在等待上的 next() 在中止后立
   } finally {
     clearTimeout(timer)
   }
+})
+
+for (const revision of [0, 1, 2]) test(`stream：Host generation 在 revision ${revision} 切换时先 gap`, async () => {
+  const base = { ...snapshot(1, 'a'), generation: 'host-a' }, next = { ...snapshot(revision, 'a'), generation: 'host-b' }
+  const frames = await generation(scripted(base, next))
+  assert.equal(frames.length, 2); assert.equal(frames[1].kind, 'gap')
+  assert.match(frames[1].gap.reason, /generation/)
 })

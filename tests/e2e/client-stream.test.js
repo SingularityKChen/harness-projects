@@ -17,7 +17,7 @@ const row = (revision, title) => ({
   entityId: 'entity-1', kind: 'work_item', planningStatus: 'todo', derived: [], source: fresh(revision),
   content: { contentKind: 'work_item', title, body: 'body', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1' },
 })
-const header = (revision) => ({ workspace: { id: 'workspace-1', name: 'Stream workspace' }, capabilities: [], source: fresh(revision) })
+const header = (revision) => ({ generation: 'host-a', workspace: { id: 'workspace-1', name: 'Stream workspace' }, capabilities: [], source: fresh(revision) })
 const baseline = (revision, title) => ({ kind: 'baseline', baseline: { ...header(revision), revision, entities: [row(revision, title)] } })
 const delta = (previousRevision, revision, title) => ({
   kind: 'delta', delta: { ...header(revision), previousRevision, revision, upserts: [row(revision, title)], removed: [] },
@@ -215,4 +215,11 @@ test('supervise：connect 同步抛错只算一次终止，不向调用方抛出
   assert.deepEqual([viewOf(supervisor.getSnapshot()), streams.length, timers.length], [live('a'), 1, 2])
   assert.deepEqual(retries.map(([error, delayMs]) => [error.message, delayMs]), [['connect 同步失败', 1000], ['connect 同步失败', 2000]])
   await supervisor.close()
+})
+
+
+test('follow：普通物理重连没有 Host generation reset 权限', async () => {
+  const { follower } = start([{ frames: [baseline(2, 'current'), gap] }, { frames: [baseline(1, 'old')] }])
+  await assert.rejects(follower.done, /baseline revision/)
+  assert.equal(titleOf(follower), 'current')
 })

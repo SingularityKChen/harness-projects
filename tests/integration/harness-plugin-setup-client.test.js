@@ -9,7 +9,7 @@ const tick = () => new Promise((resolve) => setImmediate(resolve))
 const empty = { workspace: null, planning: { state: 'unbound' } }
 const configured = (state = 'confirmed') => ({ workspace: { id: 'ws-1', name: 'Mounted' }, planning: { state, bindingId: 'binding-1', projectNodeId: 'PVT_1' } })
 const local = (value) => ({ writeState: 'local_only', saving: false, authoritative: false, value })
-const header = (id, revision) => ({ workspace: { id, name: 'Mounted' }, capabilities: [], source: { revision, freshness: 'fresh', authority: 'provider' } })
+const header = (id, revision) => ({ generation: 'host-setup', workspace: { id, name: 'Mounted' }, capabilities: [], source: { revision, freshness: 'fresh', authority: 'provider' } })
 async function mount(methods = {}) {
   const calls = [], effects = [], slots = [], waiters = []
   let options, disposed = 0
