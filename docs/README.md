@@ -25,6 +25,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-28-pull-request-identity-convergence](exec-plan/active/2026-10-28-pull-request-identity-convergence.md) | PR 原生身份声明、成员与谱系双入口收敛（#367） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
