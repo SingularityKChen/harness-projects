@@ -361,7 +361,7 @@ test('时间与头：idle 与纯能力 / 名称 metadata 不推进时间；parti
   assert.deepEqual([sync.read().workspace.name, sync.read().capabilities[0].access, sync.read().lastUpdatedAt], ['renamed', 'read_only', T(1)])
 
   const revision = base.revision + 1
-  transport.events.push({ kind: 'delta', delta: { previousRevision: base.revision, revision, upserts: [base.entities[0]], removed: [], workspace: base.workspace, capabilities: base.capabilities, source: { ...tone(base.source, false, '部分缺口'), revision } } })
+  transport.events.push({ kind: 'delta', delta: { generation: base.generation, previousRevision: base.revision, revision, upserts: [base.entities[0]], removed: [], workspace: base.workspace, capabilities: base.capabilities, source: { ...tone(base.source, false, '部分缺口'), revision } } })
   assert.equal((await sync.poll()).kind, 'delta')
   assert.deepEqual([sync.read().lastUpdatedAt, sync.read().reason, store.isCurrent(base.entities[0].entityId)], [T(2), '部分缺口', true], '整表 degraded 但确有 fresh 行：推进时间、保留原因')
 
@@ -376,7 +376,7 @@ test('接受点：clock 非法、store 拒绝的载体都不推进头 / 能力 /
   const row = base.entities[0]
   const degraded = { ...row.source, freshness: 'degraded' }
   const valid = toWireMetadata({ ...base, workspace: { ...base.workspace, name: 'renamed' } })
-  const delta = { previousRevision: base.revision, revision: base.revision + 1, upserts: [], removed: [], workspace: valid.workspace, capabilities: base.capabilities, source: { ...base.source, revision: base.revision + 1 } }
+  const delta = { generation: base.generation, previousRevision: base.revision, revision: base.revision + 1, upserts: [], removed: [], workspace: valid.workspace, capabilities: base.capabilities, source: { ...base.source, revision: base.revision + 1 } }
   const rowsWith = (change) => valid.entities.map((entry, i) => (i === 0 ? { ...entry, ...change } : entry))
   const cases = [
     ['clock 非法（带一条改过标题的 upsert：先 apply 后读时钟会先写 store）', { kind: 'delta', delta: { ...delta, upserts: [{ ...row, content: { ...row.content, title: 'retitled' } }] } }, clockOf(T(1), 'not-a-time')],
@@ -455,22 +455,22 @@ test('接受点：低 revision baseline 只有新 generation evidence 才能 res
   const { controller } = await compose()
   const first = await controller.baseline()
   const transport = scripted(controller)
-  let nextBaseline = { ...first, generation: 1 }
+  let nextBaseline = { ...first, generation: 'host-z' }
   transport.fetchBaseline = () => Promise.resolve(nextBaseline)
   const { sync } = await client(controller, { transport })
   await sync.connect()
 
-  const higher = { ...first, revision: first.revision + 1, source: { ...first.source, revision: first.revision + 1 }, generation: 1 }
+  const higher = { ...first, revision: first.revision + 1, source: { ...first.source, revision: first.revision + 1 }, generation: 'host-z' }
   transport.events.push({ kind: 'delta', delta: { ...higher, previousRevision: first.revision, revision: higher.revision, upserts: [], removed: [] } })
   await sync.poll()
 
-  nextBaseline = { ...first, revision: Math.max(0, first.revision - 1), source: { ...first.source, revision: Math.max(0, first.revision - 1) }, generation: 1 }
+  nextBaseline = { ...first, revision: Math.max(0, first.revision - 1), source: { ...first.source, revision: Math.max(0, first.revision - 1) }, generation: 'host-z' }
   sync.disconnect()
   const rejectedBefore = stateOf(sync)
   await assert.rejects(sync.reconnect(), /generation|revision/i)
   assert.deepEqual(stateOf(sync), rejectedBefore, '重连预先标 stale；拒绝帧不得再改变快照')
 
-  nextBaseline = { ...nextBaseline, generation: 2 }
+  nextBaseline = { ...nextBaseline, generation: 'host-a' }
   await sync.reconnect()
   assert.equal(sync.revision, nextBaseline.revision, '新 generation 的低 revision baseline 可按 #218 合同 reset')
 })
@@ -479,16 +479,16 @@ test('接受点：generation 建立后，缺 generation 的 delta / metadata 被
   const { controller } = await compose()
   const base = await controller.baseline()
   const transport = scripted(controller)
-  transport.fetchBaseline = () => Promise.resolve({ ...base, generation: 1 })
+  transport.fetchBaseline = () => Promise.resolve({ ...base, generation: 'host-z' })
   const { sync } = await client(controller, { transport })
   await sync.connect()
   const before = stateOf(sync)
   const next = base.revision + 1
-  transport.events.push({ kind: 'delta', delta: { ...base, previousRevision: base.revision, revision: next, source: { ...base.source, revision: next }, upserts: [], removed: [] } })
+  transport.events.push({ kind: 'delta', delta: { ...base, generation: undefined, previousRevision: base.revision, revision: next, source: { ...base.source, revision: next }, upserts: [], removed: [] } })
   await assert.rejects(sync.poll(), /generation/i)
   assert.deepEqual(stateOf(sync), before)
 
-  transport.events.push({ kind: 'metadata', metadata: { ...base, revision: base.revision, entities: base.entities.map(({ entityId, source }) => ({ entityId, source })) } })
+  transport.events.push({ kind: 'metadata', metadata: { ...base, generation: undefined, revision: base.revision, entities: base.entities.map(({ entityId, source }) => ({ entityId, source })) } })
   await assert.rejects(sync.poll(), /generation/i)
   assert.deepEqual(stateOf(sync), before)
 })

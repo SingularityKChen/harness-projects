@@ -501,7 +501,7 @@ for (const kind of ['memory', 'sqlite']) {
       return sync
     }
     const input = (sync, metadata) => ({ read: sync.read(), metadata, phase: 'received', refreshing: false })
-    assert.deepEqual(Object.keys(await controller.baseline()).sort(), ['capabilities', 'entities', 'revision', 'source', 'workspace'], '首轮引导没读到项目：名字未知，头字段与加入 planningSource 之前逐字相同')
+    assert.deepEqual(Object.keys(await controller.baseline()).sort(), ['capabilities', 'entities', 'generation', 'revision', 'source', 'workspace'], '首轮引导没读到项目：名字未知，头字段与加入 planningSource 之前逐字相同')
     assert.equal(deriveWorkItemListView(input(await connected(), { sourceNames: {} })).planningSourceName, '规划来源名称未提供', '名字未知时仍是「未提供」，不退到实现键')
     online = true
     assert.equal((await core.commands.bootstrapWorkspace()).ok, true)

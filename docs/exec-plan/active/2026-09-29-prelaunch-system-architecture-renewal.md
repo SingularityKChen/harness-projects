@@ -30,7 +30,7 @@ Batch 0 先交付最后那一半：只读仓库的人能在 `docs/product/vertic
 | 独立 Web 先落地 | 宿主探针选择的有意调整，并非放弃 Host 权威 | `docs/architecture/harness-host-spike.md` 的 `fallback-web` 裁决；宿主与 UI 尚未交付 |
 | 多 Development 来源 | core 注册表每域一个实例，`implementationKey` 取的是域名（Superseded by `docs/exec-plan/completed/2026-10-01-provider-binding-registration.md`（2026-10-02，#197）：`implementationKey` 改由实现作者的静态 `definition` 声明，同一连接可在一个工作区挂多个域；每域一个主实例不变；Superseded by `docs/exec-plan/completed/2026-10-08-development-repository-routing.md`（2026-10-08，#219）：Development 可以有多个挂载，唯一挂载是默认、多个时全部非默认并按仓库路由，其余域仍每域一个主实例） | `packages/core/src/registry.ts`；#197、#219 |
 | 同步与交付事实 | 已复现：交付 Query 发现并写关系、离线时丢最后已知 CI；重复 bootstrap 推进 revision（**Superseded by #220 修复**，2026-10-08，`fix/sync-revision-freshness`：重复引导不再推进，见 P2 的观察行；交付两项 **Superseded by #221 / #222**，2026-10-09：交付事实只经唯一刷新写者写入，离线保留最后确认的 CI 并标陈旧，查询纯读，见 P3′ 的观察行） | `packages/core/src/delivery.ts`、`chain-facts.ts`、`bootstrap.ts`；复现命令 P2、P3 |
-| 客户端连接 | 重连期间可把 revision 2 覆盖回迟到 baseline 1，旧值仍报 current | `packages/client/src/sync.ts`、`store.ts`；#218 |
+| 客户端连接 | 重连期间可把 revision 2 覆盖回迟到 baseline 1，旧值仍报 current。**Superseded by `docs/exec-plan/completed/2026-10-28-client-snapshot-ordering.md`（2026-10-28，#218）**：同代修订护栏、生命周期/Transport 接受权和真实 Host 新代重置已有判别性验收 | `packages/client/src/sync.ts`、`store.ts`；#218 |
 | MVP-0 / 首发 | 7 条节点测试不等于 13 步都有生产入口；第 9 步与 Draft→Issue 没有生产入口 | Batch 0 的矩阵；真实 Provider、Host、UI 未交付属于分期，不是已实现后退 |
 
 ### Batch 0 需要的代码事实（行号以 `main@f6a33d2` 为准）
@@ -202,6 +202,8 @@ SQLite 目标是发布前单一空库建表基线。允许不支持旧开发库�
 **验证**：`Validation and Acceptance` 的 B0-1 至 B0-11，期望逐条满足。**回滚**：合并前删除三条本地子分支，把 `docs/system-architecture-renewal` 退回 B0.2 记录的恢复锚点（已推送时按 `Idempotence and Recovery` 的 force-with-lease 流程）；合并后用一次反向提交整体撤回，不关闭也不重开功能 issue，#217 如被关闭由人类决定是否重开。
 
 ### Batch 1 · Client 快照代与重连时序（#218）
+
+原始“当前实现回退、新用例必须先红”的历史复现描述，Superseded by `docs/exec-plan/completed/2026-10-28-client-snapshot-ordering.md`（2026-10-28）：旧低 revision 护栏此前已交付，本次 RED 是迟到成功/失败、Transport 游标和 descriptor 读窗；同 Core opaque generation 稳定，新 Core 可以重置，既有事务补齐存储 metadata。
 
 最小闭环是迟到 baseline、并发 poll、重连失败均不能让较新事实回退或把陈旧值报 current。主文件 `packages/client/src/sync.ts`、`store.ts`、`tests/e2e/client-sync.test.js`。先加入受控延迟反例：connect 得 revision 1，reconnect baseline 悬置，poll 接受 revision 2，再释放 baseline 1；当前实现回退到 1，新用例必须先红。设计连接代或串行化协议，定义工作空间重建时的合法 revision 重置与跨代丢弃条件；重连开始立即 stale，失败保留最后已知值并提示失败。不能只用 `revision >= current`，那会误拒绝合法重建。验收 `node --test tests/e2e/client-sync.test.js` 新反例与既有用例全过、`node_modules/.bin/tsc --noEmit` exit 0；修改 controller 快照协议时先加契约并确认 client 不依赖 React。回滚为独立 PR 的 revert，同步更新第 4 行矩阵。
 
@@ -423,7 +425,7 @@ cd "$SCRATCH/export" && node --input-type=module -e "console.log(import.meta.res
 - H4：R1 §2.1 的断言在哪一层才算数（端口、纯函数、core 辅助函数是否算"已断言"）（默认：写明层，不替人类判定）。B0.5 起：第 5 条只在纯函数层、第 10 条只在内存 Storage 上，按缺口所在层记为"部分"；第 8 条的反例（#203）只在 Storage 端口层可复现、当前没有生产路径触达，仍记"反例"；三者都随 H4 的裁决复核。
 - H5：#215 是否纳入 #216 作为 Batch 4 的第四次交付（默认：不纳入）。
 - H7：是否允许本 PR 顺带修改 mvp0 节点 3 标题与文件头（约 5 行测试代码）（默认：不改，归 TD-001 / #224）。
-- [ ] Batch 1（#218）。
+- [x] (2026-10-28) Batch 1（#218）的工程实现与独立验收；完整结果见子计划，PR/规划接受仍分开。
 - [ ] Batch 2：2A–2E（#197 #219 #189 #198 #203 #202 #199 #220）。
   - 2E（#199 #220）在 `fix/sync-revision-freshness` 实现，计划 `docs/exec-plan/completed/2026-10-08-sync-revision-freshness.md`；合并状态以 PR 回读为准。
 - [ ] Batch 3：3A/3B（#221 #222）。
@@ -471,6 +473,7 @@ cd "$SCRATCH/export" && node --input-type=module -e "console.log(import.meta.res
 |---|---|---|
 | 2026-09-29 / 计划作者 | 一份 Active ExecPlan 控制本轮，由多个独立 PR 按事实边界交付 | 一个巨型 PR 不满足规模、回滚与评审约束 |
 | 2026-09-29 / 计划作者 | 公开依据以 `AGENTS.md`、产品/架构文档、ADR、代码与测试为准，不依赖不随仓库分发的输入 | 仓库 `docs/` 必须自包含；Gate E1 实测已正当地修订早期表形 |
+| 2026-10-28 10:09 SGT / 交付协调者 | #218 迟到连接/Transport 与 descriptor AC 按完整闭环验收；产品第4行降为部分 | 112项独立测试与7探针通过；Board 和真实宿主走查仍分别由 #145/#143 承担 |
 | 2026-09-29 / 计划作者 | 先修权威/行为，再合 SQL 与删兼容形状 | 已有绿色测试漏掉用户可见的重连与交付离线偏移；先删会锁住错误 |
 | 2026-09-29 / 计划作者 | 允许发布前旧库不兼容，但以库清单与数据保留判据作执行门 | 未上线取消兼容承诺，不授权静默丢本机开发或证据数据 |
 | 2026-09-29 / 计划作者 | 前置 Binding/作用域裁决；事件去重与全量权威对账分开 | 交付缓存键依赖连接/工作空间身份；事件可缺失，不是正确性的唯一来源 |
@@ -556,3 +559,4 @@ B0.5 在最终提交上的验收结果：B0-1 为 13 个编号行加 1 个附行
 - 2026-09-30 00:34 CST 起：B0.6 验收复核。原因：执行者的 `f7909e1` 要按评审原条件独立复跑。改动：13.3 补引两条经入口用例、13.7 入口格改为"无"、简称表补 `start-work-step-recording`、`vertical-path.md` 的 Node 说明补文档依据、TD-003 遗留影响列与被取代的 Decision Log 行订正；Plan of Work 补 B0.6 条目，Progress、Surprises（S-15 补注、S-18）、Decision Log、Outcomes 随之更新。
 
 - 2026-09-30：#240 合入前按同 PR 纪律刷新 #203 的端口反例与 R1 汇总，保留历史快照和探针，记录仍缺的 core 乱序注入。
+- 2026-10-28 10:09 SGT：#218 收口实际剩余异步/代际反例及本地 metadata 一致读，更新第4行局部证据，保留产品验收边界。

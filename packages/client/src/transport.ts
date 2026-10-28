@@ -27,6 +27,7 @@ export interface Transport {
 export function createTransport(source: RevisionSource, options: TransportOptions = {}): Transport {
   let snapshot: WireSnapshot | undefined
   let watch: WorkspaceWatch | undefined
+  let operation = 0
 
   const optionsFor = (afterRevision: number): WatchOptions => ({
     afterRevision,
@@ -36,16 +37,24 @@ export function createTransport(source: RevisionSource, options: TransportOption
 
   return {
     async fetchBaseline(): Promise<WireSnapshot> {
-      snapshot = await source.baseline()
-      watch?.close()
-      watch = undefined
-      return snapshot
+      const ticket = ++operation
+      const next = await source.baseline()
+      if (ticket === operation) {
+        snapshot = next
+        watch?.close()
+        watch = undefined
+      }
+      return next
     },
     async poll(afterRevision: number): Promise<WireEvent | undefined> {
       watch ??= source.watch(optionsFor(afterRevision))
-      return watch.poll()
+      const current = watch
+      const event = await current.poll()
+      return current === watch ? event : undefined
     },
     close(): void {
+      operation++
+      snapshot = undefined
       watch?.close()
       watch = undefined
     },

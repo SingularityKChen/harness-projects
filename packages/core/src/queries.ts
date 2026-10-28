@@ -49,7 +49,7 @@ export interface RepositoryMetadata {
 
 export interface CoreQueries {
   listProviderBindings(): Promise<readonly ProviderBindingRecord[]>
-  getPlanningSnapshot(): Promise<{ readonly views: readonly PlanningItemView[]; readonly sync: SyncSummary; readonly revision: number }>
+  getPlanningSnapshot(): Promise<{ readonly views: readonly PlanningItemView[]; readonly sync: SyncSummary; readonly revision: number; readonly metadata: WorkspaceMetadata }>
   listPlanningItems(): Promise<readonly PlanningItemView[]>
   getItemDetail(entityId: EntityId): Promise<PlanningItemDetail | undefined>
   getExecutionContext(query: ExecutionContextQuery): Promise<ExecutionContextView | undefined>
@@ -90,7 +90,7 @@ export function createQueries(context: CoreContext): CoreQueries {
   }
 }
 
-/** Planning triple 的一致读作用域；tx 内仅访问本地存储，不调用 Provider 或根 Storage。 */
+/** Planning 与存储 metadata 的一致读作用域；registry 固定于 Core，tx 内不调用 Provider 或根 Storage。 */
 async function planningSnapshot(context: CoreContext) {
   return context.storage.transaction(async (tx) => {
     const sync = await syncSummary(context, tx)
@@ -100,7 +100,7 @@ async function planningSnapshot(context: CoreContext) {
       const identity = (await tx.listIdentitiesForEntity(projection.entityId)).find((entry) => entry.role === IdentityRole.Primary)
       if (identity !== undefined) views.push(toPlanningItemView(projection, identity, sync))
     }
-    return { views: views.sort((left, right) => left.entityId < right.entityId ? -1 : 1), sync, revision: await tx.currentRevision(context.workspaceId) }
+    return { views: views.sort((left, right) => left.entityId < right.entityId ? -1 : 1), sync, revision: await tx.currentRevision(context.workspaceId), metadata: await workspaceMetadata(context, tx) }
   })
 }
 
@@ -130,15 +130,15 @@ async function syncSummary(context: CoreContext, storage: StorageTransaction = c
  * 逐个已知 key 按 `bindingForCapability` 路由到唯一挂载并读取其已求交的 access；没有目标的 key 明确 unavailable，不让备用覆盖主目标。
  * storage 域不经外部挂载，registry 里没有它的目标，因此不在此报告（报 unavailable 会说错）。
  */
-async function workspaceMetadata(context: CoreContext): Promise<WorkspaceMetadata> {
-  const record = await context.storage.getWorkspace(context.workspaceId)
+async function workspaceMetadata(context: CoreContext, storage: StorageTransaction = context.storage): Promise<WorkspaceMetadata> {
+  const record = await storage.getWorkspace(context.workspaceId)
   const keys = Object.values(CapabilityKey).filter((key) => !key.startsWith(`${CapabilityDomain.Storage}.`))
   const planning = singlePlanningBinding(context.registry)
   return {
     workspace: record === undefined ? undefined : { id: record.id, name: record.name },
     capabilities: keys.map((key) => bindingForCapability(context.registry, key)?.capabilities.find((entry) => entry.key === key)
       ?? { key, access: AccessLevel.Unavailable, reason: `没有挂载提供能力 ${key}`, bindingId: undefined, externalActionUrl: undefined }),
-    repositories: await repositoryMetadata(context),
+    repositories: await repositoryMetadata(context, storage),
     planningSource: planning === undefined || !context.projectTitle ? undefined : { bindingId: planning.ref.bindingId, name: context.projectTitle, ...(context.planningMappingOrigin === undefined ? {} : { mappingOrigin: context.planningMappingOrigin }) },
   }
 }
@@ -148,15 +148,15 @@ async function workspaceMetadata(context: CoreContext): Promise<WorkspaceMetadat
  * 变更请求读（`change_request.read`）与 PR 谱系的远端分支头读取共用完整 `CHANGE_REQUEST_READ_ROUTE`。
  * 路由成功：该操作报告的 key 取被选挂载的有效能力（门已过，key 必在其中）；被拒：这些 key 逐个 unavailable，原因是拒绝文案。每个 key 只由一个操作报告。
  */
-async function repositoryMetadata(context: CoreContext): Promise<readonly RepositoryMetadata[]> {
+async function repositoryMetadata(context: CoreContext, storage: StorageTransaction): Promise<readonly RepositoryMetadata[]> {
   const mounts = bindingsForDomain(context.registry, CapabilityDomain.Development).map((mount) => mount.ref.bindingId)
-  const records = [...await context.storage.listRepositories(context.workspaceId)].sort((left, right) => (left.id < right.id ? -1 : 1))
+  const records = [...await storage.listRepositories(context.workspaceId)].sort((left, right) => (left.id < right.id ? -1 : 1))
   const repositories: RepositoryMetadata[] = []
   for (const record of records) {
-    const references = await repositoryReferences(context.storage, record, mounts)
+    const references = await repositoryReferences(storage, record, mounts)
     const capabilities: EffectiveCapability[] = []
     for (const { anchor, earlier, reports } of [START_WORK_ROUTE, CHANGE_REQUEST_READ_ROUTE]) {
-      const route = await routeDevelopment(context, record.id, anchor[0], anchor[1], earlier)
+      const route = await routeDevelopment({ workspaceId: context.workspaceId, registry: context.registry, storage }, record.id, anchor[0], anchor[1], earlier)
       capabilities.push(...(route.ok
         ? route.binding.capabilities.filter((entry) => reports.includes(entry.key))
         : reports.map((key) => ({ key, access: AccessLevel.Unavailable, reason: route.error.message, bindingId: undefined, externalActionUrl: undefined }))))

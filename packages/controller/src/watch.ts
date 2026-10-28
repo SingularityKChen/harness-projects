@@ -45,6 +45,10 @@ function gapEvent(state: WatchState, current: number, reason: string): WireEvent
 async function pollSource(source: WatchSource, state: WatchState): Promise<WireEvent | undefined> {
   if (state.closed) return undefined
   const next = await source.baseline()
+  if (state.closed) return undefined
+  if (state.previous !== undefined && state.previous.generation !== next.generation) {
+    return gapEvent(state, next.revision, 'Host generation 已变化，必须重拉基线')
+  }
   if (next.revision === state.cursor) {
     const previous = state.previous
     if (previous !== undefined && businessSignature(previous) !== businessSignature(next)) {

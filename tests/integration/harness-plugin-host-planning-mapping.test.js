@@ -169,14 +169,23 @@ test('same Host watch updates list and open drawer once; failed read retains con
   })
   let host = await open(env.dataPath, env.catalog)
   const sync = createSync(createTransport(host.controller), createEntityStore()), abort = new AbortController()
-  const stream = host.watch(abort.signal)[Symbol.asyncIterator](); t.after(() => { abort.abort(); return stream.return() })
-  sync.receive((await stream.next()).value); const itemId = sync.read().store.list().find((item) => item.entity.content.contentKind === 'work_item').entityId
+  let stream = host.watch(abort.signal)[Symbol.asyncIterator](); t.after(() => { abort.abort(); return stream.return() })
+  const first = (await stream.next()).value, controller = host.controller
+  sync.receive(first); const itemId = sync.read().store.list().find((item) => item.entity.content.contentKind === 'work_item').entityId
   const read = () => ({ read: sync.read(), metadata: { sourceNames: {} }, phase: 'received', refreshing: false })
   const target = { projectId: WORKSPACE, itemId }
   assert.match(deriveWorkItemDetailView(read(), target).body.planningStatus, /未映射/)
   const input = { actorRef: { kind: 'user' }, idempotencyKey: 'live', expectedBindingId: GITHUB, expectedProjectExternalId: projectNodeId, mapping: { status: { projectFieldId: 's', options: { x: 'done' } } } }
   const before = itemReads; await host.call('setPlanningMapping', input)
-  sync.receive((await stream.next()).value)
+  assert.notEqual(host.controller, controller)
+  const gap = (await stream.next()).value; assert.equal(gap.kind, 'gap'); assert.match(gap.gap.reason, /generation/)
+  sync.receive(gap); assert.ok(sync.read().store.list().every((row) => row.stale))
+  assert.equal((await stream.next()).done, true)
+  stream = host.watch(abort.signal)[Symbol.asyncIterator]()
+  const reopened = (await stream.next()).value; assert.equal(reopened.kind, 'baseline')
+  assert.notEqual(reopened.baseline.generation, first.baseline.generation)
+  assert.equal(reopened.baseline.generation, (await host.controller.baseline()).generation)
+  sync.receive(reopened)
   assert.equal(itemReads, before + 1)
   assert.equal(deriveWorkItemListView(read()).body.rows.find((row) => row.key === itemId).planningStatus, '已完成')
   assert.equal(deriveWorkItemDetailView(read(), target).body.planningStatus, '已完成')

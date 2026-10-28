@@ -215,7 +215,7 @@ for (const [label, makeStorage] of ADAPTERS) {
     const { core } = await compose(storage, workspaceId, [typedFake('local-git', LOCAL_GIT, newProviderBindingId())])
     assert.deepEqual((await core.queries.getWorkspaceMetadata()).repositories, [])
     const controller = createController(core)
-    assert.deepEqual(Object.keys(await controller.baseline()).sort(), ['capabilities', 'entities', 'planningSource', 'revision', 'source', 'workspace'], '没有 repositories 字段（planningSource 来自替身规划挂载，#383）')
+    assert.deepEqual(Object.keys(await controller.baseline()).sort(), ['capabilities', 'entities', 'generation', 'planningSource', 'revision', 'source', 'workspace'], '没有 repositories 字段（planningSource 来自替身规划挂载，#383）')
     const sync = createSync(createTransport(controller), createEntityStore())
     await sync.connect()
     assert.equal(sync.read().repositories, undefined)

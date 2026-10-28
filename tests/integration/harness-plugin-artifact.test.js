@@ -77,6 +77,7 @@ const { renderToStaticMarkup } = uiRequire('react-dom/server')
 const BASELINE_FRAME = {
   kind: 'baseline',
   baseline: {
+    generation: 'host-artifact',
     workspace: { id: 'workspace-1', name: 'Artifact workspace' },
     capabilities: [{ key: 'planning.item.read', access: 'available' }],
     source: { revision: 1, freshness: 'fresh', authority: 'provider', reason: undefined },

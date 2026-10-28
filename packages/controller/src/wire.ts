@@ -78,6 +78,8 @@ export interface WirePlanningSource { readonly bindingId: ProviderBindingId; rea
  * `repositories` 只在有已登记仓库时出现，`planningSource` 只在规划来源的名字已知时出现（没有时整个字段缺席，wire 与加入它们之前逐字相同）。
  */
 export interface WireWorkspaceHeader {
+  /** Host 出版者实例身份；物理重连保持不变，不透明且不按大小比较。 */
+  readonly generation: string
   readonly workspace: WireWorkspaceDescriptor | undefined
   readonly capabilities: readonly WireCapabilityEntry[]
   readonly repositories?: readonly WireRepositoryEntry[]
@@ -152,7 +154,7 @@ export function revisionOf(entities: readonly WireEntity[]): number {
 /** 整表新鲜度取工作区级同步摘要：与逐条 freshness 同源，没有实体时也成立（不再恒为 fresh）。 */
 export function toWireSnapshot(
   views: readonly PlanningItemView[], authority: WireAuthority, workspaceRevision: number | undefined, sync: SyncSummary,
-  metadata: WorkspaceMetadata,
+  metadata: WorkspaceMetadata, generation: string,
 ): WireSnapshot {
   const entities = views
     .map((view) => toWireEntity(view, authority))
@@ -162,7 +164,7 @@ export function toWireSnapshot(
   const repositories = metadata.repositories.map(({ id, capabilities }) => ({ id, capabilities: capabilities.map(wireCapability) }))
   const planning = metadata.planningSource
   return {
-    revision,
+    generation, revision,
     entities,
     workspace: metadata.workspace,
     capabilities: metadata.capabilities.map(wireCapability),
@@ -186,17 +188,17 @@ export function diffSnapshots(previous: WireSnapshot, next: WireSnapshot): WireD
   const upserts = next.entities.filter((entity) => before.get(entity.entityId) !== signature(entity))
   const after = new Set(next.entities.map((entity) => entity.entityId))
   const removed = previous.entities.filter((entity) => !after.has(entity.entityId)).map((entity) => entity.entityId)
-  const { workspace, capabilities, repositories, planningSource, source } = next
+  const { generation, workspace, capabilities, repositories, planningSource, source } = next
   return {
-    previousRevision: previous.revision, revision: next.revision, upserts, removed, workspace, capabilities,
+    generation, previousRevision: previous.revision, revision: next.revision, upserts, removed, workspace, capabilities,
     ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }), source,
   }
 }
 
 export function toWireMetadata(snapshot: WireSnapshot): WireWorkspaceMetadata {
-  const { revision, workspace, capabilities, repositories, planningSource, source } = snapshot
+  const { generation, revision, workspace, capabilities, repositories, planningSource, source } = snapshot
   return {
-    revision, workspace, capabilities, ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }),
+    generation, revision, workspace, capabilities, ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }),
     source, entities: snapshot.entities.map(({ entityId, source }) => ({ entityId, source })),
   }
 }

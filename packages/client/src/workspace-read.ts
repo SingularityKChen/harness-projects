@@ -96,11 +96,11 @@ function validPlanningSource(planning: unknown): boolean {
 }
 
 export function assertHeader(header: WireWorkspaceHeader): void {
-  const malformed = '帧头不合契约：workspace / capabilities / repositories / planningSource / source 形状错误'
+  const malformed = '帧头不合契约：generation / workspace / capabilities / repositories / planningSource / source 形状错误'
   if (typeof header !== 'object' || header === null) throw new TypeError(malformed)
-  const { workspace, capabilities, repositories, planningSource, source } = header
+  const { generation, workspace, capabilities, repositories, planningSource, source } = header
   const described = workspace === undefined || (typeof workspace.id === 'string' && workspace.id !== '' && typeof workspace.name === 'string')
-  if (!described || !validCapabilityList(capabilities) || !validRepositories(repositories) || !validPlanningSource(planningSource) || !isSource(source)) {
+  if (typeof generation !== 'string' || generation.trim() === '' || !described || !validCapabilityList(capabilities) || !validRepositories(repositories) || !validPlanningSource(planningSource) || !isSource(source)) {
     throw new TypeError(malformed)
   }
 }

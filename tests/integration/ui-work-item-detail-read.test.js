@@ -103,7 +103,7 @@ test('sync-recovery-reprojects：恢复帧与增量重新投影实际内容，�
   const entity = base.entities.find((candidate) => candidate.entityId === target.itemId)
   const revision = base.revision + 1
   const source = { ...base.source, revision }
-  transport.events.push({ kind: 'delta', delta: { previousRevision: base.revision, revision, source, upserts: [{ ...entity, content: { ...entity.content, title: '恢复后的新标题' }, source }], removed: [], workspace: base.workspace, capabilities: base.capabilities } })
+  transport.events.push({ kind: 'delta', delta: { generation: base.generation, previousRevision: base.revision, revision, source, upserts: [{ ...entity, content: { ...entity.content, title: '恢复后的新标题' }, source }], removed: [], workspace: base.workspace, capabilities: base.capabilities } })
   assert.equal((await sync.poll()).kind, 'delta')
   const reprojected = contentOf(sync.read(), target)
   assert.deepEqual([reprojected.title, reprojected.lastUpdatedAt], ['恢复后的新标题', T(3)], '新帧必须重新投影，而不是沿用缓存')
