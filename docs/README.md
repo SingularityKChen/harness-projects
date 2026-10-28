@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-28-pr438-pr440-review-followup](exec-plan/completed/2026-10-28-pr438-pr440-review-followup.md) | PR #438–#440 MMP 评审、非阻塞修复与授权收尾 |
 | [2026-10-28-execution-run-refresh](exec-plan/completed/2026-10-28-execution-run-refresh.md) | 签发者运行刷新、变化式健康度与详情读回（#365） |
 | [2026-10-27-pr406-pr409-review-followup](exec-plan/completed/2026-10-27-pr406-pr409-review-followup.md) | PR #406–#409 MMP 评审、非阻塞修复、独立复评与授权合并 |
 | [2026-10-26-plugin-demo-artifact](exec-plan/completed/2026-10-26-plugin-demo-artifact.md) | 版本化 tarball 与干净 Web profile 安装、打开、卸载验收（#230）；[安装指南](product/demo-install.md) |
