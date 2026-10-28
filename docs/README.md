@@ -25,7 +25,6 @@
 
 | 计划 | 用途 |
 |---|---|
-| [2026-10-28-plugin-bundle-evidence](exec-plan/active/2026-10-28-plugin-bundle-evidence.md) | Host 公开组件与同配置 bundle/pack 证据（#428） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
@@ -90,6 +89,7 @@
 | [2026-09-29-e1-uncertain-create-wallclock](exec-plan/completed/2026-09-29-e1-uncertain-create-wallclock.md) | 119 验收 1 按字面补齐：不确定创建记录的逐条墙钟与确切命令 |
 | [2026-09-29-github-projects-read](exec-plan/completed/2026-09-29-github-projects-read.md) | GitHub Projects 读取投影 |
 | [2026-09-29-harness-plugin-package](exec-plan/completed/2026-09-29-harness-plugin-package.md) | Harness 插件打包（issue #227） |
+| [2026-10-28-plugin-bundle-evidence](exec-plan/completed/2026-10-28-plugin-bundle-evidence.md) | Host 公开组件与同配置 bundle/pack 证据（#428） |
 | [2026-09-29-harness-plugin-reprobe](exec-plan/completed/2026-09-29-harness-plugin-reprobe.md) | 宿主嵌入复探（issue #225） |
 | [2026-09-29-source-version-order](exec-plan/completed/2026-09-29-source-version-order.md) | 观察版本载体收窄与定序 |
 | [2026-09-29-start-work-resume-evidence](exec-plan/completed/2026-09-29-start-work-resume-evidence.md) | 2026-09-29-start-work-resume-evidence —— 补齐 Start Work 恢复的剩余闭环（#183） |

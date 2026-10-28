@@ -15,7 +15,7 @@
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
-import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
@@ -352,6 +352,17 @@ describe('Harness 插件安装件契约', () => {
       for (const id of evaluated.requested) {
         assert.ok(CLIENT_BASELINE.includes(id), `factory 运行期 require 了非基线模块 ${id}`)
       }
+    })
+
+    it('Loader 负控拒绝重复 load 和基线之外的 factory require', async () => {
+      const code = await readFile(path.join(packageDir, 'lib/client.js'), 'utf8')
+      const duplicate = path.join(tmpRoot, 'duplicate-loader.js')
+      await writeFile(duplicate, `${code}\nwindow.__ModuleLoader__.load({ id: 'extra', factory() {} });`)
+      await assert.rejects(evaluateClientBundle(duplicate), /恰好调用一次/)
+      const unknown = path.join(tmpRoot, 'unknown-require.js')
+      assert.match(code, /require\("react"\)/)
+      await writeFile(unknown, code.replace(/require\("react"\)/, 'require("react/private")'))
+      await assert.rejects(evaluateClientBundle(unknown), /missed the module table/)
     })
   })
 

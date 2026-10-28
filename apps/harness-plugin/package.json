@@ -25,7 +25,8 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "pack:plugin": "node scripts/build.mjs && pnpm --dir dist/package pack --pack-destination .."
+    "pack:plugin": "node scripts/build.mjs && pnpm --dir dist/package pack --pack-destination ..",
+    "bundle:report": "node scripts/bundle-report.mjs"
   },
   "devDependencies": {
     "esbuild": "0.28.2"
