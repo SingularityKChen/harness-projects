@@ -58,7 +58,7 @@ async function assertDeliveryScope(controller: Controller, scope: { workItemId: 
 }
 
 /** 工作区身份来自 Host；执行记录只在读取前后均可见的工作项上投影允许字段。 */
-const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness'): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts'>, Controller> => ({
+const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness'): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts'>, Controller> => ({
   getStartWorkOptions: async (controller, input) => {
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
     return { workspaceId, workItemId: input.workItemId, executionMode: mode() }
@@ -88,16 +88,27 @@ const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness')
   baseline: (controller) => controller.baseline(),
   refreshPlanning: (controller, input) => controller.commands.refreshPlanning(input),
   bootstrapWorkspace: (controller, input) => controller.commands.bootstrapWorkspace(input),
+  refreshExecutionRun: async (controller, { actorRef, ...scope }) => {
+    const visible = async () => { const entity = await controller.queries.getEntity(scope.workItemId); return (await controller.baseline()).workspace?.id === workspaceId && entity?.content.contentKind === 'work_item' }
+    if (!await visible()) throw new Error('工作项不可见')
+    const result = await controller.commands.refreshExecutionRun(scope, { actorRef })
+    if (!await visible()) throw new Error('工作项不可见')
+    return result
+  },
   getExecutionContext: async (controller, input) => {
-    if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') return { context: null }
+    const before = await controller.queries.getEntity(input.workItemId)
+    if ((await controller.baseline()).workspace?.id !== workspaceId || before?.content.contentKind !== 'work_item') return { context: null }
     const context = await controller.queries.getExecutionContext(input)
-    const visible = (await controller.queries.getEntity(input.workItemId))?.content.contentKind === 'work_item'
+    const after = await controller.queries.getEntity(input.workItemId)
+    const visible = (await controller.baseline()).workspace?.id === workspaceId && after?.content.contentKind === 'work_item'
     if (!visible || context === undefined || context.workspaceId !== workspaceId
       || context.workItemId !== input.workItemId || context.repositoryId !== input.repositoryId) return { context: null }
     const dto: ExecutionContextDTO = {
       workspaceId, workItemId: context.workItemId, repositoryId: context.repositoryId, status: context.status,
       ...(context.branchExternalId === undefined ? {} : { branchExternalId: context.branchExternalId }),
       ...(context.worktreeExternalId === undefined ? {} : { worktreeExternalId: context.worktreeExternalId }),
+      ...(context.runConfirmedAt === undefined ? {} : { runConfirmedAt: context.runConfirmedAt }),
+      ...(context.runStale === undefined ? {} : { runStale: context.runStale }),
       ...(context.runStatus === undefined ? {} : { runStatus: context.runStatus }),
       ...(context.fallback === undefined ? {} : { fallback: context.fallback }),
     }

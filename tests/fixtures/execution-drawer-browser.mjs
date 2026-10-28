@@ -13,7 +13,7 @@ import { catalogOf, hostStoragePolicy } from '../../apps/harness-plugin/src/host
 import { installHostRemote } from '../../apps/harness-plugin/src/remote.ts'
 export async function createExecutionFixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'execution-drawer-')), dataPath = path.join(root, 'workspace.sqlite')
-  const providers = createFakeProviders(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: {}, create: async ({ binding }) => createFakeProviders({ [binding.domain]: { bindingId: binding.id } })[binding.domain] }])
+  const mounted = [], providers = createFakeProviders(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: {}, create: async ({ binding }) => { const provider = createFakeProviders({ [binding.domain]: { bindingId: binding.id } })[binding.domain]; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
   const workspaceId = '00000000-0000-4000-8000-000000000282'
   const storage = createSqliteStorage(dataPath, hostStoragePolicy(catalog)), core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture' }, providers, storage })
   const itemId = (await core.queries.listPlanningItems()).find((item) => item.content.contentKind === 'work_item').entityId
@@ -22,7 +22,7 @@ export async function createExecutionFixture() {
   await storage.putExecutionRun({ ...(await storage.getExecutionRun(runId)), fallback: true })
   const host = await createHostComposition({ dataPath, workspaceId, catalog, resolveCredential: async () => undefined })
   const installed = await installHostRemote({ provide: () => () => {}, typert: { register: () => () => {} } }, host)
-  return { workspaceId, itemId, runId, storage, host, installed, close: async () => { await installed.dispose(); host.dispose(); storage.close(); await rm(root, { recursive: true, force: true }) } }
+  return { workspaceId, itemId, runId, storage, host, installed, mounted, close: async () => { await installed.dispose(); host.dispose(); storage.close(); await rm(root, { recursive: true, force: true }) } }
 }
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url)), uiRequire = createRequire(path.join(repoRoot, 'packages/ui/package.json'))

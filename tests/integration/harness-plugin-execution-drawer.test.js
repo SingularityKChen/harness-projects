@@ -12,7 +12,7 @@ test('real Host/remote returns exact nullable DTO, rejects bad input before quer
   assert.equal(typeof h.installed.service.getExecutionContext, 'function')
   const reader = createExecutionContextReader(async ({ workItemId, repositoryId }) => json(await h.installed.service.getExecutionContext(workItemId, repositoryId)))
   const dto = await reader(scope)
-  assert.deepEqual(Object.keys(dto).sort(), ['branchExternalId', 'fallback', 'repositoryId', 'runStatus', 'status', 'workItemId', 'workspaceId', 'worktreeExternalId'])
+  assert.deepEqual(Object.keys(dto).sort(), ['branchExternalId', 'fallback', 'repositoryId', 'runConfirmedAt', 'runStale', 'runStatus', 'status', 'workItemId', 'workspaceId', 'worktreeExternalId'])
   assert.equal(dto.runStatus, 'running'); assert.equal(dto.fallback, 'manual_fallback')
   assert.equal(await reader({ ...scope, repositoryId: 'unknown' }), null)
   let reads = 0; const read = h.host.controller.queries.getExecutionContext
@@ -36,11 +36,30 @@ test('production apply registers Panel with actual watch source and unwrapped st
   const h = await createExecutionFixture()
   const abort = new AbortController(), stream = { restart() {}, dispose: async () => abort.abort(), async *[Symbol.asyncIterator]() { for await (const value of h.host.watch(abort.signal)) yield { generation: 1, value: json(value), accept() {} } } }
   const disposers = []; let Panel
-  const child = { remote: { harnessProjects: { getExecutionContext: async (...args) => ({ ok: true, value: await h.installed.service.getExecutionContext(...args) }) }, $stream: () => stream }, effect: (run) => disposers.push(run()), slots: { inject: (_, run) => run(), register: (slot, component) => { if (slot.name === 'main') Panel = component } } }
+  const child = { remote: { harnessProjects: { getExecutionContext: async (...args) => ({ ok: true, value: await h.installed.service.getExecutionContext(...args) }), refreshExecutionRun: async (...args) => ({ ok: true, value: await h.installed.service.refreshExecutionRun(...args) }) }, $stream: () => stream }, effect: (run) => disposers.push(run()), slots: { inject: (_, run) => run(), register: (slot, component) => { if (slot.name === 'main') Panel = component } } }
   await apply({ remote: { $mount: async () => {} }, inject: (_, run) => run(child) })
   t.after(async () => { await Promise.all(disposers.map((run) => run())); await h.close() })
   const app = Panel(); assert.equal(typeof app.props.executionReader, 'function')
   const dto = await app.props.executionReader({ workspaceId: h.workspaceId, workItemId: h.itemId, repositoryId: 'repo-alpha' }); assert.equal(dto.runStatus, 'running')
+  await assert.rejects(() => app.props.executionReader.refresh({ workspaceId: h.workspaceId, workItemId: h.itemId, repositoryId: 'repo-alpha' })); assert.equal((await app.props.executionReader({ workspaceId: h.workspaceId, workItemId: h.itemId, repositoryId: 'repo-alpha' })).runStale, true)
   child.remote.harnessProjects.getExecutionContext = async () => ({ ok: false, error: 'SECRET-REMOTE-ERROR' })
   await assert.rejects(() => app.props.executionReader({ workspaceId: h.workspaceId, workItemId: h.itemId, repositoryId: 'repo-alpha' }), (error) => !error.message.includes('SECRET-REMOTE-ERROR'))
+})
+
+test('Host refresh command reaches issuing provider, persists stale, and fences redacted scope before and after I/O', async (t) => {
+  const h = await createExecutionFixture(); t.after(h.close)
+  const scope = { workspaceId: h.workspaceId, workItemId: h.itemId, repositoryId: 'repo-alpha' }
+  assert.equal(typeof h.installed.service.refreshExecutionRun, 'function')
+  const command = h.host.controller.commands.refreshExecutionRun; let calls = 0
+  h.host.controller.commands.refreshExecutionRun = async (...args) => { calls++; return command(...args) }
+  const reader = createExecutionContextReader(async ({ workItemId, repositoryId }) => json(await h.installed.service.getExecutionContext(workItemId, repositoryId)), async ({ workItemId, repositoryId }) => { const result = await h.installed.service.refreshExecutionRun({ kind: 'human' }, workItemId, repositoryId); if (result.writeState === 'failed') throw Error('fixed') })
+  assert.equal((await reader(scope)).runStale, false); assert.equal(calls, 0)
+  await assert.rejects(() => reader.refresh(scope)); assert.equal(calls, 1); assert.equal((await reader(scope)).runStale, true); assert.equal((await reader(scope)).runStatus, 'running')
+  h.mounted[0].getRun = async (ref) => ({ ok: true, value: { ref, status: 'succeeded' } })
+  await reader.refresh(scope); assert.equal((await reader(scope)).runStatus, 'succeeded'); assert.equal((await reader(scope)).runStale, false); assert.equal(calls, 2)
+  const get = h.host.controller.queries.getEntity
+  h.host.controller.queries.getEntity = async (id) => ({ ...(await get(id)), content: { contentKind: 'redacted' } })
+  await assert.rejects(() => reader.refresh(scope)); assert.equal(calls, 2)
+  let entities = 0; h.host.controller.queries.getEntity = async (id) => { const entity = await get(id); return ++entities === 1 ? entity : { ...entity, content: { contentKind: 'redacted' } } }
+  await assert.rejects(() => reader.refresh(scope)); assert.equal(calls, 3)
 })

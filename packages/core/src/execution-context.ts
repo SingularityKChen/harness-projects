@@ -2,13 +2,14 @@
  *
  */
 import { createHash } from 'node:crypto'
-import { ProjectErrorCode, projectError, type ExecutionContextRecord, type ExecutionRunRecord, type ProjectError } from '@harness-projects/capabilities'
+import { SyncState, ProjectErrorCode, projectError, type ExecutionContextRecord, type ExecutionRunRecord, type ProjectError } from '@harness-projects/capabilities'
 import {
   ExecutionContextStatus, ExecutionRunStatus, RelationState, RelationType, WriteState, asBrandedId,
   type EntityId, type ExecutionContextId, type ExecutionRunId, type WorkspaceId,
 } from '@harness-projects/domain'
 import { worktreeEntityId } from './chain-facts.ts' // 与 chain-facts 互相引用（TD-005）：只在函数体里调用，不在模块求值时使用
 import type { CoreContext } from './context.ts'
+import { runHealthScope, runReadGate, validRunRef } from './execution-run.ts'
 import { asEntityId, findRelation } from './relations.ts'
 import { emptyValues, reportFor, WritePhase, type WriteReport } from './write-machine.ts'
 
@@ -59,6 +60,8 @@ export interface ExecutionContextView {
   readonly runExternalId: string | undefined
   readonly runId: ExecutionRunId | undefined
   readonly runStatus: ExecutionRunStatus | undefined
+  readonly runConfirmedAt: string | undefined
+  readonly runStale: boolean | undefined
   readonly fallback: StartWorkFallback | undefined
   readonly degraded: boolean
 }
@@ -149,13 +152,16 @@ export async function readExecutionContext(
   const record = await context.storage.getExecutionContext(id)
   if (record === undefined) return undefined
   const run = await context.storage.getExecutionRun(runIdFor(id))
+  const health = run?.providerRef === undefined ? undefined : await context.storage.getSyncCursor(context.workspaceId, run.providerRef.bindingId, runHealthScope(run))
+  const confirmed = run !== undefined && run.status !== ExecutionRunStatus.Unknown && validRunRef(run.providerRef) && Number.isFinite(Date.parse(run.updatedAt))
   const fallback = fallbackOf(run)
   const gap = record.status === ExecutionContextStatus.Ready ? await readyGap(context, record, run) : undefined
   return {
     id: record.id, workspaceId: record.workspaceId, workItemId: record.workItemId, repositoryId: record.repositoryId,
     status: record.status, branchExternalId: record.branchExternalId, worktreeExternalId: record.worktreeExternalId,
     runExternalId: run?.providerRef?.externalId,
-    runId: run?.id, runStatus: run?.status, fallback, degraded: fallback !== undefined || gap !== undefined,
+    runId: run?.id, runStatus: run?.status, runConfirmedAt: confirmed ? run.updatedAt : undefined,
+    runStale: run === undefined ? undefined : health?.state === SyncState.Degraded || runReadGate(context, run)?.allowed !== true, fallback, degraded: fallback !== undefined || gap !== undefined,
   }
 }
 

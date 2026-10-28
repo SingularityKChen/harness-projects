@@ -5,5 +5,6 @@ const LABELS: Record<ExecutionRunStatus, string> = { queued: '排队中', starti
 export function executionContextText(context: ExecutionContextDTO) {
   return { path: context.worktreeExternalId ?? '工作树路径尚未提供', branch: context.branchExternalId ?? '分支尚未提供',
     run: context.runStatus === undefined ? '尚无运行记录' : LABELS[context.runStatus],
+    confirmation: context.runConfirmedAt === undefined ? context.runStale ? '当前无法核对运行状态' : undefined : context.runStale ? `最后确认，当前无法核对（${context.runConfirmedAt}）` : `此状态于 ${context.runConfirmedAt} 确认`,
     manual: context.fallback === 'manual_fallback' ? '人工处理，可在该工作树继续' : undefined }
 }
