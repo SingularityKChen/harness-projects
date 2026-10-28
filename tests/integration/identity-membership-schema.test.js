@@ -295,7 +295,7 @@ test('#133：投影缺字段展示列的旧 002 库在 migrate 之前以可执�
       const path = join(dir, `legacy-${index}.sqlite`)
       createSqliteStorage(path).close()
       const before = fingerprint(path, sql)
-      assert.throws(() => createSqliteStorage(path), /规划字段展示列.*删除库文件重建/, `${name}：旧形状必须在 migrate 与第一次读写之前被拒绝`)
+      assert.throws(() => createSqliteStorage(path), (error) => error.code === 'incompatible_database', `${name}：旧形状必须在 migrate 与第一次读写之前被拒绝`)
       assert.equal(fingerprint(path), before, `${name}：拒绝必须零写入（schema 与迁移记账逐字不变）`)
     }
     const upper = join(dir, 'upper.sqlite')

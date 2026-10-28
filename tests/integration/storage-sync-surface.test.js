@@ -289,10 +289,10 @@ test('003 重写后的库自检：旧库必须显式报错，且自检失败必�
       assert.deepEqual(rewriteObservationTable(db, PRE_REWRITE_COLUMNS),
         ['workspace_id', 'item_external_id', 'observed_at', 'binding_id', 'updated_at', 'snapshot_json', 'state'], '前置：库已退回重写前的 003 形状')
     } finally { db.close() }
-    assert.throws(() => createSqliteStorage(location), /重写前的 003/,
+    assert.throws(() => createSqliteStorage(location), (error) => error.code === 'incompatible_database',
       '旧库必须在打开时就显式报错并给出处置（删除重建）；否则调用方拿到的是第一次写观察时的驱动层报错')
     const before = readdirSync('/dev/fd').length // R4-3 ②：连续失败 5 次 fd 数不得增加（实测关掉 +0、删掉 this.db.close() +5）。
-    for (let attempt = 1; attempt <= 5; attempt += 1) assert.throws(() => createSqliteStorage(location), /重写前的 003/)
+    for (let attempt = 1; attempt <= 5; attempt += 1) assert.throws(() => createSqliteStorage(location), (error) => error.code === 'incompatible_database')
     assert.equal(readdirSync('/dev/fd').length, before, '自检失败必须关掉句柄：每次失败的打开都不得留下一个文件描述符')
     // 判别性：自检要同时看**主体列**与 `dedupe_key`。中间形状（主体仍是工作区 + 条目，但已有 `dedupe_key`）只靠
     // "有没有 dedupe_key"判不出来，会在第一次写观察时以 `no such column: object_kind` 炸在驱动层。
@@ -300,7 +300,7 @@ test('003 重写后的库自检：旧库必须显式报错，且自检失败必�
     createSqliteStorage(intermediate).close()
     const legacy = openDatabase(intermediate)
     try { rewriteObservationTable(legacy, PRE_REWRITE_COLUMNS.replace('observed_at TEXT NOT NULL,', "observed_at TEXT NOT NULL, dedupe_key TEXT NOT NULL,")) } finally { legacy.close() }
-    assert.throws(() => createSqliteStorage(intermediate), /重写前的 003/, '只有 dedupe_key、没有端口主体列的旧库同样必须在打开时报错')
+    assert.throws(() => createSqliteStorage(intermediate), (error) => error.code === 'incompatible_database', '只有 dedupe_key、没有端口主体列的旧库同样必须在打开时报错')
     const current = createSqliteStorage(join(dir, 'current.sqlite'))
     try { assert.deepEqual(await current.listMemberships(WORKSPACE, PROJECT), [], '正方向：当前形状的库照常打开，自检不得挡住新库') } finally { current.close() }
     // #187 / #188 原位把 repository 的主键改成 (workspace_id, id)：单列主键的旧库同样在打开时报错，而不是等到第二个工作区挂载时才以 UNIQUE 失败。
@@ -308,7 +308,7 @@ test('003 重写后的库自检：旧库必须显式报错，且自检失败必�
     createSqliteStorage(singleKey).close()
     const old = openDatabase(singleKey)
     try { old.exec('PRAGMA foreign_keys = OFF; DROP TABLE repository; CREATE TABLE repository (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspace (id), external_identity_id TEXT NOT NULL REFERENCES external_identity (id), UNIQUE (workspace_id, external_identity_id), UNIQUE (workspace_id, id)); PRAGMA foreign_keys = ON') } finally { old.close() }
-    assert.throws(() => createSqliteStorage(singleKey), /repository 的主键不是 \(workspace_id, id\)/, '仓库挂载键仍是单列 id 的旧库必须在打开时报错')
+    assert.throws(() => createSqliteStorage(singleKey), (error) => error.code === 'incompatible_database', '仓库挂载键仍是单列 id 的旧库必须在打开时报错')
   })
 })
 
@@ -323,9 +323,9 @@ test('003 重写后的库自检：旧的游标主键（两元，或有 workspace
       createSqliteStorage(location).close()
       const db = openDatabase(location)
       try { db.exec(`PRAGMA foreign_keys = OFF; DROP TABLE sync_cursor; ${ddl}; PRAGMA foreign_keys = ON`) } finally { db.close() }
-      assert.throws(() => createSqliteStorage(location), /sync_cursor 的主键不是 \(workspace_id, binding_id, scope_key\)/, `${name}：必须在业务写入前拒绝`)
+      assert.throws(() => createSqliteStorage(location), (error) => error.code === 'incompatible_database', `${name}：必须在业务写入前拒绝`)
       const before = readdirSync('/dev/fd').length
-      for (let attempt = 1; attempt <= 3; attempt += 1) assert.throws(() => createSqliteStorage(location), /重写前的 003/)
+      for (let attempt = 1; attempt <= 3; attempt += 1) assert.throws(() => createSqliteStorage(location), (error) => error.code === 'incompatible_database')
       assert.equal(readdirSync('/dev/fd').length, before, `${name}：拒绝必须关掉句柄`)
       const after = openDatabase(location)
       try { assert.equal(after.prepare(`SELECT sql FROM sqlite_master WHERE name = 'sync_cursor'`).get().sql.replace(/\s+/g, ' '), ddl.replace(/\s+/g, ' '), `${name}：库被拒绝而不是被升级或删除`) } finally { after.close() }

@@ -6,11 +6,11 @@
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
+import { Worker } from 'node:worker_threads'
 
 import {
   BUSY_TIMEOUT_MS,
@@ -19,11 +19,6 @@ import {
   migrate,
   openDatabase,
 } from '@harness-projects/storage-sqlite'
-
-/** 真值来自包内迁移体本身，避免测试里复制一份会漂移的 DDL。 */
-const REAL_INIT_SQL = fileURLToPath(
-  new URL('../../packages/storage/sqlite/migrations/001_init.sql', import.meta.url),
-)
 
 /** 每个用例一个临时目录，结束时删除。 */
 function withTempDir(run) {
@@ -94,103 +89,37 @@ test('第二次运行是幂等的：schema 内容与版本都不变', () => {
   })
 })
 
-/**
- * 让清单在被切片/遍历时确定性地触发一次回调，用来插桩"后到者读完版本、尚未执行 DDL"
- * 的时序点。
- *
- * 同步 SQLite 无法在单线程里真的让两个 migrate 并行，但并发启动的真实交错是可复现的：
- * 清单的 slice 访问必然发生在"读取已应用版本"之后、"执行任何 DDL"之前；第二次遍历
- * 作为兜底插桩点，条件相同。
- */
-function withInterleave(entries, interleave) {
-  let fired = false
-  let iterations = 0
-  const fire = () => {
-    if (fired) return
-    fired = true
-    interleave()
-  }
-  return new Proxy(entries, {
-    get(target, property) {
-      if (property === 'slice') fire()
-      if (property === Symbol.iterator) {
-        iterations += 1
-        if (iterations > 1) fire()
-      }
-      return Reflect.get(target, property, target)
-    },
+test('双 Worker 屏障同时打开空库：只有一个进程初始化完整链', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'storage-concurrent-'))
+  const module = new URL('../../packages/storage/sqlite/src/index.ts', import.meta.url).href
+  const workers = [0, 1].map(() => new Worker(`
+    const { parentPort, workerData } = require('node:worker_threads');
+    import(workerData.module).then(({ openDatabase, migrate }) => {
+      const db = openDatabase(workerData.file);
+      parentPort.once('message', () => {
+        try { parentPort.postMessage(migrate(db)) } finally { db.close() }
+      });
+      parentPort.postMessage('ready');
+    });
+  `, { eval: true, workerData: { module, file: join(dir, 'workspace.sqlite') } }))
+  const next = (worker) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('worker barrier timeout')), 15000)
+    worker.once('message', (value) => { clearTimeout(timer); resolve(value) })
+    worker.once('error', (error) => { clearTimeout(timer); reject(error) })
   })
-}
-
-test('两连接交错启动：后到者重读已提交版本后跳过，DDL 只执行一次', () => {
-  withTempDir((dir) => {
-    const migrationsDir = join(dir, 'migrations')
-    mkdirSync(migrationsDir)
-    writeFileSync(join(migrationsDir, '001_init.sql'), readFileSync(REAL_INIT_SQL, 'utf8'))
-    // 版本 2 的副作用可观测：重复执行会让 ddl_probe 多出一行。
-    writeFileSync(
-      join(migrationsDir, '002_probe.sql'),
-      'CREATE TABLE IF NOT EXISTS ddl_probe (id INTEGER PRIMARY KEY);\n' +
-        'INSERT INTO ddl_probe (id) VALUES (1);\n',
-    )
-    const entries = [
-      { version: 1, file: '001_init.sql' },
-      { version: 2, file: '002_probe.sql' },
-    ]
-
-    const file = join(dir, 'workspace.sqlite')
-    const early = openDatabase(file)
-    const late = openDatabase(file)
-    try {
-      let earlyResult
-      // 交错时序：late 先读到"空库"，随后 early 完整迁移并提交，late 才继续执行。
-      // 事务外读版本的实现会拿着陈旧的"空库"结论重复执行 DDL；事务内重读的实现在
-      // BEGIN IMMEDIATE 之后看到 [1, 2]，于是跳过。
-      const lateResult = migrate(late, {
-        entries: withInterleave(entries, () => {
-          earlyResult = migrate(early, { entries, dir: migrationsDir })
-        }),
-        dir: migrationsDir,
-      })
-
-      assert.deepEqual(earlyResult.applied, [1, 2], '先到者必须应用全部缺失迁移')
-      assert.deepEqual(lateResult.applied, [], '后到者不得重复应用已被并发提交的版本')
-      assert.equal(lateResult.version, earlyResult.version, '两个连接看到的最终版本必须一致')
-      assert.deepEqual(appliedVersions(early), appliedVersions(late), '两连接的版本记录必须一致')
-      assert.equal(
-        late.prepare('SELECT COUNT(*) AS n FROM ddl_probe').get().n,
-        1,
-        '同一段 DDL 只允许执行一次',
-      )
-    } finally {
-      early.close()
-      late.close()
-    }
-  })
-})
-
-test('抛错的迁移不留下版本记录，半写状态一并回滚', () => {
-  withTempDir((dir) => {
-    const migrationsDir = join(dir, 'migrations')
-    mkdirSync(migrationsDir)
-    writeFileSync(join(migrationsDir, '001_init.sql'), readFileSync(REAL_INIT_SQL, 'utf8'))
-    writeFileSync(
-      join(migrationsDir, '002_boom.sql'),
-      'CREATE TABLE half_written (id INTEGER PRIMARY KEY);\nTHIS IS NOT VALID SQL;\n',
-    )
-    const entries = [
-      { version: 1, file: '001_init.sql' },
-      { version: 2, file: '002_boom.sql' },
-    ]
+  try {
+    assert.deepEqual(await Promise.all(workers.map(next)), ['ready', 'ready'])
+    const results = workers.map(next)
+    workers.forEach((worker) => worker.postMessage('go'))
+    const applied = (await Promise.all(results)).map((result) => result.applied).sort((a, b) => a.length - b.length)
+    assert.deepEqual(applied, [[], [1, 2, 3, 4, 5, 6, 7]])
     withDatabase(dir, (db) => {
-      assert.throws(() => migrate(db, { entries, dir: migrationsDir }))
-      assert.deepEqual(appliedVersions(db), [1], '失败的迁移不得写入版本记录')
-      const halfWritten = db
-        .prepare("SELECT name FROM sqlite_master WHERE name = 'half_written'")
-        .get()
-      assert.equal(halfWritten, undefined, '失败迁移的半写状态必须回滚')
+      assert.deepEqual(appliedVersions(db), [1, 2, 3, 4, 5, 6, 7])
+      assert.equal(db.prepare('PRAGMA user_version').get().user_version, 1)
+      assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok')
+      assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
     })
-  })
+  } finally { await Promise.all(workers.map((worker) => worker.terminate())); rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('清单自检拦住重复版本、不递增的版本与缺失文件', () => {

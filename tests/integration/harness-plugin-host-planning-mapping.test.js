@@ -132,7 +132,7 @@ test('real GitHub read replay derives status/iteration/date, survives restart, a
 test('old 002 shape is refused before migration without touching existing data', async (t) => {
   const env = await sandbox(t); await seed(env.dataPath, new Map(), seedWorkspace)
   const db = openDatabase(env.dataPath); db.exec('DROP TABLE workspace_planning_mapping'); const versions = db.prepare('SELECT * FROM schema_migrations').all(); db.close()
-  assert.throws(() => createSqliteStorage(env.dataPath), /Planning mapping schema is outdated/)
+  assert.throws(() => createSqliteStorage(env.dataPath), (error) => error.code === 'incompatible_database')
   const check = openDatabase(env.dataPath); assert.deepEqual(check.prepare('SELECT * FROM schema_migrations').all(), versions)
   assert.equal(check.prepare("SELECT name FROM sqlite_master WHERE name = 'workspace_planning_mapping'").get(), undefined); assert.equal(check.prepare('SELECT count(*) AS n FROM workspace').get().n, 1); check.close()
 })

@@ -52,7 +52,7 @@ Batch 0 先交付最后那一半：只读仓库的人能在 `docs/product/vertic
 
 目标读路径有两种入口：增量事件先经观察账本去重和定序，再触发或辅助刷新；全量权威快照即使没有事件也必须独立收敛。两者按已裁决的连接/工作空间/项目作用域更新本地事实，只有有效内容变化才推进业务 revision，刷新尝试与 freshness 另记。同一事务提交工作空间事实、关系和修订号；普通 Query 只消费已提交事实，带 freshness/degraded 元数据。目标写路径是 actor + 目标 binding + 请求指纹 + 幂等键先落待处理尝试，再调用 Provider，收到 ack 或 reconcile 后推进结果；未知结果不得盲重试创建或报 `Saved`。客户端以快照代和修订号共同判新旧，重连失败须显式 stale。一个事实一个拥有者：不加第二套缓存遮住交付查询副作用；不让 UI、脚本或 LLM 成为规划真值控制者；能力与权限按 `Capability ∩ Permission ∩ Policy` 检查。
 
-SQLite 目标是发布前单一空库建表基线。允许不支持旧开发库的自动升级，但不得静默丢弃本机数据：压缩前列出实际库文件与持有人，逐项判可重建或需导出；发现真实不可丢数据、已部署实例或用户不接受重建时停止压缩，另设计向前迁移。保留 `migrate.ts` 的事务内版本复读、原子记账和失败回滚。新 001 建立 `schema_generation` 表，在同一事务内写唯一一行 `(id=1, baseline='prelaunch-v1')`；迁移运行器在跳过任何已应用版本前校验标记与预期清单，旧 [1] 与 [1,2,3,4] 均 fail closed，空库以外的未知表也拒绝。新空库运行 `PRAGMA foreign_key_check` 与 `PRAGMA integrity_check` 并断言无错误。
+SQLite 目标是发布前单一空库建表基线。允许不支持旧开发库的自动升级，但不得静默丢弃本机数据：压缩前列出实际库文件与持有人，逐项判可重建或需导出；发现真实不可丢数据、已部署实例或用户不接受重建时停止压缩，另设计向前迁移。保留 `migrate.ts` 的事务内版本复读、原子记账和失败回滚。新 001 建立 `schema_generation` 表，在同一事务内写唯一一行 `(id=1, baseline='prelaunch-v1')`；**Superseded by `docs/exec-plan/completed/2026-10-28-storage-baseline-admission.md` Design / Spec（2026-10-28，#414）**：准入使用原生 `user_version` 加当前 manifest 派生结构，不增加 marker 表；当前完整 1–7 仍可打开，物理折叠由 #417 独立承担；迁移运行器在跳过任何已应用版本前校验标记与预期清单，旧 [1] 与 [1,2,3,4] 均 fail closed，空库以外的未知表也拒绝。新空库运行 `PRAGMA foreign_key_check` 与 `PRAGMA integrity_check` 并断言无错误。
 
 "dead code"经过定义、导出/调用点、运行时入口、测试替身、公共契约五重排查。`CoreNamespace<T>` 的可调用形状和 `DeliveryScope` 的字符串形状只是候选；`committed_observation` 视图与 `webhook_subscription` 表可能承载 Gate E1 正式事实，先决定保留消费者或删除后的设计修订；`git-provisioning.ts` 的默认 `recordStep` 有直接测试消费者，不列为 dead code。测试分三类：业务不变量、公开契约与发布门禁必须保留或加强；仅锁句式或源码行文本的断言改为结构化/行为判据；承担防漂移职责的历史证据测试保留明确的 authority 与反例。
 
@@ -238,6 +238,8 @@ SQLite 目标是发布前单一空库建表基线。允许不支持旧开发库�
 最小闭环是同一个幂等键只代表同一 actor、目标与参数；同键不同请求显式 conflict，崩溃/重启后返回原结果或待对账，未知外部创建不盲重试。主文件 `packages/core/src/start-work.ts`、`write-machine.ts`、`execution-run.ts`、`packages/controller/src/commands.ts`、`packages/capabilities/src/storage.ts`、`tests/e2e/write-machine.test.js`、`tests/e2e/start-work-recovery.test.js`。按事实拥有者至少三次独立交付：请求指纹与 durable in-flight claim（#194，P4 应变为结构化拒绝）；外部写尝试/ack/reconcile 与 `Saved` 边界（#204）；重启后重跑对账而不是存储"怎样被解决"（#191）。运行取消的记账（#215）若经人类纳入，作为第四次交付，依据 `docs/adr/ADR-0008-run-identity-is-the-core-run-record.md`。每次先运行新反例，再运行 `node --test tests/contract tests/integration tests/e2e`；出现不确定外部结果时停在可见 pending/uncertain。合并时更新矩阵第 6、13 行与 R1 第 6 行。
 
 ### Batch 5 · Gate E1 裁决后的 SQLite 基线合并（#223）
+
+2026-10-28 局部交付：#414 的世代/结构准入与整体原子初始化见 `docs/exec-plan/completed/2026-10-28-storage-baseline-admission.md`；本批旧“两个 PR”与 `[1]` 目标仅作为历史总方案保留，Superseded by #223 当前拆分（#414/#415/#416/#417）。#223 本身未关闭，旧 repair 退役、消费者裁定及物理折叠仍未完成。
 
 前置是人类对 #4 的具体裁决、#190 #195 #196 #221 合并、当前端口与关系模型定案，以及"本机有哪些库、是否可重建"的逐项清单；缺任一前置只做空库原型。第一个 PR 加世代守卫，第二个 PR 合并迁移。主文件 `packages/storage/sqlite/migrations/*.sql`、`src/migrations.ts`、`src/migrate.ts`、`src/storage-sync.ts` 及 schema/runner/端口测试。在可丢弃临时库把现行 001–004（若 Batch 3 新增 005，也包括它）重写成一份 001 完整建库基线；保留活合同的 `execution_run.provider_ref_json` / `fallback`、连接/成员约束和原子版本记账。`migrate.ts` 在判断"版本 1 已应用，可跳过"之前先验证：空库无用户表才允许建库；非空库必须有匹配的 generation 与完整清单；否则以结构化"旧库需备份并重建"失败，不执行 DDL 或业务写入。测试分别构造旧 [1]、[1,2]、[1,2,3,4]、旧 003 表形、未知用户表和损坏版本表，断言拒绝前后 schema/行数据未变。新库执行两次迁移（第一次 [1]、第二次 []），用第二连接、进程重启、并发启动和故障注入验证；`PRAGMA foreign_key_check` 零行、`PRAGMA integrity_check` 为 `ok`。正式删除前分别裁定 `committed_observation` 视图与 `webhook_subscription` 表的消费者。运行 `node --test tests/integration/migration-runner.test.js tests/integration/storage-sync-surface.test.js tests/integration/identity-membership-schema.test.js tests/integration/execution-relation-write-schema.test.js tests/contract/storage-contract.test.js` 与 `pnpm verify`。
 
@@ -546,6 +548,7 @@ B0.5 在最终提交上的验收结果：B0-1 为 13 个编号行加 1 个附行
 ## Bottom Change Note
 
 - 2026-09-30：B0.7 修复管道吞退出码的 P2；记录两个 shell 的正常、负对照与进程级失败结果，说明本次合并授权、提交整合与控制计划保持 active 的边界。
+- 2026-10-28 10:04 SGT：#414 采用原生世代标记与当前结构准入，订正 Batch 5 的历史 marker 表/两次交付设想；保留 #223 未完成边界。
 
 - 2026-09-29 08:55 CST：用 `exec-plan` 脚手架建骨架，因用户要求先调研并给出发布前系统/架构清理计划。
 - 2026-09-29 09:00 CST：根据原始意图对照、当前代码/测试、Gate E1/ADR、独立调查与反例，把骨架改成分阶段控制计划。
