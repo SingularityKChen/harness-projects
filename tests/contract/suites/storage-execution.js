@@ -108,7 +108,22 @@ export function storageExecutionSuite(adapter, register = test) {
     await storage.putMutationAttempt({ ...attempt, workspaceId: 'ws-2', state: 'pending' })
     assert.equal((await storage.findMutationAttempt('ws-2', 'key-1'))?.state, 'pending', '幂等键的作用域是工作区')
     assert.deepEqual((await storage.listMutationAttempts(WORKSPACE)).map((a) => a.id), ['attempt-1'], '另一个工作区的写入不得进入本工作区')
+    await storage.putProviderBinding({ ...binding('binding-2'), enabled: false })
+    const bound = { id: 'bound', workspaceId: WORKSPACE, bindingId: 'binding-1', commandName: 'startWork', idempotencyKey: 'bound', state: 'pending', requestFingerprint: '["fixed"]', expectedSourceVersion: undefined, errorCode: undefined }
+    await assert.rejects(storage.putMutationAttempt({ ...bound, requestFingerprint: undefined }))
+    const caller = { ...bound }; await storage.putMutationAttempt(caller)
+    caller.requestFingerprint = '["caller mutation"]'
+    const read = await storage.findMutationAttempt(WORKSPACE, 'bound'); read.requestFingerprint = '["read mutation"]'
+    const listed = await storage.listMutationAttempts(WORKSPACE); listed.find((a) => a.idempotencyKey === 'bound').commandName = 'changed'
+    assert.deepEqual(await storage.findMutationAttempt(WORKSPACE, 'bound'), bound, '调用方与读回对象不能绕过身份守卫')
+    for (const patch of [{ requestFingerprint: undefined }, { requestFingerprint: '' }, { requestFingerprint: '["other"]' }, { commandName: 'other' }, { bindingId: 'binding-2' }]) {
+      await assert.rejects(storage.putMutationAttempt({ ...bound, ...patch }))
+      assert.deepEqual(await storage.findMutationAttempt(WORKSPACE, 'bound'), bound)
+    }
+    await storage.putMutationAttempt({ ...bound, state: 'saved' })
+    assert.deepEqual(await storage.findMutationAttempt(WORKSPACE, 'bound'), { ...bound, state: 'saved' })
   })
+
 
   /**
    * 引用完整性（L6 评审 F1，第四轮评审 P3 订正清单，第五轮补全）：执行面在两个实现上**已对齐**的父边与枚举

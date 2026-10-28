@@ -56,8 +56,17 @@ export const CHANGE_REQUEST_READ_ROUTE: DevelopmentOperation = {
  * 缺路由时只有一个挂载就先按它过门、过了再报 conflict（门 → 缺路由，与改动前「门 → ack → 缺路由」的先后一致，只是不再调 provider）；多个挂载没有可以过门的候选，直接 conflict。
  * 没有 Development 挂载时没有可选的挂载：第一道门（`earlier` 的第一项，没有就是锚点）报「没有绑定提供能力」，排在任何 conflict 之前。
  */
-export async function routeDevelopment(
+export function routeDevelopment(
   source: DevelopmentRouteSource, repositoryId: string, key: CapabilityKey, mode: CommandMode, earlier: readonly DevelopmentGate[] = [],
+): Promise<DevelopmentRoute> { return developmentRoute(source, repositoryId, key, mode, earlier) }
+
+/** 只选身份，不检查创建权限；已有请求与观察收据共用同一选择算法。 */
+export function selectDevelopment(source: DevelopmentRouteSource, repositoryId: string, key: CapabilityKey): Promise<DevelopmentRoute> {
+  return developmentRoute(source, repositoryId, key, undefined, [])
+}
+
+async function developmentRoute(
+  source: DevelopmentRouteSource, repositoryId: string, key: CapabilityKey, mode: CommandMode | undefined, earlier: readonly DevelopmentGate[],
 ): Promise<DevelopmentRoute> {
   const mounts = bindingsForDomain(source.registry, 'development')
   const refuse = (code: ProjectErrorCode, message: string): DevelopmentRoute => ({ ok: false, error: projectError(code, message) })
@@ -82,7 +91,7 @@ export async function routeDevelopment(
       binding = mounts[0]
     }
   }
-  for (const [gateKey, gateMode] of [...earlier, [key, mode] as const]) {
+  for (const [gateKey, gateMode] of mode === undefined ? [] : [...earlier, [key, mode] as const]) {
     const gate = gateBinding(binding, gateKey, gateMode)
     if (!gate.allowed) return { ok: false, error: gate.error ?? unsupportedCapability(gateKey) }
   }

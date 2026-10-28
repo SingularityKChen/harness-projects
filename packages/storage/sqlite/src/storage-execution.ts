@@ -18,7 +18,7 @@
  *
  * 写尝试：落在 `mutation_attempt`，模型是**一行一键**——003 的主键就是 `(workspace_id, idempotency_key)`，同键写入是
  * **幂等覆盖**（后写的状态取代先写的），`id` 由调用方派生、在工作区内唯一（`UNIQUE (workspace_id, id)` 拒绝复用）。
- * 覆盖写成单语句 UPSERT，查与写之间没有窗口。DDL 的 `created_at` / `updated_at` 是 NOT NULL 而端口记录没有时间戳，
+ * 带请求指纹的身份在原子写作用域内检查、再 UPSERT，查与写之间没有窗口。DDL 的 `created_at` / `updated_at` 是 NOT NULL 而端口记录没有时间戳，
  * 插入时用同一个 ISO-8601 UTC 时刻填两列（覆盖时保留 `created_at`）；端口不读回这两列，因此它们不构成第二套事实。
  */
 import { StorageInputError, type DeliveryFactsRecord, type ExecutionContextRecord, type ExecutionRunRecord, type MutationAttemptRecord } from '@harness-projects/capabilities'
@@ -30,7 +30,7 @@ import { SqliteSyncSurface } from './storage-sync.ts'
 const CONTEXT_COLUMNS = 'id, workspace_id, work_item_id, repository_id, status, branch_external_id, worktree_external_id, provisioning_started_at'
 const RUN_COLUMNS = 'id, workspace_id, context_id, status, updated_at, provider_ref_json, fallback'
 const FACT_COLUMNS = 'workspace_id, context_id, attempted_at, sets_json'
-const ATTEMPT_COLUMNS = 'id, workspace_id, binding_id, command_name, idempotency_key, state, expected_source_version, error_code'
+const ATTEMPT_COLUMNS = 'id, workspace_id, binding_id, command_name, idempotency_key, state, expected_source_version, error_code, request_fingerprint'
 /** 两张关系表的列名相同：路由到哪张表由 `state` 决定，读回形状因此只有一份。 */
 const RELATION_COLUMNS = 'from_entity_id, to_entity_id, relation_type, relation_class, source, state'
 /** 关系定位键的 SQL 片段：两张表的主键相同，路由、去重与删除都按它定位。 */
@@ -148,17 +148,22 @@ export class SqliteExecutionSurface extends SqliteSyncSurface {
   /**
    * 写尝试取**一行一键**模型（003 的主键就是 `(workspace_id, idempotency_key)`）：同键写入是**幂等覆盖**——后写的状态
    * 取代先写的，而不是"保留首次结果"；`id` 由调用方派生、在工作区内唯一，由 `UNIQUE (workspace_id, id)` 拒绝复用。
+   * 带请求指纹的 command/binding/fingerprint 不可覆盖；检查与写在同一原子作用域内。
    * `created_at` 保留首次写入的时刻（它是"这行什么时候建的"），`updated_at` 随每次覆盖推进；两列都不在端口面上，
    * 因此不构成第二套事实。
    */
   putMutationAttempt(record: MutationAttemptRecord): Promise<void> {
-    return this.write(`INSERT INTO mutation_attempt (${ATTEMPT_COLUMNS}, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${NOW_SQL}, ${NOW_SQL})
-      ON CONFLICT (workspace_id, idempotency_key) DO UPDATE SET id = excluded.id, binding_id = excluded.binding_id,
-        command_name = excluded.command_name, state = excluded.state, expected_source_version = excluded.expected_source_version,
-        error_code = excluded.error_code, updated_at = excluded.updated_at`,
-      record.id, record.workspaceId, record.bindingId, record.commandName, record.idempotencyKey, record.state,
-      record.expectedSourceVersion ?? null, record.errorCode ?? null)
+    return this.atomic(() => {
+      const previous = this.db.prepare('SELECT request_fingerprint, command_name, binding_id FROM mutation_attempt WHERE workspace_id = ? AND idempotency_key = ?').get(record.workspaceId, record.idempotencyKey) as Row | undefined
+      if (previous?.request_fingerprint != null && (previous.request_fingerprint !== record.requestFingerprint || previous.command_name !== record.commandName || previous.binding_id !== record.bindingId)) throw new Error('mutation attempt request identity is immutable')
+      this.db.prepare(`INSERT INTO mutation_attempt (${ATTEMPT_COLUMNS}, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${NOW_SQL}, ${NOW_SQL})
+        ON CONFLICT (workspace_id, idempotency_key) DO UPDATE SET id = excluded.id, binding_id = excluded.binding_id,
+          command_name = excluded.command_name, state = excluded.state, expected_source_version = excluded.expected_source_version,
+          error_code = excluded.error_code, request_fingerprint = excluded.request_fingerprint, updated_at = excluded.updated_at`)
+        .run(record.id, record.workspaceId, record.bindingId, record.commandName, record.idempotencyKey, record.state,
+          record.expectedSourceVersion ?? null, record.errorCode ?? null, record.requestFingerprint ?? null)
+    })
   }
 
   findMutationAttempt(workspaceId: WorkspaceId, idempotencyKey: string): Promise<MutationAttemptRecord | undefined> {

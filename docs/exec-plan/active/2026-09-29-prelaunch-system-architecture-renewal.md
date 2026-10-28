@@ -231,6 +231,8 @@ SQLite 目标是发布前单一空库建表基线。允许不支持旧开发库�
 
 ### Batch 4 · 外部写入与 Start Work 的持久命令身份（#194 #204 #191）
 
+2026-10-28 局部交付：#194 的首请求指纹、同事务认领与重启/竞争验收见 `docs/exec-plan/completed/2026-10-28-start-work-request-binding.md`，P4 的假 Saved 由结构化冲突取代；#204/#191 仍按各自范围跟踪，本 Batch 不整体勾选。
+
 最小闭环是同一个幂等键只代表同一 actor、目标与参数；同键不同请求显式 conflict，崩溃/重启后返回原结果或待对账，未知外部创建不盲重试。主文件 `packages/core/src/start-work.ts`、`write-machine.ts`、`execution-run.ts`、`packages/controller/src/commands.ts`、`packages/capabilities/src/storage.ts`、`tests/e2e/write-machine.test.js`、`tests/e2e/start-work-recovery.test.js`。按事实拥有者至少三次独立交付：请求指纹与 durable in-flight claim（#194，P4 应变为结构化拒绝）；外部写尝试/ack/reconcile 与 `Saved` 边界（#204）；重启后重跑对账而不是存储"怎样被解决"（#191）。运行取消的记账（#215）若经人类纳入，作为第四次交付，依据 `docs/adr/ADR-0008-run-identity-is-the-core-run-record.md`。每次先运行新反例，再运行 `node --test tests/contract tests/integration tests/e2e`；出现不确定外部结果时停在可见 pending/uncertain。合并时更新矩阵第 6、13 行与 R1 第 6 行。
 
 ### Batch 5 · Gate E1 裁决后的 SQLite 基线合并（#223）
@@ -427,7 +429,7 @@ cd "$SCRATCH/export" && node --input-type=module -e "console.log(import.meta.res
 - [ ] Batch 3：3A/3B（#221 #222）。
   - [x] (2026-10-08 CST) 3A（#221）：实现与回填完成，PR #292（`feature/delivery-fact-writer`；三轮 MMP 评审 APPROVED，2026-10-09 归档，合并由评审会话进行），ExecPlan `docs/exec-plan/completed/2026-10-08-delivery-fact-writer.md`。回读：在 `.worktrees/delivery-fact-writer` 运行 `node --test --test-timeout=60000 tests/e2e/delivery-lineage.test.js tests/contract/storage-contract.test.js tests/integration/execution-relation-write-schema.test.js`，`ℹ fail 0`；P3 原命令观察 `relations 2 -> 9 | ci online 5 | ci offline 5 | degraded true`。3B（#222）未做。
   - [x] (2026-10-08 CST) 3B（#222；上一行末尾的「3B（#222）未做」随本行作废）：实现与回填完成，PR #293（`fix/delivery-query-pure-read`，栈在 PR #292 上；三轮 MMP 评审 APPROVED，2026-10-09 归档，合并由评审会话进行），ExecPlan `docs/exec-plan/completed/2026-10-08-delivery-query-pure-read.md`。回读：在 `.worktrees/delivery-query-pure-read` 运行 `node --test --test-timeout=120000 tests/integration tests/e2e` 与 `pnpm run boundaries`，都以 `ℹ fail 0` 或退出码 0 结束；P3 原命令观察 `relations 2 -> 2 | ci online 0 | ci offline 0 | degraded true`，P3′ 观察 `read relations 2 -> 2 | refresh relations -> 9 | ci online 5 | ci offline 5 | stale true | degraded true`。
-- [ ] Batch 4（#194 #204 #191）。
+- [ ] Batch 4（#194 #204 #191）；其中 #194 已由独立子计划完成工程验收，#204/#191 不随之完成。
 - [ ] Batch 5（#223）。
 - [ ] Batch 6（#224）。
 - [ ] Batch 7（#9 #8）与归档。
@@ -476,6 +478,7 @@ cd "$SCRATCH/export" && node --input-type=module -e "console.log(import.meta.res
 | 2026-09-29 / 计划作者 | 3A 只合入已实现行为的绿测试，3B 再把纯读反例先红后绿 | 每个 PR 必须可独立合并；不以 skip/todo 掩盖过渡状态 |
 | 2026-09-29 / 人类伙伴 | 指定流程：多个独立子 agent 设计 → 独立评审定稿写 ExecPlan → draft PR 关联 issue → Sonnet 在各自 worktree 并行 TDD 与对抗验证 → Opus 验收重构 → 请人类评审 PR | 人类伙伴本轮指令；Batch 0 的 B0.1–B0.5 按此排布；模型分工只适用于本轮，不是仓库默认（`AGENTS.md` §5） |
 | 2026-09-29 / 人类伙伴 | 规划弹性上限：每个 PR 代码 ≤ 800、文档 ≤ 1300 行；CI 硬上限代码 1000 / 文档 1500 保持不变 | 本轮指令。人类伙伴同日订正：1000/1500 是 CI 硬上限，800/1300 是给评审与后续优化留余量的弹性上限，二者不冲突，不同步根规则（原待裁决项 H6 因此撤销） |
+| 2026-10-28 10:09 SGT / 交付协调者 | #194 反例由有判别力的 Fake/SQLite 首请求、重启和竞争证据取代；R1 整行仍保守为部分 | 子计划独立402项/6探针通过，不替代 #204/#191 与人类发布裁决 |
 | 2026-09-29 / 人类伙伴 | 看板 `Status`：#217 由 `Todo` 改为 `In Progress`，由 agent 在开 draft PR 时写入并回读 | `AGENTS.md` §7：点名目标（#217）的人类批准，记入本表；工程事件本身不推进 `Status` |
 | 2026-09-29 / 人类伙伴 | #203 从 2C 拆出，作为 `#203 → #70` 栈底单独交付；#227 叠在 #225 上 | 迭代 3 的并行 / 堆叠划分：#70 与 #227 各自只被一条 issue 阻塞，叠栈可把 Demo 关键路径前移；2C 其余部分不变 |
 | 2026-09-29 / 定稿评审者 | Batch 0 收窄到 #217：只改 `.md`；不改 `tests/mvp0/chain.test.js`、`docs/architecture/README.md`，"上游能力意图"表移到 Batch 7 | #217 排除行为变更；该表依赖不随仓库分发的输入 |
@@ -546,6 +549,7 @@ B0.5 在最终提交上的验收结果：B0-1 为 13 个编号行加 1 个附行
 - 2026-09-29 09:04 CST：补逐批可执行命令与证据说明。
 - 2026-09-29 09:14 CST：独立复审发现旧 [1] 库可绕过新基线、事件被误设为正确性依赖、交付缓存先于键裁决、过渡写者不唯一；重排 Batch 2/3，增加世代拒绝、2A–2E/3A–3B 判据和唯一文件集。
 - 2026-09-29 09:18 CST：把 3A 的独立通过项与 3B 才加入的纯读红→绿用例分开。
+- 2026-10-28 10:09 SGT：记录 #194 首请求绑定子闭环与 P4 局部取代；更大写入恢复范围保持开放。
 - 2026-09-29 14:40 CST：按人类伙伴指定的流程定稿 Batch 0（#217）。原因：原计划只写了 CI 硬上限（1000/1500），缺本轮的弹性规划上限（800/1300）、Batch 0 超出 #217 范围、易失基线写了四处、没有引用 #216 子 issue、Decision Log 作者写成工具品牌、两个非强制章节重复事实，且三份独立设计对同一行给出互相矛盾的结论。改动：新增 Batch 0 规格（证据规则、矩阵与 R1 初值、Superseded 清单、技术债、评审者会怎么打破它）；把批次 → issue 映射与 Batch 0 文件所有权收进 `Global Constraints`；Validation 表第 1–10 行原样保留并冻结，另立 Batch 0 验收、P1–P5 与变异规程；删去 Concrete Steps 与 Artifacts and Notes 两节（内容并入 Plan of Work、Progress 与 Surprises）；#223/#224 各按两个 PR 计划，#215 移出默认范围。
 - 2026-09-29 19:39 CST 起：B0.5 验收收口。原因：三条子分支需要按所有者摘取，B0.4 留下 P3 与待定项。改动：按 T3 → T2 → T1 摘取并以 `comm` 核对文件集合；R1 第 5、10 条降为"部分"、矩阵第 3 行改为"反例：#199（X2）"并把两条组合期用例记旁证，第 4、6 行改为本轮复跑（X3、X1）；§2.2 过期计数加注；0.3、0.4 初值表换成指向矩阵与 R1 快照的一句话；B0-2 判据三处改为带对照的判别命令，B0-10 与 B0.5 的关闭关系只留在 PR 正文；Progress、Surprises（S-11 至 S-14）、Decision Log、Outcomes 与 `docs/README.md` 索引行随之更新。
 - 2026-09-30：B0.6 评审响应。原因：评审 5353108706（CHANGES_REQUESTED）指出第 13 行既无入口也未标"未交付"、回读判据依赖 Node 22 没有的 `--test-isolation`，并要求变基后刷新第 7 行。改动：第 13 行拆成 13.1–13.10 故障面并同步 B0-1；回读命令改为直接运行测试文件的判别命令（`vertical-path.md`、`release-gates.md` §2.1.1、0.3、0.8、B0-2、TD-003 五处同步）；第 7 行与 R1 第 9、10 行按 `main@699d715` 的新增用例改写；观察基线改为 `main@699d715` 并重跑 P1–P5、X1–X3、M1、M3、M9、M10；Progress（B0.6）、Surprises（S-15 至 S-17）、Decision Log、Outcomes 随之更新。

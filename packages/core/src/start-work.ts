@@ -3,7 +3,7 @@
  * `git-provisioning.ts`。
  */
 import {
-  CapabilityKey, ProjectErrorCode, projectError, type ExecutionContextRecord, type ExecutionRunRecord, type ExternalObjectRef, type StorageTransaction,
+  CapabilityKey, ProjectErrorCode, projectError, type ExecutionContextRecord, type ExecutionRunRecord, type ExternalObjectRef, type MutationAttemptRecord, type StorageTransaction,
 } from '@harness-projects/capabilities'
 import {
   ContentKind, EntityKind, ExecutionContextStatus, ExecutionRunStatus, ExternalIdentityKind, ProviderErrorCode, RelationType, asBrandedId,
@@ -12,7 +12,7 @@ import {
 import { resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
 import { chainNode, worktreeEntityId } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
-import { START_WORK_ROUTE, registerRepository, routeDevelopment } from './development-route.ts'
+import { START_WORK_ROUTE, registerRepository, routeDevelopment, selectDevelopment, type DevelopmentRoute } from './development-route.ts'
 import {
   StartWorkFallback, contextIdFor, contextRecord, fallbackOf, readyGap, reportForExisting, runIdFor, runStatusFor,
   startWorkUnavailable, toResult,
@@ -20,12 +20,8 @@ import {
 } from './execution-context.ts'
 import { namesFor, namesProblem, outcomeOf, provisionGit, type GitOutcome } from './git-provisioning.ts'
 import { EdgeProvenance, asEntityId, recordEdges, type DiscoveredEdge, type RelationStore } from './relations.ts'
+import { bindingConflict, requestFingerprint, requestMismatch, snapshotRequest } from './start-work-request.ts'
 import { beginWrite, createWriteLedger, markFailed, reportFor, WritePhase, type WriteReport } from './write-machine.ts'
-
-function actorKind(request: StartWorkRequest): string | undefined {
-  const actor: StartWorkRequest['actor'] | undefined = request.actor
-  return actor !== undefined && typeof actor.kind === 'string' && actor.kind.trim() !== '' ? actor.kind : undefined
-}
 
 /**
  */
@@ -34,7 +30,6 @@ function validateRequest(request: StartWorkRequest): ProjectError | undefined {
   if (typeof request.repositoryId !== 'string' || request.repositoryId.trim() === '') return invalid('repositoryId 不能为空')
   if (typeof request.idempotencyKey !== 'string' || request.idempotencyKey.trim() === '') return invalid('idempotencyKey 不能为空')
   if (request.branchName !== undefined && (typeof request.branchName !== 'string' || request.branchName.trim() === '')) return invalid('branchName 不能为空')
-  if (actorKind(request) === undefined) return invalid('actor 必须声明发起方')
   // 身份闸门：退化的工作项 id 会让两个工作项共用同一个分支名；输入形状错误先于存在性判定，也先于任何写入。
   const degenerate = namesProblem(request.workItemId)
   return degenerate === undefined ? undefined : invalid(degenerate)
@@ -44,30 +39,54 @@ function invalid(message: string): ProjectError {
   return projectError(ProjectErrorCode.InvalidInput, message)
 }
 
-export async function startWork(context: CoreContext, request: StartWorkRequest): Promise<StartWorkResult> {
+export async function startWork(context: CoreContext, input: StartWorkRequest): Promise<StartWorkResult> {
+  const request = snapshotRequest(input)
+  if (request === undefined) return startWorkUnavailable(invalid('actor 与 worktreePath 必须是声明的 primitive 类型'))
   const invalidInput = validateRequest(request)
   if (invalidInput !== undefined) return startWorkUnavailable(invalidInput)
   const contextId = contextIdFor(context.workspaceId, request.workItemId, request.repositoryId)
-  const ledger = createWriteLedger(context.storage)
-  const replayed = await ledger.replay(context.workspaceId, request.idempotencyKey)
-  if (replayed !== undefined) return existingResult(context, contextId, replayed)
+  const replayed = await context.storage.findMutationAttempt(context.workspaceId, request.idempotencyKey)
+  if (replayed !== undefined) return replayRequest(context, contextId, request, replayed)
   // 只有没有 context 记录的新请求才预检、过能力门并 ack；已有记录（终态接管、过期续跑、在途、Ready）沿用原路径。
-  const prepared = (await context.storage.getExecutionContext(contextId)) === undefined ? await prepareRegistration(context, request, contextId) : undefined
+  const existing = await context.storage.getExecutionContext(contextId)
+  const prepared = existing === undefined ? await prepareRegistration(context, request, contextId) : undefined
   if (prepared?.ok === false) return startWorkUnavailable(prepared.error)
+  const observing = existing !== undefined && !needsSupply(existing, context.clock())
+  const route = prepared?.route ?? await selectDevelopment(context, request.repositoryId, START_WORK_ROUTE.anchor[0])
+  if (!route.ok) {
+    if (observing) return existingResult(context, contextId, undefined)
+    const gated = await routeDevelopment(context, request.repositoryId, ...START_WORK_ROUTE.anchor)
+    return startWorkUnavailable(gated.ok ? route.error : gated.error)
+  }
   let claimed: Awaited<ReturnType<typeof claimContext>>
   try {
-    claimed = await claimContext(context, contextId, request, prepared?.register)
+    claimed = await claimContext(context, contextId, request, route, prepared?.register)
   } catch (error) {
     if (prepared === undefined) throw error // 已有记录（终态接管、过期续跑、在途、Ready）保持原行为：此前的尝试可能已经有过外部写入
     // 新请求的认领事务整笔回滚，此时还没有任何外部写入：结构化失败，不冒充外部结果未知。
     return startWorkUnavailable(projectError(ProjectErrorCode.Unavailable, `本地登记失败，没有发起任何外部写入：${error instanceof Error ? error.message : String(error)}`))
   }
-  if (claimed !== 'new' && claimed !== 'resume') return existingResult(context, contextId, undefined)
+  if (claimed.kind === 'replay') return replayRequest(context, contextId, request, claimed.attempt)
+  if (claimed.kind === 'conflict') return conflictResult(claimed.error)
+  if (claimed.kind === 'rejected') return claimed.result
+  if (claimed.kind !== 'new' && claimed.kind !== 'resume') return existingResult(context, contextId, undefined)
   // 只转换 `localWrite` 标记过的本地写失败；Provider 的抛出（崩溃、中断）原样传出，不被吞掉。
-  return provision(context, request, contextId).catch((error) => {
+  return provision(context, request, contextId, claimed.route).catch((error) => {
     if (error instanceof LocalWriteFailed) return unknownAfterAck(error)
     throw error
   })
+}
+
+function conflictResult(error: ProjectError): StartWorkResult {
+  const report = reportFor(WritePhase.Conflict, { attemptedValue: undefined, lastKnownAuthoritative: undefined }, error)
+  return toResult(report, undefined, error)
+}
+async function replayRequest(context: CoreContext, contextId: ExecutionContextId, request: StartWorkRequest, attempt: MutationAttemptRecord): Promise<StartWorkResult> {
+  if (requestMismatch(context.workspaceId, request, attempt)) return conflictResult(bindingConflict('idempotency_request_mismatch'))
+  const route = await selectDevelopment(context, request.repositoryId, START_WORK_ROUTE.anchor[0])
+  if (!route.ok || route.binding.ref.bindingId !== attempt.bindingId) return conflictResult(bindingConflict('idempotency_target_changed'))
+  const supplied = attempt.state === 'pending' ? undefined : await createWriteLedger(context.storage).replay(context.workspaceId, request.idempotencyKey)
+  return existingResult(context, contextId, supplied)
 }
 
 /** ack 之后的本地写失败：只由 `localWrite`（显式的本地写调用点，不包 Provider 调用）抛出，带着最后一个已 ack 的步骤结果（其 `status` 是本地记录此刻的状态）；run 记录的失败还带着已 ack 的 run 句柄。 */
@@ -100,7 +119,7 @@ function existingRun(git: GitOutcome, existing: ExecutionRunRecord): StartWorkRe
 
 /** 写前事务里要做的登记：`claimContext` 在没有记录的分支里先调它，再写 Provisioning。 */
 type Registration = (tx: StorageTransaction) => Promise<void>
-type Prepared = { readonly ok: true; readonly register: Registration } | { readonly ok: false; readonly error: ProjectError }
+type Prepared = { readonly ok: true; readonly register: Registration; readonly route: DevelopmentRoute } | { readonly ok: false; readonly error: ProjectError }
 
 /**
  * 新请求在任何写入之前的只读准备：工作项预检（工作区作用域的规划投影，只有 `work_item` 内容可开始）→ 按仓库路由并在同一挂载上过能力门
@@ -122,7 +141,7 @@ async function prepareRegistration(context: CoreContext, request: StartWorkReque
   if (acked.bindingId !== repository.bindingId || acked.objectKind !== repository.objectKind || acked.externalId !== repository.externalId) {
     return reject(projectError(ProjectErrorCode.Conflict, `仓库 ack 的身份 ${acked.bindingId}/${acked.objectKind}/${acked.externalId} 与请求的 ${repository.bindingId}/repository/${repository.externalId} 不一致`))
   }
-  return { ok: true, register: (tx) => registerParents(tx, context, request, contextId, repository.bindingId) }
+  return { ok: true, route, register: (tx) => registerParents(tx, context, request, contextId, repository.bindingId) }
 }
 
 /**
@@ -165,29 +184,43 @@ function isTerminal(status: ExecutionContextStatus): boolean {
   return status === ExecutionContextStatus.Closed || status === ExecutionContextStatus.Failed
 }
 
-/**
- * 认领上下文。**只有幂等键没有命中账本时才会走到这里**（`startWork` 先 `ledger.replay`），因此：
- * 同一个 key 返回那一次的报告、不重新尝试；**换一个新 key 才是重试**。
- *
- * **不要把这条读成「key 绑定了这一个确切的请求」。** 账本只按 `(workspaceId, idempotencyKey)` 查
- * （`findMutationAttempt`），**不校验工作项、仓库或任何其它参数**。所以同 key 换一个工作项会命中旧记录、
- * 返回那一次的 `saved` 报告，而**什么都没有供应**——一次静默的假成功。要关掉它得让账本记请求指纹，
- * 那是 write ledger 的跨层变更，不在本批次（见批次计划「遗留」§2）。
- *
- * 三种可认领的情形：记录不存在（`new`）、在途且租约过期（`resume`）、**终态**（`resume`）。
- * 在途且租约未过期一律挡住（`in-flight`）；`Ready` 等 active 状态返回 `existing`，不重新供应。
- * 记录不存在时，`register`（写前登记，见 `registerParents`）与 Provisioning 在**同一个事务**里提交。
- */
+function needsSupply(record: ExecutionContextRecord, now: string): boolean {
+  return isTerminal(record.status) || (record.status === ExecutionContextStatus.Provisioning && leaseExpired(record.provisioningStartedAt, now))
+}
+
+/** workspace/key 与 context 租约在同一事务认领；先占键，再写父行与 context，失败整笔回滚。 */
+type Claim = { readonly kind: 'replay'; readonly attempt: MutationAttemptRecord } | { readonly kind: 'conflict'; readonly error: ProjectError }
+  | { readonly kind: 'rejected'; readonly result: StartWorkResult }
+  | { readonly kind: 'new' | 'resume' | 'in-flight' | 'existing'; readonly route: DevelopmentRoute }
 async function claimContext(
-  context: CoreContext, contextId: ExecutionContextId, request: StartWorkRequest, register?: Registration,
-): Promise<'new' | 'resume' | 'in-flight' | 'existing'> {
+  context: CoreContext, contextId: ExecutionContextId, request: StartWorkRequest, selected: Extract<DevelopmentRoute, { ok: true }>, register?: Registration,
+): Promise<Claim> {
   const now = context.clock()
-  return context.storage.transaction(async (tx) => {
+  return context.storage.transaction(async (tx): Promise<Claim> => {
+    const attempt = await tx.findMutationAttempt(context.workspaceId, request.idempotencyKey)
+    if (attempt !== undefined) return { kind: 'replay', attempt }
+    const source = { ...context, storage: tx }
+    const current = await selectDevelopment(source, request.repositoryId, START_WORK_ROUTE.anchor[0])
+    if (!current.ok || current.binding.ref.bindingId !== selected.binding.ref.bindingId) return { kind: 'conflict', error: bindingConflict('idempotency_target_changed') }
     const existing = await tx.getExecutionContext(contextId)
+    const supplying = existing === undefined || needsSupply(existing, now)
+    const route = supplying ? await routeDevelopment(source, request.repositoryId, ...START_WORK_ROUTE.anchor) : current
+    if (!route.ok) {
+      if (existing === undefined) return { kind: 'rejected', result: startWorkUnavailable(route.error) }
+      // 原有续跑拒绝仍结算为 Failed 并清除失效工作树；先复核 key，未获准的请求不占键。
+      const names = namesFor(request); const report = markFailed(beginWrite(names.path ?? names.worktreeKey), route.error)
+      const saved = await saveContext(context, contextId, request, ExecutionContextStatus.Failed, undefined, undefined, tx)
+      const git: GitOutcome = { contextId, report, ok: false, bindingId: undefined, status: saved.status, branchExternalId: saved.branchExternalId,
+        worktreeExternalId: undefined, branchHeadCommit: undefined }
+      await recordStartFacts({ workspaceId: context.workspaceId, storage: tx }, request, contextId, git)
+      return { kind: 'rejected', result: toResult(report, outcomeOf(git), route.error) }
+    }
+    await createWriteLedger(tx).record({ workspaceId: context.workspaceId, bindingId: selected.binding.ref.bindingId, commandName: 'startWork', idempotencyKey: request.idempotencyKey,
+      requestFingerprint: requestFingerprint(context.workspaceId, selected.binding.ref.bindingId, request), report: beginWrite(undefined) })
     if (existing === undefined) {
       await register?.(tx)
       await tx.putExecutionContext(contextRecord(context, contextId, request, ExecutionContextStatus.Provisioning, undefined, undefined, now))
-      return 'new'
+      return { kind: 'new', route }
     }
     // 终态可以被接管：一次失败不再把 (工作项, 仓库) 永久锁死。在此之前 `reportForExisting` 那句
     // 「需显式重试或关闭」是一条没有兑现的承诺——端口没有删除入口、`Closed` 没有写者，而
@@ -198,21 +231,21 @@ async function claimContext(
     // 重新推导供应输入——那正是「基线前进后重试失败」的来源。
     if (isTerminal(existing.status)) {
       await tx.putExecutionContext({ ...existing, status: ExecutionContextStatus.Provisioning, provisioningStartedAt: now })
-      return 'resume'
+      return { kind: 'resume', route }
     }
-    if (existing.status !== ExecutionContextStatus.Provisioning) return 'existing'
-    if (!leaseExpired(existing.provisioningStartedAt, now)) return 'in-flight'
+    if (existing.status !== ExecutionContextStatus.Provisioning) return { kind: 'existing', route }
+    if (!leaseExpired(existing.provisioningStartedAt, now)) return { kind: 'in-flight', route }
     await tx.putExecutionContext({ ...existing, provisioningStartedAt: now })
-    return 'resume'
+    return { kind: 'resume', route }
   })
 }
 
-async function provision(context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId): Promise<StartWorkResult> {
+async function provision(context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, route: DevelopmentRoute): Promise<StartWorkResult> {
   const names = namesFor(request)
   // 每一步成功后立刻回填：中断在两步之间时，重放跳过已完成的那一步（批次计划 D2）。两步写的都是 Provisioning，Ready 要等 `settle`。
   const git = await provisionGit(context, request, names, contextId, async (outcome) => {
     await localWrite(outcome, () => saveContext(context, contextId, request, outcome.status, outcome.branchExternalId, outcome.worktreeExternalId))
-  })
+  }, route)
   const saved = await localWrite({ ...git, status: ExecutionContextStatus.Provisioning }, () => settle(context, request, contextId, git)) // 结算失败时记录仍停在 Provisioning
   // 失败路径的结果面取自**写入后的记录**，不取本次尝试的中间结果：能力不可用时 `git.branchExternalId` 是
   // `undefined`（本次没走到分支步），而记录里保留着此前已决定的分支；调用返回一个答案、记录与 `existingResult`
@@ -226,12 +259,9 @@ function settle(context: CoreContext, request: StartWorkRequest, contextId: Exec
   return context.storage.transaction(async (tx) => {
     const saved = await saveContext(context, contextId, request, git.status, git.branchExternalId, git.worktreeExternalId, tx)
     await recordStartFacts({ workspaceId: context.workspaceId, storage: tx }, request, contextId, git)
-    if (git.bindingId !== undefined) {
-      await createWriteLedger(tx).record({
-        workspaceId: context.workspaceId, bindingId: git.bindingId, commandName: 'startWork',
-        idempotencyKey: request.idempotencyKey, report: git.report,
-      })
-    }
+    const attempt = await tx.findMutationAttempt(context.workspaceId, request.idempotencyKey)
+    if (attempt === undefined) throw new Error('Start Work admission receipt missing')
+    await tx.putMutationAttempt({ ...attempt, state: git.report.writeState, errorCode: git.report.error?.code })
     return saved
   })
 }

@@ -186,6 +186,10 @@ for (const [label, makeStorage] of ADAPTERS) {
     assert.deepEqual([faulty.result.writeState, faulty.result.error?.code, faulty.unchanged], ['failed', 'unavailable', true], '整笔回滚：canonical 实体、身份、挂载、context 都没有留下，外部零写入')
     const claim = await run(1, 'putExecutionContext')
     assert.deepEqual([claim.hits, claim.result.error?.code, claim.unchanged], [{ calls: 1, thrown: 1 }, 'unavailable', true], '认领自己的写失败：登记与认领同一个事务，整笔回滚、不留孤儿行')
+    for (const method of ['putMutationAttempt', 'putEntity', 'putExternalIdentity']) {
+      const failed = await run(1, method)
+      assert.deepEqual([failed.hits, failed.result.error?.code, failed.unchanged, failed.delta], [{ calls: 1, thrown: 1 }, 'unavailable', true, [0, 0, 0]], `${method}：认领任一步失败，Pending 与全部父行一起回滚`)
+    }
     const control = await run(0)
     assert.deepEqual([control.hits, control.result.status, control.unchanged], [{ calls: 1, thrown: 0 }, 'ready', false], '同一场景无故障时成功')
   })
@@ -221,7 +225,7 @@ for (const [label, makeStorage] of ADAPTERS) {
   }
   // ack 之后的本地写失败：[场景, 注入的写方法, 第几次写, 外部增量（分支、工作树、运行）, 无故障时该方法的总调用次数]。
   const LOCAL_FAILURES = [
-    ['最终事务的最后一写：Git 的 mutation_attempt', 'putMutationAttempt', 1, [1, 1, 0], 1],
+    ['最终事务的最后一写：Git 的 mutation_attempt', 'putMutationAttempt', 2, [1, 1, 0], 2],
     ['最终事务的第二条关系 has_worktree，tracks 一并回滚', 'putRelation', 2, [1, 1, 0], 2],
     ['分支步的步骤回填，工作树步不得开始', 'putExecutionContext', 2, [1, 0, 0], 4],
     ['工作树步的步骤回填（写已生效、调用失败）', 'putExecutionContext', 3, [1, 1, 0], 4],
@@ -235,7 +239,7 @@ for (const [label, makeStorage] of ADAPTERS) {
       assert.deepEqual(rest.delta, delta, '外部写入只到已 ack 的那一步，startRun 0 次')
       assert.deepEqual([record.status, record.branchExternalId, record.provisioningStartedAt !== undefined, record.worktreeExternalId !== undefined], ['provisioning', branch, true, delta[1] === 1], '停在 Provisioning，保留已 ack 的句柄与租约')
       assert.deepEqual([result.branchExternalId, result.worktreeExternalId], [record.branchExternalId, record.worktreeExternalId], '结果面带着最后已 ack 的句柄')
-      assert.deepEqual([rest.relations, rest.attempts, rest.run], [[], [], undefined], '没有关系、attempt 与 run：Ready、关系与账本同一个事务，要么全在要么全无')
+      assert.deepEqual([rest.relations, rest.attempts, rest.run], [[], ['pending'], undefined], '只有首次 Pending：Ready、关系与结算状态同一个事务，要么全在要么全无')
       const control = await attempt(method, 0)
       assert.deepEqual([control.hits, control.result.status, control.relations, control.attempts, control.record.provisioningStartedAt], [{ calls: total, thrown: 0 }, 'ready', ['has_worktree', 'tracks'], ['saved'], undefined], '同场景无故障正控（Ready 的租约已清空）')
     })
@@ -245,18 +249,18 @@ for (const [label, makeStorage] of ADAPTERS) {
     const failWorktree = (p) => { p.development.createWorktree = async () => providerFail('unavailable', '注入的工作树失败') }
     const control = await attempt('putMutationAttempt', 0, failWorktree)
     assert.deepEqual([control.hits, control.result.status, control.result.error?.code, control.result.branchExternalId, control.record.status, control.record.branchExternalId, control.relations, control.attempts],
-      [{ calls: 1, thrown: 0 }, 'failed', 'unavailable', control.branch, 'failed', control.branch, ['tracks'], ['failed']], '落 Failed、分支保留、只有 tracks、失败也记 attempt')
-    const faulty = await attempt('putMutationAttempt', 1, failWorktree)
+      [{ calls: 2, thrown: 0 }, 'failed', 'unavailable', control.branch, 'failed', control.branch, ['tracks'], ['failed']], '落 Failed、分支保留、只有 tracks、失败也记 attempt')
+    const faulty = await attempt('putMutationAttempt', 2, failWorktree)
     assert.deepEqual([faulty.hits, faulty.result.writeState, faulty.result.error?.code, faulty.result.branchExternalId, faulty.record.status, faulty.relations, faulty.attempts],
-      [{ calls: 1, thrown: 1 }, 'unknown', 'result_unknown', faulty.branch, 'provisioning', [], []], '失败结算的写失败：Failed 与 tracks 都不落')
+      [{ calls: 2, thrown: 1 }, 'unknown', 'result_unknown', faulty.branch, 'provisioning', [], ['pending']], '失败结算的写失败：Failed 与 tracks 都不落')
     assert.match(faulty.result.error.message, /已 ack.*unavailable.*注入的工作树失败/, '有已 ack 的分支：文案如实说已 ack，并带上 provider 的原始失败')
   })
 
   test(`${label}：分支步被 provider 拒绝（没有任何 ack）再叠加结算写失败——Unknown，文案不称已 ack，带上 provider 的原始失败`, async () => {
     const failBranch = (p) => { p.development.createBranch = async () => providerFail('unavailable', '注入的分支失败') }
-    const control = await attempt('putMutationAttempt', 0, failBranch); const faulty = await attempt('putMutationAttempt', 1, failBranch)
-    assert.deepEqual([control.hits, control.result.writeState, control.result.error?.code], [{ calls: 1, thrown: 0 }, 'failed', 'unavailable'], '正控：没有本地故障时，provider 的拒绝就是 failed / unavailable')
-    assert.deepEqual([faulty.hits, faulty.result.writeState, faulty.result.error?.code, faulty.delta, faulty.result.branchExternalId], [{ calls: 1, thrown: 1 }, 'unknown', 'result_unknown', [0, 0, 0], undefined])
+    const control = await attempt('putMutationAttempt', 0, failBranch); const faulty = await attempt('putMutationAttempt', 2, failBranch)
+    assert.deepEqual([control.hits, control.result.writeState, control.result.error?.code], [{ calls: 2, thrown: 0 }, 'failed', 'unavailable'], '正控：没有本地故障时，provider 的拒绝就是 failed / unavailable')
+    assert.deepEqual([faulty.hits, faulty.result.writeState, faulty.result.error?.code, faulty.delta, faulty.result.branchExternalId], [{ calls: 2, thrown: 1 }, 'unknown', 'result_unknown', [0, 0, 0], undefined])
     assert.doesNotMatch(faulty.result.error.message, /已 ack/, '没有任何 ack：不得说已 ack'); assert.match(faulty.result.error.message, /unavailable.*注入的分支失败/, '保留 provider 的原始失败')
   })
 
@@ -279,7 +283,11 @@ for (const [label, makeStorage] of ADAPTERS) {
     for (const r of results) assert.deepEqual([r.writeState, r.confirmed, r.degraded, r.status, r.error?.code], [writeState, confirmed, degraded, 'ready', degraded ? 'result_unknown' : undefined])
     if (degraded) for (const r of results) assert.match(r.error.message, /^已 ready 的上下文（[^）]+）：外部执行是否已启动无法确认/, '缺口文案：缺口描述加括号，与前后文分开')
     assert.deepEqual(views.map((v) => [v.status, v.degraded]), [['ready', degraded], ['ready', degraded]], 'Query')
-    assert.equal(await world(w.providers, storage, w.workspaceId, w.contextId), before, '外部没有新增 run / 分支 / 工作树，本地事实一字不改（不补边、不补 run）')
+    const after = JSON.parse(await world(w.providers, storage, w.workspaceId, w.contextId)); const original = JSON.parse(before)
+    const receipts = after[5].filter((a) => a.idempotencyKey !== 'saved')
+    assert.deepEqual(receipts.map((a) => [a.idempotencyKey, a.state, a.requestFingerprint]).sort(), ['new-key', 'reopen-key'].map((key) => [key, 'pending', original[5][0].requestFingerprint]), '新观察键也耐久绑定首次请求')
+    after[5] = after[5].filter((a) => a.idempotencyKey === 'saved')
+    assert.deepEqual(after, original, '外部没有新增 run / 分支 / 工作树，除新观察收据之外本地事实不变（不补边、不补 run）')
   }
 
   // run 的 ack 之后：本地 run 记录写不进去、或 ack 的状态不是已知取值；关系的写入被静默丢掉（历史残缺的 Ready 的真实成因）。
@@ -321,7 +329,7 @@ for (const [label, makeStorage] of ADAPTERS) {
     const original = w.providers.development.getWorktree; const core = (await fault(w)) ?? w.core; const replay = await start(core, w.workItemId, 'saved')
     assert.deepEqual([replay.status, replay.writeState, (await w.storage.getExecutionContext(w.contextId)).status], status === 'ready' ? ['ready', 'unknown', 'ready'] : ['failed', 'failed', 'failed'])
     if (status === 'ready') {
-      await w.storage.putMutationAttempt({ id: 'write:startWork:first-failed', workspaceId: w.workspaceId, bindingId: w.bindingId, commandName: 'startWork', idempotencyKey: 'first-failed', state: 'failed', expectedSourceVersion: undefined, errorCode: 'unavailable' })
+      await w.storage.putMutationAttempt({ id: 'write:startWork:first-failed', workspaceId: w.workspaceId, bindingId: w.bindingId, commandName: 'startWork', idempotencyKey: 'first-failed', state: 'failed', requestFingerprint: (await w.storage.findMutationAttempt(w.workspaceId, 'saved')).requestFingerprint, expectedSourceVersion: undefined, errorCode: 'unavailable' })
       const hit = await start(core, w.workItemId, 'first-failed')
       assert.deepEqual([hit.writeState, hit.status, (await w.storage.getExecutionContext(w.contextId)).status], ['failed', 'ready', 'ready'], '命中的 Failed 首次报告原样返回，记录也不被改判')
     }
@@ -371,7 +379,7 @@ for (const [label, makeStorage] of ADAPTERS) {
     await registerWorkItem(w.storage, w.workspaceId, w.workItemId, { contentKind: 'redacted', reason: 'permission_denied' }) // 工作项之后被扣下
     assert.equal((await start(w.core, w.workItemId, 'saved')).error?.code, 'result_unknown', '同 key 重放：首次的 saved 报告只过完整性守卫，不是被扣下的 unavailable')
     for (const [key, state, code] of [['first-failed', 'failed', 'unavailable'], ['first-unknown', 'unknown', 'result_unknown']]) {
-      await w.storage.putMutationAttempt({ id: `write:startWork:${key}`, workspaceId: w.workspaceId, bindingId: w.bindingId, commandName: 'startWork', idempotencyKey: key, state, expectedSourceVersion: undefined, errorCode: code })
+      await w.storage.putMutationAttempt({ id: `write:startWork:${key}`, workspaceId: w.workspaceId, bindingId: w.bindingId, commandName: 'startWork', idempotencyKey: key, state, requestFingerprint: (await w.storage.findMutationAttempt(w.workspaceId, 'saved')).requestFingerprint, expectedSourceVersion: undefined, errorCode: code })
       const replay = await start(w.core, w.workItemId, key)
       assert.deepEqual([replay.writeState, replay.confirmed, replay.error?.code, replay.status], [state, false, code, 'ready'], `${key}：原样返回`)
     }
@@ -380,7 +388,7 @@ for (const [label, makeStorage] of ADAPTERS) {
   test(`${label}：租约内的在途不被完整性守卫改判，租约过期后接管把序列做完`, async () => {
     const { clock, advance } = controllableClock(); const w = await setup(makeStorage, { clock }); const workItemId = w.pick('work_item'); const before = external(w.providers)
     const delta = () => external(w.providers).map((n, i) => n - before[i])
-    injectAfterWrite(w.storage, 'putMutationAttempt', 1); await start(w.core, workItemId, 'seed') // 最终事务失败：Provisioning、有句柄，租约从现在起算
+    injectAfterWrite(w.storage, 'putMutationAttempt', 2); await start(w.core, workItemId, 'seed') // 最终事务失败：Provisioning、有句柄，租约从现在起算
     advance(1_000); const inFlight = await start(w.core, workItemId, 'in-flight')
     const view = await w.core.queries.getExecutionContext({ workItemId, repositoryId: REQUEST.repositoryId })
     assert.deepEqual([inFlight.writeState, inFlight.saving, inFlight.confirmed, inFlight.status, inFlight.error, delta(), view.degraded], ['pending', true, false, 'provisioning', undefined, [1, 1, 0], false], '租约内：还在途，不是 Ready，守卫不介入（命令与 Query 都不判），没有再写外部')

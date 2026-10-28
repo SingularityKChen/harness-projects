@@ -129,6 +129,7 @@ export interface WriteAttemptInput {
   readonly commandName: string
   readonly idempotencyKey: string
   readonly report: WriteReport
+  readonly requestFingerprint?: string
 }
 
 /** 写尝试账本：以 (workspace, idempotencyKey) 去重，同键重放返回首次尝试的结果。 */
@@ -157,6 +158,7 @@ export function createWriteLedger(storage: Pick<Storage, 'findMutationAttempt' |
         workspaceId: input.workspaceId, bindingId: input.bindingId, commandName: input.commandName,
         idempotencyKey: input.idempotencyKey, state: input.report.writeState,
         expectedSourceVersion: undefined, errorCode: input.report.error?.code,
+        ...(input.requestFingerprint === undefined ? {} : { requestFingerprint: input.requestFingerprint }),
       })
     },
   }

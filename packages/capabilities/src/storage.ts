@@ -101,6 +101,8 @@ export interface MutationAttemptRecord {
   readonly id: string; readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId
   readonly commandName: string; readonly idempotencyKey: string; readonly state: WriteState
   readonly expectedSourceVersion: string | undefined; readonly errorCode: ProjectErrorCode | undefined
+  /** Start Work 必填；首次请求身份与 command/binding 不可改写，只有状态可推进。 */
+  readonly requestFingerprint?: string
 }
 
 /** 同步游标状态；degraded 表示还在推进但有失败，failed 表示必须人工介入。 */

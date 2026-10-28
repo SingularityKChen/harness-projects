@@ -493,19 +493,22 @@ export class MemoryStorage implements cap.Storage {
     })
   }
   /** 写尝试以 (workspace, idempotencyKey) 唯一：同键重放是**幂等覆盖**（与 003 的 `PRIMARY KEY (workspace_id, idempotency_key)` 同模型），`id` 在工作区内唯一。工作区与绑定两条父边、`state` 枚举都与 SQLite 的 `mutation_attempt` 外键与 CHECK 同语义（L6 评审 F1；第四轮评审补工作区与枚举）。 */
-  async findMutationAttempt(workspaceId: domain.WorkspaceId, idempotencyKey: string): Promise<cap.MutationAttemptRecord | undefined> { return this.data.attempts.find((a) => a.workspaceId === workspaceId && a.idempotencyKey === idempotencyKey) }
+  async findMutationAttempt(workspaceId: domain.WorkspaceId, idempotencyKey: string): Promise<cap.MutationAttemptRecord | undefined> { return structuredClone(this.data.attempts.find((a) => a.workspaceId === workspaceId && a.idempotencyKey === idempotencyKey)) }
   async putMutationAttempt(record: cap.MutationAttemptRecord): Promise<void> {
     return this.#mutate(() => {
       if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('mutation attempt workspace does not exist')
       if (!this.data.providerBindings.some((binding) => binding.id === record.bindingId)) throw new Error('mutation attempt binding does not exist')
+      const previous = this.data.attempts.find((a) => a.workspaceId === record.workspaceId && a.idempotencyKey === record.idempotencyKey)
+      if (record.commandName === 'startWork' && (typeof record.requestFingerprint !== 'string' || record.requestFingerprint.length === 0)) throw new Error('Start Work request fingerprint required')
+      if (previous?.requestFingerprint !== undefined && (record.requestFingerprint !== previous.requestFingerprint || record.commandName !== previous.commandName || record.bindingId !== previous.bindingId)) throw new Error('mutation attempt request identity is immutable')
       if (!WRITE_STATES.includes(record.state)) throw new Error(`mutation attempt state is not a known value: ${record.state}`)
       const clash = this.data.attempts.find((a) => a.workspaceId === record.workspaceId
         && a.id === record.id && a.idempotencyKey !== record.idempotencyKey)
       if (clash !== undefined) throw new Error('mutation attempt id already used in this workspace')
-      upsert(this.data.attempts, record, (a) => a.workspaceId === record.workspaceId && a.idempotencyKey === record.idempotencyKey)
+      upsert(this.data.attempts, structuredClone(record), (a) => a.workspaceId === record.workspaceId && a.idempotencyKey === record.idempotencyKey)
     })
   }
-  async listMutationAttempts(workspaceId: domain.WorkspaceId): Promise<readonly cap.MutationAttemptRecord[]> { return this.data.attempts.filter((a) => a.workspaceId === workspaceId) }
+  async listMutationAttempts(workspaceId: domain.WorkspaceId): Promise<readonly cap.MutationAttemptRecord[]> { return structuredClone(this.data.attempts.filter((a) => a.workspaceId === workspaceId)) }
   async currentRevision(workspaceId: domain.WorkspaceId): Promise<number> { return this.data.revisions.find((r) => r.workspaceId === workspaceId)?.revision ?? 0 }
   async advanceRevision(workspaceId: domain.WorkspaceId): Promise<number> {
     return this.#mutate(() => {
