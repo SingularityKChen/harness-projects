@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [2026-10-28-pr438-pr440-mmp-review](2026-10-28-pr438-pr440-mmp-review.md) | #438–#440 的 MMP 风险矩阵、独立反例与授权收尾 | 无新增 P0/P1；#439 一 P2 回链修正并复评，其余无新增问题 |
 | [2026-09-18-mvp-delivery-review](2026-09-18-mvp-delivery-review.md) | 9 个开放 PR（#3 #11 #12 #13 #19 #21 #33 #35 #37）的 MVP 交付评审 | 8 个合并、#37 因两条 P0 暂缓；风险矩阵、38 条行级意见、13 个跟踪 issue（#38–#50） |
 | [2026-09-18-stacked-checker-convergence-review](2026-09-18-stacked-checker-convergence-review.md) | 规则语义收敛栈 7 个 PR（#56–#61 #63）的交付评审：逐 PR 锁定 head 与体量证据 | 本轮一个都不合并——1 条 P0、7 条 P1；队列首位自身带 3 条 P1，事实上堵住整条队列 |
 | [2026-09-18-rule-semantics-stacked-review](2026-09-18-rule-semantics-stacked-review.md) | 同一栈（#60 #56–#59 #61 #63）的 MVP 交付评审：批次划分、合并顺序假设与合并并集模拟 | #61 存在未解决的 P0/P1 而 Blocked；其余 6 个可继续排队，并给出 #61 的可复现修复路径 |
