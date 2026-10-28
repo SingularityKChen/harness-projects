@@ -25,6 +25,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-28-execution-run-refresh](exec-plan/active/2026-10-28-execution-run-refresh.md) | 签发者运行刷新、变化式健康度与详情读回（#365） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
