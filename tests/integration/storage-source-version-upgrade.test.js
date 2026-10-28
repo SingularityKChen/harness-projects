@@ -1,10 +1,4 @@
-// 集成层：跨版本重开（PR #240 评审 5352511875 的阻塞项，issue #203）。旧版本写过的库文件在本版本上重开时，已持久化的
-// 非规范观察版本载体必须在任何业务写入之前被处理：能无损归一的由迁移 005 归一；不能的，整库在任何迁移之前被拒绝、
-// 库文件逐字节不变，并有一条先备份、保留全部行的修复路径。
-// 「旧库」由 main 等价写入器 `legacyDatabase` 构造（按 main 的 `recordObservation` 编码裸插入）；它与真 main 的一致性由
-// 计划 R1 步骤 7 的一次性对照证明，因此不依赖 `origin/main`，在浅克隆的 CI 上也承重。新名字一律经 `sqlite.*` 引用：
-// 文件在 base 上也能加载，每条用例各自变红，而不是整个文件加载失败。
-
+// 集成层：当前基线拒绝历史库；运行时载体与显式 repair 安全合同保留至 #415。
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
@@ -48,9 +42,12 @@ function withDb(location, run) {
   try { return run(db) } finally { db.close() }
 }
 
-/** main 等价写入器：只迁移到 `versions`，裸 SQL 写工作区与绑定，再按 main 的编码写观察（`legacy: undefined` 即无版本）。 */
+/** 历史夹具：裸 SQL 执行前 `versions` 条并记账，再写工作区、绑定和旧编码观察（`legacy: undefined` 即无版本）。 */
 const legacyDatabase = (location, versions, rows) => withDb(location, (db) => {
-  migrate(db, { entries: MIGRATIONS.slice(0, versions) })
+  for (const entry of MIGRATIONS.slice(0, versions)) {
+    db.exec(sqlite.readMigrationSql(entry))
+    db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(entry.version, `fixture-${entry.version}`)
+  }
   db.prepare("INSERT INTO workspace (id, name, status_policy) VALUES (?, '工作区', 'provider_authoritative')").run(WORKSPACE)
   db.prepare("INSERT INTO provider_binding (id, implementation_key) VALUES (?, 'fake')").run(BINDING)
   db.prepare("INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES (?, ?, 'planning', 1, 0)").run(WORKSPACE, BINDING)
@@ -77,35 +74,22 @@ async function write(location, ...args) {
   try { return await storage.recordObservation(record(...args)) } finally { storage.close() }
 }
 
-/** R1-3 的不变量：每一行 `updated_at === 规范化(snapshot.observation.sourceVersion)`，无版本或不可定序记为 `''`。 */
-function assertDerivedKeyInvariant(location) {
-  const derive = (source) => { try { return source === undefined ? '' : cap.sourceVersionFromTimestamp(source) } catch { return '' } }
-  for (const row of read(location, 'SELECT object_external_id, updated_at, snapshot_json FROM sync_observation ORDER BY rowid')) {
-    assert.equal(row.updated_at, derive(JSON.parse(row.snapshot_json).observation.sourceVersion), `${row.object_external_id}：updated_at 必须由快照按唯一规则推导`)
-  }
-}
-
 /** 把 `sync_observation` 退回重写前的列集合（与 storage-sync-surface.test.js 的同名辅助等价，不改那个文件）。 */
 const rewriteObservationTable = (location) => withDb(location, (db) => db.exec(`PRAGMA foreign_keys = OFF; DROP VIEW committed_observation;
   DROP TABLE sync_observation; CREATE TABLE sync_observation (workspace_id TEXT NOT NULL, item_external_id TEXT NOT NULL, observed_at TEXT NOT NULL,
   binding_id TEXT NOT NULL REFERENCES provider_binding (id), updated_at TEXT NOT NULL, snapshot_json TEXT NOT NULL,
   state TEXT NOT NULL CHECK (state IN ('pending','processed','ignored','failed')), PRIMARY KEY (workspace_id, item_external_id, observed_at))`))
 
-test('U1 评审反例：旧库含 v9 时打开被拒绝，库逐字节不变，句柄不泄漏，旧清单仍能打开', async () => {
+test('U1 评审反例：旧库含 v9 时打开被拒绝，库逐字节不变，句柄不泄漏', async () => {
   await withTempDir((dir) => {
     const location = join(dir, 'legacy.sqlite')
     legacyDatabase(location, 4, [{ item: 'item-1', legacy: 'v9', observedAt: T(1) }])
     const before = fingerprint(location)
-    assert.throws(() => createSqliteStorage(location), (error) => error instanceof sqlite.LegacySourceVersionError
-      && error.code === 'legacy_source_version' && error.unorderableRows === 1 && error.samples[0].updatedAt === 'v9'
-      && error.phase === 'preflight' && JSON.stringify(error.appliedVersions) === '[1,2,3,4]'
-      && /库未被修改/.test(error.message) && /repairLegacySourceVersions/.test(error.message),
-    '旧库含不可定序载体时必须整库拒绝，并给出结构化错误与恢复入口')
+    assert.throws(() => createSqliteStorage(location), (error) => error instanceof sqlite.IncompatibleDatabaseError && error.action === 'back_up_and_rebuild')
     assert.deepEqual(fingerprint(location), before, '拒绝必须零改动：文件哈希、目录列表、schema 与全部行都不变')
     const fds = readdirSync('/dev/fd').length
-    for (let attempt = 1; attempt <= 5; attempt += 1) assert.throws(() => createSqliteStorage(location), (error) => error.code === 'legacy_source_version')
+    for (let attempt = 1; attempt <= 5; attempt += 1) assert.throws(() => createSqliteStorage(location), (error) => error.code === 'incompatible_database')
     assert.equal(readdirSync('/dev/fd').length, fds, '拒绝时必须关掉句柄：每次失败的打开都不得留下文件描述符')
-    assert.deepEqual(withDb(location, (db) => migrate(db, { entries: MIGRATIONS.slice(0, 4) }).applied), [], '本修复之前的清单仍能打开这个未改动的库')
   })
 })
 
@@ -114,13 +98,13 @@ test('U2 拒绝早于更早的待应用迁移：[1,2,3] 库含 v9 时 004 也不
     const location = join(dir, 'legacy.sqlite')
     legacyDatabase(location, 3, [{ item: 'item-1', legacy: 'v9', observedAt: T(1) }])
     const before = fingerprint(location)
-    assert.throws(() => createSqliteStorage(location), (error) => error instanceof sqlite.LegacySourceVersionError)
+    assert.throws(() => createSqliteStorage(location), (error) => error instanceof sqlite.IncompatibleDatabaseError)
     assert.deepEqual(versions(location), [1, 2, 3], '预检必须先于任何待应用迁移：004 不得被应用')
     assert.deepEqual(fingerprint(location), before)
   })
 })
 
-test('U3 可归一的旧值被迁移并纠正定序；snapshot_json 不变', async () => {
+test('U3 可归一的旧值也拒绝；所有行与 snapshot_json 不变', async () => {
   await withTempDir(async (dir) => {
     const location = join(dir, 'legacy.sqlite')
     legacyDatabase(location, 4, [
@@ -131,21 +115,13 @@ test('U3 可归一的旧值被迁移并纠正定序；snapshot_json 不变', asy
       { item: 'item-c', legacy: undefined, observedAt: T(4) },
       { item: 'item-d', legacy: CANONICAL('54.250000000Z'), observedAt: T(5) },
     ])
-    const snapshots = read(location, 'SELECT snapshot_json FROM sync_observation ORDER BY rowid')
-    assert.deepEqual(withDb(location, (db) => migrate(db).applied), [5, 6, 7], '005 只执行一次，其后应用 006 交付事实与 007 Planning round')
-    assert.deepEqual(updatedAt(location), [CANONICAL('54.000000000Z'), CANONICAL('55.000000000Z'), CANONICAL('54.000000000Z'), '', CANONICAL('54.250000000Z')],
-      '可归一的值改写为规范载体，无版本与规范值保持原样')
-    assert.deepEqual(read(location, 'SELECT snapshot_json FROM sync_observation ORDER BY rowid'), snapshots, 'snapshot_json 是端口收到的原样记录，不得改写')
-    const committed = read(location, "SELECT snapshot_json FROM committed_observation WHERE object_external_id = 'item-b'")
-    assert.deepEqual(committed.map((row) => JSON.parse(row.snapshot_json).observation.sourceVersion), ['2026-09-21T07:11:55Z'], '纠正：item-b 的已提交快照是时间上真正最新的那一行')
-    assert.equal(await write(location, 'item-a', 101, T(6), CANONICAL('54.500000000Z')), true, '归一后更新的规范观察必须被应用')
-    assert.equal(await write(location, 'item-b', 102, T(6), CANONICAL('54.900000000Z')), false, '比已提交的 …55 更旧的观察仍是乱序')
-    assert.equal(await write(location, 'item-c', 103, T(6), CANONICAL('54.000000000Z')), true, '无版本的旧行被任何规范观察胜过')
-    assertDerivedKeyInvariant(location)
+    const before = fingerprint(location)
+    assert.throws(() => withDb(location, (db) => migrate(db)), (error) => error.code === 'incompatible_database')
+    assert.deepEqual(fingerprint(location), before)
   })
 })
 
-test('U4 同一时刻的不同写法归一后是同一版本（R4 ②）', async () => {
+test('U4 同一时刻的不同旧写法不触发自动归一', async () => {
   await withTempDir(async (dir) => {
     const location = join(dir, 'legacy.sqlite')
     // main 按码点序接受这个顺序（'.' < 'Z'）；反过来的顺序会被 main 拒绝。
@@ -153,26 +129,25 @@ test('U4 同一时刻的不同写法归一后是同一版本（R4 ②）', async
       { item: 'item-1', legacy: '2026-09-21T07:11:54.000Z', observedAt: T(1) },
       { item: 'item-1', legacy: '2026-09-21T07:11:54Z', observedAt: T(2) },
     ])
-    withDb(location, (db) => migrate(db))
-    assert.deepEqual(updatedAt(location), [CANONICAL('54.000000000Z'), CANONICAL('54.000000000Z')], '同一时刻的两种写法归一为同一版本')
-    assert.equal(await write(location, 'item-1', 101, T(3), CANONICAL('54.000000000Z')), true, '同版本不同去重键：整快照替换，必须返回 true')
-    assertDerivedKeyInvariant(location)
+    const before = fingerprint(location)
+    assert.throws(() => createSqliteStorage(location), (error) => error.code === 'incompatible_database')
+    assert.deepEqual(fingerprint(location), before)
   })
 })
 
-test('U5 / U7 幂等与降级拒绝：005 只执行一次且不动定义域内的行；迁移到 5 的库不能被清单只到 4 的二进制打开', async () => {
+test('U5 / U7 当前库幂等；清单前缀不能绕过准入', async () => {
   await withTempDir((dir) => {
     withDb(join(dir, 'fresh.sqlite'), (db) => {
       assert.deepEqual(migrate(db).applied, MIGRATIONS.map((entry) => entry.version))
       assert.ok(MIGRATIONS.some((entry) => entry.version === 5 && entry.data !== undefined), '005 是带数据步骤的载体世代标记')
       assert.deepEqual(migrate(db).applied, [], '第二次运行什么也不应用')
     })
-    const location = join(dir, 'legacy.sqlite')
-    legacyDatabase(location, 4, [{ item: 'item-1', legacy: CANONICAL('54.000000000Z'), observedAt: T(1) }, { item: 'item-2', legacy: undefined, observedAt: T(2) }])
+    const location = join(dir, 'current.sqlite')
+    legacyDatabase(location, MIGRATIONS.length, [{ item: 'item-1', legacy: CANONICAL('54.000000000Z'), observedAt: T(1) }])
     const before = read(location, 'SELECT * FROM sync_observation ORDER BY rowid')
-    assert.deepEqual(withDb(location, (db) => migrate(db).applied), [5, 6, 7])
-    assert.deepEqual(read(location, 'SELECT * FROM sync_observation ORDER BY rowid'), before, '已在定义域内的库：005 不改任何一行')
-    assert.throws(() => withDb(location, (db) => migrate(db, { entries: MIGRATIONS.slice(0, 4) })), /已应用版本与迁移清单不一致/, 'U7：降级写入在结构上被挡住')
+    assert.deepEqual(withDb(location, (db) => migrate(db).applied), [])
+    assert.deepEqual(read(location, 'SELECT * FROM sync_observation ORDER BY rowid'), before)
+    assert.throws(() => withDb(location, (db) => migrate(db, { entries: MIGRATIONS.slice(0, 4) })), /完整当前清单/)
   })
 })
 
@@ -209,7 +184,7 @@ test('U9 恢复路径：先备份并核对，再保留全部行；降为无版�
   await withTempDir(async (dir) => {
     mkdirSync(join(dir, 'db')); mkdirSync(join(dir, 'bak'))
     const location = join(dir, 'db', 'legacy.sqlite')
-    legacyDatabase(location, 4, [
+    legacyDatabase(location, MIGRATIONS.length, [
       { item: 'item-1', legacy: 'v9', observedAt: T(1) },
       { item: 'item-2', legacy: '2026-09-21T07:11:54Z', observedAt: T(2) },
       { item: 'item-3', legacy: CANONICAL('54.000000000Z'), observedAt: T(3) },
@@ -248,7 +223,7 @@ test('U9 恢复路径：先备份并核对，再保留全部行；降为无版�
     assert.deepEqual(after.tables.sync_observation.map((row) => row.updated_at), ['', CANONICAL('54.000000000Z'), CANONICAL('54.000000000Z'), ''],
       'v9 与 v10 降为无版本，…54Z 归一，规范值不动')
 
-    // 5 重开成功（应用 005）；评审的反例在修复后返回 true。
+    // 5 完整当前库重开成功；评审的反例在显式修复后返回 true。
     assert.equal(await write(location, 'item-1', 101, T(5), '2026-09-30T00:00:00.000000000Z'), true, '评审的原输入：修复后更晚的规范观察被应用')
     assert.equal(await write(location, 'item-3', 102, T(5), CANONICAL('53.000000000Z')), false, '比已提交的规范值更旧的观察仍是乱序')
     assert.deepEqual(versions(location), [1, 2, 3, 4, 5, 6, 7])
@@ -270,32 +245,21 @@ test('U10 重写前 003 形状的库在任何迁移之前被拒绝', async () =>
     legacyDatabase(location, 3, [])
     rewriteObservationTable(location)
     const before = fingerprint(location)
-    assert.throws(() => createSqliteStorage(location), /重写前的 003/)
+    assert.throws(() => createSqliteStorage(location), (error) => error.code === 'incompatible_database')
     assert.deepEqual(versions(location), [1, 2, 3], '004 不得先于拒绝被应用')
     assert.deepEqual(fingerprint(location), before, '拒绝零改动')
   })
 })
 
-test('U11 预检后的旧写者插入：完整迁移拒绝时报告阶段与已提交版本，不误称整库未修改', async () => {
+test('U11 非空历史库拒绝时不调用旧数据 hooks', async () => {
   await withTempDir((dir) => {
     const location = join(dir, 'legacy.sqlite')
     legacyDatabase(location, 3, [])
-    withDb(location, (db) => {
-      let inserted = false
-      const wrapped = { prepare: db.prepare.bind(db), close: db.close.bind(db), exec(sql) {
-        if (sql === 'BEGIN IMMEDIATE' && !inserted) {
-          withDb(location, (writer) => insertLegacyObservation(writer, { item: 'late', n: 1, observedAt: T(1), legacy: 'v9' }))
-          inserted = true
-        }
-        return db.exec(sql)
-      } }
-      assert.throws(() => migrate(wrapped), (error) => error instanceof sqlite.LegacySourceVersionError
-        && error.phase === 'migration' && JSON.stringify(error.appliedVersions) === '[1,2,3,4]'
-        && !/库未被修改/.test(error.message) && /先前已提交/.test(error.message),
-      '005 回滚不撤销已提交的 004：错误必须报告实际阶段与版本，不能承诺整库零变化')
-      assert.equal(inserted, true, '前置条件：第二连接确实在只读预检之后写入旧载体')
-    })
-    assert.deepEqual(versions(location), [1, 2, 3, 4], '004 已提交，005 未误记账')
-    assert.deepEqual(updatedAt(location), ['v9'], '拒绝不丢掉迟到观察，也不自动降级其版本')
+    const before = fingerprint(location)
+    const entries = MIGRATIONS.map((entry) => ({ ...entry, data: {
+      preflight() { assert.fail('历史库不得预检旧行') }, apply() { assert.fail('历史库不得升级旧行') },
+    } }))
+    assert.throws(() => withDb(location, (db) => migrate(db, { entries })), (error) => error.code === 'incompatible_database')
+    assert.deepEqual(fingerprint(location), before)
   })
 })

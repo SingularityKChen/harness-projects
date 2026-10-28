@@ -209,8 +209,8 @@ export function createSqliteStorage(
   const snapshot = snapshotPolicy(policy)
   const db = openDatabase(location)
   try {
-    assert002Shape(db)
     migrate(db, options.migrationsDir === undefined ? {} : { dir: options.migrationsDir })
+    assert002Shape(db)
     return new SqliteStorage(location, db, false, undefined, undefined, snapshot)
   } catch (error) { try { db.close() } catch { /* 构造函数已关：幂等 */ } throw error }
 }

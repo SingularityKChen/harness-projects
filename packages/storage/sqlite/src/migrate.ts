@@ -1,127 +1,114 @@
-import type { WorkspaceDatabase } from './db.ts'
+import { openDatabase, type WorkspaceDatabase } from './db.ts'
 import type { Migration } from './migrations.ts'
 import { MIGRATIONS, MIGRATIONS_DIR, assertManifestIntegrity, readMigrationSql } from './migrations.ts'
 
 export interface MigrateOptions {
-  /** 迁移清单，默认包内 MIGRATIONS；测试用它注入失败迁移。 */
+  /** 必须与包内完整当前清单的版本和文件一致。 */
   readonly entries?: readonly Migration[]
-  /** 迁移体目录，默认包内 migrations/。 */
+  /** 受信打包迁移体目录；参考结构与建库使用同一批 SQL。 */
   readonly dir?: string
 }
 
 export interface MigrateResult {
-  /** 本次真正应用的版本号，按应用顺序排列；重复运行时为 []。 */
   readonly applied: number[]
-  /** 运行结束后的当前 schema 版本；空库为 0。 */
   readonly version: number
 }
 
-/**
- * 按清单顺序应用缺失迁移，返回本次应用的版本与结束版本。
- *
- * 每个迁移一个事务，顺序固定为：开启写事务 → 在事务内重新读取已应用版本 → 执行迁移体
- * → 写 schema_migrations → 提交。顺序与事务缺一不可：代码注释里的顺序被破坏、版本记录
- * 落在事务之外、或"版本是否已应用"只依据写事务之外的读取，都会让"半执行的库"被标记为
- * 已迁移，或让并发启动的两个进程重复执行同一段 DDL——这正是本模块要防的失败模式。
- *
- * 事务外的快路径读取只用于跳过"已确认应用"的版本：版本记录只增不减，读到即可信任。
- * 它绝不作为"某版本缺失"的最终依据——并发进程可能在这次读取之后提交同一版本，
- * 因此真正决定是否执行 DDL 的判定必须发生在 BEGIN IMMEDIATE 之内。
- *
- * 数据步骤（`Migration.data`）与版本记录同生共死：`apply` 在迁移体之后、写 schema_migrations 之前，同在一个 BEGIN IMMEDIATE 内；
- * 预检早于任何迁移——数据不合格的库在应用第一个待应用迁移之前就被拒绝，库文件不留任何改动。
- * 若旧写者在预检后才写入不合格数据，apply 的事务内复判只回滚当前迁移；此前成功提交的版本不会撤销。
- */
+export const CURRENT_SCHEMA_GENERATION = 1
+export type IncompatibleDatabaseReason = 'generation' | 'version_list' | 'schema_shape' | 'unknown_objects'
+export class IncompatibleDatabaseError extends Error {
+  readonly code = 'incompatible_database'
+  readonly expectedGeneration = CURRENT_SCHEMA_GENERATION
+  readonly action = 'back_up_and_rebuild'
+  readonly reason: IncompatibleDatabaseReason
+  readonly actualGeneration: number
+  constructor(reason: IncompatibleDatabaseReason, actualGeneration: number) {
+    super('数据库不符合当前基线。请停止打开进程，先备份并核对所需数据，再由用户决定在新位置重建。')
+    this.name = 'IncompatibleDatabaseError'
+    this.reason = reason
+    this.actualGeneration = actualGeneration
+  }
+}
+
+type SchemaObject = { type: string; name: string; tbl_name: string; sql: string }
+function schema(db: WorkspaceDatabase): SchemaObject[] {
+  return db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY name").all() as SchemaObject[]
+}
+
+const fold = (value: string): string => value.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
+/** 仅忽略 SQLite 的五个 ASCII 空白；其它字符、字符串原文与词边界保留。 */
+function normalized(sql: string, identifiers: ReadonlySet<string>): string {
+  const tokens = sql.match(/--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/|'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|[\p{L}\p{N}_$]+|[^ \t\n\f\r]/gu) ?? []
+  return JSON.stringify(tokens.filter((token) => !token.startsWith('--') && !token.startsWith('/*')).map((token) => {
+    if (token.startsWith("'")) return token
+    if (token.startsWith('"') || token.startsWith('`') || token.startsWith('[')) {
+      const identifier = fold(token.slice(1, -1).replaceAll(token.charAt(0) + token.charAt(0), token.charAt(0)))
+      // 只把参考结构中的已知名字视为标识符；引号里的约束词/标点保留类别。
+      return identifiers.has(identifier) ? identifier : ['quoted', identifier]
+    }
+    return fold(token)
+  }))
+}
+function sameObject(actual: SchemaObject, expected: SchemaObject, identifiers: ReadonlySet<string>): boolean {
+  return actual.type === expected.type && fold(actual.name) === fold(expected.name)
+    && fold(actual.tbl_name) === fold(expected.tbl_name) && normalized(actual.sql, identifiers) === normalized(expected.sql, identifiers)
+}
+function assertCurrent(db: WorkspaceDatabase, expected: SchemaObject[], identifiers: ReadonlySet<string>, generation: number): void {
+  const actual = schema(db)
+  const byName = new Map(expected.map((row) => [fold(row.name), row]))
+  const refuse = (reason: IncompatibleDatabaseReason): never => { throw new IncompatibleDatabaseError(reason, generation) }
+  if (actual.some((row) => !byName.has(fold(row.name)))) refuse('unknown_objects')
+  const ledger = actual.find((row) => fold(row.name) === 'schema_migrations')
+  if (!ledger || !sameObject(ledger, byName.get('schema_migrations')!, identifiers)) refuse('schema_shape')
+  const versions = (db.prepare('SELECT CAST(version AS TEXT) AS version FROM schema_migrations ORDER BY version').all() as { version: string }[]).map((row) => row.version)
+  if (versions.length !== MIGRATIONS.length || versions.some((version, index) => version !== String(MIGRATIONS[index]?.version))) refuse('version_list')
+  if (actual.length !== expected.length || actual.some((row) => !sameObject(row, byName.get(fold(row.name))!, identifiers))) refuse('schema_shape')
+}
+
+/** 唯一打开期准入：非空库只认可完整当前基线；空库一次原子建立全链。 */
 export function migrate(db: WorkspaceDatabase, options: MigrateOptions = {}): MigrateResult {
   const entries = options.entries ?? MIGRATIONS
   const dir = options.dir ?? MIGRATIONS_DIR
   assertManifestIntegrity(entries, dir)
-
-  const observed = readAppliedVersions(db)
-  assertAppliedIsManifestPrefix(observed, entries)
-
-  const settled = new Set(observed)
-  // 预检：只读、不开事务，先于任何待应用迁移（更早的待应用迁移也不得在拒绝之前执行）。权威判定在各自事务内的 apply。
-  for (const entry of entries) {
-    if (!settled.has(entry.version)) entry.data?.preflight(db)
+  if (entries.length !== MIGRATIONS.length || entries.some((entry, index) => entry.version !== MIGRATIONS[index]?.version || entry.file !== MIGRATIONS[index]?.file)) {
+    throw new Error('迁移选项必须使用完整当前清单')
   }
-  const newlyApplied: number[] = []
-  for (const entry of entries) {
-    if (settled.has(entry.version)) continue
-    if (applyIfMissing(db, entries, entry, dir)) newlyApplied.push(entry.version)
-  }
+  const sql = entries.map((entry) => readMigrationSql(entry, dir))
+  const reference = openDatabase(':memory:')
+  let expected: SchemaObject[]
+  const identifiers = new Set<string>()
+  try {
+    for (const body of sql) reference.exec(body)
+    expected = schema(reference)
+    for (const object of expected) {
+      identifiers.add(fold(object.name))
+      if (object.type === 'table' || object.type === 'view') {
+        const columns = reference.prepare('SELECT name FROM pragma_table_info(?)').all(object.name) as { name: string }[]
+        for (const column of columns) identifiers.add(fold(column.name))
+      }
+    }
+  } finally { reference.close() }
 
-  // 仅用于汇报运行结束后的已提交版本，不参与任何"是否应用"的判定。
-  return { applied: newlyApplied, version: readAppliedVersions(db).at(-1) ?? 0 }
-}
-
-/**
- * 单元：迁移体与版本记录同生共死——失败时两者都不留下。
- *
- * BEGIN IMMEDIATE 先取得写锁，随后在锁内重新读取已提交版本。并发启动的后到者会在
- * BEGIN IMMEDIATE 处等待（受 busy_timeout 约束），拿到锁后看到先到者提交的版本而跳过，
- * 而不是拿着过期的读取结果重复执行 DDL。返回 true 表示本次真正应用了该迁移。
- */
-function applyIfMissing(
-  db: WorkspaceDatabase,
-  entries: readonly Migration[],
-  entry: Migration,
-  dir: string,
-): boolean {
-  const sql = readMigrationSql(entry, dir)
   db.exec('BEGIN IMMEDIATE')
   try {
-    const applied = readAppliedVersions(db)
-    assertAppliedIsManifestPrefix(applied, entries)
-    if (applied.includes(entry.version)) {
-      db.exec('ROLLBACK')
-      return false
+    const generation = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
+    if (generation !== 0 && generation !== CURRENT_SCHEMA_GENERATION) throw new IncompatibleDatabaseError('generation', generation)
+    const empty = schema(db).length === 0
+    if (empty) {
+      for (const entry of entries) entry.data?.preflight(db)
+      for (const [index, entry] of entries.entries()) {
+        db.exec(sql[index]!)
+        entry.data?.apply(db)
+        db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(entry.version, new Date().toISOString())
+      }
     }
-    db.exec(sql)
-    entry.data?.apply(db)
-    db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(
-      entry.version,
-      new Date().toISOString(),
-    )
+    assertCurrent(db, expected, identifiers, generation)
+    if (generation === 0) db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_GENERATION}`)
     db.exec('COMMIT')
-    return true
+    return { applied: empty ? entries.map((entry) => entry.version) : [], version: entries.at(-1)!.version }
   } catch (error) {
-    rollbackQuietly(db)
+    try { db.exec('ROLLBACK') } catch { /* 原始失败优先；SQLite 可能已回滚。 */ }
     throw error
-  }
-}
-
-function rollbackQuietly(db: WorkspaceDatabase): void {
-  try {
-    db.exec('ROLLBACK')
-  } catch {
-    // SQLite 可能已经自动回滚；此时不要用回滚错误覆盖真正的失败原因。
-  }
-}
-
-/** 已应用版本升序读取；schema_migrations 还没建立时（空库）视为 0 个版本。 */
-function readAppliedVersions(db: WorkspaceDatabase): number[] {
-  const table = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
-    .get()
-  if (table === undefined) return []
-  const rows = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as {
-    readonly version: number
-  }[]
-  return rows.map((row) => row.version)
-}
-
-/** 已应用版本必须恰好是清单的前缀：丢失、篡改或乱序都会在这里报错，而不是静默跳过。 */
-function assertAppliedIsManifestPrefix(
-  applied: readonly number[],
-  entries: readonly Migration[],
-): void {
-  const expected = entries.slice(0, applied.length).map((entry) => entry.version)
-  const mismatch =
-    applied.length !== expected.length || applied.some((version, index) => version !== expected[index])
-  if (mismatch) {
-    const actual = applied.join(', ')
-    const declared = entries.map((entry) => entry.version).join(', ')
-    throw new Error(`数据库已应用版本与迁移清单不一致：库为 [${actual}]，清单为 [${declared}]`)
   }
 }
