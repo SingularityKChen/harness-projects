@@ -25,7 +25,6 @@
 
 | 计划 | 用途 |
 |---|---|
-| [2026-10-28-pull-request-identity-convergence](exec-plan/active/2026-10-28-pull-request-identity-convergence.md) | PR 原生身份声明、成员与谱系双入口收敛（#367） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
@@ -57,6 +56,7 @@
 | [2026-09-20-vertical-path-and-gates](exec-plan/completed/2026-09-20-vertical-path-and-gates.md) | 纵向链路与 R1 门禁重述 |
 | [2026-09-21-engineering-state-trust-boundary](exec-plan/completed/2026-09-21-engineering-state-trust-boundary.md) | 工程状态信任边界 |
 | [2026-09-21-gate-e1-content-identities](exec-plan/completed/2026-09-21-gate-e1-content-identities.md) | Gate E1 · 三类内容身份 |
+| [2026-10-28-pull-request-identity-convergence](exec-plan/completed/2026-10-28-pull-request-identity-convergence.md) | PR 原生身份声明、成员与谱系双入口收敛（#367） |
 | [2026-09-21-gate-e1-membership-and-draft](exec-plan/completed/2026-09-21-gate-e1-membership-and-draft.md) | Gate E1 · 多项目成员关系与 Draft 转换 |
 | [2026-09-21-gate-e1-ruling](exec-plan/completed/2026-09-21-gate-e1-ruling.md) | Gate E1 · 裁决与 v1 冻结建议 |
 | [2026-09-21-gate-e1-write-and-events](exec-plan/completed/2026-09-21-gate-e1-write-and-events.md) | Gate E1 · 写确认与事件可靠性 |

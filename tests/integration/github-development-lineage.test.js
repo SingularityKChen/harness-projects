@@ -150,7 +150,22 @@ for (const [method, key, kind] of [
 }
 
 import { GAMMA_BRANCH, GAMMA_HEAD, RECORDED_PR, RECORDED_REPOSITORY_ID, recordedChain, sqlRows } from '../fixtures/lineage-refresh.mjs'
-const planningBytes = (w) => JSON.stringify(['workspace_projection', 'external_identity', 'project_item_membership', 'planning_field_value'].map((name) => sqlRows(w.storage.location, name)))
+// ExternalIdentity 是共享身份表：Delivery 可新增自己的自然键，但不能改动任何已存在身份或 Planning 三表。
+const planningBytes = (w) => JSON.stringify(['workspace_projection', 'project_item_membership', 'planning_field_value'].map((name) => sqlRows(w.storage.location, name)))
+const planningBaseline = (w) => ({ bytes: planningBytes(w), identities: sqlRows(w.storage.location, 'external_identity') })
+const assertPlanningUnchanged = async (w, before) => {
+  assert.equal(planningBytes(w), before.bytes)
+  const ids = new Set(before.identities.map((row) => row.id))
+  const identities = sqlRows(w.storage.location, 'external_identity')
+  assert.deepEqual(identities.filter((row) => ids.has(row.id)), before.identities)
+  const added = identities.filter((row) => !ids.has(row.id))
+  assert.equal(added.length, 1, '只新增本次确认 PR 的 Development 身份')
+  const { id, ...row } = added[0]
+  const entityId = (await w.snapshot()).sets.find((set) => set.kind === 'change_request').nodes.find((node) => node.externalId === RECORDED_PR.id).entityId
+  assert.ok(id)
+  assert.deepEqual(row, { entity_id: entityId, binding_id: w.repositoryRef.bindingId, external_kind: 'change_request', external_id: RECORDED_PR.id,
+    role: before.identities.some((identity) => identity.entity_id === entityId && identity.role === 'primary') ? 'alias' : 'primary' })
+}
 const graphKeys = async (w) => ({ entities: sqlRows(w.storage.location, 'entity').map((row) => row.id).sort(),
   relations: (await w.storage.listRelations(w.workspace.id)).map(({ from, type, to }) => [from, type, to].join('|')).sort() })
 const refresh = async (w) => {
@@ -161,7 +176,7 @@ const refresh = async (w) => {
 
 test('录制 Development + 真实双 adapter + SQLite：概念链逐字段可追溯、身份稳定、重开纯查询零 Provider 调用', async (t) => {
   const w = await recordedChain(t)
-  const before = planningBytes(w)
+  const before = planningBaseline(w)
   const projection = await refresh(w)
   assert.deepEqual(projection.gaps, [])
   const byKind = (kind) => projection.hops.find((hop) => hop.entityKind === kind)
@@ -180,7 +195,7 @@ test('录制 Development + 真实双 adapter + SQLite：概念链逐字段可追
   assert.deepEqual(primaryKeys.filter((id) => [RECORDED_PR.id, RECORDED_REPOSITORY_ID].includes(id)), [])
   await refresh(w)
   assert.deepEqual(await graphKeys(w), keys, '重复刷新不得增加实体或关系三元组')
-  assert.equal(planningBytes(w), before)
+  await assertPlanningUnchanged(w, before)
   const committed = await w.core.queries.getDeliveryProjection(w.scope)
   await w.reopen()
   w.calls.length = 0
@@ -233,22 +248,22 @@ test('录制双 adapter / SQLite：显式刷新反向完成时晚完成旧快照
 for (const policy of Object.values(StatusPolicy)) {
   test(`录制双 adapter / SQLite：${policy} 下 CI failure 不写 Planning 存储`, async (t) => {
     const w = await recordedChain(t, policy)
-    const before = planningBytes(w)
+    const before = planningBaseline(w)
     w.conclusion = 'failure'
     const projection = await refresh(w)
     assert.deepEqual(projection.hops.filter((hop) => hop.fact).map((hop) => hop.fact), ['ci_failed', 'ci_failed'])
-    assert.equal(planningBytes(w), before)
+    await assertPlanningUnchanged(w, before)
     assert.deepEqual([w.reconcileCalls, w.replay.misses], [0, []])
   })
 }
 
 test('SQLite 默认策略：合成 merged PR 经真实 Development adapter 刷新不写 Planning 存储', async (t) => {
   const w = await recordedChain(t)
-  const before = planningBytes(w)
+  const before = planningBaseline(w)
   w.merged = true
   assert.equal((await w.development.listChangeRequests({ repository: w.repositoryRef, headBranch: GAMMA_BRANCH, limit: 50 })).value.items[0].state, 'merged')
   const projection = await refresh(w)
   assert.equal(projection.hops.find((hop) => hop.entityKind === 'change_request').externalId, RECORDED_PR.id)
-  assert.equal(planningBytes(w), before)
+  await assertPlanningUnchanged(w, before)
   assert.deepEqual([w.reconcileCalls, w.replay.misses], [0, []])
 })

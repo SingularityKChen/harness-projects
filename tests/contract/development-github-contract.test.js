@@ -125,6 +125,7 @@ test('identity-shape：仓库引用用宿主配置的本地键，PR 用 node id 
   assert.equal(results[0].value.sourceUpdatedAt, exchangesOf('DevelopmentRepository')[0].body.data.repository.updatedAt)
   assert.equal(results[2].value.ref.externalId, GAMMA_HEAD)
   assert.deepEqual(results[3].value.ref, PR_REF, 'PR 的 ref 带平台 url')
+  assert.deepEqual(results[3].value.nativeIdentity, { namespace: 'github.com/graphql/PullRequest', id: PR_NODE.id })
   const planningPr = loadFixture().exchanges.flatMap((entry) => entry.body.data?.node?.items?.nodes ?? []).map((node) => node.content).find((content) => content?.__typename === 'PullRequest')
   assert.equal(results[3].value.ref.externalId, planningPr.id, 'PR 的 externalId 与规划 provider 对同一 PR 给出的内容 id 逐字相同')
   assert.deepEqual(results[3].value, results[4].value.items[0], 'get 与 list 透出逐字段相同的事实')

@@ -8,13 +8,14 @@
  */
 import {
   CapabilityKey, providerErr, providerError, providerOk,
-  type ExternalObjectRef, type ProjectError, type ProviderPage, type ProviderResult, type ResolvedBinding,
+  type ExternalObjectRef, type ProviderNativeIdentity, type ProjectError, type ProviderPage, type ProviderResult, type ResolvedBinding,
 } from '@harness-projects/capabilities'
 import { EngineeringFactKind, EntityKind, ProviderErrorCode, type EntityId, type WorkspaceId } from '@harness-projects/domain'
 import { gateCommand } from './capabilities.ts'
 import { CHANGE_REQUEST_READ_ROUTE, routeDevelopment } from './development-route.ts'
 import type { CoreContext } from './context.ts'
 import { contextIdFor, readExecutionContext } from './execution-context.ts'
+import { changeRequestEntityId, validNativeIdentity } from './identity.ts'
 import { branchNameFor, worktreeKeyFor } from './git-provisioning.ts'
 import { asEntityId, chainEntityId, type ChainNode } from './relations.ts'
 
@@ -24,11 +25,13 @@ export interface DeliveryScopeInput { readonly workItemId: string; readonly repo
 export interface ChainFacts {
   readonly workItem: ChainNode; readonly context: ChainNode; readonly worktree: ChainNode; readonly commit: ChainNode
   readonly changeRequest: ChainNode; readonly pipelines: readonly ChainNode[]; readonly checks: readonly ChainNode[]
+  /** 仅本次确认的 PR 定位与声明；写者在同一事务内登记并复验，不作为快照身份权威。 */
+  readonly changeRequestIdentity: Pick<ChangeRequestFact, 'ref' | 'nativeIdentity'> | undefined
   readonly gaps: readonly CapabilityGap[]
 }
 
 type ReadResult<T> = { readonly value: T | undefined; readonly gap: CapabilityGap | undefined }
-interface ChangeRequestFact { readonly ref: ExternalObjectRef; readonly label: string }
+interface ChangeRequestFact { readonly ref: ExternalObjectRef; readonly entityId: EntityId; readonly label: string; readonly nativeIdentity: ProviderNativeIdentity | undefined }
 
 const PAGE_LIMIT = 50
 /** 单次集合读取的页数上界；成环或超限都按整次读取不完整处理。 */
@@ -192,17 +195,25 @@ async function readHeadCommit(route: ReadRoute, branch: string, gaps: Capability
 }
 
 /** 只认头部提交匹配的变更请求：不匹配就当没观察到，绝不把别的分支的提交挂到本链上。 */
-async function readChangeRequest(route: ReadRoute, branch: string, head: string, gaps: CapabilityGap[]): Promise<ChangeRequestFact | undefined> {
+async function readChangeRequest(context: CoreContext, route: ReadRoute, branch: string, head: string, gaps: CapabilityGap[]): Promise<ChangeRequestFact | undefined> {
   const key = CapabilityKey.DevelopmentChangeRequestRead
   const read = await gated(route, key, (binding, repository) =>
     repository === undefined || binding.development === undefined ? undefined : findDevelopment(
       (cursor) => binding.development!.listChangeRequests({ repository, headBranch: branch, cursor, limit: PAGE_LIMIT }),
-      (item) => Number.isSafeInteger(item.number) && item.number > 0 && typeof item.title === 'string'
+      (item) => item.ref.objectKind === 'change_request' && item.ref.bindingId === binding.ref.bindingId
+        && validNativeIdentity(item.nativeIdentity) && Number.isSafeInteger(item.number) && item.number > 0 && typeof item.title === 'string'
         && (item.sourceVersion === undefined || nonEmptyString(item.sourceVersion)),
       (item) => item.sourceVersion === head))
   collect(gaps, read.gap)
   const found = read.value?.[0]
-  return found === undefined ? undefined : { ref: found.ref, label: `#${found.number} ${found.title}` }
+  if (found === undefined) return undefined
+  const desiredId = changeRequestEntityId(found.ref, found.nativeIdentity)
+  const known = await context.storage.findExternalIdentity(found.ref.bindingId, 'change_request', found.ref.externalId)
+  if (found.nativeIdentity !== undefined && known !== undefined && known.entityId !== desiredId) {
+    collect(gaps, { key, reason: '原生 PR 身份与已登记实体冲突' })
+    return undefined
+  }
+  return { ref: found.ref, entityId: known?.entityId ?? desiredId, nativeIdentity: found.nativeIdentity, label: `#${found.number} ${found.title}` }
 }
 
 /** 每个能力域各自的引用由提供该能力的 binding 构造：交付方读到的是它自己 binding 下的仓库对象。 */
@@ -278,7 +289,8 @@ function commitNode(context: CoreContext, scope: DeliveryScopeInput, repository:
 
 function changeRequestNode(context: CoreContext, repository: ExternalObjectRef | undefined, branch: string, fact: ChangeRequestFact | undefined): ChainNode {
   const slot = `${fact?.ref.bindingId ?? repository?.bindingId ?? 'unbound'}|${fact?.ref.externalId ?? branch}`
-  return chainNode(chainEntityId(context.workspaceId, EntityKind.ChangeRequest, slot), EntityKind.ChangeRequest,
+  return chainNode(fact === undefined ? chainEntityId(context.workspaceId, EntityKind.ChangeRequest, slot)
+    : fact.entityId, EntityKind.ChangeRequest,
     fact?.ref.externalId, fact?.label ?? branch, fact !== undefined, fact === undefined ? '变更请求尚未观察到' : undefined)
 }
 
@@ -302,7 +314,7 @@ export async function readChainFacts(context: CoreContext, scope: DeliveryScopeI
   // `work/<workItemId>` here would let an unrelated/manual branch manufacture lineage for a missing context.
   const hasObservedWorktree = view?.worktreeExternalId !== undefined
   const head = route?.ok !== true || !hasObservedWorktree ? undefined : await readHeadCommit(route, branch, gaps)
-  const crFact = route?.ok !== true || head === undefined ? undefined : await readChangeRequest(route, branch, head, gaps)
+  const crFact = route?.ok !== true || head === undefined ? undefined : await readChangeRequest(context, route, branch, head, gaps)
   const changeRequest = changeRequestNode(context, repository, branch, crFact)
   // 事实必须挂在已观察到的锚点上（ExecPlan D4）：head 未观察到就不读流水线，也不得以 commit: undefined 读取整个仓库的运行；
   // 检查同理，没有已观察到的变更请求就不读。此时只保留"缺哪一跳"的骨架，骨架不进谱系。
@@ -316,6 +328,7 @@ export async function readChainFacts(context: CoreContext, scope: DeliveryScopeI
     worktree,
     commit: commitNode(context, scope, repository, branch, head),
     changeRequest,
+    changeRequestIdentity: crFact,
     pipelines: pipelines.length > 0 ? pipelines : [skeleton(context, EntityKind.PipelineRun, `${slot}|${branch}|pipeline`, branch, '流水线事实尚未观察到')],
     checks: checks.length > 0 ? checks : [skeleton(context, EntityKind.CheckRun, `${slot}|${branch}|check`, branch, '检查事实尚未观察到')],
     gaps,

@@ -70,7 +70,8 @@ function decodeRow(raw: unknown, project: ExternalObjectRef): ItemRow {
     : { kind: 'work_item', workItem: { externalId, title, body } }
   const ref = { bindingId, objectKind, externalId, url: isDraft ? undefined : str(source.url) }
   const fields = emptyFields(decodeFieldValues(obj(node.fieldValues)))
-  return { item: { ...common, fields, ref, content }, content: { version: sourceVersionFromTimestamp(str(source.updatedAt)), fields: { kind: objectKind, number, title, body } } }
+  return { item: { ...common, fields, ref, content, ...(objectKind === 'change_request'
+    ? { nativeIdentity: { namespace: 'github.com/graphql/PullRequest', id: externalId } } : {}) }, content: { version: sourceVersionFromTimestamp(str(source.updatedAt)), fields: { kind: objectKind, number, title, body } } }
 }
 
 /** 一个字段值；只解码已实现读取的三种值类型，其余（Text / Labels / Repository …）返回 undefined 被跳过。schema 里可空的单选 `optionId` 与日期为 null 返回 null：字段在、没有值，仍参与同字段去重。 */

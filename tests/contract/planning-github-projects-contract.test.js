@@ -89,6 +89,13 @@ test('条目映射：内容身份、成员关系与两套时间戳逐字段归�
   })
 })
 
+test('PR native identity：只有确认的 PullRequest 声明公开实例的 opaque 身份', async () => {
+  const items = (await replayProvider().provider.listPlanningItems({ project, cursor: undefined, limit: 100 })).value.items
+  const pr = items.find((item) => item.ref.objectKind === 'change_request')
+  assert.deepEqual(pr.nativeIdentity, { namespace: 'github.com/graphql/PullRequest', id: 'PR_kwDOUjWAl88AAAABEYNntg' })
+  assert.ok(items.filter((item) => item !== pr).every((item) => item.nativeIdentity === undefined))
+})
+
 test('R7：历史 draft id 查询返回 not_found，且从不作为平台查询参数', async () => {
   const DRAFT_BEFORE_CONVERSION = 'DI_lAHOAY1ahM4BkJ9rzgLKQZ0'
   const { replay, provider } = replayProvider()

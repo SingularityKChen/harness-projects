@@ -6,7 +6,7 @@
  */
 import { ContentKind, type NativePlanningFieldValue, type RedactionReason } from '@harness-projects/domain'
 import type { ProviderCapabilitySnapshot } from './capability-keys.ts'
-import type { ExternalObjectRef, ProviderObservation, ProviderReconcileScope } from './observation.ts'
+import type { ExternalObjectRef, ProviderNativeIdentity, ProviderObservation, ProviderReconcileScope } from './observation.ts'
 import type { ProviderPage, ProviderResult } from './result.ts'
 import type { ProviderDefinition } from './registry.ts'
 
@@ -52,6 +52,8 @@ export const PLANNING_MEMBERSHIP_OBJECT_KIND = 'project_item'
  * 4. `reconcile` 失败时一条观察都不产出（全有或全无）。
  */
 export interface ProviderPlanningItem {
+  /** 仅已确认的 PR 声明跨 binding 内容身份；缺省只保证 binding 内身份。 */
+  readonly nativeIdentity?: ProviderNativeIdentity
   readonly ref: ExternalObjectRef; readonly project: ExternalObjectRef; readonly membership: ProviderPlanningMembership
   readonly content: ProviderPlanningContent
   readonly fields: ProviderPlanningFields; readonly sourceVersion: string | undefined; readonly sourceUpdatedAt: string | undefined

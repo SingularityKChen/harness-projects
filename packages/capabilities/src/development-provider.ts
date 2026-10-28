@@ -20,7 +20,7 @@
  *    当作「不知道」；游标不结束（包括循环回到旧游标）的 provider 会让对账停在 `unknown`。契约套件的分页用例钉住这一条。
  */
 import type { ProviderCapabilitySnapshot } from './capability-keys.ts'
-import type { ExternalObjectRef, ProviderObservation, ProviderReconcileScope } from './observation.ts'
+import type { ExternalObjectRef, ProviderNativeIdentity, ProviderObservation, ProviderReconcileScope } from './observation.ts'
 import type { ProviderPage, ProviderResult } from './result.ts'
 import type { ProviderDefinition } from './registry.ts'
 
@@ -49,6 +49,8 @@ export interface ProviderCommit {
 export type ProviderReviewState = 'approved' | 'changes_requested' | 'review_required' | 'unknown'
 
 export interface ProviderChangeRequest {
+  /** 仅已确认的 PR 声明跨 binding 内容身份；缺省只保证 binding 内身份。 */
+  readonly nativeIdentity?: ProviderNativeIdentity
   readonly ref: ExternalObjectRef; readonly number: number; readonly title: string; readonly body: string
   readonly state: string
   /** 头部提交 sha：谱系只按**相等**比较，不是观察的定序载体（观察只认 `observation.ts` R4 的规范载体）。 */

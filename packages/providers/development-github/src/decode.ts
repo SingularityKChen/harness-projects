@@ -65,6 +65,7 @@ function decodeChangeRequestNode(raw: unknown, bindingId: ProviderBindingId): Ch
   const number = Number.isInteger(node.number) && Number(node.number) > 0 ? Number(node.number) : fail()
   if (typeof node.isCrossRepository !== 'boolean') fail()
   const item: ProviderChangeRequest = {
+    nativeIdentity: { namespace: 'github.com/graphql/PullRequest', id: externalId },
     ref: { bindingId, objectKind: 'change_request', externalId, url: str(node.url) }, number, title: str(node.title), body: str(node.body),
     state: str(node.state).toLowerCase(), sourceVersion: sha(node.headRefOid),
     // fork 上的同名分支不是本仓库的分支身份：headBranch 只在 head 与 base 同仓库时才有。
