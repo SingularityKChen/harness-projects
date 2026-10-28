@@ -52,6 +52,9 @@ export async function apply(ctx: ClientContext): Promise<void> {
       const result = await child.remote.harnessProjects.getExecutionContext(workItemId, repositoryId)
       if (!result.ok) throw new Error('暂时无法读取执行状态')
       return result.value
+    }, async ({ workItemId, repositoryId }) => {
+      const result = await child.remote.harnessProjects.refreshExecutionRun({ kind: 'user' }, workItemId, repositoryId)
+      if (!result.ok || result.value === null || typeof result.value !== 'object' || !('writeState' in result.value) || result.value.writeState !== 'local_only') throw new Error('暂时无法读取执行状态')
     })
     const repositoryBinding = createRepositoryBindingSource({ connectAccount: (...args) => unwrap(remote.connectAccount(...args)),
       bindRepository: (actor, key, id, refs) => unwrap(remote.bindRepository(actor, key, id, refs.map((ref) => ({ ...ref })))),

@@ -1,6 +1,6 @@
 # 执行运行签发者刷新 ExecPlan
 
-> 状态：Active；设计已收敛，产品实现尚未开始。
+> 状态：Completed；实现与独立验收通过，PR 等待人类评审。
 > 创建：2026-10-28；规范：根 `PLANS.md`。
 > 范围：显式刷新一条既有运行，持久记录变化式健康度，并从详情按钮读回可信状态。
 > Issue：[同仓 #365](https://github.com/SingularityKChen/harness-projects/issues/365)；分支：`feature/execution-run-refresh`。
@@ -80,7 +80,8 @@ Host 的命令与查询均在读取前后检查工作项仍可见、属于当前
 - `apps/harness-plugin/src/host-operations.ts`、`apps/harness-plugin/src/host-composition.ts`、`apps/harness-plugin/src/client.ts`。
 - `packages/ui-model/src/execution-context.ts`、`packages/ui/src/execution-context-section.ts`。
 - `tests/integration/execution-run-refresh.test.js`、`tests/integration/execution-context-run-status.test.js`、`tests/integration/harness-plugin-execution-drawer.test.js`。
-- `tests/contract/ui-execution-context.test.js`、`tests/contract/harness-host-operations.test.js`，本 ExecPlan。
+- `tests/contract/ui-execution-context.test.js`、`tests/contract/harness-host-operations.test.js`、`tests/contract/harness-host-remote-adapter.test.js`。
+- `tests/fixtures/execution-drawer-browser.mjs`，本 ExecPlan。
 
 `host-surface.ts`/`remote.ts` 的 operation 类型由声明派生，默认不修改；`core/index.ts` 已 re-export execution-run，不加重复出口。
 与 #367 不共享写区；与 #428 不共享测试或构建脚本。`docs/README.md` 索引由整合 owner 串行更新。
@@ -137,16 +138,25 @@ Host 的命令与查询均在读取前后检查工作项仍可见、属于当前
 ## Progress
 
 - [x] 2026-10-28：独立核对两设计与实际调用边界，收敛语义和最小方案。
-- [ ] 2026-10-28：Batch 1 尚未开始，需记录 RED/GREEN 的实际命令与结果。
-- [ ] 2026-10-28：Batch 2 尚未开始；无已知外部阻塞，验收不以计划文字代替执行。
+- [x] 2026-10-28：Batch 1 RED 确认命令与确认字段缺失；指定聚焦命令 12/12 通过，包含两 Storage 的取消交错和回滚。
+- [x] 2026-10-28：Batch 2 RED 确认 Host 操作、DTO、展示缺口；指定聚焦命令 43/43 通过，随后补按钮经 Host 组合/Fake 签发者成功链及 unknown 陈旧展示。
+- [x] 2026-10-28：在 `feature/execution-run-refresh`（目录 `.worktrees/execution-run-refresh`）运行最终 `pnpm verify`，exit 0：typecheck、2361 项主测试与 7 项 MVP 测试通过；`pnpm run boundaries` 9/9，`node scripts/workflow-check.mjs` 无发现。
+- [x] 2026-10-28：独立验收已通过；最终远端 head/base/checks 和关闭引用按 Validation 命令回读，Gate 通过后 ready。本地证据不替代已安装 Host 验收。
+
+- [x] 2026-10-28：独立验收 PASS；聚焦 64 项及完整 2361 + 7 项通过，归档计划和验收证据。
 
 ## Surprises & Discoveries
+
+- 2026-10-28：完整回归首轮 2358 项中 2 项失败：新 remote 描述符缺少金样覆盖；取消响应被误限同 externalId。第二轮 2360 项中 2 项失败：既有路由夹具的仓库内部 ID 与 query 外部 ID 不同，额外取消入口限制改变了既有语义。均按根因修正，不改既有取消或路由测试的判定。
 
 - 2026-10-28：runStatus 已存在，但 Host/client 闭集使新增字段不会自动透传；依据见 Context 中实际模块。
 - 2026-10-28：取消 CAS 当前只比 status/externalId，不能照抄到刷新；完整身份与本地快照复核是必要修正。
 - 2026-10-28：既有 SyncCursor 可持久表达健康度，故推翻“新增 freshness 必须改 SQLite 列”的初始假设；采用 Design 方案。
 
 ## Decision Log
+
+- 2026-10-28 / 实现者：最小扩充测试夹具，仅暴露 Host catalog 创建的 Fake execution 实例，以验证按钮事件经 Host 组合读到签发者结果；同步 remote 描述符契约。范围见 Global Constraints。
+- 2026-10-28 / 实现者：完整回归揭示人工执行器取消会签发新 externalId；刷新严格同引用，取消保持既有签发语义，仅接受同 binding/objectKind 的新引用并以完整原 run 快照 CAS。取消不额外引入 query 与 context 字段相等的入口限制。
 
 - 2026-10-28 / 计划评审者：选择变化式 SyncCursor，避免同语义新表及基线变更；范围见 Global Constraints。
 - 2026-10-28 / 计划评审者：确认时间为当前状态的确认下界；freshness 恢复允许一次健康写，常态同值绝对零写，保留原 issue 验收。
@@ -170,10 +180,18 @@ Actor 只表示发起人；没有外部写入，因此不新增 mutation attempt
 
 ## Outcomes & Retrospective
 
-当前产物仅是收敛后的设计与执行计划；产品命令、测试、PR 与运行态验收尚未交付。
+产品刷新命令、变化式健康度和按钮经 Host 组合的链路已实现；聚焦测试覆盖签发者、零写、持久陈旧、恢复、CAS、取消交错、严格解码与目标隔离。最终完整本地回归与独立验收已通过；远端最终 head 依本计划命令核对，不宣称已安装官方 Host 或真实模型平台验收。
 技术债务边界：跨进程最新开始序、实时 push、TTL、运行历史不在 #365；有实际需求时另建闭环，不以本计划宣称已解决。
-完成时将实际结果、偏差及失败证据写回此节，移入 completed 并由整合 owner 更新索引。
+独立验收记录见 `docs/review/pr-438-delivery-review.md`；本地实现与验收已完成，远端检查及人类评审按 PR 当前 head 回读。
 
 ## Bottom Change Note
 
 - 2026-10-28：首次创建；裁决正常 no-op/恢复健康度、未知状态、取消并发和按钮到 Host 的最小闭环。
+
+- 2026-10-28：实现两批纵向链路，记录红绿证据和全量回归发现；补最小测试夹具与描述符契约的范围和取消引用裁决。
+
+- 2026-10-28：记录最终本地 2361 + 7 与类型检查/边界结果，保留独立验收待办。
+
+- 2026-10-28：独立验收通过后归档；补执行检出、候选提交及产品文件指纹，保留远端 CI 与人类裁决边界。
+
+- 2026-10-28：订正归档顶部遗留 Active 文案及已完成验收待办；三项产品组合在独立集成检出通过 2442 + 7 与类型检查，最终远端事实仍以回读命令为准。

@@ -174,3 +174,9 @@ test('mapping command exposes expected scope and shape only, never workspace or 
   const parse = OPERATIONS.setPlanningMapping.params.at(-1).parse
   for (const value of [null, [], 'mapping']) assert.throws(() => parse(value), TypeError)
 })
+
+test('run refresh exposes only actor and explicit work/repository IDs without replay key', () => {
+  const operation = OPERATIONS.refreshExecutionRun
+  assert.deepEqual(operation.params.map((parameter) => parameter.name), ['actorRef', 'workItemId', 'repositoryId'])
+  for (const parameter of operation.params.slice(1)) for (const value of ['', null, 7]) assert.throws(() => parameter.parse(value), TypeError)
+})

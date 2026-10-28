@@ -25,13 +25,13 @@
 
 | 计划 | 用途 |
 |---|---|
-| [2026-10-28-execution-run-refresh](exec-plan/active/2026-10-28-execution-run-refresh.md) | 签发者运行刷新、变化式健康度与详情读回（#365） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-28-execution-run-refresh](exec-plan/completed/2026-10-28-execution-run-refresh.md) | 签发者运行刷新、变化式健康度与详情读回（#365） |
 | [2026-10-27-pr406-pr409-review-followup](exec-plan/completed/2026-10-27-pr406-pr409-review-followup.md) | PR #406–#409 MMP 评审、非阻塞修复、独立复评与授权合并 |
 | [2026-10-26-plugin-demo-artifact](exec-plan/completed/2026-10-26-plugin-demo-artifact.md) | 版本化 tarball 与干净 Web profile 安装、打开、卸载验收（#230）；[安装指南](product/demo-install.md) |
 | [2026-10-26-repository-binding-ui](exec-plan/completed/2026-10-26-repository-binding-ui.md) | 仓库选择、只读预检与三引用绑定（#356） |

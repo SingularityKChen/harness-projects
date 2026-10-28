@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as client from '@harness-projects/client'
 import { deriveWorkItemDetailView } from '@harness-projects/ui-model'
+import { createExecutionFixture } from '../fixtures/execution-drawer-browser.mjs'
 import { wire, redacted } from '../fixtures/work-item-wire.mjs'
 const target = { workspaceId: 'ws-1', workItemId: 'ent-aa', repositoryId: 'repo-a' }
 const dto = { ...target, status: 'ready', runStatus: 'running', fallback: 'manual_fallback', branchExternalId: 'work/one', worktreeExternalId: '/fixture/work' }
@@ -33,6 +34,7 @@ function harness(props) {
   const slots = []; let cursor = 0, pending = []
   const slot = (make) => slots[cursor++] ?? (slots[cursor - 1] = make())
   const dispatcher = {
+    useRef: (value) => slot(() => ({ current: value })),
     useState: (value) => { const cell = slot(() => ({ value })); return [cell.value, (next) => { cell.value = typeof next === 'function' ? next(cell.value) : next }] },
     useEffect: (run, deps) => { const cell = slot(() => ({})); if (!cell.deps || deps.some((dep, index) => !Object.is(dep, cell.deps[index]))) pending.push(() => { cell.cleanup?.(); cell.cleanup = run() }); cell.deps = deps },
   }
@@ -136,4 +138,33 @@ test('no repository metadata is distinct from all-null; unavailable fields have 
   assert.match(text(h), /仓库信息尚未提供/); h.flush(); await settle(); assert.equal(q.pending.length, 0)
   h.props.target = { ...sectionTarget, repositoryIds: ['repo-a'] }; text(h); h.flush(); await settle(); q.pending[0].resolve({ ...target, status: 'ready', runStatus: 'unknown', worktreeExternalId: '<script>bad</script>' }); await settle()
   assert.match(text(h), /状态未知/); assert.match(text(h), /分支尚未提供/); assert.match(text(h), /&lt;script&gt;/); assert.doesNotMatch(text(h), /<script>/)
+})
+
+test('existing refresh button commands each repository then rereads durable stale even on command failure', async () => {
+  const calls = [], reader = client.createExecutionContextReader(async (scope) => { calls.push(['read', scope.repositoryId]); return { context: { ...dto, repositoryId: scope.repositoryId, runConfirmedAt: '2026-10-28T01:00:00Z', runStale: calls.some(([kind]) => kind === 'refresh') } } }, async (scope) => { calls.push(['refresh', scope.repositoryId]); throw Error('SECRET') })
+  const h = harness({ target: sectionTarget, reader, connected: true }); text(h); h.flush(); await settle()
+  assert.deepEqual(calls, [['read', 'repo-a'], ['read', 'repo-z']]); assert.match(text(h), /此状态于 2026-10-28T01:00:00Z 确认/)
+  await refresh(h); await settle(); assert.deepEqual(calls.slice(2), [['refresh', 'repo-a'], ['refresh', 'repo-z'], ['read', 'repo-a'], ['read', 'repo-z']])
+  assert.match(text(h), /最后确认，当前无法核对/); assert.match(text(h), /暂时无法读取执行状态/); assert.doesNotMatch(text(h), /SECRET/)
+  for (const patch of [{ runStale: 'yes' }, { runConfirmedAt: 5 }, { runConfirmedAt: 'invalid' }]) await assert.rejects(() => client.createExecutionContextReader(async () => ({ context: { ...dto, ...patch } }))(target), TypeError)
+})
+
+test('actual button reads issuing Provider through Host remote and renders the decoded confirmation', async (t) => {
+  const fixture = await createExecutionFixture(); t.after(fixture.close); let calls = 0
+  fixture.mounted[0].getRun = async (ref) => { calls++; return { ok: true, value: { ref, status: 'succeeded' } } }
+  const reader = client.createExecutionContextReader(async ({ workItemId, repositoryId }) => JSON.parse(JSON.stringify(await fixture.installed.service.getExecutionContext(workItemId, repositoryId))), async ({ workItemId, repositoryId }) => { await fixture.installed.service.refreshExecutionRun({ kind: 'human' }, workItemId, repositoryId) })
+  const h = harness({ target: { workspaceId: fixture.workspaceId, workItemId: fixture.itemId, repositoryIds: ['repo-alpha'] }, reader, connected: true })
+  text(h); h.flush(); for (let i = 0; i < 6; i++) await new Promise((resolve) => setImmediate(resolve)); assert.equal(calls, 0); assert.match(text(h), /运行中/)
+  await refresh(h); for (let i = 0; i < 6; i++) await new Promise((resolve) => setImmediate(resolve)); assert.equal(calls, 1); assert.match(text(h), /已完成/); assert.match(text(h), /此状态于 .* 确认/); h.close()
+})
+test('unconfirmed unknown remains visibly stale without inventing a confirmation time', async () => {
+  const h = harness({ target: { ...sectionTarget, repositoryIds: ['repo-a'] }, reader: async () => ({ ...dto, runStatus: 'unknown', runStale: true }), connected: true })
+  text(h); h.flush(); await settle(); assert.match(text(h), /状态未知/); assert.match(text(h), /当前无法核对运行状态/); assert.doesNotMatch(text(h), /此状态于/); h.close()
+})
+test('target cleanup before queued refresh begins suppresses the old command', async () => {
+  const calls = [], reader = Object.assign(async (scope) => { calls.push(['read', scope.workItemId]); return null }, { refresh: async (scope) => { calls.push(['refresh', scope.workItemId]) } })
+  const h = harness({ target: sectionTarget, reader, connected: true }); text(h); h.flush(); await settle(); calls.length = 0
+  h.render().props.children.find((child) => child?.type === 'button').props.onClick(); text(h); h.flush()
+  h.props.target = { ...sectionTarget, workItemId: 'ent-bb' }; text(h); h.flush(); await settle()
+  assert.ok(calls.every(([kind, id]) => kind === 'read' && id === 'ent-bb')); h.close()
 })
