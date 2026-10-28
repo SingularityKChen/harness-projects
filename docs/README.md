@@ -25,6 +25,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-28-plugin-bundle-evidence](exec-plan/active/2026-10-28-plugin-bundle-evidence.md) | Host 公开组件与同配置 bundle/pack 证据（#428） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
