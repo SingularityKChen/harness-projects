@@ -17,6 +17,9 @@ export interface ExternalObjectRef {
   readonly bindingId: ProviderBindingId; readonly objectKind: string; readonly externalId: string; readonly url: string | undefined
 }
 
+/** Provider 对服务实例、对象种类与 ID 协议的承诺；id 是该 namespace 内的 opaque 键。 */
+export interface ProviderNativeIdentity { readonly namespace: string; readonly id: string }
+
 /** 带 scope 的主体键：binding 参与其中，同一外部 id 在两个绑定下不得互相去重。 */
 export function scopedSubjectKey(ref: ExternalObjectRef): string {
   return JSON.stringify([ref.bindingId, ref.objectKind, ref.externalId])

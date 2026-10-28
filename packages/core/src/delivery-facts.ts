@@ -3,11 +3,12 @@
  * TD-009、TD-014）并整行覆盖本上下文的快照。完整读到的集合整组替换（含删除），其余原样保留并标陈旧；不推进修订号（K1），任何异常都折成结构化结果（K2）。
  */
 import { CapabilityKey, ProjectErrorCode, projectError, type DeliveryFactSetKind, type DeliveryFactsRecord, type DeliveryNodeFact, type ProjectError } from '@harness-projects/capabilities'
-import { RelationType, type ExecutionContextId } from '@harness-projects/domain'
+import { EntityKind, ExternalIdentityKind, RelationType, type ExecutionContextId } from '@harness-projects/domain'
 import { readChainFacts, type ChainFacts } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
 import { isDeliveryScope, type NormalizedDeliveryScope } from './delivery.ts'
 import { contextIdFor } from './execution-context.ts'
+import { ensureEntity, IdentityConflictError } from './identity.ts'
 import { EdgeProvenance, recordEdges, type ChainNode, type DiscoveredEdge } from './relations.ts'
 
 /** 刷新结果里的缺口：只带能力键。provider 的错误文字（可能带路径、令牌）不进结果，因为结果会原样到达 controller 的 wire（K2）；原因码归 TD-046。 */
@@ -96,6 +97,12 @@ export async function refreshDeliveryFacts(context: CoreContext, scope: Normaliz
     const applied = await context.storage.transaction(async (tx) => {
       const existing = await tx.getDeliveryFacts(context.workspaceId, contextId)
       if (superseded(existing, attemptedAt)) return false
+      if (complete.has('change_request') && facts.changeRequestIdentity !== undefined) {
+        const { ref } = facts.changeRequestIdentity
+        // 复验 read 阶段选定的 exact identity：读后写前出现另一指向时回滚，不能重绑或只改端点。
+        await ensureEntity(tx, { bindingId: ref.bindingId, externalKind: ExternalIdentityKind.ChangeRequest, externalId: ref.externalId },
+          EntityKind.ChangeRequest, context.ids, facts.changeRequest.id)
+      }
       const edges: DiscoveredEdge[] = sets.filter((set) => set.confirmed).flatMap(({ nodes, anchor, type }) =>
         nodes.map((node) => ({ from: node.id, to: anchor.id, type, artifact: node, provenance: EdgeProvenance.ProviderRead })))
       // 端点先登记：SQLite 的关系表两端有外键指向 entity（迁移 003），替身与它同语义（#221）。
@@ -110,9 +117,9 @@ export async function refreshDeliveryFacts(context: CoreContext, scope: Normaliz
       return true
     })
     return { ok: true, anchored: true, applied, gaps, error: undefined }
-  } catch {
+  } catch (error) {
     // K2：读取或提交失败不裸抛。已确认的事实随回滚保持原样；尽力把这次尝试记成陈旧（全部集合标 stale），这一步再失败也只吞掉，返回结构化失败。
     await markStale(context, contextId, attemptedAt).catch(() => undefined)
-    return { ok: false, anchored, applied: false, gaps, error: projectError(ProjectErrorCode.Unavailable, '交付事实未能提交；已确认的事实保持不变') }
+    return { ok: false, anchored, applied: false, gaps, error: projectError(error instanceof IdentityConflictError ? ProjectErrorCode.Conflict : ProjectErrorCode.Unavailable, '交付事实未能提交；已确认的事实保持不变') }
   }
 }

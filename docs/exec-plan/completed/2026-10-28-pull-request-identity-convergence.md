@@ -1,6 +1,6 @@
 # PR 规划成员与谱系身份收敛 ExecPlan
 
-> 状态：Active；设计已收敛，产品实现尚未开始。
+> 状态：Completed；实现与独立验收通过，PR 等待人类评审。
 > 创建：2026-10-28；规范：根 `PLANS.md`。
 > 范围：同一个 Provider 确认的原生 PR，两个观察入口和两种顺序均解析为一个全局 ChangeRequest 实体。
 > Issue：[同仓 #367](https://github.com/SingularityKChen/harness-projects/issues/367)；分支：`fix/pull-request-identity-convergence`。
@@ -58,6 +58,16 @@ Planning `anchorOf` 为 PR 调同一 resolver；`ensureEntity` 可接显式 desi
 Lineage 的真实 ChangeRequestFact 带出 `nativeIdentity`，`changeRequestNode` 直接调同一纯 resolver。
 `readChainFacts` 仅计算节点身份，不注册 alias，不触碰 Planning；现有 Delivery writer 将该节点在一个事务中写实体、边与 facts。
 无需为本 issue 新增 Development ExternalIdentity 登记：当前谱系存储通过 canonical entityId 对齐内容实体即可闭环。
+**Superseded by Fix round 1（2026-10-28）**：上述“每次直接纯解析、不登记 Development 身份即可闭环”的结论被 native → absent 反例推翻；同 binding/ref/head 的可选声明丢失会生成另一个 fallback ID。采用下列现有身份表方案。
+
+### Fix round 1 · Development exact identity 持久锚点
+
+`readChangeRequest` 先要求引用的 `objectKind=change_request` 且 `bindingId` 属于实际选中的 Development read route，非法引用整组降级为 gap。
+真实 PR 只读查 exact ExternalIdentity；已有 exact 且声明缺省时复用既有 entityId，明确原生声明与既有指向不一致时拒绝并保留旧 PR/check facts，只标陈旧。
+没有 exact 时仍由唯一纯 resolver 计算首次身份，不从 Planning projection 或 Delivery 快照猜关联。
+`readChainFacts` 带出本次确认的 PR 引用；Delivery writer 在原有事务里调用 `ensureEntity` 登记该自然键，再写端点、边和 facts。
+事务内必须再次核对本次选定的 entityId；读后写前有另一指向出现时返回 Conflict、回滚整轮，不重绑。新身份按已有 primary 决定 primary/alias，重复 exact 零新增。
+因此读取仍零写，身份权威仍只有 ExternalIdentity；持久摄入增加一次 exact lookup 和必要的身份行，无 schema、迁移或历史实体合并。
 check 的 anchor 与 produced_by 的端点均来自同一 resolved PR 节点；不得只改展示 ID 而遗留旧 anchor。
 两个入口首次观察都可幂等写同一 entity；不需要先扫描已有 Planning projection、合并双实体、重连旧边或增加 alias 索引表。
 重放遵循现有 Planning 内容深比较规则；sync round/cursor 可变化，但业务 revision 不得因相同内容重放而变化。
@@ -80,12 +90,12 @@ check 的 anchor 与 produced_by 的端点均来自同一 resolved PR 节点；�
 
 - `packages/capabilities/src/observation.ts`、`packages/capabilities/src/planning-provider.ts`、`packages/capabilities/src/development-provider.ts`。
 - `packages/providers/planning-github-projects/src/decode.ts`、`packages/providers/development-github/src/decode.ts`。
-- `packages/core/src/identity.ts`、`packages/core/src/bootstrap.ts`、`packages/core/src/chain-facts.ts`。
-- `tests/integration/pull-request-identity-convergence.test.js`、`tests/contract/planning-github-projects-contract.test.js`、`tests/contract/development-github-contract.test.js`。
+- `packages/core/src/identity.ts`、`packages/core/src/bootstrap.ts`、`packages/core/src/chain-facts.ts`、`packages/core/src/delivery-facts.ts`。
+- `tests/integration/pull-request-identity-convergence.test.js`、`tests/integration/github-development-lineage.test.js`、`tests/contract/planning-github-projects-contract.test.js`、`tests/contract/development-github-contract.test.js`。
 - `docs/architecture/release-gates.md`，本 ExecPlan。
 
 `capabilities/index.ts` 已 re-export observation；Core 内部复用 identity，不新增 barrel、context 或执行接口改动。
-`delivery-facts.ts` 现有 writer 已消费统一节点，默认不改；如实际测试证明必须修改，先在本节更新范围和成本。
+`delivery-facts.ts` 原“默认不改”的边界 **Superseded by Fix round 1（2026-10-28）**：评审反例证明 Development 声明丢失会分叉，新增事务内 exact identity 登记与读后写前复验；沿用现有表，不增加 schema 或 Storage 方法，预计增加 Core 30–50 行、测试 80–120 行。
 与 #365、#428 文件所有权不重叠；`docs/README.md` 由整合 owner 最终串行更新。
 不改看板 Status、Iteration、原生依赖，不自行合并。
 
@@ -96,7 +106,7 @@ check 的 anchor 与 produced_by 的端点均来自同一 resolved PR 节点；�
 ### Batch 1 · 双入口确定性 PR 身份
 
 最小闭环：同一明确 native PR 在两个 binding、两种到达顺序均形成同一个实体。
-主文件：`packages/core/src/identity.ts`、`packages/core/src/bootstrap.ts`、`packages/core/src/chain-facts.ts`。
+主文件：`packages/core/src/identity.ts`、`packages/core/src/bootstrap.ts`、`packages/core/src/chain-facts.ts`、`packages/core/src/delivery-facts.ts`。
 - 先写 fake/SQLite × Planning-first/Lineage-first 四个红测，fixture 使用不同 binding 和 implementationKey、同一显式 namespace/native id。
 - 添加最小结果契约与两个真实 GitHub decoder 声明，测试 actual provider response 的输出。
 - 实现唯一 resolver，Planning 登记 desiredId 与 primary/alias；Lineage 在只读生成阶段复用同一 ID。
@@ -142,22 +152,35 @@ check 的 anchor 与 produced_by 的端点均来自同一 resolved PR 节点；�
 ## Progress
 
 - [x] 2026-10-28：核对 domain 全局身份、两 decoder 和实际摄入边界，完成双案独立评审。
-- [ ] 2026-10-28：Batch 1 尚未实施；四组合 RED/GREEN 需要实际记录。
-- [ ] 2026-10-28：Batch 2 尚未实施；无已知外部阻塞，计划不是验收证明。
+- [x] 2026-10-28（首次实现 `6ad21bd`）：Batch 1：真实 decoder 契约与四组合摄入先红（52 项中 6 失败：两项缺声明、四项双轨 ID），最小实现后三文件 82/82 绿；新增边界断言后两 provider 契约与集成为 102 项，见下方命令。
+- [x] 2026-10-28（首次实现 `6ad21bd`）：Batch 2：集成 54/54 绿；SQLite 两顺序 close/reopen、两轮重放、五个写入故障点的回滚/重开/重试、隔离和非法声明均已断言。四组变异均被对应断言杀死，还原后 46/46 绿；随后增加的边界断言为 54/54 绿。
+- [x] 2026-10-28：Fix round 1：独立 F1/F2 探针在两存储先 0/4、后 4/4；扩展集成先 50/68、后 68/68，覆盖两顺序 native → absent 重开/重放、Development identity 写后回滚、明确 native 冲突、错误 kind/binding 和事务复验竞争。
+- [x] 2026-10-28：本地全门禁已执行，结果见 Outcomes；发布面五类目人工检查无命中。本轮只提交一个能力 commit，不 push、不改 PR 或看板。独立验收、最终远端 head/CI 回读与 completed/索引由整合 owner 收口。
+
+- [x] 2026-10-28：独立验收 F1/F2 修复后复评 PASS；计划归档，等待远端检查及人类评审。
 
 ## Surprises & Discoveries
 
 - 2026-10-28：真实 GitHub 两 decoder 已有相同 nodeId，但 implementationKey/binding 不同，说明同 fake binding 测试不足。
 - 2026-10-28：Domain 身份不含 workspace，当前 lineage 哈希惯例不能覆盖内容身份规则。
 - 2026-10-28：统一纯节点 resolver 会自然传播到 check anchor；无需为了收敛引入事务后实体合并或新 alias 表。
+- 2026-10-28：变异经 Python 子进程调用 pnpm 时曾在测试前触发 `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`；这些失败不算功能 RED。改用 `node --test --test-name-pattern=...` 后，首 import 的 resolution preflight 通过并由目标断言真实失败。
+- 2026-10-28：独立验收发现 steady-native 全绿不能覆盖可选声明消失；Development 不登记 exact 身份导致同一对象下轮分叉。Planning 的类型校验也没有自动覆盖 Development。F1/F2 探针 Fake/SQLite 共 4 项失败，改由现有身份表解决。
+- 2026-10-28：Fix round 1 首次完整回归 2414 项中 5 项失败，均来自 `github-development-lineage.test.js::planningBytes` 将共享 `external_identity` 整表计入 Planning 不变快照。调整为 Planning 三表逐字不变、原有身份行逐行不变，只允许本次真实 Development binding 下该已确认 PR 的一条新身份，canonical entity 与 primary/alias 角色逐项断言；没有放松规划状态或既有身份不可重绑要求。
+- 2026-10-28：重开后 `composeCore` 会自动引导 Planning；故故障落盘断言先 close/reopen Storage、不组合 Core，确认零实体，再组合并重试。否则自动恢复成功会使“重开仍为零”的 fixture 断言失真。
 
 ## Decision Log
 
 - 2026-10-28 / 计划评审者：选 PR 结果的 `{ namespace, id }` 声明，限制在实际对象，不扩 ExternalObjectRef；文件范围见 Global Constraints。
 - 2026-10-28 / 计划评审者：拒绝 static namespace + account origin 作为本轮默认；当前对象证据已在 decoder，少一次认证/Storage 耦合与更多配置 fixture。
 - 2026-10-28 / 计划评审者：全局 canonical ID 不含 workspace；缺声明仅 binding-local，绝不把它声称为跨域验收。
-- 2026-10-28 / 计划评审者：Lineage 不新增 identity 登记；统一实体、关系和快照已满足 #367，保留当前写者职责。
+- 2026-10-28 / 计划评审者：Lineage 不新增 identity 登记；统一实体、关系和快照已满足 #367，保留当前写者职责。**Superseded by Fix round 1（2026-10-28）**：F1 证明可选声明消失时不成立，现有 ExternalIdentity 登记为唯一持久锚点。
 - 2026-10-28 / 计划评审者：不合并已有双实体、不改 Status/Iteration/原生依赖，未授权合并 PR。
+- 2026-10-28 / 实现者：保留现有 Delivery writer，仅读入的 PR 节点经唯一 resolver 收敛；两类摄入各自原子，Lineage 每轮验证 Planning 投影和业务 revision 不变。**Superseded by Fix round 1（2026-10-28）**：新增 writer 内的 exact identity 登记和原子复验，其他职责不变。
+- 2026-10-28 / 实现者：只有明确原生声明才校验已有 exact identity 与 desiredId 的冲突；后续声明缺省时保留已登记实体，不用 binding fallback 否决它。新反例修复前两存储 2/2 红，修复后全文件 54/54 绿。
+- 2026-10-28 / 实现者：本轮变异在指定隔离 worktree 顺序执行，以文件原字节备份、非空 diff、解析守卫和 `finally` 还原保障证据；不触及其他检出。M1 去 namespace → 隔离 2/2 红，M2 native 改 binding、M3 Planning 改随机、M4 恒推进 → 四顺序 4/4 红。
+
+- 2026-10-28 / 整合 owner 裁定、实现者落实：F1/F2 属本 issue；推翻“无需 Development 登记”，复用现有自然键，在 Delivery 事务内登记/复验，读侧仅 lookup，拒绝错误 kind 与跨 route binding。维护代价为一条 PR exact 身份与一次事务内复验，避免新 schema、快照权威或历史合并。
 
 ## Idempotence and Recovery
 
@@ -175,10 +198,24 @@ namespace 是适配器拥有的对象事实契约；认证账号、项目成员�
 
 ## Outcomes & Retrospective
 
-目前仅有计划；实现、测试、门禁证据与 PR 尚未交付，不能宣称 R1 或 issue 已通过。
-遗留边界：历史双实体修复、新实例支持、Draft → Issue 提升不在本闭环；没有为它们新建基础设施。
-完成后记录实际结果与偏差，将文件移 completed，并由整合 owner 更新索引。
+在检出 `fix/pull-request-identity-convergence` 的工作树根运行：
+
+- `pnpm test:file tests/integration/pull-request-identity-convergence.test.js tests/contract/planning-github-projects-contract.test.js tests/contract/development-github-contract.test.js`：首次实现 102/102；Fix round 1 扩展集成文件实际读回 68/68，两个真实 decoder 契约由下方 202 项命令一并覆盖。
+- `pnpm test:file tests/integration/pull-request-identity-convergence.test.js tests/integration/planning-membership-reconcile.test.js tests/integration/sync-revision-freshness.test.js tests/integration/delivery-repository-routing.test.js tests/e2e/chain-bootstrap.test.js`：首次实现 180/180；Fix round 1 使用下条更窄的 Delivery 相关回归与完整 verify。
+- `pnpm test:file tests/integration/pull-request-identity-convergence.test.js tests/contract/planning-github-projects-contract.test.js tests/contract/development-github-contract.test.js tests/integration/delivery-pages-complete.test.js tests/integration/delivery-repository-routing.test.js tests/integration/github-development-lineage.test.js tests/integration/github-actions-ci-facts.test.js tests/e2e/delivery-lineage.test.js`：Fix round 1 为 202/202。
+- `pnpm verify`：类型检查、contract/integration/e2e 及 MVP0 必须全部 exit 0；首次实现为 2400/2400 + MVP0 7/7；Fix round 1 最终为 2414/2414 + MVP0 7/7，全部 exit 0。
+- `pnpm run boundaries`：9/9；`node scripts/workflow-check.mjs`：8 个文件 no findings；disclosure、size 与 `git diff --check origin/main...HEAD` 在本地能力 commit 后再次执行，预期无命中、规模低于 Global Constraints。
+
+两个实际 GitHub decoder 声明同一公开实例 namespace；Core 不查账号、不猜 URL、不新增 schema/Storage 方法或迁移。故障点覆盖 Planning 实体/身份和 Lineage 实体/身份/边/facts，每个写后抛错均回滚，重开后可以恢复。查询零写与无观察骨架仍保持。
+本地证据仅支持 release-gates §2.1.1 第 3 行这一项；不能据此宣称 R1 或 issue 已获人类接受。遗留边界仍为历史双实体修复、新实例支持和 Draft → Issue 提升，没有新增技术债基础设施。
+独立复评已通过并完成归档/索引；远端最终 head/base/checks/关闭引用按本计划命令回读，通过后 ready。
 
 ## Bottom Change Note
 
 - 2026-10-28：首次创建；裁决 per-object 原生身份、全局作用域、双入口纯解析与最小持久边界。
+- 2026-10-28：完成两批本地实现、真实 RED/GREEN、四组变异、故障重开与完整验证；记录环境性非功能失败和自动 bootstrap 的 fixture 边界，保留独立验收/远端交付门。
+- 2026-10-28：Fix round 1 按 F1/F2 真实反例订正原处结论，新增 Development exact identity 原子登记/复验、引用归属校验与对应 RED/GREEN；不扩展 schema、迁移、Planning 或外部写入范围。
+
+- 2026-10-28：独立复评 PASS 后归档；保留旧裁定的 Superseded、缺声明重放与类型守卫修复证据。
+
+- 2026-10-28：订正归档顶部遗留 Active 文案及已完成验收待办；三项产品组合在独立集成检出通过 2442 + 7 与类型检查，最终远端事实仍以回读命令为准。

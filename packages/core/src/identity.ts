@@ -5,8 +5,10 @@
  * 重复登记保留已分配的 id 与 entityId。Draft→Issue 提升复用 domain 的纯函数：只改外部身份，
  * 内部实体 id 原样保持（`promoteDraftToIssue`）。
  */
-import type { StorageTransaction } from '@harness-projects/capabilities'
+import { createHash } from 'node:crypto'
+import type { ExternalObjectRef, ProviderNativeIdentity, StorageTransaction } from '@harness-projects/capabilities'
 import {
+  asBrandedId,
   ContentKind,
   EntityKind,
   ExternalIdentityKind,
@@ -40,16 +42,44 @@ export function entityKindFor(contentKind: ContentKind, externalKind: ExternalId
   return EntityKind.WorkItem
 }
 
+/** 声明缺省与非法是不同状态；不能把坏声明降级成另一个身份。 */
+export function validNativeIdentity(value: unknown): value is ProviderNativeIdentity | undefined {
+  if (value === undefined) return true
+  if (typeof value !== 'object' || value === null) return false
+  const identity = value as Record<string, unknown>
+  return typeof identity.namespace === 'string' && identity.namespace.trim().length > 0
+    && typeof identity.id === 'string' && identity.id.trim().length > 0
+}
+
+/** 全局 PR 身份的唯一解析点：数组编码防碰撞；opaque id 不解析、不归一。 */
+export function changeRequestEntityId(ref: Pick<ExternalObjectRef, 'bindingId' | 'externalId'>, nativeIdentity?: ProviderNativeIdentity): EntityId {
+  if (!validNativeIdentity(nativeIdentity)) throw new TypeError('invalid native identity')
+  const key = nativeIdentity === undefined ? ['binding', ref.bindingId, ref.externalId]
+    : ['native', nativeIdentity.namespace, nativeIdentity.id]
+  const digest = createHash('sha256').update(JSON.stringify([EntityKind.ChangeRequest, ...key])).digest('hex').slice(0, 32)
+  return asBrandedId<EntityId>(`${EntityKind.ChangeRequest}-${digest}`)
+}
+
+/** 已有自然键指向别的实体时整轮拒绝；不建立历史实体迁移或合并。 */
+export class IdentityConflictError extends Error {}
+
 /** 已登记则返回原 entityId；未登记才新建实体并登记一条 primary 身份。 */
 export async function ensureEntity(
   tx: StorageTransaction,
   input: ExternalObjectInput,
   kind: EntityKind,
   ids: IdFactory,
+  desiredId?: EntityId,
+  // 缺省声明只复用 exact identity；明确的原生声明才可否决既有指向。
+  requireDesiredIdMatch = true,
 ): Promise<EntityId> {
   const existing = await tx.findExternalIdentity(input.bindingId, input.externalKind, input.externalId)
-  if (existing !== undefined) return existing.entityId
-  const entityId = ids.entityId()
+  if (existing !== undefined) {
+    if (requireDesiredIdMatch && desiredId !== undefined && existing.entityId !== desiredId) throw new IdentityConflictError('原生身份与已登记实体冲突')
+    return existing.entityId
+  }
+  const entityId = desiredId ?? ids.entityId()
+  const identities = await tx.listIdentitiesForEntity(entityId)
   await tx.putEntity({ id: entityId, kind })
   await tx.putExternalIdentity({
     id: ids.externalIdentityId(),
@@ -57,7 +87,7 @@ export async function ensureEntity(
     bindingId: input.bindingId,
     externalKind: input.externalKind,
     externalId: input.externalId,
-    role: IdentityRole.Primary,
+    role: identities.some((identity) => identity.role === IdentityRole.Primary) ? IdentityRole.Alias : IdentityRole.Primary,
   })
   return entityId
 }

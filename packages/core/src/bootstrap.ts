@@ -18,7 +18,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { gateCommand } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
 import { reportSyncRoundFailure } from './diagnostics.ts'
-import { ensureEntity, entityKindFor, planningContentKind } from './identity.ts'
+import { changeRequestEntityId, ensureEntity, entityKindFor, IdentityConflictError, planningContentKind, validNativeIdentity } from './identity.ts'
 import { planningFieldsOf } from './planning-fields.ts'
 
 /** 一个工作空间只有一个 Planning 事实源（不变量 1），因此每个（工作区，绑定）只需要一条同步游标。 */
@@ -76,7 +76,7 @@ export async function bootstrapWorkspace(context: CoreContext): Promise<Bootstra
     result = await syncRound(context, bindingId, planning, round)
   } catch (error) {
     reportSyncRoundFailure(context, error)
-    return fail(context, bindingId, projectError(ProjectErrorCode.Unavailable, SYNC_ROUND_FAILED), round)
+    return fail(context, bindingId, projectError(error instanceof IdentityConflictError ? ProjectErrorCode.Conflict : ProjectErrorCode.Unavailable, SYNC_ROUND_FAILED), round)
   }
   return result.ok ? result.value : fail(context, bindingId, toProjectError(result.error), round)
 }
@@ -159,6 +159,10 @@ function validatePlanningItems(
   project: ExternalObjectRef, items: readonly ProviderPlanningItem[],
 ): ProviderResult<ValidatedPlanningRead> {
   for (const item of items) {
+    if (!validNativeIdentity(item.nativeIdentity) || (item.nativeIdentity !== undefined
+      && (item.ref.objectKind !== 'change_request' || item.content.kind !== ContentKind.ChangeRequest))) {
+      return providerErr(providerError(ProviderErrorCode.InvalidInput, '原生 PR 身份声明不合法'))
+    }
     if (item.project.bindingId !== project.bindingId
       || item.project.objectKind !== project.objectKind
       || item.project.externalId !== project.externalId) {
@@ -287,7 +291,7 @@ async function anchorOf(
   })
   const external = { bindingId: item.ref.bindingId, externalKind: contentKind, externalId: item.ref.externalId }
   const kind = entityKindFor(item.content.kind, contentKind)
-  return { entityId: await ensureEntity(tx, external, kind, context.ids), kind }
+  return { entityId: await ensureEntity(tx, external, kind, context.ids, kind === EntityKind.ChangeRequest ? changeRequestEntityId(item.ref, item.nativeIdentity) : undefined, item.nativeIdentity !== undefined), kind }
 }
 
 function toProjection(
