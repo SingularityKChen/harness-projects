@@ -7,7 +7,7 @@ import {
 import { ExecutionContextStatus, ProviderErrorCode, type ExecutionContextId, type ProviderBindingId } from '@harness-projects/domain'
 import { toProjectError, unsupportedCapability } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
-import { routeDevelopment } from './development-route.ts'
+import { routeDevelopment, type DevelopmentRoute } from './development-route.ts'
 import { StartWorkFallback, type StartOutcome, type StartWorkRequest } from './execution-context.ts'
 import {
   beginWrite, confirmWrite, markFailed, markUnknown, markWriting, reconcileWrite, WritePhase,
@@ -46,8 +46,12 @@ export type RecordStep = (outcome: GitOutcome) => Promise<void>
 
 /** 归一化后的 slug；`undefined` 表示这个 id 归一化之后为空（退化输入）。 */
 function slugOrUndefined(raw: string): string | undefined {
-  const cleaned = raw.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
-  return cleaned === '' ? undefined : cleaned
+  const cleaned = raw.replace(/[^A-Za-z0-9._-]+/g, '-')
+  let start = 0; let end = cleaned.length
+  // 首尾各走一次，不在合法的长内部连字符段上反复尝试尾锚定匹配。
+  while (start < end && cleaned[start] === '-') start += 1
+  while (end > start && cleaned[end - 1] === '-') end -= 1
+  return start === end ? undefined : cleaned.slice(start, end)
 }
 
 /** 谱系投影用的展示名：退化 id 用它兜底，只影响标签——写入路径由 `namesProblem` 拒绝。 */
@@ -117,9 +121,9 @@ function stepRecord(
 
 export async function provisionGit(
   context: CoreContext, request: StartWorkRequest, names: Names, contextId: ExecutionContextId,
-  recordStep: RecordStep = async () => {},
+  recordStep: RecordStep = async () => {}, frozenRoute?: DevelopmentRoute,
 ): Promise<GitOutcome> {
-  const route = await routeDevelopment(context, request.repositoryId, CapabilityKey.DevelopmentWorktreeCreate, 'write')
+  const route = frozenRoute ?? await routeDevelopment(context, request.repositoryId, CapabilityKey.DevelopmentWorktreeCreate, 'write')
   if (!route.ok) return gitFailure(contextId, markFailed(beginWrite(names.path ?? names.worktreeKey), route.error), undefined, undefined)
   const { provider, repository } = route
   const bindingId = repository.bindingId

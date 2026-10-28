@@ -97,6 +97,7 @@ export const rowToRelation = (row: Row): Relation => ({ from: text(row, 'from_en
 
 export const rowToMutationAttempt = (row: Row): MutationAttemptRecord => ({ id: text(row, 'id'),
   workspaceId: text(row, 'workspace_id') as WorkspaceId, bindingId: text(row, 'binding_id') as ProviderBindingId,
+  ...(row.request_fingerprint == null ? {} : { requestFingerprint: text(row, 'request_fingerprint') }),
   commandName: text(row, 'command_name'), idempotencyKey: text(row, 'idempotency_key'), state: text(row, 'state') as WriteState,
   expectedSourceVersion: optionalText(row, 'expected_source_version'), errorCode: optionalText(row, 'error_code') as ProjectErrorCode | undefined })
 

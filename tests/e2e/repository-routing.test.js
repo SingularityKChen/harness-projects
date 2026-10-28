@@ -151,13 +151,14 @@ for (const [label, makeStorage] of ADAPTERS) {
     const host = typedFake('local-git', LOCAL_GIT, hostMount, { getRepository: async () => { bound = await bindRepository(commands, workspaceId, REPOSITORY, [['local-git', LOCAL_GIT], ['github', GITHUB]]) } })
     const { core, start, workItemId } = await compose(storage, workspaceId, [host])
     const result = await start('race-1')
-    assert.deepEqual([result.writeState, result.error?.code, host.calls], ['failed', 'unavailable', ['getRepository']], `认领回滚，没有建分支或工作树：${result.error?.message}`)
+    assert.deepEqual([result.writeState, result.error?.code, host.calls], ['conflict', 'conflict', ['getRepository']], `认领回滚，没有建分支或工作树：${result.error?.message}`)
     assert.equal(await storage.findExternalIdentity(hostMount, 'repository', REPOSITORY), undefined, '路由到的连接下没有补出 alias')
     const { entityId } = await storage.findExternalIdentity(bound[0], 'repository', REPOSITORY)
     assert.deepEqual((await storage.listIdentitiesForEntity(entityId)).map(({ bindingId, role }) => [bindingId, role]).sort(), [[bound[0], 'primary'], [bound[1], 'alias']].sort(), '仓库只有绑定命令写下的两条引用')
     assert.equal(await core.queries.getExecutionContext({ workItemId, repositoryId: REPOSITORY }), undefined, '没有上下文')
-    // 原因可识别：unavailable 的恢复动作是 retry（原样重发即重读：新请求重新路由）。重发得到缺路由 conflict（不是终态歧义），仍无外部写入；Host 按新挂载重组（#354）后它消失。
-    assert.deepEqual([result.error.recovery, result.error.retryable, result.error.message.startsWith('本地登记失败，没有发起任何外部写入')], ['retry', true, true], result.error.message)
+    // 事务内复核首次目标变化：结构化冲突、键未被消费；重发重新选择缺路由时仍拒绝。Host 按新挂载重组（#354）后它消失。
+    assert.deepEqual([result.error.recovery, result.error.retryable, result.error.message], ['reapply', false, 'idempotency_target_changed'], result.error.message)
+    assert.equal(await storage.findMutationAttempt(workspaceId, 'race-1'), undefined, '事务内路由复核拒绝不消耗键')
     const retried = await start('race-1')
     assert.deepEqual([retried.writeState, retried.error?.code, host.calls], ['failed', 'conflict', ['getRepository']], `重发重新路由：仓库已登记在不在注册表里的连接下，缺路由 conflict，不再调 provider：${retried.error?.message}`)
   })

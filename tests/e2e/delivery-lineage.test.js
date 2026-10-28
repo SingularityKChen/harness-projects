@@ -42,11 +42,11 @@ const stub = (target, method, impl) => { const original = target[method]; target
 /** Delivery 读不完：页永远带 `nextCursor` 且重复投递，#295 的完整分页把它读成本集合的缺口，不交出第一页。 */
 const endless = (delivery, method) => { const list = delivery[method].bind(delivery); return stub(delivery, method, async (input) => { const page = await list({ ...input, cursor: undefined }); return { ...page, value: { ...page.value, nextCursor: 'again' } } }) }
 /** 让事务内对 `method` 的调用抛错：事务体照常执行到那一步，此前的写入随回滚撤销。`once` 时只影响下一个事务；返回恢复函数。 */
-function throwInside(providers, method, message, once = false) {
+function throwInside(providers, method, message, once = false, reject = () => true) {
   const transaction = providers.storage.transaction.bind(providers.storage)
   const restore = stub(providers.storage, 'transaction', (work) => {
     if (once) restore()
-    return transaction((tx) => work(new Proxy(tx, { get: (target, key) => key === method ? async () => { throw new Error(message) } : typeof target[key] === 'function' ? target[key].bind(target) : target[key] })))
+    return transaction((tx) => work(new Proxy(tx, { get: (target, key) => key === method ? async (...args) => { if (reject(...args)) throw new Error(message); return target[key](...args) } : typeof target[key] === 'function' ? target[key].bind(target) : target[key] })))
   })
   return restore
 }
@@ -635,7 +635,7 @@ test('谱系写者不写命令边：开始工作的最终事务失败后刷新�
   const core = await compose(providers)
   const workItemId = await workItemIdOf(core)
   // 最终事务（settle）写写账本：让它抛错，开始工作就停在 Provisioning，已建的分支与工作树留在外部。
-  const restore = throwInside(providers, 'putMutationAttempt', '注入的最终事务失败')
+  const restore = throwInside(providers, 'putMutationAttempt', '注入的最终事务失败', false, (attempt) => attempt.state !== 'pending')
   await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'lineage-half-commit' })
   restore()
   const view = await core.queries.getExecutionContext({ workItemId, repositoryId: REPOSITORY })

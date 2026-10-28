@@ -150,14 +150,15 @@ CREATE TABLE webhook_subscription (
 -- 结果轴用 domain 的 `WriteState`（pending / saved / unknown / conflict / failed），不自造第二套词表：
 -- L1 记录的四个取值是"怎么得知结果的"（confirmed / reconciled / rejected / unresolved），映射到结果轴，
 -- 作为证据记在层计划里，不冻结成第二套状态列。
--- **"未决行存在时不得发起第二次外部写"是调用方的义务，当前没有强制点**：core 在外部写完成后才落写尝试行，Start Work 靠执行上下文租约防重（#204）；
--- storage 只保证同键只有一行、不会被并发写成两行。端口注释与替身与本表同模型。
+-- Start Work 在 context 认领事务中先写 Pending 请求指纹；同键精确回放只观察，不接管租约。
+-- Storage 原子写入口保留首次指纹、command 与 binding，状态可推进；其它命令仍沿用原账本语义。
 CREATE TABLE mutation_attempt (
   workspace_id TEXT NOT NULL REFERENCES workspace (id),
   idempotency_key TEXT NOT NULL,
   id TEXT NOT NULL,
   binding_id TEXT NOT NULL REFERENCES provider_binding (id),
   command_name TEXT NOT NULL,
+  request_fingerprint TEXT CHECK (command_name != 'startWork' OR (request_fingerprint IS NOT NULL AND length(request_fingerprint) > 0)),
   -- R8：幂等键由调用方选择；"加入既有内容"这一步取 content_id，"创建内容"这一步的键形状仍未证明（L1 记录 §3 第 6 条）。
   state TEXT NOT NULL CHECK (state IN ('pending','saved','unknown','conflict','failed')),
   expected_source_version TEXT,
