@@ -42,6 +42,7 @@
 | [2026-10-27-pr406-pr409-review-followup](exec-plan/completed/2026-10-27-pr406-pr409-review-followup.md) | PR #406–#409 MMP 评审、非阻塞修复、独立复评与授权合并 |
 | [2026-10-26-plugin-demo-artifact](exec-plan/completed/2026-10-26-plugin-demo-artifact.md) | 版本化 tarball 与干净 Web profile 安装、打开、卸载验收（#230）；[安装指南](product/demo-install.md) |
 | [2026-10-26-repository-binding-ui](exec-plan/completed/2026-10-26-repository-binding-ui.md) | 仓库选择、只读预检与三引用绑定（#356） |
+| [2026-10-29-mmp-ui-forms](exec-plan/completed/2026-10-29-mmp-ui-forms.md) | 连接表单闭环（#447） |
 | [2026-10-26-start-work-drawer](exec-plan/completed/2026-10-26-start-work-drawer.md) | 详情显式开始工作、默认分支与人工降级恢复（#142） |
 | [2026-10-26-delivery-lineage-drawer](exec-plan/completed/2026-10-26-delivery-lineage-drawer.md) | 交付谱系抽屉、缺口与时间核对（#234） |
 | [2026-10-26-harness-execution](exec-plan/completed/2026-10-26-harness-execution.md) | Harness 会话启动与读取、取消安全拒绝及工作树目录通路（#140） |
@@ -185,6 +186,7 @@
 | [ui-workspace-frame.md](product/ui-workspace-frame.md) | 当前工作区的主题、层次、响应式与事实呈现约定 |
 | [board-semantics.md](product/board-semantics.md) | `Status` 与 `Engineering` 字段分别属于规划轴还是工程轴、谁写、不变量 3 在看板上如何被满足、全部内置工作流该开该关、`Size` 为什么是信号而不是控制 |
 | [demo.md](product/demo.md) | Harness Projects 预发布 Demo 的用户路径、验收边界、已知限制与人工走查记录 |
+| [ui-forms.md](product/ui-forms.md) | 连接表单的布局、状态与可访问交互约定 |
 | [vertical-path.md](product/vertical-path.md) | 纵向链路的步骤枚举、MVP-0 / MVP-1 / 首发范围各自的判定方式、MVP-0 的非目标 |
 | [ui-detail.md](product/ui-detail.md) | 响应式详情的布局、状态与可访问交互约定 |
 | [2026-10-26-host-recomposition](exec-plan/completed/2026-10-26-host-recomposition.md) | 提交设置即时重组、同流连续读取与延迟权限探测（#354） |

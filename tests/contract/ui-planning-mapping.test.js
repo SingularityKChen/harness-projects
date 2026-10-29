@@ -20,9 +20,11 @@ const html = (source) => renderToStaticMarkup(React.createElement(ui.PlanningMap
 const find = (node, type) => Array.isArray(node) ? node.flatMap((child) => find(child, type)) : node && typeof node === 'object' ? [...(node.type === type ? [node] : []), ...find(node.props?.children, type)] : []
 function mount(source, component = ui.PlanningMappingForm, props = { source }, effects = []) {
   const slots = []; let cursor = 0
-  const dispatcher = { useSyncExternalStore: (_subscribe, read) => read(), useEffect: (effect) => effects.push(effect), useRef: (current) => ({ current }), useState: (initial) => { const i = cursor++; const cell = slots[i] ??= { value: initial }; return [cell.value, (value) => { cell.value = value }] } }
-  return () => { const internals = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED, previous = internals.ReactCurrentDispatcher.current; internals.ReactCurrentDispatcher.current = dispatcher; cursor = 0
+  const dispatcher = { useSyncExternalStore: (_subscribe, read) => read(), useId: () => ':fixture:', useEffect: (effect, deps) => { const i = cursor++, cell = slots[i] ??= {}; if (!cell.deps || deps.some((value, j) => value !== cell.deps[j])) effects.push(effect); cell.deps = deps }, useRef: (current) => { const i = cursor++; return slots[i] ??= { current } }, useState: (initial) => { const i = cursor++; const cell = slots[i] ??= { value: initial }; return [cell.value, (value) => { cell.value = value }] } }
+  const render = () => { const internals = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED, previous = internals.ReactCurrentDispatcher.current; internals.ReactCurrentDispatcher.current = dispatcher; cursor = 0
     try { return component(props) } finally { internals.ReactCurrentDispatcher.current = previous } }
+  render.flush = () => effects.splice(0).forEach(effect => effect())
+  return render
 }
 test('chooser uses kind and IDs, distinguishes names, clears previous options and shows unmapped/native values', async () => {
   const f = fixture(); await f.source.refresh(dto.scope)
@@ -149,4 +151,22 @@ test('unknown mapping results do not claim local saved and reconcile before retr
   unknown = false; await f.source.save({})
   assert.equal(reads, 3); assert.equal(f.calls.length, 2); assert.equal(f.calls[0][1], f.calls[1][1])
   assert.deepEqual(f.source.getSnapshot().data.mapping, {}); assert.equal(f.source.getSnapshot().intent, undefined)
+})
+
+test('mapping labels use local IDs and preserve native identity in visible options', async () => {
+  const f = fixture(); await f.source.refresh(dto.scope)
+  const out = html(f.source), labels = [...out.matchAll(/<label for="([^"]+)"/g)].map((match) => match[1])
+  assert.equal(labels.length, 5)
+  for (const id of labels) assert.ok(out.includes(`<select id="${id}"`))
+  assert.match(out, /aria-describedby="[^"]+-help"/)
+  assert.match(out, /Same（s2）/); assert.match(out, /Native（x）/)
+})
+
+test('mapping failure focuses its submitted summary and a background read cannot reclaim focus', async () => {
+  let finish, broken = false, focused = 0
+  const f = fixture({ setPlanningMapping: () => new Promise(resolve => { finish = resolve }), getPlanningMapping: async () => { if (broken) throw new Error('RAW'); return dto } }); await f.source.refresh(dto.scope)
+  const render = mount(f.source), tree = render(); find(tree, 'form')[0].ref.current = { querySelector: () => ({ focus: () => { focused++ } }) }; render.flush()
+  find(render(), 'form')[0].props.onSubmit({ preventDefault() {} }); render(); render.flush()
+  finish({ writeState: 'failed', saving: false, authoritative: false, error: { code: 'unavailable' } }); await new Promise(resolve => setImmediate(resolve)); render(); render.flush(); assert.equal(focused, 1)
+  broken = true; await f.source.refresh(dto.scope); render(); render.flush(); assert.equal(focused, 1); f.source.dispose()
 })
