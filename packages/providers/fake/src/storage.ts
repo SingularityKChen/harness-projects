@@ -12,6 +12,10 @@ export interface FakeWorkspaceBindingMount {
   enabled: boolean
   isDefault: boolean
 }
+function validateGeneration(record: cap.ExecutionContextRecord): void {
+  const n = record.provisioningGeneration
+  if (n !== undefined && (!Number.isSafeInteger(n) || n < 1)) throw new RangeError('provisioning generation must be a positive safe integer')
+}
 export interface FakeStorageData {
   planningMappings: cap.WorkspacePlanningMappingRecord[]
   workspaces: cap.WorkspaceRecord[]
@@ -98,6 +102,7 @@ export class MemoryStorage implements cap.Storage {
       cap.planningMappingRecordSnapshot(record)
       if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId) || !this.data.workspaceBindings.some((mount) => mount.workspaceId === record.workspaceId && mount.bindingId === record.bindingId && mount.domain === 'planning')) throw new RangeError('planning mapping mount does not exist')
     }
+    for (const record of this.data.contexts) validateGeneration(record)
     this.#transactionScope = transactionScope
     // 导入时校验已存元数据与引用完整性（对抗验证 P3-2）：配置必须有挂载、账号关联必须指向存在的账号，否则孤儿状态会被导入。
     for (const record of this.data.accounts) cap.parseConnectorAccount(record, this.#policy)
@@ -374,6 +379,7 @@ export class MemoryStorage implements cap.Storage {
    */
   async putExecutionContext(record: cap.ExecutionContextRecord): Promise<void> {
     return this.#mutate(() => {
+      validateGeneration(record)
       if (!this.data.entities.some((entity) => entity.id === record.workItemId)) throw cap.StorageInputError.unregisteredWorkItem()
       if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('execution context workspace does not exist')
       if (!this.data.repositories.some((r) => r.workspaceId === record.workspaceId && r.id === record.repositoryId)) throw new Error('execution context repository does not exist in the context workspace')

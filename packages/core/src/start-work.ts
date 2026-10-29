@@ -64,6 +64,7 @@ export async function startWork(context: CoreContext, input: StartWorkRequest): 
   try {
     claimed = await claimContext(context, contextId, request, route, prepared?.register)
   } catch (error) {
+    if (error instanceof GenerationExhausted) return conflictResult(projectError(ProjectErrorCode.Conflict, error.message))
     if (prepared === undefined) throw error // 已有记录（终态接管、过期续跑、在途、Ready）保持原行为：此前的尝试可能已经有过外部写入
     // 新请求的认领事务整笔回滚，此时还没有任何外部写入：结构化失败，不冒充外部结果未知。
     return startWorkUnavailable(projectError(ProjectErrorCode.Unavailable, `本地登记失败，没有发起任何外部写入：${error instanceof Error ? error.message : String(error)}`))
@@ -73,7 +74,8 @@ export async function startWork(context: CoreContext, input: StartWorkRequest): 
   if (claimed.kind === 'rejected') return claimed.result
   if (claimed.kind !== 'new' && claimed.kind !== 'resume') return existingResult(context, contextId, undefined)
   // 只转换 `localWrite` 标记过的本地写失败；Provider 的抛出（崩溃、中断）原样传出，不被吞掉。
-  return provision(context, request, contextId, claimed.route).catch((error) => {
+  return provision(context, request, contextId, claimed.route, claimed.generation).catch((error) => {
+    if (error instanceof OwnerLost) return ownerLostResult(error)
     if (error instanceof LocalWriteFailed) return unknownAfterAck(error)
     throw error
   })
@@ -91,6 +93,29 @@ async function replayRequest(context: CoreContext, contextId: ExecutionContextId
   return existingResult(context, contextId, supplied)
 }
 
+class GenerationExhausted extends Error { constructor() { super('开始工作的 owner 代际已耗尽，未发起外部写入') } }
+class OwnerLost extends Error {
+  readonly acked: GitOutcome | undefined; readonly runExternalId: string | undefined
+  constructor(acked?: GitOutcome, runExternalId?: string) { super('开始工作的所有权已丢失'); this.acked = acked; this.runExternalId = runExternalId }
+}
+function nextGeneration(record: ExecutionContextRecord | undefined): number {
+  const previous = record?.provisioningGeneration ?? 0
+  if (!Number.isSafeInteger(previous) || previous < 0 || previous >= Number.MAX_SAFE_INTEGER) throw new GenerationExhausted()
+  return previous + 1
+}
+/** 比较 owner 与依赖读写处于同一短事务；Provider I/O 永不放进这里。 */
+function owned<T>(context: CoreContext, id: ExecutionContextId, generation: number, work: (tx: StorageTransaction) => Promise<T>): Promise<T> {
+  return context.storage.transaction(async (tx) => {
+    if (!Number.isSafeInteger(generation) || generation < 1 || (await tx.getExecutionContext(id))?.provisioningGeneration !== generation) throw new OwnerLost()
+    return work(tx)
+  })
+}
+const checkOwner = (context: CoreContext, id: ExecutionContextId, generation: number) => owned(context, id, generation, async () => {})
+function ownerLostResult({ acked, runExternalId }: OwnerLost): StartWorkResult {
+  const error = projectError(acked?.report.phase === WritePhase.Unknown || acked?.branchExternalId !== undefined || runExternalId !== undefined ? ProjectErrorCode.ResultUnknown : ProjectErrorCode.Conflict, '开始工作的所有权已丢失；保留外部结果，需先对账')
+  return acked === undefined ? conflictResult(error) : toResult(reportFor(error.code === ProjectErrorCode.ResultUnknown ? WritePhase.Unknown : WritePhase.Conflict, acked.report.values, error), outcomeOf(acked, undefined, runExternalId), error)
+}
+
 /** ack 之后的本地写失败：只由 `localWrite`（显式的本地写调用点，不包 Provider 调用）抛出，带着最后一个已 ack 的步骤结果（其 `status` 是本地记录此刻的状态）；run 记录的失败还带着已 ack 的 run 句柄。 */
 class LocalWriteFailed extends Error {
   readonly acked: GitOutcome
@@ -98,7 +123,7 @@ class LocalWriteFailed extends Error {
   constructor(acked: GitOutcome, cause: unknown, runExternalId?: string) { super(cause instanceof Error ? cause.message : String(cause), { cause }); this.acked = acked; this.runExternalId = runExternalId }
 }
 async function localWrite<T>(acked: GitOutcome, write: () => Promise<T>, runExternalId?: string): Promise<T> {
-  try { return await write() } catch (error) { throw new LocalWriteFailed(acked, error, runExternalId) }
+  try { return await write() } catch (error) { if (error instanceof OwnerLost) throw new OwnerLost(acked, runExternalId); throw new LocalWriteFailed(acked, error, runExternalId) }
 }
 
 /** 本地写失败的结果是 Unknown，不是 Failed 或 Saved：外部资源存在、不自动删除，句柄取最后已 ack 的，不起 run；`markUnknown` 对 Confirmed 原样返回，所以用 `reportFor` 建报告。 */
@@ -204,7 +229,8 @@ function needsSupply(record: ExecutionContextRecord, now: string): boolean {
 /** workspace/key 与 context 租约在同一事务认领；先占键，再写父行与 context，失败整笔回滚。 */
 type Claim = { readonly kind: 'replay'; readonly attempt: MutationAttemptRecord } | { readonly kind: 'conflict'; readonly error: ProjectError }
   | { readonly kind: 'rejected'; readonly result: StartWorkResult }
-  | { readonly kind: 'new' | 'resume' | 'in-flight' | 'existing'; readonly route: DevelopmentRoute }
+  | { readonly kind: 'new' | 'resume'; readonly route: DevelopmentRoute; readonly generation: number }
+  | { readonly kind: 'in-flight' | 'existing'; readonly route: DevelopmentRoute }
 async function claimContext(
   context: CoreContext, contextId: ExecutionContextId, request: StartWorkRequest, selected: Extract<DevelopmentRoute, { ok: true }>, register?: Registration,
 ): Promise<Claim> {
@@ -219,12 +245,13 @@ async function claimContext(
     if (!current.ok || current.binding.ref.bindingId !== selected.binding.ref.bindingId) return { kind: 'conflict', error: bindingConflict('idempotency_target_changed') }
     const existing = await tx.getExecutionContext(contextId)
     const supplying = existing === undefined || needsSupply(existing, now)
+    const generation = supplying ? nextGeneration(existing) : existing?.provisioningGeneration
     const route = supplying ? await routeDevelopment(source, request.repositoryId, ...START_WORK_ROUTE.anchor) : current
     if (!route.ok) {
       if (existing === undefined) return { kind: 'rejected', result: startWorkUnavailable(route.error) }
       // 原有续跑拒绝仍结算为 Failed 并清除失效工作树；先复核 key，未获准的请求不占键。
       const names = namesFor(request); const report = markFailed(beginWrite(names.path ?? names.worktreeKey), route.error)
-      const saved = await saveContext(context, contextId, request, ExecutionContextStatus.Failed, undefined, undefined, tx)
+      const saved = await saveContext(context, contextId, request, ExecutionContextStatus.Failed, undefined, undefined, tx, generation)
       const git: GitOutcome = { contextId, report, ok: false, bindingId: undefined, status: saved.status, branchExternalId: saved.branchExternalId,
         worktreeExternalId: undefined, branchHeadCommit: undefined }
       await recordStartFacts({ workspaceId: context.workspaceId, storage: tx }, request, contextId, git)
@@ -234,8 +261,8 @@ async function claimContext(
       requestFingerprint: requestFingerprint(context.workspaceId, selected.binding.ref.bindingId, request), report: beginWrite(undefined) })
     if (existing === undefined) {
       await register?.(tx)
-      await tx.putExecutionContext(contextRecord(context, contextId, request, ExecutionContextStatus.Provisioning, undefined, undefined, now))
-      return { kind: 'new', route }
+      await tx.putExecutionContext({ ...contextRecord(context, contextId, request, ExecutionContextStatus.Provisioning, undefined, undefined, now), provisioningGeneration: generation! })
+      return { kind: 'new', route, generation: generation! }
     }
     // 终态可以被接管：一次失败不再把 (工作项, 仓库) 永久锁死。在此之前 `reportForExisting` 那句
     // 「需显式重试或关闭」是一条没有兑现的承诺——端口没有删除入口、`Closed` 没有写者，而
@@ -245,33 +272,34 @@ async function claimContext(
     // 不是新建一条。用 `contextRecord(..., undefined, undefined)` 重建会把分步回填的成果抹掉，重放于是
     // 重新推导供应输入——那正是「基线前进后重试失败」的来源。
     if (isTerminal(existing.status)) {
-      await tx.putExecutionContext({ ...existing, status: ExecutionContextStatus.Provisioning, provisioningStartedAt: now })
-      return { kind: 'resume', route }
+      await tx.putExecutionContext({ ...existing, status: ExecutionContextStatus.Provisioning, provisioningStartedAt: now, provisioningGeneration: generation! })
+      return { kind: 'resume', route, generation: generation! }
     }
     if (existing.status !== ExecutionContextStatus.Provisioning) return { kind: 'existing', route }
     if (!leaseExpired(existing.provisioningStartedAt, now)) return { kind: 'in-flight', route }
-    await tx.putExecutionContext({ ...existing, provisioningStartedAt: now })
-    return { kind: 'resume', route }
+    await tx.putExecutionContext({ ...existing, provisioningStartedAt: now, provisioningGeneration: generation! })
+    return { kind: 'resume', route, generation: generation! }
   })
 }
 
-async function provision(context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, route: DevelopmentRoute): Promise<StartWorkResult> {
+async function provision(context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, route: DevelopmentRoute, generation: number): Promise<StartWorkResult> {
+  await checkOwner(context, contextId, generation)
   const names = namesFor(request)
   // 每一步成功后立刻回填：中断在两步之间时，重放跳过已完成的那一步（批次计划 D2）。两步写的都是 Provisioning，Ready 要等 `settle`。
   const git = await provisionGit(context, request, names, contextId, async (outcome) => {
-    await localWrite(outcome, () => saveContext(context, contextId, request, outcome.status, outcome.branchExternalId, outcome.worktreeExternalId))
+    await localWrite(outcome, () => owned(context, contextId, generation, (tx) => saveContext(context, contextId, request, outcome.status, outcome.branchExternalId, outcome.worktreeExternalId, tx)))
   }, route)
-  const saved = await localWrite({ ...git, status: ExecutionContextStatus.Provisioning }, () => settle(context, request, contextId, git)) // 结算失败时记录仍停在 Provisioning
+  const saved = await localWrite({ ...git, status: ExecutionContextStatus.Provisioning }, () => settle(context, request, contextId, git, generation)) // 结算失败时记录仍停在 Provisioning
   // 失败路径的结果面取自**写入后的记录**，不取本次尝试的中间结果：能力不可用时 `git.branchExternalId` 是
   // `undefined`（本次没走到分支步），而记录里保留着此前已决定的分支；调用返回一个答案、记录与 `existingResult`
   // 返回另一个，就是 Host 权威状态分叉。`recordStartFacts` 仍吃 `git`（本次观测到的事实），所以不补写关系。
   if (!git.ok) return toResult(git.report, outcomeOf({ ...git, branchExternalId: saved.branchExternalId }), git.report.error)
-  return startExecution(context, request, contextId, git)
+  return startExecution(context, request, contextId, git, generation)
 }
 
 /** 最终事务：context 记录（成功 Ready、失败 Failed）、tracks / has_worktree 与该次 Git 的 mutation_attempt 同生共死；只用 tx，不调根 Storage、Provider，不嵌套事务。 */
-function settle(context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, git: GitOutcome): Promise<ExecutionContextRecord> {
-  return context.storage.transaction(async (tx) => {
+function settle(context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, git: GitOutcome, generation: number): Promise<ExecutionContextRecord> {
+  return owned(context, contextId, generation, async (tx) => {
     const saved = await saveContext(context, contextId, request, git.status, git.branchExternalId, git.worktreeExternalId, tx)
     await recordStartFacts({ workspaceId: context.workspaceId, storage: tx }, request, contextId, git)
     const attempt = await tx.findMutationAttempt(context.workspaceId, request.idempotencyKey)
@@ -309,15 +337,15 @@ async function recordStartFacts(context: RelationStore, request: StartWorkReques
 }
 
 async function startExecution(
-  context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, git: GitOutcome,
+  context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, git: GitOutcome, generation: number,
 ): Promise<StartWorkResult> {
   if (git.worktreeExternalId === undefined) return unknownRun(git, '缺少 Git ack 的工作目录，不能启动执行', undefined)
   const target = resolveWriteTarget(context.registry, CapabilityKey.ExecutionRunStart)
   const provider = target.binding?.execution
   if (provider === undefined || target.binding === undefined) {
-    return manualFallback(context, contextId, git, target.error ?? unsupportedCapability(CapabilityKey.ExecutionRunStart))
+    return manualFallback(context, contextId, git, generation, target.error ?? unsupportedCapability(CapabilityKey.ExecutionRunStart))
   }
-  const existing = await context.storage.getExecutionRun(runIdFor(contextId))
+  const existing = await localWrite(git, () => owned(context, contextId, generation, (tx) => tx.getExecutionRun(runIdFor(contextId))))
   if (existing !== undefined) {
     return existingRun(git, existing)
   }
@@ -330,9 +358,9 @@ async function startExecution(
     // 用它」那条命题的下一步。
     command: `harness run ${git.branchExternalId ?? namesFor(request).branch}`, environment: {},
   })
-  if (!run.ok) return manualFallback(context, contextId, git, toProjectError(run.error))
+  if (!run.ok) return manualFallback(context, contextId, git, generation, toProjectError(run.error))
   const status = runStatusFor(run.value.status)
-  await localWrite(git, () => recordRun(context, contextId, status, run.value.ref), run.value.ref.externalId)
+  await localWrite(git, () => recordRun(context, contextId, generation, status, run.value.ref), run.value.ref.externalId)
   if (status === ExecutionRunStatus.Unknown) return unknownRun(git, `ack 的状态 ${run.value.status} 不是已知取值`, run.value.ref.externalId) // 本地记成 unknown，顶层也是 Unknown（与重放、Query 一致）
   return toResult(git.report, outcomeOf(git, undefined, run.value.ref.externalId), undefined)
 }
@@ -342,13 +370,13 @@ async function startExecution(
  * 主执行结果不确定（`ambiguous_result`）时它可能已在跑，不起第二个执行者（ADR-0007），记 unknown 并报 Unknown；接管时已有运行同理，不覆盖它。
  */
 async function manualFallback(
-  context: CoreContext, contextId: ExecutionContextId, git: GitOutcome, error: ProjectError,
+  context: CoreContext, contextId: ExecutionContextId, git: GitOutcome, generation: number, error: ProjectError,
 ): Promise<StartWorkResult> {
-  const existing = await context.storage.getExecutionRun(runIdFor(contextId))
+  const existing = await localWrite(git, () => owned(context, contextId, generation, (tx) => tx.getExecutionRun(runIdFor(contextId))))
   if (existing !== undefined) return existingRun(git, existing)
   if (error.code === ProjectErrorCode.AmbiguousResult) {
     // 运行可能已在跑：不记 failed、不转人工降级，本地记 unknown，顶层 Unknown，与重放、Query 同一个答案（评审 P2）。
-    await localWrite(git, () => recordRun(context, contextId, ExecutionRunStatus.Unknown))
+    await localWrite(git, () => recordRun(context, contextId, generation, ExecutionRunStatus.Unknown))
     return unknownRun(git, `startRun 的结果不确定：${error.message}`, undefined)
   }
   if (git.worktreeExternalId === undefined) return unknownRun(git, '缺少 Git ack 的工作目录，不能人工接管', undefined)
@@ -360,30 +388,31 @@ async function manualFallback(
       command: `manual fallback ${git.branchExternalId ?? ''}`.trim(), environment: {},
     })
     if (run.ok && run.value.status === 'running') {
-      await recordRun(context, contextId, runStatusFor(run.value.status), run.value.ref, true)
+      await localWrite(git, () => recordRun(context, contextId, generation, runStatusFor(run.value.status), run.value.ref, true), run.value.ref.externalId)
       return toResult(git.report, outcomeOf(git, StartWorkFallback.Manual, run.value.ref.externalId), undefined)
     }
   }
-  await recordRun(context, contextId, ExecutionRunStatus.Failed, undefined, true)
+  await localWrite(git, () => recordRun(context, contextId, generation, ExecutionRunStatus.Failed, undefined, true))
   return toResult(git.report, outcomeOf(git, StartWorkFallback.Manual), error)
 }
 
-async function recordRun(context: CoreContext, contextId: ExecutionContextId, status: ExecutionRunStatus, providerRef?: ExternalObjectRef, fallback = false): Promise<void> {
-  await context.storage.putExecutionRun({
+async function recordRun(context: CoreContext, contextId: ExecutionContextId, generation: number, status: ExecutionRunStatus, providerRef?: ExternalObjectRef, fallback = false): Promise<void> {
+  await owned(context, contextId, generation, (tx) => tx.putExecutionRun({
     id: runIdFor(contextId), workspaceId: context.workspaceId, contextId, status, updatedAt: context.clock(),
     ...(providerRef === undefined ? {} : { providerRef }), ...(fallback ? { fallback } : {}),
-  })
+  }))
 }
 
 async function saveContext(
   context: CoreContext, contextId: ExecutionContextId, request: StartWorkRequest,
   status: ExecutionContextStatus, branchExternalId: string | undefined, worktreeExternalId: string | undefined,
-  storage: StorageTransaction = context.storage,
+  storage: StorageTransaction = context.storage, generation?: number,
 ): Promise<ExecutionContextRecord> {
   // 分步回填会在 `Provisioning` 中途写记录；清掉租约起点会让在途保护失效（`claimContext` 用它
   // 判断租约是否过期），所以中途写入必须保留它。终态不再被租约查询，按原样清空。
   const existing = await storage.getExecutionContext(contextId)
   const keepLease = status === ExecutionContextStatus.Provisioning ? existing?.provisioningStartedAt : undefined
+  const keptGeneration = generation ?? existing?.provisioningGeneration
   // 已决定的分支身份**写一次**：记录里已有的值优先，本次尝试产出的 `undefined` 只表示「没走到这一步」，不表示
   // 清空。今天两者在能走到这里的路径上不会分歧（重放时 `provisionGit` 只会产出同一个名字），选 `existing ??`
   // 是为了把这条不变量写成代码，而不是写成「碰巧」。**只保留分支，不保留工作树句柄**：工作树步每次重放都重跑，
@@ -392,13 +421,14 @@ async function saveContext(
   const record: ExecutionContextRecord = {
     ...contextRecord(context, contextId, request, status, existing?.branchExternalId ?? branchExternalId, worktreeExternalId, undefined),
     provisioningStartedAt: keepLease,
+    ...(keptGeneration === undefined ? {} : { provisioningGeneration: keptGeneration }),
   }
   await storage.putExecutionContext(record)
   return record
 }
 
 async function existingResult(
-  context: CoreContext, contextId: ExecutionContextId, supplied: WriteReport | undefined,
+  context: CoreContext, contextId: ExecutionContextId, supplied: WriteReport | undefined, verify = true,
 ): Promise<StartWorkResult> {
   const record = await context.storage.getExecutionContext(contextId)
   if (record === undefined) {
@@ -410,10 +440,17 @@ async function existingResult(
   let report = supplied?.confirmed && record.status !== ExecutionContextStatus.Ready ? reportForExisting(record.status) : supplied ?? reportForExisting(record.status)
   // 缺口对任何 supplied 都要算（TD-006 止血，评审 P2）：有缺口的 Ready 不读回、不改判 Failed，否则换新 key 接管会在缺 run 记录时再起一个 run；它停在 Unknown，直到 #193 的对账。只有完整的 Ready 读回确定丢失才改判（不分 supplied）。
   const gap = record.status === ExecutionContextStatus.Ready ? await readyGap(context, record, run) : undefined
-  if (record.status === ExecutionContextStatus.Ready && gap === undefined) {
+  if (verify && record.status === ExecutionContextStatus.Ready && gap === undefined) {
     const verified = await verifyExistingWorktree(context, record)
     if (!verified.ok && verified.definite) {
-      await context.storage.putExecutionContext({ ...record, status: ExecutionContextStatus.Failed, provisioningStartedAt: undefined })
+      const changed = await context.storage.transaction(async (tx) => {
+        const current = await tx.getExecutionContext(contextId)
+        if (current?.provisioningGeneration !== record.provisioningGeneration || current?.status !== ExecutionContextStatus.Ready
+          || current.branchExternalId !== record.branchExternalId || current.worktreeExternalId !== record.worktreeExternalId) return false
+        await tx.putExecutionContext({ ...current, status: ExecutionContextStatus.Failed, provisioningStartedAt: undefined })
+        return true
+      })
+      if (!changed) return existingResult(context, contextId, undefined, false)
       const report = markFailed(beginWrite(record.worktreeExternalId ?? record.branchExternalId ?? ''), verified.error)
       return toResult(report, {
         contextId, status: ExecutionContextStatus.Failed, branchExternalId: record.branchExternalId,

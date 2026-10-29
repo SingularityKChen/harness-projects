@@ -14,7 +14,7 @@ export interface MigrateResult {
   readonly version: number
 }
 
-export const CURRENT_SCHEMA_GENERATION = 1
+export const CURRENT_SCHEMA_GENERATION = 2
 export type IncompatibleDatabaseReason = 'generation' | 'version_list' | 'schema_shape' | 'unknown_objects'
 export class IncompatibleDatabaseError extends Error {
   readonly code = 'incompatible_database'

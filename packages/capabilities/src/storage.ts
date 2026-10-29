@@ -81,6 +81,8 @@ export interface RepositoryRecord {
 }
 
 export interface ExecutionContextRecord {
+  /** 持久 owner 代际：正 safe integer；每次 claim 递增，Ready 后保留，缺省仅表示无主记录。 */
+  readonly provisioningGeneration?: number
   readonly id: ExecutionContextId; readonly workspaceId: WorkspaceId; readonly workItemId: EntityId
   readonly repositoryId: EntityId; readonly status: ExecutionContextStatus
   readonly branchExternalId: string | undefined; readonly worktreeExternalId: string | undefined

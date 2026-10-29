@@ -54,6 +54,18 @@ export function storageExecutionSuite(adapter, register = test) {
     const replaced = { id: 'run-1', workspaceId: WORKSPACE, contextId: 'context-2', status: 'canceled', updatedAt: '2026-09-20T00:00:01Z', providerRef, fallback: true }
     await storage.putExecutionRun(replaced)
     assert.deepEqual(await storage.getExecutionRun('run-1'), replaced, '覆盖写入后逐字段读回新的 providerRef 与"由降级产生"')
+    let generationStorage = storage
+    const record = { id: 'owner-generation', workspaceId: WORKSPACE, workItemId: 'entity-1', repositoryId: 'repo-1', status: 'ready', branchExternalId: undefined, worktreeExternalId: undefined, provisioningStartedAt: undefined }
+    await generationStorage.putExecutionContext(record)
+    assert.equal((await generationStorage.getExecutionContext(record.id)).provisioningGeneration, undefined)
+    for (const provisioningGeneration of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, null, '1']) {
+      await assert.rejects(generationStorage.putExecutionContext({ ...record, provisioningGeneration }))
+      assert.equal((await generationStorage.getExecutionContext(record.id)).provisioningGeneration, undefined, '非法代际零写入')
+    }
+    for (const provisioningGeneration of [1, Number.MAX_SAFE_INTEGER]) {
+      await generationStorage.putExecutionContext({ ...record, provisioningGeneration }); generationStorage = await restart(generationStorage)
+      assert.equal((await generationStorage.getExecutionContext(record.id)).provisioningGeneration, provisioningGeneration)
+    }
   })
 
   register(`${label}：关系按工作区隔离且重复写入不产生第二条`, async () => {

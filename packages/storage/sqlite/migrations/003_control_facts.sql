@@ -20,6 +20,7 @@ CREATE TABLE execution_context (
   branch_external_id TEXT,
   worktree_external_id TEXT,
   provisioning_started_at TEXT,
+  provisioning_generation INTEGER CHECK (provisioning_generation IS NULL OR (typeof(provisioning_generation) = 'integer' AND provisioning_generation BETWEEN 1 AND 9007199254740991)),
   -- 不变量 5：执行上下文引用的仓库必须属于同一个工作区（复合外键，2026-09-24 评审）。
   FOREIGN KEY (workspace_id, repository_id) REFERENCES repository (workspace_id, id),
   -- 供 execution_run 的复合外键引用（见下）。

@@ -73,7 +73,8 @@ export const rowToExecutionContext = (row: Row): ExecutionContextRecord => ({ id
   workspaceId: text(row, 'workspace_id') as WorkspaceId, workItemId: text(row, 'work_item_id') as EntityId,
   repositoryId: text(row, 'repository_id') as EntityId, status: text(row, 'status') as ExecutionContextStatus,
   branchExternalId: optionalText(row, 'branch_external_id'), worktreeExternalId: optionalText(row, 'worktree_external_id'),
-  provisioningStartedAt: optionalText(row, 'provisioning_started_at') })
+  provisioningStartedAt: optionalText(row, 'provisioning_started_at'),
+  ...(row.provisioning_generation == null ? {} : { provisioningGeneration: Number(row.provisioning_generation) }) })
 
 /** JSON 往返会把 `url: undefined` 变成"没有这个键"：按端口的四元组显式重建，两个实现才读回同一形状。 */
 function providerRefOf(json: string): ExternalObjectRef {

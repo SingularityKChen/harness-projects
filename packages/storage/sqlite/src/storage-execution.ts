@@ -27,7 +27,7 @@ import { optional, rowToDeliveryFacts, rowToExecutionContext, rowToExecutionRun,
 import { SqliteSyncSurface } from './storage-sync.ts'
 
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。
-const CONTEXT_COLUMNS = 'id, workspace_id, work_item_id, repository_id, status, branch_external_id, worktree_external_id, provisioning_started_at'
+const CONTEXT_COLUMNS = 'id, workspace_id, work_item_id, repository_id, status, branch_external_id, worktree_external_id, provisioning_started_at, provisioning_generation'
 const RUN_COLUMNS = 'id, workspace_id, context_id, status, updated_at, provider_ref_json, fallback'
 const FACT_COLUMNS = 'workspace_id, context_id, attempted_at, sets_json'
 const ATTEMPT_COLUMNS = 'id, workspace_id, binding_id, command_name, idempotency_key, state, expected_source_version, error_code, request_fingerprint'
@@ -53,19 +53,23 @@ export class SqliteExecutionSurface extends SqliteSyncSurface {
    */
   putExecutionContext(record: ExecutionContextRecord): Promise<void> {
     // 工作项父边（#196）：写前检查在同一个队列槽、早于自己的 BEGIN，缺失以 `StorageInputError` 拒绝；003 的外键仍是最终防线。
-    const preflight = () => { if (this.db.prepare('SELECT 1 FROM entity WHERE id = ?').get(record.workItemId) === undefined) throw StorageInputError.unregisteredWorkItem() }
+    const preflight = () => {
+      const n = record.provisioningGeneration
+      if (n !== undefined && (!Number.isSafeInteger(n) || n < 1)) throw new RangeError('provisioning generation must be a positive safe integer')
+      if (this.db.prepare('SELECT 1 FROM entity WHERE id = ?').get(record.workItemId) === undefined) throw StorageInputError.unregisteredWorkItem()
+    }
     return this.atomic(() => {
       if (ACTIVE_CONTEXT_STATUSES.includes(record.status)) {
         this.db.prepare(`UPDATE execution_context SET status = 'closed', provisioning_started_at = NULL
           WHERE workspace_id = ? AND work_item_id = ? AND repository_id = ? AND id <> ? AND status IN (${ACTIVE_CONTEXT_SQL})`)
           .run(record.workspaceId, record.workItemId, record.repositoryId, record.id)
       }
-      this.db.prepare(`INSERT INTO execution_context (${CONTEXT_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      this.db.prepare(`INSERT INTO execution_context (${CONTEXT_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (id) DO UPDATE SET workspace_id = excluded.workspace_id, work_item_id = excluded.work_item_id,
           repository_id = excluded.repository_id, status = excluded.status, branch_external_id = excluded.branch_external_id,
-          worktree_external_id = excluded.worktree_external_id, provisioning_started_at = excluded.provisioning_started_at`)
+          worktree_external_id = excluded.worktree_external_id, provisioning_started_at = excluded.provisioning_started_at, provisioning_generation = excluded.provisioning_generation`)
         .run(record.id, record.workspaceId, record.workItemId, record.repositoryId, record.status,
-          record.branchExternalId ?? null, record.worktreeExternalId ?? null, record.provisioningStartedAt ?? null)
+          record.branchExternalId ?? null, record.worktreeExternalId ?? null, record.provisioningStartedAt ?? null, record.provisioningGeneration ?? null)
     }, preflight)
   }
 
