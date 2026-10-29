@@ -90,14 +90,15 @@ for (const scenario of ['completed', 'error', 'missing', 'forced', 'unknown', 'e
     t.mock.property(process, 'env', environment)
     let dispose, disposal
     await applyHost({
-      get: (name) => name === 'sessionController' ? raw : name === 'credentials' ? { resolve: async (handle) => ({ value: await options.resolveCredential(handle), source: 'fixture' }) } : undefined,
+      invocation: { peer: { id: 'fixture-peer' } },
+      get: (name) => name === 'profileContext' ? { dir: fixture.root } : name === 'sessionController' ? raw : name === 'credentials' ? { resolve: async (handle) => ({ value: await options.resolveCredential(handle), source: 'fixture' }) } : undefined,
       provide: (_name, service) => { remote = { service, dispose: async () => {} }; return () => {} },
       typert: { register: () => () => {} }, effect: (run) => { dispose = run() },
     })
     host = { stop: () => { disposal ??= dispose() }, dispose: () => disposal ??= dispose(), disabled: [] }
   } else {
     host = await createHostComposition(options)
-    remote = await installHostRemote({ provide: () => () => {}, typert: { register: () => () => {} } }, host)
+    remote = await installHostRemote({ invocation: { peer: { id: 'fixture-peer' } }, provide: () => () => {}, typert: { register: () => () => {} } }, host)
   }
   t.after(async () => { host.stop(); await remote.dispose(); await host.dispose() })
   const installed = await remote.service.installExecutionBindings(actor, 'install')
@@ -120,7 +121,7 @@ for (const scenario of ['completed', 'error', 'missing', 'forced', 'unknown', 'e
   if (!manual && scenario !== 'unknown') { assert.deepEqual(JSON.parse(run.providerRef.externalId)[1], id); recording.assertConsumed() }
   if (manual) {
     host.stop(); await remote.dispose(); await host.dispose()
-    host = await createHostComposition(options); remote = await installHostRemote({ provide: () => () => {}, typert: { register: () => () => {} } }, host)
+    host = await createHostComposition(options); remote = await installHostRemote({ invocation: { peer: { id: 'fixture-peer' } }, provide: () => () => {}, typert: { register: () => () => {} } }, host)
     assert.deepEqual((await remote.service.installExecutionBindings(actor, 'install-restart')).value, installed.value)
     const reopened = createSqliteStorage(dataPath, hostStoragePolicy(PROVIDER_CATALOG))
     try {

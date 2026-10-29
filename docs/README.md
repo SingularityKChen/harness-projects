@@ -130,6 +130,7 @@
 | [2026-10-12-planning-round-order](exec-plan/completed/2026-10-12-planning-round-order.md) | Planning 全量同步轮次顺序 |
 | [2026-10-12-review-mutate-crash](exec-plan/completed/2026-10-12-review-mutate-crash.md) | Review Mutation Harness 崩溃清理 |
 | [2026-10-13-harness-host-composition](exec-plan/completed/2026-10-13-harness-host-composition.md) | Harness Host Composition |
+| [2026-10-29-host-command-authority](exec-plan/completed/2026-10-29-host-command-authority.md) | Host 调用身份与 profile 数据根（#423） |
 | [2026-10-13-planning-membership-reconcile](exec-plan/completed/2026-10-13-planning-membership-reconcile.md) | Planning Membership Reconcile |
 | [2026-10-13-planning-refresh-scheduler](exec-plan/completed/2026-10-13-planning-refresh-scheduler.md) | Planning Refresh Scheduler |
 | [2026-10-13-status-projection-race](exec-plan/completed/2026-10-13-status-projection-race.md) | Status Projection Race Repair |

@@ -18,7 +18,7 @@ async function open(t) {
   let viewer = 'U_viewer_canary', broken = false, viewerReads = 0
   const host = await createHostComposition({ dataPath, workspaceId: WORKSPACE, catalog: PROVIDER_CATALOG, resolveCredential: async () => 'credential-canary', planningTimers: { setInterval: () => 1, clearInterval: () => {} },
     fetch: (url, init) => url.endsWith('/user') ? (viewerReads++, Promise.resolve(new Response(JSON.stringify({ node_id: viewer, login: 'viewer-login-canary' })))) : broken ? Promise.resolve(new Response('{}', { status: 401 })) : replay.fetch(url, init) })
-  const installed = await installHostRemote({ provide: () => () => {}, typert: { register: () => () => {} } }, host)
+  const installed = await installHostRemote({ invocation: { peer: { id: 'fixture-peer' } }, provide: () => () => {}, typert: { register: () => () => {} } }, host)
   t.after(async () => { host.stop(); await installed.dispose(); await host.dispose(); await rm(dir, { recursive: true, force: true }) })
   const read = async () => parseWorkspaceSetup(await installed.service.getWorkspaceSetup())
   const sql = (statement) => { const db = new DatabaseSync(dataPath); try { return db.prepare(statement).get() } finally { db.close() } }

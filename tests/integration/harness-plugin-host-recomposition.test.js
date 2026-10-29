@@ -31,7 +31,7 @@ async function open(t, overrides = {}, build) {
   const requestedFetch = overrides.fetch ?? fetch
   const normalizedFetch = (url, init) => { if (url.endsWith('/graphql')) { const body = JSON.parse(init.body); if (body.operationName === 'DevelopmentRepository') { body.variables.owner = selected.repositoryOwner; return requestedFetch(url, { ...init, body: JSON.stringify(body) }) } } return requestedFetch(url, init) }
   const host = await createHostComposition({ dataPath, workspaceId: WORKSPACE, catalog: PROVIDER_CATALOG, resolveCredential: async () => 'canary-token', fetch, watchIntervalMs: 1, planningTimers: clock, ...overrides, fetch: normalizedFetch })
-  const events = [], installed = await installHostRemote({ provide: () => () => { events.push('withdraw') }, typert: { register: () => () => {} } }, host)
+  const events = [], installed = await installHostRemote({ invocation: { peer: { id: 'fixture-peer' } }, provide: () => () => { events.push('withdraw') }, typert: { register: () => () => {} } }, host)
   const streams = [], watch = installed.service.watch
   installed.service.watch = (...args) => { const stream = watch(...args); streams.push(stream); return stream }
   t.after(async () => { host.stop(); await Promise.allSettled(streams.map((stream) => stream.return())); await installed.dispose(); await host.dispose(); await rm(dir, { recursive: true, force: true }) })

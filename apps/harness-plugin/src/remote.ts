@@ -61,8 +61,20 @@ export type HostCompositionCall = {
 }
 
 export interface HostRemoteContext {
+  readonly invocation?: { readonly peer?: { readonly id?: unknown } }
   provide(name: string, value: unknown): (() => void | Promise<void>) | void
   typert: { register(contribution: HostRemoteContribution): (() => void) | (() => Promise<void>) }
+}
+
+/** Fixed fail-closed error; the existing Gateway owns its transport error envelope. */
+export class HostAuthorityError extends Error {
+  constructor(message = 'Host connection identity is unavailable') { super(message); this.name = 'HostAuthorityError' }
+}
+
+function commandActor(ctx: HostRemoteContext): { readonly kind: 'harness_peer'; readonly id: string } {
+  const id = ctx.invocation?.peer?.id
+  if (typeof id !== 'string' || id.trim() === '') throw new HostAuthorityError()
+  return { kind: 'harness_peer', id }
 }
 
 function jsonValue(value: unknown, label = 'Remote 值'): unknown {
@@ -143,6 +155,7 @@ export async function installHostRemote(
   ctx: HostRemoteContext,
   composition: HostCompositionCall,
   remote: { readonly operations: Operations; readonly host: HostRemoteContribution } = REMOTE,
+  decorate: (service: Record<string, unknown>) => void = () => {},
 ): Promise<InstalledHostRemote> {
   let unregisterRemote: (() => void) | (() => Promise<void>)
   let provideDispose: (() => void | Promise<void>) | undefined
@@ -172,14 +185,19 @@ export async function installHostRemote(
           for await (const frame of frames) yield toJson(frame)
         } finally { endCall() }
       }
-      : async (...args: unknown[]) => {
+      : async function (this: { ctx: HostRemoteContext }, ...args: unknown[]) {
         beginCall()
-        try { return await composition.call(operation.name as UnaryName<typeof OPERATIONS>, inputOfArguments(operation, args)) } finally { endCall() }
+        try {
+          const input = inputOfArguments(operation, args)
+          if (operation.params.some(({ name }) => name === 'actorRef')) input.actorRef = commandActor(this.ctx)
+          return await composition.call(operation.name as UnaryName<typeof OPERATIONS>, input)
+        } finally { endCall() }
       }
   }
   service.typertRemote = Object.freeze({ service, serviceKey: REMOTE_SERVICE, namespace: REMOTE_NAMESPACE })
 
   try {
+    decorate(service)
     provideDispose = ctx.provide(REMOTE_SERVICE, service) ?? undefined
     unregisterRemote = ctx.typert.register(remote.host)
   } catch (error) {

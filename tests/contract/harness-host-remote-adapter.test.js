@@ -16,6 +16,7 @@ function recordingContext() {
   const registrations = []
   const events = []
   const ctx = {
+    invocation: { peer: { id: 'adapter-peer' } },
     provide(name, value) {
       services.set(name, value)
       const dispose = async () => { events.push('provide-dispose-start'); services.delete(name); await Promise.resolve(); events.push('provide-dispose-end') }
@@ -66,7 +67,7 @@ test('host adapter validates through the strict parser before reaching Core and 
   )
   assert.deepEqual(calls, [
     ['baseline', {}],
-    ['bootstrapWorkspace', { actorRef: { kind: 'agent', id: 'adapter-test' }, idempotencyKey: 'idempotency-1' }],
+    ['bootstrapWorkspace', { actorRef: { kind: 'harness_peer', id: 'adapter-peer' }, idempotencyKey: 'idempotency-1' }],
   ])
   await assert.rejects(() => service.bootstrapWorkspace({ kind: 7 }, 'idempotency-2'), /actorRef/)
   await assert.rejects(() => service.bootstrapWorkspace({ kind: 'agent' }, ''), /idempotencyKey/)

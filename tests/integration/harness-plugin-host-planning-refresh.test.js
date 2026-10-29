@@ -30,7 +30,7 @@ async function open(t, overrides = {}, seeded = true) {
   if (seeded) await seed(dataPath, catalog, async (storage) => { await seedWorkspace(storage); await storage.putProviderBinding(mount('00000000-0000-4000-8000-0000000000b1', 'planning', 'harness.fake')) })
   const timers = manualTimers()
   const host = await createHostComposition({ dataPath, workspaceId: WORKSPACE, catalog, resolveCredential: async () => undefined, planningTimers: timers, planningReadTimeoutMs: 100, ...overrides })
-  const installed = await installHostRemote({ provide: () => () => {}, typert: { register: () => () => {} } }, host)
+  const installed = await installHostRemote({ invocation: { peer: { id: 'fixture-peer' } }, provide: () => () => {}, typert: { register: () => () => {} } }, host)
   t.after(async () => { host.stop?.(); await installed.dispose(); await host.dispose(); await rm(root, { recursive: true, force: true }) })
   return { host, timers, service: installed.service, planning, root, installed }
 }
@@ -160,7 +160,7 @@ test('Host entry discovers late credentials and later provider changes through q
     }
     return new Response(JSON.stringify(body), { status: response.status })
   })
-  const ctx = { get: () => credential, provide(name, value) { services.set(name, value); return () => services.delete(name) }, typert: { register: () => () => {} }, effect(callback) { effects.push(callback()) } }
+  const ctx = { invocation: { peer: { id: 'fixture-peer' } }, get: (name) => name === 'profileContext' ? { dir: root } : credential, provide(name, value) { services.set(name, value); return () => services.delete(name) }, typert: { register: () => () => {} }, effect(callback) { effects.push(callback()) } }
   process.env.DSH_HOME = root
   t.after(async () => { for (const dispose of effects.reverse()) await dispose(); delete process.env.DSH_HOME; await rm(root, { recursive: true, force: true }) })
   await seed(dataPath, PROVIDER_CATALOG, async (storage) => { await seedWorkspace(storage); await seedPlanning(storage) })

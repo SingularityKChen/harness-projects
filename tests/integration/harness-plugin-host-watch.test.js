@@ -55,7 +55,7 @@ async function open(t, { seed: seeded = true } = {}) {
   const catalog = catalogOf([fakePlanningEntry((provider) => { planning = provider })])
   if (seeded) await seed(dataPath, catalog, async (storage) => { await seedWorkspace(storage); await storage.putProviderBinding(mount('00000000-0000-4000-8000-0000000000b1', 'planning', 'harness.fake')) })
   const host = await createHostComposition({ dataPath, workspaceId: WORKSPACE, catalog, resolveCredential: async () => undefined, watchIntervalMs: 5 })
-  const installed = await installHostRemote({ provide: () => () => {}, typert: { register: () => () => {} } }, host)
+  const installed = await installHostRemote({ invocation: { peer: { id: 'fixture-peer' } }, provide: () => () => {}, typert: { register: () => () => {} } }, host)
   const { RemoteStream, RemoteStreamCarrierError } = await loadRemoteStream()
   const connection = createConnection()
   const carrier = createCarrier(RemoteStreamCarrierError)

@@ -15,7 +15,7 @@
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
-import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile, symlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
@@ -263,6 +263,7 @@ describe('Harness 插件安装件契约', () => {
       await mkdir(path.dirname(installedRoot), { recursive: true })
       await cp(packageDir, installedRoot, { recursive: true })
       hostText = await readFile(path.join(packageDir, 'lib/index.js'), 'utf8')
+      await symlink(path.dirname(path.dirname(fileURLToPath(import.meta.resolve('@deepseek-ai/cordis/package.json')))), path.join(tmpRoot, 'host', 'node_modules', '@deepseek-ai'))
     })
 
     it('装进 node_modules 后，包名、/package.json、/client 三个说明符都能解析', () => {
@@ -286,11 +287,13 @@ describe('Harness 插件安装件契约', () => {
       process.env.DSH_HOME = path.join(tmpRoot, 'profile')
       const effects = []
       const services = new Map()
+      await mkdir(process.env.DSH_HOME, { recursive: true })
       const context = {
+        invocation: { peer: { id: 'artifact-peer' } },
         effect(callback) { effects.push(callback()) },
         provide(name, value) { services.set(name, value); return () => services.delete(name) },
         typert: { register() { return async () => {} } },
-        get() { return undefined }, // 宿主没有 credentials 服务：Host 照常加载
+        get(name) { return name === 'profileContext' ? { dir: process.env.DSH_HOME } : undefined }, // 宿主没有 credentials 服务：Host 照常加载
       }
       try {
         await hostModule.apply(context)

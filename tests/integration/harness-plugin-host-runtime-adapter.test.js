@@ -17,7 +17,8 @@ async function withHost(run, { register = () => async () => {} } = {}) {
   const services = new Map()
   const effects = []
   const ctx = {
-    get: () => undefined,
+    invocation: { peer: { id: 'fixture-peer' } },
+    get: (name) => name === 'profileContext' ? { dir: root } : undefined,
     provide(name, value) { services.set(name, value); return () => { services.delete(name) } },
     typert: { register },
     effect(callback) { effects.push(callback()) },
@@ -52,7 +53,7 @@ test('Host entry loads without the credentials service, resolves it per provider
     assert.ok((await readFile(path.join(dataDir, 'diagnostics.log'), 'utf8')).includes('"name":"CredentialServiceUnavailable"'), '诊断日志记下服务缺席')
 
     // 服务出现：不重载 Host，下一次操作就经 ctx.get 取到它并按句柄解析。
-    ctx.get = (name) => (name === 'credentials' ? credential : undefined)
+    ctx.get = (name) => name === 'profileContext' ? { dir: root } : name === 'credentials' ? credential : undefined
     const command = await service.bootstrapWorkspace({ kind: 'agent', id: 'host-entry' }, 'host-entry-1')
     assert.deepEqual([command.writeState, (await service.baseline()).entities.length > 0, received()[0]], ['local_only', true, 'bearer credential-canary-1'])
 
