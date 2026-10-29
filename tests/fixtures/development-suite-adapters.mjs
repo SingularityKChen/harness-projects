@@ -16,6 +16,8 @@ const repository = { bindingId, objectKind: 'repository', externalId: 'repo-alph
 const PREPARED_BRANCH = 'prepared/source'
 const PREPARED_HELD = 'prepared/held'
 const PREPARED_DUP = 'prepared/dup'
+const PREPARED_COLLISION_A = 'prepared/collision-a'
+const PREPARED_COLLISION_B = 'prepared/collision-b'
 const PREPARED_WORKTREE = '/worktrees/wt-prepared'
 const PREPARED_CR = 'pr-prepared'
 
@@ -40,6 +42,8 @@ export function baseProvider(scenario = {}) {
     { repository: repositoryRef, ref: refOf(bindingId, 'branch', PREPARED_BRANCH), name: PREPARED_BRANCH, headCommit: 'sha-1' },
     { repository: repositoryRef, ref: refOf(bindingId, 'branch', PREPARED_HELD), name: PREPARED_HELD, headCommit: 'sha-1' },
     { repository: repositoryRef, ref: refOf(bindingId, 'branch', PREPARED_DUP), name: PREPARED_DUP, headCommit: 'sha-1' },
+    { repository: repositoryRef, ref: refOf(bindingId, 'branch', PREPARED_COLLISION_A), name: PREPARED_COLLISION_A, headCommit: 'sha-1' },
+    { repository: repositoryRef, ref: refOf(bindingId, 'branch', PREPARED_COLLISION_B), name: PREPARED_COLLISION_B, headCommit: 'sha-1' },
   )
   provider.state.worktrees.push(
     { repository: repositoryRef, ref: refOf(bindingId, 'worktree', PREPARED_WORKTREE), path: PREPARED_WORKTREE, branch: PREPARED_HELD },
@@ -79,6 +83,7 @@ const worktreeRef = { bindingId, objectKind: 'worktree', externalId: PREPARED_WO
 export const SUITE_EXPECT = Object.freeze({
   repository, baseBranch: 'main', headCommit: 'sha-1', pageSize: 1, worktreePath: '/worktrees/wt-1',
   worktreeBranch: PREPARED_BRANCH, worktreeRef, worktreeRefBranch: PREPARED_HELD, worktreeDupBranch: PREPARED_DUP,
+  worktreeCollisionBranchA: PREPARED_COLLISION_A, worktreeCollisionBranchB: PREPARED_COLLISION_B,
   preparedChangeRequest: { ref: { bindingId, objectKind: 'change_request', externalId: PREPARED_CR, url: undefined }, headBranch: PREPARED_HELD, reviewState: 'approved' },
   objects: (provider) => structuredClone(provider.state),
 })

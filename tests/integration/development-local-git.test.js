@@ -30,8 +30,12 @@ const suiteFixture = await makeFixture((cleanup) => after(cleanup))
  *  已被预置工作树 `wt-prepared` 检出；该形态不声明 createWorktree，创建用例不会再去检出它。 */
 const PREPARED_BRANCH = 'feature/prepared'
 const PREPARED_DUP_BRANCH = 'feature/prepared-dup'
+const PREPARED_COLLISION_A = 'feature/prepared-collision-a'
+const PREPARED_COLLISION_B = 'feature/prepared-collision-b'
 await suiteFixture.run(['branch', PREPARED_BRANCH, 'main'])
 await suiteFixture.run(['branch', PREPARED_DUP_BRANCH, 'main'])
+await suiteFixture.run(['branch', PREPARED_COLLISION_A, 'main'])
+await suiteFixture.run(['branch', PREPARED_COLLISION_B, 'main'])
 
 /** 对象钩子：每次从磁盘真实读取 refs 与 worktree 登记，不缓存、不 alias。 */
 const diskObjects = (fixture) => async () => ({
@@ -53,6 +57,8 @@ const localGitSuite = (fixture, capabilities) => developmentContractSuite({
     worktreeRef: fixture.worktreeRef,
     worktreeRefBranch: fixture.worktreeRefBranch,
     worktreeDupBranch: PREPARED_DUP_BRANCH,
+    worktreeCollisionBranchA: PREPARED_COLLISION_A,
+    worktreeCollisionBranchB: PREPARED_COLLISION_B,
     objects: diskObjects(fixture),
   },
 })
@@ -64,6 +70,8 @@ for (const capabilities of [{ branchCreate: false }, { worktreeCreate: false }, 
   const fixture = await makeFixture((cleanup) => after(cleanup))
   await fixture.run(['branch', PREPARED_BRANCH, 'main'])
   await fixture.run(['branch', PREPARED_DUP_BRANCH, 'main'])
+  await fixture.run(['branch', PREPARED_COLLISION_A, 'main'])
+  await fixture.run(['branch', PREPARED_COLLISION_B, 'main'])
   // worktree.create 关闭时读取用例必须读回一份真实存在于磁盘上的预置工作树，而不是跳过。
   if (capabilities.worktreeCreate === false) {
     fixture.worktreeRef = { bindingId: BINDING, objectKind: 'worktree', externalId: path.join(fixture.root, 'wt-prepared'), url: undefined }

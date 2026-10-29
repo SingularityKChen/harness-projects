@@ -4,7 +4,7 @@
  * `{ capabilities: { branchCreate: false } }` 可选能力未启用；`{ faults: { permissionDenied: true } }`
  * 权限被拒；`{ faults: { offline: true } }` 离线；`{ faults: { ambiguousCreate: true } }` 创建结果不确定。
  * `expect`：`{ repository, baseBranch, headCommit, pageSize, worktreePath, worktreeBranch?, worktreeRef?, worktreeRefBranch?,
- * worktreeDupBranch?, preparedChangeRequest?, objects }`。`preparedChangeRequest` 是适配器预置的一份变更请求事实
+ * worktreeDupBranch?, worktreeCollisionBranchA?, worktreeCollisionBranchB?, preparedChangeRequest?, objects }`。`preparedChangeRequest` 是适配器预置的一份变更请求事实
  * `{ ref, headBranch, reviewState }`：声明 `change_request.read` 时套件据它判定 get / list 的分支与评审投影和
  * headBranch 过滤。只读形态（能读、不能建变更请求）的判别力只能来自它，所以该形态**必须**提供，缺失时具名报「测试装配缺」；
  * 能现建变更请求的形态可选。能力子集从
@@ -27,7 +27,7 @@
  * 谱系——变更请求的 sourceVersion 就是它头部提交的 sha，所以 工作树→分支→提交→变更请求 一路都能
  * 按外部 id 读回，调用方不需要重新识别对象；失败是结构化结果而不是裸错误。两个身份闸门同样是契约：
  * 外来 binding 的仓库引用必须 not_found 而不是静默空页 / 静默创建（未声明的能力对任何输入都回答
- * not_supported——能力整体不存在时结论与输入无关）；同一路径重复创建工作树必须 conflict 而不是静默复用。
+ * not_supported——能力整体不存在时结论与输入无关）；同仓同路径同分支重复创建工作树返回 conflict，路径被另一分支或仓库占用则硬失败。
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -627,6 +627,40 @@ export function developmentContractSuite(adapter) {
     const again = await implemented(provider, 'createWorktree')(dupInput)
     assert.equal(again.ok, false)
     assert.equal(again.error.code, 'conflict', '第二次创建必须报冲突，而不是把两次创建折成同一条记录')
+  })
+
+  test(`${label}：同一路径已有另一分支时硬失败且不改对象`, async () => {
+    const provider = makeProvider({})
+    const collisionPath = `${expected.worktreePath}-branch-collision`
+    const createInput = (branch) => ({ repository, worktreeKey: 'wt-branch-collision', path: collisionPath, branch })
+    if (!await declares(provider, 'createWorktree')) {
+      await expectOptional(provider, 'createWorktree', createInput('feature/wt-collision-a'), expected)
+      return
+    }
+
+    const ownBranches = await declares(provider, 'createBranch')
+    const branchA = ownBranches ? 'feature/wt-collision-a' : need('worktreeCollisionBranchA', 'branch.create 不可用时冲突用例需要独立预置分支 A')
+    const branchB = ownBranches ? 'feature/wt-collision-b' : need('worktreeCollisionBranchB', 'branch.create 不可用时冲突用例需要独立预置分支 B')
+    if (ownBranches) {
+      for (const name of [branchA, branchB]) {
+        const branch = await implemented(provider, 'createBranch')({ repository, name, fromRef: expected.baseBranch })
+        assert.equal(branch.ok, true, `${name} 必须存在且未检出`)
+      }
+    }
+
+    const first = await implemented(provider, 'createWorktree')(createInput(branchA))
+    assert.equal(first.ok, true, '路径必须先成功关联分支 A')
+    const beforeRejected = await expected.objects(provider)
+    const rejected = await implemented(provider, 'createWorktree')(createInput(branchB))
+    assert.equal(rejected.ok, false, '已被 A 占用的路径不得被 B 复用')
+    assert.notEqual(rejected.error.code, 'conflict', 'conflict 表示同仓同路径同分支可供对账复用')
+    assert.equal(rejected.error.retryable, false, '不同分支占用路径是确定性冲突，原样重试无效')
+    await assertObjectsUnchanged(provider, expected, beforeRejected, '不同分支占用工作树路径')
+    if (await declares(provider, 'getWorktree')) {
+      const read = await implemented(provider, 'getWorktree')({ worktree: first.value.ref })
+      assert.equal(read.ok, true)
+      assert.equal(read.value.branch, branchA, '原工作树仍必须属于 A')
+    }
   })
 
   test(`${label}：未启用的可选能力报 unavailable，调用后是结构化 not_supported 且无副作用`, async () => {

@@ -32,6 +32,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-10-29-membership-duplicate-content](exec-plan/completed/2026-10-29-membership-duplicate-content.md) | 成员替换重复内容契约（#337） |
+| [2026-10-29-worktree-conflict-contract](exec-plan/completed/2026-10-29-worktree-conflict-contract.md) | 可复用工作树冲突契约（#200） |
 | [2026-10-28-pr438-pr440-review-followup](exec-plan/completed/2026-10-28-pr438-pr440-review-followup.md) | PR #438–#440 MMP 评审、非阻塞修复与授权收尾 |
 | [2026-10-28-execution-run-refresh](exec-plan/completed/2026-10-28-execution-run-refresh.md) | 签发者运行刷新、变化式健康度与详情读回（#365） |
 | [2026-10-27-pr406-pr409-review-followup](exec-plan/completed/2026-10-27-pr406-pr409-review-followup.md) | PR #406–#409 MMP 评审、非阻塞修复、独立复评与授权合并 |
