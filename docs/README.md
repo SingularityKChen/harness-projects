@@ -32,6 +32,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-10-29-membership-duplicate-content](exec-plan/completed/2026-10-29-membership-duplicate-content.md) | 成员替换重复内容契约（#337） |
+| [2026-10-29-demo-user-guide](exec-plan/completed/2026-10-29-demo-user-guide.md) | Demo 用户路径、限制与人工走查准备（#444） |
 | [2026-10-29-worktree-conflict-contract](exec-plan/completed/2026-10-29-worktree-conflict-contract.md) | 可复用工作树冲突契约（#200） |
 | [2026-10-29-truthful-readable-list](exec-plan/completed/2026-10-29-truthful-readable-list.md) | 可见行新鲜度与主题列表闭环（#366/#429） |
 | [2026-10-28-pr438-pr440-review-followup](exec-plan/completed/2026-10-28-pr438-pr440-review-followup.md) | PR #438–#440 MMP 评审、非阻塞修复与授权收尾 |
@@ -180,6 +181,7 @@
 | 文档 | 回答的问题 |
 |---|---|
 | [board-semantics.md](product/board-semantics.md) | `Status` 与 `Engineering` 字段分别属于规划轴还是工程轴、谁写、不变量 3 在看板上如何被满足、全部内置工作流该开该关、`Size` 为什么是信号而不是控制 |
+| [demo.md](product/demo.md) | Harness Projects 预发布 Demo 的用户路径、验收边界、已知限制与人工走查记录 |
 | [vertical-path.md](product/vertical-path.md) | 纵向链路的步骤枚举、MVP-0 / MVP-1 / 首发范围各自的判定方式、MVP-0 的非目标 |
 | [2026-10-26-host-recomposition](exec-plan/completed/2026-10-26-host-recomposition.md) | 提交设置即时重组、同流连续读取与延迟权限探测（#354） |
 | [2026-10-26-plugin-workspace-setup](exec-plan/completed/2026-10-26-plugin-workspace-setup.md) | 插件单工作区创建/连接与真实 Harness Web 沙箱验收（#131） |
