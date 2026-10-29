@@ -60,6 +60,14 @@ npx --yes --package @deepseek-ai/dsh@0.2.0-rc.2 dsh web --patch "$HP_DEMO_SCRATC
 
 连接规划服务时，凭据参考名为 `HARNESS_PROJECTS_GITHUB_TOKEN`；通过宿主 credentials 服务配置，Project 数据库只保存句柄。不要把 token 放在工作区名称、配置文案或本指南中。连接、仓库绑定、完整 demo 走查分别遵循其产品指南与验收范围。
 
+## 当前数据根与旧库保留
+
+当前插件以官方 launcher 提供的 `profileContext.dir` 为权威目录，realpath 核对后将数据库写入该 profile 的 `harness-projects/workspace.sqlite`，工作树与诊断位于同一插件数据目录。上述固定 Web profile 对应 `$DSH_HOME/profiles/web/harness-projects/`；自定义 profile 各有自己的目录。同一 profile 重启沿同一路径，两个 profile 不共享数据库。home 与 tilde 由官方 launcher 解析，插件不再自行按环境变量或用户 home 重建根；缺失或无效 profile 元数据会在开库前拒绝。
+
+旧版 `$DSH_HOME/harness-projects/` 原件保持不动，切换后可能先看到空工作区。先停止使用该库的宿主，备份并核对需要保留的数据和工作树，再明确选择新位置重建或匹配旧 artifact 的恢复副本；插件不自动搬动、合并、删除或升级旧库。不把旧数据库复制到新 profile 来接管执行，也不承诺旧插件可安全读取新库。回滚使用停机后明确选定的匹配版本与原库副本，新 profile 库及用户仓库、分支、工作树继续保留。人工备用仍使用原凭据管理器中的稳定密钥。
+
+命令发起者由本次宿主 Connection 的 peer 决定，客户端发送的 actorRef 不授予身份或权限。它不是稳定的人类账号；重启后 peer 可变化，Start Work 等带耐久身份的旧 key 会明确冲突，先读取已发生的结果。设置命令只有进程内重放，重启后按自然键读回，不能借此声称所有命令都有持久 actor 账本。
+
 ## 显式启用会话执行与人工备用
 
 宿主出现 `host ready` 只代表插件已加载。工作区创建后，在 **连接设置** 点击 **启用 Harness 执行**。Host 在一次本地事务中安装 Harness 主执行与 human 备用两个挂载，成功后重新装配并显示 **Harness 执行绑定已启用**。这条提示表示绑定配置已启用；它不证明会话服务、模型凭据或人工备用密钥可用。重复点击或重启读回同一对 binding ID；已有自定义、残缺或停用的执行挂载会返回冲突，不覆盖用户配置。普通启动不会自动安装、补齐或复活挂载。
@@ -119,3 +127,5 @@ npx --yes --package @deepseek-ai/dsh@0.2.0-rc.2 dsh web --patch "$HP_DEMO_SCRATC
 源码候选、具体判定、独立评审与回读命令见 [安装件 ExecPlan](../exec-plan/completed/2026-10-26-plugin-demo-artifact.md)。重新打包后应重新核对摘要；版本号不能替代本次字节身份。原始访问日志和截图仅留隔离运行目录。
 
 2026-10-27 的执行接线验证使用临时 SQLite、真实 Local Git 工作树、生产 Host/remote 与既有会话录制回放；覆盖安装幂等、主备用冲突、同密钥重启、缺服务和故障开关、模型错误及 unknown 零人工启动。此轮未启动真实模型或用户会话，也未重新执行实际 Web/ Desktop 安装演练；新 tarball 的摘要必须按本指南重新核对，不能沿用上面的历史摘要。
+
+2026-10-29 的 #423 临时 Web 观察使用官方 `0.2.0-rc.2` / Cordis `4.0.4`、两个自定义 profile 与产物 SHA-256 `3b704750efebb01a660f8604a13417ac00ace87d546d67834f28fba2d81ba308`：同一 Connection 在两个合法伪造 actor 下重放本地 createWorkspace，结果相同；另一个 profile 首次为空并创建自己的工作区；同 profile 重启后保留名称，Connection peer 已变化。设置命令没有持久 actor 账本，重启后相同自然键成功读回，不能冒充旧 key 的耐久身份验证。实际 peer 与 profile 根由单独的临时只读观察插件记录，该插件不在交付 tgz；撤下观察层、卸载插件并重启后，两 profile 的认证远程入口均为 404、数据库保留。没有配置模型或发送 prompt，也没有真实 GitHub 写入；Start Work 的耐久 actor/冲突证据来自独立的真实 Gateway/生产 composition/Local Git/SQLite 集成用例。

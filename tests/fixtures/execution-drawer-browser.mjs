@@ -21,7 +21,7 @@ export async function createExecutionFixture() {
   const id = contextIdFor(workspaceId, itemId, 'repo-alpha'), runId = runIdFor(id)
   await storage.putExecutionRun({ ...(await storage.getExecutionRun(runId)), fallback: true })
   const host = await createHostComposition({ dataPath, workspaceId, catalog, resolveCredential: async () => undefined })
-  const installed = await installHostRemote({ provide: () => () => {}, typert: { register: () => () => {} } }, host)
+  const installed = await installHostRemote({ invocation: { peer: { id: 'fixture-peer' } }, provide: () => () => {}, typert: { register: () => () => {} } }, host)
   return { workspaceId, itemId, runId, storage, host, installed, mounted, close: async () => { await installed.dispose(); host.dispose(); storage.close(); await rm(root, { recursive: true, force: true }) } }
 }
 

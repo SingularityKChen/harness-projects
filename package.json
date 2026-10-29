@@ -20,6 +20,10 @@
     "verify": "pnpm run typecheck && pnpm run test && pnpm run test:mvp0"
   },
   "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-api-gateway": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-home-paths": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-typert-registry": "0.2.0-rc.2",
     "@harness-projects/app-harness-plugin": "workspace:*",
     "@harness-projects/app-web": "workspace:*",
     "@harness-projects/capabilities": "workspace:*",

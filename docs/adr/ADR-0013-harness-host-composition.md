@@ -31,3 +31,6 @@ Host 必须拥有权威状态，前端只能消费它；把 Core 或 SQLite 放�
 - 本地 adapter、打包安装件和 TypeScript 契约可以在 CI 验证。真实 Desktop 的安装、401/403 与缺 `harnessProjectsProviders` 时的 404 fail closed 已在 head `c494a62c` 的构建上观测，之后的修复改了两个 bundle、未复测；正向 `/api` POST 往返与宿主内建库经人类批准转入 #132 联合验收；Host unload、重连与卸载后保留调用的宿主内观测未执行，同样要等 #132 的 provider，不在批准转移范围内，作为残余风险。这些都不能由本地 green 推断。
 - `dispose` 先撤回 remote contribution，再关闭 composition；重复 dispose 幂等。当前批次拒绝新请求并等待已开始的 handler 由 typed remote 生命周期处理，跨代 watch drain 留给 #276。
 - `Status`、Project Status、`blocked-by` / `blocking` 与 ADR Accepted 状态不由 agent 写入；人类伙伴决定是否采纳本 ADR。
+
+- #423（2026-10-29）：Host-only adapter 使用固定 Harness 0.2.0-rc.2 / Cordis 4.0.4 公开的 `Service.tracker` 与 `Tracker`，令普通 live service 保留调用级 `this.ctx.invocation`，同时保留已有 `provide` disposer。wire 的 actorRef 仅作严格形状校验，命令实际采用 `harness_peer/<invocation.peer.id>`；缺失调用身份在 composition 前固定失败，不回退到客户端或全局 operator。peer 是 Connection 身份，不是稳定的人类账号。Start Work 的耐久指纹跨 Host 重启仍可能因 peer 变化拒绝旧 key；设置命令只有进程内重放，重启后按自然键读回，不暗示新增耐久 actor 账本。
+- #423（2026-10-29）：数据库由 launcher 的 `profileContext.dir` 经 realpath 后派生，各 profile 分别保存 `harness-projects/workspace.sqlite`、worktrees 与诊断。缺失、相对、无效目录在打开库前失败；官方 launcher 负责 home/tilde 解析。旧全局共享根不自动移动、合并、升级或删除；回滚前停宿主并明确选择匹配旧 artifact 的原库，新 profile 数据保留，不能靠复制库接管未知执行。

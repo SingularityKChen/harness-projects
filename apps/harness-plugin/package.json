@@ -23,6 +23,9 @@
     "@harness-projects/provider-execution-harness": "workspace:*",
     "@harness-projects/provider-execution-human": "workspace:*"
   },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  },
   "scripts": {
     "build": "node scripts/build.mjs",
     "pack:plugin": "node scripts/build.mjs && pnpm --dir dist/package pack --pack-destination ..",
