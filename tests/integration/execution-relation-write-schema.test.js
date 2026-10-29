@@ -51,7 +51,7 @@ function seed(db) {
     INSERT INTO external_identity VALUES ('identity-1','entity-2','binding-1','issue','repo-1','primary');
     INSERT INTO repository VALUES ('repo-1','ws-1','identity-1');
     INSERT INTO project_item_membership VALUES ('ws-1','project-1','item-1','issue','issue-1','x','x');
-    INSERT INTO execution_context VALUES ('context-1','ws-1','entity-1','repo-1','ready',NULL,NULL,NULL);`)
+    INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-1','ws-1','entity-1','repo-1','ready',NULL,NULL,NULL);`)
 }
 
 test('空库建出 L3 十一张表，二次运行是 no-op', () => withDatabase((db) => {
@@ -186,10 +186,10 @@ test('已钉住的约束变异：每条拒绝用例只因目标约束失败，�
   rejects(db, "INSERT INTO candidate_relation VALUES ('ws-1','entity-1','entity-2','depends_on','business_semantics','deterministic','confirmed')", /CHECK constraint failed: state = 'candidate'/)
   rejects(db, "INSERT INTO sync_observation VALUES ('binding-1','issue','issue-9','t9','k9','v9','{}','bogus')", /CHECK constraint failed: state IN \('pending','processed','ignored','failed'\)/)
   rejects(db, "INSERT INTO sync_cursor VALUES ('ws-1','binding-1','scope-9','c','bogus',NULL)", /CHECK constraint failed: state IN \('idle','syncing','healthy','degraded','failed'\)/)
-  rejects(db, "INSERT INTO execution_context VALUES ('context-9','ws-1','entity-1','repo-1','bogus',NULL,NULL,NULL)", /CHECK constraint failed: status IN \('planned','provisioning','ready','closed','failed'\)/)
+  rejects(db, "INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-9','ws-1','entity-1','repo-1','bogus',NULL,NULL,NULL)", /CHECK constraint failed: status IN \('planned','provisioning','ready','closed','failed'\)/)
   // 部分索引 execution_context_active 的 WHERE：active 状态被覆盖，closed 不被覆盖（去掉 WHERE 会让下面这条变红）
-  rejects(db, "INSERT INTO execution_context VALUES ('context-2','ws-1','entity-1','repo-1','provisioning',NULL,NULL,NULL)", /UNIQUE constraint failed: execution_context\.workspace_id, execution_context\.work_item_id, execution_context\.repository_id/)
-  db.exec("INSERT INTO execution_context VALUES ('context-3','ws-1','entity-1','repo-1','closed',NULL,NULL,NULL)")
+  rejects(db, "INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-2','ws-1','entity-1','repo-1','provisioning',NULL,NULL,NULL)", /UNIQUE constraint failed: execution_context\.workspace_id, execution_context\.work_item_id, execution_context\.repository_id/)
+  db.exec("INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-3','ws-1','entity-1','repo-1','closed',NULL,NULL,NULL)")
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM execution_context WHERE status='closed'").get().n, 1, 'closed 不在部分索引的 WHERE 里，可与 active 上下文并存')
   // webhook_subscription 的唯一键含 workspace_id（ADR-0006：订阅是工作区级事实）
   db.exec("INSERT INTO webhook_subscription VALUES ('wh-1','ws-1','binding-1','scope-1','issues',1)")
@@ -207,7 +207,7 @@ test('已钉住的约束变异：每条拒绝用例只因目标约束失败，�
   rejects(db, "INSERT INTO sync_cursor VALUES ('ws-none','binding-1','scope-1','c','idle',NULL)", /FOREIGN KEY constraint failed/)
   rejects(db, "INSERT INTO webhook_subscription VALUES ('wh-4','ws-1','binding-none','scope-1','issues',1)", /FOREIGN KEY constraint failed/)
   // work_item_id 外键：端口在它之前以 StorageInputError 拒绝（#196），端口用例碰不到它；这道最终防线只由本条钉住
-  rejects(db, "INSERT INTO execution_context VALUES ('context-8','ws-1','entity-none','repo-1','closed',NULL,NULL,NULL)", /FOREIGN KEY constraint failed/)
+  rejects(db, "INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-8','ws-1','entity-none','repo-1','closed',NULL,NULL,NULL)", /FOREIGN KEY constraint failed/)
 }))
 
 test('关系候选分表、执行 active 唯一、修订删除实体不倒退，外键目标均存在', () => withDatabase((db) => {
@@ -228,15 +228,15 @@ test('关系候选分表、执行 active 唯一、修订删除实体不倒退，
   rejects(db, "INSERT INTO mutation_attempt (workspace_id,idempotency_key,id,binding_id,command_name,state,expected_source_version,error_code,created_at,updated_at) VALUES ('ws-1','k1','w1','binding-none','addItem','pending',NULL,NULL,'x','x')", /FOREIGN KEY constraint failed/)
   rejects(db, "INSERT INTO mutation_attempt (workspace_id,idempotency_key,id,binding_id,command_name,state,expected_source_version,error_code,created_at,updated_at) VALUES ('ws-1',NULL,'w1','binding-1','addItem','pending',NULL,NULL,'x','x')", /NOT NULL constraint failed/)
   rejects(db, "INSERT INTO mutation_attempt (workspace_id,idempotency_key,id,binding_id,command_name,state,expected_source_version,error_code,created_at,updated_at) VALUES ('ws-1','k1','w1','binding-1','addItem','bogus',NULL,NULL,'x','x')", /CHECK constraint failed/)
-  rejects(db, "INSERT INTO execution_context VALUES ('context-2','ws-1','entity-1','repo-1','planned',NULL,NULL,NULL)", /UNIQUE constraint failed/)
+  rejects(db, "INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-2','ws-1','entity-1','repo-1','planned',NULL,NULL,NULL)", /UNIQUE constraint failed/)
   // 部分索引的 WHERE 只覆盖 active 状态：去掉 WHERE 会让下面这条 closed 插入变红（部分性由"closed 可并存"钉住）。
-  rejects(db, "INSERT INTO execution_context VALUES ('context-2b','ws-1','entity-1','repo-1','provisioning',NULL,NULL,NULL)", /UNIQUE constraint failed: execution_context\.workspace_id, execution_context\.work_item_id, execution_context\.repository_id/)
-  db.exec("INSERT INTO execution_context VALUES ('context-2c','ws-1','entity-1','repo-1','closed',NULL,NULL,NULL)")
+  rejects(db, "INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-2b','ws-1','entity-1','repo-1','provisioning',NULL,NULL,NULL)", /UNIQUE constraint failed: execution_context\.workspace_id, execution_context\.work_item_id, execution_context\.repository_id/)
+  db.exec("INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-2c','ws-1','entity-1','repo-1','closed',NULL,NULL,NULL)")
   // 工作区作用域经复合外键传递：仓库属于另一个工作区时必须被拒绝（不变量 5）。
   db.exec("INSERT INTO repository VALUES ('repo-2','ws-2','identity-1')")
   // 挂载键是 (workspace_id, id)（#187 / #188）：SQLite 的复合主键允许 NULL，所以 id 必须显式 NOT NULL，否则「没有 id 的挂载」能被裸 SQL 写进库。
   rejects(db, "INSERT INTO repository VALUES (NULL,'ws-1','identity-1')", /NOT NULL constraint failed: repository\.id/)
-  rejects(db, "INSERT INTO execution_context VALUES ('context-3','ws-1','entity-1','repo-2','planned',NULL,NULL,NULL)", /FOREIGN KEY constraint failed/)
+  rejects(db, "INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-3','ws-1','entity-1','repo-2','planned',NULL,NULL,NULL)", /FOREIGN KEY constraint failed/)
   rejects(db, "INSERT INTO execution_run (id,workspace_id,context_id,status,updated_at) VALUES ('run-2','ws-2','context-1','running','now')", /FOREIGN KEY constraint failed/)
   const run = (ref, fallback) => `INSERT INTO execution_run VALUES ('run-4','ws-1','context-1','running','now',${ref},${fallback})`
   for (const [ref, fallback] of [["'{not json'", 0], ["'null'", 0], ["'[]'", 0], ['NULL', 2]]) rejects(db, run(ref, fallback), /CHECK constraint failed/)
@@ -248,14 +248,14 @@ test('关系候选分表、执行 active 唯一、修订删除实体不倒退，
   // 单调增长是端口职责（见迁移注释与契约套件的修订号用例）；库层只保证非负，这里断言的就是这一条。
 }))
 
-test('003 显式 schema 审查：十一张表的 67 列全部在白名单内，没有列能存凭据材料', () => withDatabase((db) => {
+test('003 显式 schema 审查：十一张表的 68 列全部在白名单内，没有列能存凭据材料', () => withDatabase((db) => {
   migrate(db)
   // 逐列白名单（与 L2 的 `identity-membership-schema.test.js` 同形）：与 `pragma_table_info` **互相覆盖**，
   // 多一列、少一列都失败——新增列必须同步写进这里，否则这份审查只是声明。
   const AUDITED = {
     'repository.external_identity_id': '标识', 'repository.id': '标识', 'repository.workspace_id': '标识',
     'execution_context.branch_external_id': '平台原样值', 'execution_context.id': '标识',
-    'execution_context.provisioning_started_at': '时间戳', 'execution_context.repository_id': '标识',
+    'execution_context.provisioning_generation': '单调 owner 代际：正 safe integer', 'execution_context.provisioning_started_at': '时间戳', 'execution_context.repository_id': '标识',
     'execution_context.status': '枚举：执行上下文状态', 'execution_context.work_item_id': '标识',
     'execution_context.workspace_id': '标识', 'execution_context.worktree_external_id': '平台原样值',
     'execution_run.context_id': '标识', 'execution_run.id': '标识', 'execution_run.status': '枚举：运行状态',
@@ -286,7 +286,14 @@ test('003 显式 schema 审查：十一张表的 67 列全部在白名单内，�
     .flatMap((table) => columns(db, table).map((column) => `${table}.${column}`)).sort()
   assert.deepEqual(actual, Object.keys(AUDITED).sort(),
     '每一条列都必须被显式审计：新增列要同步写进 AUDITED，否则这份审查只是声明')
-  assert.equal(actual.length, 67, '003/004 建出的执行面表共 67 列')
+  assert.equal(actual.length, 68, '003/004 建出的执行面表共 68 列')
+  seed(db)
+  for (const invalid of ['0', '-1', '1.5', '9007199254740992', "'invalid'"]) {
+    rejects(db, `UPDATE execution_context SET provisioning_generation=${invalid}`, /CHECK constraint failed/)
+    assert.equal(db.prepare('SELECT provisioning_generation FROM execution_context').get().provisioning_generation, null, 'CHECK 拒绝不留下半写')
+  }
+  db.exec('UPDATE execution_context SET provisioning_generation=9007199254740991')
+  assert.equal(db.prepare('SELECT provisioning_generation FROM execution_context').get().provisioning_generation, Number.MAX_SAFE_INTEGER)
   const credentialLike = /token|password|passwd|secret|credential|private_?key|access_?key|api_?key/i
   assert.deepEqual(actual.filter((qualified) => credentialLike.test(qualified)), [],
     '没有任何列能存凭据材料；凭据只保存 secret 服务句柄')

@@ -68,8 +68,14 @@ function injectAfterWrite(storage, method, nth) {
 }
 /** 第 nth 次写不进去（抛错且不落库），其余原样透传；nth 为 0 时只计数（无故障正控）。与 injectAfterWrite 的区别：这里本地事实确实缺失。 */
 function injectLostWrite(storage, method, nth) {
-  const hits = { calls: 0, thrown: 0 }; const write = storage[method].bind(storage)
-  storage[method] = async (...args) => { hits.calls += 1; if (hits.calls === nth) { hits.thrown += 1; throw new Error('注入的写失败') } return write(...args) }
+  const hits = { calls: 0, thrown: 0 }
+  const counted = (target, write) => async (...args) => { hits.calls++; if (hits.calls === nth) { hits.thrown++; throw new Error('注入的写失败') } return write.apply(target, args) }
+  storage[method] = counted(storage, storage[method])
+  const transaction = storage.transaction.bind(storage)
+  storage.transaction = (work) => transaction((tx) => work(new Proxy(tx, { get(target, key) {
+    const value = Reflect.get(target, key, target)
+    return key === method ? counted(target, value) : typeof value === 'function' ? value.bind(target) : value
+  } })))
   return hits
 }
 /** 事务里写入的 `type` 关系被静默丢掉（不抛错、不落库），或降成候选：写入方以为成功，只留下缺口——历史残缺的 Ready 的真实成因。 */
@@ -414,14 +420,14 @@ for (const [label, makeStorage] of ADAPTERS) {
     tamper(providers); const hits = injectAfterWrite(storage, method, nth); const workItemId = pick('work_item'); const contextId = contextIdFor(ws, workItemId, REQUEST.repositoryId)
     const before = external(providers); const snapshot = await world(providers, storage, ws, contextId); const result = await start(core, workItemId, 'local')
     return { hits, result, unchanged: (await world(providers, storage, ws, contextId)) === snapshot, branch: `work/${workItemId}`, delta: external(providers).map((n, i) => n - before[i]), record: await storage.getExecutionContext(contextId),
-      relations: (await storage.listRelations(ws)).map((r) => r.type).sort(), attempts: (await storage.listMutationAttempts(ws)).map((a) => a.state), run: await storage.getExecutionRun(runIdFor(contextId)) }
+      relations: (await storage.listRelations(ws)).map((r) => r.type).sort(), attempts: (await storage.listMutationAttempts(ws)).map((a) => a.state), run: await storage.getExecutionRun(runIdFor(contextId)), ackedWorktree: providers.development.state.worktrees.at(-1)?.ref.externalId }
   }
   // ack 之后的本地写失败：[场景, 注入的写方法, 第几次写, 外部增量（分支、工作树、运行）, 无故障时该方法的总调用次数]。
   const LOCAL_FAILURES = [
     ['最终事务的最后一写：Git 的 mutation_attempt', 'putMutationAttempt', 2, [1, 1, 0], 2],
     ['最终事务的第二条关系 has_worktree，tracks 一并回滚', 'putRelation', 2, [1, 1, 0], 2],
     ['分支步的步骤回填，工作树步不得开始', 'putExecutionContext', 2, [1, 0, 0], 4],
-    ['工作树步的步骤回填（写已生效、调用失败）', 'putExecutionContext', 3, [1, 1, 0], 4],
+    ['工作树步的步骤回填（事务内写后失败回滚）', 'putExecutionContext', 3, [1, 1, 0], 4],
     ['最终事务自己的 context 写（事务里第一写）', 'putExecutionContext', 4, [1, 1, 0], 4],
   ]
   for (const [name, method, nth, delta, total] of LOCAL_FAILURES) {
@@ -430,8 +436,8 @@ for (const [label, makeStorage] of ADAPTERS) {
       assert.deepEqual(hits, { calls: nth, thrown: 1 }, '注入真的触发了')
       assert.deepEqual([result.writeState, result.confirmed, result.saving, result.degraded, result.error?.code, result.status, /本次外部调用的失败/.test(result.error.message)], ['unknown', false, false, true, 'result_unknown', 'provisioning', false], '外部调用没有失败过：文案不带「原始失败」后缀')
       assert.deepEqual(rest.delta, delta, '外部写入只到已 ack 的那一步，startRun 0 次')
-      assert.deepEqual([record.status, record.branchExternalId, record.provisioningStartedAt !== undefined, record.worktreeExternalId !== undefined], ['provisioning', branch, true, delta[1] === 1], '停在 Provisioning，保留已 ack 的句柄与租约')
-      assert.deepEqual([result.branchExternalId, result.worktreeExternalId], [record.branchExternalId, record.worktreeExternalId], '结果面带着最后已 ack 的句柄')
+      assert.deepEqual([record.status, record.branchExternalId, record.provisioningStartedAt !== undefined, record.worktreeExternalId !== undefined], ['provisioning', method === 'putExecutionContext' && nth === 2 ? undefined : branch, true, delta[1] === 1 && !(method === 'putExecutionContext' && nth < 4)], '停在 Provisioning，短事务失败不留下步骤半写，先前已提交步骤与租约保留')
+      assert.deepEqual([result.branchExternalId, result.worktreeExternalId], [branch, rest.ackedWorktree], '结果带着 Provider 实际 ack 的句柄，独立于本地事务是否成功')
       assert.deepEqual([rest.relations, rest.attempts, rest.run], [[], ['pending'], undefined], '只有首次 Pending：Ready、关系与结算状态同一个事务，要么全在要么全无')
       const control = await attempt(method, 0)
       assert.deepEqual([control.hits, control.result.status, control.relations, control.attempts, control.record.provisioningStartedAt], [{ calls: total, thrown: 0 }, 'ready', ['has_worktree', 'tracks'], ['saved'], undefined], '同场景无故障正控（Ready 的租约已清空）')
