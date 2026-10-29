@@ -18,6 +18,7 @@
 | 文档 | 回答的问题 |
 |---|---|
 | [board-semantics.md](board-semantics.md) | `Status` 与 `Engineering` 分别属于规划轴还是工程轴、谁写、不变量 3 在看板上如何被满足 |
+| [demo.md](demo.md) | Harness Projects 预发布 Demo 的用户路径、验收边界、已知限制与人工走查记录 |
 | [vertical-path.md](vertical-path.md) | 纵向链路的步骤枚举、MVP-0 / MVP-1 / 首发范围各自的判定方式、MVP-0 的非目标 |
 
 尚未补齐的主题：独立术语表、页面与交互的目标形态、MVP / V1 / 后续版本的范围分级。在这些补齐之前，产品结论以本索引中的文档与 `AGENTS.md` §1 为准。

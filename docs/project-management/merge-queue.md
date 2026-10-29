@@ -552,6 +552,8 @@ gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,baseRe
 | 3 | #456 `fix/host-command-authority` | Closes #423 | 更新至已含#455的main；重核真实profile根与生产打包 |
 | 4 | #445 `docs/demo-user-guide` | Closes #444；Refs #236 | 更新#420已交付事实与profile根，人工走查/独立安装仍未接受 |
 
+2026-10-29 已回读 #454→`3160568431fe9417147ade1fb379a4ff652c8ffd`、#455→`cfbdca6b5d4eeabc950990d1aed45a68f456794d`、#456→`ba13dd90af9ceeff7405f95496a8ecc77bb6ce5c` 均 MERGED。#445 已按这些实际落点更新owner围栏与profile目录，最终状态按本轮评审记录所列命令重读。
+
 授权为本会话人类对这四个PR的直接条件授权；没有未修复P0/P1才可用rebase merge。最终状态用评审记录中的只读命令重算，不以本队列表替代当前远端事实。
 
 ## 5. 历史：2026-09-18 那一轮的实测结果
