@@ -185,3 +185,86 @@ test('旧列表回归：没有 navigation 时列表输出完全不变，标题�
   assert.doesNotMatch(plain, /<a[ >]|href=/)
   assert.match(plain, /<th scope="row"[^>]*>VISIBLE-TITLE<\/th>/)
 })
+
+
+// Catches: measuring the window instead of the plugin workspace, omitting reserve, or remounting on resize.
+test('responsive-detail：真实布局根裁剪到 viewport，1200 预留，1199 与窄 Host 容器覆盖，resize 不重开', () => {
+  const internals = uiRequire('react').__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED
+  const previous = internals.ReactCurrentDispatcher.current
+  const oldWindow = globalThis.window, oldObserver = globalThis.ResizeObserver
+  const effects = [], refs = [], writes = new Map(), attributes = new Map(), listeners = new Map()
+  let resize, observed, disconnects = 0, opens = 0, closes = 0
+  let rect = { left: 100, top: 80, right: 1300, bottom: 800 }
+  const root = { getBoundingClientRect: () => rect, style: { setProperty: (k, v) => writes.set(k, v), removeProperty: (k) => writes.delete(k) },
+    setAttribute: (k, v) => attributes.set(k, v), removeAttribute: (k) => attributes.delete(k) }
+  globalThis.window = { innerWidth: 1440, innerHeight: 900, addEventListener: (k, fn) => listeners.set(k, fn), removeEventListener: (k) => listeners.delete(k) }
+  globalThis.ResizeObserver = class { constructor(fn) { resize = fn } observe(node) { observed = node } disconnect() { disconnects += 1 } }
+  internals.ReactCurrentDispatcher.current = { useState: (v) => [v, () => undefined], useRef: (v) => { const ref = { current: v }; refs.push(ref); return ref }, useId: () => ':r:', useEffect: (fn) => effects.push(fn) }
+  try {
+    const tree = ui.WorkItemDetailDrawer({ view: views([wire('ent-aa')]).detailView, onClose: () => { closes += 1 }, layoutRoot: { current: root } })
+    refs[0].current = { open: false, showModal: () => { opens += 1 } }
+    const cleanups = effects.map((fn) => fn()).filter(Boolean)
+    assert.equal(attributes.get('data-detail-layout'), 'wide', '1200px 的实际工作区进入预留模式')
+    assert.equal(observed, root, '观察实际工作区，而不是全窗口')
+    assert.deepEqual([...writes.values()], ['960px', '80px', '340px', '720px'], '右340px落在可见工作区矩形内')
+    assert.equal(tree.props.className.includes('hp-detail'), true)
+    rect = { left: 100, top: 80, right: 1299, bottom: 800 }; resize()
+    assert.equal(attributes.get('data-detail-layout'), 'overlay', '1199px 覆盖，不能挤压主列表')
+    rect = { left: 300, top: 20, right: 1300, bottom: 1200 }; resize()
+    assert.deepEqual([...writes.values()], ['960px', '20px', '340px', '880px'], '窗口宽1440但Host主区1000仍覆盖，底部裁到viewport')
+    assert.equal(attributes.get('data-detail-layout'), 'overlay')
+    rect = { left: -20, top: -10, right: 300, bottom: 500 }; listeners.get('scroll')()
+    assert.deepEqual([...writes.values()], ['0px', '0px', '300px', '500px'], '320宽容器被viewport裁剪后不得出屏')
+    assert.deepEqual([opens, closes], [1, 0], 'resize/scroll只更新表现，不showModal或导航')
+    cleanups.forEach((fn) => fn())
+    assert.deepEqual([disconnects, listeners.size, attributes.size, writes.size], [1, 0, 0, 0], '卸载释放观察器/监听和表现属性')
+  } finally { internals.ReactCurrentDispatcher.current = previous; globalThis.window = oldWindow; globalThis.ResizeObserver = oldObserver }
+})
+
+// Catches: cycling focus into a disabled, hidden, or CSS-hidden last control.
+test('detail-tab：隐藏和禁用控件不参与首尾循环，标题Shift+Tab进入最后可用控件', () => {
+  const internals = uiRequire('react').__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED
+  const previous = internals.ReactCurrentDispatcher.current, doc = globalThis.document
+  const refs = [], focused = []
+  internals.ReactCurrentDispatcher.current = { useState: (v) => [v, () => undefined], useRef: (v) => { const ref = { current: v }; refs.push(ref); return ref }, useId: () => ':r:', useEffect: () => undefined }
+  try {
+    const tree = ui.WorkItemDetailDrawer({ view: views([wire('ent-aa')]).detailView, onClose: () => undefined })
+    const node = (name, attrs = {}, visible = true) => ({ hasAttribute: (k) => Boolean(attrs[k]), closest: () => attrs.hidden ? {} : null, getClientRects: () => visible ? [{}] : [], focus: () => focused.push(name) })
+    const first = node('first'), last = node('last'), heading = node('heading')
+    refs[0].current = { querySelectorAll: () => [node('disabled', { disabled: true }), first, last, node('hidden', { hidden: true }), node('css-hidden', {}, false)] }
+    refs[1].current = heading
+    let prevented = 0
+    globalThis.document = { activeElement: last }; tree.props.onKeyDown({ key: 'Tab', preventDefault: () => { prevented += 1 } })
+    globalThis.document.activeElement = first; tree.props.onKeyDown({ key: 'Tab', shiftKey: true, preventDefault: () => { prevented += 1 } })
+    globalThis.document.activeElement = heading; tree.props.onKeyDown({ key: 'Tab', shiftKey: true, preventDefault: () => { prevented += 1 } })
+    assert.deepEqual([prevented, focused], [3, ['first', 'last', 'last']])
+  } finally { internals.ReactCurrentDispatcher.current = previous; globalThis.document = doc }
+})
+
+
+// Catches: restoring focus to a disconnected/replaced opener, or navigating during cleanup.
+test('detail-close-focus：原入口仍在列表时回焦，否则落可聚焦列表标题', () => {
+  const internals = uiRequire('react').__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED
+  const previous = internals.ReactCurrentDispatcher.current, doc = globalThis.document
+  const refs = [], focused = [], effects = []
+  let cursor = 0
+  internals.ReactCurrentDispatcher.current = { useRef: (v) => { const i = cursor++; return refs[i] ?? (refs[i] = { current: v }) }, useEffect: (fn) => effects.push(fn) }
+  try {
+    const { listView, detailView } = views([wire('ent-aa')])
+    const opener = { isConnected: true, focus: () => focused.push('opener') }
+    const list = { contains: (node) => node === opener, querySelector: () => ({ focus: () => focused.push('heading') }) }
+    const render = (detail) => { cursor = 0; effects.length = 0; return ui.WorkItemProjectPage({ listView, detailView: detail, navigation: { href: (id) => id, open: () => undefined }, onCloseDetail: () => undefined }) }
+    const runEffects = () => effects.forEach((fn) => fn())
+    const initial = render(undefined)
+    initial.props.children.find((node) => node?.props?.className === 'hp-project-list').ref.current = list
+    runEffects()
+    globalThis.document = { activeElement: opener }
+    const open = () => render(undefined).props.children.find((node) => node?.props?.className === 'hp-project-list').props.children.props.navigation.open('ent-aa')
+    open(); render(detailView); runEffects(); render(undefined); runEffects()
+    opener.isConnected = false
+    open(); render(detailView); runEffects(); render(undefined); runEffects()
+    opener.isConnected = true; list.contains = () => false
+    open(); render(detailView); runEffects(); render(undefined); runEffects()
+    assert.deepEqual(focused, ['opener', 'heading', 'heading'])
+  } finally { internals.ReactCurrentDispatcher.current = previous; globalThis.document = doc }
+})

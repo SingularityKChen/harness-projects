@@ -9,6 +9,8 @@ import type { ReactElement } from 'react'
 import type { WorkItemDetailView, WorkItemListView } from '@harness-projects/ui-model'
 import { WorkItemDetailDrawer, activeElement, type DOMElement } from './work-item-detail.ts'
 import { WorkItemListPage, type ItemNavigation } from './work-item-list.ts'
+import { DETAIL_STYLES, type LayoutRoot } from './detail-presentation.ts'
+import { WORKSPACE_STYLES } from './workspace-presentation.ts'
 
 export function WorkItemProjectPage({ listView, detailView, navigation, onCloseDetail, executionReader, connected, startWork, onBindRepository, deliveryReader, refresh }: {
   readonly refresh?: { readonly pending: boolean; readonly disabled: boolean; readonly run: () => void } | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined;
@@ -21,6 +23,7 @@ export function WorkItemProjectPage({ listView, detailView, navigation, onCloseD
   readonly navigation: ItemNavigation | undefined
   readonly onCloseDetail: () => void
 }): ReactElement {
+  const layoutRoot = useRef<LayoutRoot | null>(null)
   const list = useRef<DOMElement | null>(null)
   const opener = useRef<DOMElement | null>(null)
   const openerContainer = useRef<DOMElement | null>(null)
@@ -41,11 +44,12 @@ export function WorkItemProjectPage({ listView, detailView, navigation, onCloseD
     href: navigation.href,
     open: (itemId) => { opener.current = activeElement(); openerContainer.current = list.current; navigation.open(itemId) },
   }
-  return createElement('div', null,
-    ...(refresh === undefined ? [] : [createElement('button', { type: 'button', disabled: refresh.disabled, 'aria-busy': refresh.pending, onClick: refresh.run }, refresh.pending ? '正在刷新规划' : '刷新规划')]),
-    createElement('div', { ref: list }, createElement(WorkItemListPage, { view: listView, navigation: routed, headingTabIndex: -1 })),
+  return createElement('div', { ref: layoutRoot, className: 'hp-workspace hp-project' },
+    ...(refresh === undefined ? [] : [createElement('button', { className: 'hp-project-refresh hp-action', type: 'button', disabled: refresh.disabled, 'aria-busy': refresh.pending, onClick: refresh.run }, refresh.pending ? '正在刷新规划' : '刷新规划')]),
+    createElement('div', { ref: list, className: 'hp-project-list' }, createElement(WorkItemListPage, { view: listView, navigation: routed, headingTabIndex: -1 })),
     // 列表的页面级说明也交给抽屉：模态打开时列表 inert，说明只在列表里就既看不到也不被宣告（#379）
     detailView === undefined ? null : createElement(WorkItemDetailDrawer, {
-      view: detailView, refresh, executionReader, deliveryReader, connected, startWork, onBindRepository, notice: listView.body.kind === 'content' ? listView.body.notice : undefined, onClose: onCloseDetail,
-    }))
+      view: detailView, layoutRoot, refresh, executionReader, deliveryReader, connected, startWork, onBindRepository, notice: listView.body.kind === 'content' ? listView.body.notice : undefined, onClose: onCloseDetail,
+    }),
+    createElement('style', null, WORKSPACE_STYLES, DETAIL_STYLES))
 }
