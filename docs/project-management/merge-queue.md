@@ -656,3 +656,16 @@ gh issue reopen 4 -c "被 #108 的关闭引用自动关闭；revise 清单（R1�
 每条合入后fetch真实main，再变基下一条；共享历史先backup再精确lease。最终产品blob必须与已独立验证的完整前序对应版本相同，变动则重审重测。只执行rebase merge，issue验收与规划Status分离。跨PR证据见 `docs/review/2026-10-27-pr406-pr409-mmp-review.md`。
 
 2026-10-27 +08 本批逐步回读：#406已rebase合并为`f60236748e7aa34713342c4361cfc034f50aaae7`、#230CLOSED；#407已rebase合并为`d310a06c933e8801462962b3a4feedf5e79ec400`、#356CLOSED；#408已rebase合并为`6a335358458afe83c1af9bc33227a0aaffd06406`、#142CLOSED。#409继续按上表当前头门禁及回读命令执行，未在记录中预写成功。
+
+
+## 2026-10-29 · PR #441–#443 授权收尾
+
+直接用户授权与完整矩阵见 `docs/review/2026-10-29-pr441-pr443-mmp-review.md`。共同初始 base `main@bb9a7a259ab81ca89f01d03aa837555607a74fdd`，以下顺序没有产品依赖；仓库外 clone 的完整前序预演已完成。每条合入后 fetch 真实 main，再更新下一条；精确 lease 与当前 head 批准/门禁是前置条件。
+
+| 顺序 | PR / issue | 接合点与处置 | 最终结果回读 |
+|---|---|---|---|
+| 1 | #441 / #337 | 承载本批索引/队列；唯一 P2 为端口 scope 说明，已独立复评 | `gh pr view 441 -R SingularityKChen/harness-projects --json state,mergeCommit,headRefOid` |
+| 2 | #442 / #200 | 仅 Completed 索引预演冲突，保留两边全部条目；产品树无冲突 | `gh pr view 442 -R SingularityKChen/harness-projects --json state,mergeCommit,headRefOid` |
+| 3 | #443 / #366/#429 | 同上，保留三份计划索引；visible/redacted 语义与八列 UI 一并保留 | `gh pr view 443 -R SingularityKChen/harness-projects --json state,mergeCommit,headRefOid` |
+
+对应 issue 回读 CLOSED；父项和人工 Demo/R1 不随本批关闭。merge 只推进工程事实，规划 Status 保持人类所有。记录不预写未来 merge SHA。

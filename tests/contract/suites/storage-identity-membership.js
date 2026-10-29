@@ -278,6 +278,43 @@ export function storageIdentitySyncSuite(adapter, register = test) {
       }, { scope: [], scopeValues: [], otherProject: ['other-project'], otherWorkspace: ['other-workspace'], identity: 'entity-2' }, '空 incoming 清空 scope 内成员与字段值，scope 外与身份不动')
     })
 
+    register(`${label}：duplicate-content-last-wins follows incoming order and removes displaced fields`, async () => {
+      const run = async (incoming, expectedWinner) => {
+        const storage = makeStorage()
+        await seedWorkspace(storage)
+        await seedWorkspace(storage, 'ws-2')
+        const old = membership({ itemExternalId: 'item-old', contentExternalId: 'issue-obsolete', membershipCreatedAt: '2026-09-19T00:00:00Z', membershipUpdatedAt: '2026-09-19T00:00:01Z' })
+        const independent = membership({ itemExternalId: 'item-0-keep', contentExternalId: 'issue-independent', membershipCreatedAt: '2026-09-18T00:00:00Z', membershipUpdatedAt: '2026-09-18T00:00:01Z' })
+        const otherProject = membership({ projectExternalId: 'project-2', itemExternalId: 'item-other-project' })
+        const otherWorkspace = membership({ workspaceId: 'ws-2', itemExternalId: 'item-other-workspace' })
+        await storage.putMembership(old)
+        await storage.putMembership(incoming[0])
+        await storage.putMembership(independent)
+        await storage.putMembership(otherProject)
+        await storage.putMembership(otherWorkspace)
+        await storage.putFieldValue(fieldValue({ itemExternalId: 'item-old', value: 'displaced' }))
+        await storage.putFieldValue(fieldValue({ itemExternalId: incoming[0].itemExternalId, value: 'displaced-incoming' }))
+        await storage.putFieldValue(fieldValue({ itemExternalId: 'item-other-project', value: 'other-project' }))
+        await storage.putFieldValue(fieldValue({ workspaceId: 'ws-2', itemExternalId: 'item-other-workspace', value: 'other-workspace' }))
+
+        await storage.transaction((tx) => tx.replacePlanningMemberships(
+          { workspaceId: WORKSPACE, projectExternalId: 'project-1' }, [...incoming, independent],
+        ))
+
+        assert.deepEqual(await storage.listMemberships(WORKSPACE, 'project-1'), [independent, expectedWinner], '同内容只保留数组中最后一个完整成员记录，其他 incoming 内容保留')
+        assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-old'), [], '被重复内容取代的旧成员字段值必须清除')
+        assert.deepEqual(await storage.listFieldValues(WORKSPACE, incoming[0].itemExternalId), [], '同内容后项取代已存的前项时，前项字段值必须在循环内清除')
+        assert.deepEqual(await storage.listMemberships(WORKSPACE, 'project-2'), [otherProject], '另一个 project 的同内容成员必须保留')
+        assert.deepEqual(await storage.listMemberships('ws-2', 'project-1'), [otherWorkspace], '另一个 workspace 的同内容成员必须保留')
+        assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-other-project'), [fieldValue({ itemExternalId: 'item-other-project', value: 'other-project' })], '另一个 project 中同内容成员的字段值必须保留')
+        assert.deepEqual(await storage.listFieldValues('ws-2', 'item-other-workspace'), [fieldValue({ workspaceId: 'ws-2', itemExternalId: 'item-other-workspace', value: 'other-workspace' })], 'scope 外字段值必须保留')
+      }
+      const itemA = membership({ itemExternalId: 'item-a', membershipCreatedAt: '2026-09-21T00:00:00Z', membershipUpdatedAt: '2026-09-21T00:00:01Z' })
+      const itemB = membership({ itemExternalId: 'item-b', membershipCreatedAt: '2026-09-22T00:00:00Z', membershipUpdatedAt: '2026-09-22T00:00:01Z' })
+      await run([itemA, itemB], itemB)
+      await run([itemB, itemA], itemA)
+    })
+
     register(`${label}：item 是字段值的定位分量——两个条目同一 projectFieldId 各自一条`, async () => {
       const storage = makeStorage()
       await seedWorkspace(storage)

@@ -227,7 +227,11 @@ export interface Storage {
   putMembership(record: MembershipRecord): Promise<void>
   getMembership(workspaceId: WorkspaceId, itemExternalId: string): Promise<MembershipRecord | undefined>
   listMemberships(workspaceId: WorkspaceId, projectExternalId: string): Promise<readonly MembershipRecord[]>
-  /** 把一个完整 Planning project 读取收敛为 incoming；只删除 scope 内缺失的成员及其字段值，保留实体与外部身份。 */
+  /**
+   * 把一个完整 Planning project 读取收敛为 incoming；只删除 workspaceId+projectExternalId scope 内缺失的成员及字段值，保留实体与外部身份。
+   * incoming 的写入仍遵循上面的 (workspaceId, itemExternalId) 覆盖规则。
+   * 同一 contentKind+contentExternalId 在 incoming 重复时按数组顺序以后项获胜；被替换成员的字段值一并清除。
+   */
   replacePlanningMemberships(scope: { readonly workspaceId: WorkspaceId; readonly projectExternalId: string }, incoming: readonly MembershipRecord[]): Promise<void>
   putFieldValue(record: FieldValueRecord): Promise<void>
   listFieldValues(workspaceId: WorkspaceId, itemExternalId: string): Promise<readonly FieldValueRecord[]>
