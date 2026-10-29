@@ -66,12 +66,12 @@ const SCENARIOS = {
 }
 
 /** `lastUpdatedAt: null` 表示 Host 从未读到当前值（read 上省略该字段）。 */
-function render({ entities = [], access = 'available', capabilities, connected = true, metadata = meta, workspace = '工作区', lastUpdatedAt = T, gap = false, reason, ...input }) {
+function render({ entities = [], access = 'available', capabilities, connected = true, metadata = meta, workspace = '工作区', lastUpdatedAt = T, reconciledAt, gap = false, reason, ...input }) {
   const store = createEntityStore()
   store.applyBaseline({ revision: 0, entities, source: { revision: 0, freshness: 'fresh', authority: 'provider', reason: undefined } })
   if (gap) store.markAllStale()
   const read = {
-    workspace: { id: 'ws-1', name: workspace }, store, connection: { connected }, lastUpdatedAt: lastUpdatedAt ?? undefined, reason,
+    workspace: { id: 'ws-1', name: workspace }, store, connection: { connected }, lastUpdatedAt: lastUpdatedAt ?? undefined, reconciledAt, reason,
     capabilities: capabilities ?? [{ key: 'planning.item.read', access }],
   }
   return renderToStaticMarkup(createElement(ui.WorkItemListPage, { view: deriveWorkItemListView({ ...input, read, metadata }) }))
@@ -122,6 +122,17 @@ test('内容：原生 table 语义、稳定状态区在 busy 容器外、规划�
   const never = render({ ...SCENARIOS.content, lastUpdatedAt: null })
   assert.match(never, /来源：(<[^>]+>)?规划源.*最后已知值（最后读取时间未知）/)
   assert.equal(never.match(/最后读取时间未知/g).length, 1, '时间只在横幅里说明一次')
+  const times = render({ ...SCENARIOS.content, reconciledAt: '2026-10-01T07:59:00.000Z' })
+  assert.match(times, /规划来源最后确认：<time dateTime="2026-10-01T07:59:00.000Z">/)
+  assert.match(times, /最后读取：<time dateTime="2026-10-01T08:00:00.000Z">/, '来源确认与本地接收时间分别保留')
+})
+
+test('长迭代与多条工程事实：完整文字各在原始列，不截断或合并到相邻事实', () => {
+  const html = render({ phase: 'received', refreshing: false, entities: [wire('ent-aa', {
+    planningFields: { iterationTitle: 'Iteration 2026 Platform Integration', targetDate: '2026-11-01' },
+    derived: ['ci_failing', 'execution_failed'],
+  })] })
+  assert.deepEqual(cells(html)[1].slice(3, 7), ['Iteration 2026 Platform Integration', '2026-11-01', 'CI 失败、执行失败', '来源一（提供方权威）'])
 })
 
 test('陈旧 / 刷新 / 降级 / 缺口：保行；状态区只宣告一次，横幅只带来源与固定时刻；页首与行都不冒充当前值', () => {
@@ -132,7 +143,7 @@ test('陈旧 / 刷新 / 降级 / 缺口：保行；状态区只宣告一次，�
   for (const name of ['stale', 'degraded', 'gap', 'offlineKept', 'refreshing']) assert.equal(H[name].match(/尚未确认|正在刷新/g).length, 1, `${name} 只宣告一次`)
   for (const name of ['stale', 'degraded', 'gap', 'offlineKept', 'refreshing', 'staleEmpty', 'refreshingEmpty']) {
     assert.match(H[name], banner, name)
-    assert.match(H[name], /<p>规划来源：<span>规划源<\/span><\/p>/, `${name} 的页首不再单独声明新鲜度`)
+    assert.match(H[name], /<p[^>]*>规划来源：<span[^>]*>规划源<\/span><\/p>/, `${name} 的页首不再单独声明新鲜度`)
   }
   assert.equal(status(H.refreshing), '正在刷新，当前显示的是最后已知值')
   assert.doesNotMatch(H.refreshing, /当前值/, '刷新页没有任何“当前值”')
@@ -145,7 +156,7 @@ test('陈旧 / 刷新 / 降级 / 缺口：保行；状态区只宣告一次，�
 test('部分读取（#382）：状态区说部分条目未确认；没有「最后已知值」横幅，页首与已确认的行一样是当前值并带时刻', () => {
   assert.equal(H.partial.match(/<div role="status"[^>]*>(.*?)<\/div>/)[1], '部分条目尚未确认，已显示的条目是当前值')
   assert.doesNotMatch(H.partial, /最后已知值/, '可见行都已确认：横幅与行都不说最后已知值')
-  assert.match(H.partial, /<p>规划来源：<span>规划源<\/span>；<span>当前值（最后读取：<time dateTime="2026-10-01T08:00:00.000Z">/, '确认时刻仍在页首给出')
+  assert.match(H.partial, /<p[^>]*>规划来源：<span[^>]*>规划源<\/span>；<span[^>]*>当前值（最后读取：<time dateTime="2026-10-01T08:00:00.000Z">/, '确认时刻仍在页首给出')
   assert.deepEqual(cells(H.partial).slice(1).map((row) => row[7]), ['当前值', '—', '当前值'])
 })
 
@@ -157,13 +168,15 @@ test('独立标记只在为真的状态出现：degraded 与只读只在可读�
   assert.doesNotMatch(H.permissionReadOnly, /只读：|降级/)
 })
 
-test('版式：滚动容器可聚焦且横向可滚；短标签列不换行，标题与来源有最小宽度并可换行（内联 style 是唯一载体）', () => {
-  assert.match(H.content, /<div role="region" aria-label="[^"]+" tabindex="0" style="overflow-x:auto"><table>/)
-  const [head, visible, hidden] = [...H.content.matchAll(/<tr>(.*?)<\/tr>/g)].map(([, tr]) => [...tr.matchAll(/style="([^"]*)"/g)].map((match) => match[1]))
-  const [nowrap, wrap] = ['white-space:nowrap', 'overflow-wrap:anywhere;min-width:12em']
-  assert.deepEqual(head, Array(8).fill(nowrap))
-  const row = [wrap, nowrap, nowrap, nowrap, nowrap, nowrap, wrap, nowrap]
-  assert.deepEqual([visible, hidden], [row, row])
+test('版式：原生表格在独立滚动区；长文字有换行规则、单元格间距与 Host 焦点 token', () => {
+  assert.match(H.content, /<div role="region" aria-label="[^"]+" tabindex="0" class="hp-list-scroll"><table/)
+  assert.match(H.content, /overflow-x:auto/)
+  assert.match(H.content, /overflow-wrap:anywhere/)
+  assert.match(H.content, /padding:12px 14px/)
+  assert.match(H.content, /:focus-visible/)
+  assert.match(H.content, /var\(--dsw-focus-ring-width, 2px\)/)
+  assert.match(H.content, /var\(--dsw-focus-ring-color, var\(--dsw-alias-state-business-primary, #4176e6\)\)/)
+  assert.equal((H.content.match(/class="hp-list-wrap"/g) ?? []).length, 6, '每行标题与来源都可换行，redacted 占位仍在原列')
 })
 
 test('不可用：权限 / 不支持 / 未知 / 离线 / 错误说明各不相同，不借缓存，没有行；每类都写出还能做什么，读门已观测不可用不说尚未确认', () => {
@@ -173,7 +186,7 @@ test('不可用：权限 / 不支持 / 未知 / 离线 / 错误说明各不相�
     gateUnavailable: [/读取工作项的能力（planning\.item\.read）当前不可用，原因未提供/, /工作区与规划来源仍可查看.*读取能力恢复之前不显示条目.*也不显示此前的缓存/],
     offlineNone: [/无法连接规划来源/, /连接恢复后会重新读取/], error: [/读取工作项失败/, /稍后重试/],
   }
-  const parts = (html) => html.match(/<div aria-busy="false"><div><p>([^<]*)<\/p><p>([^<]*)<\/p><\/div><\/div>/)?.slice(1) ?? []
+  const parts = (html) => html.match(/<div aria-busy="false"><div[^>]*><p>([^<]*)<\/p><p>([^<]*)<\/p><\/div><\/div>/)?.slice(1) ?? []
   assert.doesNotMatch(H.gateUnavailable, /尚未确认/)
   for (const [name, [message, remaining]] of Object.entries(expected)) {
     const [shownMessage = '', shownRemaining = ''] = parts(H[name])
@@ -181,7 +194,7 @@ test('不可用：权限 / 不支持 / 未知 / 离线 / 错误说明各不相�
     assert.match(shownRemaining, remaining, `${name} 的第二段写出还能做什么 / 怎样恢复`)
     assert.doesNotMatch(`${shownMessage}${shownRemaining}`, /仍会显示|但会显示|会显示此前的缓存/, `${name} 不得承诺显示此前的缓存`)
     assert.doesNotMatch(H[name], /Visible A|<table|<tr/, name)
-    assert.match(H[name], /<h2>工作区<\/h2><p>规划来源：<span>规划源<\/span><\/p>/, `${name} 仍显示剩余可见的工作区与来源`)
+    assert.match(H[name], /<h2>工作区<\/h2><p[^>]*>规划来源：<span[^>]*>规划源<\/span><\/p>/, `${name} 仍显示剩余可见的工作区与来源`)
   }
 })
 
@@ -190,7 +203,8 @@ test('泄漏面：全部场景的完整 HTML 不含被遮蔽字段与内部标�
     for (const canary of CANARIES) assert.ok(!html.includes(canary), `${name}: ${canary}`)
   }
   for (const name of ['content', 'stale', 'refreshing', 'degraded', 'readOnly', 'offlineKept']) assert.ok(H[name].includes('Visible A'), name)
-  assert.doesNotMatch(Object.values(H).join(''), /<(a|button|input|script|style)\b|href=|data-|\bid=|\bon[a-z]+=|ent-|bind-/)
+  for (const html of Object.values(H)) assert.equal((html.match(/<style>/g) ?? []).length, 1, '仅页面自有局部样式，不插入用户样式')
+  assert.doesNotMatch(Object.values(H).join(''), /<(a|button|input|script)\b|href=|data-|\bid=|\bon[a-z]+=|ent-|bind-/)
 })
 
 test('转义：恶意来源名、提示、工作区名按文字转义，不产生标签', () => {

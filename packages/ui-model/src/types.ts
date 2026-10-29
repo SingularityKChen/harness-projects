@@ -120,7 +120,7 @@ export interface WorkItemRow {
   readonly actions: readonly ActionAvailability[]
 }
 
-/** 工作项列表：`stale` / `connection` / `reason` 三者同出一处降级决策，`stale` 是**整表**结论。 */
+/** 工作项列表：`stale` / `connection` / `reason` 三者同出一处降级决策，`stale` 是可见行与工作区读取状态的整页结论，redacted 自身 freshness 不参与。 */
 export interface WorkItemList {
   readonly rows: readonly WorkItemRow[]
   readonly stale: boolean
