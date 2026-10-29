@@ -172,10 +172,10 @@ test('版式：原生表格在独立滚动区；长文字有换行规则、单�
   assert.match(H.content, /<div role="region" aria-label="[^"]+" tabindex="0" class="hp-list-scroll"><table/)
   assert.match(H.content, /overflow-x:auto/)
   assert.match(H.content, /overflow-wrap:anywhere/)
-  assert.match(H.content, /padding:12px 14px/)
+  assert.match(H.content, /padding:\.75rem 1rem/)
   assert.match(H.content, /:focus-visible/)
-  assert.match(H.content, /var\(--dsw-focus-ring-width, 2px\)/)
-  assert.match(H.content, /var\(--dsw-focus-ring-color, var\(--dsw-alias-state-business-primary, #4176e6\)\)/)
+  assert.match(H.content, /var\(--dsw-focus-ring-width,2px\)/)
+  assert.match(H.content, /var\(--dsw-focus-ring-color,var\(--dsw-alias-state-business-primary,currentColor\)\)/)
   assert.equal((H.content.match(/class="hp-list-wrap"/g) ?? []).length, 6, '每行标题与来源都可换行，redacted 占位仍在原列')
 })
 

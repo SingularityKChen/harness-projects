@@ -67,3 +67,35 @@ test('完整路径：meta 触达 derive → page view → renderer → 纯值 le
 test('负控：入口经 domain 根出口取运行时值时构建失败（node:crypto 不可解析），不能靠外置 node:* 掩盖', async () => {
   await assert.rejects(bundle("import { newEntityId } from '@harness-projects/domain'\nexport const id = newEntityId"), /node:crypto/)
 })
+
+// 丢失实际 app/store/view 装配或泄漏被遮蔽字段会失败；这仍是 VM+SSR，不声称 DOM 布局。
+test('框架 fixture 打包真实 app 和 store；状态、来源时刻、长事实与 redacted 安全边界保持', async () => {
+  const { buildWorkspaceFrameBundle, startWorkspaceFrameServer } = await import('../fixtures/workspace-frame-browser.mjs')
+  const built = await buildWorkspaceFrameBundle()
+  for (const file of ['packages/ui/src/work-item-app.ts', 'packages/ui/src/workspace-presentation.ts', 'packages/client/src/store.ts', 'packages/ui-model/src/work-item-list-view.ts']) {
+    assert.ok(Object.keys(built.metafile.inputs).includes(file), file)
+  }
+  const sandbox = { module: { exports: {} }, require: (id) => id === 'react' ? React : assert.fail(id) }
+  vm.runInNewContext(built.outputFiles[0].text, sandbox)
+  const out = (scenario) => renderToStaticMarkup(sandbox.module.exports.scene(scenario))
+  for (const scenario of ['content', 'long', 'stale', 'offline', 'empty', 'loading', 'unresolved']) {
+    const html = out(scenario)
+    assert.match(html, /class="hp-workspace"/, scenario)
+    assert.doesNotMatch(html, /CANARY-|2099-12-31/, scenario)
+    if (['content', 'stale', 'offline'].includes(scenario)) assert.match(html, /可见工作项/, scenario)
+  }
+  assert.match(out('content'), /2026-10-01T07:59:00.000Z/)
+  assert.match(out('long'), /IterationWithoutSpacesIterationWithoutSpaces/)
+  assert.match(out('empty'), /当前快照没有工作项/)
+  assert.doesNotMatch(out('loading'), /<table|当前快照没有工作项/)
+  assert.match(out('offline'), /最后已知值/)
+  const fixture = await startWorkspaceFrameServer()
+  try {
+    const response = await fetch(fixture.url + '/?theme=dark&scenario=long&font=400')
+    assert.match(response.headers.get('content-type'), /text\/html/)
+    assert.match(await response.text(), /module.exports.mount/)
+    const script = await fetch(fixture.url + '/bundle.js')
+    assert.equal(script.status, 200)
+    assert.match(script.headers.get('content-type'), /javascript/)
+  } finally { await fixture.close() }
+})

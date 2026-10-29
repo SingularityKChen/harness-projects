@@ -684,3 +684,16 @@ gh issue reopen 4 -c "被 #108 的关闭引用自动关闭；revise 清单（R1�
 | 3 | #443 / #366/#429 | 同上，保留三份计划索引；visible/redacted 语义与八列 UI 一并保留 | `gh pr view 443 -R SingularityKChen/harness-projects --json state,mergeCommit,headRefOid` |
 
 对应 issue 回读 CLOSED；父项和人工 Demo/R1 不随本批关闭。merge 只推进工程事实，规划 Status 保持人类所有。记录不预写未来 merge SHA。
+
+
+## 2026-10-30 · PR #461–#463 条件授权收尾
+
+人类在本会话直接要求：没有 P0/P1 时，由评审会话修复、独立复评、归档、整理提交、核对 issue 并以 rebase 合并。完整风险矩阵和版本证据见 [本轮记录](../review/2026-10-30-pr461-pr463-mmp-review.md)。三个分支不是原生 stack，#462/#463 均只依赖 #461；选定顺序不新增规划依赖。
+
+| 顺序 | PR / issue | 闭环与接合 |
+|---|---|---|
+| 1 | #461 / Refs #446 | 共享 Host 主题框架；尚缺人类具体界面参数确认，保持 #446 OPEN，不通过 PR 或 commit 关闭 |
+| 2 | #462 / Closes #430 | 移到 #461 合入后的实际 main；保留详情长标识/原生控件 P2 修复和全部 Completed/Review 索引 |
+| 3 | #463 / Closes #447 | 移到前两项合入后的实际 main；保留表单状态和已结算的安装件新断言/最终组合验证；索引两边都保留 |
+
+每条合入后 fetch 真实 main；重新锁定下一条 head/base、diff、产品blob、当前 CI/PR Fast Gate、threads 与 issue双向关联，再取得当前 head 的评审结论。共享历史修改前保留 `backup/pr<n>-before-mmp-review-20261030` 并用精确 lease，不覆盖并发修改。最终产品/测试树须与已独立验证的 `test/mmp-ui-final@a9c277a` 一致，有差异就回到验证门。#427/#446/#449/#457/#459、组合浏览器与 R1 均不因 merge 自动接受；不改 Planning Status。

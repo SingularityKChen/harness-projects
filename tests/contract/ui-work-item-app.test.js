@@ -73,7 +73,7 @@ test('scope 门：未知路由与跨 scope 路由只出中性 unresolved，不�
   const source = sourceOf({ ...readOf(), store: trap })
   for (const initialPath of ['/projects/ws-1/item/ent-aa', '/projects/ws-9/items', '/projects/ws-9/items/ent-aa']) {
     const out = html({ source, initialPath })
-    assert.match(out, /<section aria-label="Harness Projects"><h2 tabindex="-1">无法显示此页面<\/h2>/, initialPath)
+    assert.match(out, /<section aria-label="Harness Projects" class="hp-workspace"><h2 tabindex="-1">无法显示此页面<\/h2>/, initialPath)
     for (const text of ['链接无效，或不属于当前工作区。', '回到工作项列表']) assert.ok(out.includes(text), `${initialPath}：${text}`)
     assert.doesNotMatch(out, /<tr|<a[ >]|href|ws-9|ent-aa|projects/, `${initialPath}：不回显路由，不生成行 / 链接`)
   }
@@ -122,7 +122,7 @@ test('断开说明只在 connected 为 false 时出现；无快照时是带 tabi
   assert.ok(drawer(false).includes(`<div role="status" aria-live="polite" aria-atomic="true">${NOTICE}</div>`), '抽屉打开时列表在模态背景下 inert：说明也在抽屉的状态区里')
   assert.ok(!drawer(true).includes('与宿主的连接已中断'), '在线：抽屉里也没有说明')
   const loading = html({ source: sourceOf(undefined), initialPath: '/projects/ws-1/items' })
-  assert.match(loading, /^<section aria-label="Harness Projects"><h2 tabindex="-1">Harness Projects<\/h2><p>正在连接宿主并读取工作项。<\/p>/)
+  assert.match(loading, /^<section aria-label="Harness Projects" class="hp-workspace"><h2 tabindex="-1">Harness Projects<\/h2><p>正在连接宿主并读取工作项。<\/p>/)
   assert.doesNotMatch(loading, /<tr|<table|<a[ >]|无法显示/, 'loading 不伪造工作区，也不进 scope 门')
 })
 
@@ -161,4 +161,19 @@ test('焦点：页面被替换（scope 变化、工作区切换）后只在焦�
   } finally {
     globalThis.document = previous
   }
+})
+
+// 移除实际入口的框架消费者应失败；这里只证明 SSR 装配，尺寸与焦点由真实浏览器验收。
+test('框架覆盖 loading、列表与 unresolved；无效链接仍有原生返回动作', () => {
+  for (const props of [
+    { source: sourceOf(undefined) },
+    { source: sourceOf(readOf()) },
+    { source: sourceOf(readOf()), initialPath: '/projects/other/items' },
+  ]) {
+    const out = html(props)
+    assert.match(out, /^<section[^>]*class="hp-workspace"/, '每个实际入口屏都承载共享框架')
+    assert.match(out, /<style>[^]*\.hp-workspace[^]*<\/style>/, '共享样式随真实入口装配')
+  }
+  const unresolved = html({ source: sourceOf(readOf()), initialPath: '/projects/other/items' })
+  assert.match(unresolved, /<button type="button" class="hp-action hp-action-primary">回到工作项列表<\/button>/)
 })
