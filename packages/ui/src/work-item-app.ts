@@ -13,6 +13,7 @@ import { LoadingState } from './list-states.ts'
 import { HARNESS_PANEL_TITLE } from './placeholder.ts'
 import type { DOMElement } from './work-item-detail.ts'
 import { WorkItemProjectPage } from './work-item-project.ts'
+import { WORKSPACE_STYLES } from './workspace-presentation.ts'
 
 /** 外部可订阅的读数源：快照在两次发布之间是同一对象（`useSyncExternalStore` 的前提），`undefined` = 还没有接受过帧。 */
 export interface WorkspaceSource {
@@ -39,7 +40,7 @@ function screenOf(read: WorkspaceRead | undefined, path: string | undefined, set
   const route = path === undefined ? { projectId: read.workspace.id } : parseItemRoute(path)
   if (route === undefined || route.projectId !== read.workspace.id) {
     return { key: 'unresolved', children: [heading('无法显示此页面'), createElement('p', null, '链接无效，或不属于当前工作区。'),
-      createElement('button', { type: 'button', onClick: () => setPath(undefined) }, '回到工作项列表')] }
+      createElement('button', { type: 'button', className: 'hp-action hp-action-primary', onClick: () => setPath(undefined) }, '回到工作项列表')] }
   }
   const { projectId, itemId } = route
   const notice = refresh.error ?? (refresh.pending ? '正在刷新，当前显示的是最后已知值' : read.connection.connected ? undefined : DISCONNECTED)
@@ -79,7 +80,7 @@ export function WorkItemApp({ source, initialPath, executionReader, startWork, o
     shown.current = key
     if (previous !== undefined && previous !== key && focusLost()) root.current?.querySelector?.('h2')?.focus?.()
   }, [key])
-  return createElement('section', { 'aria-label': HARNESS_PANEL_TITLE, ref: root }, ...children)
+  return createElement('section', { 'aria-label': HARNESS_PANEL_TITLE, className: 'hp-workspace', ref: root }, ...children, createElement('style', null, WORKSPACE_STYLES))
 }
 
 /** 壳只拿到一个无 hook 的组件：不写 `createElement`、不 import react，面板只算一次。 */

@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-29-mmp-ui-frame](exec-plan/completed/2026-10-29-mmp-ui-frame.md) | Host主题工作区视觉框架（#446） |
 | [2026-10-29-membership-duplicate-content](exec-plan/completed/2026-10-29-membership-duplicate-content.md) | 成员替换重复内容契约（#337） |
 | [2026-10-29-demo-user-guide](exec-plan/completed/2026-10-29-demo-user-guide.md) | Demo 用户路径、限制与人工走查准备（#444） |
 | [2026-10-29-worktree-conflict-contract](exec-plan/completed/2026-10-29-worktree-conflict-contract.md) | 可复用工作树冲突契约（#200） |
@@ -180,6 +181,7 @@
 
 | 文档 | 回答的问题 |
 |---|---|
+| [ui-workspace-frame.md](product/ui-workspace-frame.md) | 当前工作区的主题、层次、响应式与事实呈现约定 |
 | [board-semantics.md](product/board-semantics.md) | `Status` 与 `Engineering` 字段分别属于规划轴还是工程轴、谁写、不变量 3 在看板上如何被满足、全部内置工作流该开该关、`Size` 为什么是信号而不是控制 |
 | [demo.md](product/demo.md) | Harness Projects 预发布 Demo 的用户路径、验收边界、已知限制与人工走查记录 |
 | [vertical-path.md](product/vertical-path.md) | 纵向链路的步骤枚举、MVP-0 / MVP-1 / 首发范围各自的判定方式、MVP-0 的非目标 |
