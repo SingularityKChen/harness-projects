@@ -77,3 +77,16 @@ test('同源 HTTP：两个 canonical pathname 与深链都交给同一入口，�
     await fixture.close()
   }
 })
+
+
+// Catches: fixture scenario targets overriding the closed list route, which masks product focus restoration.
+test('遮蔽场景关闭：canonical列表路由不再保留详情，深链仍命中真实遮蔽目标', async () => {
+  const result = await buildBundle()
+  const sandbox = { module: { exports: {} }, require: (id) => (id === 'react' ? React : assert.fail(id)), ReactDOMServer: uiRequire('react-dom/server'), ReactDOMClient: uiRequire('react-dom/client') }
+  vm.runInNewContext(result.outputFiles[0].text, sandbox)
+  const { renderStatic } = sandbox.module.exports
+  assert.match(renderStatic('redacted', '/projects/ws-1/items/ent-aa'), /<dialog[^]*内容不可见/)
+  for (const scenario of ['content', 'redacted', 'missing']) {
+    assert.doesNotMatch(renderStatic(scenario, '/projects/ws-1/items'), /<dialog/, `${scenario} 关闭后只有列表，不能强制恢复scenario目标`)
+  }
+})

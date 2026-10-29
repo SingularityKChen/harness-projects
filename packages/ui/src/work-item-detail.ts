@@ -7,6 +7,8 @@ import { createElement, useEffect, useId, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { WorkItemDetailView } from '@harness-projects/ui-model'
 import { LoadingState, SourceBadge, UnavailableState } from './list-states.ts'
+import { DETAIL_STYLES, observeDetailLayout, type LayoutRoot } from './detail-presentation.ts'
+import { WORKSPACE_STYLES } from './workspace-presentation.ts'
 
 /** 浏览器 DOM 最小结构面：只声明真正用到的成员且全部可选；SSR 无 `document`，存在性由运行时判断。 */
 export interface DOMElement {
@@ -16,6 +18,8 @@ export interface DOMElement {
   querySelector?(selectors: string): DOMElement | null
   querySelectorAll?(selectors: string): readonly DOMElement[]
   hasAttribute?(name: string): boolean
+  closest?(selectors: string): DOMElement | null
+  getClientRects?(): ArrayLike<unknown>
   focus?(): void
   close?(): void
   showModal?(): void
@@ -28,8 +32,6 @@ export function activeElement(): DOMElement | null {
 }
 
 const UNRESOLVED = '当前快照未找到此条目，是否存在尚未确认。'
-const ROW_STYLE = { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } as const
-const PANEL_STYLE = { maxWidth: '38rem', width: '100%', padding: '0 1rem', overflowWrap: 'anywhere' } as const
 const FOCUSABLE = 'a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])'
 
 /** 时间固定为“工作区最后接收确认帧”：未提供只说未知，不读时钟补事实。 */
@@ -42,7 +44,7 @@ function contentPanel(body: Extract<WorkItemDetailView['body'], { kind: 'content
     createElement('p', null, '来源身份：', createElement(SourceBadge, { name: body.source, authority: body.authority }),
       body.identity === undefined ? '（来源身份尚未提供）' : `（${body.identity.kind} ${body.identity.externalId}）`),
     createElement('p', null, '规划来源最后确认：', body.reconciledAt === undefined ? '未知' : createElement('time', { dateTime: body.reconciledAt }, body.reconciledAt)),
-    createElement('p', { style: ROW_STYLE }, body.body),
+    createElement('p', { className: 'hp-detail-prose' }, body.body),
     createElement('p', null, body.derived ?? '无派生提示'),
     createElement('p', null, body.stale || body.refreshing ? '最后已知值，当前结果尚未确认' : '当前值', '（工作区最后接收确认帧：', at, '）'))
 }
@@ -56,11 +58,11 @@ function panelBody(body: WorkItemDetailView['body']): ReactElement {
 }
 
 /** Tab 循环：末元素回首、首元素 Shift+Tab 回末；Escape 只走原生 cancel，避免一次按键关两次。 */
-function cycleFocus(dialog: DOMElement, shiftKey: boolean, event: { preventDefault?: () => void }): void {
-  const focusable = Array.from(dialog.querySelectorAll?.(FOCUSABLE) ?? []).filter((node) => node.hasAttribute?.('disabled') !== true)
+function cycleFocus(dialog: DOMElement, title: DOMElement | null, shiftKey: boolean, event: { preventDefault?: () => void }): void {
+  const focusable = Array.from(dialog.querySelectorAll?.(FOCUSABLE) ?? []).filter((node) => node.hasAttribute?.('disabled') !== true && node.closest?.('[hidden],[inert]') == null && (node.getClientRects === undefined || node.getClientRects().length > 0))
   const first = focusable[0] ?? dialog
   const last = focusable[focusable.length - 1] ?? dialog
-  if (shiftKey && activeElement() === first) { event.preventDefault?.(); last.focus?.() }
+  if (shiftKey && (activeElement() === first || activeElement() === title)) { event.preventDefault?.(); last.focus?.() }
   if (!shiftKey && activeElement() === last) { event.preventDefault?.(); first.focus?.() }
 }
 
@@ -68,7 +70,7 @@ function cycleFocus(dialog: DOMElement, shiftKey: boolean, event: { preventDefau
  * 唯一详情抽屉：view 变化只更新内容；Escape 只走原生 cancel（preventDefault 后一次 onClose）；cleanup 不导航。
  * `notice` 是页面级说明（如断开重连）：模态打开时背景 inert，所以抽屉在自己稳定的状态区里再说一次，打开期间出现也会被宣告。
  */
-export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, connected, startWork, onBindRepository, deliveryReader, refresh }: { readonly refresh?: { readonly pending: boolean; readonly disabled: boolean; readonly run: () => void } | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; startWork?: StartWork | undefined; onBindRepository?: (() => void) | undefined; executionReader?: ExecutionContextReader | undefined; connected?: boolean | undefined; view: WorkItemDetailView; notice?: string | undefined; onClose: () => void }): ReactElement {
+export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, connected, startWork, onBindRepository, deliveryReader, refresh, layoutRoot }: { readonly layoutRoot?: { readonly current: LayoutRoot | null } | undefined; readonly refresh?: { readonly pending: boolean; readonly disabled: boolean; readonly run: () => void } | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; startWork?: StartWork | undefined; onBindRepository?: (() => void) | undefined; executionReader?: ExecutionContextReader | undefined; connected?: boolean | undefined; view: WorkItemDetailView; notice?: string | undefined; onClose: () => void }): ReactElement {
   const dialog = useRef<DOMElement | null>(null)
   const title = useRef<DOMElement | null>(null)
   const titleId = useId()
@@ -85,19 +87,27 @@ export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, c
     return () => { if (element.open === true) element.close?.() }
   }, [])
 
+  useEffect(() => {
+    const root = layoutRoot?.current
+    return root == null ? undefined : observeDetailLayout(root)
+  }, [layoutRoot])
+
   const onKeyDown = (event: { key: string; shiftKey?: boolean; preventDefault?: () => void }): void => {
     if (event.key !== 'Tab') return
     const element = dialog.current
-    if (element !== null) cycleFocus(element, event.shiftKey === true, event)
+    if (element !== null) cycleFocus(element, title.current, event.shiftKey === true, event)
   }
 
   const target = view.body.kind === 'content' ? view.body.executionTarget : undefined
   return createElement('dialog', {
-    ref: dialog, 'aria-labelledby': titleId, onKeyDown,
+    ref: dialog, className: 'hp-workspace hp-detail', 'aria-labelledby': titleId, onKeyDown,
     onCancel: (event: { preventDefault: () => void }) => { event.preventDefault(); onClose() },
   },
-  createElement('div', { style: PANEL_STYLE },
-    createElement('h2', { id: titleId, ref: title, tabIndex: -1 }, view.body.kind === 'content' ? view.body.title : '工作项详情'),
+  createElement('style', null, WORKSPACE_STYLES, DETAIL_STYLES),
+  createElement('header', { className: 'hp-detail-header' },
+    createElement('h2', { className: 'hp-detail-title', id: titleId, ref: title, tabIndex: -1 }, view.body.kind === 'content' ? view.body.title : '工作项详情'),
+    createElement('button', { className: 'hp-action', type: 'button', onClick: onClose }, '关闭详情')),
+  createElement('div', { className: 'hp-detail-body' },
     createElement('div', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, notice),
     ...(refresh === undefined ? [] : [createElement('button', { type: 'button', disabled: refresh.disabled, 'aria-busy': refresh.pending, onClick: refresh.run }, refresh.pending ? '正在刷新规划' : '刷新规划')]),
     panelBody(view.body),
@@ -107,6 +117,5 @@ export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, c
         scope: { workspaceId: target.workspaceId, workItemId: target.workItemId, repositoryId }, reader: deliveryReader, connected: connected === true })),
     view.body.kind !== 'content' || view.body.executionTarget === undefined || executionReader === undefined ? null
       : createElement(ExecutionContextSection, { key: JSON.stringify(view.body.executionTarget), target: view.body.executionTarget, reader: executionReader, connected: connected === true, refreshToken: executionRefresh }),
-    view.body.kind !== 'content' || !view.body.executionTarget || !startWork ? null : createElement(StartWorkSection, { key: JSON.stringify(view.body.executionTarget), target: view.body.executionTarget, repositories: view.body.startWorkRepositories ?? [], startWork, connected: connected === true, onStarted: () => setExecutionRefresh((value) => value + 1), onBindRepository }),
-    createElement('button', { type: 'button', onClick: onClose }, '关闭详情')))
+    view.body.kind !== 'content' || !view.body.executionTarget || !startWork ? null : createElement(StartWorkSection, { key: JSON.stringify(view.body.executionTarget), target: view.body.executionTarget, repositories: view.body.startWorkRepositories ?? [], startWork, connected: connected === true, onStarted: () => setExecutionRefresh((value) => value + 1), onBindRepository })))
 }

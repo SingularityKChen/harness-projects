@@ -22,7 +22,7 @@ const item = (entityId, over) => Object.assign({ entityId, kind: 'work_item', pl
 const REDACTED = item('ent-bb', { planningStatus: 'done', derived: ['attention'], content: { contentKind: 'redacted', title: 'CANARY-TITLE', body: 'CANARY-BODY', bindingId: 'bind-1' }, source: { revision: 1, freshness: 'degraded', authority: 'host', reason: 'CANARY-REASON' } })
 export const SCENARIOS = {
   content: { items: [item('ent-aa'), REDACTED] },
-  long: { items: [item('ent-aa', { derived: ['ci_failing', 'execution_failed'], content: { contentKind: 'work_item', title: '长标题无空格Title'.repeat(18), body: 'Fixture 长正文', bindingId: 'bind-long', externalKind: 'issue', externalId: 'ext-long' }, planningFields: { iterationTitle: 'Iteration 2026 Platform Integration', targetDate: '2026-11-01' } }), item('ent-cc', { planningStatus: 'unknown', derived: [], content: { contentKind: 'work_item', title: '稀疏字段工作项', bindingId: 'bind-1' } }), REDACTED] },
+  long: { items: [item('ent-aa', { derived: ['ci_failing', 'execution_failed'], content: { contentKind: 'work_item', title: '长标题无空格Title'.repeat(18), body: ('Fixture 长正文与路径 /workspace/' + 'unbroken-path-segment'.repeat(12) + '\\n').repeat(40), bindingId: 'bind-long', externalKind: 'issue', externalId: 'ext-long-without-spaces-'.repeat(12) }, planningFields: { iterationTitle: 'Iteration 2026 Platform Integration', targetDate: '2026-11-01' } }), item('ent-cc', { planningStatus: 'unknown', derived: [], content: { contentKind: 'work_item', title: '稀疏字段工作项', bindingId: 'bind-1' } }), REDACTED] },
   empty: { items: [] },
   loading: { items: [item('ent-aa')], phase: 'pending' },
   offline: { items: [item('ent-aa'), REDACTED], failure: 'offline' },
@@ -39,7 +39,7 @@ export const views = (name, projectId, itemId) => {
   const read = { workspace: { id: s.workspace || 'ws-1', name: 'Fixture 工作区' }, store: storeFor(s.items), connection: { connected: true }, lastUpdatedAt: '2026-10-01T08:00:00.000Z', reconciledAt: '2026-10-01T07:59:00.000Z', capabilities: [{ key: 'planning.item.read', access: 'available' }] }
   const marks = s.failure === undefined ? { phase: s.phase || 'received', refreshing: false } : { phase: 'failed', hasReceivedSnapshot: true, cacheVisibility: 'authorized', failure: { kind: s.failure } }
   const input = Object.assign({ read, metadata: { planningSourceName: '规划来源', sourceNames: { 'bind-1': '来源一', 'bind-long': '长来源无空格Source'.repeat(12) } } }, marks)
-  const target = s.target || itemId
+  const target = itemId === undefined ? undefined : s.target || itemId
   if (projectId !== read.workspace.id) return {} // 未知路由与跨 scope：不绑定当前 store，也不生成任何 href
   return { listView: deriveWorkItemListView(input), detailView: target === undefined ? undefined : deriveWorkItemDetailView(input, { projectId, itemId: target }) }
 }
@@ -52,17 +52,17 @@ export const renderStatic = (name = 'content', pathname = '/projects/ws-1/items/
   return html
 }
 export function mount(element, port = browserHistoryPort(), root = (dom().ReactDOMClient ?? dom().ReactDOM).createRoot(element)) {
-  const state = { scenario: 'content' }
+  const state = { scenario: 'content', pending: false, disabled: false, refreshes: 0, closes: 0 }
   let navigation, route
   const render = (next) => {
     route = next
     const projectId = next?.projectId // 只有通过 views 的 scope 门时才会被用于 href 与导航
     const v = views(state.scenario, projectId, next?.itemId)
     root.render(v.listView === undefined ? createElement('p', null, '当前快照未找到此条目，是否存在尚未确认')
-      : createElement(WorkItemProjectPage, { listView: v.listView, detailView: v.detailView, navigation: { href: hrefOf(projectId), open: (id) => navigation.open({ projectId, itemId: id }) }, onCloseDetail: () => navigation.close(projectId) }))
+      : createElement(WorkItemProjectPage, { listView: v.listView, detailView: v.detailView, navigation: { href: hrefOf(projectId), open: (id) => navigation.open({ projectId, itemId: id }) }, refresh: { pending: state.pending, disabled: state.disabled || state.pending, run: () => { state.refreshes += 1; state.pending = true; render(route); state.onCounts?.() } }, onCloseDetail: () => { state.closes += 1; navigation.close(projectId); state.onCounts?.() } }))
   }
   navigation = createItemNavigation(port, render)
-  return { setScenario: (name) => { state.scenario = name; render(route) } }
+  return { setScenario: (name) => { state.scenario = name; render(route) }, setRefresh: (pending, disabled = false) => { state.pending = pending; state.disabled = disabled; render(route) }, counts: () => ({ refreshes: state.refreshes, closes: state.closes }), onCounts: (fn) => { state.onCounts = fn } }
 }
 `
 
@@ -83,13 +83,13 @@ const page = () => `<!doctype html><meta charset="utf-8"><meta name="viewport" c
 /* 公开 theme 0.2.0-rc.2 README 的两组真实 focus token；中性宿主表面是本地 fixture，未加载或安装 Host。 */
 :root { --dsw-focus-ring-color:#4176E6; --dsw-focus-ring-width:2px; --dsw-alias-state-business-primary:#4176E6; color-scheme:light; color:#20242c; background:#fff; font:14px/1.5 system-ui,sans-serif }
 :root[data-theme="dark"] { --dsw-focus-ring-color:#7AAAFF; --dsw-alias-state-business-primary:#7AAAFF; color-scheme:dark; color:#e3e5eb; background:#191b20 }
-body { margin:24px } #controls { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:20px } #controls button { font:inherit }
-#app { display:grid; min-width:0 } #app > div { min-width:0 }
+body { margin:0 } #controls { padding:16px } #controls { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:20px } #controls button { font:inherit }
+#app { display:grid; min-width:0; width:100%; max-width:100% } #app > div { min-width:0 }
 </style>
 <script>document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') === 'dark' ? 'dark' : 'light'</script>
 <div id="controls">${'content long empty loading offline redacted missing denied scoped'.split(' ')
   .map((name) => `<button type="button" data-scenario="${name}">${name}</button>`).join('')}</div>
-<div id="app"></div>
+<output id="fixture-counts">Fixture refreshes=0 closes=0</output><div id="app"></div>
 <script src="/vendor/react.js"></script><script src="/vendor/react-dom-server.js"></script><script src="/vendor/react-dom-client.js"></script>
 <script>// react-dom/client 与 react-dom 是同一份 UMD；它只装 window.ReactDOM，这里显式补上入口读取的别名。
 window.ReactDOMClient = window.ReactDOM
@@ -97,7 +97,30 @@ window.require = (id) => { if (id === 'react') return window.React; throw new Er
 var module = { exports: {} }; var exports = module.exports</script>
 <script src="/bundle.js"></script>
 <script>window.__fixture = module.exports.mount(document.getElementById('app'))
-for (const button of document.querySelectorAll('#controls button')) button.addEventListener('click', () => window.__fixture.setScenario(button.dataset.scenario))</script>`
+for (const button of document.querySelectorAll('#controls button')) button.addEventListener('click', () => window.__fixture.setScenario(button.dataset.scenario))
+const params = new URLSearchParams(location.search)
+if (params.get('width')) document.getElementById('app').style.width = params.get('width') + 'px'
+if (params.get('scenario')) window.__fixture.setScenario(params.get('scenario'))
+if (params.get('refresh')) window.__fixture.setRefresh(false, params.get('refresh') === 'disabled')
+window.__fixture.onCounts(() => { const counts = window.__fixture.counts(); document.getElementById('fixture-counts').textContent = 'Fixture refreshes=' + counts.refreshes + ' closes=' + counts.closes })
+// Fixture-only controls remain inside the modal so real pointer/keyboard actions can update props while background is inert.
+const attach = () => {
+  const dialog = document.querySelector('dialog')
+  if (!dialog || dialog.querySelector('[data-fixture-controls]')) return
+  const controls = document.createElement('div'); controls.dataset.fixtureControls = ''; controls.setAttribute('aria-label', 'Fixture controls')
+  const actions = {
+    'Fixture redacted': () => window.__fixture.setScenario('redacted'),
+    'Fixture content': () => window.__fixture.setScenario('content'),
+    'Fixture refresh disabled': () => window.__fixture.setRefresh(false, true),
+    'Fixture refresh enabled': () => window.__fixture.setRefresh(false),
+    'Fixture hide refresh': () => { const refresh = Array.from(dialog.querySelectorAll('button')).find((node) => node.textContent === '刷新规划'); if (refresh) refresh.hidden = true },
+    'Fixture remove opener': () => document.querySelector('.hp-project-list a')?.remove(),
+  }
+  for (const [label, action] of Object.entries(actions)) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.addEventListener('click', action); controls.append(button) }
+  dialog.querySelector('.hp-detail-body').append(controls)
+}
+new MutationObserver(attach).observe(document.getElementById('app'), { childList: true, subtree: true })
+attach()</script>`
 
 /** 启动同源 HTTP 服务：两个 canonical pathname 与任意 `/projects/**` 都交给同一入口。 */
 export async function startServer() {
