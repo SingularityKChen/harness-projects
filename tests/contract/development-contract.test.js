@@ -162,6 +162,22 @@ test('Development 替身：分支已存在时返回 conflict，不静默复用�
   assert.equal(again.error.code, 'conflict')
 })
 
+test('Development 替身：同路径同分支名但另一已知仓库占用时硬失败且无副作用', async () => {
+  const provider = createFakeDevelopmentProvider({ bindingId })
+  const second = { ...repository, externalId: 'repo-beta' }
+  provider.state.repositories.push({ ref: second, name: 'beta', defaultBranch: 'main', sourceUpdatedAt: undefined })
+  provider.state.branches.push({ repository: second, ref: { ...second, objectKind: 'branch', externalId: 'main' }, name: 'main', headCommit: 'sha-1' })
+  const path = '/worktrees/cross-repository-identity'
+  const first = await provider.createWorktree({ repository, path, branch: 'main', worktreeKey: 'cross-repository-identity' })
+  assert.equal(first.ok, true)
+  const before = structuredClone(provider.state)
+  const secondRepository = await provider.createWorktree({ repository: second, path, branch: 'main', worktreeKey: 'cross-repository-identity' })
+  assert.equal(secondRepository.ok, false)
+  assert.equal(secondRepository.error.code, 'invalid_input', '路径相同但 repository 身份不同不能被报告为可复用 conflict')
+  assert.equal(secondRepository.error.retryable, false)
+  assert.deepEqual(provider.state, before, '跨仓库拒绝不得改动任何已知对象')
+})
+
 test('Development 替身：外来 binding 的仓库引用被冷拒，state 里不产生任何对象', async () => {
   const provider = createFakeDevelopmentProvider({ bindingId })
   const foreign = { ...repository, bindingId: 'binding-foreign-development' }

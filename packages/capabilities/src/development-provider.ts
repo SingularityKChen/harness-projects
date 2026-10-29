@@ -104,6 +104,7 @@ export interface DevelopmentProvider {
    * `createWorktree` 时必须被接受并落在该处——core 在 `ensureBranch` 之前调用它，之后的创建与对账读回都只用这个值。
    */
   preflightWorktree?(input: ProviderCreateWorktreeInput): Promise<ProviderResult<{ readonly path: string }>>
+  /** 同仓、同路径、同分支已有工作树时答 `conflict`，供调用方对账复用；路径被另一分支或仓库占用时必须硬失败。 */
   createWorktree?(input: ProviderCreateWorktreeInput): Promise<ProviderResult<ProviderWorktree>>
   getWorktree?(input: ProviderGetWorktreeInput): Promise<ProviderResult<ProviderWorktree>>
   createChangeRequest?(input: ProviderCreateChangeRequestInput): Promise<ProviderResult<ProviderChangeRequest>>

@@ -183,8 +183,14 @@ export class FakeDevelopmentProvider implements cap.DevelopmentProvider {
     if (this.branchOf(input.repository, input.branch) === undefined) return this.gate.notFound('分支')
     const path = input.path ?? input.worktreeKey ?? ''
     const ref = refOf(this.gate.bindingId, EntityKind.Worktree, path)
-    // 同一路径重复创建必须 conflict：静默复用会把两次"创建"折成同一条记录，调用方无法察觉第二次其实没生效。
-    if (this.state.worktrees.some((w) => itemKey(w.ref) === itemKey(ref))) return providerFail(ProviderErrorCode.Conflict, `工作树路径已存在：${input.path}`)
+    const occupying = this.state.worktrees.find((w) => itemKey(w.ref) === itemKey(ref))
+    if (occupying !== undefined) {
+      const reusable = itemKey(occupying.repository) === itemKey(input.repository) && occupying.branch === input.branch
+      return providerFail(
+        reusable ? ProviderErrorCode.Conflict : ProviderErrorCode.InvalidInput,
+        `工作树路径已存在：${input.path}`,
+      )
+    }
     const record: FakeWorktreeRecord = {
       repository: input.repository, ref, path, branch: input.branch,
     }
