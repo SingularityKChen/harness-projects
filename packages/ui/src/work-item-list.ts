@@ -7,13 +7,11 @@
 import { Fragment, createElement } from 'react'
 import type { ReactElement } from 'react'
 import type { VisibleListRow, WorkItemListView } from '@harness-projects/ui-model'
-import { EmptyState, FreshnessBadge, LoadingState, SourceBadge, StaleBanner, UnavailableState } from './list-states.ts'
+import { EmptyState, FreshnessBadge, LoadingState, LIST_STYLES, SourceBadge, StaleBanner, UnavailableState } from './list-states.ts'
 
 const COLUMNS = ['工作项', '内容身份', '规划状态', '迭代', '目标日期', '工程提示', '来源', '新鲜度'] as const
-/** 版式只能靠内联 style（renderer 没有样式表）：短标签列不换行，窄屏靠横向滚动而不是被挤成一字一行；标题与来源有最小宽度并可换行。 */
-const NOWRAP = { whiteSpace: 'nowrap' } as const
-const WRAP = { overflowWrap: 'anywhere', minWidth: '12em' } as const
-const COLUMN_STYLE = [WRAP, NOWRAP, NOWRAP, NOWRAP, NOWRAP, NOWRAP, WRAP, NOWRAP] as const
+// 八列比例是自动布局的宽度提示：实际事实可扩列，标题/来源换行；窄宽度只滚动表格区域。
+const WIDTHS = ['26%', '8%', '9%', '10%', '11%', '9%', '17%', '10%'] as const
 
 /** 列表页消费的导航契约（ui 无状态回调）：`href` 供真实 href 与修饰键点击，`open` 只在普通左键点击时调用。 */
 export type ItemNavigation = { readonly href: (itemId: string) => string; readonly open: (itemId: string) => void }
@@ -37,17 +35,17 @@ function ItemRow({ row, navigation }: { row: VisibleListRow; navigation: ItemNav
       createElement(SourceBadge, { name: row.source, authority: row.authority }), createElement(FreshnessBadge, { stale: row.stale })]
   const title = row.kind === 'redacted' ? '内容不可见' : row.title
   return createElement('tr', null,
-    createElement('th', { scope: 'row', style: COLUMN_STYLE[0] },
+    createElement('th', { scope: 'row', className: 'hp-list-wrap' },
       row.kind === 'item' && navigation !== undefined ? createElement(TitleLink, { itemId: row.key, title, navigation }) : title),
-    ...cells.map((cell, index) => createElement('td', { key: index, style: COLUMN_STYLE[index + 1] }, cell)))
+    ...cells.map((cell, index) => createElement('td', { key: index, className: index === 5 ? 'hp-list-wrap' : undefined }, cell)))
 }
 
-/** 横向滚动容器可聚焦（保留默认 focus 轮廓），窄屏不隐藏列；标题与来源名换行。 */
+/** 可聚焦的局部滚动容器，焦点轮廓使用公开 Host token，窄屏保留八列。 */
 function ItemTable({ rows, navigation }: { rows: readonly VisibleListRow[]; navigation: ItemNavigation | undefined }): ReactElement {
-  return createElement('div', { role: 'region', 'aria-label': '工作项表格，可横向滚动', tabIndex: 0, style: { overflowX: 'auto' } },
+  return createElement('div', { role: 'region', 'aria-label': '工作项表格，可横向滚动', tabIndex: 0, className: 'hp-list-scroll' },
     createElement('table', null,
       createElement('caption', null, '工作项列表'),
-      createElement('thead', null, createElement('tr', null, ...COLUMNS.map((name) => createElement('th', { key: name, scope: 'col', style: NOWRAP }, name)))),
+      createElement('thead', null, createElement('tr', null, ...COLUMNS.map((name, index) => createElement('th', { key: name, scope: 'col', style: { width: WIDTHS[index] } }, name)))),
       createElement('tbody', null, ...rows.map((row) => createElement(ItemRow, { key: row.key, row, navigation })))))
 }
 
@@ -66,12 +64,13 @@ export function WorkItemListPage({ view, navigation, headingTabIndex }: { view: 
   const busy = body.kind === 'loading' || (body.kind === 'content' && body.refreshing)
   // 新鲜度只在已确认的内容旁声明（部分读取的可见内容也已确认）；未确认时由状态区宣告、横幅点名来源与时刻，页首不再重复。
   const confirmed = body.kind === 'content' && (!body.stale || body.partial === true) && !body.refreshing
-  return createElement('section', { 'aria-label': '工作项列表' },
+  return createElement('section', { 'aria-label': '工作项列表', className: 'hp-work-items' },
+    createElement('style', null, LIST_STYLES),
     createElement('h2', { tabIndex: headingTabIndex }, view.workspaceName),
-    createElement('p', null, '规划来源：', createElement(SourceBadge, { name: view.planningSourceName }),
+    createElement('p', { className: 'hp-list-meta' }, '规划来源：', createElement(SourceBadge, { name: view.planningSourceName }),
       ...(view.mappingSourceText === undefined ? [] : ['；', view.mappingSourceText]),
       ...(confirmed ? ['；', createElement(FreshnessBadge, { stale: false, at: body.lastUpdatedAt ?? null })] : [])),
-    body.kind === 'content' ? createElement('p', null, '规划来源最后确认：', body.reconciledAt === undefined ? '未知' : createElement('time', { dateTime: body.reconciledAt }, body.reconciledAt)) : null,
+    body.kind === 'content' ? createElement('p', { className: 'hp-list-meta' }, '规划来源最后确认：', body.reconciledAt === undefined ? '未知' : createElement('time', { dateTime: body.reconciledAt }, body.reconciledAt)) : null,
     view.readOnly ? createElement('p', null, '只读：规划来源只允许读取，此处不提供编辑或开始工作入口。') : null,
     view.degraded ? createElement('p', null, '读取能力降级：显示的是保守的最后已知值。') : null,
     createElement('div', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, view.statusText),

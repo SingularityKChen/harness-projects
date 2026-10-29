@@ -1,7 +1,7 @@
 /**
  * 三组展示结构的派生（issue #128）：项目首页、工作项列表、统一详情。全部是纯函数：不读时钟、不改
- * 入参、无内部状态。陈旧是如实展示的状态，不是过滤条件——陈旧快照绝不返回空列表。降级只算一次
- * （`degradationOf`），首页 / 列表 / 详情共用，同一份读取不可能在两处给出相反结论。
+ * 入参、无内部状态。陈旧是如实展示的状态，不是过滤条件——陈旧快照绝不返回空列表。降级规则共用
+ * `degradationOf`；列表只归约可见行，首页 / 详情仍取完整集合。
  */
 import { AccessLevel, ContentKind } from '@harness-projects/domain/values'
 import type { StoredEntity } from '@harness-projects/client'
@@ -114,13 +114,13 @@ function planningSectionOf(entry: StoredEntity): PlanningSection {
 
 /**
  * 工作项列表：每行以规划条目为键，顺序沿用客户端模型的稳定顺序。陈旧是展示状态，不是过滤条件——
- * 无论连接是否可用、条目是否陈旧，行都在；`stale` / `connection` / `reason` 三者同出一处降级决策。
+ * 无论连接是否可用、条目是否陈旧，行都在；`stale` / `connection` / `reason` 三者仅按可见行和工作区读取状态同出一处决策。
  */
 export function deriveWorkItemList(read: WorkspaceRead): WorkItemList {
   assertTimestamp(read.lastUpdatedAt, 'lastUpdatedAt')
   const entries = read.store.list()
   const access = accessIndex(read.capabilities ?? [])
-  const degradation = degradationOf(read, entries)
+  const degradation = degradationOf(read, entries.filter((entry) => entry.entity.content.contentKind !== ContentKind.Redacted))
   return {
     rows: entries.map((entry) => rowOf(entry, read, access, degradation)),
     stale: degradation.level !== WorkspaceConnectionState.Connected,

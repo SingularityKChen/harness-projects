@@ -22,6 +22,8 @@ const item = (entityId, over) => Object.assign({ entityId, kind: 'work_item', pl
 const REDACTED = item('ent-bb', { planningStatus: 'done', derived: ['attention'], content: { contentKind: 'redacted', title: 'CANARY-TITLE', body: 'CANARY-BODY', bindingId: 'bind-1' }, source: { revision: 1, freshness: 'degraded', authority: 'host', reason: 'CANARY-REASON' } })
 export const SCENARIOS = {
   content: { items: [item('ent-aa'), REDACTED] },
+  long: { items: [item('ent-aa', { derived: ['ci_failing', 'execution_failed'], content: { contentKind: 'work_item', title: '长标题无空格Title'.repeat(18), body: 'Fixture 长正文', bindingId: 'bind-long', externalKind: 'issue', externalId: 'ext-long' }, planningFields: { iterationTitle: 'Iteration 2026 Platform Integration', targetDate: '2026-11-01' } }), item('ent-cc', { planningStatus: 'unknown', derived: [], content: { contentKind: 'work_item', title: '稀疏字段工作项', bindingId: 'bind-1' } }), REDACTED] },
+  empty: { items: [] },
   loading: { items: [item('ent-aa')], phase: 'pending' },
   offline: { items: [item('ent-aa'), REDACTED], failure: 'offline' },
   redacted: { items: [item('ent-aa'), REDACTED], target: 'ent-bb' },
@@ -34,9 +36,9 @@ const storeFor = (items) => ({ revision: 1,
   get: (id) => { const entity = items.find((row) => row.entityId === id); return entity === undefined ? undefined : { entityId: id, entity, revision: 1, stale: false } } })
 export const views = (name, projectId, itemId) => {
   const s = SCENARIOS[name] || SCENARIOS.content
-  const read = { workspace: { id: s.workspace || 'ws-1', name: 'Fixture 工作区' }, store: storeFor(s.items), connection: { connected: true }, lastUpdatedAt: '2026-10-01T08:00:00.000Z', capabilities: [{ key: 'planning.item.read', access: 'available' }] }
+  const read = { workspace: { id: s.workspace || 'ws-1', name: 'Fixture 工作区' }, store: storeFor(s.items), connection: { connected: true }, lastUpdatedAt: '2026-10-01T08:00:00.000Z', reconciledAt: '2026-10-01T07:59:00.000Z', capabilities: [{ key: 'planning.item.read', access: 'available' }] }
   const marks = s.failure === undefined ? { phase: s.phase || 'received', refreshing: false } : { phase: 'failed', hasReceivedSnapshot: true, cacheVisibility: 'authorized', failure: { kind: s.failure } }
-  const input = Object.assign({ read, metadata: { planningSourceName: '规划来源', sourceNames: { 'bind-1': '来源一' } } }, marks)
+  const input = Object.assign({ read, metadata: { planningSourceName: '规划来源', sourceNames: { 'bind-1': '来源一', 'bind-long': '长来源无空格Source'.repeat(12) } } }, marks)
   const target = s.target || itemId
   if (projectId !== read.workspace.id) return {} // 未知路由与跨 scope：不绑定当前 store，也不生成任何 href
   return { listView: deriveWorkItemListView(input), detailView: target === undefined ? undefined : deriveWorkItemDetailView(input, { projectId, itemId: target }) }
@@ -77,7 +79,15 @@ export function buildBundle(contents = ENTRY) {
 /** 同源入口页：控件在 React 之外，只调用入口导出的 setScenario。 */
 const page = () => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>work-item-detail fixture</title>
-<div id="controls">${'content loading offline redacted missing denied scoped'.split(' ')
+<style>
+/* 公开 theme 0.2.0-rc.2 README 的两组真实 focus token；中性宿主表面是本地 fixture，未加载或安装 Host。 */
+:root { --dsw-focus-ring-color:#4176E6; --dsw-focus-ring-width:2px; --dsw-alias-state-business-primary:#4176E6; color-scheme:light; color:#20242c; background:#fff; font:14px/1.5 system-ui,sans-serif }
+:root[data-theme="dark"] { --dsw-focus-ring-color:#7AAAFF; --dsw-alias-state-business-primary:#7AAAFF; color-scheme:dark; color:#e3e5eb; background:#191b20 }
+body { margin:24px } #controls { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:20px } #controls button { font:inherit }
+#app { display:grid; min-width:0 } #app > div { min-width:0 }
+</style>
+<script>document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') === 'dark' ? 'dark' : 'light'</script>
+<div id="controls">${'content long empty loading offline redacted missing denied scoped'.split(' ')
   .map((name) => `<button type="button" data-scenario="${name}">${name}</button>`).join('')}</div>
 <div id="app"></div>
 <script src="/vendor/react.js"></script><script src="/vendor/react-dom-server.js"></script><script src="/vendor/react-dom-client.js"></script>

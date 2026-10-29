@@ -61,7 +61,7 @@ test('same-drawer-from-both-entries：两个入口显示同一导出抽屉；列
   const modified = ['metaKey', 'ctrlKey', 'shiftKey', 'altKey'].map((key) => click({ [key]: true }))
   assert.deepEqual([click({}), ...modified, click({ button: 1 })], [true, false, false, false, false, false], '只有普通左键拦截并走 open；修饰键 / 中键保留浏览器默认')
   assert.deepEqual([calls, [...hrefs], [...html.matchAll(/href="([^"]*)"/g)].map((match) => match[1])], [['ent-aa'], ['ent-aa'], ['/projects/ws-1/items/ent-aa']], 'L2：href / open 只收到 visible ID，redacted 行不调用也不生成 href；href 是 canonical pathname')
-  assert.doesNotMatch(html.replace(/href="[^"]*"/g, ''), /\bent-|bind-|ext-|CANARY|data-|\bid=/, 'L3：locator 只在 href 值里，不进 data-* / id / 文字，redacted ID 与 bindingId / externalId 完全不出现')
+  assert.doesNotMatch(html.replace(/href="[^"]*"/g, ''), /\b(?:ent-|bind-|ext-|data-)|CANARY|\bid=/, 'L3：locator 只在 href 值里，不进 data-* / id / 文字，redacted ID 与 bindingId / externalId 完全不出现')
 
   // React useId 的值依赖渲染位置，两次 render 会不同；只归一化它，其余 HTML 必须逐字相同。
   const normalize = (html) => html.replace(/:[Rr][0-9a-zA-Z]*:/g, ':R:')

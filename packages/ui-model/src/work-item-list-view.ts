@@ -164,9 +164,7 @@ export function deriveWorkItemListView(input: WorkItemListReadInput): WorkItemLi
   const stale = list.stale || degradedPage
   const refreshing = input.phase === 'received' && input.refreshing
   const rows = list.rows.map((row) => rowView(row, nameOf, row.freshness.stale || degradedPage || refreshing))
-  // 部分读取：整表未确认（如表级 permission_denied），但每一条可见条目都已确认（整页降级时行已全部 stale）。只看可见行：表级已有
-  // 原因时，redacted 条目新鲜与否不改变这句话；没有表级原因时，它经 `list.stale`（`degradationOf`）仍决定这里是 partial 还是
-  // 「已读取当前快照」——#129 既有的 1 bit 通道（ADR-0010 L1 不接受），由 #366 验收 1 关闭，本处没有关上它。
+  // 部分读取：工作区未确认，但每一条可见条目都已确认；redacted 自身 freshness 不参与整页结论（D）。
   const partial = stale && rows.some((row) => row.kind === 'item') && rows.every((row) => row.kind === 'redacted' || !row.stale)
   const statusText = refreshing ? '正在刷新，当前显示的是最后已知值'
     : partial ? '部分条目尚未确认，已显示的条目是当前值'

@@ -82,6 +82,8 @@ export function toPlanningItemView(
   projection: WorkspaceProjection, identity: ExternalIdentity, sync: SyncSummary,
   facts: readonly EngineeringFact[] = [],
 ): PlanningItemView {
+  // 遮蔽行没有独立 freshness：跟随工作区完整性；可见行保留 D23 部分成功的当前值。
+  const degraded = projection.content.contentKind === ContentKind.Redacted ? sync.degraded : sync.stale
   return {
     entityId: projection.entityId,
     kind: entityKindFor(projection.content.contentKind, identity.externalKind),
@@ -89,7 +91,7 @@ export function toPlanningItemView(
     content: contentReference(projection.content, identityRef(identity)),
     planningFields: projection.planningFields,
     engineering: engineeringBlock(facts),
-    freshness: { revision: projection.revision, degraded: sync.stale, reason: sync.stale ? sync.reason : undefined },
+    freshness: { revision: projection.revision, degraded, reason: degraded ? sync.reason : undefined },
   }
 }
 

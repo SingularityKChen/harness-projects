@@ -16,7 +16,7 @@ import { createController, toWireMetadata, watchWorkspace } from '@harness-proje
 import * as capabilities from '@harness-projects/capabilities'
 import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
 import { CapabilityKey, intersectAccess } from '@harness-projects/client/keys'
-import { deriveWorkItemList, deriveWorkItemListView } from '@harness-projects/ui-model'
+import { deriveProjectsHome, deriveWorkItemList, deriveWorkItemListView } from '@harness-projects/ui-model'
 import {
   FaultKind, createFakeExecutionProvider, createFakeProviders, fixtureProjectRef, removeItem,
 } from '@harness-projects/provider-fake'
@@ -215,11 +215,65 @@ function partialProviders() {
   return providers
 }
 
+test('E partial：redacted source 跟随工作区 degraded；可见 source 仍跟随 stale，snapshot 与直接查询一致', async () => {
+  const { core, controller, providers } = await compose(partialProviders())
+  const snapshot = await controller.baseline()
+  const { sync: summary } = await core.queries.getPlanningSnapshot()
+  assert.deepEqual([summary.degraded, summary.stale], [true, false], '真实部分成功是 E 与可见行规则的判别输入')
+  const hidden = snapshot.entities.filter((row) => row.content.contentKind === 'redacted')
+  const visible = snapshot.entities.filter((row) => row.content.contentKind !== 'redacted')
+  assert.ok(hidden.length && visible.length, '两类行都必须存在')
+  assert.equal(snapshot.source.freshness, 'degraded')
+  for (const row of hidden) {
+    assert.deepEqual([row.source.freshness, row.source.reason], ['degraded', snapshot.source.reason])
+    assert.deepEqual(await controller.queries.getEntity(row.entityId), row, '直接 query 经过同一 core owner')
+  }
+  for (const row of visible) assert.deepEqual([row.source.freshness, row.source.reason], ['fresh', undefined])
+  const { sync } = await client(controller)
+  await sync.connect()
+  assert.deepEqual(hiddenStale(sync.read()), hidden.map(() => true), '经真实 transport / sync 仍保留 E')
+  assert.ok(itemRows(sync.read()).every((row) => !row.stale), '部分成功不拖旧已确认的可见行')
+  providers.planning.state.items = providers.planning.state.items.filter((row) => row.ref.externalId !== 'm-orphan')
+  await core.commands.bootstrapWorkspace()
+  const restored = await controller.baseline()
+  assert.equal(restored.source.freshness, 'fresh')
+  assert.ok(restored.entities.every((row) => row.source.freshness === 'fresh' && row.source.reason === undefined))
+})
+
+test('D snapshot 对抗负控：只改隐藏 freshness 不影响列表结论；可见 stale 仍使列表降级', async () => {
+  const { controller } = await compose()
+  const baseline = await controller.baseline()
+  assert.ok(baseline.entities.some((row) => row.content.contentKind === 'redacted'))
+  const show = async (hiddenFreshness, visibleStale = false) => {
+    // 有意构造不符合 E 的 wire 输入，以验证 ui-model 自身的 D 防线；其它字段均来自生产 snapshot。
+    const snapshot = structuredClone(baseline)
+    for (const row of snapshot.entities) {
+      if (row.content.contentKind === 'redacted') row.source = { ...row.source, freshness: hiddenFreshness, reason: 'HIDDEN-FRESHNESS-CANARY' }
+      else if (visibleStale) row.source = { ...row.source, freshness: 'degraded' }
+    }
+    const { sync } = await client(controller, { transport: { fetchBaseline: async () => snapshot, close() {} } })
+    await sync.connect()
+    const list = deriveWorkItemList(sync.read())
+    return { state: [list.stale, list.connection, list.reason], view: viewOf(sync.read()), home: deriveProjectsHome([sync.read()]).workspaces[0].connection }
+  }
+  const fresh = await show('fresh')
+  const hiddenStaleOnly = await show('degraded')
+  assert.deepEqual([hiddenStaleOnly.state, hiddenStaleOnly.view], [fresh.state, fresh.view], '整页结论和安全 view 必须逐字相同，包含 redacted 占位')
+  assert.deepEqual([fresh.home, hiddenStaleOnly.home], ['connected', 'degraded'], 'D 有意只作用列表，不改变首页完整集合的归约')
+  assert.deepEqual(fresh.state, [false, 'connected', undefined])
+  assert.match(fresh.view.statusText, /已读取当前快照/)
+  assert.ok(fresh.view.body.rows.some((row) => row.kind === 'redacted'))
+  assert.ok(!JSON.stringify(hiddenStaleOnly).includes('HIDDEN-FRESHNESS-CANARY'))
+  const stale = await show('fresh', true)
+  assert.deepEqual(stale.state.slice(0, 2), [true, 'degraded'])
+  assert.equal(stale.view.statusText, '当前结果尚未确认，最后已知值不是当前值')
+})
+
 test('partial：整表 degraded 带原因并推进时间；已确认行经 view 保持 fresh、整表仍降级；断网后全部 stale', async () => {
   const { store, sync } = await client((await compose(partialProviders())).controller)
   await sync.connect()
   assert.ok(sync.read().reason, '整表缺口原因保留，不被 fresh 行洗成正常')
-  assert.ok(store.list().length > 0 && store.list().every((entry) => !entry.stale), '本次确认的行保持 fresh')
+  assert.ok(store.list().length > 0 && store.list().filter((entry) => entry.entity.content.contentKind !== 'redacted').every((entry) => !entry.stale), '本次确认的可见行保持 fresh；隐藏行跟随工作区 degraded')
   assert.equal(sync.read().lastUpdatedAt, T(1), 'partial 帧确有 fresh 行才更新时间')
   const shown = viewOf(sync.read())
   assert.deepEqual([shown.body.stale, shown.statusText], [true, '部分条目尚未确认，已显示的条目是当前值'], '整表仍降级，状态区说的是部分读取而不是最后已知值')
