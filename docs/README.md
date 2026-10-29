@@ -97,6 +97,7 @@
 | [2026-09-29-source-version-order](exec-plan/completed/2026-09-29-source-version-order.md) | 观察版本载体收窄与定序 |
 | [2026-09-29-start-work-resume-evidence](exec-plan/completed/2026-09-29-start-work-resume-evidence.md) | 2026-09-29-start-work-resume-evidence —— 补齐 Start Work 恢复的剩余闭环（#183） |
 | [2026-10-28-start-work-request-binding](exec-plan/completed/2026-10-28-start-work-request-binding.md) | 开始工作首请求耐久绑定、无副作用冲突与真实重启/并发验证（#194） |
+| [2026-10-29-start-work-visibility](exec-plan/completed/2026-10-29-start-work-visibility.md) | 不可见目标的事务准入与 Controller 重放守卫（#349） |
 | [2026-10-01-board-auto-add-ruling](exec-plan/completed/2026-10-01-board-auto-add-ruling.md) | 2026-10-01-board-auto-add-ruling —— 裁决 `Auto-add to project` 并让看板工作流检查恢复 |
 | [2026-10-01-engineering-reconcile-coverage](exec-plan/completed/2026-10-01-engineering-reconcile-coverage.md) | Engineering 全候选重算与独立唤醒 |
 | [2026-10-01-provider-binding-registration](exec-plan/completed/2026-10-01-provider-binding-registration.md) | Provider 连接实现身份与原子注册 |

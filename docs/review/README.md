@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [2026-10-29-pr445-pr456-mmp-review](2026-10-29-pr445-pr456-mmp-review.md) | 准入、owner 围栏、Host 身份/profile 与 Demo 指南四闭环 | 首轮全矩阵无新增缺陷；组合2551+7通过；按人类授权逐PR复评后rebase收尾，保留人类产品/发布门 |
 | [2026-10-29-pr441-pr443-mmp-review](2026-10-29-pr441-pr443-mmp-review.md) | 重复成员契约、工作树冲突、准确可读列表三闭环 | 首轮无 P0/P1；#441 唯一 P2 已修复复评，最终门禁与授权串行收尾见记录 |
 | [2026-10-28-pr438-pr440-mmp-review](2026-10-28-pr438-pr440-mmp-review.md) | #438–#440 的 MMP 风险矩阵、独立反例与授权收尾 | 无新增 P0/P1；#439 一 P2 回链修正并复评，其余无新增问题 |
 | [2026-09-18-mvp-delivery-review](2026-09-18-mvp-delivery-review.md) | 9 个开放 PR（#3 #11 #12 #13 #19 #21 #33 #35 #37）的 MVP 交付评审 | 8 个合并、#37 因两条 P0 暂缓；风险矩阵、38 条行级意见、13 个跟踪 issue（#38–#50） |

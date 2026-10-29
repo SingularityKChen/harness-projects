@@ -156,31 +156,41 @@ export interface ControllerCommands {
 type ReplayEntry = { readonly fingerprint: string; readonly result: CommandResult<unknown> }
 type InFlightEntry = { readonly fingerprint: string; readonly promise: Promise<CommandResult<unknown>> }
 
-function canonical(value: unknown, seen = new Set<object>()): string {
-  if (value === undefined) return 'u'
-  if (value === null) return 'n'
-  if (typeof value === 'string') return `s${value.length}:${value}`
-  if (typeof value === 'boolean') return value ? 'b1' : 'b0'
+/** 同一次遍历同时规范身份并捕获普通值；每个调用方属性只读一次，副本不保留其嵌套引用。 */
+function captureIdentity(value: unknown, seen = new Set<object>()): { readonly identity: string; readonly value: unknown } {
+  const leaf = (identity: string) => ({ identity, value })
+  if (value === undefined) return leaf('u')
+  if (value === null) return leaf('n')
+  if (typeof value === 'string') return leaf(`s${value.length}:${value}`)
+  if (typeof value === 'boolean') return leaf(value ? 'b1' : 'b0')
   if (typeof value === 'number') {
-    if (Number.isNaN(value)) return 'd:NaN'
-    if (Object.is(value, -0)) return 'd:-0'
-    if (value === Infinity) return 'd:+Inf'
-    if (value === -Infinity) return 'd:-Inf'
-    return `d:${value}`
+    if (Number.isNaN(value)) return leaf('d:NaN')
+    if (Object.is(value, -0)) return leaf('d:-0')
+    if (value === Infinity) return leaf('d:+Inf')
+    if (value === -Infinity) return leaf('d:-Inf')
+    return leaf(`d:${value}`)
   }
   if (typeof value !== 'object') throw new TypeError('请求身份含不支持的值')
   if (seen.has(value)) throw new TypeError('请求身份不能含循环引用')
   seen.add(value)
   try {
-    if (Array.isArray(value)) return `a${value.length}[${value.map((item) => canonical(item, seen)).join('|')}]`
+    if (Array.isArray(value)) {
+      const children = value.map((item) => captureIdentity(item, seen))
+      return { identity: `a${value.length}[${children.map((item) => item.identity).join('|')}]`, value: Object.freeze(children.map((item) => item.value)) }
+    }
     const prototype = Object.getPrototypeOf(value)
     if (prototype !== Object.prototype && prototype !== null) throw new TypeError('请求身份只接受普通对象')
     const keys = Object.keys(value).sort()
-    return `o${keys.length}{${keys.map((key) => `${canonical(key)}=${canonical((value as Record<string, unknown>)[key], seen)}`).join('|')}}`
+    const children = keys.map((key) => captureIdentity((value as Record<string, unknown>)[key], seen))
+    const captured = Object.create(prototype) as Record<string, unknown>
+    for (const [index, key] of keys.entries()) Object.defineProperty(captured, key, { value: children[index]!.value, enumerable: true })
+    return { identity: `o${keys.length}{${keys.map((key, index) => `${captureIdentity(key).identity}=${children[index]!.identity}`).join('|')}}`, value: Object.freeze(captured) }
   } finally {
     seen.delete(value)
   }
 }
+
+function canonical(value: unknown): string { return captureIdentity(value).identity }
 
 function requestPayload<T extends CommandEnvelope>(input: T): Omit<T, keyof CommandEnvelope> {
   const { actorRef: _actorRef, idempotencyKey: _idempotencyKey, ...payload } = input
@@ -240,7 +250,21 @@ export function createControllerCommands(core: CoreApi): ControllerCommands {
       return resultOf(result.ok ? CommandWriteState.LocalOnly : CommandWriteState.Failed, result, result.error)
     },
 
-    startWork: (input) => replay('startWork', input, requestPayload(input), () => runStartWork(core, input)),
+    startWork: async (input) => {
+      let captured: StartWorkCommandInput
+      try {
+        const value = captureIdentity(input).value
+        if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Start Work 请求必须是普通对象')
+        captured = value as StartWorkCommandInput
+        if (captured.actorRef === null || captured.actorRef === undefined) throw new TypeError('actorRef 必须是普通对象')
+      } catch (error) {
+        return resultOf<StartWorkView>(CommandWriteState.Failed, undefined, projectError(ProjectErrorCode.InvalidInput, error instanceof Error ? error.message : '请求身份不合法'))
+      }
+      // 同一自有副本贯穿预检、身份与调用；缓存与在途结果不能替代当前目标裁决。
+      const error = await core.queries.getStartWorkTargetError(captured.workItemId)
+      if (error !== undefined) return resultOf<StartWorkView>(CommandWriteState.Failed, undefined, error)
+      return replay('startWork', captured, requestPayload(captured), () => runStartWork(core, captured))
+    },
 
     applyPlanningStatus: (input) => replay('applyPlanningStatus', input, requestPayload(input), async () => {
       const decision = await core.commands.applyPlanningStatus({ entityId: input.entityId, status: input.status })

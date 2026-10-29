@@ -197,6 +197,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
 export function unavailableCore(reason: string): CoreApi {
   const error = projectError(ProjectErrorCode.NotSupported, reason)
   const queries: CoreQueries = {
+    getStartWorkTargetError: async () => error,
     listProviderBindings: async () => [],
     getPlanningSnapshot: async () => ({ views: [], revision: 0, sync: { degraded: true, stale: true, reason }, metadata: { workspace: undefined, capabilities: [], repositories: [], planningSource: undefined } }),
     listPlanningItems: async () => [],

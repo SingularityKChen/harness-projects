@@ -11,7 +11,8 @@ import {
   type EffectiveCapability,
   type ProviderBindingRecord, type StorageTransaction,
 } from '@harness-projects/capabilities'
-import { IdentityRole, type EntityId, type ProviderBindingId, type WorkspaceId } from '@harness-projects/domain'
+import { IdentityRole, type EntityId, type ProjectError, type ProviderBindingId, type WorkspaceId } from '@harness-projects/domain'
+import { startTargetError } from './start-work.ts'
 import { gateCommand } from './capabilities.ts'
 import { PLANNING_SYNC_SCOPE } from './bootstrap.ts'
 import type { CoreContext } from './context.ts'
@@ -48,6 +49,8 @@ export interface RepositoryMetadata {
 }
 
 export interface CoreQueries {
+  /** Start Work 的只读目标预检：复用 Core 准入守卫，不依赖展示身份，不发外部调用或落控制事实。 */
+  getStartWorkTargetError(workItemId: string): Promise<ProjectError | undefined>
   listProviderBindings(): Promise<readonly ProviderBindingRecord[]>
   getPlanningSnapshot(): Promise<{ readonly views: readonly PlanningItemView[]; readonly sync: SyncSummary; readonly revision: number; readonly metadata: WorkspaceMetadata }>
   listPlanningItems(): Promise<readonly PlanningItemView[]>
@@ -64,6 +67,7 @@ export interface CoreQueries {
 
 export function createQueries(context: CoreContext): CoreQueries {
   return {
+    getStartWorkTargetError: (workItemId) => startTargetError(context, workItemId),
     listProviderBindings: () => context.storage.listProviderBindings(context.workspaceId),
 
     getPlanningSnapshot: () => planningSnapshot(context),

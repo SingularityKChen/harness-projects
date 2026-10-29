@@ -44,6 +44,8 @@ export async function startWork(context: CoreContext, input: StartWorkRequest): 
   if (request === undefined) return startWorkUnavailable(invalid('actor 与 worktreePath 必须是声明的 primitive 类型'))
   const invalidInput = validateRequest(request)
   if (invalidInput !== undefined) return startWorkUnavailable(invalidInput)
+  const targetError = await startTargetError(context, request.workItemId)
+  if (targetError !== undefined) return startWorkUnavailable(targetError)
   const contextId = contextIdFor(context.workspaceId, request.workItemId, request.repositoryId)
   const replayed = await context.storage.findMutationAttempt(context.workspaceId, request.idempotencyKey)
   if (replayed !== undefined) return replayRequest(context, contextId, request, replayed)
@@ -117,20 +119,31 @@ function existingRun(git: GitOutcome, existing: ExecutionRunRecord): StartWorkRe
   return toResult(git.report, outcomeOf(git, fallbackOf(existing), existing.providerRef?.externalId), undefined)
 }
 
+/** 当前可见性先于重放与路由；准入事务复用同一判定，不把早期读取当成登记许可。 */
+export async function startTargetError(
+  context: Pick<CoreContext, 'workspaceId'> & { readonly storage: Pick<StorageTransaction, 'getPlanningProjection'> }, workItemId: string,
+): Promise<ProjectError | undefined> {
+  if (typeof workItemId !== 'string' || workItemId.trim() === '') return invalid('workItemId 不能为空')
+  const degenerate = namesProblem(workItemId)
+  if (degenerate !== undefined) return invalid(degenerate)
+  const projection = await context.storage.getPlanningProjection(context.workspaceId, asBrandedId<EntityId>(workItemId))
+  if (projection === undefined || projection.content.contentKind === ContentKind.Redacted) {
+    return projectError(ProjectErrorCode.NotFound, '规划条目不存在或对当前凭据不可见，无法开始工作')
+  }
+  if (projection.content.contentKind === ContentKind.ChangeRequest) return projectError(ProjectErrorCode.InvalidInput, '变更请求不是可开始工作的工作项')
+  return undefined
+}
+
 /** 写前事务里要做的登记：`claimContext` 在没有记录的分支里先调它，再写 Provisioning。 */
 type Registration = (tx: StorageTransaction) => Promise<void>
 type Prepared = { readonly ok: true; readonly register: Registration; readonly route: DevelopmentRoute } | { readonly ok: false; readonly error: ProjectError }
 
 /**
- * 新请求在任何写入之前的只读准备：工作项预检（工作区作用域的规划投影，只有 `work_item` 内容可开始）→ 按仓库路由并在同一挂载上过能力门
+ * 新请求在可见性守卫之后的只读准备：按仓库路由并在同一挂载上过能力门
  * （缺路由、歧义与「绑定 id 变了」都在这里拒绝）→ 向路由到的 Development provider 要仓库 ack（`ref` 必须逐字等于路由给出的引用）；通过后返回写前事务里的登记。
  */
 async function prepareRegistration(context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId): Promise<Prepared> {
   const reject = (error: ProjectError): Prepared => ({ ok: false, error })
-  const projection = await context.storage.getPlanningProjection(context.workspaceId, asBrandedId<EntityId>(request.workItemId))
-  if (projection === undefined) return reject(projectError(ProjectErrorCode.NotFound, `工作项 ${request.workItemId} 不在当前工作区的规划投影里`))
-  if (projection.content.contentKind === ContentKind.ChangeRequest) return reject(projectError(ProjectErrorCode.InvalidInput, '变更请求不是可开始工作的工作项'))
-  if (projection.content.contentKind === ContentKind.Redacted) return reject(projectError(ProjectErrorCode.Unavailable, '工作项内容被扣下，不是可操作的规划条目'))
   const [key, mode] = START_WORK_ROUTE.anchor
   const route = await routeDevelopment(context, request.repositoryId, key, mode, START_WORK_ROUTE.earlier)
   if (!route.ok) return reject(route.error)
@@ -197,6 +210,8 @@ async function claimContext(
 ): Promise<Claim> {
   const now = context.clock()
   return context.storage.transaction(async (tx): Promise<Claim> => {
+    const targetError = await startTargetError({ workspaceId: context.workspaceId, storage: tx }, request.workItemId)
+    if (targetError !== undefined) return { kind: 'rejected', result: startWorkUnavailable(targetError) }
     const attempt = await tx.findMutationAttempt(context.workspaceId, request.idempotencyKey)
     if (attempt !== undefined) return { kind: 'replay', attempt }
     const source = { ...context, storage: tx }
