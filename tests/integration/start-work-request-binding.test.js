@@ -42,7 +42,7 @@ for (const kind of ['Fake', 'SQLite']) {
     let calls = 0; const d = w.providers.development
     for (const key of ['getWorktree', 'getRepository', 'createBranch', 'createWorktree']) { const call = d[key].bind(d); d[key] = (...args) => { calls++; return call(...args) } }
     const before = local(w.storage); const external = counts(w)
-    for (const patch of [{ workItemId: 'missing' }, { repositoryId: 'missing' }, { actor: { kind: 'human', id: 'one' } }, { actor: { kind: 'agent', id: 'two' } }, { actor: { kind: 'agent' } }, { branchName: `work/${w.request.workItemId}` }, { worktreePath: '' }, { worktreePath: ' ' }, { worktreePath: 'a|b"\\中' }]) conflict(await start(w, patch))
+    for (const patch of [{ workItemId: w.items[1] }, { repositoryId: 'missing' }, { actor: { kind: 'human', id: 'one' } }, { actor: { kind: 'agent', id: 'two' } }, { actor: { kind: 'agent' } }, { branchName: `work/${w.request.workItemId}` }, { worktreePath: '' }, { worktreePath: ' ' }, { worktreePath: 'a|b"\\中' }]) conflict(await start(w, patch))
     assert.equal(calls, 0); assert.equal(local(w.storage), before); assert.deepEqual(counts(w), external)
     assert.equal((await start(w, { actor: { id: 'one', kind: 'agent', toJSON() { throw Error('must not serialize caller') } }, branchName: undefined, worktreePath: undefined })).writeState, 'saved')
   })
@@ -52,7 +52,7 @@ for (const kind of ['Fake', 'SQLite']) {
     await assert.rejects(start(w), /interrupt/)
     const pending = await w.storage.findMutationAttempt(w.workspace.id, 'first'); assert.equal(pending.state, 'pending')
     const before = local(w.storage); const external = counts(w)
-    conflict(await start(w, { workItemId: 'missing' })); assert.equal(local(w.storage), before)
+    conflict(await start(w, { workItemId: w.items[1] })); assert.equal(local(w.storage), before)
     for (const advance of [0, 60_000]) { w.time.advance(advance); assert.equal((await start(w)).writeState, 'pending'); assert.equal(local(w.storage), before) }
     assert.deepEqual(counts(w), external)
     w.time.advance(-60_000); assert.equal((await start(w, { idempotencyKey: 'observer' })).writeState, 'pending')
@@ -144,7 +144,7 @@ for (const stage of ['pending', 'branch ack', 'settled']) test(`SQLite: close/re
   if (stage === 'settled') await start(w); else await assert.rejects(start(w), /interruption/)
   const row = await w.storage.findMutationAttempt(w.workspace.id, 'first'); w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w)
   assert.deepEqual(await w.storage.findMutationAttempt(w.workspace.id, 'first'), row)
-  const before = local(w.storage); conflict(await start(w, { workItemId: 'missing' })); assert.equal(local(w.storage), before)
+  const before = local(w.storage); conflict(await start(w, { workItemId: w.items[1] })); assert.equal(local(w.storage), before)
   w.time.advance(60_000); const external = counts(w); assert.equal((await start(w)).writeState, stage === 'settled' ? 'saved' : 'pending'); assert.deepEqual(counts(w), external)
   d[method] = create; if (stage !== 'settled') assert.equal((await start(w, { idempotencyKey: 'recover' })).writeState, 'saved')
 })

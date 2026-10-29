@@ -14,7 +14,8 @@ import test, { after } from 'node:test'
 
 import { CapabilityKey } from '@harness-projects/capabilities'
 import { composeCore, contextIdFor, runIdFor, worktreeEntityId } from '@harness-projects/core'
-import { AccessLevel, newWorkspaceId } from '@harness-projects/domain'
+import { createControllerCommands } from '@harness-projects/controller'
+import { AccessLevel, RedactionReason, newWorkspaceId } from '@harness-projects/domain'
 import { FaultKind, createFakeProviders, exportFakeStorageState, providerFail } from '@harness-projects/provider-fake'
 import { createSqliteStorage, openDatabase } from '@harness-projects/storage-sqlite'
 
@@ -39,12 +40,12 @@ const start = (core, workItemId, key, overrides = {}) => core.commands.startWork
 const external = (p) => [p.development.state.branches.length, p.development.state.worktrees.length, p.execution.state.runs.length]
 /** 端口没有按种类列实体的方法：SQLite 开第二个连接旁路读，替身读导出的内部状态。 */
 function rawOf(storage) {
-  if (storage.location === undefined) return { entities: exportFakeStorageState(storage).entities, fk: [] }
+  if (storage.location === undefined) { const { entities, identities } = exportFakeStorageState(storage); return { entities, identities, fk: [] } }
   const db = openDatabase(storage.location)
-  try { return { entities: db.prepare('SELECT id, kind FROM entity ORDER BY id').all().map((row) => ({ ...row })), fk: db.prepare('PRAGMA foreign_key_check').all() } } finally { db.close() }
+  try { return { entities: db.prepare('SELECT id, kind FROM entity ORDER BY id').all().map((row) => ({ ...row })), identities: db.prepare('SELECT * FROM external_identity ORDER BY id').all().map((row) => ({ ...row })), fk: db.prepare('PRAGMA foreign_key_check').all() } } finally { db.close() }
 }
 /** 外部增量与本地状态的快照：挂载、context、关系、attempt、实体全在里面，前后相等即零写入。 */
-const world = async (p, s, ws, contextId) => JSON.stringify([external(p), await s.listRepositories(ws), await s.getExecutionContext(contextId), await s.getExecutionRun(runIdFor(contextId)), await s.listRelations(ws), await s.listMutationAttempts(ws), rawOf(s).entities])
+const world = async (p, s, ws, contextId) => JSON.stringify([external(p), await s.listRepositories(ws), await s.getExecutionContext(contextId), await s.getExecutionRun(runIdFor(contextId)), await s.listRelations(ws), await s.listMutationAttempts(ws), rawOf(s).entities, rawOf(s).identities, await s.listProviderBindings(ws), await s.currentRevision(ws)])
 /** 在 `method` 第 nth 次写之后抛错；nth 为 0 时从不触发，只计数（无故障正控）。同时包根方法（根上的写不在事务里，抛错时已落库）与 `transaction` 的 tx 代理（抛错时整笔回滚），共用一个命中计数。 */
 function injectAfterWrite(storage, method, nth) {
   const hits = { calls: 0, thrown: 0 }
@@ -115,18 +116,210 @@ for (const [label, makeStorage] of ADAPTERS) {
     assert.deepEqual(raw.fk, [], 'SQLite 的外键完整（只是必要条件，不证明业务闭环）')
   })
 
-  test(`${label}：工作项守卫——未知、别的工作区、变更请求、被扣下的条目在任何写入之前被拒绝，有效工作项仍可开始`, async () => {
-    const { providers, storage, core, workspaceId: ws, pick } = await setup(makeStorage)
+  const INVISIBLE = { code: 'not_found', recovery: 'open_provider', retryable: false,
+    message: '规划条目不存在或对当前凭据不可见，无法开始工作', confirmedValue: undefined, attemptedValue: undefined }
+  const rejected = (result) => {
+    assert.deepEqual(result.error, INVISIBLE, '不存在与不可见共享同一完整错误，不泄漏目标或撤权原因')
+    assert.deepEqual([result.writeState, result.confirmed, result.executionContextId, result.status, result.branchExternalId, result.worktreeExternalId, result.runExternalId],
+      ['failed', false, undefined, undefined, undefined, undefined, undefined], '拒绝不返回既有工程谱系')
+  }
+  // 删除守卫、把它放在 replay/context/路由之后，或只统一 code 而泄漏文案/恢复建议，都会失败。
+  test(`${label}：不可见目标在重放与路由前统一拒绝，任何 redaction reason 都不泄漏且零事实/修订增量`, async () => {
+    const w = await setup(makeStorage); const { providers, storage, core, workspaceId: ws, pick } = w
     await storage.putWorkspace({ id: 'ws-other', name: '另一个工作区', statusPolicy: 'provider_authoritative' })
     await registerWorkItem(storage, 'ws-other', 'other-item')
-    for (const [workItemId, code] of [['no-such-item', 'not_found'], ['other-item', 'not_found'], [pick('change_request'), 'invalid_input'], [pick('redacted'), 'unavailable']]) {
-      const contextId = contextIdFor(ws, workItemId, REQUEST.repositoryId); const before = await world(providers, storage, ws, contextId)
-      const result = await start(core, workItemId, `guard-${workItemId}`)
-      assert.deepEqual([result.writeState, result.executionContextId, result.error?.code], ['failed', undefined, code], workItemId)
-      assert.equal(await world(providers, storage, ws, contextId), before, `${workItemId}：零外部写入、零本地新增`)
+    const targets = ['no-such-item', 'other-item']
+    for (const reason of Object.values(RedactionReason)) {
+      const id = `private-${reason}`; await registerWorkItem(storage, ws, id, { contentKind: 'redacted', reason }); targets.push(id)
     }
-    assert.equal((await start(core, pick('work_item'), 'guard-ok')).status, 'ready', '正控：有效工作项必须能开始，否则「一律拒绝」也能通过上面的断言')
+    for (const workItemId of targets) {
+      const contextId = contextIdFor(ws, workItemId, REQUEST.repositoryId); const before = await world(providers, storage, ws, contextId)
+      const undo = []; let calls = 0
+      for (const [object, methods] of [[storage, ['findMutationAttempt', 'getExecutionContext', 'listRepositories']], [providers.development, ['getRepository']]]) {
+        for (const method of methods) { const original = object[method]; object[method] = function (...args) { calls++; return original.apply(this, args) }; undo.push(() => { object[method] = original }) }
+      }
+      let result
+      try { result = await start(core, workItemId, `guard-${workItemId}`, { repositoryId: 'private-repository' }); assert.equal(calls, 0, '不可见时不查 replay/context、不路由、不读仓库') } finally { undo.forEach((restore) => restore()) }
+      rejected(result)
+      assert.equal(await world(providers, storage, ws, contextId), before, '零外部写入、登记、身份、挂载、context、run、attempt、关系和修订增量')
+    }
+    const change = await start(core, pick('change_request'), 'guard-pr')
+    assert.equal(change.error?.code, 'invalid_input', '可见 PR 仍不可开始')
+    const item = await storage.getPlanningProjection(ws, pick('work_item'))
+    await storage.putPlanningProjection(ws, { ...item, planningStatus: 'unknown' })
+    assert.equal((await start(core, item.entityId, 'guard-ok')).status, 'ready', '可见且状态未映射的正控仍可开始')
   })
+
+  test(`${label}：Core 的目标预检只读投影，不依赖展示 identity、不调 Provider 或推进修订`, async () => {
+    const w = await setup(makeStorage); const id = 'visible-without-identity'; const contextId = contextIdFor(w.workspaceId, id, REQUEST.repositoryId)
+    await registerWorkItem(w.storage, w.workspaceId, id)
+    assert.equal(await w.core.queries.getItemDetail(id), undefined, '展示查询要求 primary identity，不能用它代替准入预检')
+    const before = await world(w.providers, w.storage, w.workspaceId, contextId)
+    let calls = 0; const undo = []
+    for (const provider of [w.providers.planning, w.providers.development, w.providers.delivery, w.providers.execution]) {
+      for (const key of Object.getOwnPropertyNames(Object.getPrototypeOf(provider))) if (key !== 'constructor' && typeof provider[key] === 'function') {
+        const call = provider[key]; provider[key] = function (...args) { calls++; return call.apply(this, args) }; undo.push(() => { provider[key] = call })
+      }
+    }
+    for (const [target, expected] of [[id, undefined], ['missing', INVISIBLE], [w.pick('redacted'), INVISIBLE]]) {
+      assert.deepEqual(await w.core.queries.getStartWorkTargetError(target), expected)
+      assert.equal(await world(w.providers, w.storage, w.workspaceId, contextId), before, '只读预检不登记任何控制事实')
+    }
+    for (const target of ['', ' ', null, 3]) assert.equal((await w.core.queries.getStartWorkTargetError(target)).code, 'invalid_input', '目标 primitive 先于存储读取')
+    assert.equal(calls, 0, '预检没有调用任何 Provider 的读写方法'); undo.forEach((restore) => restore())
+    const commands = createControllerCommands(w.core)
+    const input = { workItemId: id, repositoryId: REQUEST.repositoryId, actorRef: REQUEST.actor, idempotencyKey: 'identityless-visible' }
+    assert.equal((await commands.startWork(input)).writeState, 'confirmed', '可见且无 primary identity 的正控可以准入')
+    assert.equal((await commands.startWork({ ...input, actorRef: { kind: 'changed' } })).writeState, 'conflict', '预检不跳过 Controller 完整请求身份')
+  })
+
+  test(`${label}：Controller 预检等待期间目标/key/仓库/分支/actor 深层变化不改变已捕获请求`, async () => {
+    const w = await setup(makeStorage); const workItemId = w.pick('work_item'); const commands = createControllerCommands(w.core)
+    const original = { workItemId, repositoryId: REQUEST.repositoryId, branchName: 'work/captured-input', worktreePath: '.worktrees/captured-input',
+      actorRef: { kind: 'agent', id: 'captured', metadata: { options: ['one', 'two'], absent: undefined, nullable: null } }, idempotencyKey: 'captured-key' }
+    const input = { ...original, actorRef: { ...original.actorRef, metadata: { ...original.actorRef.metadata, options: [...original.actorRef.metadata.options] } } }
+    const pending = commands.startWork(input)
+    input.workItemId = w.pick('redacted'); input.idempotencyKey = 'changed-key'; input.repositoryId = 'missing'
+    input.branchName = 'work/changed'; input.worktreePath = '.worktrees/changed'; input.actorRef.kind = 'changed'; input.actorRef.id = 'changed'
+    input.actorRef.metadata.options.reverse(); input.actorRef.metadata.absent = null; input.actorRef.metadata.nullable = undefined
+    const first = await pending
+    assert.deepEqual([first.writeState, first.value?.branchExternalId], ['confirmed', 'work/captured-input'], 'Core handoff 使用最初副本')
+    assert.equal(await w.storage.findMutationAttempt(w.workspaceId, 'changed-key'), undefined, '后来改的 key 不被占用')
+    const attempt = await w.storage.findMutationAttempt(w.workspaceId, 'captured-key')
+    assert.deepEqual(JSON.parse(attempt.requestFingerprint).slice(3), [['agent', 'captured'], workItemId, REQUEST.repositoryId, 'work/captured-input', '.worktrees/captured-input'])
+    assert.deepEqual(await commands.startWork(original), first, '最初完整元数据仍是匹配的 Controller 身份')
+    for (const metadata of [
+      { ...original.actorRef.metadata, options: ['two', 'one'] },
+      { ...original.actorRef.metadata, absent: null },
+      { options: ['one', 'two'], nullable: null },
+    ]) assert.equal((await commands.startWork({ ...original, actorRef: { ...original.actorRef, metadata } })).writeState, 'conflict', '数组顺序、undefined/null 和缺键各自保留身份差异')
+    assert.deepEqual(await commands.startWork({ ...original, actorRef: { ...original.actorRef, metadata: Object.assign(Object.create(null), original.actorRef.metadata) } }), first, '普通和 null 原型的相同值保持既有 canonical 等价')
+    assert.deepEqual([Object.isFrozen(input), Object.isFrozen(input.actorRef), Object.isFrozen(input.actorRef.metadata.options)], [false, false, false], '不冻结调用方')
+  })
+
+  test(`${label}：Controller 捕获拒绝不支持的元数据、非普通原型和循环，结构化 invalid_input 且零副作用`, async () => {
+    const w = await setup(makeStorage); const workItemId = w.pick('work_item'); const commands = createControllerCommands(w.core)
+    const contextId = contextIdFor(w.workspaceId, workItemId, REQUEST.repositoryId); const before = await world(w.providers, w.storage, w.workspaceId, contextId)
+    const cycle = {}; cycle.self = cycle
+    for (const metadata of [() => {}, Symbol('unsupported'), 1n, new Date(), cycle]) {
+      const result = await commands.startWork({ workItemId, repositoryId: REQUEST.repositoryId, actorRef: { kind: 'agent', metadata }, idempotencyKey: 'invalid-capture' })
+      assert.deepEqual([result.writeState, result.error?.code, result.value], ['failed', 'invalid_input', undefined])
+      assert.equal(await world(w.providers, w.storage, w.workspaceId, contextId), before, '拒绝不占 key、不供应或改 revision')
+    }
+  })
+
+  /** 模拟正常同步提交：只走 Storage 事务，删除保留实体身份，撤权只改投影，提交自己的修订。 */
+  async function withdraw(w, workItemId, kind) {
+    await w.storage.transaction(async (tx) => {
+      const rows = await tx.listPlanningProjections(w.workspaceId); const revision = await tx.advanceRevision(w.workspaceId)
+      const next = kind === 'remove' ? rows.filter((row) => row.entityId !== workItemId)
+        : rows.map((row) => row.entityId === workItemId ? { ...row, revision, content: { contentKind: 'redacted', reason: 'permission_denied' } } : row)
+      await tx.replacePlanningProjections({ workspaceId: w.workspaceId, bindingId: w.providers.planning.bindingId }, next)
+    })
+    const row = await w.storage.getPlanningProjection(w.workspaceId, workItemId)
+    assert.equal(row?.content.contentKind, kind === 'remove' ? undefined : 'redacted', '撤回确已提交并能从根 Storage 读回')
+  }
+
+  for (const kind of ['redact', 'remove']) {
+    test(`${label}：${kind} 先于准入提交——仓库 ack barrier 之后复判不可见，不写 pending 或任何登记`, { timeout: 10_000 }, async () => {
+      const w = await setup(makeStorage); const workItemId = w.pick('work_item'); const contextId = contextIdFor(w.workspaceId, workItemId, REQUEST.repositoryId)
+      const entered = Promise.withResolvers(); const release = Promise.withResolvers(); let hits = 0
+      const read = w.providers.development.getRepository.bind(w.providers.development)
+      w.providers.development.getRepository = async (ref) => { hits++; entered.resolve(); await release.promise; return read(ref) }
+      const pending = start(w.core, workItemId, 'withdraw-before-admission')
+      try {
+        await entered.promise; assert.equal(hits, 1, '一次仓库只读 ack 已进入 barrier'); await withdraw(w, workItemId, kind)
+        const before = await world(w.providers, w.storage, w.workspaceId, contextId)
+        release.resolve(); const result = await pending
+        rejected(result)
+        assert.equal(await world(w.providers, w.storage, w.workspaceId, contextId), before, '撤回提交之后，准入拒绝不再改变世界或修订')
+      } finally { release.resolve(); await pending }
+    })
+
+    test(`${label}：准入先于 ${kind} 提交——保留合法 claim，供应中途不追溯撤销`, { timeout: 10_000 }, async () => {
+      const w = await setup(makeStorage); const workItemId = w.pick('work_item'); const contextId = contextIdFor(w.workspaceId, workItemId, REQUEST.repositoryId)
+      const entered = Promise.withResolvers(); const release = Promise.withResolvers(); let hits = 0
+      const create = w.providers.development.createBranch.bind(w.providers.development)
+      w.providers.development.createBranch = async (input) => { hits++; entered.resolve(); await release.promise; return create(input) }
+      const before = external(w.providers); const pending = start(w.core, workItemId, 'admission-before-withdraw')
+      try {
+        await entered.promise
+        assert.equal((await w.storage.getExecutionContext(contextId))?.status, 'provisioning', '分支 barrier 前合法准入已提交')
+        await withdraw(w, workItemId, kind); const revision = await w.storage.currentRevision(w.workspaceId)
+        release.resolve(); const result = await pending
+        assert.deepEqual([hits, result.status, result.writeState, external(w.providers).map((n, i) => n - before[i])], [1, 'ready', 'saved', [1, 1, 1]])
+        assert.equal(await w.storage.currentRevision(w.workspaceId), revision, '工程供应不改规划修订')
+      } finally { release.resolve(); await pending }
+    })
+
+    test(`${label}：Controller 同步捕获可见目标，调用方立即改成 ${kind} 的缓存目标也不能返回其旧句柄`, async () => {
+      const w = await setup(makeStorage); const items = (await w.core.queries.listPlanningItems()).filter((row) => row.content.contentKind === 'work_item')
+      const [hidden, visible] = items.map((row) => row.entityId); const commands = createControllerCommands(w.core)
+      const cached = { workItemId: hidden, repositoryId: REQUEST.repositoryId, actorRef: { kind: 'agent', id: 'snapshot' }, idempotencyKey: 'hidden-cache' }
+      assert.equal((await commands.startWork(cached)).writeState, 'confirmed')
+      await withdraw(w, hidden, kind); const contextId = contextIdFor(w.workspaceId, hidden, REQUEST.repositoryId)
+      const before = await world(w.providers, w.storage, w.workspaceId, contextId)
+      const input = { ...cached, workItemId: visible }; const pending = commands.startWork(input)
+      input.workItemId = hidden // 真实异步 query 已经让出；不替换或延迟它
+      const result = await pending
+      assert.deepEqual([result.writeState, result.authoritative, result.value], ['conflict', false, undefined], '检查的是可见 A，完整请求必须仍是 A，不能借 B 的 key 返回 B 的缓存')
+      assert.equal(await world(w.providers, w.storage, w.workspaceId, contextId), before, '冲突零写入、保留旧事实')
+      assert.equal((await commands.startWork(cached)).error?.code, 'not_found', '固定隐藏目标仍拒绝')
+    })
+
+    test(`${label}：Controller 的 settled same-key 在 ${kind} 后先经当前可见性裁决，不返回缓存句柄`, async () => {
+      const w = await setup(makeStorage); const workItemId = w.pick('work_item'); const contextId = contextIdFor(w.workspaceId, workItemId, REQUEST.repositoryId)
+      const commands = createControllerCommands(w.core)
+      const input = { workItemId, repositoryId: REQUEST.repositoryId, actorRef: REQUEST.actor, idempotencyKey: 'controller-cached' }
+      const first = await commands.startWork(input)
+      assert.deepEqual([first.writeState, first.authoritative, first.value.status], ['confirmed', true, 'ready'])
+      assert.deepEqual(await commands.startWork({ ...input, actorRef: { ...input.actorRef } }), first, '可见同请求仍重放完整结果')
+      assert.equal((await commands.startWork({ ...input, actorRef: { kind: 'other' } })).writeState, 'conflict', '可见同 key 异 actor 仍 conflict')
+      await withdraw(w, workItemId, kind); const before = await world(w.providers, w.storage, w.workspaceId, contextId)
+      for (const patch of [{}, { actorRef: { kind: 'other' } }, { idempotencyKey: 'controller-new' }]) {
+        const result = await commands.startWork({ ...input, ...patch })
+        assert.deepEqual(result.error, INVISIBLE, '当前不可见先于缓存结果和缓存指纹比较')
+        assert.deepEqual([result.writeState, result.authoritative, result.value?.executionContextId, result.value?.branchExternalId, result.value?.worktreeExternalId, result.value?.runExternalId],
+          ['failed', false, undefined, undefined, undefined, undefined], 'Controller 不返回旧工程句柄')
+        assert.equal(await world(w.providers, w.storage, w.workspaceId, contextId), before, '保留旧事实，不占新 key')
+      }
+    })
+
+    test(`${label}：Controller 在途合并只共享已可见的调用，${kind} 后的新同键调用先拒绝`, { timeout: 10_000 }, async () => {
+      const w = await setup(makeStorage); const workItemId = w.pick('work_item'); const contextId = contextIdFor(w.workspaceId, workItemId, REQUEST.repositoryId)
+      const commands = createControllerCommands(w.core)
+      const input = { workItemId, repositoryId: REQUEST.repositoryId, actorRef: REQUEST.actor, idempotencyKey: 'controller-inflight' }
+      const entered = Promise.withResolvers(); const release = Promise.withResolvers(); let hits = 0
+      const create = w.providers.development.createBranch.bind(w.providers.development)
+      w.providers.development.createBranch = async (value) => { hits++; entered.resolve(); await release.promise; return create(value) }
+      const first = commands.startWork(input); let exact
+      try {
+        await entered.promise; exact = commands.startWork({ ...input }); await new Promise((resolve) => setImmediate(resolve))
+        assert.equal((await commands.startWork({ ...input, actorRef: { kind: 'changed' } })).writeState, 'conflict', '在途可见异请求仍独立冲突')
+        assert.equal(hits, 1, '可见同请求共用在途供应')
+        await withdraw(w, workItemId, kind); const before = await world(w.providers, w.storage, w.workspaceId, contextId)
+        const refused = await commands.startWork(input)
+        assert.deepEqual([refused.writeState, refused.authoritative, refused.error], ['failed', false, INVISIBLE], '撤回之后的新调用不共享旧 promise')
+        assert.equal(await world(w.providers, w.storage, w.workspaceId, contextId), before, '新拒绝保留在途旧事实')
+        release.resolve(); const result = await first
+        assert.deepEqual(await exact, result, '撤回之前已经合并的合法调用保留原供应结果')
+        assert.deepEqual([result.writeState, hits], ['confirmed', 1])
+      } finally { release.resolve(); await Promise.all([first, exact]) }
+    })
+
+    for (const status of ['ready', 'failed', 'closed', 'provisioning']) test(`${label}：${status} context 在 ${kind} 后，同 key 重放和新 key 都先拒绝，原工程事实不变`, async () => {
+      const w = await started(); const record = await w.storage.getExecutionContext(w.contextId)
+      await w.storage.putExecutionContext({ ...record, status })
+      const attempt = await w.storage.findMutationAttempt(w.workspaceId, 'saved')
+      await w.storage.putMutationAttempt({ ...attempt, state: status === 'provisioning' ? 'pending' : status === 'failed' ? 'failed' : 'saved' })
+      await withdraw(w, w.workItemId, kind)
+      const before = await world(w.providers, w.storage, w.workspaceId, w.contextId)
+      for (const key of ['saved', 'after-withdraw']) {
+        rejected(await start(w.core, w.workItemId, key))
+        assert.equal(await world(w.providers, w.storage, w.workspaceId, w.contextId), before, '不读取/改判/删除旧 context、run、attempt 或谱系，不占新键')
+      }
+    })
+  }
 
   const forged = (field) => (p) => {
     const real = p.development.getRepository.bind(p.development)
@@ -374,10 +567,9 @@ for (const [label, makeStorage] of ADAPTERS) {
     assert.match(result.error.message, /当前 Development 绑定 \S+ 下没有它的身份——绑定 id 变了/, '文案点名真实成因，而不是只指向 #219')
   })
 
-  test(`${label}：同 key 重放先于预检、命中的 Failed / Unknown 首次报告原样返回，不被 Ready 提升（也不被完整性守卫改写）`, async () => {
+  test(`${label}：目标仍可见时，同 key 命中的 Failed / Unknown 首次报告原样返回，不被 Ready 提升（也不被完整性守卫改写）`, async () => {
     const w = await started((x) => injectLostWrite(x.storage, 'putExecutionRun', 1)) // Ready 但没有 run 记录
-    await registerWorkItem(w.storage, w.workspaceId, w.workItemId, { contentKind: 'redacted', reason: 'permission_denied' }) // 工作项之后被扣下
-    assert.equal((await start(w.core, w.workItemId, 'saved')).error?.code, 'result_unknown', '同 key 重放：首次的 saved 报告只过完整性守卫，不是被扣下的 unavailable')
+    assert.equal((await start(w.core, w.workItemId, 'saved')).error?.code, 'result_unknown', '目标可见：首次 saved 报告仍经过完整性守卫')
     for (const [key, state, code] of [['first-failed', 'failed', 'unavailable'], ['first-unknown', 'unknown', 'result_unknown']]) {
       await w.storage.putMutationAttempt({ id: `write:startWork:${key}`, workspaceId: w.workspaceId, bindingId: w.bindingId, commandName: 'startWork', idempotencyKey: key, state, requestFingerprint: (await w.storage.findMutationAttempt(w.workspaceId, 'saved')).requestFingerprint, expectedSourceVersion: undefined, errorCode: code })
       const replay = await start(w.core, w.workItemId, key)

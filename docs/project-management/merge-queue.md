@@ -541,6 +541,19 @@ gh pr view <n> -R SingularityKChen/harness-projects --json state,mergedAt,baseRe
 
 每次前项合并后，后项重新 fetch、必要时 rebase 并核对 range-diff、受影响测试和公开面检查；备份 ref 与精确 lease 防止覆盖并发推送。每个 PR 的全矩阵保存在其自身的 `docs/review/pr-<n>-mmp-review.md`。可选 `Create review session` 的当前失败已逐项核对为端点连接失败，由 #364 承接；唯一保护必需检查是 `PR Fast Gate`。最终结果以 `gh pr view <n> -R SingularityKChen/harness-projects --json state,headRefOid,baseRefOid,mergeCommit,reviews,closingIssuesReferences`、`gh pr checks <n> -R SingularityKChen/harness-projects` 和对应 issue 回读为准，不预写未来 SHA。
 
+### 4.12 2026-10-29 · PR #445、#454–#456 人类授权收尾
+
+本轮选择 #454 → #455 → #456 → #445，均为独立 main-base PR，不建立原生栈或新规划依赖。固定原 head 的逐项变基预演无冲突，组合 head 与执行证据见 [本轮评审记录](../review/2026-10-29-pr445-pr456-mmp-review.md)。每步合入后先按真实 main 重核下一项；若出现新冲突或未修复P0/P1，停止该项合并，不能沿用预演代替。
+
+| 位置 | PR / 分支 | 闭环 | 收尾约束 |
+|---|---|---|---|
+| 1 | #454 `fix/start-work-visibility` | Closes #349 | 准入与Controller重放；先保留原head、整理提交、复评与当前head门禁 |
+| 2 | #455 `fix/start-work-owner-fencing` | Closes #420 | 更新至已含#454的main；保留generation2旧库拒绝与外部唯一性边界 |
+| 3 | #456 `fix/host-command-authority` | Closes #423 | 更新至已含#455的main；重核真实profile根与生产打包 |
+| 4 | #445 `docs/demo-user-guide` | Closes #444；Refs #236 | 更新#420已交付事实与profile根，人工走查/独立安装仍未接受 |
+
+授权为本会话人类对这四个PR的直接条件授权；没有未修复P0/P1才可用rebase merge。最终状态用评审记录中的只读命令重算，不以本队列表替代当前远端事实。
+
 ## 5. 历史：2026-09-18 那一轮的实测结果
 
 以下是 2026-09-18 完成的上一轮评审（9 个开放 PR：#12 #19 #21 #3 #11 #13 #33 #35 #37）的**实测记录**，不是当前队列的一部分，也不是可以直接套用的模板——它作为一个已经发生过的具体案例，说明第 2 节的流程为什么长这个样子。来源：`docs/review/2026-09-18-mvp-delivery-review.md`。
