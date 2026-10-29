@@ -517,7 +517,9 @@ describe('Harness 插件安装件契约', () => {
     it('main 面板用真实 React 渲染：section[aria-label=Harness Projects] 里是监督者读数的工作项列表；入口图标是 aria-hidden 的 svg', () => {
       const main = registrations.find((entry) => entry.options.name === 'main')
       const markup = renderToStaticMarkup(realReact.createElement(main.component))
-      assert.ok(markup.startsWith(`<section aria-label="${PANEL_TITLE}">`), markup)
+      const root = markup.match(/^<section(?=[\s>])[^>]*>/)?.[0]
+      assert.ok(root, '主面板根必须是 section')
+      assert.equal(root.match(/\saria-label="([^"]*)"/)?.[1], PANEL_TITLE, '根 section 保持精确的可访问名称')
       assert.ok(markup.includes('<a href="#/projects/workspace-1/items/entity-1">Artifact item</a>'), '标题是片段 href 的链接')
 
       const icon = registrations.find((entry) => entry.options.name === 'sidebar.panellist').component()

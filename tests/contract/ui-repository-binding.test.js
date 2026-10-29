@@ -71,7 +71,7 @@ const require = createRequire(new URL('../../packages/ui/package.json', import.m
 const find = (node, type) => Array.isArray(node) ? node.flatMap((child) => find(child, type)) : node && typeof node === 'object' ? [...(node.type === type ? [node] : []), ...find(node.props?.children, type)] : []
 function mount(source) {
   const slots = [], cleanups = []; let cursor = 0
-  const dispatcher = { useSyncExternalStore: (_subscribe, read) => read(), useEffect: (effect) => { const index = cursor++; if (!slots[index]) { slots[index] = {}; const cleanup = effect(); if (cleanup) cleanups.push(cleanup) } }, useState: (initial) => { const index = cursor++; slots[index] ??= { value: initial }; return [slots[index].value, (value) => { slots[index].value = value }] } }
+  const dispatcher = { useSyncExternalStore: (_subscribe, read) => read(), useRef: (current) => { const index = cursor++; return slots[index] ??= { current } }, useEffect: (effect, deps) => { const index = cursor++, cell = slots[index] ??= {}; if (!cell.deps || deps.some((value, i) => value !== cell.deps[i])) { const cleanup = effect(); if (cleanup) cleanups.push(cleanup) }; cell.deps = deps }, useState: (initial) => { const index = cursor++; slots[index] ??= { value: initial }; return [slots[index].value, (value) => { slots[index].value = value }] } }
   const render = () => { const internals = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED, before = internals.ReactCurrentDispatcher.current; internals.ReactCurrentDispatcher.current = dispatcher; cursor = 0
     try { return ui.RepositoryBindingForm({ source }) } finally { internals.ReactCurrentDispatcher.current = before } }
   render.unmount = () => { cleanups.splice(0).forEach((cleanup) => cleanup()); slots.length = 0 }
@@ -131,4 +131,43 @@ test('unmount after Host bind was sent ignores late result and preserves unknown
   assert.deepEqual(f.calls.filter(([name]) => name === 'bind').map((c) => c[2]), ['intent-1:bind', 'intent-1:bind'])
   finish(result({ repositoryId: 'github.com/octo/repo', bindingIds: ['a', 'b', 'c'] })); await new Promise((resolve) => setImmediate(resolve))
   assert.equal(f.source.getSnapshot().state, 'active'); assert.equal(reads, 1); render.unmount()
+})
+
+test('repository controls associate help and failures with a focusable recovery summary', async () => {
+  const f = fixture({ bindRepository: async () => result(undefined, { writeState: 'failed', error: error() }) }); await f.source.bind(selection)
+  const out = renderToStaticMarkup(React.createElement(ui.RepositoryBindingForm, { source: f.source }))
+  for (const field of ['localPath', 'owner', 'name']) {
+    assert.ok(out.includes(`aria-describedby="repository-${field}-help repository-error"`))
+    assert.ok(out.includes(`id="repository-${field}-help"`))
+  }
+  assert.match(out, /id="repository-error"[^]*tabindex="-1"/)
+  assert.match(out, /草稿已保留/)
+})
+test('unknown repository command visibly asks for confirmation without claiming activation', async () => {
+  const f = fixture({ bindRepository: async () => result(undefined, { writeState: 'unknown' }) }); await f.source.bind(selection)
+  const out = renderToStaticMarkup(React.createElement(ui.RepositoryBindingForm, { source: f.source }))
+  assert.match(out, /结果未知/); assert.doesNotMatch(out, /Saved|仓库已连接/)
+})
+
+test('repository failure focuses only the attempt submitted by this form', async () => {
+  let finish, focused = 0
+  const f = fixture({ bindRepository: () => new Promise(resolve => { finish = resolve }) }), render = mount(f.source)
+  const tree = render(); find(tree, 'form')[0].ref.current = { querySelector: () => ({ focus: () => { focused++ } }) }
+  for (const [index, value] of [selection.localPath, selection.owner, selection.name].entries()) find(render(), 'input')[index].props.onChange({ target: { value } })
+  find(render(), 'form')[0].props.onSubmit({ preventDefault() {} }); render(); await new Promise(resolve => setImmediate(resolve))
+  finish(result(undefined, { writeState: 'failed', error: error() })); await new Promise(resolve => setImmediate(resolve)); render(); assert.equal(focused, 1)
+  const background = f.source.bind(selection); render(); await new Promise(resolve => setImmediate(resolve)); finish(result(undefined, { writeState: 'failed', error: error() })); await background
+  render(); assert.equal(focused, 1); render.unmount()
+})
+
+test('repository acknowledgement retains submitted focus ownership through deferred baseline failure', async () => {
+  let rejectBaseline, focused = 0
+  const f = fixture({ baseline: () => new Promise((_, reject) => { rejectBaseline = reject }) }), render = mount(f.source)
+  find(render(), 'form')[0].ref.current = { querySelector: () => ({ focus: () => { focused++ } }) }
+  for (const [index, value] of [selection.localPath, selection.owner, selection.name].entries()) find(render(), 'input')[index].props.onChange({ target: { value } })
+  find(render(), 'form')[0].props.onSubmit({ preventDefault() {} }); render(); await new Promise(resolve => setImmediate(resolve)); render()
+  assert.equal(f.source.getSnapshot().state, 'configured'); assert.equal(focused, 0)
+  rejectBaseline(new Error('RAW-CANARY')); await new Promise(resolve => setImmediate(resolve)); render()
+  assert.equal(f.source.getSnapshot().state, 'configured'); assert.ok(f.source.getSnapshot().error); assert.equal(focused, 1)
+  assert.deepEqual(find(render(), 'input').map(input => input.props.value), [selection.localPath, selection.owner, selection.name]); render.unmount()
 })

@@ -279,3 +279,36 @@ test('Host null read error is error-only before discovery and preserves confirme
     assert.equal(f.source.getSnapshot().error.code, 'unavailable'); assert.equal(f.source.getSnapshot().setup, confirmed)
   }
 })
+
+test('setup controls explain project identity and associate safe failure without losing draft', async () => {
+  const f = fixture(); f.set(setup('configured')); await f.source.refresh()
+  const out = html(f.source)
+  assert.match(out, /class="hp-workspace"/)
+  assert.match(out, /aria-describedby="project-node-id-help"/)
+  assert.match(out, /id="project-node-id-help"[^]*项目设置/)
+  assert.match(out, /class="hp-action hp-action-primary"/)
+})
+test('only a submitted setup failure focuses its own summary, background reads keep focus', async () => {
+  let reject, focused = 0
+  const f = fixture({ createWorkspace: () => new Promise((_, no) => { reject = no }) }); await f.source.refresh()
+  const app = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
+  const tree = app.render(), form = find(tree, 'form')[0]
+  assert.ok(form.ref, 'submitted form owns its focus root')
+  form.ref.current = { querySelector: () => ({ focus: () => { focused++ } }) }; app.flush()
+  find(tree, 'input')[0].props.onChange({ target: { value: 'Draft' } })
+  find(app.render(), 'form')[0].props.onSubmit({ preventDefault() {} }); app.render(); app.flush()
+  reject(new Error('RAW-CANARY')); await new Promise((resolve) => setImmediate(resolve)); app.render(); app.flush()
+  assert.equal(focused, 1)
+  await f.source.refresh(); app.render(); app.flush(); assert.equal(focused, 1)
+})
+test('unknown setup command visibly asks for confirmation and never claims saved', async () => {
+  const f = fixture({ createWorkspace: async () => result(undefined, { writeState: 'unknown' }) }); await f.source.refresh(); await f.source.create('Keep')
+  assert.match(html(f.source), /结果未知/); assert.doesNotMatch(html(f.source), /Saved|已连接/)
+})
+test('confirmed list keeps heading and settings action inside shared workspace presentation', async () => {
+  const f = fixture(); f.set(setup('confirmed')); await f.source.refresh()
+  const store = client.createEntityStore(); store.applyBaseline({ revision: 0, entities: [], source: { revision: 0, freshness: 'fresh', authority: 'provider' } })
+  const out = html(f.source, { workspace: { id: 'ws-1', name: 'Fixture' }, store, connection: { connected: true }, capabilities: [] })
+  const opening = out.slice(0, out.indexOf('>') + 1)
+  assert.match(opening, /class="[^"]*hp-workspace/); assert.match(out, /class="hp-action"[^>]*>连接设置<\/button>/)
+})
