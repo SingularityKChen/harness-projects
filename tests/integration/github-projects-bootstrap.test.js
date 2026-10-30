@@ -2,7 +2,7 @@
  * core 经 GitHub Projects provider 引导沙箱 Project A（录制夹具回放，不触网；替身与 SQLite 两种 Storage 各一轮）。保护的不变量：
  * (1) 9 个条目得到 8 个工作项与 1 个变更请求；外部身份恰好是内容 node id、没有成员关系 id；本地实体 id 不是任何 node id（R1）；
  * (2) 重复引导幂等：两种 Storage 上实体 id 集合不变，替身上另读行数（实体 9、身份 9、观察 18）；
- * (3) 故障（离线、部分成功）不伪造成功：同步游标 degraded，投影保持最后已知值并带 freshness.degraded；(4) 回放没有未命中；
+ * (3) 故障不伪造成功：普通离线保留最后许可投影；源级拒读遮罩，后续暂态失败不解锁；(4) 回放没有未命中；
  * (5) 内容被扣下：有成员关系映射时出剥离正文的 redacted 占位（实体不变、不泄露），没有映射时整次标 degraded / permission_denied 且可查询；
  * (6) 分页游标成环或永不收敛时，真实组装路径有界返回结构化 degraded；
  * (7) #133：录制的原生字段经映射走完 controller → client → ui-model → 真实列表 HTML；未映射只显示原生名；规范状态只有一个来源，
@@ -125,7 +125,7 @@ for (const [label, makeStorage] of [['替身 Storage', createFakeStorage], ['SQL
     storage.close?.()
   })
 
-  test(`${label}：故障（离线、部分成功、分页成环或永不收敛）有界返回结构化 degraded，不伪造成功，投影保持最后已知值`, async () => {
+  test(`${label}：故障有界返回 degraded；普通离线保留许可值，源级拒读遮罩且后续故障不解锁`, async () => {
     const storage = makeStorage()
     const cycle = paging((after) => ({ null: 'A', A: 'B', B: 'A' })[String(after)], 50)
     const { core, views, replay, switchTransport } = await assemble(storage, () => cycle.transport)
@@ -134,13 +134,18 @@ for (const [label, makeStorage] of [['替身 Storage', createFakeStorage], ['SQL
     await core.commands.bootstrapWorkspace()
     const snapshot = async () => (await views()).map((view) => [view.entityId, view.planningStatus, view.content])
     const before = await snapshot()
+    let revoked = false
     const endless = paging((after) => `c${after === null ? 1 : Number(after.slice(1)) + 1}`, 1600)
     for (const [transport, code, pages] of [[REJECT, 'unavailable'], [PARTIAL, 'permission_denied'], [cycle.transport, 'unavailable', [cycle, 12]], [endless.transport, 'unavailable', [endless, 1500]]]) {
       switchTransport(transport)
       const result = await core.commands.bootstrapWorkspace()
       assert.deepEqual([result.ok, result.degraded, result.error?.code], [false, true, code])
       if (pages !== undefined) assert.deepEqual([pages[0].counter.items, /成环或超过页数上界/.test(result.error.message)], [pages[1], true], '成环停在第 3 页；永不收敛停在扫描 500 页、逐页读取 1000 页')
-      assert.deepEqual(await snapshot(), before, '故障不得清掉或改动投影')
+      revoked ||= code === 'permission_denied'
+      if (revoked) {
+        assert.ok((await views()).every((view) => view.content.contentKind === 'redacted' && view.content.title === undefined))
+        assert.deepEqual((await views()).map((view) => view.entityId), before.map(([id]) => id), '拒读保留稳定身份')
+      } else assert.deepEqual(await snapshot(), before, '普通离线不改最后许可投影')
       assert.ok((await views()).every((view) => view.freshness.degraded === true))
       assert.equal((await core.queries.getPlanningSync()).stale, true, 'H11：读取彻底失败时旧投影仍是 stale')
     }
