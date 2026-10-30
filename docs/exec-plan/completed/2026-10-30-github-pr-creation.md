@@ -1,6 +1,6 @@
 # GitHub 原生变更请求创建 ExecPlan
 
-> 状态：Active；实现与本地验证完成，等待独立验收和最终远端交付。
+> 状态：Completed；adapter 实现、独立验收与 Ready 交付完成，等待本会话授权的评审收尾及合并；真实平台、Core/UI 与人类发布验收保持独立。
 > 创建：2026-10-30（Asia/Singapore）。
 > 范围：issue #436，GitHub Development adapter 的原生创建、保守权限与可对账读面。
 > 依据：`AGENTS.md`、`PLANS.md`、`docs/development/workflow.md`、现有 Development port 与生产 provider；本计划是唯一实施规格。
@@ -243,6 +243,9 @@ Host 重组可能复用 developmentCache，因此“读成功即解除写拒绝�
 
 ## Decision Log
 
+- 2026-10-30：本轮人类直接授权“如果没有且无 P0 / P1，或只有 P2/P3 → 你负责后续：三思后修复 → re-review → 归档 ExecPlan → 按 Conventional Commits 与可独立理解、回滚、审阅的交付边界整合为适量的 commit → 核对并处理对应 issue → `merge_method=rebase` 合并”。本 PR 首轮仅 R464-D1/P3；由本评审会话修正归档状态、保留验收边界，并在当前 head 复评和门禁通过后 rebase 合并。
+
+
 - Decision：采用 GraphQL 两阶段，复用 port 与 Host。Rationale：最小跨层面，原生身份统一。Date/Author：2026-10-30 SGT / 独立计划审稿者。
 - Decision：createPermission 独立、Degraded 可单次尝试、明确拒绝 ReadOnly、新实例恢复未知。Rationale：read 不证明 write，且兼容现 Core gate/registry。Date/Author：2026-10-30 SGT / 独立计划审稿者。
 - Decision：选择合法双 base 共享套件，保留全部 liar。Rationale：既保留两候选判别力，又少于新增种子协议的改动。Date/Author：2026-10-30 SGT / 独立计划审稿者。
@@ -297,3 +300,5 @@ Change Note (2026-10-30 SGT)：独立审查发现两项 P1 后补真实 RED，�
 Change Note (2026-10-30 SGT)：两项 P1 修复后完整本地验证 2572+7 全通过；当前代码 A+D 590，保持 scoped recheck 与远端交付未完成边界。
 
 Change Note (2026-10-30 10:57 SGT)：记录独立两P1修复、最新 main 本地回归及源码 head hosted checks，归档计划并保留实际平台/产品验收边界。
+
+2026-10-30：MMP 首轮评审仅发现归档页首状态残留 P3，更新当前阶段并记录本会话条件合并授权；不扩大 adapter 验收。
