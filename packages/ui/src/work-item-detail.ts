@@ -114,7 +114,7 @@ export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, c
     target === undefined || deliveryReader === undefined ? null
       : target.repositoryIds.length === 0 ? createElement('p', null, '仓库信息尚未提供')
       : target.repositoryIds.map((repositoryId) => createElement(DeliveryLineageSection, { key: repositoryId,
-        scope: { workspaceId: target.workspaceId, workItemId: target.workItemId, repositoryId }, reader: deliveryReader, connected: connected === true })),
+        scope: { workspaceId: target.workspaceId, workItemId: target.workItemId, repositoryId }, reader: deliveryReader, accessToken: view.body.kind === 'content' ? view.body.deliveryAccessTokens?.[repositoryId] : undefined, connected: connected === true })),
     view.body.kind !== 'content' || view.body.executionTarget === undefined || executionReader === undefined ? null
       : createElement(ExecutionContextSection, { key: JSON.stringify(view.body.executionTarget), target: view.body.executionTarget, reader: executionReader, connected: connected === true, refreshToken: executionRefresh }),
     view.body.kind !== 'content' || !view.body.executionTarget || !startWork ? null : createElement(StartWorkSection, { key: JSON.stringify(view.body.executionTarget), target: view.body.executionTarget, repositories: view.body.startWorkRepositories ?? [], startWork, connected: connected === true, onStarted: () => setExecutionRefresh((value) => value + 1), onBindRepository })))

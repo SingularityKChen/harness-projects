@@ -47,7 +47,7 @@ async function renderHostSection(reader, scope) {
   render(); const close = effect(); for (let n = 0; n < 30 && state?.pending !== false; n++) await new Promise((resolve) => setImmediate(resolve))
   const html = renderToStaticMarkup(render()); close(); return html
 }
-test('real Core route denial preserves available stale CR through Host and section; pure queries ingest nothing', async (t) => {
+test('real Core route denial masks protected CR through Host and section; pure queries ingest nothing', async (t) => {
   const h = await createExecutionFixture(); t.after(h.close)
   const scope = { workspaceId: h.workspaceId, workItemId: h.itemId, repositoryId: 'repo-alpha' }, input = { workItemId: h.itemId, repositoryId: scope.repositoryId }
   const mounts = await h.storage.listProviderBindings(h.workspaceId), providers = createFakeProviders(Object.fromEntries(mounts.map((mount) => [mount.domain, { bindingId: mount.id }])))
@@ -78,11 +78,12 @@ test('real Core route denial preserves available stale CR through Host and secti
   denied = true; await compose(); await reader.refresh(scope); const stale = await reader.read(scope)
   assert.deepEqual(calls, [], 'real CHANGE_REQUEST_READ_ROUTE rejects before Development and CI reads')
   const cr = stale.projection.hops.find((hop) => hop.entityKind === 'change_request')
-  assert.deepEqual([cr.unavailable, cr.stale, cr.relationState], [false, true, 'candidate'])
-  assert.deepEqual(stale.projection.freshness.map(({ confirmedAt }) => confirmedAt), fresh.projection.freshness.map(({ confirmedAt }) => confirmedAt))
+  assert.equal(cr, undefined)
+  assert.ok(stale.projection.gaps.some((gap) => gap.entityKind === 'change_request' && gap.key === 'development.repository.read'))
+  assert.ok(stale.projection.freshness.every(({ confirmedAt, stale }) => confirmedAt === undefined && stale))
   assert.deepEqual(await h.storage.listRelations(h.workspaceId), relations)
   const html = await renderHostSection(reader, scope)
-  assert.match(html, /Last PR/); assert.match(html, /陈旧（最后已知）/); assert.match(html, /候选关系/); assert.match(html, /谱系不完整/); assert.doesNotMatch(html, /data-state="passed"/)
+  assert.doesNotMatch(html, /Last PR/); assert.match(html, /development.repository.read/); assert.match(html, /谱系不完整/); assert.doesNotMatch(html, /data-state="passed"/)
 })
 test('client treats failed refresh as failure and rejects impossible Host calendar date', async () => {
   const scope = { workspaceId: 'ws', workItemId: 'wi', repositoryId: 'repo' }

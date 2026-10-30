@@ -2,13 +2,13 @@ import { createElement as h, useEffect, useRef, useState } from 'react'
 import type { DeliveryLineageRead, DeliveryLineageReader, DeliveryLineageScope } from '@harness-projects/client'
 import { deriveDeliveryLineageStrip } from '@harness-projects/ui-model'
 const LABELS = { execution_context: '执行上下文', worktree: '工作树（分支）', commit: '提交', change_request: '变更请求', pipeline_run: '流水线', check_run: '检查' }
-const GAPS = { not_started: '尚未开始工作', not_observed: '尚未观察到', not_refreshed: '尚未刷新', unconfirmed: '尚未确认', unknown: '原因未知' }
+const GAPS = { not_started: '尚未开始工作', not_observed: '尚未观察到', not_refreshed: '尚未刷新', unconfirmed: '尚未确认', permission_denied: '读取被拒绝', unknown: '原因未知' }
 const STATES = { observed: '已观察', passed: '通过', failed: '失败', unknown: '未知', stale: '陈旧（最后已知）' }
 type Refresh = { key: string; reader: DeliveryLineageReader; task?: Promise<boolean> }
 type State = { key: string; reader: DeliveryLineageReader; thresholdMs: number | undefined; read?: DeliveryLineageRead; pending: boolean; failed: boolean }
 /** 每个明确仓库 scope 一个消费者：只有 open/manual 才摄入；时间边界与恢复只纯读 Host。 */
-export function DeliveryLineageSection({ scope, reader, connected, thresholdMs }: { readonly scope: DeliveryLineageScope; readonly reader: DeliveryLineageReader; readonly connected: boolean; readonly thresholdMs?: number }) {
-  const key = JSON.stringify([scope.workspaceId, scope.workItemId, scope.repositoryId])
+export function DeliveryLineageSection({ scope, reader, connected, thresholdMs, accessToken }: { readonly accessToken?: string | undefined; readonly scope: DeliveryLineageScope; readonly reader: DeliveryLineageReader; readonly connected: boolean; readonly thresholdMs?: number }) {
+  const scopeKey = JSON.stringify([scope.workspaceId, scope.workItemId, scope.repositoryId]), key = JSON.stringify([scopeKey, accessToken])
   const [state, setState] = useState<State>({ key, reader, thresholdMs, pending: true, failed: false })
   const refreshing = useRef<Refresh | undefined>(undefined)
   const opened = useRef<string | undefined>(undefined), action = useRef<(() => void) | undefined>(undefined)
@@ -47,7 +47,7 @@ export function DeliveryLineageSection({ scope, reader, connected, thresholdMs }
     const win = (globalThis as { window?: { addEventListener?: (name: string, listener: () => void) => void; removeEventListener?: (name: string, listener: () => void) => void } }).window
     const resume = () => { if (doc?.visibilityState === 'hidden') mark(); else void load(false) }
     action.current = () => { void load(true) }
-    const first = opened.current !== key; opened.current = key
+    const first = opened.current !== scopeKey; opened.current = scopeKey
     void load(first)
     doc?.addEventListener?.('visibilitychange', resume); win?.addEventListener?.('pageshow', resume)
     return () => { active = false; generation++; cancel(); action.current = undefined; doc?.removeEventListener?.('visibilitychange', resume); win?.removeEventListener?.('pageshow', resume) }
@@ -58,7 +58,7 @@ export function DeliveryLineageSection({ scope, reader, connected, thresholdMs }
     blocked ? h('p', { role: 'status' }, !connected ? '连接中断，最后已知；正在核对新鲜度' : current?.failed ? '暂时无法确认谱系，最后已知' : '正在核对新鲜度') : null,
     current?.read?.projection.degraded || current?.read?.projection.error ? h('p', null, '谱系不完整，保留最后已知事实') : null,
     strip === undefined ? h('p', null, '尚无已读谱系') : h('ol', null, ...strip.slots.map((slot) => h('li', { key: slot.position, 'data-position': slot.position }, h('h4', null, LABELS[slot.position]),
-      slot.kind === 'gap' ? h('p', { 'data-reason': slot.reason }, `缺口：${GAPS[slot.reason]}`) : slot.nodes.map((node, index) => {
+      slot.kind === 'gap' ? h('p', { 'data-reason': slot.reason }, `缺口：${GAPS[slot.reason]}${slot.reason === 'permission_denied' ? ' · ' + current?.read?.projection.gaps.find((gap) => gap.entityKind === slot.position)?.key + ' · ' + current?.read?.projection.gaps.find((gap) => gap.entityKind === slot.position)?.layer + '；其它获准集合仍可读取，请恢复授权后刷新交付谱系' : ''}`) : slot.nodes.map((node, index) => {
         const state = blocked && node.state === 'passed' ? 'unknown' : node.state
         return h('p', { key: index, 'data-state': state }, node.label ?? node.externalId ?? '身份未知', ' · ', STATES[state], ' · ', node.relationState === 'candidate' ? '候选关系' : node.relationState === 'confirmed' ? '已确认关系' : '已拒绝关系', node.available ? '' : ' · 逐跳不可用', ['pipeline_run', 'check_run'].includes(slot.position) ? '（所属提交的最后已知 CI）' : '')
       })))),

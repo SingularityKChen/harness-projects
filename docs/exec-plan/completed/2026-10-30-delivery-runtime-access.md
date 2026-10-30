@@ -1,6 +1,6 @@
 # Delivery 运行时读访问隔离 ExecPlan
 
-> 状态：Active；创建：2026-10-30（Asia/Singapore）。
+> 状态：Completed；创建：2026-10-30（Asia/Singapore）。
 > 范围：已发货交付谱系的按能力拒读、离线保留、迟到提交和已开详情失效。
 > 关联：Closes #468；Refs #465、#457；本切片独立验收 Delivery 读侧，#457 继续由后续 operation/browser 切片总验收。
 > 归档位置：实施时落入所属工作树 `docs/exec-plan/active/2026-10-30-delivery-runtime-access.md`，按根 `PLANS.md` 维护。
@@ -33,6 +33,16 @@ target 明确取已选择的 repositoryId，不按 provider 名猜。仓库局�
 
 显式 refreshDeliveryFacts 对 runtime denied 的已实现 key 可做真实只读重新验证，但不能绕过 capability 缺失或 policy 禁止。成功仅清除同 binding/key/target、在 denial 后开始且完整读完的观察；静态 describe、另一 key 或另一 target 的成功均无效。
 
+### 跨 owner 读健康与返回一致性
+
+同一 owner 的 Map 仅是 `SyncCursor` 读健康的内存投影。复用已有 `(workspaceId,bindingId,scopeKey)`，scopeKey 为 `JSON.stringify(['delivery.read', key, repositoryId])`；cursorValue 闭集为版本、denied、该版本已确认 workItem scopes 与未完成读 pending 计数。不存请求参数、Provider 原文或任意队列；下一次拒读递增版本并清 scopes，pending 计数随结果完成回收，完整新读可替代遗留未完成读证据。
+
+Provider I/O 之前先持久化 pending，marker 未获 Storage ack 不发请求。普通 offline/不完整结果只结束 pending，保留获准节点/stale；明确拒读立即内存 fail closed，并独立提交读健康，节点 redaction 失败不丢拒读。若健康结果写本身失败，新 owner 从遗留 pending 发现读取未完成，不能借 descriptor 恢复；同 owner 的已观察拒读不能被更旧磁盘健康覆盖。每次纯查询都读取对应健康记录，既有 owner 也观察其他 owner 已持久的新版本，不仅在 compose 时 hydrate。
+
+成功读取本身仅结束 pending；只有事实与该 workItem scope 的恢复证据在同一事实事务成功提交，Storage ack 后才发布恢复。事务回滚不能使内存版本超前并提前恢复旧事实。读取票据同时带已捕获版本；旧 success/offline/denial 的持久更新须匹配当前版本，不能清新拒读。
+
+Core 的同步 `getDeliveryAccessVersion()` 只投影同 authority 的 Planning/Delivery 内存版本，经 Controller 纯转发供 Host 将前后 scopeGuard 和投影置于同一复验闭环；最后异步 scopeGuard 完成后同步比较，变化就重读，比较与 return 间没有 await。metadata 同时复验两版本。逐仓库 `accessVersion` 从对应持久健康版本派生，经 wire 严格闭集解码；详情 token 纳入该值，使 available→denied→available 即使被 watch 合并也不能 ABA。
+
 ### 集合提交与读取
 
 离线/Unavailable/RateLimited 保留已获准节点和 confirmedAt，仅标 stale。PermissionDenied 立即使该 key/target 进入拒读；本次涉及集合的 nodes 清空、confirmedAt 不作为当前可见确认外发，保持 stale/unconfirmed，而不是完整确认空集合。完整成功读到空集合仍是另一合法状态。
@@ -55,7 +65,7 @@ target 明确取已选择的 repositoryId，不按 provider 名猜。仓库局�
 
 ## Global Constraints
 
-文件集：`packages/core/src/runtime-access.ts`（仅目标扩展）、`packages/core/src/chain-facts.ts`、`packages/core/src/delivery-facts.ts`、`packages/core/src/delivery.ts`、`packages/core/src/queries.ts`（repository capability metadata）；`packages/client/src/delivery-lineage-reader.ts`；`packages/ui-model/src/work-item-detail-view.ts`、`packages/ui-model/src/delivery-lineage.ts`；`packages/ui/src/work-item-detail.ts`、`packages/ui/src/delivery-lineage-section.ts`；新 `tests/integration/runtime-delivery-access.test.js`、既有 `tests/integration/harness-plugin-runtime-access.test.js`；必要既有 `tests/e2e/delivery-lineage.test.js`、`tests/e2e/delivery-lineage-strip.test.js`、`tests/integration/harness-plugin-delivery-lineage.test.js` 精确断言；本计划与 `docs/README.md`。不修改 Start Work provision 或 browser carrier。
+文件集：`tests/integration/pull-request-identity-convergence.test.js`（健康短事务后仍在事实事务前注入身份竞争），`packages/controller/src/wire.ts`、`packages/client/src/workspace-read.ts`（逐仓库安全 accessVersion 元数据闭集），`apps/harness-plugin/src/host-composition.ts`（返回前同 authority fence）、`packages/controller/src/queries.ts`（纯版本转发）、`packages/core/src/context.ts`（持久 read-health 接线）、`packages/core/src/runtime-access.ts`（仅目标扩展）、`packages/core/src/registry.ts`（仅 unavailable 固定层来源）、`packages/core/src/chain-facts.ts`、`packages/core/src/delivery-facts.ts`、`packages/core/src/delivery.ts`、`packages/core/src/queries.ts`（repository capability metadata）；`packages/client/src/delivery-lineage-reader.ts`；`packages/ui-model/src/work-item-detail-view.ts`、`packages/ui-model/src/delivery-lineage.ts`；`packages/ui/src/work-item-detail.ts`、`packages/ui/src/delivery-lineage-section.ts`；新 `tests/integration/runtime-delivery-access.test.js`、既有 `tests/integration/harness-plugin-runtime-access.test.js`；必要既有 `tests/e2e/controller-roundtrip.test.js`、`tests/integration/delivery-repository-routing.test.js`、`tests/integration/harness-plugin-host-github-catalog.test.js`、`tests/integration/provider-binding-registration.test.js`、`tests/e2e/delivery-lineage.test.js`、`tests/e2e/delivery-lineage-strip.test.js`、`tests/integration/harness-plugin-delivery-lineage.test.js` 精确断言；本计划与 `docs/README.md`。不修改 Start Work provision 或 browser carrier。
 
 每 PR 非 docs additions+deletions ≤799、docs ≤1299。预测代码/测试/config：结构码与目标 authority 70–110、事务/读取 140–190、client/UI 70–110、判别测试 230–290、现有断言 25–45，合计 535–745；尚非实际 diff。优先复用参数化用例和 seed，不新增新平台/缓存层。
 
@@ -124,17 +134,17 @@ target 明确取已选择的 repositoryId，不按 provider 名猜。仓库局�
 ## Progress
 
 - [x] 2026-10-30（Asia/Singapore）：独立检查读链、唯一写者、投影与局部 UI 缓存，建立本计划。
-- [ ] 确认 A 的实际合入接口/base，落盘 repository active plan 和 docs 索引。
-- [ ] Batch 1：红测试和实际预算。
-- [ ] Batch 2：读侧权威状态及持久化矩阵。
-- [ ] Batch 3：生产组合/局部 cache/负控。
-- [ ] Batch 4：独立 PR 验证、严格规模与远端回读。
+- [x] 2026-10-30：重放到实际 A head `d9b669e5c3b2f29b185df8b8ae71ec2391670c10`（父 #204），保留新 A 安全栅栏与本计划 active 索引。
+- [x] 2026-10-30：Batch 1 内容断言有效 RED，首轮 9 用例 8 红；最后矩阵 14/14 绿，包含两 Storage、目标/挂载/历史 scope、静态层、事务等待时撤权。
+- [x] 2026-10-30：Batch 2 结构码、真实 binding/key/repository ticket、同 owner mask 与 epoch、事务回滚和纯读遮罩实现。
+- [x] 2026-10-30：Batch 3 真 Host/SQLite/typed remote/watch/client.apply 与已开 section 的 late success/reject 通过；隔离复制 Core 的 query/epoch 负控分别 10/14、2/14 红。
+- [x] (2026-10-30 12:47 SGT) Batch 4：独立修复复评、原反例6/新健康探针2/相关197、源码head15项hosted checks与双向closing468/空线程回读；归档后最终head继续同样检查后才ready。
 
 ## Surprises & Discoveries
 
 `CapabilityGap` 原来只有 reason，无法区分离线与拒权；`DeliveryRefreshGap` 只有 key 是有意的安全边界，结构码扩展仍需坚持不转发 Provider 原文。`readDeliveryProjection` 原有 unavailable 标志并没有移除 label/externalId/fact，故不能只测试 flag。
 
-Storage 只有按 context 获取/写 DeliveryFacts，无全库枚举 API；本切片不为全库批量清理加 migration。当前触达 scope 的 redaction 落库，其余历史 scope 由同 owner 的目标 mask 在权威 query 过滤；成功恢复只能针对同 scope/key 新读，不能使别处旧事实复活。
+Storage 只有按 context 获取/写 DeliveryFacts，无全库枚举 API；本切片不为全库批量清理加 migration。当前触达 scope 的 redaction 落库，其余历史 scope 由现有 SyncCursor 持久读健康的目标 mask 在权威 query 过滤；成功恢复只能针对同 scope/key 新读，不能使别处旧事实复活。
 
 ## Decision Log
 
@@ -153,7 +163,7 @@ Storage 只有按 context 获取/写 DeliveryFacts，无全库枚举 API；本�
 
 ## Interfaces and Dependencies
 
-Node ≥22、pnpm、fake/SQLite 与生产 Host typed remote，无真实凭据或上游外部写。A 必须先提供 current binding/key access 与 epoch；B 只加 repository target 和读结果观察，不改变其 Planning 语义。C 会在 B 上 stack，使用同一 owner 和目标 metadata。
+Node ≥22、pnpm、fake/SQLite 与生产 Host typed remote，无真实凭据或上游外部写。A 已提供 Planning epoch/denied/registry/probeRegistry/deny/recover/error/local，保留其语义；B 增有界 DeliveryReadTicket、captureDelivery/currentDelivery/denyDelivery/recoverDelivery/deliveryRegistry/deliveryEpoch，地址为真实 binding/key/repository，恢复另须 workItem scope。C 会在 B 上 stack，使用同一 owner 和目标 metadata。
 
 后续实际浏览器沿唯一 `tests/fixtures/execution-drawer-browser.mjs` 改造，B 不需要它先存在。#204 拥有 provision/execution，B 不修改该文件域；最终组合回读验证前端快照顺序，不能绕开 redaction 的职责。
 
@@ -161,14 +171,44 @@ Delivery 之外的 C 验收是同 issue 尚未完成的范围，不是本 PR 可
 
 ## Outcomes & Retrospective
 
-当前为独立评审后的可执行候选，尚无产品 diff、测试成功或规模实测。实施结束记录实际 head/base、矩阵、负控、规模和偏差；B 仅报告 Delivery 读侧闭合，不宣称完整 #457 接受。
+完成 Delivery 按 binding/repository/key/workItem 的读取隔离、offline许可值/stale、新owner读健康延续、Storage ack 后恢复、Host返回和metadata版本复验，以及已开详情token失效。仍由Core同一runtime owner控制，持久证据沿现SyncCursor健康scope，无新权限数据库或第二操作ledger。
+
+独立完整评审在旧a6477f2发现2P1+1P2，普通Core/Host反例5红与既定117绿分开记录；修复head `f43efcde3b7c06cefebd2d10c06d758ffe456b85` 限定复评原反例6/6、新健康状态2/2、相关197/197、typecheck通过，无新增阻塞。真实close/reopen、跨owner/target、redaction和恢复事务失败、marker写失败、metadata ABA、phantomowned等已纳入正式测试。
+
+在 `fix/delivery-runtime-access`（base A `d9b669e5c3b2f29b185df8b8ae71ec2391670c10`）最终 `pnpm verify` 为2688+7、关键34、扩大137通过；八类隔离副本负控击中对应内容断言。源码head的15项hosted checks全部成功，base/双向closing#468/空分页线程已回读。实际非docs A+D=738；归档文档按最终对象重新累计必须<1300。
+
+本次归档仅改文档；最终push后仍重新读取该head的checks/issue/全部threads再设置ready，不沿用旧head。外部actor=SingularityKChen，目标GitHub repository/project10，幂等键`2026-10-30:468:delivery`；维护同一PR469和字段，未写规划Status或原生依赖。
+
+这证明本地生产Host链路与hosted验证，不替代真实账号/已安装Host UAT或R1；父#457继续开放，逐步门和唯一production browser总矩阵由C验收。回滚本PR保留A，不删除数据或外部资源。
 
 ### Artifacts and Notes
 
-临时日志和负控保存任务运行态目录；正式证据包含分支、命令和真实结果。
+原始日志和负控在任务运行态；本计划保存检出/命令/真实结果与边界。
 
 ## Bottom Change Note
 
 - 2026-10-30（Asia/Singapore）：初版；从原超预算 B 收敛完整 Delivery 读侧，保留目标/key隔离、真实 Host/client 和已开详情安全，逐步写门/browser 由独立 C 完成。
 
 Change Note (2026-10-30 SGT)：协调者创建并回读父 #457 的 Delivery 子 issue #468，固定当前 A 实际 API；A 独立审查发现正在其工作树修复，Delivery 仅修改自身区域，最终须重放 A 修复并跑全部组合验证。外部 actor=SingularityKChen，目标 GitHub repository/project10，幂等键=2026-10-30:457:delivery-child，结果为子 issue 与父子关系成功，未写 Status 或 blocked-by。
+
+Change Note (2026-10-30 SGT)：实施发现 collectBindings 丢失静态拒读的层来源，文件集有界增加 registry.ts，只为 unavailable effective capability 保留固定 permission/policy/capability reason；不带 Provider 原文、不增加 authority。当前非 docs 预算仍小于 799，先加层归因判别测试再实现。
+
+Change Note (2026-10-30 SGT)：首轮完整 verify 报 24 个失败（含子测试）：详情精确白名单 2、controller gap 1、AC297 missing-reference/gate-denial/partial 两 Storage 16、Host credential catalog 父子 3、hand-built shared-binding context 2。增加上述既有测试的精确断言/真实 runtime owner 接线到写集；静态路由或 policy 缺口只查询遮罩，只有明确 permission 拒读清空当前快照，保持原有关系和无关存储事实。
+
+Change Note (2026-10-30 SGT)：完成 B 本地实现、内容 canary 与晚到请求红绿、目标/挂载/history scope 隔离、静态归因与提交末尾 epoch 判别；如实记录首次 full verify 的 24 失败与第二轮全绿。查询只做 epoch 复验而不持 publication 队列，避免已有“snapshot 与 relations 间刷新”用例中的嵌套等待；提交仍用 owner.local 串行。计划保持 Active 等待 A 重放、独立 review 和远端回读。
+
+Change Note (2026-10-30 SGT)：基于已建立的 `backup/delivery-before-planning-rebase-20261030` 重放至最终 A `d9b669e5c3b2f29b185df8b8ae71ec2391670c10`；唯一冲突在 Host runtime 测试，完整保留 A claim/first-write/intent-commit/ignored-old-error 与 B late success/reject。`context.ts`、`start-work.ts`、`bootstrap.ts`、`git-provisioning.ts` 相对 A 无 diff；`queries.ts` 保留 epochRead/consistentRead/getPlanningSync，固定 PermissionDenied 路径未改。重放后 B/Host 关键 63/63、A 与 admission/external-intent/step/request 关键 156/156、execution refresh 与 Start Work E2E 50/50 通过；新父 source 副本负控 query 10/14 红、epoch 2/14 红。计划仍 Active，待新独立对抗评审及远端回读。
+
+Change Note (2026-10-30 SGT)：新父基线下 `pnpm verify` 成功，typecheck、主测试 2676/2676、MVP 7/7 全绿，无新增失败。最终检查使用 `node scripts/rule-checks.mjs disclosure fix/planning-runtime-access`、`size fix/planning-runtime-access`、`git diff --check fix/planning-runtime-access...HEAD`；代码/测试 A+D 保持 389，文档按本次提交后的实测回读。没有 push、ready、merge 或 Status 写入。
+
+Change Note (2026-10-30 SGT)：独立完整评审发现 F1 新 owner 重新外发历史/failed-redaction CI、F2 Host 最后 scopeGuard await 窗口返回旧投影、F3 metadata 只围 Planning epoch。先纳入两 Core/三 Host 普通状态探针 RED，再集中修复。扩展上述最小写集；SyncCursor 承载按 binding/key/repository 的读健康版本、拒读与 scope 复验证据，不加权限库或 migration。Provider 调用前持久 in-flight 标记，结果失败不能使新 owner 借 descriptor 恢复；普通 offline 清标记并保留许可 stale cache。查询每次读健康事实且零写，Host 最后异步检查之后同步比较同 authority 版本，metadata 双版本围栏；每目标 token 含不可 ABA 访问版本。预算预测约650–720非docs，最终必须<799。
+
+Change Note (2026-10-30 SGT)：首次持久 read-health full verify 2682 中 12 红：两个离线保留重启、唯一写者旧单事务断言、四类提交失败注入/乱序、两个跨 owner 普通离线与 AC367 两 Storage。调整不完整读只清健康 marker、不恢复 scope；未知在途健康用 capability 缺口，不能冒充明确 permission 并清事实。故障注入定向事实事务读写，避免读前健康短事务提前消耗一次性 fault；AC367 在事实已读取后再注入外部身份竞争。
+
+Change Note (2026-10-30 SGT)：集中修复 F1/F2/F3 后关键两文件 33/33、含 AC367/既有 Delivery 的组合 137/137 通过；第二轮 full verify typecheck+2687/2687+MVP7/7 全绿。新增真实 close/reopen、已经存在的另一 owner 看到持久拒读、offline 授权 cache 重组、marker 起点写失败零 Provider、健康观察落盘失败、新 owner 同 scope 恢复及事务 ack 前后失败矩阵。memory/SQLite 均先故障 redaction 留旧事实，再拒绝恢复事实/健康事务 commit，确认旧节点仍不可见；begin 只在 ack 后增加 owned，scope 健康只在 ack 后安装。初次 ACK 负控因提前版本与 guard 的组合未命中目标窗口，改为同时提前 ticket.version 与 install 后，两条内容断言均红且无超时；最终源码仍绿。全部运行态证据保留 `.superpowers/delivery-access-evidence/review-*`，不提交日志。
+
+Change Note (2026-10-30 SGT)：最终新增 phantom-owned 判别：读前健康事务 callback 正常执行后 rollback，随后另一 owner 正常开始未完成读，本 owner 不能用虚假的 owned 计数放行旧 CI；隔离副本把 owned 增量提前到 ack 前后，该条内容断言红。最终核心+生产 Host 两文件 34/34，全 B 非 docs A+D=738；所有 scope/source 解码与 owned 改变均受 Delivery epoch 复验。独立副本负控结果：query 13/21 红、current epoch 1/21 红、去持久化 3/21 红、metadata 单 epoch 1/21 红、Host final fence 1/1 红、去 accessVersion 1/1 红、scope 提前安装 2/2 红、owned 提前 1/1 红；均保护内容/访问状态，最终 ACK/owned 负控无取消或超时。计划继续 Active，待限定复评、最终发布面/远端回读，不宣称完成 #457 或 #468 人类验收。
+
+Change Note (2026-10-30 SGT)：最终冻结源码 `pnpm verify`：typecheck、主测试 2688/2688、MVP7/7 全绿，workflow 8 文件无 findings，diff whitespace 检查通过。人工五类目检查没有真实凭据、本机身份/路径、个人信息、内部系统或保密内容。最终 amend 后以 base `fix/planning-runtime-access` @ `d9b669e5c3b2f29b185df8b8ae71ec2391670c10` 回读规模及 disclosure。
+
+Change Note (2026-10-30 12:47 SGT)：记录两P1与P2的持久健康/版本/Host出站修复、限定复评和源码head hosted结果，归档完整Delivery读闭环。
