@@ -71,7 +71,7 @@ export function WorkItemListPage({ view, navigation, headingTabIndex }: { view: 
       ...(view.mappingSourceText === undefined ? [] : ['；', view.mappingSourceText]),
       ...(confirmed ? ['；', createElement(FreshnessBadge, { stale: false, at: body.lastUpdatedAt ?? null })] : [])),
     body.kind === 'content' ? createElement('p', { className: 'hp-list-meta' }, '规划来源最后确认：', body.reconciledAt === undefined ? '未知' : createElement('time', { dateTime: body.reconciledAt }, body.reconciledAt)) : null,
-    view.readOnly ? createElement('p', null, '只读：规划来源只允许读取，此处不提供编辑或开始工作入口。') : null,
+    view.readOnly ? createElement('p', null, '只读：规划来源仅允许读取，此处展示规划内容。') : null,
     view.degraded ? createElement('p', null, '读取能力降级：显示的是保守的最后已知值。') : null,
     createElement('div', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, view.statusText),
     createElement('div', { 'aria-busy': busy }, bodyOf(view, navigation)))
