@@ -26,6 +26,7 @@ export async function createExecutionFixture() {
 }
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url)), uiRequire = createRequire(path.join(repoRoot, 'packages/ui/package.json'))
+const LONG_REPOSITORY = 'repository-with-a-long-unbroken-identity-' + 'abcdef'.repeat(12)
 const ENTRY = `
 import { createElement } from 'react'
 import { apply } from './apps/harness-plugin/src/client.ts'
@@ -34,16 +35,17 @@ export async function mount(root) {
   const queue = [], waiters = [], disposers = []
   const next = () => queue.length ? Promise.resolve(queue.shift()) : new Promise((resolve) => waiters.push(resolve))
   const emit = (value) => waiters.length ? waiters.shift()(value) : queue.push(value)
-  const command = async (action, value) => (await fetch('/control', { method: 'POST', body: JSON.stringify({ action, value }) })).json()
+  const load = (url, options) => fetch(url + location.search, options)
+  const command = async (action, value) => (await load('/control', { method: 'POST', body: JSON.stringify({ action, value }) })).json()
   const child = { effect: (run) => disposers.push(run()), slots: { inject: (_, run) => run(), register: (slot, Panel) => { if (slot.name === 'main') root.render(createElement(Panel)) } }, remote: {
-    harnessProjects: { getExecutionContext: async (workItemId, repositoryId) => (await fetch('/context', { method: 'POST', body: JSON.stringify({ workItemId, repositoryId }) })).json() },
+    harnessProjects: { ...Object.fromEntries(['getWorkspaceSetup', 'getStartWorkOptions', 'startWork', 'getDeliveryProjection', 'refreshDeliveryFacts', 'refreshExecutionRun'].map((method) => [method, async (...args) => (await load('/remote', { method: 'POST', body: JSON.stringify({ method, args }) })).json()])), getExecutionContext: async (workItemId, repositoryId) => (await load('/context', { method: 'POST', body: JSON.stringify({ workItemId, repositoryId }) })).json() },
     $stream: (options) => { carrierFailed = options.carrierFailed; return { restart() {}, dispose: async () => { stopped = true; emit(null) }, async *[Symbol.asyncIterator]() {
-      emit(await (await fetch('/baseline')).json())
+      emit(await (await load('/baseline')).json())
       while (!stopped) { const baseline = await next(); if (baseline === null) return; yield { generation: ++generation, value: { kind: 'baseline', baseline }, accept() {} } }
     } } },
   } }
   await apply({ remote: { $mount: async () => {} }, inject: (_, run) => run(child) })
-  return { command, emit: async () => emit(await (await fetch('/baseline')).json()), disconnect: () => carrierFailed?.(new Error('fixture disconnect')), unmount: async () => { root.unmount(); await Promise.all(disposers.map((run) => run())) } }
+  return { command, emit: async () => emit(await (await load('/baseline')).json()), disconnect: () => carrierFailed?.(new Error('fixture disconnect')), unmount: async () => { root.unmount(); await Promise.all(disposers.map((run) => run())) } }
 }`
 /** 真实浏览器与 Node 测试共用同一个 Host。HTTP 只是 fixture 的 JSON 载体，不替代产品 reader 或 apply。 */
 export async function startExecutionServer() {
@@ -57,10 +59,16 @@ export async function startExecutionServer() {
   const vendor = async (id, file) => readFile(path.join(path.dirname(uiRequire.resolve(id)), 'umd', file), 'utf8')
   const [react, reactDOM] = await Promise.all([vendor('react', 'react.development.js'), vendor('react-dom/client', 'react-dom.development.js')])
   const scripts = { '/react.js': react, '/react-dom.js': reactDOM, '/bundle.js': bundle.outputFiles[0].text }
-  const page = '<!doctype html><meta charset="utf-8"><title>执行抽屉</title><div id="app"></div><script src="/react.js"></script><script src="/react-dom.js"></script><script>window.require=()=>React;var module={exports:{}};var exports=module.exports</script><script src="/bundle.js"></script><script>module.exports.mount(ReactDOM.createRoot(document.getElementById("app"))).then(value=>window.fixture=value)</script>'
+  const page = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>执行抽屉</title><style>
+/* 仅本地 fixture 的 Host token 与文字大小输入，不代表安装 Host。 */
+:root { --dsw-focus-ring-color:#4176e6; --dsw-focus-ring-width:2px; --dsw-alias-state-business-primary:#4176e6; color-scheme:light; color:#20242c; background:#fff; font:15px/1.5 system-ui,sans-serif }
+:root[data-theme=dark] { --dsw-focus-ring-color:#7aaaff; --dsw-alias-state-business-primary:#7aaaff; color-scheme:dark; color:#e3e5eb; background:#191b20 }
+html,body { margin:0; padding:0; min-width:0 } #app { min-width:0; max-width:100% }
+</style><div id="app"></div><script src="/react.js"></script><script src="/react-dom.js"></script><script>const params=new URLSearchParams(location.search);document.documentElement.dataset.theme=params.get('theme')==='dark'?'dark':'light';if(params.get('font')==='200')document.documentElement.style.fontSize='30px';window.require=()=>React;var module={exports:{}};var exports=module.exports</script><script src="/bundle.js"></script><script>module.exports.mount(ReactDOM.createRoot(document.getElementById("app"))).then(value=>window.fixture=value)</script></html>`
   const server = createServer(async (request, response) => {
     try {
-      const route = new URL(request.url, 'http://fixture.invalid').pathname
+      const url = new URL(request.url, 'http://fixture.invalid'), route = url.pathname, scenario = url.searchParams.get('scenario')
+      const showcase = ['all', 'unknown', 'failed', 'succeeded', 'missing', 'stale'].includes(scenario)
       if (scripts[route]) { response.setHeader('content-type', 'text/javascript'); response.end(scripts[route]); return }
       if (route === '/') { response.setHeader('content-type', 'text/html;charset=utf-8'); response.end(page); return }
       let raw = ''; for await (const chunk of request) raw += chunk
@@ -69,7 +77,31 @@ export async function startExecutionServer() {
       if (route === '/context') {
         requests.push(input)
         try { result = fail ? { ok: false, error: 'SECRET' } : { ok: true, value: await h.installed.service.getExecutionContext(input.workItemId, input.repositoryId) } } catch { result = { ok: false, error: 'Host unavailable' } }
+        if (showcase && !fail) result = { ok: true, value: { context: {
+          workspaceId: h.workspaceId, workItemId: input.workItemId, repositoryId: input.repositoryId, status: 'ready',
+          ...(scenario === 'missing' || input.repositoryId === LONG_REPOSITORY ? {} : { runStatus: scenario === 'failed' ? 'failed' : scenario === 'succeeded' || scenario === 'stale' ? 'succeeded' : 'unknown', runConfirmedAt: '2026-10-30T00:00:00.000Z', runStale: ['all', 'unknown', 'stale'].includes(scenario), fallback: 'manual_fallback' }),
+          worktreeExternalId: '/fixture/' + 'longdirectory'.repeat(18), branchExternalId: 'feature/' + 'longbranch'.repeat(12),
+        } } }
         if (paused) await new Promise((resolve) => held.push(resolve))
+      } else if (route === '/remote') {
+        const { method, args } = input
+        if (!['getWorkspaceSetup', 'getStartWorkOptions', 'startWork', 'getDeliveryProjection', 'refreshDeliveryFacts', 'refreshExecutionRun'].includes(method)) throw new Error('Unsupported fixture method')
+        if (!showcase) { try { result = { ok: true, value: await h.installed.service[method](...args) } } catch { result = { ok: false, error: 'Fixture Host unavailable' } } }
+        else {
+          // 仅测试展示数据；生产 apply、严格 client 解码、组件和动作仍是现有入口。
+          const confirmedAt = '2026-10-30T00:00:00.000Z', stale = ['all', 'stale'].includes(scenario), value = method === 'getWorkspaceSetup'
+            ? { workspace: { id: h.workspaceId, name: 'Execution Fixture' }, planning: { state: 'confirmed', bindingId: 'fixture-planning', projectNodeId: 'fixture-project' }, executionInstalled: true }
+            : method === 'getStartWorkOptions'
+            ? { workspaceId: h.workspaceId, workItemId: args[0], executionMode: 'manual' }
+            : method === 'getDeliveryProjection' ? { workspaceId: h.workspaceId, workItemId: args[0], repositoryId: args[1], now: '2026-10-30T00:01:00.000Z', projection: {
+              workItemId: args[0], repositoryId: args[1], optional: [], degraded: false, gaps: [{ entityKind: 'commit', reason: 'not_observed' }],
+              freshness: ['change_request', 'pipeline_run', 'check_run'].map((kind) => ({ kind, stale, ...(scenario === 'unknown' || scenario === 'missing' ? {} : { confirmedAt }) })),
+              hops: ['change_request', 'pipeline_run', 'check_run'].map((entityKind) => ({ entityKind, from: 'fixture-source', to: 'fixture-' + entityKind, label: entityKind === 'change_request' ? '变更请求 #42' : '持续集成检查', externalId: 'fixture-external-identity-' + '1234567890'.repeat(10), fact: scenario === 'failed' ? 'ci_failed' : 'ci_passed', stale, unavailable: false, relationState: 'candidate' })),
+            } }
+            : method === 'startWork' ? { writeState: scenario === 'failed' ? 'failed' : scenario === 'succeeded' ? 'confirmed' : 'unknown', saving: false, authoritative: scenario === 'succeeded', value: { executionContextId: 'fixture-context', status: 'ready', degraded: true, fallback: 'manual_fallback' } }
+            : { writeState: 'local_only', saving: false, authoritative: false, value: { applied: true } }
+          result = { ok: true, value }
+        }
       } else if (route === '/control') {
         if (input.action === 'status') await h.storage.putExecutionRun({ ...(await h.storage.getExecutionRun(h.runId)), status: input.value })
         if (input.action === 'visibility') input.value === null ? visibility.delete(h.itemId) : visibility.set(h.itemId, input.value)
@@ -77,7 +109,7 @@ export async function startExecutionServer() {
         if (input.action === 'fail') fail = input.value
         if (input.action === 'release') { paused = false; held.splice(0).forEach((resolve) => resolve()) }
         result = { requests }
-      } else if (route === '/baseline') { const baseline = await h.host.controller.baseline(); result = { ...baseline, entities: baseline.entities.map(project) } }
+      } else if (route === '/baseline') { const baseline = await h.host.controller.baseline(); result = { ...baseline, ...(showcase ? { repositories: [...baseline.repositories, { ...baseline.repositories[0], id: LONG_REPOSITORY }] } : {}), entities: baseline.entities.map(project) } }
       else { response.writeHead(404); response.end(); return }
       response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(result))
     } catch (error) { response.writeHead(500); response.end(JSON.stringify({ error: error.message })) }

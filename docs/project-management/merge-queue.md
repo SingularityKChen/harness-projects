@@ -697,3 +697,8 @@ gh issue reopen 4 -c "被 #108 的关闭引用自动关闭；revise 清单（R1�
 | 3 | #463 / Closes #447 | 移到前两项合入后的实际 main；保留表单状态和已结算的安装件新断言/最终组合验证；索引两边都保留 |
 
 每条合入后 fetch 真实 main；重新锁定下一条 head/base、diff、产品blob、当前 CI/PR Fast Gate、threads 与 issue双向关联，再取得当前 head 的评审结论。共享历史修改前保留 `backup/pr<n>-before-mmp-review-20261030` 并用精确 lease，不覆盖并发修改。最终产品/测试树须与已独立验证的 `test/mmp-ui-final@a9c277a` 一致，有差异就回到验证门。#427/#446/#449/#457/#459、组合浏览器与 R1 均不因 merge 自动接受；不改 Planning Status。
+
+
+## 2026-10-30 · PR #476–#478、#480 条件授权收尾
+
+直接用户授权、完整首轮矩阵与证据入口见 [本轮记录](../review/2026-10-30-pr476-pr480-mmp-review.md)。四条独立main分支，无原生stack关系。顺序为#477/#475 → #476/#448 → #478/#434 → #480/#479。两P2须独立复评；每条合入后fetch真实main再更新下一条，保留Completed/Review索引全部条目。恢复引用为 `refs/backup/pr<N>-before-mmp-review-20261030`，push用精确lease，当前head的PR Fast Gate与新批准是合并前提。只执行带预期head的rebase merge并回读issue；#449、#427及R1不因merge自动接受，Planning Status不改。

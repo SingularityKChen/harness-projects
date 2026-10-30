@@ -143,3 +143,25 @@ test('two explicit refresh intents execute twice and recovery waits for both com
   finishes[1](); await settle(); assert.equal(f.calls.filter((call) => call === 'explicit-refresh').length, 2)
   assert.match(text(f.h), /陈旧/); assert.doesNotMatch(text(f.h), /data-state="passed"/); f.h.close()
 })
+
+test('six lineage slots expose state, gaps and confirmation while identities and relation sources collapse', async (t) => {
+  const f = fixture(t), p = projection(); p.hops[0].externalId = 'PIPELINE_IDENTITY'; p.hops[1].fact = 'ci_failed'; f.p = p; await f.open()
+  const html = text(f.h), details = html.match(/<details\b[^>]*>[\s\S]*?<\/details>/g) ?? []
+  assert.equal(details.length, 2, 'each observed node has a native source disclosure')
+  assert.match(details.join(''), /PIPELINE_IDENTITY/); assert.match(details.join(''), /候选关系/)
+  assert.ok(details.every((part) => !/<details[^>]* open/.test(part)))
+  const visible = html.replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, '')
+  assert.equal((visible.match(/data-position=/g) ?? []).length, 6); assert.match(visible, /缺口：尚未观察到/)
+  assert.match(visible, /通过/); assert.match(visible, /失败/); assert.match(visible, /所属提交的最后已知 CI/)
+  assert.match(visible, /2026-10-26T00:00:00.000Z/); assert.match(visible, /刷新交付谱系/); assert.doesNotMatch(visible, /PIPELINE_IDENTITY|候选关系/)
+  const before = f.calls.length; text(f.h); f.h.flush(); await settle(); assert.equal(f.calls.length, before)
+  f.now = 1100; f.resume(); await settle()
+  const stale = text(f.h).replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, '')
+  assert.match(stale, /陈旧（最后已知）/); assert.doesNotMatch(stale, /data-state="passed"/); f.h.close()
+})
+
+test('unconfirmed malformed time is never labelled as a last confirmation', async (t) => {
+  const f = fixture(t), p = projection(); p.freshness[0].confirmedAt = '2026-02-30T00:00:00.000Z'; f.p = p; await f.open()
+  const slot = text(f.h).match(/<li data-position="pipeline_run">[\s\S]*?<\/li>/)[0]
+  assert.match(slot, /未知/); assert.doesNotMatch(slot, /最后确认：|2026-02-30|data-state="passed"/); f.h.close()
+})

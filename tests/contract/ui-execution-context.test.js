@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as client from '@harness-projects/client'
 import { deriveWorkItemDetailView } from '@harness-projects/ui-model'
-import { createExecutionFixture } from '../fixtures/execution-drawer-browser.mjs'
+import { createExecutionFixture, startExecutionServer } from '../fixtures/execution-drawer-browser.mjs'
 import { wire, redacted } from '../fixtures/work-item-wire.mjs'
 const target = { workspaceId: 'ws-1', workItemId: 'ent-aa', repositoryId: 'repo-a' }
 const dto = { ...target, status: 'ready', runStatus: 'running', fallback: 'manual_fallback', branchExternalId: 'work/one', worktreeExternalId: '/fixture/work' }
@@ -167,4 +167,38 @@ test('target cleanup before queued refresh begins suppresses the old command', a
   h.render().props.children.find((child) => child?.type === 'button').props.onClick(); text(h); h.flush()
   h.props.target = { ...sectionTarget, workItemId: 'ent-bb' }; text(h); h.flush(); await settle()
   assert.ok(calls.every(([kind, id]) => kind === 'read' && id === 'ent-bb')); h.close()
+})
+
+test('run state, stale confirmation and manual next step stay outside collapsible technical sources', async () => {
+  let reads = 0
+  const h = harness({ target: { ...sectionTarget, repositoryIds: ['repo-a'] }, connected: true, reader: async () => { reads++; return { ...dto, runStatus: 'unknown', runStale: true, runConfirmedAt: '2026-10-28T01:00:00Z' } } })
+  text(h); h.flush(); await settle()
+  const html = text(h), disclosure = html.match(/<details\b[^>]*>[\s\S]*?<\/details>/g) ?? []
+  assert.equal(disclosure.length, 1, 'each repository has one native technical-source disclosure')
+  assert.match(disclosure[0], /<summary[^>]*>执行来源<\/summary>/); assert.doesNotMatch(disclosure[0], / open(?:=|>)/)
+  assert.match(disclosure[0], /fixture\/work|work\/one/)
+  const visible = html.replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, '')
+  for (const fact of ['状态未知', '最后确认，当前无法核对', '2026-10-28T01:00:00Z', '人工处理，可在该工作树继续', '刷新执行状态']) assert.ok(visible.includes(fact), fact)
+  assert.doesNotMatch(visible, /fixture\/work|work\/one|已完成/)
+  text(h); text(h); h.flush(); await settle(); assert.equal(reads, 1, 'presentation rerenders cannot read the Provider'); h.close()
+})
+test('missing run and missing time remain explicit beside hidden paths', async () => {
+  const h = harness({ target: { ...sectionTarget, repositoryIds: ['repo-a'] }, connected: true, reader: async () => ({ ...target, status: 'ready' }) })
+  text(h); h.flush(); await settle()
+  const visible = text(h).replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, '')
+  assert.match(visible, /尚无运行记录/); assert.doesNotMatch(visible, /此状态于|已完成|运行成功/); h.close()
+})
+
+test('browser showcase transports setup, execution, start and lineage through strict production clients', async (t) => {
+  const server = await startExecutionServer(); t.after(server.close)
+  const call = async (method, args) => (await (await fetch(`${server.url}/remote?scenario=all`, { method: 'POST', body: JSON.stringify({ method, args }) })).json()).value
+  const setup = client.createWorkspaceSetupSource({ getWorkspaceSetup: () => call('getWorkspaceSetup', []) }, { actorRef: { kind: 'human' } }); t.after(setup.dispose)
+  await setup.refresh(); assert.equal(setup.getSnapshot().setup?.planning.state, 'confirmed')
+  const scope = { workspaceId: server.workspaceId, workItemId: server.itemId, repositoryId: 'repo-alpha' }
+  const reader = client.createDeliveryLineageReader({ read: () => call('getDeliveryProjection', [server.itemId, 'repo-alpha']), refresh: () => call('refreshDeliveryFacts', [{ kind: 'human' }, server.itemId, 'repo-alpha']) })
+  await reader.refresh(scope); const read = await reader.read(scope); assert.equal(read.projection.hops.length, 3)
+  const start = client.createStartWork({ getStartWorkOptions: (id) => call('getStartWorkOptions', [id]), startWork: (...args) => call('startWork', args) }, async () => null, { kind: 'human' })
+  assert.equal((await start.options(scope)).executionMode, 'manual'); assert.equal((await start.submit(scope)).writeState, 'unknown')
+  const execution = client.createExecutionContextReader(async () => (await (await fetch(`${server.url}/context?scenario=all`, { method: 'POST', body: JSON.stringify(scope) })).json()).value)
+  assert.equal((await execution(scope)).runStatus, 'unknown'); assert.equal((await execution(scope)).runStale, true)
 })
