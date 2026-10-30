@@ -25,6 +25,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-30-operation-runtime-browser](exec-plan/active/2026-10-30-operation-runtime-browser.md) | 逐步操作准入与唯一生产浏览器总验收（#457） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
