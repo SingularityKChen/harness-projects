@@ -9,7 +9,7 @@ import { WORKSPACE_STYLES } from './workspace-presentation.ts'
 import { FORM_STYLES, focusFormError } from './form-presentation.ts'
 import type { DOMElement } from './work-item-detail.ts'
 /** 唯一工作区设置门：仅持草稿与导航；确认状态和工作区 identity 全部来自 Host。 */
-export function WorkspaceSetupGate({ setupSource, source, executionReader, repositoryBindingSource, startWork, deliveryReader, mappingSource, refreshSource }: { readonly mappingSource?: PlanningMappingSource | undefined; readonly refreshSource?: PlanningRefreshSource | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly startWork?: StartWork | undefined; readonly repositoryBindingSource?: RepositoryBindingSource | undefined; readonly setupSource: WorkspaceSetupSource; readonly source: WorkspaceSource; readonly executionReader?: ExecutionContextReader | undefined }): ReactElement {
+export function WorkspaceSetupGate({ setupSource, source, executionReader, repositoryBindingSource, startWork, deliveryReader, mappingSource, refreshSource, announceListStatus }: { readonly announceListStatus?: boolean | undefined; readonly mappingSource?: PlanningMappingSource | undefined; readonly refreshSource?: PlanningRefreshSource | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly startWork?: StartWork | undefined; readonly repositoryBindingSource?: RepositoryBindingSource | undefined; readonly setupSource: WorkspaceSetupSource; readonly source: WorkspaceSource; readonly executionReader?: ExecutionContextReader | undefined }): ReactElement {
   const snapshot = useSyncExternalStore(setupSource.subscribe, setupSource.getSnapshot, setupSource.getSnapshot)
   const read = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot)
   const [name, setName] = useState(''), [project, setProject] = useState<string | undefined>(undefined), [settings, setSettings] = useState(false), [connecting, setConnecting] = useState(false)
@@ -45,7 +45,7 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   const button = (label: string, action: () => void): ReactElement => h('button', { className: 'hp-action', type: 'button', disabled: snapshot.pending, onClick: action }, label)
   const errorSummary = view.error ? h('div', { id: 'setup-error', className: 'hp-form-notice', role: 'alert', tabIndex: -1, 'data-form-error': true }, h('strong', null, '工作区设置未完成'), h('p', null, view.error.code === 'result_unknown' || view.error.code === 'ambiguous_result' ? '结果未知，请重新读取确认。' : view.error.message), h('p', null, '草稿已保留，请按以下提示恢复。'), view.recovery?.action ? button(view.recovery.label, () => { submitted.current = true; recovery() }) : h('p', null, view.recovery?.label)) : null
   const children: ReactElement[] = [h('style', { key: 'styles' }, WORKSPACE_STYLES + FORM_STYLES), h('h2', { tabIndex: -1, key: 'heading' }, list ? '工作项' : stage === 'create' ? '创建工作区' : '连接设置')]
-  if (list) children.push(button('连接设置', () => setSettings(true)), h(WorkItemApp, { source, refreshSource, executionReader, deliveryReader, startWork, onBindRepository: () => setSettings(true) }))
+  if (list) children.push(button('连接设置', () => setSettings(true)), h(WorkItemApp, { source, refreshSource, announceListStatus, executionReader, deliveryReader, startWork, onBindRepository: () => setSettings(true) }))
   else if (!setup) { if (!view.error) children.push(h('p', null, '正在读取工作区设置。')) }
   else if (confirmed && !settings) children.push(h('p', { role: 'status' }, '正在等待工作项。'))
   else {

@@ -532,7 +532,9 @@ describe('Harness 插件安装件契约', () => {
         const seen = await applyClient({ frame: BASELINE_FRAME, setup })
         try {
           const markup = renderToStaticMarkup(realReact.createElement(seen.registrations.find((entry) => entry.options.name === 'main').component))
-          assert.ok(markup.includes(text)); assert.doesNotMatch(markup, /Saved|已连接|Artifact item/)
+          assert.ok(markup.includes(text)); assert.doesNotMatch(markup, /Saved|Artifact item/)
+          assert.equal(markup.match(/<dt>规划<\/dt><dd>([^<]*)<\/dd>/)?.[1], setup.workspace ? '配置已记录，待确认' : '未绑定')
+          if (setup.workspace) assert.match(markup, /<dt>宿主<\/dt><dd>已连接<\/dd>/)
         } finally { await seen.unload() }
       }
     })
