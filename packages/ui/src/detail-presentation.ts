@@ -4,22 +4,22 @@ export const DETAIL_STYLES = `
 .hp-project > .hp-project-refresh { float:right; margin:0 0 var(--hp-space-3) var(--hp-space-3) }
 .hp-project > .hp-project-list { clear:both }
 .hp-project[data-detail-layout="wide"] > .hp-project-list { padding-right:356px }
-.hp-detail {
+.hp-workspace.hp-detail {
   position:fixed; inset:auto 0 auto auto; top:0; margin:0; box-sizing:border-box;
   left:var(--hp-detail-left,auto); top:var(--hp-detail-top,0px);
   width:var(--hp-detail-width,min(340px,100vw)); height:var(--hp-detail-height,100dvh);
   max-width:100vw; max-height:100dvh; padding:0; border:1px solid var(--hp-border);
-  border-radius:var(--hp-radius); color:inherit; background:Canvas; overflow:hidden;
+  border-radius:var(--hp-radius); color:inherit; background:Canvas; overflow:auto;
 }
 .hp-detail[open] { display:flex; flex-direction:column }
 .hp-detail::backdrop { background:color-mix(in srgb,CanvasText 15%,transparent) }
-.hp-detail > .hp-detail-header { flex:none; display:flex; align-items:flex-start; gap:var(--hp-space-2); padding:var(--hp-space-4); border-bottom:1px solid var(--hp-border) }
-.hp-detail .hp-detail-title { flex:1; margin:0; max-height:30dvh; overflow:auto; font-size:1.25rem; outline-offset:-3px }
-.hp-detail > .hp-detail-body { flex:1; min-height:0; overflow:auto; padding:var(--hp-space-4); overscroll-behavior:contain }
+.hp-detail > .hp-detail-header { flex:none; display:flex; flex-wrap:wrap; align-items:flex-start; gap:var(--hp-space-2); padding:var(--hp-space-4); border-bottom:1px solid var(--hp-border) }
+.hp-detail .hp-detail-title { flex:1 1 12rem; margin:0; max-height:30dvh; overflow:auto; font-size:1.25rem; outline-offset:-3px }
+.hp-detail > .hp-detail-body { flex:1; min-height:calc(3em + var(--hp-space-4) + var(--hp-space-4)); overflow:auto; padding:var(--hp-space-4); overscroll-behavior:contain }
 .hp-detail :where(p,time,a,span,code,pre,h2,h3,h4) { overflow-wrap:anywhere; white-space:normal }
 .hp-detail :where(input,select) { max-inline-size:100%; box-sizing:border-box }
 .hp-detail .hp-detail-prose { white-space:pre-wrap }
-.hp-detail .hp-detail-header button { flex:none }
+.hp-detail .hp-detail-header button { flex:none; margin-inline-start:auto }
 `
 
 /** 可选 DOM 面保持 SSR 和最小 renderer 契约可用；真实浏览器具有完整接口。 */
