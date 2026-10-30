@@ -26,6 +26,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-10-30-ui-detail-text-reflow](exec-plan/completed/2026-10-30-ui-detail-text-reflow.md) | 实际App样式归属、放大文字标题重排（#479） |
+| [2026-10-30-github-pr-creation](exec-plan/active/2026-10-30-github-pr-creation.md) | 原生 GitHub PR 创建、独立写权限与不确定回执（#436） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
