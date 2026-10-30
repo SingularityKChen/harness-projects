@@ -144,3 +144,5 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 单 PR 的记录（`pr-NN-mvp-review.md`、现行的 `pr-NN-mmp-review.md` 与 `2026-09-21-pr-NN-risk-matrix.md`）同样放在本目录，但不进上表——判据就是上面那条：**跨多个 PR、且删掉之后接手的人会缺失决策依据**的才登记。
 
 记录按 `PLANS.md` §3 的 ExecPlan 章节写——评审本身也是一次有批次、有验收、有决策的工作。
+
+2026-11-02：PR #486/#487/#488 的独立矩阵分别见 `pr-486-mmp-review.md`、`pr-487-mmp-review.md`、`pr-488-mmp-review.md`。#486/#488 为原生栈，#487 独立；按当前 main 先收尾该栈，再接合 #487，产品树须保持已验证组合。用户仅在无 P0/P1 且修复独立复评通过时授权这三条 rebase merge；不变更规划 Status 或原生依赖。
