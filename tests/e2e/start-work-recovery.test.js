@@ -26,7 +26,7 @@ function controllableClock() {
   return { clock: () => new Date(now).toISOString(), advance: (ms) => { now += ms } }
 }
 
-test('中断后：Provisioning 上下文接管供应并只创建一份资源', async () => {
+test('创建调用抛出后：未知结果跨新 key 与租约过期保守阻挡', async () => {
   const providers = createFakeProviders()
   const time = controllableClock()
   const core = await compose(providers, undefined, time.clock)
@@ -40,22 +40,22 @@ test('中断后：Provisioning 上下文接管供应并只创建一份资源', a
     }
     return original(input)
   }
-  await assert.rejects(() => core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'interrupt-1' }))
+  assert.equal((await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'interrupt-1' })).writeState, WriteState.Unknown)
   const stateAfterInterrupt = exportFakeStorageState(providers.storage)
-  assert.equal(stateAfterInterrupt.contexts[0].status, ExecutionContextStatus.Provisioning)
+  assert.equal(stateAfterInterrupt.contexts[0].status, ExecutionContextStatus.Failed)
 
   const inFlight = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'interrupt-inflight' })
   assert.equal(inFlight.executionContextId, stateAfterInterrupt.contexts[0].id)
   assert.equal(providers.execution.state.runs.length, 2, '在途期间不得启动第二个执行运行')
   assert.equal(providers.development.state.branches.filter((b) => b.name === `work/${workItemId}`).length, 0)
 
-  // 租约过期后才允许接管，把同一个上下文做完。
+  // 时间不能证明外部未发生：新键仍被未决意图阻挡。
   time.advance(31_000)
   const resumed = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'interrupt-2' })
-  assert.equal(resumed.writeState, WriteState.Saved)
-  assert.equal(resumed.status, ExecutionContextStatus.Ready)
+  assert.equal(resumed.writeState, WriteState.Unknown)
+  assert.equal(resumed.status, ExecutionContextStatus.Failed)
   assert.equal(exportFakeStorageState(providers.storage).contexts.length, 1)
-  assert.equal(providers.development.state.branches.filter((b) => b.name === `work/${workItemId}`).length, 1)
-  assert.equal(providers.development.state.worktrees.length, 1)
-  assert.equal(providers.execution.state.runs.length, 3)
+  assert.equal(providers.development.state.branches.filter((b) => b.name === `work/${workItemId}`).length, 0)
+  assert.equal(providers.development.state.worktrees.length, 0)
+  assert.equal(providers.execution.state.runs.length, 2)
 })

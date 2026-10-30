@@ -248,7 +248,7 @@ test('关系候选分表、执行 active 唯一、修订删除实体不倒退，
   // 单调增长是端口职责（见迁移注释与契约套件的修订号用例）；库层只保证非负，这里断言的就是这一条。
 }))
 
-test('003 显式 schema 审查：十一张表的 68 列全部在白名单内，没有列能存凭据材料', () => withDatabase((db) => {
+test('003 显式 schema 审查：十一张表的 69 列全部在白名单内，没有列能存凭据材料', () => withDatabase((db) => {
   migrate(db)
   // 逐列白名单（与 L2 的 `identity-membership-schema.test.js` 同形）：与 `pragma_table_info` **互相覆盖**，
   // 多一列、少一列都失败——新增列必须同步写进这里，否则这份审查只是声明。
@@ -274,7 +274,7 @@ test('003 显式 schema 审查：十一张表的 68 列全部在白名单内，�
     'reconcile_cursor.last_reconciled_at': '时间戳', 'reconcile_cursor.workspace_id': '标识',
     'webhook_subscription.binding_id': '标识', 'webhook_subscription.enabled': '标志', 'webhook_subscription.event_name': '平台事件名',
     'webhook_subscription.id': '标识', 'webhook_subscription.scope_key': '调用方 scope 键', 'webhook_subscription.workspace_id': '标识',
-    'mutation_attempt.request_fingerprint': '固定请求身份（不含凭据）', 'mutation_attempt.binding_id': '标识', 'mutation_attempt.command_name': '命令名', 'mutation_attempt.created_at': '时间戳',
+    'mutation_attempt.external_intent_json': 'Start Work 白名单输入、实际连接、owner 与当前外部步骤（禁止 URL/environment 材料）', 'mutation_attempt.request_fingerprint': '固定请求身份（不含凭据）', 'mutation_attempt.binding_id': '标识', 'mutation_attempt.command_name': '命令名', 'mutation_attempt.created_at': '时间戳',
     'mutation_attempt.error_code': '错误码', 'mutation_attempt.expected_source_version': '平台版本载体',
     'mutation_attempt.id': '标识', 'mutation_attempt.idempotency_key': '调用方幂等键', 'mutation_attempt.state': '枚举：WriteState',
     'mutation_attempt.updated_at': '时间戳', 'mutation_attempt.workspace_id': '标识',
@@ -286,7 +286,7 @@ test('003 显式 schema 审查：十一张表的 68 列全部在白名单内，�
     .flatMap((table) => columns(db, table).map((column) => `${table}.${column}`)).sort()
   assert.deepEqual(actual, Object.keys(AUDITED).sort(),
     '每一条列都必须被显式审计：新增列要同步写进 AUDITED，否则这份审查只是声明')
-  assert.equal(actual.length, 68, '003/004 建出的执行面表共 68 列')
+  assert.equal(actual.length, 69, '003/004 建出的执行面表共 69 列')
   seed(db)
   for (const invalid of ['0', '-1', '1.5', '9007199254740992', "'invalid'"]) {
     rejects(db, `UPDATE execution_context SET provisioning_generation=${invalid}`, /CHECK constraint failed/)

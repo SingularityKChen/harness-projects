@@ -160,6 +160,8 @@ CREATE TABLE mutation_attempt (
   binding_id TEXT NOT NULL REFERENCES provider_binding (id),
   command_name TEXT NOT NULL,
   request_fingerprint TEXT CHECK (command_name != 'startWork' OR (request_fingerprint IS NOT NULL AND length(request_fingerprint) > 0)),
+  -- Start Work 在每个实际 Provider 写前提交精确输入；未知步骤跨 key/lease 保守阻挡，非自动恢复日志。
+  external_intent_json TEXT CHECK (external_intent_json IS NULL OR (command_name = 'startWork' AND json_valid(external_intent_json) AND json_type(external_intent_json) = 'object')),
   -- R8：幂等键由调用方选择；"加入既有内容"这一步取 content_id，"创建内容"这一步的键形状仍未证明（L1 记录 §3 第 6 条）。
   state TEXT NOT NULL CHECK (state IN ('pending','saved','unknown','conflict','failed')),
   expected_source_version TEXT,

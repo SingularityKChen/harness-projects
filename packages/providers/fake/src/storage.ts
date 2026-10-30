@@ -103,6 +103,11 @@ export class MemoryStorage implements cap.Storage {
       if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId) || !this.data.workspaceBindings.some((mount) => mount.workspaceId === record.workspaceId && mount.bindingId === record.bindingId && mount.domain === 'planning')) throw new RangeError('planning mapping mount does not exist')
     }
     for (const record of this.data.contexts) validateGeneration(record)
+    this.data.attempts = this.data.attempts.map((record) => {
+      if (record.externalIntent === undefined) return record
+      if (record.commandName !== 'startWork') throw new TypeError('external intent requires Start Work')
+      return { ...record, externalIntent: cap.externalIntentSnapshot(record.externalIntent) }
+    })
     this.#transactionScope = transactionScope
     // 导入时校验已存元数据与引用完整性（对抗验证 P3-2）：配置必须有挂载、账号关联必须指向存在的账号，否则孤儿状态会被导入。
     for (const record of this.data.accounts) cap.parseConnectorAccount(record, this.#policy)
@@ -502,6 +507,10 @@ export class MemoryStorage implements cap.Storage {
   async findMutationAttempt(workspaceId: domain.WorkspaceId, idempotencyKey: string): Promise<cap.MutationAttemptRecord | undefined> { return structuredClone(this.data.attempts.find((a) => a.workspaceId === workspaceId && a.idempotencyKey === idempotencyKey)) }
   async putMutationAttempt(record: cap.MutationAttemptRecord): Promise<void> {
     return this.#mutate(() => {
+      if (record.externalIntent !== undefined) {
+        if (record.commandName !== 'startWork') throw new TypeError('external intent requires Start Work')
+        record = { ...record, externalIntent: cap.externalIntentSnapshot(record.externalIntent) }
+      }
       if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('mutation attempt workspace does not exist')
       if (!this.data.providerBindings.some((binding) => binding.id === record.bindingId)) throw new Error('mutation attempt binding does not exist')
       const previous = this.data.attempts.find((a) => a.workspaceId === record.workspaceId && a.idempotencyKey === record.idempotencyKey)
