@@ -36,7 +36,7 @@ export function PlanningMappingForm({ source }: { readonly source: PlanningMappi
   const status = mapping.status, field = data.fields.find((field) => field.id === status?.projectFieldId)
   const options = field?.options ?? [], orphanOptions = Object.keys(status?.options ?? {}).filter((id) => !options.some((option) => option.id === id))
   return h('form', { className: 'hp-form', ref: form, 'aria-busy': snapshot.pending, 'aria-label': '字段映射', onSubmit: (event: { preventDefault(): void }) => { event.preventDefault(); submitted.current = true; void source.save(mapping) } },
-    h('style', null, FORM_STYLES), h('h3', null, '字段映射'), choose('status', 'single_select', '状态字段'), choose('iterationFieldId', 'iteration', '迭代字段'), choose('targetDateFieldId', 'date', '目标日期字段'),
+    h('style', null, FORM_STYLES), h('h3', null, '字段映射'), !snapshot.pending && !snapshot.error && !unconfirmed && !unapplied ? h('p', null, '当前字段映射已确认。') : null, choose('status', 'single_select', '状态字段'), choose('iterationFieldId', 'iteration', '迭代字段'), choose('targetDateFieldId', 'date', '目标日期字段'),
     ...[...options, ...orphanOptions.map((id) => ({ id, name: '当前定义中已不存在' }))].map((option, index) => h('div', { key: option.id, className: 'hp-field' }, h('label', { htmlFor: `${prefix}-option-${index}` }, `${option.name}（${option.id}）`), h('select', { id: `${prefix}-option-${index}`, 'aria-describedby': described(`${prefix}-option-${index}`),
       value: status && Object.hasOwn(status.options, option.id) ? status.options[option.id] : '', disabled: snapshot.pending, onChange: (event: { target: { value: string } }) => {
         if (!status) return

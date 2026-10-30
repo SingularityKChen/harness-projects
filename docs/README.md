@@ -49,6 +49,7 @@
 | [2026-10-26-plugin-demo-artifact](exec-plan/completed/2026-10-26-plugin-demo-artifact.md) | 版本化 tarball 与干净 Web profile 安装、打开、卸载验收（#230）；[安装指南](product/demo-install.md) |
 | [2026-10-26-repository-binding-ui](exec-plan/completed/2026-10-26-repository-binding-ui.md) | 仓库选择、只读预检与三引用绑定（#356） |
 | [2026-10-29-mmp-ui-forms](exec-plan/completed/2026-10-29-mmp-ui-forms.md) | 连接表单闭环（#447） |
+| [2026-10-30-ui-settings-tasks](exec-plan/completed/2026-10-30-ui-settings-tasks.md) | 聚焦设置任务、共享恢复与窄屏任务定位（#485） |
 | [2026-10-30-ui-connect-diagnostics](exec-plan/completed/2026-10-30-ui-connect-diagnostics.md) | 连接失败原因、安全拒绝与草稿恢复（#434） |
 | [2026-10-26-start-work-drawer](exec-plan/completed/2026-10-26-start-work-drawer.md) | 详情显式开始工作、默认分支与人工降级恢复（#142） |
 | [2026-10-26-delivery-lineage-drawer](exec-plan/completed/2026-10-26-delivery-lineage-drawer.md) | 交付谱系抽屉、缺口与时间核对（#234） |
