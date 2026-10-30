@@ -227,6 +227,8 @@ export interface DeliveryFactsRecord {
 }
 
 export interface Storage {
+  /** 同步读取已提交状态的 opaque fence；不得在 StorageTransaction 内调用。 */
+  committedReadFence(): string
   // ── 事务：一个 transaction 内的写入要么全部生效，要么全部不生效 ──
   transaction<T>(work: (tx: StorageTransaction) => Promise<T>): Promise<T>
 
@@ -343,4 +345,4 @@ export interface Storage {
 }
 
 /** 事务内的 Storage：不允许嵌套事务，因此去掉 transaction 本身。 */
-export type StorageTransaction = Omit<Storage, 'transaction'>
+export type StorageTransaction = Omit<Storage, 'transaction' | 'committedReadFence'>

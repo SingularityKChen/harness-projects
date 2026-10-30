@@ -1,5 +1,10 @@
 import { AccessLevel, CapabilityKey, projectError, type ResolvedBinding, type ProviderRegistry, type Storage, type StorageTransaction } from '@harness-projects/capabilities'
 import { ContentKind, NormalizedStatus, ProjectErrorCode, RedactionReason, type WorkspaceProjection, type WorkspaceId, type ProviderBindingId } from '@harness-projects/domain'
+export const committedFence = (storage: Storage): string => {
+  const value = storage.committedReadFence()
+  if (typeof value !== 'string') throw new Error('Storage committed read fence must be synchronous')
+  return value
+}
 export const PLANNING_DENIED = 'Core 读取层拒绝 planning.item.read；本地工程信息仍可浏览，请恢复授权后重新验证'
 export function redactPlanning(row: WorkspaceProjection): WorkspaceProjection {
   const { planningFields: _fields, ...identity } = row

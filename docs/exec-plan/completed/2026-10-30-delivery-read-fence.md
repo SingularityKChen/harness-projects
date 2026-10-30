@@ -1,6 +1,6 @@
 # Delivery 跨 owner 提交读栅栏 ExecPlan
 
-> 状态：Active（源码独立复评通过；正在同步最新父层并等待最终远端门）；创建：2026-10-30（Asia/Singapore）。
+> 状态：Completed（源码与独立对抗验收通过；最后文档push后回读远端门再Ready）；创建/验收：2026-10-30（Asia/Singapore）。
 > 范围：修复 #469 复审发现的跨 owner Delivery 拒读返回窗口；基于 `fix/delivery-runtime-access` 形成独立 stacked PR，完成后关闭 #468。
 > 关联：Closes #468；Refs #469、#457。
 
@@ -34,8 +34,8 @@
 
 ### Concrete Steps
 
-- [ ] 运行两份跨 owner RED 探针并记录 Memory/SQLite 与 Host 结果。
-- [ ] 实现 token、接入 Core/Host fence，逐批运行判别测试。
+先运行两份跨owner探针，已得到Memory/SQLite及Host有效RED。
+随后实现token并接Core/Host fence，逐批判别已GREEN。
 
 
 ### Batch 1 · RED 与方案锁定
@@ -81,7 +81,7 @@
 - [x] Batch 1 RED 与候选方案
 - [x] Batch 2 实现 committed-read fence
 - [x] 2026-10-30：Batch 3 原P1及F1–F4独立复评通过；源码完整verify2704+7通过，最新父层组合另行回读。
-- [ ] Batch 4 Draft/Ready 与远端回读
+- [x] 2026-10-30：Batch 4 已建Draft PR #481、双向closing468、字段/标签/assignee/milestone及独立验收；末次文档head须重新回读checks/threads后才Ready。
 
 ## Surprises & Discoveries
 
@@ -108,7 +108,7 @@ Storage token 读取只读、可重复；事务 rollback 不推进 token；失�
 
 ## Outcomes & Retrospective
 
-源码验收head `6e2da2f10c695fcd76b8065b5289e41931b18f0b`：原Core Memory/SQLite和真实双Host探针均返回受限节点0；fence12/12、聚焦含contract1315/1315、boundaries9/9、完整verify2704/2704与MVP0 7/7。独立复评F1–F4全部ADDRESSED。最新父层更新后正在重新验证；产品通过不代替新head远端门、人类UAT或R1。
+源码验收head `6e2da2f10c695fcd76b8065b5289e41931b18f0b`：原Core Memory/SQLite和真实双Host探针均返回受限节点0；fence12/12、聚焦含contract1315/1315、boundaries9/9、完整verify2704/2704与MVP0 7/7。独立复评F1–F4全部ADDRESSED。最新统一source `de24119e918329549069fd82e5713219fe57ed21`、父层 `d7cc8a3` 的正式fence12项与Core/Host跨owner3项均通过；新增3项在隔离旧base `9618fc8` 有效RED。完整统一 `pnpm verify` 主套件2780/2780、MVP0 7/7。独立限定复评通过，代码A+D306、文档126。产品通过不代替末次文档head远端门、人类UAT或R1。
 
 ## Bottom Change Note
 
@@ -123,3 +123,5 @@ Change Note (2026-10-30 SGT)：F4 修复 settled async callback 误拒：SQLite/
 Change Note (2026-10-30 SGT)：修正前次仅移动计划但未保存头部状态的归档记录错误；按真实源码/父层状态暂留Active，最终源代码验证和远端门完成后归档。
 
 Change Note (2026-10-30 SGT)：把原Memory/SQLite与双Host返回探针升级为3项正式回归，隔离旧base3/3有效RED，当前15项新验收全GREEN；复用runtime-access leaf承载fence校验，移除queries↔delivery模块循环，测试临时库按mkdtemp清理。
+
+Change Note (2026-10-30 SGT)：实际保存Completed状态与Progress/Outcomes，记录统一source2780+7和正式15项判别；最后归档变更仅文档，源码逐字校验后按新head回读远端。

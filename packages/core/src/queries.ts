@@ -13,7 +13,7 @@ import {
 } from '@harness-projects/capabilities'
 import { IdentityRole, type EntityId, type ProjectError, type ProviderBindingId, type WorkspaceId } from '@harness-projects/domain'
 import { startTargetError } from './start-work.ts'
-import { redactPlanning } from './runtime-access.ts'
+import { committedFence, redactPlanning } from './runtime-access.ts'
 import { gateCommand } from './capabilities.ts'
 import { PLANNING_SYNC_SCOPE } from './bootstrap.ts'
 import type { CoreContext } from './context.ts'
@@ -70,7 +70,7 @@ export interface CoreQueries {
 
 export function createQueries(context: CoreContext): CoreQueries {
   return {
-    getDeliveryAccessVersion: () => `${context.runtimeAccess.epoch}:${context.runtimeAccess.deliveryEpoch}`,
+    getDeliveryAccessVersion: () => `${context.runtimeAccess.epoch}:${context.runtimeAccess.deliveryEpoch}:${committedFence(context.storage)}`,
     getStartWorkTargetError: (workItemId) => startTargetError(context, workItemId),
     listProviderBindings: () => context.storage.listProviderBindings(context.workspaceId),
 
@@ -119,8 +119,9 @@ async function consistentRead<T>(context: CoreContext, read: () => Promise<T>): 
 
 async function epochRead<T>(context: CoreContext, read: () => Promise<T>): Promise<T> {
   for (;;) {
-    const epoch = context.runtimeAccess.epoch, delivery = context.runtimeAccess.deliveryEpoch, value = await read()
-    if (epoch === context.runtimeAccess.epoch && delivery === context.runtimeAccess.deliveryEpoch) return value
+    const epoch = context.runtimeAccess.epoch, delivery = context.runtimeAccess.deliveryEpoch, fence = committedFence(context.storage), value = await read()
+    const currentFence = committedFence(context.storage)
+    if (epoch === context.runtimeAccess.epoch && delivery === context.runtimeAccess.deliveryEpoch && fence === currentFence) return value
   }
 }
 

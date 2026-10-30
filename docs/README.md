@@ -25,7 +25,6 @@
 
 | 计划 | 用途 |
 |---|---|
-| [2026-10-30-delivery-read-fence](exec-plan/active/2026-10-30-delivery-read-fence.md) | Delivery 跨 owner 已提交读 fence（#468） |
 | [2026-10-30-delivery-runtime-access](exec-plan/completed/2026-10-30-delivery-runtime-access.md) | Delivery 按能力与目标拒读、离线与恢复（#468 / #457） |
 | [2026-10-30-ui-detail-text-reflow](exec-plan/completed/2026-10-30-ui-detail-text-reflow.md) | 实际App样式归属、放大文字标题重排（#479） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
@@ -34,6 +33,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-30-delivery-read-fence](exec-plan/completed/2026-10-30-delivery-read-fence.md) | Delivery 跨 owner 已提交读 fence（#468） |
 | [2026-10-30-planning-runtime-access](exec-plan/completed/2026-10-30-planning-runtime-access.md) | Planning 运行时撤权、离线与恢复（#465 / #457） |
 | [2026-10-30-github-pr-creation](exec-plan/completed/2026-10-30-github-pr-creation.md) | 原生 GitHub PR 创建、独立写权限与不确定回执（#436） |
 | [2026-10-30-durable-write-intent](exec-plan/completed/2026-10-30-durable-write-intent.md) | Start Work 写前意图与不确定结果结算（#204） |
