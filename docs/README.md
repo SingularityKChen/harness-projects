@@ -25,6 +25,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-30-durable-write-intent](exec-plan/active/2026-10-30-durable-write-intent.md) | Start Work 写前意图与不确定结果结算（#204） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
