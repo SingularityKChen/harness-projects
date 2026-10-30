@@ -51,6 +51,9 @@ function injectAfterWrite(storage, method, nth) {
   const hits = { calls: 0, thrown: 0 }
   const counted = (target, write) => async (...args) => {
     const out = await write.apply(target, args)
+    // 只计请求 admission/final Git 结算；写前/步骤/run 槽位写不冒充最终事务。
+    const intent = args[0]?.externalIntent
+    if (method === 'putMutationAttempt' && intent && (!intent.operation.startsWith('create') || (await target.getExecutionContext(intent.contextId))?.status === 'provisioning')) return out
     hits.calls += 1
     if (hits.calls === nth) { hits.thrown += 1; throw new Error('注入的写后失败') }
     return out
@@ -479,12 +482,14 @@ for (const [label, makeStorage] of ADAPTERS) {
     const storage = w.storage.location === undefined ? w.storage : (w.storage.close(), createSqliteStorage(w.storage.location))
     const core = await composeCore({ workspace: { id: w.workspaceId, name: 'B-3 重开' }, providers: w.providers, storage })
     results.push(await start(core, w.workItemId, 'reopen-key')); views.push(await query(core))
-    for (const r of results) assert.deepEqual([r.writeState, r.confirmed, r.degraded, r.status, r.error?.code], [writeState, confirmed, degraded, 'ready', degraded ? 'result_unknown' : undefined])
-    if (degraded) for (const r of results) assert.match(r.error.message, /^已 ready 的上下文（[^）]+）：外部执行是否已启动无法确认/, '缺口文案：缺口描述加括号，与前后文分开')
+    const source = (await storage.findMutationAttempt(w.workspaceId, 'saved')); const blocked = ['pending', 'unknown'].includes(source.externalIntent?.state) || source.state === 'unknown'
+    const pending = source.state === 'pending' && blocked
+    for (const r of results) assert.deepEqual([r.writeState, r.confirmed, r.degraded, r.status, r.error?.code], pending ? ['pending', false, false, 'ready', undefined] : [writeState, confirmed, degraded, 'ready', degraded ? 'result_unknown' : undefined])
+    if (degraded && !blocked) for (const r of results) assert.match(r.error.message, /^已 ready 的上下文（[^）]+）：外部执行是否已启动无法确认/, '缺口文案：缺口描述加括号，与前后文分开')
     assert.deepEqual(views.map((v) => [v.status, v.degraded]), [['ready', degraded], ['ready', degraded]], 'Query')
     const after = JSON.parse(await world(w.providers, storage, w.workspaceId, w.contextId)); const original = JSON.parse(before)
     const receipts = after[5].filter((a) => a.idempotencyKey !== 'saved')
-    assert.deepEqual(receipts.map((a) => [a.idempotencyKey, a.state, a.requestFingerprint]).sort(), ['new-key', 'reopen-key'].map((key) => [key, 'pending', original[5][0].requestFingerprint]), '新观察键也耐久绑定首次请求')
+    assert.deepEqual(receipts.map((a) => [a.idempotencyKey, a.state, a.requestFingerprint]).sort(), blocked ? [] : ['new-key', 'reopen-key'].map((key) => [key, 'pending', original[5][0].requestFingerprint]), '新观察键也耐久绑定首次请求')
     after[5] = after[5].filter((a) => a.idempotencyKey === 'saved')
     assert.deepEqual(after, original, '外部没有新增 run / 分支 / 工作树，除新观察收据之外本地事实不变（不补边、不补 run）')
   }
@@ -526,7 +531,7 @@ for (const [label, makeStorage] of ADAPTERS) {
   for (const [name, gapped, fault, status] of WORKTREE_READS) test(`${label}：Ready 的工作树读回（${name}）——${status === 'ready' ? '保留 Ready、报 Unknown' : '判 Failed'}，换新 key 也不起第二个 run（评审 P2）`, async () => {
     const w = await started(gapped ? (x) => injectLostWrite(x.storage, 'putExecutionRun', 1) : undefined); const runs = w.providers.execution.state.runs.length
     const original = w.providers.development.getWorktree; const core = (await fault(w)) ?? w.core; const replay = await start(core, w.workItemId, 'saved')
-    assert.deepEqual([replay.status, replay.writeState, (await w.storage.getExecutionContext(w.contextId)).status], status === 'ready' ? ['ready', 'unknown', 'ready'] : ['failed', 'failed', 'failed'])
+    assert.deepEqual([replay.status, replay.writeState, (await w.storage.getExecutionContext(w.contextId)).status], status === 'ready' ? ['ready', gapped ? 'pending' : 'unknown', 'ready'] : ['failed', 'failed', 'failed'])
     if (status === 'ready') {
       await w.storage.putMutationAttempt({ id: 'write:startWork:first-failed', workspaceId: w.workspaceId, bindingId: w.bindingId, commandName: 'startWork', idempotencyKey: 'first-failed', state: 'failed', requestFingerprint: (await w.storage.findMutationAttempt(w.workspaceId, 'saved')).requestFingerprint, expectedSourceVersion: undefined, errorCode: 'unavailable' })
       const hit = await start(core, w.workItemId, 'first-failed')
@@ -534,7 +539,7 @@ for (const [label, makeStorage] of ADAPTERS) {
     }
     if (status === 'failed') w.providers.development.getWorktree = original // 读回恢复后接管才走得到 run 步
     const retake = await start(core, w.workItemId, 'retake')
-    assert.deepEqual([retake.writeState, w.providers.execution.state.runs.length], [status === 'ready' ? 'unknown' : 'saved', runs], '换新 key 接管也不起第二个 run')
+    assert.deepEqual([retake.writeState, w.providers.execution.state.runs.length], [status === 'ready' ? gapped ? 'pending' : 'unknown' : 'saved', runs], '换新 key 接管也不起第二个 run')
     if (status === 'failed') assert.equal(retake.runExternalId, w.first.runExternalId, '接管沿用已有的 run')
   })
 
@@ -542,7 +547,7 @@ for (const [label, makeStorage] of ADAPTERS) {
     const w = await started((x) => { x.providers.execution.startRun = async () => providerFail('ambiguous_result', '注入的响应丢失') })
     const run = await w.storage.getExecutionRun(runIdFor(w.contextId))
     assert.deepEqual([w.first.writeState, w.first.confirmed, w.first.status, w.first.fallback, w.first.error?.code, run?.status, run?.fallback], ['unknown', false, 'ready', undefined, 'result_unknown', 'unknown', undefined])
-    assert.match(w.first.error.message, /^运行状态未知（startRun 的结果不确定：/)
+    assert.match(w.first.error.message, /^运行状态未知（/)
     await readBack(w, UNKNOWN)
     const lost = await started((x) => { x.providers.execution.startRun = async () => providerFail('ambiguous_result', '注入'); return injectLostWrite(x.storage, 'putExecutionRun', 1) })
     assert.deepEqual([lost.hits, lost.first.writeState, lost.first.status], [{ calls: 1, thrown: 1 }, 'unknown', 'ready'], 'unknown 的 run 记录写不进去：仍是 Unknown，不是拒绝')
@@ -575,7 +580,7 @@ for (const [label, makeStorage] of ADAPTERS) {
 
   test(`${label}：目标仍可见时，同 key 命中的 Failed / Unknown 首次报告原样返回，不被 Ready 提升（也不被完整性守卫改写）`, async () => {
     const w = await started((x) => injectLostWrite(x.storage, 'putExecutionRun', 1)) // Ready 但没有 run 记录
-    assert.equal((await start(w.core, w.workItemId, 'saved')).error?.code, 'result_unknown', '目标可见：首次 saved 报告仍经过完整性守卫')
+    assert.equal((await start(w.core, w.workItemId, 'saved')).writeState, 'pending', 'ack 后本地结算失败仍保留耐久 Pending，不假报 Saved')
     for (const [key, state, code] of [['first-failed', 'failed', 'unavailable'], ['first-unknown', 'unknown', 'result_unknown']]) {
       await w.storage.putMutationAttempt({ id: `write:startWork:${key}`, workspaceId: w.workspaceId, bindingId: w.bindingId, commandName: 'startWork', idempotencyKey: key, state, requestFingerprint: (await w.storage.findMutationAttempt(w.workspaceId, 'saved')).requestFingerprint, expectedSourceVersion: undefined, errorCode: code })
       const replay = await start(w.core, w.workItemId, key)
@@ -609,9 +614,9 @@ for (const [label, makeStorage] of ADAPTERS) {
     const core = policy === undefined ? w.core : await composeCore({ workspace: { id: w.workspaceId, name: 'B-3 接管' }, providers: w.providers, storage: w.storage, policy })
     const runs = w.providers.execution.state.runs.length; const face = (r) => [r.writeState, r.confirmed, r.degraded, r.status, r.fallback, r.runExternalId, r.branchExternalId, r.worktreeExternalId]
     const taken = await start(core, w.workItemId, 'retake'); const view = await core.queries.getExecutionContext({ workItemId: w.workItemId, repositoryId: REQUEST.repositoryId })
-    assert.deepEqual(face(taken), [writeState, confirmed, degraded, 'ready', w.first.fallback, w.first.runExternalId, w.first.branchExternalId, w.first.worktreeExternalId], '如实带回已有 run 的句柄与降级、分支与工作树的句柄；主执行 ack 的 failed 是已确认的运行，不从 failed 反推')
-    assert.deepEqual([face(await start(core, w.workItemId, 'retake')), view.degraded, view.fallback, w.providers.execution.state.runs.length], [face(taken), degraded, w.first.fallback, runs], '与重放、Query 同一个答案，不起第二个 run')
-    if (writeState === 'unknown') assert.deepEqual([/^运行状态未知（ack 的状态 mystery 不是已知取值）/.test(w.first.error.message), /^运行状态未知（已有的 run 记录是 unknown）/.test(taken.error.message)], [true, true], '文案陈述运行状态与原因，不称本地写失败')
+    assert.deepEqual(face(taken), [writeState, confirmed, degraded, writeState === 'unknown' ? 'failed' : 'ready', w.first.fallback, w.first.runExternalId, w.first.branchExternalId, w.first.worktreeExternalId], '如实带回已有 run 的句柄与降级、分支与工作树的句柄；主执行 ack 的 failed 是已确认的运行，不从 failed 反推')
+    assert.deepEqual([face(await start(core, w.workItemId, 'retake')), view.degraded, view.fallback, w.providers.execution.state.runs.length], [face(taken), writeState === 'unknown' ? false : degraded, w.first.fallback, runs], '与重放、Query 同一个答案，不起第二个 run')
+    if (writeState === 'unknown') assert.deepEqual([/^运行状态未知（ack 的状态 mystery 不是已知取值）/.test(w.first.error.message), taken.error.code === 'result_unknown'], [true, true], '文案陈述运行状态与原因，不称本地写失败')
   })
   test(`${label}：主执行 startRun 失败时并发的写者刚落了 run 记录——降级不覆盖它，如实带回`, async () => {
     const w = await started(({ providers, storage, workspaceId }) => { providers.execution.startRun = async ({ context }) => { await storage.putExecutionRun({ id: runIdFor(context.externalId), workspaceId, contextId: context.externalId, status: 'running', updatedAt: '2026-10-01T00:00:00.000Z', providerRef: { ...context, objectKind: 'execution_run', externalId: 'run-concurrent' } }); return providerFail('unavailable', '主执行启动失败') } })

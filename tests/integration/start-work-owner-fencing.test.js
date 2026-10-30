@@ -56,7 +56,11 @@ for (const kind of ['Fake', 'SQLite']) {
       const before = await w.storage.getExecutionContext(w.contextId)
       assert.equal((await start(w, 'within-lease')).writeState, 'pending')
       assert.equal((await w.storage.getExecutionContext(w.contextId)).provisioningGeneration, before.provisioningGeneration, 'in-flight 不增代')
-      w.time.advance(31_000); assert.equal((await start(w, 'winner')).writeState, 'saved')
+      w.time.advance(31_000)
+      if (step.startsWith('create')) {
+        const blocked = snapshot(w); assert.equal((await start(w, 'winner')).writeState, 'pending'); assert.equal(snapshot(w), blocked)
+        await w.storage.putExecutionContext({ ...before, provisioningGeneration: 2 }) // 明确后继 fixture，仍独立验证迟到 owner 的结算 fence
+      } else assert.equal((await start(w, 'winner')).writeState, 'saved')
       const winner = snapshot(w); gate.release.resolve(); const result = await old
       assert.equal(snapshot(w), winner, '旧 context/relations/run/attempt/revision 全快照不得改写赢家')
       if (step === 'claim') assert.deepEqual([result.writeState, result.error?.code, result.branchExternalId], ['conflict', 'conflict', undefined], '外部调用前丢失所有权不假称已有 ack')
@@ -71,7 +75,8 @@ for (const kind of ['Fake', 'SQLite']) {
     try {
       await gate.entered.promise; w.time.advance(31_000)
       const denied = await composeCore({ ...w, policy: { [CapabilityKey.DevelopmentWorktreeCreate]: AccessLevel.Unavailable } })
-      assert.equal((await start(w, 'denied', denied)).status, 'failed')
+      const before = snapshot(w); assert.equal((await start(w, 'denied', denied)).writeState, 'pending'); assert.equal(snapshot(w), before)
+      await w.storage.putExecutionContext({ ...await w.storage.getExecutionContext(w.contextId), provisioningGeneration: 2, status: 'failed' })
       const winner = snapshot(w); gate.release.resolve(); lost(await old)
       assert.equal(snapshot(w), winner, '拒绝接管的 Failed 也不能被旧回调撤销')
       assert.equal((await w.storage.getExecutionContext(w.contextId)).provisioningGeneration, 2)
@@ -150,7 +155,10 @@ for (const kind of ['Fake', 'SQLite']) {
     const old = start(w, 'old')
     try {
       await gate.entered.promise
-      if (takeover) { w.time.advance(31_000); assert.equal((await start(w, 'winner')).writeState, 'saved') }
+      if (takeover) {
+        w.time.advance(31_000); const before = snapshot(w); assert.equal((await start(w, 'winner')).writeState, 'pending'); assert.equal(snapshot(w), before)
+        await w.storage.putExecutionContext({ ...await w.storage.getExecutionContext(w.contextId), provisioningGeneration: 2 })
+      }
       const winner = snapshot(w); gate.release.resolve(); const result = await old
       assert.deepEqual([result.writeState, result.confirmed, result.branchExternalId], ['unknown', false, undefined], '没有已知句柄也不能把不确定外部结果改称 conflict/reapply')
       if (takeover) { assert.equal(snapshot(w), winner); assert.deepEqual([result.error.code, result.error.recovery], ['result_unknown', 'refresh']) }

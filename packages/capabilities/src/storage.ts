@@ -24,6 +24,8 @@ import type {
 import type { BindingConfigurationRecord, ConnectorAccountRecord } from './connector-account.ts'
 import type { CapabilityDomain } from './capability-keys.ts'
 import type { ExternalObjectRef, ProviderObservation } from './observation.ts'
+import type { ProviderCreateBranchInput, ProviderCreateWorktreeInput } from './development-provider.ts'
+import type { ProviderStartRunInput } from './execution-provider.ts'
 import { ProjectErrorCode, projectError, type ProjectError } from './result.ts'
 
 /**
@@ -105,6 +107,43 @@ export interface MutationAttemptRecord {
   readonly expectedSourceVersion: string | undefined; readonly errorCode: ProjectErrorCode | undefined
   /** Start Work 必填；首次请求身份与 command/binding 不可改写，只有状态可推进。 */
   readonly requestFingerprint?: string
+  /** Start Work 当前外部步骤；根 state 直到完整命令结束前保持 pending。 */
+  readonly externalIntent?: StartWorkExternalIntent
+}
+
+export type StartWorkExternalOperation = { readonly operation: 'createBranch'; readonly input: ProviderCreateBranchInput }
+  | { readonly operation: 'createWorktree'; readonly input: ProviderCreateWorktreeInput }
+  | { readonly operation: 'startRun' | 'startFallbackRun'; readonly input: ProviderStartRunInput }
+export type StartWorkExternalIntent = StartWorkExternalOperation & {
+  readonly contextId: ExecutionContextId; readonly ownerGeneration: number; readonly bindingId: ProviderBindingId; readonly state: WriteState
+}
+/** 持久输入白名单：字段只读一次，不接收任意 environment、不保存访问 URL；两个 Storage 共用同一复制与校验。 */
+export function externalIntentSnapshot(value: StartWorkExternalIntent): StartWorkExternalIntent {
+  const fail = (): never => { throw new TypeError('invalid Start Work external intent') }
+  const text = (v: unknown): string => typeof v === 'string' && v.length > 0 ? v : fail()
+  const ref = (v: ExternalObjectRef, kind: string): ExternalObjectRef => {
+    if (v === null || typeof v !== 'object') return fail()
+    const { bindingId, objectKind, externalId } = v
+    if (objectKind !== kind) return fail()
+    return { bindingId: text(bindingId) as ProviderBindingId, objectKind, externalId: text(externalId), url: undefined }
+  }
+  if (value === null || typeof value !== 'object') return fail()
+  const { contextId, ownerGeneration, bindingId, state, operation, input } = value
+  if (!Number.isSafeInteger(ownerGeneration) || ownerGeneration < 1 || !['pending', 'saved', 'unknown', 'conflict', 'failed'].includes(state)
+    || input === null || typeof input !== 'object') return fail()
+  const base = { contextId: text(contextId) as ExecutionContextId, ownerGeneration, bindingId: text(bindingId) as ProviderBindingId, state }
+  if (operation === 'createBranch') {
+    const { repository, name, fromRef } = input
+    return { ...base, operation, input: { repository: ref(repository, 'repository'), name: text(name), fromRef: text(fromRef) } }
+  }
+  if (operation === 'createWorktree') {
+    const { repository, worktreeKey, branch, path } = input
+    return { ...base, operation, input: { repository: ref(repository, 'repository'), worktreeKey: text(worktreeKey), branch: text(branch), ...(path === undefined ? {} : { path: text(path) }) } }
+  }
+  if (operation !== 'startRun' && operation !== 'startFallbackRun') return fail()
+  const { workingDirectory, context, command, environment } = input
+  if (environment === null || typeof environment !== 'object' || Array.isArray(environment) || Object.keys(environment).length !== 0) return fail()
+  return { ...base, operation, input: { workingDirectory: text(workingDirectory), context: ref(context, 'execution_context'), command: text(command), environment: {} } }
 }
 
 /** 同步游标状态；degraded 表示还在推进但有失败，failed 表示必须人工介入。 */
@@ -291,8 +330,8 @@ export interface Storage {
   putReconcileCursor(record: ReconcileCursorRecord): Promise<void>
 
   // ── 写尝试：**一行一键**——同 (workspace, idempotencyKey) 只有一行，写入是幂等覆盖（后写的状态取代先写的），
-  // `id` 在工作区内唯一。「未决行存在时不得发起第二次外部写」是**调用方**的义务，当前没有强制点（core 在外部写完成后才记录，#204），
-  // storage 只保证同键只有一行、不会被并发写成两行。
+  // `id` 在工作区内唯一。Start Work 认领先写 Pending 请求，每步调用前提交 typed externalIntent；未决槽位由 core 跨 key 阻挡。
+  // Storage 镜像只保存白名单与同键唯一性；其他命令的写前要求仍由各自调用方负责，#193/#421 不在此承诺。
   findMutationAttempt(workspaceId: WorkspaceId, idempotencyKey: string): Promise<MutationAttemptRecord | undefined>
   putMutationAttempt(record: MutationAttemptRecord): Promise<void>
   listMutationAttempts(workspaceId: WorkspaceId): Promise<readonly MutationAttemptRecord[]>

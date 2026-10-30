@@ -1,4 +1,5 @@
 /** SQLite 行 → 端口记录的映射：列名是 snake_case，端口字段是 camelCase，本模块是两者之间唯一的翻译层（换列名只改这里，改一处）。 */
+import { externalIntentSnapshot } from '@harness-projects/capabilities'
 import type { BindingConfigurationRecord, CapabilityDomain, ConnectorAccountRecord, DeliveryFactsRecord, ExecutionContextRecord, ExecutionRunRecord, ExternalObjectRef, FieldValueRecord, MembershipRecord, MutationAttemptRecord, PlanningSyncRoundRecord, ProviderBindingRecord, ReconcileCursorRecord, RepositoryRecord, SecretHandle, SyncCursorRecord, SyncState, WorkspaceRecord } from '@harness-projects/capabilities'
 import type { ConnectorAccountId, EntityId, ExecutionContextId, ExecutionContextStatus, ExecutionRunId, ExecutionRunStatus, ExternalIdentity, ExternalIdentityId, IdentityRole, MembershipContentKind,
   NormalizedStatus, PlanningContent, PlanningFieldsSnapshot, ProjectErrorCode, ProviderBindingId, RedactionReason, Relation, RelationClass, RelationSource, RelationState, RelationType, StatusPolicy,
@@ -99,6 +100,7 @@ export const rowToRelation = (row: Row): Relation => ({ from: text(row, 'from_en
 export const rowToMutationAttempt = (row: Row): MutationAttemptRecord => ({ id: text(row, 'id'),
   workspaceId: text(row, 'workspace_id') as WorkspaceId, bindingId: text(row, 'binding_id') as ProviderBindingId,
   ...(row.request_fingerprint == null ? {} : { requestFingerprint: text(row, 'request_fingerprint') }),
+  ...(row.external_intent_json == null ? {} : { externalIntent: externalIntentSnapshot(JSON.parse(text(row, 'external_intent_json'))) }),
   commandName: text(row, 'command_name'), idempotencyKey: text(row, 'idempotency_key'), state: text(row, 'state') as WriteState,
   expectedSourceVersion: optionalText(row, 'expected_source_version'), errorCode: optionalText(row, 'error_code') as ProjectErrorCode | undefined })
 
