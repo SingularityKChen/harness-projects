@@ -33,7 +33,7 @@ export function createDeliveryLineageReader(port: { read(scope: DeliveryLineageS
         if (!positions.includes(String(hop.entityKind)) || !['candidate', 'confirmed', 'rejected'].includes(String(hop.relationState)) || typeof hop.stale !== 'boolean' || typeof hop.unavailable !== 'boolean' || ['from', 'to'].some((key) => typeof hop[key] !== 'string') || ['externalId', 'label'].some((key) => hop[key] !== undefined && typeof hop[key] !== 'string')) throw new TypeError(INVALID)
       }
       for (const entry of p.freshness) { const set = record(entry, ['kind', 'confirmedAt', 'stale']); if (!positions.slice(2).includes(String(set.kind)) || typeof set.stale !== 'boolean' || (set.confirmedAt !== undefined && typeof set.confirmedAt !== 'string')) throw new TypeError(INVALID) }
-      for (const entry of p.gaps) { const gap = record(entry, ['entityKind', 'reason']); if (!positions.includes(String(gap.entityKind)) || !['not_started', 'not_observed', 'not_refreshed', 'unconfirmed'].includes(String(gap.reason))) throw new TypeError(INVALID) }
+      for (const entry of p.gaps) { const gap = record(entry, ['entityKind', 'reason', 'key', 'layer']); if (!positions.includes(String(gap.entityKind)) || !['not_started', 'not_observed', 'not_refreshed', 'unconfirmed', 'permission_denied'].includes(String(gap.reason)) || (gap.reason === 'permission_denied' && (!['development.repository.read', 'development.change_request.read', 'delivery.pipeline.read', 'delivery.check.read'].includes(String(gap.key)) || !['permission', 'capability', 'policy'].includes(String(gap.layer))))) throw new TypeError(INVALID) }
       return value as unknown as DeliveryLineageRead
     },
   }

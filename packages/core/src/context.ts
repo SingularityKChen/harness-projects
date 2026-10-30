@@ -150,7 +150,7 @@ export async function createContext(deps: CoreDeps): Promise<CoreContext | undef
     await tx.putWorkspace(workspace)
     for (const record of prepared.records) await tx.putProviderBinding(record)
   })
-  const runtimeAccess = createRuntimeAccess(providerRegistry(prepared.bindings))
+  const runtimeAccess = createRuntimeAccess(providerRegistry(prepared.bindings), storage, workspace.id)
   return {
     storage, workspaceId: workspace.id, runtimeAccess, get registry() { return runtimeAccess.registry },
     clock: deps.clock ?? (() => new Date().toISOString()),
@@ -202,6 +202,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
 export function unavailableCore(reason: string): CoreApi {
   const error = projectError(ProjectErrorCode.NotSupported, reason)
   const queries: CoreQueries = {
+    getDeliveryAccessVersion: () => 'unavailable',
     getStartWorkTargetError: async () => error,
     listProviderBindings: async () => [],
     getPlanningSnapshot: async () => ({ views: [], revision: 0, sync: { degraded: true, stale: true, reason }, metadata: { workspace: undefined, capabilities: [], repositories: [], planningSource: undefined } }),

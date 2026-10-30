@@ -346,7 +346,13 @@ for (const label of ['Fake', 'SQLite']) {
     const w = await world(label, t)
     await w.plan()
     const before = await w.record()
-    w.control.beforeTransaction = () => w.storage.transaction(async (tx) => {
+    const find = w.storage.findExternalIdentity.bind(w.storage)
+    w.storage.findExternalIdentity = async (...args) => {
+      const value = await find(...args)
+      if (args[1] === 'change_request' && args[2] === 'pr-7') { w.storage.findExternalIdentity = find; w.control.beforeTransaction = inject }
+      return value
+    }
+    const inject = () => w.storage.transaction(async (tx) => {
       await tx.putEntity({ id: 'concurrent-pr', kind: 'change_request' })
       await tx.putExternalIdentity({ id: 'concurrent-identity', entityId: 'concurrent-pr', bindingId: w.providers.development.gate.bindingId,
         externalKind: 'change_request', externalId: 'pr-7', role: 'primary' })

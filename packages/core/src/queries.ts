@@ -45,12 +45,14 @@ export interface WorkspaceMetadata {
  */
 export interface RepositoryMetadata {
   readonly id: string
+  readonly accessVersion?: string
   readonly references: readonly { readonly bindingId: ProviderBindingId; readonly role: IdentityRole }[]
   readonly capabilities: readonly EffectiveCapability[]
 }
 
 export interface CoreQueries {
   /** Start Work 的只读目标预检：复用 Core 准入守卫，不依赖展示身份，不发外部调用或落控制事实。 */
+  getDeliveryAccessVersion(): string
   getStartWorkTargetError(workItemId: string): Promise<ProjectError | undefined>
   listProviderBindings(): Promise<readonly ProviderBindingRecord[]>
   getPlanningSnapshot(): Promise<{ readonly views: readonly PlanningItemView[]; readonly sync: SyncSummary; readonly revision: number; readonly metadata: WorkspaceMetadata }>
@@ -68,6 +70,7 @@ export interface CoreQueries {
 
 export function createQueries(context: CoreContext): CoreQueries {
   return {
+    getDeliveryAccessVersion: () => `${context.runtimeAccess.epoch}:${context.runtimeAccess.deliveryEpoch}`,
     getStartWorkTargetError: (workItemId) => startTargetError(context, workItemId),
     listProviderBindings: () => context.storage.listProviderBindings(context.workspaceId),
 
@@ -118,8 +121,8 @@ async function consistentRead<T>(context: CoreContext, read: () => Promise<T>): 
 /** 独立新鲜度读不占 publication 队列；epoch 变化后重读，不能以旧 healthy 游标返回。 */
 async function epochRead<T>(context: CoreContext, read: () => Promise<T>): Promise<T> {
   for (;;) {
-    const epoch = context.runtimeAccess.epoch, value = await read()
-    if (epoch === context.runtimeAccess.epoch) return value
+    const epoch = context.runtimeAccess.epoch, delivery = context.runtimeAccess.deliveryEpoch, value = await read()
+    if (epoch === context.runtimeAccess.epoch && delivery === context.runtimeAccess.deliveryEpoch) return value
   }
 }
 
@@ -180,14 +183,20 @@ async function repositoryMetadata(context: CoreContext, storage: StorageTransact
   const repositories: RepositoryMetadata[] = []
   for (const record of records) {
     const references = await repositoryReferences(storage, record, mounts)
+    await context.runtimeAccess.syncDelivery(record.id, storage)
+    const registry = context.runtimeAccess.deliveryRegistry(record.id)
     const capabilities: EffectiveCapability[] = []
     for (const { anchor, earlier, reports } of [START_WORK_ROUTE, CHANGE_REQUEST_READ_ROUTE]) {
-      const route = await routeDevelopment({ workspaceId: context.workspaceId, registry: context.registry, storage }, record.id, anchor[0], anchor[1], earlier)
+      const route = await routeDevelopment({ workspaceId: context.workspaceId, registry, storage }, record.id, anchor[0], anchor[1], earlier)
       capabilities.push(...(route.ok
         ? route.binding.capabilities.filter((entry) => reports.includes(entry.key))
         : reports.map((key) => ({ key, access: AccessLevel.Unavailable, reason: route.error.message, bindingId: undefined, externalActionUrl: undefined }))))
     }
-    repositories.push({ id: record.id, references: references.map(({ bindingId, role }) => ({ bindingId, role })), capabilities })
+    for (const key of [CapabilityKey.DeliveryPipelineRead, CapabilityKey.DeliveryCheckRead]) {
+      const entry = bindingForCapability(registry, key)?.capabilities.find((entry) => entry.key === key)
+      if (entry) capabilities.push(entry)
+    }
+    repositories.push({ ...(context.runtimeAccess.deliveryVersion(record.id) === undefined ? {} : { accessVersion: context.runtimeAccess.deliveryVersion(record.id)! }), id: record.id, references: references.map(({ bindingId, role }) => ({ bindingId, role })), capabilities })
   }
   return repositories
 }

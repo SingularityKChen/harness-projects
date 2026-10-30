@@ -6,13 +6,13 @@ import { CapabilityKey, ProjectErrorCode, projectError, type DeliveryFactSetKind
 import { EntityKind, ExternalIdentityKind, RelationType, type ExecutionContextId } from '@harness-projects/domain'
 import { readChainFacts, type ChainFacts } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
-import { isDeliveryScope, type NormalizedDeliveryScope } from './delivery.ts'
+import { deliveryMasks, isDeliveryScope, type NormalizedDeliveryScope } from './delivery.ts'
 import { contextIdFor } from './execution-context.ts'
 import { ensureEntity, IdentityConflictError } from './identity.ts'
 import { EdgeProvenance, recordEdges, type ChainNode, type DiscoveredEdge } from './relations.ts'
 
 /** 刷新结果里的缺口：只带能力键。provider 的错误文字（可能带路径、令牌）不进结果，因为结果会原样到达 controller 的 wire（K2）；原因码归 TD-046。 */
-export interface DeliveryRefreshGap { readonly key: CapabilityKey }
+export interface DeliveryRefreshGap { readonly key: CapabilityKey; readonly code?: ProjectErrorCode }
 
 export interface DeliveryRefreshResult {
   /** 读取或提交失败为 false；provider 读不全不是失败（那是 `gaps`，对应集合保留并标陈旧）。 */
@@ -24,6 +24,8 @@ export interface DeliveryRefreshResult {
   readonly gaps: readonly DeliveryRefreshGap[]
   readonly error: ProjectError | undefined
 }
+
+class DeliveryReadSuperseded extends Error {}
 
 const SET_KINDS: readonly DeliveryFactSetKind[] = ['commit', 'change_request', 'pipeline_run', 'check_run']
 
@@ -85,8 +87,8 @@ export async function refreshDeliveryFacts(context: CoreContext, scope: Normaliz
   let anchored = false
   try {
     const confirmedAt = new Date(wall).toISOString() // 读数不能解析时这里抛 RangeError，走下面的降级路径，不写入非法的确认时刻
-    const facts = await readChainFacts(context, scope)
-    gaps = facts.gaps.map(({ key }) => ({ key }))
+    const facts = await readChainFacts({ ...context, registry: context.runtimeAccess.probeRegistry }, scope)
+    gaps = facts.gaps.map(({ key, code }) => ({ key, ...(code === undefined ? {} : { code }) }))
     if (!facts.context.observed || !facts.worktree.observed) {
       await markStale(context, contextId, attemptedAt) // 什么也没读，证明不了已提交的快照还是最新；这一步失败走下面的 catch，返回诚实的失败
       return { ok: true, anchored: false, applied: false, gaps, error: undefined }
@@ -94,7 +96,10 @@ export async function refreshDeliveryFacts(context: CoreContext, scope: Normaliz
     anchored = true
     const complete = completeSets(facts)
     const sets = SET_KINDS.map((kind) => ({ kind, confirmed: complete.has(kind), ...setOf(facts, kind) }))
-    const applied = await context.storage.transaction(async (tx) => {
+    const applied = await context.runtimeAccess.local(async () => {
+      if (facts.reads.some((ticket) => !context.runtimeAccess.currentDelivery(ticket))) return false
+      const masks = await deliveryMasks(context, scope)
+      const value = await context.storage.transaction(async (tx) => {
       const existing = await tx.getDeliveryFacts(context.workspaceId, contextId)
       if (superseded(existing, attemptedAt)) return false
       if (complete.has('change_request') && facts.changeRequestIdentity !== undefined) {
@@ -112,12 +117,20 @@ export async function refreshDeliveryFacts(context: CoreContext, scope: Normaliz
         workspaceId: context.workspaceId, contextId, attemptedAt,
         sets: sets.map(({ kind, confirmed, nodes, anchor }) => confirmed
           ? { kind, anchorId: anchor.id, confirmedAt, stale: false, nodes: nodes.map(toFact) }
+          : masks.get(kind)?.layer === 'permission' ? { kind, anchorId: undefined, confirmedAt: undefined, nodes: [], stale: true }
           : { ...(existing?.sets.find((set) => set.kind === kind) ?? { kind, anchorId: undefined, confirmedAt: undefined, nodes: [] }), stale: true }),
       })
+      for (const ticket of facts.reads) if (!facts.gaps.some((gap) => gap.key === ticket.key)) await context.runtimeAccess.settleDelivery(ticket, false, scope.workItemId, tx)
+      if (facts.reads.some((ticket) => !context.runtimeAccess.currentDelivery(ticket))) throw new DeliveryReadSuperseded()
       return true
+      })
+      if (value) await context.runtimeAccess.syncDelivery(scope.repositoryId ?? '')
+      if (value) for (const ticket of facts.reads) if (!facts.gaps.some((gap) => gap.key === ticket.key)) context.runtimeAccess.recoverDelivery(ticket, scope.workItemId)
+      return value
     })
     return { ok: true, anchored: true, applied, gaps, error: undefined }
   } catch (error) {
+    if (error instanceof DeliveryReadSuperseded) return { ok: true, anchored, applied: false, gaps, error: undefined }
     // K2：读取或提交失败不裸抛。已确认的事实随回滚保持原样；尽力把这次尝试记成陈旧（全部集合标 stale），这一步再失败也只吞掉，返回结构化失败。
     await markStale(context, contextId, attemptedAt).catch(() => undefined)
     return { ok: false, anchored, applied: false, gaps, error: projectError(error instanceof IdentityConflictError ? ProjectErrorCode.Conflict : ProjectErrorCode.Unavailable, '交付事实未能提交；已确认的事实保持不变') }

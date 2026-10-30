@@ -137,6 +137,8 @@ export async function collectBindings(input: CollectBindingsInput): Promise<Prep
     const withheld = domain !== 'execution' ? undefined : isDefault ? CapabilityKey.ExecutionRunFallback : CapabilityKey.ExecutionRunStart
     const capabilities = effectiveCapabilities({ ...snapshot, capability: slice(snapshot.capability), permission: slice(snapshot.permission) }, policy)
       .filter((item) => item.key !== withheld)
+      .map((entry) => entry.access !== AccessLevel.Unavailable ? entry : { ...entry, reason:
+        `${snapshot.capability[entry.key] === AccessLevel.Unavailable ? 'capability' : (snapshot.permission[entry.key] ?? AccessLevel.Unavailable) === AccessLevel.Unavailable ? 'permission' : 'policy'} 层拒绝 ${entry.key}` })
     const own = <T>(want: ExternalCapabilityDomain): T | undefined => (domain === want ? (port as T) : undefined)
     bindings.push({
       ref: { workspaceId, bindingId, domain }, enabled: true, isDefault, capabilities, storage: undefined,
