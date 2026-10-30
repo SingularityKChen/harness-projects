@@ -1,5 +1,5 @@
 /**
- * Start Work 的恢复在**真实临时 Git 仓库**上的验收（issue #183）：中断在分支步之后、`main` 前进、换新幂等键重试。
+ * Start Work 的恢复在**真实临时 Git 仓库**上的验收（issue #183）：工作树明确拒绝后、`main` 前进、换新幂等键重试。
  *
  * 判据是磁盘事实与 Git argv，不是 provider 返回值的形状：重试期间没有任何一条命令解析 `fromRef`，才说明
  * 「基线是否前进」没有进入判定。夹具没有执行 provider，`result.error` 恒为 `not_supported`，所以成功判据
@@ -14,11 +14,12 @@ import path from 'node:path'
 import { test } from 'node:test'
 
 import { ExecutionContextStatus, RelationType } from '@harness-projects/domain'
+import { providerErr, providerError } from '@harness-projects/capabilities'
 import { contextIdFor, startWork } from '@harness-projects/core'
 
 import {
   LEASE_EXPIRED_MS, REPOSITORY_ID, advanceMain, controllableClock, coreContextFor, fixtureFor, git,
-  interruptAfterBranchStep, providerFor, recordingRunner, registerWorkItem, worktreePaths,
+  providerFor, recordingRunner, registerWorkItem, worktreePaths,
 } from './local-git-fixture.js'
 
 const request = (workItemId, idempotencyKey) => ({
@@ -27,17 +28,18 @@ const request = (workItemId, idempotencyKey) => ({
 
 const branchHead = async (fixture, name) => (await fixture.run(['rev-parse', name])).trim()
 
-/** 中断在分支步之后：分支真实落地，工作树步「进程死掉」，记录停在 `provisioning` 且已带分支身份。 */
-async function interruptedAttempt(fixture, workItemId) {
+/** 工作树明确拒绝：分支真实落地，记录为 Failed 且保留分支身份，可用新键恢复。 */
+async function refusedAttempt(fixture, workItemId) {
   const clock = controllableClock()
   const recorder = recordingRunner()
-  const provider = interruptAfterBranchStep(providerFor(fixture, { runGit: recorder.runGit }))
+  const provider = providerFor(fixture, { runGit: recorder.runGit }), create = provider.createWorktree.bind(provider); let refused = false
+  provider.createWorktree = (input) => { if (!refused) { refused = true; return Promise.resolve(providerErr(providerError('unavailable', '确定未创建工作树'))) } return create(input) }
   const { storage, workspaceId, context } = await coreContextFor(fixture, { development: provider }, { clock: clock.clock })
   await registerWorkItem(storage, workspaceId, workItemId)
-  await assert.rejects(startWork(context, request(workItemId, 'k-1')), /测试注入的中断/)
+  assert.equal((await startWork(context, request(workItemId, 'k-1'))).writeState, 'failed')
   const contextId = contextIdFor(workspaceId, workItemId, REPOSITORY_ID)
   const record = await storage.getExecutionContext(contextId)
-  assert.equal(record?.status, ExecutionContextStatus.Provisioning, '中断后记录必须停在 provisioning')
+  assert.equal(record?.status, ExecutionContextStatus.Failed, '明确拒绝后保留已决定分支')
   assert.equal(record.branchExternalId, `work/${workItemId}`, '分支步已成功：分支身份必须已经回填')
   assert.equal(record.worktreeExternalId, undefined, '工作树步没有走到')
   return { clock, recorder, storage, workspaceId, context, contextId }
@@ -52,7 +54,7 @@ const withoutWorktreeCreate = (fixture) => providerFor(fixture, { capabilities: 
 
 test('R1 基线前进后换新键重试：接管既有分支、不解析 fromRef，工作树落在中断前的分支上', async (t) => {
   const fixture = await fixtureFor(t)
-  const attempt = await interruptedAttempt(fixture, 'wi-3')
+  const attempt = await refusedAttempt(fixture, 'wi-3')
   const before = await branchHead(fixture, 'work/wi-3')
   assert.equal(before, fixture.headCommit, '中断时分支指向当时的 main')
   const moved = await advanceMain(fixture)
@@ -84,7 +86,7 @@ test('R1 基线前进后换新键重试：接管既有分支、不解析 fromRef
 
 test('R2 Development 能力不可用的失败不抹掉已决定的分支，恢复后在基线前进下仍 ready', async (t) => {
   const fixture = await fixtureFor(t)
-  const attempt = await interruptedAttempt(fixture, 'wi-3')
+  const attempt = await refusedAttempt(fixture, 'wi-3')
   const before = await branchHead(fixture, 'work/wi-3')
   attempt.clock.advance(LEASE_EXPIRED_MS)
 
@@ -111,7 +113,7 @@ test('R2 Development 能力不可用的失败不抹掉已决定的分支，恢�
 
 test('R3 失败的尝试只保留已决定的分支，不保留工作树句柄', async (t) => {
   const fixture = await fixtureFor(t)
-  const attempt = await interruptedAttempt(fixture, 'wi-5')
+  const attempt = await refusedAttempt(fixture, 'wi-5')
   // 记录带着一个更早观察到的工作树句柄。生产上的来源：`ready` 上下文核验失败后 `existingResult` 把记录转为
   // `failed` 但保留句柄，下一次开始工作接管终态时原样展开它。这里直接写入，不依赖那条路径（它的语义归 #211）。
   const interrupted = await attempt.storage.getExecutionContext(attempt.contextId)

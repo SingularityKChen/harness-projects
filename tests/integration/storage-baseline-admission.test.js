@@ -24,16 +24,19 @@ const incompatible = (reason) => (error) => {
   assert.equal(error.constructor.name, 'IncompatibleDatabaseError')
   assert.equal(error.code, 'incompatible_database')
   if (reason) assert.equal(error.reason, reason)
-  assert.equal(error.expectedGeneration, 2)
+  assert.equal(error.expectedGeneration, 3)
   assert.equal(typeof error.actualGeneration, 'number')
   assert.equal(error.action, 'back_up_and_rebuild')
   assert.match(error.message, /备份/)
   return true
 }
 const withoutOwner = (sql) => sql.replace(/^.*provisioning_generation.*\n/gm, '')
+const withoutIntent = (sql) => sql.replace(/^.*external_intent_json.*\n/gm, '')
 const cases = [
+  ['old-generation-two', (db) => { fixture(db, versions.length, withoutIntent); db.exec("INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=2") }, 'generation'],
+  ...[0, 3].map((generation) => [`masked-old-intent-shape-${generation}`, (db) => { fixture(db, versions.length, withoutIntent); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
   ['old-generation-one', (db) => { fixture(db, versions.length, withoutOwner); db.exec("INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=1") }, 'generation'],
-  ...[0, 2].map((generation) => [`masked-old-owner-shape-${generation}`, (db) => { fixture(db, versions.length, withoutOwner); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
+  ...[0, 3].map((generation) => [`masked-old-owner-shape-${generation}`, (db) => { fixture(db, versions.length, withoutOwner); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
   ['prefix1', (db) => fixture(db, 1), 'version_list'],
   ['prefix2', (db) => fixture(db, 2), 'version_list'],
   ['prefix4', (db) => fixture(db, 4), 'version_list'],
@@ -45,7 +48,7 @@ const cases = [
   ['quoted-ledger-primary-key', (db) => { fixture(db, versions.length, (sql) => sql.replace('version INTEGER PRIMARY KEY', 'version INTEGER "PRIMARY" "KEY"')); assert.equal(db.prepare('PRAGMA table_info(schema_migrations)').all().find((row) => row.name === 'version').pk, 0) }, 'schema_shape'],
   ['quoted-ledger-not-null', (db) => { fixture(db, versions.length, (sql) => sql.replace('applied_at TEXT NOT NULL', 'applied_at TEXT "NOT" "NULL"')); assert.equal(db.prepare('PRAGMA table_info(schema_migrations)').all().find((row) => row.name === 'applied_at').notnull, 0) }, 'schema_shape'],
   ['generation', (db) => db.exec('PRAGMA user_version=99'), 'generation'],
-  ['marked-wrong', (db) => { fixture(db, 1); db.exec('PRAGMA user_version=2') }, 'version_list'],
+  ['marked-wrong', (db) => { fixture(db, 1); db.exec('PRAGMA user_version=3') }, 'version_list'],
   ['unknown', (db) => { fixture(db); db.exec('CREATE TABLE sqliteX_extra(value TEXT); INSERT INTO sqliteX_extra VALUES (\'keep\')') }, 'unknown_objects'],
   ['unicode-identifier', (db) => fixture(db, versions.length, (sql) => sql.replaceAll('workspace', 'worKspace')), 'unknown_objects'],
   ['malformed-ledger', (db) => db.exec('CREATE TABLE schema_migrations (garbage TEXT); INSERT INTO schema_migrations VALUES (\'keep\')'), 'schema_shape'],
@@ -109,7 +112,7 @@ for (const whitespace of [' ', '\t', '\n', '\f', '\r']) test(`SQLite ASCII 空�
     const before = snapshot(db)
     assert.deepEqual(sqlite.migrate(db), { applied: [], version: 7 })
     sqlite.createSqliteStorage(file).close()
-    assert.deepEqual(snapshot(db), { ...before, generation: 2 })
+    assert.deepEqual(snapshot(db), { ...before, generation: 3 })
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }) }
 })
 
@@ -120,7 +123,7 @@ for (const quoted of [false, true]) test(`实际完整当前链有数据（引�
     fixture(db, versions.length, (sql) => quoted ? sql.replace(/\bid\b/g, '"ID"') : sql); db.exec("INSERT INTO workspace(id,name,status_policy) VALUES ('kept','kept','provider_authoritative')")
     const before = snapshot(db)
     assert.deepEqual(sqlite.migrate(db), { applied: [], version: 7 })
-    assert.deepEqual(snapshot(db), { ...before, generation: 2 })
+    assert.deepEqual(snapshot(db), { ...before, generation: 3 })
     const stamped = snapshot(db)
     sqlite.createSqliteStorage(file).close()
     for (let i = 0; i < 2; i++) assert.deepEqual(sqlite.migrate(db), { applied: [], version: 7 })

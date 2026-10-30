@@ -21,7 +21,7 @@
  * 带请求指纹的身份在原子写作用域内检查、再 UPSERT，查与写之间没有窗口。DDL 的 `created_at` / `updated_at` 是 NOT NULL 而端口记录没有时间戳，
  * 插入时用同一个 ISO-8601 UTC 时刻填两列（覆盖时保留 `created_at`）；端口不读回这两列，因此它们不构成第二套事实。
  */
-import { StorageInputError, type DeliveryFactsRecord, type ExecutionContextRecord, type ExecutionRunRecord, type MutationAttemptRecord } from '@harness-projects/capabilities'
+import { externalIntentSnapshot, StorageInputError, type DeliveryFactsRecord, type ExecutionContextRecord, type ExecutionRunRecord, type MutationAttemptRecord } from '@harness-projects/capabilities'
 import type { EntityId, ExecutionContextId, ExecutionRunId, Relation, WorkspaceId } from '@harness-projects/domain'
 import { optional, rowToDeliveryFacts, rowToExecutionContext, rowToExecutionRun, rowToMutationAttempt, rowToRelation, type Row } from './storage-rows.ts'
 import { SqliteSyncSurface } from './storage-sync.ts'
@@ -30,7 +30,7 @@ import { SqliteSyncSurface } from './storage-sync.ts'
 const CONTEXT_COLUMNS = 'id, workspace_id, work_item_id, repository_id, status, branch_external_id, worktree_external_id, provisioning_started_at, provisioning_generation'
 const RUN_COLUMNS = 'id, workspace_id, context_id, status, updated_at, provider_ref_json, fallback'
 const FACT_COLUMNS = 'workspace_id, context_id, attempted_at, sets_json'
-const ATTEMPT_COLUMNS = 'id, workspace_id, binding_id, command_name, idempotency_key, state, expected_source_version, error_code, request_fingerprint'
+const ATTEMPT_COLUMNS = 'id, workspace_id, binding_id, command_name, idempotency_key, state, expected_source_version, error_code, request_fingerprint, external_intent_json'
 /** 两张关系表的列名相同：路由到哪张表由 `state` 决定，读回形状因此只有一份。 */
 const RELATION_COLUMNS = 'from_entity_id, to_entity_id, relation_type, relation_class, source, state'
 /** 关系定位键的 SQL 片段：两张表的主键相同，路由、去重与删除都按它定位。 */
@@ -158,15 +158,17 @@ export class SqliteExecutionSurface extends SqliteSyncSurface {
    */
   putMutationAttempt(record: MutationAttemptRecord): Promise<void> {
     return this.atomic(() => {
+      if (record.externalIntent !== undefined && record.commandName !== 'startWork') throw new TypeError('external intent requires Start Work')
+      const intent = record.externalIntent === undefined ? null : JSON.stringify(externalIntentSnapshot(record.externalIntent))
       const previous = this.db.prepare('SELECT request_fingerprint, command_name, binding_id FROM mutation_attempt WHERE workspace_id = ? AND idempotency_key = ?').get(record.workspaceId, record.idempotencyKey) as Row | undefined
       if (previous?.request_fingerprint != null && (previous.request_fingerprint !== record.requestFingerprint || previous.command_name !== record.commandName || previous.binding_id !== record.bindingId)) throw new Error('mutation attempt request identity is immutable')
       this.db.prepare(`INSERT INTO mutation_attempt (${ATTEMPT_COLUMNS}, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${NOW_SQL}, ${NOW_SQL})
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${NOW_SQL}, ${NOW_SQL})
         ON CONFLICT (workspace_id, idempotency_key) DO UPDATE SET id = excluded.id, binding_id = excluded.binding_id,
           command_name = excluded.command_name, state = excluded.state, expected_source_version = excluded.expected_source_version,
-          error_code = excluded.error_code, request_fingerprint = excluded.request_fingerprint, updated_at = excluded.updated_at`)
+          error_code = excluded.error_code, request_fingerprint = excluded.request_fingerprint, external_intent_json = excluded.external_intent_json, updated_at = excluded.updated_at`)
         .run(record.id, record.workspaceId, record.bindingId, record.commandName, record.idempotencyKey, record.state,
-          record.expectedSourceVersion ?? null, record.errorCode ?? null, record.requestFingerprint ?? null)
+          record.expectedSourceVersion ?? null, record.errorCode ?? null, record.requestFingerprint ?? null, intent)
     })
   }
 

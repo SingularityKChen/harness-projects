@@ -1,6 +1,6 @@
 # Start Work 耐久外部意图 ExecPlan
 
-> 状态：Active，设计已收敛，尚未实现。
+> 状态：Active，本地实现和验证完成；独立验收、组合与远端交付尚未完成。
 > 创建：2026-10-30；时区：Asia/Singapore（+08）。
 > 范围：#204，一个独立验收、合并和回滚的 PR；遵循根 `AGENTS.md` 与 `PLANS.md`。
 
@@ -12,7 +12,7 @@ Start Work 在创建分支、工作树、主执行或人工执行之前，先耐
 
 ## Context and Orientation
 
-执行检出是 `.worktrees/durable-write-intent`，分支 `fix/durable-write-intent`。2026-10-30 10:05 +08 观察到该检出的 HEAD 为 `7907efbbdc5e35cc8ea4769c7067e885cec844e1`；主检出与远端已前进，最终交付必须重新核对 base。以下源码调查以该任务 HEAD 为准，开工先运行 `git rev-parse HEAD`、`git status --short --branch`，记录新的执行上下文。
+执行检出是 `.worktrees/durable-write-intent`，分支 `fix/durable-write-intent`。2026-10-30 10:05 +08 观察到该检出的 HEAD 为 `7907efbbdc5e35cc8ea4769c7067e885cec844e1`；主检出与远端已前进，最终交付必须重新核对 base。实施时复核任务 HEAD 为 `14ae6bb0fff640e508b0821bef1b65f3de1847ba`，其父与本地 `origin/main` 都是 `b19b4eac4f12aa40c05d75b492f3335299874641`；`69db614` 已不是当前 base。以下初始源码调查以该任务设计 HEAD 为准，开工先运行 `git rev-parse HEAD`、`git status --short --branch`，记录新的执行上下文。
 
 `packages/core/src/start-work.ts` 的 `claimContext` 已把 Pending、不可变 `requestFingerprint`、父实体和 context 在同一事务登记。`replayRequest` 对同 key 只观察，过期也不接管。#420 已有持久 `provisioningGeneration` 与 `owned` 短事务；它们是本地结算的唯一 owner 权威，不应重复实现另一套令牌。
 
@@ -68,7 +68,7 @@ Git input 包含完整 repository 引用；branch 包含实际 name/fromRef；wo
 
 ## Global Constraints
 
-代码、测试与 config 增删合计必须严格小于 800（最多 799），文档严格小于 1300；锁文件/生成物不作为压预算手段。以下是实施分配估计，合计 **727**，不是实际 diff 证明；到 760 即先压缩重复结构并重算，最终硬门不放宽。
+代码、测试与 config 增删合计必须严格小于 800（最多 799），文档严格小于 1300；锁文件/生成物不作为压预算手段。以下是实施分配估计，合计 **766**，不是实际 diff 证明；到 760 即先压缩重复结构并重算，最终硬门不放宽。
 
 | 唯一候选写集 | 增删预算 |
 |---|---:|
@@ -87,8 +87,9 @@ Git input 包含完整 repository 引用；branch 包含实际 name/fromRef；wo
 | `tests/integration/start-work-sqlite-registration.test.js` | 35 |
 | `tests/integration/start-work-step-recording.test.js` | 40 |
 | `tests/integration/start-work-retry-identity.test.js` | 8 |
-| `tests/integration/local-git-start-work-resume.test.js` | 12 |
-| `tests/e2e/start-work-recovery.test.js` | 10 |
+| `tests/integration/local-git-start-work-resume.test.js`、`tests/integration/local-git-core-provisioning.test.js` | 35 |
+| `tests/e2e/start-work-recovery.test.js`、`tests/e2e/delivery-lineage.test.js` | 15 |
+| `tests/integration/local-git-branch-probe.test.js` | 11 |
 | `tests/integration/storage-baseline-admission.test.js`、`tests/integration/migration-runner.test.js`、`tests/integration/execution-relation-write-schema.test.js` | 25 |
 
 收敛靠单槽位无 ack 副本、复用已有 clone/owned/recordStep、在原 suite 增加参数化故障格；不新建 fixture 框架、引擎或通用生命周期 API。若实测仍超限，先用实际 numstat 指明成本，合并重复 setup/表驱动断言；不得删掉未知、重启、身份或 fence 的独立判据，也不得把不完整能力拆出 PR 后宣称 #204 完成。确实不足时，提交有实测差异的范围调整方案，由主控重新收敛闭环，不能写伪预算。
@@ -167,14 +168,23 @@ owner suite 中已有外部 Pending 的 public takeover 改为阻挡证明；旧
 
 ## Progress
 
+- [x] (2026-10-30 +08) 实现执行上下文 HEAD `14ae6bb`，干净任务分支；主控确认 draft #467 / Closes #204。新增入口 suite 首跑 18/18 RED：真实 createBranch 读到 externalIntent undefined，丢 ack throw 逃逸、写前故障未生效。Storage 新断言首跑 148 pass / 2 fail（Fake 未拒非法槽位、SQLite 未保存槽位）；不是 import/type 错误。
+- [x] (2026-10-30 +08) 首轮最小 GREEN：新入口和共享 Storage 168/168，typecheck exit 0；聚焦旧回归发现恢复假设、故障写入计数及 schema generation 预期需同步。全部失败记录于本机临时日志，修复后报告精确矩阵。
+
 - [x] (2026-10-30 10:05 +08) 核对任务检出、AGENTS/PLANS、两份独立设计和实际核心/Storage/测试入口。
 - [x] (2026-10-30 10:05 +08) 收敛单槽位、根/步骤语义、跨 key 未决阻挡与 #457 单 owner 边界。
-- [ ] (2026-10-30 +08) 主控回读当前 base/draft，执行有效 RED 并保存证据。
-- [ ] (2026-10-30 +08) GREEN、故障矩阵、真实 SQLite restart 与旧库拒绝全部完成。
-- [ ] (2026-10-30 +08) 独立语义审查、负控、#457 组合、规模与公开面检查完成。
-- [ ] (2026-10-30 +08) 整理提交、最终远端回读后 ready；全部验收后归档计划。
+- [x] (2026-10-30 10:46 +08) 主控回读当前 base/draft，有效 RED 与恢复验证证据已记录。
+- [x] (2026-10-30 10:46 +08) 本地 GREEN、52 格外部意图矩阵、SQLite reopen、generation 2 及 masked 0/3 旧形状拒绝完成；完整本地 verify 2622 + 7 pass。
+- [x] (2026-10-30 11:42 SGT) 独立语义审查与三负控完成；唯一 Storage getter P2 已以有效 RED 修复并限定复评，Planning 组合源 head 5163bcb 的独立 426 项回归与首写窗口探针通过。
+- [x] (2026-10-30 11:42 SGT) 本地提交收敛、源码 head e7a723f 的 hosted checks、base main、双向 closing #204 和 review threads 已回读；本次文档归档后的最终 head 仍按同一规则回读后才置 ready，合并由人类决定。
 
 ## Surprises & Discoveries
+
+独立审查在实现 head `58c16e7` 未发现生产 Start Work 可达的 P0/P1，但发现一个共享复制契约 P2：owner getter 前两次返回 1、第三次返回 0，或 operation getter 先 branch 后 run，会使校验值与返回值分离，甚至写出下一次解码不能接受的槽位。当前生产写前 helper 使用普通对象，故不将它提升为已证明的生产 owner bypass；共享 Storage 契约仍须修复。
+
+完整 `pnpm verify` 首跑 2587 pass / 3 fail，具名为「谱系写者不写命令边：开始工作的最终事务失败后刷新不补写 tracks / has_worktree」「fallback 只在主执行确定起不来时承接」「接管：目标分支排在第一页之外时，头提交仍被报出」。前后两项是额外漏列的故障/恢复夹具，纳入写集（16 行预算）；中项暴露实现不应扩大确定 fallback ack 的结果契约，新增 Fake/SQLite 负控先得到 38 pass / 2 fail 后修正，保持 #458 独立。
+
+真实 Git 的 `local-git-core-provisioning.test.js` 还有两个走 Start Work 的恢复用例，原写集漏列。纳入同一恢复语义订正预算 35 行；不修改 shared fixture，确定恢复用例本地包明确拒绝，已落盘丢 ack 用例改为未知阻挡。
 
 源码已有 request Pending、fingerprint 与 generation；#204 原文和 Gate E1 说明中的“外部写后才登记/无强制点”已经部分过时。此次补的是派生请求与实际目标/owner，不重做 #194/#420，也不把根 Saved 的提前结算扩成 #458 全面结果重构。
 
@@ -183,6 +193,10 @@ owner suite 中已有外部 Pending 的 public takeover 改为阻挡证明；旧
 设计 B 原估 799 无余量且漏列部分恢复测试；本稿通过取消通用 finish/write-machine 扩展、ack 副本与重复 clone，显式补全测试写集，分配目标 727。该数字仍需实现 diff 证明。主控报告的基线本地 verify 2551+7 pass 仅作背景，不是本任务产品验证证据。
 
 ## Decision Log
+
+2026-10-30 / 实现者响应独立 P2：顶层 context/owner/binding/state/operation/input、分支或运行 input、引用和可选 path 全部逐字段只读一次，验证与返回只使用同一局部值；getter 抛错继续按 Storage 现有 Promise 拒绝契约原子拒绝。不增加递归 clone、引擎或生命周期接口。
+
+2026-10-30 10:46 +08 / 实现者：只增加 typed 当前槽位与窄 Git/运行写前 helper；确定 fallback 非 running ack 沿用旧结果契约。Rationale：#204 负责耐久证据和保守阻挡，#458 的结果规范化不并入；独立审查/组合/远端 head 通过前不归档计划。
 
 2026-10-30 10:05 +08 / 最终计划审读者：采用既有 receipt 当前 typed 槽位，复用 owned 与资源回填。Rationale：单一持久家与单一 owner 足够满足具体请求证据，无需第二 ledger。
 
@@ -210,8 +224,22 @@ Node≥22、pnpm@10.28.2；使用既有 `Storage.transaction`、find/put/listMut
 
 ## Outcomes & Retrospective
 
-本阶段产出是可实施设计与单 PR 控制计划，尚无本任务产品改动、测试通过或 hosted CI 结论。待实际结果记录时写清当前 HEAD、Fake/SQLite 故障格、RED/GREEN、负控、组合结果、A+D 及偏差；任一验收未达不得归档或宣称 #204 完成。
+完成的是单 receipt 的精确外部写前意图、请求/步骤状态边界、跨 key/lease/restart 未决阻挡与本地 owner 结算隔离。唯一独立 P2（getter 重读使非法槽位落库）已修复，两个 Storage 的8个getter子例有效 RED→GREEN；独立限定复评 230/230、30/30 probes 与旧 helper 负控通过，无新增回归。三个独立负控（意图、跨 key guard、generation）均 KILLED。
+
+在 `fix/durable-write-intent@e7a723fdc25a4183964565bb6c3c32e37260ec8a`、base `b19b4eac4f12aa40c05d75b492f3335299874641` 本地 `pnpm verify` 为2630+7通过、boundaries9、workflow8文件无发现；源码 head 的 GitHub PR Fast Gate、Merge Gate、Verify、CodeQL、规则与issue checks全部成功。
+
+Planning 的必要依赖栈已基于该源码 head 使用同一 BeforeExternalWrite：组合 head `5163bcb7ad7c3e2aa878e3ebc2deaea879da8773` 的完整本地2660+7、独立426与原/首写窗口12项探针通过；协调者另跑301项双方组合回归通过。A授权fence没有增加第二ledger，#204 Unknown、owner与存储判据保持。
+
+实际非docs A+D=616；文档按最终对象重算须<1300。归档仅变文档，最终 push 后回读该新head/base/checks/全部线程及双向closing，再设置ready；不以旧checks替代。未执行真实平台创建/真实Host安装/UAT或R1裁决，#193自动对账、#421外部唯一性、#458独立规范化仍开放。回滚使用匹配artifact与库备份，保留所有未知外部资源和证据。
+
+外部 actor=SingularityKChen，目标GitHub repository/project10，幂等键 `2026-10-30:204:delivery`；同PR更新与字段回读，不修改规划Status或原生依赖。
 
 ## Bottom Change Note
 
+Change Note (2026-10-30)：记录唯一独立 P2、可执行 getter RED/GREEN 与最小捕获修复；保留 Active 和最终验收边界。
+
+Change Note (2026-10-30 10:46 +08)：补记本地 TDD、全部故障/完整验证与真实 base；Active 等待独立验收和最终远端门禁。
+
 Change Note (2026-10-30 10:05 +08)：独立比较两份设计与实际源码后定稿；裁决根/槽位最简语义、未知跨键阻挡、旧 owner 不结算、无迁移与相邻任务边界，补齐恢复测试写集并给出需实测的 727 行分配。
+
+Change Note (2026-10-30 11:42 SGT)：记录独立getter修复、负控、Planning必要组合与源码head hosted证据，归档本能力计划并保留实际平台/后续恢复边界。

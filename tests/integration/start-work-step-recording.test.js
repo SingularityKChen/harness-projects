@@ -12,8 +12,8 @@
  * `local-git-branch-probe.test.js`（分支多于一页）；本文件只在离线替身上作证。SQLite 与重启
  * 仍归 #141（它被 #137 / #120 阻塞）。
  *
- * 「进程死在两步之间」用**抛出**模拟：`provision` 的最终 `saveContext` 因此不会执行，
- * 存储里留下的只有分步回填写的那一次——这正是本层要断言的东西。
+ * 恢复正控用明确拒绝表示工作树确定未创建；分支事实仍由步骤回填保存。
+ * throw 与丢 ack 的保守阻挡由 external-intent suite 独立验证。
  */
 import '../fixtures/resolution-preflight.mjs';
 
@@ -43,14 +43,14 @@ async function workItemIdOf(core) {
 
 const compose = (providers, clock) => composeCore({ workspace: WORKSPACE, providers, clock })
 
-/** 让 `createWorktree` 在第一次调用时抛出，模拟进程死在分支步之后、工作树步之中。 */
-function interruptAfterBranchStep(providers) {
+/** 确定拒绝工作树后允许显式恢复；已 ack 的分支身份仍应保留。 */
+function refuseWorktreeOnce(providers) {
   const original = providers.development.createWorktree.bind(providers.development)
   let interrupted = true
   providers.development.createWorktree = async (input) => {
     if (interrupted) {
       interrupted = false
-      throw new Error('injected interruption between the branch step and the worktree step')
+      return providerErr(providerError(ProviderErrorCode.Unavailable, '确定未创建工作树'))
     }
     return original(input)
   }
@@ -75,20 +75,17 @@ function localGitLikeBranch(providers, control) {
   }
 }
 
-test('中断在分支步之后：分支步的结果已经落盘，而不是等整段供应结束才写', async () => {
+test('工作树明确拒绝后：已 ack 的分支结果仍然保留', async () => {
   const providers = createFakeProviders()
   const time = controllableClock()
   const core = await compose(providers, time.clock)
   const workItemId = await workItemIdOf(core)
-  interruptAfterBranchStep(providers)
+  refuseWorktreeOnce(providers)
 
-  await assert.rejects(
-    () => core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'k-interrupt' }),
-    '注入的中断必须真的打断供应',
-  )
+  assert.equal((await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'k-interrupt' })).writeState, 'failed')
 
   const [record] = exportFakeStorageState(providers.storage).contexts
-  assert.equal(record.status, ExecutionContextStatus.Provisioning, '中断之后上下文停在 Provisioning')
+  assert.equal(record.status, ExecutionContextStatus.Failed, '明确拒绝后上下文停在 Failed，已 ack 分支保留')
   assert.equal(
     record.branchExternalId, `work/${workItemId}`,
     '分支步已经成功，它的结果必须已经落盘——否则重放只能重跑这一步',
@@ -103,9 +100,9 @@ test('基线前进之后重放：跳过已完成的分支步，复用既有分�
   const workItemId = await workItemIdOf(core)
   const control = { baseMoved: false, createBranchCalls: 0 }
   localGitLikeBranch(providers, control)
-  interruptAfterBranchStep(providers)
+  refuseWorktreeOnce(providers)
 
-  await assert.rejects(() => core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'k-1' }))
+  assert.equal((await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'k-1' })).writeState, 'failed')
   const branchBefore = providers.development.state.branches.find((branch) => branch.name === `work/${workItemId}`)
   assert.ok(branchBefore, '第一次尝试已经建出分支')
   const callsAfterFirstAttempt = control.createBranchCalls
@@ -135,9 +132,9 @@ test('接管不静默：被复用分支的头提交出现在结果面', async ()
   const workItemId = await workItemIdOf(core)
   const control = { baseMoved: false, createBranchCalls: 0 }
   localGitLikeBranch(providers, control)
-  interruptAfterBranchStep(providers)
+  refuseWorktreeOnce(providers)
 
-  await assert.rejects(() => core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'k-1' }))
+  assert.equal((await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'k-1' })).writeState, 'failed')
   const branchBefore = providers.development.state.branches.find((branch) => branch.name === `work/${workItemId}`)
   assert.ok(branchBefore)
 
@@ -185,11 +182,9 @@ test('重放不得改变已决定的分支身份：请求声明另一个分支�
   const workItemId = await workItemIdOf(core)
   const control = { baseMoved: false, createBranchCalls: 0 }
   localGitLikeBranch(providers, control)
-  interruptAfterBranchStep(providers)
+  refuseWorktreeOnce(providers)
 
-  await assert.rejects(
-    () => core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'identity-a', branchName: 'work/alpha' }),
-  )
+  assert.equal((await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'identity-a', branchName: 'work/alpha' })).writeState, 'failed')
   assert.equal(
     exportFakeStorageState(providers.storage).contexts[0].branchExternalId, 'work/alpha',
     '前置条件：序列已经决定了分支身份',
@@ -248,7 +243,7 @@ test('重放省略 branchName 时仍然用已决定的身份，不回落到默�
   const workItemId = await workItemIdOf(core)
   const control = { baseMoved: false, createBranchCalls: 0 }
   localGitLikeBranch(providers, control)
-  interruptAfterBranchStep(providers)
+  refuseWorktreeOnce(providers)
 
   // 记录执行步拿到的 run command：序列已经决定了身份，第三步必须用它，而不是本次请求重新算出来的名字。
   const commands = []
@@ -258,9 +253,7 @@ test('重放省略 branchName 时仍然用已决定的身份，不回落到默�
     return originalStartRun(input)
   }
 
-  await assert.rejects(
-    () => core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'omit-a', branchName: 'work/alpha' }),
-  )
+  assert.equal((await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'omit-a', branchName: 'work/alpha' })).writeState, 'failed')
   time.advance(LEASE_MS)
 
   // 这一次**不声明** branchName，于是本次请求算出来的默认名是 `work/<slug>`，与已决定的 `work/alpha` 不同。
@@ -315,7 +308,7 @@ test('conflict 复用：目标分支排在第一页之外时仍被认出，而�
   assert.equal(result.branchHeadCommit, 'sha-1', '复用的头提交必须报出来')
 })
 
-test('conflict 后列表读取失败只报 unknown，恢复读取后可用新键接管既有分支', async () => {
+test('conflict 后列表读取失败只报 unknown，恢复读取也不能用新键盲写', async () => {
   const providers = createFakeProviders()
   const core = await compose(providers, controllableClock().clock)
   const workItemId = await workItemIdOf(core)
@@ -335,8 +328,8 @@ test('conflict 后列表读取失败只报 unknown，恢复读取后可用新键
 
   providers.development.listBranches = originalList
   const resumed = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'k-conflict-list-recovered' })
-  assert.equal(resumed.status, ExecutionContextStatus.Ready, '列表恢复后可用新键确认并接管原分支')
-  assert.equal(resumed.branchExternalId, name)
+  assert.equal(resumed.writeState, WriteState.Unknown, '列表恢复不证明此前写入未发生，不能用新键盲写')
+  assert.equal(resumed.branchExternalId, undefined)
   assert.equal(providers.development.state.branches.filter((branch) => branch.name === name).length, 1)
 })
 

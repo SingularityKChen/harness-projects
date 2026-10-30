@@ -128,14 +128,15 @@ test('恢复预检必须使用已持久化的分支身份，而不是重放请�
       return fn(input)
     },
   })
-  const provider = interruptAfterBranchStep(checked)
+  let refused = false
+  const provider = withHooks(checked, { createWorktree: (fn) => async (input) => { if (!refused) { refused = true; return { ok: false, error: { code: 'unavailable', message: '确定未创建', retryable: false } } } return fn(input) } })
   const { storage, workspaceId, context } = await coreContextFor(fixture, { development: provider }, { clock: clock.clock })
   await registerWorkItem(storage, workspaceId, 'wi-custom-branch')
   const firstRequest = {
     workItemId: 'wi-custom-branch', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' },
     idempotencyKey: 'custom-branch-1', branchName: decidedBranch,
   }
-  await assert.rejects(startWork(context, firstRequest), /测试注入的中断/)
+  assert.equal((await startWork(context, firstRequest)).writeState, 'failed')
   const contextId = contextIdFor(workspaceId, firstRequest.workItemId, REPOSITORY_ID)
   const saved = await storage.getExecutionContext(contextId)
   assert.equal(saved?.branchExternalId, decidedBranch)
@@ -148,7 +149,7 @@ test('恢复预检必须使用已持久化的分支身份，而不是重放请�
   assert.equal(retried.branchExternalId, decidedBranch)
 })
 
-test('工作树已落盘但 ack 丢失：换 key 省略 branchName 重放，预检用已决定分支，conflict 读回 canonical 句柄后 Ready', async (t) => {
+test('工作树已落盘但 ack 丢失：换 key 省略 branchName 仍被耐久意图阻挡', async (t) => {
   // 默认意图下 names.path 为 undefined：conflict 读回只能靠预检返回的 target，退回 worktreeKey 会读错位置（PR #160 F1 那条路径）。
   const fixture = await fixtureFor(t)
   const clock = controllableClock()
@@ -166,14 +167,16 @@ test('工作树已落盘但 ack 丢失：换 key 省略 branchName 重放，预�
   const { storage, workspaceId, context } = await coreContextFor(fixture, { development: provider }, { clock: clock.clock })
   await registerWorkItem(storage, workspaceId, 'wi-landed')
   const first = { workItemId: 'wi-landed', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'landed-1', branchName: decided }
-  await assert.rejects(startWork(context, first), /工作树写入落盘后进程退出/)
+  assert.equal((await startWork(context, first)).writeState, 'unknown')
   clock.advance(LEASE_EXPIRED_MS)
   const { branchName: _omitted, ...retry } = first
   const result = await startWork(context, { ...retry, idempotencyKey: 'landed-2' })
   assert.deepEqual(
     [seen, result.status, result.branchExternalId, result.worktreeExternalId, (await worktreePaths(fixture)).length],
-    [[decided, decided], ExecutionContextStatus.Ready, decided, path.join(fixture.root, 'wi-landed'), 2],
-    '两次预检都用已决定分支；读回落盘的那一份，不出现第二份工作树',
+    [[decided], ExecutionContextStatus.Failed, decided, undefined, 2],
+    '丢 ack 后新 key 被阻挡，不新增预检或外部写入；已落盘工作树仍保留'
+  )
+  assert.equal(result.writeState, 'unknown'); assert.equal(await storage.findMutationAttempt(workspaceId, 'landed-2'), undefined,
   )
 })
 
