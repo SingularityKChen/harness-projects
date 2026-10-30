@@ -24,3 +24,4 @@ export { StartWorkSection } from './start-work-section.ts'
 export { DeliveryLineageSection } from './delivery-lineage-section.ts'
 
 export * from './planning-mapping.ts'
+export { bindWorkspaceStatusApp } from './workspace-status.ts'
