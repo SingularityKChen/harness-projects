@@ -44,9 +44,10 @@ function screenOf(read: WorkspaceRead | undefined, path: string | undefined, set
   }
   const { projectId, itemId } = route
   const notice = refresh.error ?? (refresh.pending ? '正在刷新，当前显示的是最后已知值' : read.connection.connected ? undefined : DISCONNECTED)
+  const denied = read.reason === 'permission_denied' && read.capabilities?.some((entry) => entry.key === 'planning.item.read' && entry.access === 'unavailable')
   const input: WorkItemListReadInput = { read, metadata: { sourceNames: {}, ...(notice ? { safeNotice: notice } : {}) },
-    ...(refresh.error ? { phase: 'failed', hasReceivedSnapshot: true, cacheVisibility: 'authorized', failure: { kind: 'error' } } as const : { phase: 'received', refreshing: refresh.pending } as const) }
-  const readable = read.capabilities?.some((entry) => entry.key === 'planning.item.read' && ['available', 'read_only', 'degraded'].includes(entry.access)) === true
+    ...(denied || refresh.error ? { phase: 'failed', hasReceivedSnapshot: true, cacheVisibility: 'authorized', failure: { kind: denied ? 'permission_denied' : 'error' } } as const : { phase: 'received', refreshing: refresh.pending } as const) }
+  const canRefresh = read.reason === 'permission_denied' || read.capabilities?.some((entry) => entry.key === 'planning.item.read' && ['available', 'read_only', 'degraded'].includes(entry.access)) === true
   return {
     key: `page:${projectId}`,
     children: [createElement(WorkItemProjectPage, {
@@ -54,7 +55,7 @@ function screenOf(read: WorkspaceRead | undefined, path: string | undefined, set
       detailView: itemId === undefined ? undefined : deriveWorkItemDetailView(input, { projectId, itemId }),
       navigation: { href: (id) => `#${itemPath({ projectId, itemId: id })}`, open: (id) => setPath(itemPath({ projectId, itemId: id })) },
       onCloseDetail: () => setPath(undefined), executionReader, deliveryReader, startWork, onBindRepository, connected: read.connection.connected,
-      refresh: refreshSource === undefined ? undefined : { pending: refresh.pending, disabled: refresh.pending || !read.connection.connected || !readable, run: () => { void refreshSource.refresh() } },
+      refresh: refreshSource === undefined ? undefined : { pending: refresh.pending, disabled: refresh.pending || !read.connection.connected || !canRefresh, run: () => { void refreshSource.refresh() } },
     })],
   }
 }
