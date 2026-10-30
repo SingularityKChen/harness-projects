@@ -137,8 +137,8 @@ test('C1 已存研发与 Actions 挂载在启动时组合并经宿主出口读�
 test('C2 权限只按账号事实推导：研发要 github.com 账号带句柄，Actions 无可用凭据时组合但显式 unavailable', async (t) => {
   const noMount = DELIVERY_KEYS.map((key) => ({ key, access: 'unavailable', reason: `没有挂载提供能力 ${key}` }))
   for (const [label, accountOverrides, expected, delivery] of [
-    ['无关联账号', undefined, [[DEV, 'not_supported']], accessAll(DELIVERY_KEYS, 'unavailable')],
-    ['github.com 账号不带句柄', { secretHandle: undefined }, [[DEV, 'not_supported']], accessAll(DELIVERY_KEYS, 'unavailable')],
+    ['无关联账号', undefined, [[DEV, 'not_supported']], DELIVERY_KEYS.map((key) => ({ key, access: 'unavailable', reason: `permission 层拒绝 ${key}` }))],
+    ['github.com 账号不带句柄', { secretHandle: undefined }, [[DEV, 'not_supported']], DELIVERY_KEYS.map((key) => ({ key, access: 'unavailable', reason: `permission 层拒绝 ${key}` }))],
     ['非 github.com 账号（带句柄）', { platformOrigin: 'https://github.example.com' }, [[DEV, 'not_supported'], [ACTIONS, 'not_supported']], noMount],
     ['非 github.com 账号（不带句柄）', { platformOrigin: 'https://github.example.com', secretHandle: undefined }, [[DEV, 'not_supported'], [ACTIONS, 'not_supported']], noMount],
     ['非 github.com 账号（来源以 github.com 为前缀）', { platformOrigin: 'https://github.com.example' }, [[DEV, 'not_supported'], [ACTIONS, 'not_supported']], noMount],
@@ -155,7 +155,7 @@ test('C2 权限只按账号事实推导：研发要 github.com 账号带句柄�
     const env = { fetch: github.fetch, resolveCredential: async () => CANARY } // 凭据可解析：被组合并放行就会发请求
     const { disabled, wire } = await compose(dataPath, env)
     assert.deepEqual(codesOf(disabled), expected, label)
-    assert.deepEqual(entriesOf(wire, DELIVERY_KEYS), delivery, '有挂载但不可用：reason 为空，区别于「没有挂载」')
+    assert.deepEqual(entriesOf(wire, DELIVERY_KEYS), delivery, '有挂载但不可用：固定 permission reason，区别于「没有挂载」')
     const ports = await restored(dataPath, env)
     if (ports.table.delivery !== undefined) assert.deepEqual((await ports.table.delivery.describeCapabilities()).permission, Object.fromEntries(DELIVERY_KEYS.map((key) => [key, 'unavailable'])), '恢复的端口报告 Host 传入的 unavailable')
     assert.equal(github.requests.length, 0, '被禁用或权限 unavailable 的挂载不发请求')

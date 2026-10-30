@@ -1,6 +1,6 @@
 # Delivery 运行时读访问隔离 ExecPlan
 
-> 状态：Active（2026-10-30复审重开：PR #469 新P1待修复与独立复验；早前已通过记录仅对应其标注head）；创建：2026-10-30（Asia/Singapore）。
+> 状态：Completed（本层及必要上层#481的本地独立验收通过；最终远端门按末次head回读）；创建：2026-10-30（Asia/Singapore）。
 > 范围：已发货交付谱系的按能力拒读、离线保留、迟到提交和已开详情失效。
 > 关联：Closes #468；Refs #465、#457；本切片独立验收 Delivery 读侧，#457 继续由后续 operation/browser 切片总验收。
 > 归档位置：实施时落入所属工作树 `docs/exec-plan/active/2026-10-30-delivery-runtime-access.md`，按根 `PLANS.md` 维护。
@@ -135,7 +135,7 @@ Core 的同步 `getDeliveryAccessVersion()` 只投影同 authority 的 Planning/
 
 ## Progress
 
-- [ ] 2026-10-30（Asia/Singapore）：复审P1「其它owner已提交拒读后，最终返回仍复用本owner旧健康版本」；先原探针复现，再同一authority最小修复、判别测试与独立复验；新head远端门未完成。
+- [x] 2026-10-30（Asia/Singapore）：原跨ownerP1已在必要上层#481完成同步Storage fence与3项正式Core/Host回归，本层不提前关闭#468。
 
 
 - [x] 2026-10-30（Asia/Singapore）：独立检查读链、唯一写者、投影与局部 UI 缓存，建立本计划。
@@ -175,6 +175,10 @@ Node ≥22、pnpm、fake/SQLite 与生产 Host typed remote，无真实凭据或
 Delivery 之外的 C 验收是同 issue 尚未完成的范围，不是本 PR 可接受的安全债务。若实现确实接受延期，按仓库 `docs/exec-plan/tech-debt-tracker.md` 登记，但不得降低本表关闭门。
 
 ## Outcomes & Retrospective
+
+最终拆分事实：本层源head `d7cc8a311b383376766bd6e7aae2590849e79e18` 基于Planning `6207523`；代码A+D738。上层#481的 `de24119` 同时包含本层与最终Planning，完整 `pnpm verify` 2780/2780+MVP0 7/7，原跨ownerP1升级为MemoryCore/SQLiteCore/双真实Host3项有效RED→GREEN；独立复评F1–F4全部闭合。本层是持久读健康/隔离基础，#481才在#468 closing关联上提交完整跨owner返回保证；合并与回滚应按已记录栈顺序，未经人类评审不合并。
+
+以下早前独立本owner闭环结论仅对应其标注head。Superseded by 本节最终拆分事实（2026-10-30）。
 
 完成 Delivery 按 binding/repository/key/workItem 的读取隔离、offline许可值/stale、新owner读健康延续、Storage ack 后恢复、Host返回和metadata版本复验，以及已开详情token失效。仍由Core同一runtime owner控制，持久证据沿现SyncCursor健康scope，无新权限数据库或第二操作ledger。
 
@@ -221,3 +225,5 @@ Change Note (2026-10-30 12:47 SGT)：记录两P1与P2的持久健康/版本/Host
 Change Note (2026-10-30 SGT)：因独立复审新P1重开所属计划，移回active；先前完成/Ready仅是当时head观察，不能替代本次修复验收。
 
 Change Note (2026-10-30 SGT)：明确独立跨owner P1及#481必要依赖；原闭环断言只针对标注旧head，不再以本owner gate替代共享authority。规划Status和原生依赖未写。
+
+Change Note (2026-10-30 SGT)：同一source authority的跨owner上层独立验收通过后归档；明确本层738行与#481新增完整返回保证，不将旧本owner测试充当跨owner接受。

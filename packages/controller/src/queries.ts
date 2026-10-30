@@ -11,6 +11,7 @@ import { toWireEntity, toWireSnapshot, type WireAuthority, type WireEntity, type
 
 export interface ControllerQueries {
   /** 当前修订上的完整投影；修订号是客户端增量订阅的起点。 */
+  getDeliveryAccessVersion(): string
   snapshot(): Promise<WireSnapshot>
   getEntity(entityId: string): Promise<WireEntity | undefined>
   getExecutionContext(query: ExecutionContextQuery): Promise<ExecutionContextView | undefined>
@@ -28,6 +29,7 @@ export function createControllerQueries(
   if (generation === undefined) { generation = globalThis.crypto.randomUUID(); generations.set(core, generation) }
   const token = generation
   return {
+    getDeliveryAccessVersion: () => core.queries.getDeliveryAccessVersion(),
     async snapshot(): Promise<WireSnapshot> {
       const { views, revision, sync, metadata } = await core.queries.getPlanningSnapshot()
       return toWireSnapshot(views, authority, revision, sync, metadata, token)
