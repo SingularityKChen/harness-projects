@@ -25,6 +25,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-30-delivery-runtime-access](exec-plan/active/2026-10-30-delivery-runtime-access.md) | Delivery 按能力与目标拒读、离线与恢复（#468 / #457） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
