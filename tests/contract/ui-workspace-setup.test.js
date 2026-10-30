@@ -288,13 +288,16 @@ test('setup controls explain project identity and associate safe failure without
   assert.match(out, /id="project-node-id-help"[^]*项目设置/)
   assert.match(out, /class="hp-action hp-action-primary"/)
 })
-test('only a submitted setup failure focuses its own summary, background reads keep focus', async () => {
+test('only a submitted setup failure focuses shared recovery, background reads keep focus', async () => {
   let reject, focused = 0
   const f = fixture({ createWorkspace: () => new Promise((_, no) => { reject = no }) }); await f.source.refresh()
   const app = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
   const tree = app.render(), form = find(tree, 'form')[0]
   assert.ok(form.ref, 'submitted form owns its focus root')
-  form.ref.current = { querySelector: () => ({ focus: () => { focused++ } }) }; app.flush()
+  form.ref.current = {}
+  const recovery = find(tree, 'div').find(node => node.key === 'setup-recovery')
+  assert.ok(recovery.ref, 'shared recovery owns the visible error focus target')
+  recovery.ref.current = { querySelector: () => ({ focus: () => { focused++ } }) }; app.flush()
   find(tree, 'input')[0].props.onChange({ target: { value: 'Draft' } })
   find(app.render(), 'form')[0].props.onSubmit({ preventDefault() {} }); app.render(); app.flush()
   reject(new Error('RAW-CANARY')); await new Promise((resolve) => setImmediate(resolve)); app.render(); app.flush()

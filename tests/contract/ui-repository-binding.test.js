@@ -171,3 +171,11 @@ test('repository acknowledgement retains submitted focus ownership through defer
   assert.equal(f.source.getSnapshot().state, 'configured'); assert.ok(f.source.getSnapshot().error); assert.equal(focused, 1)
   assert.deepEqual(find(render(), 'input').map(input => input.props.value), [selection.localPath, selection.owner, selection.name]); render.unmount()
 })
+
+test('repository task distinguishes an idle binding from a confirmed connection', async () => {
+  const f = fixture()
+  const html = () => renderToStaticMarkup(React.createElement(ui.RepositoryBindingForm, { source: f.source }))
+  assert.match(html(), /尚未绑定仓库/); assert.doesNotMatch(html(), /仓库已连接/)
+  await f.source.bind(selection)
+  assert.match(html(), /仓库已连接/); assert.doesNotMatch(html(), /尚未绑定仓库/)
+})
