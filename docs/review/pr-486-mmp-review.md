@@ -23,8 +23,8 @@
 - [x] 锁定当前 head/base、checks 和所有现有 review threads（均为空）。
 - [x] 在逐文件检查前建立 P0–P3 风险矩阵。
 - [x] 完成独立代码/产品/设计评审、相关契约与故障反例，并对 91 个 open issue 快照排重；浏览器视觉证据由整合者补齐。
-- [ ] 一次提交所有 inline 意见及 review。
-- [ ] 按严重度和实现 owner 执行修复、复审与授权收尾。
+- [x] 一次提交所有 inline 意见及 review。（2026-11-02 已完成）
+- [x] 2026-11-02：P2 修复与独立复评完成；#486/#488 已原子 rebase 合并，#487 的最终 CI/批准/合并按下文当前版本门执行。
 验证：在上述检出运行最窄相关测试；修改后按风险扩大。回滚：本阶段仅恢复本评审文档。
 
 ## Validation and Acceptance
@@ -37,7 +37,7 @@
 ## Progress
 - [x] 2026-11-02：事实快照与初始风险矩阵。
 - [x] 2026-11-02：独立评审锁定 `git merge-base HEAD origin/main` = `417349a3b6504b73594362a3253d9ee1565ba5c5`，与 base 快照一致；完整 diff 321 additions / 39 deletions，涉及 12 个文件。
-- [x] 2026-11-02：聚焦测试、边界、类型检查和只读 SSR 反例完成；收齐发现一次回传，尚未发布 review。
+- [x] 2026-11-02：聚焦测试、边界、类型检查和只读 SSR 反例完成；收齐发现一次回传，尚未发布 review。 Superseded by 主评审综合与收尾门（2026-11-02）。
 - [x] 2026-11-02：首轮一次性 review 已发布。
 
 ## Surprises & Discoveries
@@ -53,7 +53,7 @@
 依赖 GitHub 当前 PR/issue/check/thread 事实、Host 安装与 UI 入口。研究参考仅作设计输入，正式证据应自包含。
 
 ## Outcomes & Retrospective
-### 独立子评审结论（当前 head，未发布）
+### 独立子评审结论（初始锁定 head；发布与修复状态见主评审综合）
 
 未发现 P0/P1，发现一个 P2（F486-1）。依据本仓库严重度，属于可机械修复的局部恢复说明问题。此结论不覆盖整合者尚未完成的浏览器视觉检查，也不代替当前远端必需 checks 回读或 #449/R1 的人类接受。
 
@@ -81,7 +81,7 @@
 ## Bottom Change Note
 2026-11-02：先于逐文件检查建立风险矩阵与可恢复评审流程。
 
-2026-11-02：独立子评审完成矩阵、57/9/typecheck 与合法拒读与未观测能力反例；记录 F486-1，保持 review 未发布，浏览器和整体裁决由整合者收尾。
+2026-11-02：独立子评审完成矩阵、57/9/typecheck 与合法拒读与未观测能力反例；记录 F486-1，保持 review 未发布，浏览器和整体裁决由整合者收尾。 Superseded by 主评审综合与收尾门（2026-11-02）。
 
 ## 主评审综合与收尾门（2026-11-02 +08）
 首轮已由 Singularity-AI-Bot 在锁定 head 一次性提交完整 review；#486/#487 各一条 P2，#488 无新增发现，三条均 APPROVE，无 P0/P1。可选 review-session 三次失败逐条核验均为本地接收端不可达；取消的 Rule/Issue 检查均有相同 head 的成功后继。必需 PR Fast Gate 与 Merge Gate 均通过。
@@ -98,3 +98,5 @@ F487-1：直接订阅既有 PlanningRefreshSource；matching workspace+binding �
 共享历史恢复锚点为 `refs/backup/pr<N>-before-mmp-review-20261102`。最终 push 使用精确旧 head lease；回读当前 head/base/checks/threads、issue 双向关联后重新批准，再以 `merge_method=rebase` 合并。所有公开内容经机械扫描与凭据/本机身份/个人信息/内部系统/保密五类人工检查。最终易失结果以当前回读为准，不预写合并成功。
 
 2026-11-02 +08 最终本地组合：`pnpm verify` 为 2734+7 全通过、零 skip。修复负对照通过仓库 `review-mutate.mjs` 最终整表复跑：恢复虚假等待、移除 refresh 订阅、吞掉 pending→failed 公告、移除 matching scope 四项全部由具名测试 KILLED，还原基线 GREEN。当前 head 的 hosted CI 与批准仍须最终 push 后回读。
+
+2026-11-02 +08 收尾订正：本 PR 已原子 rebase 合并；对应 issue 已回读 CLOSED。新官方组合安装烟测的可复现版本、产物 hash、几何与明确边界见 `pr-487-mmp-review.md` 的实际接合与新安装烟测段；该记录不代替 #449/R1。
