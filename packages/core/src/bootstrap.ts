@@ -1,13 +1,13 @@
 /**
  * 工作区引导：绑定 Planning provider → 读项目与条目 → 落成三态投影 → 写游标与对账时刻；快照内容变化才推进修订号，规则见 ADR-0012（#76、#220）。
  * 重复引导安全：身份按外部对象唯一键幂等，观察按 (binding, dedupeKey) 去重，投影按 (workspace, entity)
- * upsert。一轮没有提交（provider 失败或任何异常）只把同步游标标成 degraded 并返回结构化结果，最后已知值原样留给查询读；异常的原文不进结果，只经宿主的诊断出口（TD-030）。
+ * upsert。普通失败保留最后许可值；明确拒读原子提交 redacted 并推进内容修订，落库失败仍以内存拒读关闭读门。异常原文仅交宿主诊断出口（TD-030）。
  */
 import {
   CapabilityKey, ObservationState, ProjectErrorCode, SyncState, projectCodeForProviderError,
-  projectError, providerErr, providerError, providerOk, singlePlanningBinding,
+  projectError, providerErr, providerError, providerOk, singlePlanningBinding, providerRegistry,
   type ExternalObjectRef, type MembershipRecord, type PlanningProvider, type PlanningSyncRoundRecord, type ProviderError, type ProviderObservation,
-  type ProviderPlanningContent, type ProviderPlanningItem, type ProviderResult, type StorageTransaction,
+  type ProviderProject, type ResolvedBinding, type ProviderPlanningContent, type ProviderPlanningItem, type ProviderResult, type StorageTransaction,
 } from '@harness-projects/capabilities'
 import {
   ContentKind, EntityKind, ProviderErrorCode,
@@ -20,6 +20,8 @@ import type { CoreContext } from './context.ts'
 import { reportSyncRoundFailure } from './diagnostics.ts'
 import { changeRequestEntityId, ensureEntity, entityKindFor, IdentityConflictError, planningContentKind, validNativeIdentity } from './identity.ts'
 import { planningFieldsOf } from './planning-fields.ts'
+import { collectBindings } from './registry.ts'
+import { redactPlanning, PLANNING_DENIED } from './runtime-access.ts'
 
 /** 一个工作空间只有一个 Planning 事实源（不变量 1），因此每个（工作区，绑定）只需要一条同步游标。 */
 export const PLANNING_SYNC_SCOPE = 'planning.project'
@@ -56,48 +58,61 @@ interface SyncCounts {
 }
 
 export async function bootstrapWorkspace(context: CoreContext): Promise<BootstrapResult> {
-  const binding = singlePlanningBinding(context.registry)
-  const gate = gateCommand(context.registry, CapabilityKey.PlanningItemRead, 'read')
+  let markerFailure = false
+  const captured = context.runtimeAccess.epoch
+  const binding = singlePlanningBinding(context.runtimeAccess.probeRegistry)
+  const gate = gateCommand(context.runtimeAccess.probeRegistry, CapabilityKey.PlanningItemRead, 'read')
   const planning = binding?.planning
   if (binding === undefined || planning === undefined || !gate.allowed) {
     const error = gate.error ?? projectError(ProjectErrorCode.NotSupported, '没有可用的 Planning 绑定')
     return fail(context, binding?.ref.bindingId, error)
   }
   const bindingId = binding.ref.bindingId
-  // 从读取到提交的任何异常（Storage 拒绝观察、provider 抛出、编程错误）都是未提交：结构化失败 + degraded 游标，绝不裸抛、不转发原文（K2、#199）；
-  // 原异常只交给宿主的诊断出口（TD-030），先于 `fail`，这样记录失败时 Storage 再出错也不丢原因。
-  // `fail` 自己不吞异常：记录失败时 Storage 再出错（degraded 游标写不进，或写进后读不出当前修订号）就以该错误拒绝，不假装结果已落账（TD-031）；
-  // 显式命令的调用方直接拿到这个拒绝，组合期的水合由 `composeCore` 吞掉它，所以在那里先交给宿主的诊断出口。
   let result: ProviderResult<BootstrapResult>
   let round: PlanningSyncRoundRecord | undefined
   try {
-    round = await beginSyncRound(context, bindingId)
+    round = await beginSyncRound(context, bindingId, () => { markerFailure = true })
     if (context.planningReadBaseline === Number.POSITIVE_INFINITY) context.planningReadBaseline = round.latestStartedRound - 1
-    result = await syncRound(context, bindingId, planning, round)
+    result = await syncRound(context, bindingId, planning, round, captured)
   } catch (error) {
-    reportSyncRoundFailure(context, error)
-    return fail(context, bindingId, projectError(error instanceof IdentityConflictError ? ProjectErrorCode.Conflict : ProjectErrorCode.Unavailable, SYNC_ROUND_FAILED), round)
+    if (!markerFailure) reportSyncRoundFailure(context, error)
+    const failed = await fail(context, bindingId, projectError(error instanceof IdentityConflictError ? ProjectErrorCode.Conflict : ProjectErrorCode.Unavailable, SYNC_ROUND_FAILED), round, captured)
+    if (markerFailure) reportSyncRoundFailure(context, error)
+    return failed
   }
-  return result.ok ? result.value : fail(context, bindingId, toProjectError(result.error), round)
+  return result.ok ? result.value : fail(context, bindingId, toProjectError(result.error), round, captured)
 }
 
 /** 一轮同步：读观察、读项目、分页读全部条目、在一个 Storage 事务里提交；provider 的结构化失败原样交回，异常由调用方整轮接住。 */
 async function syncRound(
-  context: CoreContext, bindingId: ProviderBindingId, planning: PlanningProvider, round: PlanningSyncRoundRecord,
+  context: CoreContext, bindingId: ProviderBindingId, planning: PlanningProvider, round: PlanningSyncRoundRecord, captured: number,
 ): Promise<ProviderResult<BootstrapResult>> {
   const observations = await collectObservations(planning)
   const project = await readProject(context, planning, observations)
   if (!project.ok) return providerErr(project.error)
-  const items = await readAllItems(planning, project.value)
+  const items = await readAllItems(planning, project.value.ref)
   if (!items.ok) return providerErr(items.error)
-  const validated = validatePlanningItems(project.value, items.value)
+  const validated = validatePlanningItems(project.value.ref, items.value)
   if (!validated.ok) return validated
-  return providerOk(await commitSync(context, bindingId, validated.value, observations, round))
+  let verified: ResolvedBinding | undefined
+  if (context.runtimeAccess.denied) {
+    const probe = await collectBindings({ workspaceId: context.workspaceId, providers: { planning }, policy: context.policy })
+    verified = probe.bindings[0]
+    if (verified?.ref.bindingId !== bindingId || !gateCommand(providerRegistry(probe.bindings), CapabilityKey.PlanningItemRead, 'read').allowed) {
+      return providerErr(providerError(ProviderErrorCode.Unavailable, 'Planning 挂载尚未重新确认'))
+    }
+  }
+  return providerOk(await commitSync(context, bindingId, validated.value, observations, round, captured, project.value, verified))
 }
 
-async function beginSyncRound(context: CoreContext, bindingId: ProviderBindingId): Promise<PlanningSyncRoundRecord> {
+async function beginSyncRound(context: CoreContext, bindingId: ProviderBindingId, markFailure: () => void): Promise<PlanningSyncRoundRecord> {
   return context.storage.transaction(async (tx) => {
     const previous = await tx.getPlanningSyncRound(context.workspaceId, bindingId, PLANNING_SYNC_SCOPE)
+    const cursor = await tx.getSyncCursor(context.workspaceId, bindingId, PLANNING_SYNC_SCOPE)
+    await tx.putSyncCursor({
+      workspaceId: context.workspaceId, bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: cursor?.cursorValue,
+      state: SyncState.Syncing, lastErrorCode: cursor?.lastErrorCode,
+    }).catch((error) => { markFailure(); throw error })
     const round: PlanningSyncRoundRecord = {
       workspaceId: context.workspaceId, bindingId, scopeKey: PLANNING_SYNC_SCOPE,
       latestStartedRound: (previous?.latestStartedRound ?? 0) + 1,
@@ -111,7 +126,7 @@ async function beginSyncRound(context: CoreContext, bindingId: ProviderBindingId
 /** 项目范围优先用注入值；否则从观察主体反查条目取回 project，不猜外部 id。 */
 async function readProject(
   context: CoreContext, planning: PlanningProvider, observations: readonly ProviderObservation[],
-): Promise<ProviderResult<ExternalObjectRef>> {
+): Promise<ProviderResult<ProviderProject>> {
   let ref = context.projectRef
   if (ref === undefined) {
     for (const observation of observations) {
@@ -125,9 +140,7 @@ async function readProject(
   if (ref === undefined) return providerErr(providerError(ProviderErrorCode.NotFound, '没有可发现的规划项目'))
   const result = await planning.getProject(ref)
   if (!result.ok) return result
-  context.projectRef = result.value.ref
-  context.projectTitle = result.value.title
-  return providerOk(result.value.ref)
+  return result
 }
 
 /** 分页读全量条目，直到 nextCursor 未定义；游标回到已发送过的值（成环）或超过页数上界时返回结构化失败。 */
@@ -184,51 +197,57 @@ async function collectObservations(planning: PlanningProvider): Promise<readonly
 
 async function commitSync(
   context: CoreContext, bindingId: ProviderBindingId,
-  read: ValidatedPlanningRead, observations: readonly ProviderObservation[], round: PlanningSyncRoundRecord,
+  read: ValidatedPlanningRead, observations: readonly ProviderObservation[], round: PlanningSyncRoundRecord, captured: number, project: ProviderProject, verified?: ResolvedBinding,
 ): Promise<BootstrapResult> {
   const { workspaceId } = context
-  const committed = await context.storage.transaction(async (tx) => {
-    const latest = await tx.getPlanningSyncRound(workspaceId, bindingId, PLANNING_SYNC_SCOPE)
-    if (latest?.latestStartedRound !== round.latestStartedRound) {
-      return { stale: true as const, revision: await tx.currentRevision(workspaceId) }
-    }
-    const before = await tx.listPlanningProjections(workspaceId)
-    let revision = await tx.currentRevision(workspaceId)
-    const synced = await upsertItems(tx, context, read.items)
-    await recordObservations(tx, observations)
-    await tx.replacePlanningMemberships({ workspaceId, projectExternalId: read.project.externalId }, synced.memberships)
-    // 先按原行修订号（新行用当前修订号）写一遍，再把事务前后的读回比较：内容变化才推进，并把本轮写入的行整批重盖（ADR-0012 第 1、2 条）。
-    const scope = { workspaceId, bindingId }
-    const kept = new Map(before.map((row) => [row.entityId, row.revision]))
-    await tx.replacePlanningProjections(scope, synced.projections.map((row) => ({ ...row, revision: kept.get(row.entityId) ?? revision })))
-    if (!sameProjections(before, await tx.listPlanningProjections(workspaceId))) {
-      revision = await tx.advanceRevision(workspaceId)
-      await tx.replacePlanningProjections(scope, synced.projections.map((row) => ({ ...row, revision })))
-    }
-    // 提交成功即 healthy；有缺口只带错误码，不写 degraded（degraded / failed 留给什么都没提交的读取，D23）。
-    const incomplete = synced.counts.unanchored > 0
-    await tx.putSyncCursor({
-      workspaceId, bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined,
-      state: SyncState.Healthy, lastErrorCode: incomplete ? ProjectErrorCode.PermissionDenied : undefined,
+  return context.runtimeAccess.local(async () => {
+    const committed = await context.storage.transaction(async (tx) => {
+      const latest = await tx.getPlanningSyncRound(workspaceId, bindingId, PLANNING_SYNC_SCOPE)
+      if (context.runtimeAccess.epoch !== captured || latest?.latestStartedRound !== round.latestStartedRound) {
+        return { stale: true as const, revision: await tx.currentRevision(workspaceId) }
+      }
+      const before = await tx.listPlanningProjections(workspaceId)
+      let revision = await tx.currentRevision(workspaceId)
+      const synced = await upsertItems(tx, context, read.items)
+      await recordObservations(tx, observations)
+      await tx.replacePlanningMemberships({ workspaceId, projectExternalId: read.project.externalId }, synced.memberships)
+      // 先按原行修订号（新行用当前修订号）写一遍，再把事务前后的读回比较：内容变化才推进，并把本轮写入的行整批重盖（ADR-0012 第 1、2 条）。
+      const scope = { workspaceId, bindingId }
+      const kept = new Map(before.map((row) => [row.entityId, row.revision]))
+      await tx.replacePlanningProjections(scope, synced.projections.map((row) => ({ ...row, revision: kept.get(row.entityId) ?? revision })))
+      if (!sameProjections(before, await tx.listPlanningProjections(workspaceId))) {
+        revision = await tx.advanceRevision(workspaceId)
+        await tx.replacePlanningProjections(scope, synced.projections.map((row) => ({ ...row, revision })))
+      }
+      // 提交成功即 healthy；有缺口只带错误码，不写 degraded（degraded / failed 留给什么都没提交的读取，D23）。
+      const incomplete = synced.counts.unanchored > 0
+      await tx.putSyncCursor({
+        workspaceId, bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined,
+        state: SyncState.Healthy, lastErrorCode: incomplete ? ProjectErrorCode.PermissionDenied : undefined,
+      })
+      // 对账时刻（ADR-0003 第 3 条）只在提交成功时记：内容不变的刷新在 Storage 里只留这一笔新鲜度。
+      await tx.putReconcileCursor({ workspaceId, lastReconciledAt: context.clock() })
+      await tx.putPlanningSyncRound({ ...round, latestCommittedRound: round.latestStartedRound })
+      if (context.runtimeAccess.epoch !== captured) throw new Error('Planning access changed during publication')
+      return { stale: false as const, revision, counts: synced.counts }
     })
-    // 对账时刻（ADR-0003 第 3 条）只在提交成功时记：内容不变的刷新在 Storage 里只留这一笔新鲜度。
-    await tx.putReconcileCursor({ workspaceId, lastReconciledAt: context.clock() })
-    await tx.putPlanningSyncRound({ ...round, latestCommittedRound: round.latestStartedRound })
-    return { stale: false as const, revision, counts: synced.counts }
-  })
-  if (committed.stale) {
-    return {
-      ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0,
-      revision: committed.revision, degraded: true,
-      error: projectError(ProjectErrorCode.StaleRevision, '本轮 Planning 快照已被更新的同步轮次取代'),
+    if (committed.stale) {
+      return {
+        ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0,
+        revision: committed.revision, degraded: true,
+        error: projectError(ProjectErrorCode.StaleRevision, '本轮 Planning 快照已被更新的同步轮次取代'),
+      }
     }
-  }
-  const { unanchored } = committed.counts
-  return {
-    ok: true, entities: committed.counts.entities, workItems: committed.counts.workItems,
-    changeRequests: committed.counts.changeRequests, unanchored, revision: committed.revision, degraded: unanchored > 0,
-    error: unanchored > 0 ? projectError(ProjectErrorCode.PermissionDenied, `${unanchored} 个条目对当前凭据不可见，按成员关系也找不回本地实体`) : undefined,
-  }
+    context.projectRef = project.ref
+    context.projectTitle = project.title
+    context.runtimeAccess.recover(captured, verified)
+    const { unanchored } = committed.counts
+    return {
+      ok: true, entities: committed.counts.entities, workItems: committed.counts.workItems,
+      changeRequests: committed.counts.changeRequests, unanchored, revision: committed.revision, degraded: unanchored > 0,
+      error: unanchored > 0 ? projectError(ProjectErrorCode.PermissionDenied, `${unanchored} 个条目对当前凭据不可见，按成员关系也找不回本地实体`) : undefined,
+    }
+  })
 }
 
 /** 已提交内容是否相同：两侧都是同一 Storage 的读回，去掉行修订号、按实体排序后深比较（不依赖键序）。 */
@@ -320,22 +339,36 @@ async function recordObservations(
     await tx.recordObservation({ observation, state: ObservationState.Processed })
   }
 }
+const persistPermissionFence = (context: CoreContext, bindingId: ProviderBindingId) => context.storage.transaction((tx) => tx.putSyncCursor({ workspaceId: context.workspaceId, bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined, state: SyncState.Degraded, lastErrorCode: ProjectErrorCode.PermissionDenied }))
 
-/** 失败只改同步游标：投影保持最后已知值，查询据此标记 degraded。 */
 async function fail(
-  context: CoreContext, bindingId: ProviderBindingId | undefined, error: ProjectError, round?: PlanningSyncRoundRecord,
+  context: CoreContext, bindingId: ProviderBindingId | undefined, error: ProjectError, round?: PlanningSyncRoundRecord, captured = context.runtimeAccess.epoch,
 ): Promise<BootstrapResult> {
+  const denied = error.code === ProjectErrorCode.PermissionDenied && context.runtimeAccess.deny(captured)
+  if (error.code === ProjectErrorCode.PermissionDenied) error = projectError(ProjectErrorCode.PermissionDenied, PLANNING_DENIED)
   if (bindingId !== undefined) {
-    await context.storage.transaction(async (tx) => {
-      if (round !== undefined) {
+    const fenced = context.runtimeAccess.denied; try { await context.runtimeAccess.local(() => context.storage.transaction(async (tx) => {
+      if (!denied && context.runtimeAccess.epoch !== captured) return
+      if (round !== undefined && !denied) {
         const latest = await tx.getPlanningSyncRound(context.workspaceId, bindingId, PLANNING_SYNC_SCOPE)
         if (latest?.latestStartedRound !== round.latestStartedRound) return
       }
+      if (context.runtimeAccess.denied) {
+        const before = await tx.listPlanningProjections(context.workspaceId), redacted = before.map(redactPlanning)
+        if (!sameProjections(before, redacted)) {
+          const revision = await tx.advanceRevision(context.workspaceId)
+          await tx.replacePlanningProjections({ workspaceId: context.workspaceId, bindingId }, redacted.map((row) => ({ ...row, revision })))
+        }
+      }
       await tx.putSyncCursor({
         workspaceId: context.workspaceId, bindingId, scopeKey: PLANNING_SYNC_SCOPE, cursorValue: undefined,
-        state: SyncState.Degraded, lastErrorCode: error.code,
+        state: SyncState.Degraded, lastErrorCode: context.runtimeAccess.denied ? ProjectErrorCode.PermissionDenied : error.code,
       })
-    })
+    })) } catch (failure) {
+      if (!fenced) throw failure
+      await persistPermissionFence(context, bindingId)
+      throw failure
+    }
   }
   return {
     ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0, degraded: true, error,
