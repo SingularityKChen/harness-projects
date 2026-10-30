@@ -10,3 +10,6 @@ export const packageId = '@harness-projects/provider-planning-github-projects' a
 export { createGithubProjectsPlanningProvider, GITHUB_PROJECTS_PROVIDER_DEFINITION, type GithubProjectsPlanningProviderOptions } from './provider.ts'
 export type { GraphqlRequest, GraphqlResponse, GraphqlTransport } from './transport.ts'
 export { PLANNING_QUERIES } from './queries.ts'
+
+/** 连接预检复用相同失败分类；调用者只消费安全 code，不透传诊断字段。 */
+export { classifyResponse as classifyGithubPlanningResponse } from './classify.ts'

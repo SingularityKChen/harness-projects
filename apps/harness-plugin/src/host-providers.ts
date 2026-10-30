@@ -15,12 +15,13 @@ import { HUMAN_EXECUTION_PROVIDER_DEFINITION } from '@harness-projects/provider-
 import { createHostHumanExecution, MANUAL_ISSUER_HANDLE } from './host-execution.ts'
 import { createHostSessionPort } from './host-session-adapter.ts'
 import type { CoreProviderTable } from '@harness-projects/core'
+import type { ConnectionCheck } from '@harness-projects/controller'
 import { ProjectErrorCode, projectError, type ProjectError, type WorkspaceId } from '@harness-projects/domain'
 import { GITHUB_ACTIONS_DEFINITION, createGithubActionsDeliveryProvider, type GithubActionsTransport } from '@harness-projects/provider-delivery-github-actions'
 import { GITHUB_DEVELOPMENT_DEFINITION, createGithubDevelopmentProvider } from '@harness-projects/provider-development-github'
 import { LOCAL_GIT_PROVIDER_DEFINITION, createLocalGitDevelopmentProvider, resolveWorktreePath } from '@harness-projects/provider-development-local-git'
 import {
-  GITHUB_PROJECTS_PROVIDER_DEFINITION, createGithubProjectsPlanningProvider, type GraphqlTransport,
+  GITHUB_PROJECTS_PROVIDER_DEFINITION, createGithubProjectsPlanningProvider, classifyGithubPlanningResponse, PLANNING_QUERIES, type GraphqlTransport,
 } from '@harness-projects/provider-planning-github-projects'
 
 /** 宿主允许存进库的凭据句柄：宿主常量，不随目录收缩（带命名空间，避免误用用户环境里通用的 GITHUB_TOKEN）。 */
@@ -118,14 +119,51 @@ export async function githubViewer(fetch: HostFetch, credential: () => Promise<s
   let code: ProjectErrorCode = ProjectErrorCode.Unavailable
   try {
     const response = await githubRequest(fetch, credential, new URL('/user', GITHUB_API), { method: 'GET', headers: { accept: 'application/vnd.github+json' } })
+    if (rateLimited(response)) return { ok: false as const, code: ProjectErrorCode.RateLimited }
     if (response.status === 200 && typeof response.body === 'object' && response.body !== null) {
       const body = response.body as Record<string, unknown>
       if (typeof body.node_id === 'string' && body.node_id !== '' && typeof body.login === 'string' && body.login !== '') return { ok: true as const, value: { nodeId: body.node_id, login: body.login } }
     }
-    code = response.status === 429 || (response.status === 403 && response.headers['x-ratelimit-remaining'] === '0') ? ProjectErrorCode.RateLimited
-      : response.status === 401 || response.status === 403 ? ProjectErrorCode.PermissionDenied : response.status === 404 ? ProjectErrorCode.NotFound : ProjectErrorCode.Unavailable
+    if (response.status === 401) return { ok: false as const, code: ProjectErrorCode.PermissionDenied, cause: 'credential_rejected' as const }
+    else if (response.status === 403) code = ProjectErrorCode.PermissionDenied
   } catch { /* 固定错误不暴露凭据服务和响应原文 */ }
-  return { ok: false as const, error: projectError(code, 'GitHub 账号身份尚未确认') }
+  return { ok: false as const, code }
+}
+
+/** 限流证据先于权限；复用既有安全分类，正文仅判定已知 secondary-rate，不成为错误输出。 */
+function rateLimited(response: GithubResponse): boolean {
+  const errors = (response.body as { errors?: unknown } | undefined)?.errors
+  return (Array.isArray(errors) && errors.some((error: unknown) => error && typeof error === 'object' && (error as { type?: unknown }).type === 'RATE_LIMITED')) || classifyGithubPlanningResponse(response, Date.now())?.code === ProjectErrorCode.RateLimited
+}
+/** 显式绑定前只读检查，复用唯一出口；不持久化授权或响应内容。 */
+export async function preflightPlanningConnection(storage: Storage, accountId: ConnectorAccountRecord['id'], project: unknown, fetch: HostFetch, resolve: (handle: string) => Promise<string | undefined>): Promise<ConnectionCheck<void>> {
+  const denied = (code: ProjectErrorCode, cause?: 'credential_rejected' | 'permission_missing' | 'target_unavailable'): ConnectionCheck<void> => ({ ok: false, code, ...(cause ? { cause } : {}) })
+  try {
+    const account = await storage.getConnectorAccount(accountId)
+    if (account?.platformFamily !== 'github' || account.platformOrigin !== GITHUB_ORIGIN || account.identityKind !== 'account' || account.secretHandle !== HOST_SECRET_HANDLES[0]) return denied(ProjectErrorCode.Unavailable)
+    if (typeof project !== 'string' || !/^PVT_[A-Za-z0-9_-]{1,96}$/.test(project)) return denied(ProjectErrorCode.InvalidInput)
+    const response = await githubRequest(fetch, () => resolve(account.secretHandle!), new URL('/graphql', GITHUB_API), {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ operationName: 'PlanningProject', query: PLANNING_QUERIES.PlanningProject, variables: { project } }),
+    })
+    if (rateLimited(response)) return denied(ProjectErrorCode.RateLimited)
+    if (response.status === 401) return denied(ProjectErrorCode.PermissionDenied, 'credential_rejected')
+    if (response.status === 403) return denied(ProjectErrorCode.PermissionDenied)
+    if (response.status === 404) return denied(ProjectErrorCode.NotFound, 'target_unavailable')
+    if (response.status !== 200 || !response.body || typeof response.body !== 'object') return denied(ProjectErrorCode.Unavailable)
+    const body = response.body as { errors?: unknown; data?: { node?: unknown } }
+    if (body.errors !== undefined) {
+      if (!Array.isArray(body.errors) || !body.errors.length) return denied(ProjectErrorCode.Unavailable)
+      const kinds = new Set(body.errors.map((error: unknown) => error && typeof error === 'object' ? (error as { type?: unknown }).type : undefined))
+      if (kinds.size !== 1) return denied(ProjectErrorCode.Unavailable)
+      if (kinds.has('INSUFFICIENT_SCOPES')) return denied(ProjectErrorCode.PermissionDenied, 'permission_missing')
+      if (kinds.has('FORBIDDEN')) return denied(ProjectErrorCode.PermissionDenied)
+      if (kinds.has('NOT_FOUND')) return denied(ProjectErrorCode.NotFound, 'target_unavailable')
+      return denied(ProjectErrorCode.Unavailable)
+    }
+    if (body.data?.node === null) return denied(ProjectErrorCode.NotFound, 'target_unavailable')
+    const node = body.data?.node as { __typename?: unknown; id?: unknown; title?: unknown; url?: unknown; updatedAt?: unknown } | undefined
+    return node?.__typename === 'ProjectV2' && node.id === project && typeof node.title === 'string' && typeof node.url === 'string' && typeof node.updatedAt === 'string' ? { ok: true, value: undefined } : denied(ProjectErrorCode.Unavailable)
+  } catch { return denied(ProjectErrorCode.Unavailable) }
 }
 
 /** GitHub GraphQL 传输：规划与研发 provider 共用（两者的 GraphqlTransport 结构逐字同形）。 */

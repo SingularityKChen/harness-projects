@@ -1,3 +1,4 @@
+import { parseConnectionFailure } from './connection-failure.ts'
 import type { ActorRef, BindRepositoryInput } from '@harness-projects/controller'
 import type { ProjectErrorCode, ConnectorAccountId, ProjectError, Recovery } from '@harness-projects/domain'
 import { CapabilityKey } from './keys.ts'
@@ -32,9 +33,11 @@ function repositoryReady(repository: Record<string, unknown>): boolean {
 }
 function command(raw: unknown, kind: 'account' | 'repository') {
   const value = object(raw), state = value.writeState
-  if (Object.keys(value).some((k) => !['writeState', 'saving', 'authoritative', 'value', 'error', 'activationError'].includes(k)) || typeof state !== 'string' || !['pending', 'local_only', 'confirmed', 'reconciled', 'failed', 'conflict', 'unknown'].includes(state) || value.saving !== (state === 'pending') || value.authoritative !== ['confirmed', 'reconciled'].includes(state)) throw new TypeError('无效仓库命令')
+  if (Object.keys(value).some((k) => !['writeState', 'saving', 'authoritative', 'value', 'error', 'activationError', 'connectionFailure'].includes(k)) || typeof state !== 'string' || !['pending', 'local_only', 'confirmed', 'reconciled', 'failed', 'conflict', 'unknown'].includes(state) || value.saving !== (state === 'pending') || value.authoritative !== ['confirmed', 'reconciled'].includes(state)) throw new TypeError('无效仓库命令')
   const failure = (raw: unknown): ProjectError | undefined => { if (raw === undefined) return; const e = object(raw); if (!(typeof e.code === 'string' && Object.hasOwn(recoveries, e.code))) throw new TypeError('无效仓库错误'); const fixed = safe(e.code as ProjectErrorCode); if (e.recovery !== fixed.recovery || e.retryable !== fixed.retryable || typeof e.message !== 'string' || Object.keys(e).some((k) => !['code', 'recovery', 'retryable', 'message', 'confirmedValue', 'attemptedValue'].includes(k))) throw new TypeError('无效仓库错误'); return fixed }
   const error = failure(value.error), activation = failure(value.activationError)
+  if (value.connectionFailure !== undefined && kind !== 'account') throw new TypeError('无效连接失败 scope')
+  parseConnectionFailure(value, error)
   if (state !== 'local_only' || error) return { error: error ?? safe(state === 'pending' || state === 'unknown' ? 'result_unknown' : 'unavailable'), definitive: !!error && ['failed', 'conflict'].includes(state) }
   const payload = object(value.value), key = kind === 'account' ? 'accountId' : 'repositoryId'
   if (Object.keys(payload).some((k) => ![key, ...(kind === 'repository' ? ['bindingIds'] : [])].includes(k)) || typeof payload[key] !== 'string' || !payload[key]) throw new TypeError('缺少仓库身份')

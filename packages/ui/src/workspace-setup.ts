@@ -19,7 +19,7 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
     if (!snapshot.pending && submitted.current) { submitted.current = false; if (snapshot.error || snapshot.setup?.error || snapshot.setup?.activationError) focusFormError(form.current) }
   }, [snapshot])
   useEffect(() => () => { submitted.current = false }, [setupSource])
-  const setup = snapshot.setup, view = workspaceSetupView(snapshot)
+  const setup = snapshot.setup, view = workspaceSetupView(snapshot, 'GitHub')
   const confirmed = setup?.planning.state === 'confirmed' && setup.workspace !== null
   const list = confirmed && read?.workspace.id === setup.workspace.id && !settings
   useEffect(() => {

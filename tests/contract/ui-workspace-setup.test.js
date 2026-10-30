@@ -88,7 +88,7 @@ test('real source renders labeled creation, unique workspace and configured reco
 })
 test('recovery exposes fixed safe guidance and only retry, refresh and reapply have local actions', async () => {
   const f = fixture()
-  for (const [code, recovery, label, actionable] of [['unavailable', 'retry', '重试', true], ['result_unknown', 'refresh', '重新读取', true], ['conflict', 'reapply', '重新应用', true], ['not_found', 'open_provider', '前往来源平台检查项目', false], ['permission_denied', 'fix_permission', '请在宿主补充授权', false], ['not_supported', 'manual_execution', '请联系管理员人工处理', false], ['invalid_input', 'none', '请检查输入', false]]) {
+  for (const [code, recovery, label, actionable] of [['unavailable', 'retry', '重试', true], ['result_unknown', 'refresh', '重新读取', true], ['conflict', 'reapply', '重新应用', true], ['not_found', 'open_provider', '前往来源平台检查项目', false], ['permission_denied', 'fix_permission', '请在宿主检查访问授权', false], ['not_supported', 'manual_execution', '请联系管理员人工处理', false], ['invalid_input', 'none', '请检查输入', false]]) {
     f.set({ ...setup(), error: error(code, recovery) }); await f.source.refresh(); const out = html(f.source)
     assert.match(out, /role="alert"/); assert.ok(out.includes(label)); assert.doesNotMatch(out, /RAW-CANARY/)
     assert.equal(out.includes(`>${label}</button>`), actionable)

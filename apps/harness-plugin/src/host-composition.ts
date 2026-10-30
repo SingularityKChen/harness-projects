@@ -3,7 +3,7 @@ import type { ExternalObjectRef, PlanningProvider, ProviderPlanningFieldDefiniti
 import { mkdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { createWorkspaceSetup, composeCore, unavailableCore, createPlanningReconciler, type PlanningReconciler, type PlanningReconcilerTimers, type CoreApi } from '@harness-projects/core'
-import { createSetupCommands, type CommandResult, createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
+import { createConnectionCommands, createSetupCommands, type CommandResult, createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
 import { createSqliteStorage, type SqliteStorage } from '@harness-projects/storage-sqlite'
 import type { ExecutionContextDTO, WorkspaceSetupDTO } from '@harness-projects/client'
 import { StatusPolicy, ProjectErrorCode, projectError, type ProjectError, type ConnectorAccountId, type WorkspaceId, type WorkspacePlanningFieldMapping } from '@harness-projects/domain'
@@ -12,7 +12,7 @@ import { createHostPlanningMapping } from './host-planning-mapping.ts'
 import { createPlanningLifetime } from './host-planning-lifetime.ts'
 import { dispatchOf, OPERATIONS, type UnaryHandlers, type UnaryName } from './host-operations.ts'
 import { preflightRepositoryBinding } from './host-repository-binding.ts'
-import { githubViewer, HOST_SECRET_HANDLES, hostStoragePolicy, restoreProviders, type DisabledBinding, type ProviderCatalog } from './host-providers.ts'
+import { preflightPlanningConnection, githubViewer, HOST_SECRET_HANDLES, hostStoragePolicy, restoreProviders, type DisabledBinding, type ProviderCatalog } from './host-providers.ts'
 
 /** Controller 失败上 wire 的唯一文案：原因只写进宿主诊断日志。 */
 const OPERATION_FAILED = 'harness-projects：操作失败，原因已写入宿主诊断日志'
@@ -177,6 +177,13 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   try {
     storage = createSqliteStorage(options.dataPath, hostStoragePolicy(options.catalog), options.migrationsDir === undefined ? {} : { migrationsDir: options.migrationsDir })
     const setup = createSetupCommands(createWorkspaceSetup(storage))
+    const connection = createConnectionCommands(setup, {
+      resolveAccount: async () => {
+        const viewer = await githubViewer(options.fetch ?? globalThis.fetch, () => options.resolveCredential(HOST_SECRET_HANDLES[0]))
+        return viewer.ok ? { ok: true, value: { platformFamily: 'github', platformOrigin: 'https://github.com', identityKind: 'account', externalId: viewer.value.nodeId, displayName: viewer.value.login, secretHandle: HOST_SECRET_HANDLES[0] } } : viewer
+      },
+      verifyProject: (input) => preflightPlanningConnection(storage!, input.accountId, input.configuration.projectNodeId, options.fetch ?? globalThis.fetch, options.resolveCredential),
+    })
     const fingerprint = async () => JSON.stringify([await storage!.getWorkspacePlanningMapping(options.workspaceId), await storage!.getWorkspace(options.workspaceId), await Promise.all((await storage!.listProviderBindings(options.workspaceId)).map(async (mount) => {
       const accountId = await storage!.getProviderBindingAccount(mount.id)
       const configuration = options.catalog.has(mount.implementationKey) ? await storage!.getBindingConfiguration({ workspaceId: options.workspaceId, bindingId: mount.id, domain: mount.domain }) : undefined
@@ -291,12 +298,8 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         return error ? { writeState: error.code === 'conflict' ? 'conflict' : 'failed', saving: false, authoritative: false, value: undefined, error } : setup.setPlanningMapping({ ...input, workspaceId: options.workspaceId })
       }, true, true),
       createWorkspace: (_controller, input) => configure(() => setup.createWorkspace({ ...input, workspaceId: options.workspaceId, statusPolicy: StatusPolicy.ProviderAuthoritative })),
-      connectAccount: (_controller, input) => configure(async () => {
-        const viewer = await githubViewer(options.fetch ?? globalThis.fetch, () => options.resolveCredential(HOST_SECRET_HANDLES[0]))
-        return viewer.ok ? setup.connectAccount({ ...input, platformFamily: 'github', platformOrigin: 'https://github.com', identityKind: 'account', externalId: viewer.value.nodeId, displayName: viewer.value.login, secretHandle: HOST_SECRET_HANDLES[0] })
-          : { writeState: 'failed', saving: false, authoritative: false, value: undefined, error: viewer.error }
-      }, false),
-      bindPlanningSource: (_controller, { projectNodeId, accountId, ...input }) => configure(() => setup.bindPlanningSource({ ...input, accountId: accountId as ConnectorAccountId, workspaceId: options.workspaceId, implementationKey: 'planning.github-projects', configuration: { projectNodeId } })),
+      connectAccount: (_controller, input) => configure(() => connection.connectAccount(input), false),
+      bindPlanningSource: (_controller, { projectNodeId, accountId, ...input }) => configure(() => connection.bindPlanningSource({ ...input, accountId: accountId as ConnectorAccountId, workspaceId: options.workspaceId, implementationKey: 'planning.github-projects', configuration: { projectNodeId } })),
       installExecutionBindings: (_controller, input) => configure(() => setup.installExecutionBindings({ ...input, workspaceId: options.workspaceId })),
       bindRepository: async (_controller, input) => {
         const checked = await preflightRepositoryBinding({ ...input, references: input.references.map((ref) => ({ ...ref, accountId: ref.accountId as ConnectorAccountId | undefined })), workspaceId: options.workspaceId }, storage!, options.catalog, { worktreesDir, fetch: options.fetch ?? globalThis.fetch, resolveCredential: options.resolveCredential })
