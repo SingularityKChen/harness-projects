@@ -135,3 +135,59 @@ test('a non-route conflict leaves an available repository retryable without fals
   assert.doesNotMatch(h.html(), /尚无可用路由|请检查仓库绑定|private conflict/)
   find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle(); assert.equal(writes, 2); assert.match(h.html(), /开始工作已确认/); h.close()
 })
+
+test('write uncertainty and manual handoff remain separate visible facts beside recovery actions', async () => {
+  const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: true, access: 'available' }], connected: true, onStarted() {}, startWork: { options: async () => ({ ...scope, executionMode: 'manual' }), submit: async () => ({ writeState: 'unknown', fallback: 'manual_fallback', degraded: true }) } })
+  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle()
+  find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
+  const status = nodes(h.render()).find((node) => node.props.role === 'status'), paragraphs = nodes(status).filter((node) => node.type === 'p')
+  assert.equal(paragraphs.length, 2, 'write result and manual handoff need independent paragraphs')
+  const visible = h.html().replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, '')
+  assert.match(visible, /结果未知/); assert.match(visible, /人工处理，可在工作树继续/); assert.match(visible, /读回并恢复/)
+  assert.doesNotMatch(visible, /运行成功|已保存|Saved/); h.close()
+})
+
+async function focusFixture(t) {
+  const body = {}, outside = {}, listeners = new Set(), pending = []; let focuses = 0
+  const doc = { body, activeElement: body, addEventListener: (_name, listener) => listeners.add(listener), removeEventListener: (_name, listener) => listeners.delete(listener) }
+  const action = { isConnected: true, focus() { focuses++; doc.activeElement = action } }, field = { focus() { doc.activeElement = field } }
+  const form = { isConnected: true, ownerDocument: doc, contains: (node) => node === action || node === field }
+  const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: true, access: 'available' }], connected: true, onStarted() {}, startWork: { options: async (target) => ({ ...target, executionMode: 'manual' }), submit: () => new Promise((resolve) => pending.push(resolve)) } })
+  find(h, 'button').props.onClick(); const bind = () => {
+    const root = find(h, 'form'), submit = nodes(h.render()).find((node) => node.props.type === 'submit')
+    if (root?.ref) root.ref.current = form
+    if (submit?.ref) submit.ref.current = action
+    find(h, 'select').ref.current = field
+  }
+  bind(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'input').props.onChange({ target: { value: 'feature/keyboard' } }); t.after(h.close)
+  return { h, doc, body, outside, action, listeners, get focuses() { return focuses },
+    async submit(origin = field) { doc.activeElement = origin; find(h, 'form').props.onSubmit({ preventDefault() {} }); h.render(); doc.activeElement = body; h.flush(); await settle() },
+    moveFocus(target) { doc.activeElement = target; for (const listener of listeners) listener({ target }) },
+    async finish(state = 'unknown', index = 0, render = true) { pending[index]({ writeState: state, degraded: false }); await settle(); if (render) { h.render(); h.flush() } },
+    async switchTarget() { h.props.target = { ...h.props.target, workItemId: 'item-new' }; h.render(); h.flush(); await settle(); bind() },
+  }
+}
+for (const writeState of ['unknown', 'failed']) test(`keyboard submission recovers lost focus to the ${writeState} action once`, async (t) => {
+  const f = await focusFixture(t); await f.submit(); await f.finish(writeState)
+  assert.equal(f.focuses, 1, 'disabled source lost focus; the resulting recovery action must regain it')
+  assert.equal(f.doc.activeElement, f.action); assert.equal(nodes(f.h.render()).find((node) => node.props.type === 'submit').props.disabled, false)
+  assert.match(f.h.html(), writeState === 'unknown' ? /读回并恢复/ : /重新提交/); assert.equal(find(f.h, 'input').props.value, 'feature/keyboard')
+  f.h.render(); f.h.flush(); assert.equal(f.focuses, 1); assert.equal(f.listeners.size, 0)
+})
+test('moving focus away permanently cancels recovery even after a later blur to body', async (t) => {
+  const f = await focusFixture(t); await f.submit(); f.moveFocus(f.outside); f.doc.activeElement = f.body; await f.finish()
+  assert.equal(f.focuses, 0); assert.equal(f.doc.activeElement, f.body); assert.equal(f.listeners.size, 0)
+  await f.submit(f.outside); await f.finish('failed', 1); assert.equal(f.focuses, 0, 'programmatic submit without form focus must not arm recovery')
+})
+for (const boundary of ['close', 'disconnect', 'unmount']) test(`focus recovery cancels at ${boundary} and ignores its late result`, async (t) => {
+  const f = await focusFixture(t); await f.submit()
+  if (boundary === 'close') nodes(f.h.render()).find((node) => node.props.children === '收起表单').props.onClick()
+  if (boundary === 'disconnect') f.h.props.connected = false
+  if (boundary === 'unmount') f.h.close(); else { f.h.render(); f.h.flush() }
+  await f.finish('unknown', 0, boundary !== 'unmount'); assert.equal(f.focuses, 0); assert.equal(f.listeners.size, 0)
+})
+test('late target result cannot clear a newer focus ticket and disconnected action cannot receive focus', async (t) => {
+  const f = await focusFixture(t); await f.submit(); await f.switchTarget(); await f.submit(); await f.finish('confirmed', 0)
+  assert.equal(f.focuses, 0); await f.finish('unknown', 1); assert.equal(f.focuses, 1)
+  await f.submit(); f.action.isConnected = false; await f.finish('failed', 2); assert.equal(f.focuses, 1)
+})

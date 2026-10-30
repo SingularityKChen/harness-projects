@@ -1,6 +1,7 @@
 import { createElement as h, useEffect, useRef, useState } from 'react'
 import type { DeliveryLineageRead, DeliveryLineageReader, DeliveryLineageScope } from '@harness-projects/client'
-import { deriveDeliveryLineageStrip } from '@harness-projects/ui-model'
+import { deriveDeliveryLineageStrip, deliverySetFreshness } from '@harness-projects/ui-model'
+import { executionBadge, executionSource, executionStyles } from './execution-presentation.ts'
 const LABELS = { execution_context: '执行上下文', worktree: '工作树（分支）', commit: '提交', change_request: '变更请求', pipeline_run: '流水线', check_run: '检查' }
 const GAPS = { not_started: '尚未开始工作', not_observed: '尚未观察到', not_refreshed: '尚未刷新', unconfirmed: '尚未确认', unknown: '原因未知' }
 const STATES = { observed: '已观察', passed: '通过', failed: '失败', unknown: '未知', stale: '陈旧（最后已知）' }
@@ -54,13 +55,19 @@ export function DeliveryLineageSection({ scope, reader, connected, thresholdMs }
   }, [key, connected, reader, thresholdMs])
   const current = state.key === key && state.reader === reader ? state : undefined, blocked = !connected || current?.pending !== false || current.failed || current.thresholdMs !== thresholdMs || current.read?.projection.error !== undefined
   const strip = current?.read === undefined ? undefined : deriveDeliveryLineageStrip(current.read.projection, current.read.now, thresholdMs === undefined ? {} : { thresholdMs })
-  return h('section', { 'aria-label': '交付谱系' }, h('h3', null, `交付谱系 · ${scope.repositoryId}`),
+  return h('section', { className: 'hp-execution', 'aria-label': '交付谱系' }, executionStyles(), h('h3', null, `交付谱系 · ${scope.repositoryId}`),
     blocked ? h('p', { role: 'status' }, !connected ? '连接中断，最后已知；正在核对新鲜度' : current?.failed ? '暂时无法确认谱系，最后已知' : '正在核对新鲜度') : null,
     current?.read?.projection.degraded || current?.read?.projection.error ? h('p', null, '谱系不完整，保留最后已知事实') : null,
     strip === undefined ? h('p', null, '尚无已读谱系') : h('ol', null, ...strip.slots.map((slot) => h('li', { key: slot.position, 'data-position': slot.position }, h('h4', null, LABELS[slot.position]),
       slot.kind === 'gap' ? h('p', { 'data-reason': slot.reason }, `缺口：${GAPS[slot.reason]}`) : slot.nodes.map((node, index) => {
         const state = blocked && node.state === 'passed' ? 'unknown' : node.state
-        return h('p', { key: index, 'data-state': state }, node.label ?? node.externalId ?? '身份未知', ' · ', STATES[state], ' · ', node.relationState === 'candidate' ? '候选关系' : node.relationState === 'confirmed' ? '已确认关系' : '已拒绝关系', node.available ? '' : ' · 逐跳不可用', ['pipeline_run', 'check_run'].includes(slot.position) ? '（所属提交的最后已知 CI）' : '')
+        const freshness = current?.read?.projection.freshness.find((entry) => entry.kind === slot.position)
+        const confirmedAt = current?.read && deliverySetFreshness(freshness, current.read.now, thresholdMs) !== 'unconfirmed' ? freshness?.confirmedAt : undefined
+        return h('div', { key: index }, h('p', { 'data-state': state }, executionBadge(state, STATES[state]), node.available ? '' : ' · 逐跳不可用', ['pipeline_run', 'check_run'].includes(slot.position) ? '（所属提交的最后已知 CI）' : ''),
+          confirmedAt === undefined ? null : h('p', { className: 'hp-execution-meta' }, '最后确认：', confirmedAt),
+          executionSource('谱系来源', h('p', null, node.label ?? node.externalId ?? '身份未知'),
+            node.label && node.externalId ? h('p', null, '外部标识：', node.externalId) : null,
+            h('p', null, node.relationState === 'candidate' ? '候选关系' : node.relationState === 'confirmed' ? '已确认关系' : '已拒绝关系')))
       })))),
-    h('button', { type: 'button', disabled: !connected, onClick: () => action.current?.() }, '刷新交付谱系'))
+    h('button', { className: 'hp-action', type: 'button', disabled: !connected, onClick: () => action.current?.() }, '刷新交付谱系'))
 }
