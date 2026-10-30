@@ -1,10 +1,11 @@
 import type { DOMElement } from './work-item-detail.ts'
 /** 只移动到调用表单的安全摘要；提交归属由各表单局部 ref 管理。 */
 export function focusFormError(root: DOMElement | null): void {
-  root?.querySelector?.('[data-form-error]')?.focus?.()
+  const target = root?.querySelector?.('[data-form-error]')
+  if (!target || target.closest?.('[hidden],[inert]') || target.getClientRects?.().length === 0) return
+  target.focus?.()
 }
 export const FORM_STYLES: string = `
-.hp-workspace[data-workspace-setup] > .hp-workspace { padding:0 }
 .hp-form { display:grid; gap:var(--hp-space-4); margin-block:var(--hp-space-6); padding-block:var(--hp-space-4); border-block-start:1px solid var(--hp-border) }
 .hp-form h3 { margin:0; font-size:1.15rem }
 .hp-field { display:grid; gap:var(--hp-space-1); min-width:0 }
