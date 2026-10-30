@@ -1,6 +1,6 @@
 # Start Work 耐久外部意图 ExecPlan
 
-> 状态：Active，本地实现和验证完成；独立验收、组合与远端交付尚未完成。
+> 状态：Completed；本地实现、独立验收、必要组合与 Ready 交付已完成，本会话授权的评审收尾及合并另行核对；真实平台、UAT 与 R1 保持独立。
 > 创建：2026-10-30；时区：Asia/Singapore（+08）。
 > 范围：#204，一个独立验收、合并和回滚的 PR；遵循根 `AGENTS.md` 与 `PLANS.md`。
 
@@ -194,6 +194,9 @@ owner suite 中已有外部 Pending 的 public takeover 改为阻挡证明；旧
 
 ## Decision Log
 
+- 2026-10-30：本轮人类直接授权“如果没有且无 P0 / P1，或只有 P2/P3 → 你负责后续：三思后修复 → re-review → 归档 ExecPlan → 按 Conventional Commits 与可独立理解、回滚、审阅的交付边界整合为适量的 commit → 核对并处理对应 issue → `merge_method=rebase` 合并”。本 PR 首轮仅 R467-F1/P3，属于只有 P2/P3 的授权条件；由本评审会话修正页首，当前 head 独立复评和门禁成功后才合并。
+
+
 2026-10-30 / 实现者响应独立 P2：顶层 context/owner/binding/state/operation/input、分支或运行 input、引用和可选 path 全部逐字段只读一次，验证与返回只使用同一局部值；getter 抛错继续按 Storage 现有 Promise 拒绝契约原子拒绝。不增加递归 clone、引擎或生命周期接口。
 
 2026-10-30 10:46 +08 / 实现者：只增加 typed 当前槽位与窄 Git/运行写前 helper；确定 fallback 非 running ack 沿用旧结果契约。Rationale：#204 负责耐久证据和保守阻挡，#458 的结果规范化不并入；独立审查/组合/远端 head 通过前不归档计划。
@@ -243,3 +246,5 @@ Change Note (2026-10-30 10:46 +08)：补记本地 TDD、全部故障/完整验�
 Change Note (2026-10-30 10:05 +08)：独立比较两份设计与实际源码后定稿；裁决根/槽位最简语义、未知跨键阻挡、旧 owner 不结算、无迁移与相邻任务边界，补齐恢复测试写集并给出需实测的 727 行分配。
 
 Change Note (2026-10-30 11:42 SGT)：记录独立getter修复、负控、Planning必要组合与源码head hosted证据，归档本能力计划并保留实际平台/后续恢复边界。
+
+2026-10-30：MMP 首轮评审发现页首阶段残留 P3，按真实完成证据更新并记录本会话条件授权；不扩大 #193/#421 或人类发布验收。

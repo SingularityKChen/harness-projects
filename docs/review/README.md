@@ -114,6 +114,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 | 记录 | 范围 | 结论 |
 |---|---|---|
 | [2026-10-30-pr476-pr480-mmp-review](2026-10-30-pr476-pr480-mmp-review.md) | 四项UI反馈、只读范围、连接诊断与详情重排 | 首轮无P0/P1；两P2由本会话修复、独立复评后按逐PR当前门禁与直接条件授权rebase收尾 |
+| [2026-10-30-pr464-pr472-mmp-review](2026-10-30-pr464-pr472-mmp-review.md) | 原生 PR 创建、持久意图及运行期访问安全栈 | 首轮两 P1 交原 owner 修复；非阻塞项由评审会话收尾，逐当前 head 复评后 rebase |
 | [2026-10-30-pr461-pr463-mmp-review](2026-10-30-pr461-pr463-mmp-review.md) | Host 视觉框架、响应式详情与连接表单三个闭环 | 首轮无 P0/P1；两 P2 与一 P3 修复独立复评，逐 PR 当前 head 门禁及条件授权 rebase 收尾；#446 人类参数确认与发布门保持 |
 | [2026-10-29-pr445-pr456-mmp-review](2026-10-29-pr445-pr456-mmp-review.md) | 准入、owner 围栏、Host 身份/profile 与 Demo 指南四闭环 | 首轮全矩阵无新增缺陷；组合2551+7通过；按人类授权逐PR复评后rebase收尾，保留人类产品/发布门 |
 | [2026-10-29-pr441-pr443-mmp-review](2026-10-29-pr441-pr443-mmp-review.md) | 重复成员契约、工作树冲突、准确可读列表三闭环 | 首轮无 P0/P1；#441 唯一 P2 已修复复评，最终门禁与授权串行收尾见记录 |
