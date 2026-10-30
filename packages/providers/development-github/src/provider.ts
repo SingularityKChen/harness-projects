@@ -1,18 +1,18 @@
 /**
- * GitHub 只读 Development provider（#231）。失败一律是结构化 `ProviderResult`，任何路径都不抛错（core 的交付刷新把裸异常折成整次失败，逐跳缺口原因随之丢失）；唯一的例外是宿主注入的时钟违约（见 `now` 选项）。
- * 只读：仓库 / 分支 / 提交 / 变更请求，不实现任何写方法与工作树方法（省略，不是返回 `not_supported` 的桩）。权限快照仅保留最近真实仓库读取；不缓存业务内容、不重试、不退避、
- * 不持有凭据；鉴权、超时与重试属于宿主注入的 transport（ADR-0013 第 3 条）。输入闸门全部在发请求之前，闸门拒绝时 transport 调用次数为 0。
+ * GitHub Development adapter：读仓库/分支/提交/PR，并显式单次创建原生 PR；不管理工作树。
+ * 不持有凭据、不缓存业务内容、不自动重试。read 权限与 create 权限各自保留易失证据。
+ * 创建发送后的未知结果必须先对账；输入闸门拒绝时 transport 调用次数为 0。
  */
 import {
   AccessLevel, CapabilityKey, makeObservation, providerErr, providerError, providerOk, sourceVersionFromTimestamp,
-  type DevelopmentProvider, type ExternalObjectRef, type ProviderChangeRequest, type ProviderDefinition, type ProviderObservation, type ProviderPage, type ProviderResult,
+  type DevelopmentProvider, type ExternalObjectRef, type ProviderChangeRequest, type ProviderCreateChangeRequestInput, type ProviderDefinition, type ProviderObservation, type ProviderPage, type ProviderResult,
 } from '@harness-projects/capabilities'
 import { ProviderErrorCode, type ProviderBindingId } from '@harness-projects/domain'
 import { classifyResponse, failure, requestIdOf } from './classify.ts'
 import {
-  SHA, decodeBranches, decodeChangeRequest, decodeChangeRequests, decodeCommit, decodeRepository, isRecord, type ChangeRequestRow, type DecodedPage, type Obj,
+  SHA, decodeCreatePreflight, decodeCreatedChangeRequest, decodeBranches, decodeChangeRequest, decodeChangeRequests, decodeCommit, decodeRepository, isRecord, type ChangeRequestRow, type DecodedPage, type Obj,
 } from './decode.ts'
-import { DEVELOPMENT_QUERIES } from './queries.ts'
+import { DEVELOPMENT_CREATE_OPERATIONS, DEVELOPMENT_QUERIES } from './queries.ts'
 import type { GraphqlRequest, GraphqlTransport } from './transport.ts'
 
 export interface GithubDevelopmentProviderOptions {
@@ -43,7 +43,7 @@ export function createGithubDevelopmentProvider({ bindingId, repository, transpo
   const ask = (operationName: keyof typeof DEVELOPMENT_QUERIES, variables: Obj): GraphqlRequest =>
     ({ operationName, query: DEVELOPMENT_QUERIES[operationName], variables: { owner, name, ...variables } })
 
-  /** 唯一的 try/catch：transport 抛错或 reject → transport_error；分类命中即失败；decode 返回 undefined → not_found；其余任何不符 → malformed_response。 */
+  /** 读调用包装：transport 抛错或 reject → transport_error；分类命中即失败；decode 返回 undefined → not_found；其余任何不符 → malformed_response。 */
   async function call<T>(request: GraphqlRequest, decode: (data: Obj) => T | undefined): Promise<ProviderResult<T>> {
     let rawClass = 'transport_error'
     let requestId: string | undefined
@@ -107,6 +107,11 @@ export function createGithubDevelopmentProvider({ bindingId, repository, transpo
     return cursor === undefined ? providerOk(rows) : providerErr(failure(ProviderErrorCode.Unavailable, undefined, 'malformed_response'))
   }
 
+  let createPermission: AccessLevel = AccessLevel.Degraded
+  // 明确写拒绝在同实例内黏住，旧调用的迟到结果不能解除；只有新实例回到未知。
+  const recordCreatePermission = (access: AccessLevel) => { if (createPermission !== AccessLevel.ReadOnly) createPermission = access }
+  const createRefusal = (): ProviderResult<never> | undefined => createPermission === AccessLevel.ReadOnly
+    ? providerErr(failure(ProviderErrorCode.PermissionDenied, undefined)) : undefined
   let permission: AccessLevel = AccessLevel.Degraded, observedAt: string | undefined
   const getRepository: DevelopmentProvider['getRepository'] = async (ref) => {
     if (!isRepository(ref)) return notFound()
@@ -115,21 +120,73 @@ export function createGithubDevelopmentProvider({ bindingId, repository, transpo
     return result
   }
 
+  const createChangeRequest: NonNullable<DevelopmentProvider['createChangeRequest']> = async (input) => {
+    let intent: ProviderCreateChangeRequestInput
+    try {
+      // getter 每项仅读一次；ack oracle 不与 caller 或 transport 的可变对象共享身份。
+      const { repository: ref, head, base, title, body } = input
+      intent = Object.freeze({ repository: Object.freeze({ bindingId: ref.bindingId, objectKind: ref.objectKind, externalId: ref.externalId, url: undefined }), head, base, title, body })
+    } catch {
+      return invalid('创建变更请求输入无法读取')
+    }
+    if (!isRepository(intent.repository)) return notFound()
+    const { head, base, title, body } = intent
+    if (![head, base, title].every(nonEmpty) || typeof body !== 'string' || head === base
+      || [head, base].some((ref) => /^[0-9a-f]{40}$/i.test(ref) || ref.includes(':'))) return invalid('创建变更请求必须使用两个不同的本仓分支、非空标题和字符串正文')
+    const denied = createRefusal()
+    if (denied !== undefined) return denied
+    const preflight = await call({ operationName: 'DevelopmentCreatePreflight', query: DEVELOPMENT_CREATE_OPERATIONS.DevelopmentCreatePreflight,
+      variables: { owner, name, headRef: `refs/heads/${head}`, baseRef: `refs/heads/${base}` } }, (data) => decodeCreatePreflight(data, owner, name, head, base))
+    if (!preflight.ok) return preflight
+    if (!preflight.value.matches) return providerErr(providerError(ProviderErrorCode.Conflict, 'GitHub 仓库或分支身份不一致'))
+    const deniedAfterPreflight = createRefusal()
+    if (deniedAfterPreflight !== undefined) return deniedAfterPreflight
+    const { repositoryId } = preflight.value
+    let requestId: string | undefined
+    const ambiguous = () => {
+      recordCreatePermission(AccessLevel.Degraded)
+      return providerErr(providerError(ProviderErrorCode.AmbiguousResult, 'GitHub 创建结果不确定，必须先读取对账'), requestId)
+    }
+    try {
+      // 一次显式调用只发送一次 mutation；clientMutationId 也不能提供服务端幂等保证。
+      const response = await transport({ operationName: 'DevelopmentCreateChangeRequest', query: DEVELOPMENT_CREATE_OPERATIONS.DevelopmentCreateChangeRequest,
+        variables: { input: { repositoryId, headRepositoryId: repositoryId, headRefName: head, baseRefName: base, title, body } } })
+      requestId = requestIdOf(response.headers)
+      const error = classifyResponse(response, now())
+      const data = isRecord(response.body) && isRecord(response.body.data) ? response.body.data : {}
+      if (error !== undefined) {
+        if (data.createPullRequest !== null && data.createPullRequest !== undefined) return ambiguous()
+        if (error.code === ProviderErrorCode.PermissionDenied || error.code === ProviderErrorCode.RateLimited) {
+          recordCreatePermission(error.code === ProviderErrorCode.PermissionDenied ? AccessLevel.ReadOnly : AccessLevel.Degraded)
+          return providerErr(error, requestId)
+        }
+        return ambiguous()
+      }
+      const created = decodeCreatedChangeRequest(data, bindingId, repositoryId, intent)
+      recordCreatePermission(AccessLevel.Available)
+      return providerOk(created, requestId)
+    } catch {
+      return ambiguous()
+    }
+  }
+
   const provider: DevelopmentProvider = {
     definition: GITHUB_DEVELOPMENT_DEFINITION,
     /**
      * eager 每次用 `getRepository` 探测；lazy 只报告最近真实读取，初值 degraded。成功 → available；结构化失败 → degraded。
      * 选 degraded 而不是 unavailable：core 对 unavailable 的读门直接拒绝（`NotSupported`），degraded 仍放行读，缺口原因来自单次调用的结构化错误，
-     * 补授权后无需重新组合就恢复。只声明已实现的两个读 key（评审结论是变更请求快照的字段，不是独立能力）。
+     * 补授权后无需重新组合就恢复。create 使用独立权限证据；read 成功不证明 write。评审结论不是独立能力。
      */
     async describeCapabilities() {
       if (permissionMode === 'eager') await getRepository(repositoryRef)
       observedAt ??= new Date(now()).toISOString()
       const keys = [CapabilityKey.DevelopmentRepositoryRead, CapabilityKey.DevelopmentChangeRequestRead]
       const level = (access: AccessLevel) => Object.fromEntries(keys.map((key) => [key, access]))
-      return { bindingId, capability: level(AccessLevel.Available), permission: level(permission), observedAt }
+      return { bindingId, capability: { ...level(AccessLevel.Available), [CapabilityKey.DevelopmentChangeRequestCreate]: AccessLevel.Available },
+        permission: { ...level(permission), [CapabilityKey.DevelopmentChangeRequestCreate]: createPermission }, observedAt }
     },
     getRepository,
+    createChangeRequest,
     async listBranches({ repository: ref, cursor, limit }) {
       if (!isRepository(ref)) return notFound()
       const bad = badPaging(limit, cursor)

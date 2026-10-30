@@ -49,3 +49,24 @@ export const DEVELOPMENT_QUERIES = Object.freeze({
   DevelopmentChangeRequests: DEVELOPMENT_CHANGE_REQUESTS,
   DevelopmentChangeRequest: DEVELOPMENT_CHANGE_REQUEST,
 } as const satisfies Readonly<Record<'DevelopmentRepository' | 'DevelopmentBranches' | 'DevelopmentCommit' | 'DevelopmentChangeRequests' | 'DevelopmentChangeRequest', string>>)
+
+/** 写操作独立于已录制的五段只读查询，不能混入其哈希/回放集合。 */
+export const DEVELOPMENT_CREATE_OPERATIONS = Object.freeze({
+  DevelopmentCreatePreflight: `query DevelopmentCreatePreflight($owner: String!, $name: String!, $headRef: String!, $baseRef: String!) {
+  repository(owner: $owner, name: $name) {
+    id nameWithOwner
+    head: ref(qualifiedName: $headRef) { ...DevelopmentCreateRef }
+    base: ref(qualifiedName: $baseRef) { ...DevelopmentCreateRef }
+  }
+}
+fragment DevelopmentCreateRef on Ref {
+  name prefix repository { id } target { __typename ... on Commit { oid } }
+}`,
+  DevelopmentCreateChangeRequest: `mutation DevelopmentCreateChangeRequest($input: CreatePullRequestInput!) {
+  createPullRequest(input: $input) {
+    pullRequest { __typename ...DevelopmentChangeRequestFields repository { id } headRepository { id } baseRefName }
+  }
+}
+
+${CHANGE_REQUEST_FIELDS}`,
+} as const)

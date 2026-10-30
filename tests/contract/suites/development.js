@@ -230,6 +230,19 @@ export function developmentContractSuite(adapter) {
   const refusalCode = (declared) => (declared ? 'not_found' : 'not_supported')
   // 必填身份字段与形态所需的预置对象字段都在这里具名校验：缺字段必须说"测试装配缺 X"，而不是 undefined 解引用。
   const need = (field, why) => needExpectField(expected, field, why)
+  const createSetup = () => {
+    const setup = need('changeRequest', '声明创建能力时必须提供合法分支组合')
+    for (const field of ['head', 'alternateBase', 'decoyHead']) {
+      assert.ok(typeof setup[field] === 'string' && setup[field] !== '', `测试装配缺 expect.changeRequest.${field}`)
+    }
+    assert.notEqual(setup.head, expected.baseBranch)
+    assert.notEqual(setup.head, setup.alternateBase)
+    assert.notEqual(setup.alternateBase, expected.baseBranch)
+    assert.notEqual(setup.decoyHead, expected.baseBranch)
+    assert.notEqual(setup.decoyHead, setup.head)
+    return setup
+  }
+  const createHead = async (provider) => await declares(provider, 'createChangeRequest') ? createSetup().head : expected.baseBranch
   for (const field of ['repository', 'baseBranch', 'headCommit', 'pageSize', 'worktreePath']) {
     need(field, '请在 developmentContractSuite 的 expect 里补齐')
   }
@@ -366,7 +379,7 @@ export function developmentContractSuite(adapter) {
     const provider = makeProvider({})
     const before = await expected.objects(provider)
     const { declared: canCreate, result: created } = await expectOptional(
-      provider, 'createChangeRequest', crInput(repository, expected.baseBranch, expected.baseBranch), expected,
+      provider, 'createChangeRequest', crInput(repository, await createHead(provider), expected.baseBranch), expected,
     )
     if (canCreate) {
       assert.equal(created.ok, true, '声明了 change_request.create 就必须真的能创建')
@@ -454,13 +467,13 @@ export function developmentContractSuite(adapter) {
         'list 与 get 必须透出同一份预置事实')
     }
     if (!await declares(provider, 'createChangeRequest')) {
-      await assertUndeclaredRejected(provider, 'createChangeRequest', crInput(repository, expected.baseBranch, expected.baseBranch), expected)
+      await assertUndeclaredRejected(provider, 'createChangeRequest', crInput(repository, await createHead(provider), expected.baseBranch), expected)
       return
     }
     const create = implemented(provider, 'createChangeRequest')
-    const fromBranch = await create(crInput(repository, expected.baseBranch, expected.baseBranch))
+    const fromBranch = await create(crInput(repository, await createHead(provider), expected.baseBranch))
     assert.equal(fromBranch.ok, true)
-    assert.equal(fromBranch.value.headBranch, expected.baseBranch, '分支名输入必须投影出真实 headBranch')
+    assert.equal(fromBranch.value.headBranch, createSetup().head, '分支名输入必须投影出真实 headBranch')
     assertFreshReviewState(fromBranch.value)
     const fromSha = await createFromSha(provider, create)
     // create / get / list 三面必须透出同一字段组：某一面漏字段就会在这里变红。
@@ -490,28 +503,18 @@ export function developmentContractSuite(adapter) {
     const prepared = await preparedFor(provider)
     if (prepared !== undefined) await assertByteExactBranch(provider, repository, prepared.headBranch, [prepared.ref.externalId])
     if (!await declares(provider, 'createChangeRequest')) {
-      await assertUndeclaredRejected(provider, 'createChangeRequest', crInput(repository, expected.baseBranch, expected.baseBranch), expected)
+      await assertUndeclaredRejected(provider, 'createChangeRequest', crInput(repository, await createHead(provider), expected.baseBranch), expected)
       return
     }
     const create = implemented(provider, 'createChangeRequest')
-    // 分支创建是独立可选能力：能建时诱饵是「不同分支 + 同一提交的另一分支」；不能建时以 expected.baseBranch 为
-    // 目标、预置的 worktreeBranch 为诱饵分支。直接 sha 的 detached 诱饵只在 provider 接受 sha 作 head 时存在。
-    const canCreateBranch = await declares(provider, 'createBranch')
-    const targetBranch = canCreateBranch ? 'feature/filter-a' : expected.baseBranch
-    const decoyBranches = canCreateBranch
-      ? ['feature/filter-b', expected.baseBranch]
-      : [need('worktreeBranch', '分支创建不可用时过滤用例以预置分支作诱饵')]
-    for (const name of canCreateBranch ? ['feature/filter-a', 'feature/filter-b'] : []) {
-      const branch = await implemented(provider, 'createBranch')({ repository, name, fromRef: expected.baseBranch })
-      assert.equal(branch.ok, true, `${name} 必须建得出来，否则分支过滤没有足够输入`)
-    }
-    assert.equal(decoyBranches.includes(targetBranch), false, '诱饵分支不得与目标分支相同')
-    const make = async (head) => {
-      const created = await create(crInput(repository, head, expected.baseBranch))
+    const { head: targetBranch, alternateBase, decoyHead } = createSetup()
+    const decoyBranches = [decoyHead]
+    const make = async (head, base = expected.baseBranch) => {
+      const created = await create(crInput(repository, head, base))
       assert.equal(created.ok, true, `以分支 ${head} 为 head 的变更请求必须建得出来`)
       return created.value
     }
-    const expectedIds = [(await make(targetBranch)).ref.externalId, (await make(targetBranch)).ref.externalId]
+    const expectedIds = [(await make(targetBranch)).ref.externalId, (await make(targetBranch, alternateBase)).ref.externalId]
     const decoys = []
     for (const branch of decoyBranches) decoys.push(await make(branch))
     const detached = await createFromSha(provider, create)
@@ -718,10 +721,10 @@ export function developmentContractSuite(adapter) {
       assert.notEqual(expected.worktreeBranch, 'feature/dup', '适配器预置分支不得占用这条用例请求的名字')
     }
     if (await declares(provider, 'createChangeRequest')) {
-      const cr = await implemented(provider, 'createChangeRequest')(crInput(repository, expected.baseBranch, expected.baseBranch))
+      const cr = await implemented(provider, 'createChangeRequest')(crInput(repository, await createHead(provider), expected.baseBranch))
       assert.equal(cr.error.code, 'ambiguous_result')
     } else {
-      await assertUndeclared(provider, 'createChangeRequest', crInput(repository, expected.baseBranch, expected.baseBranch))
+      await assertUndeclared(provider, 'createChangeRequest', crInput(repository, await createHead(provider), expected.baseBranch))
     }
     const listed = await provider.listBranches({ repository, cursor: undefined, limit: 100 })
     assert.equal(listed.value.items.some((b) => b.name === 'feature/dup'), false, '结果不确定的创建不得留下分支')

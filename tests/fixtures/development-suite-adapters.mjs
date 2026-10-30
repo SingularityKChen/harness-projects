@@ -81,6 +81,7 @@ export function omitMethods(provider, ...omitted) {
 const worktreeRef = { bindingId, objectKind: 'worktree', externalId: PREPARED_WORKTREE, url: undefined }
 /** 共享 expect 基座（导出供父测试构造 liar 装配），`objects` 由各 adapter 覆盖。 */
 export const SUITE_EXPECT = Object.freeze({
+  changeRequest: { head: PREPARED_BRANCH, alternateBase: PREPARED_DUP, decoyHead: PREPARED_COLLISION_A },
   repository, baseBranch: 'main', headCommit: 'sha-1', pageSize: 1, worktreePath: '/worktrees/wt-1',
   worktreeBranch: PREPARED_BRANCH, worktreeRef, worktreeRefBranch: PREPARED_HELD, worktreeDupBranch: PREPARED_DUP,
   worktreeCollisionBranchA: PREPARED_COLLISION_A, worktreeCollisionBranchB: PREPARED_COLLISION_B,
@@ -204,6 +205,8 @@ const ruleLiar = (label, makeProvider, expectIncludes, expect = expectOf(freshOb
 })
 const READ_ONLY = { changeRequestCreate: false }
 const RULE_LIARS = {
+  'missing-create-setup-field': ruleLiar('创建装配缺 changeRequest', baseProvider,
+    ['expect.changeRequest', '测试装配缺'], expectWithout('changeRequest')),
   'fresh-reports-approved': ruleLiar('新建变更请求报 approved', createVariant({ afterCreate: () => ({ reviewState: 'approved' }) }), ['新建变更请求在创建时还没有任何审核']),
   'fresh-reports-changes-requested': ruleLiar('新建变更请求报 changes_requested',
     createVariant({ afterCreate: () => ({ reviewState: 'changes_requested' }) }), ['新建变更请求在创建时还没有任何审核']),

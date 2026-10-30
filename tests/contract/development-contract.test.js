@@ -298,7 +298,7 @@ test('development-subset-matrix-rejects-liars：合法子集零退出，坏 adap
     .flatMap((method) => ['available-absent', 'undeclared-success', 'ns-sideeffect', 'bare-throw'].map((spec) => `${spec}-${method}`))
     .concat(['getChangeRequest', 'listChangeRequests'].flatMap((method) => [`undeclared-success-${method}`, `ns-sideeffect-${method}`]))
   // 变更请求分支与评审规则的坏形态（RULE_LIAR_NAMES）逐个必需：套件里任一条新断言被改成 no-op，对应的坏形态就会零退出。
-  const ruleLiars = ['fresh-reports-approved', 'fresh-reports-changes-requested', 'sha-create-infers-branch', 'sha-reject-not-found',
+  const ruleLiars = ['missing-create-setup-field', 'fresh-reports-approved', 'fresh-reports-changes-requested', 'sha-create-infers-branch', 'sha-reject-not-found',
     'sha-reject-not-supported', 'sha-reject-retryable', 'sha-reject-side-effect', 'readonly-review-squashed', 'readonly-filter-casefold',
     'filter-prefix', 'filter-suffix', 'empty-branch-wrong-code', 'missing-prepared-change-request-field']
   assert.deepEqual([...RULE_LIAR_NAMES].sort(), [...ruleLiars].sort(), '规则坏形态清单必须与夹具一致，不得静默删减')

@@ -1,9 +1,9 @@
 /**
- * 解码：`data` → 仓库、一页分支、提交、变更请求（单个与一页）。纯函数，任何不符都抛 `TypeError`，由 provider 的唯一 `call` 包装映射成
+ * 解码：`data` → 仓库、一页分支、提交、变更请求（单个与一页）。纯函数，任何不符都抛 `TypeError`，由 provider 的读 `call` 包装映射成
  * `unavailable` + `malformed_response`，不做「过滤坏行后成功」。返回 undefined 表示平台说目标不存在或不可见（调用方报 `not_found`），
  * 绝不读成空页。种类只由 `__typename` 决定，不解析 id 前缀；list 与 get 共用同一个变更请求解码函数，所以两面逐字段相同。
  */
-import type { ExternalObjectRef, ProviderBranch, ProviderChangeRequest, ProviderCommit, ProviderRepository, ProviderReviewState } from '@harness-projects/capabilities'
+import type { ExternalObjectRef, ProviderBranch, ProviderChangeRequest, ProviderCommit, ProviderRepository, ProviderReviewState, ProviderCreateChangeRequestInput } from '@harness-projects/capabilities'
 import type { ProviderBindingId } from '@harness-projects/domain'
 
 export type Obj = Readonly<Record<string, unknown>>
@@ -85,4 +85,29 @@ export function decodeChangeRequest(data: Obj, bindingId: ProviderBindingId): Ch
   const { node } = data
   if (repository === undefined || node === null || (isRecord(node) && node.__typename !== 'PullRequest')) return undefined
   return id(obj(obj(node).repository).id) === id(repository.id) ? decodeChangeRequestNode(node, bindingId) : undefined
+}
+
+/** 预检先验证完整形状，再报告身份是否匹配；不存在与不匹配是两种证据。 */
+export function decodeCreatePreflight(data: Obj, owner: string, name: string, head: string, base: string): { repositoryId: string; matches: boolean } | undefined {
+  const repository = repositoryOf(data)
+  if (repository === undefined || repository.head === null || repository.base === null) return undefined
+  const repositoryId = id(repository.id)
+  let matches = id(repository.nameWithOwner).toLowerCase() === `${owner}/${name}`.toLowerCase()
+  for (const [raw, expected] of [[repository.head, head], [repository.base, base]] as const) {
+    const ref = obj(raw), target = obj(ref.target)
+    if (target.__typename !== 'Commit') fail()
+    sha(target.oid)
+    const actualName = id(ref.name), prefix = id(ref.prefix), refRepositoryId = id(obj(ref.repository).id)
+    matches = actualName === expected && prefix === 'refs/heads/' && refRepositoryId === repositoryId && matches
+  }
+  return { repositoryId, matches }
+}
+
+/** 写回执必须完整且逐字对应本次意图；任何不符由写 wrapper 折成 ambiguous。 */
+export function decodeCreatedChangeRequest(data: Obj, bindingId: ProviderBindingId, repositoryId: string, input: ProviderCreateChangeRequestInput): ProviderChangeRequest {
+  const node = obj(obj(data.createPullRequest).pullRequest)
+  if (node.__typename !== 'PullRequest' || id(obj(node.repository).id) !== repositoryId || id(obj(node.headRepository).id) !== repositoryId
+    || node.isCrossRepository !== false || node.headRefName !== input.head || node.baseRefName !== input.base
+    || node.title !== input.title || node.body !== input.body || !Number.isSafeInteger(node.number)) fail()
+  return decodeChangeRequestNode(node, bindingId).item
 }

@@ -1,6 +1,6 @@
 /**
  * GitHub Development provider 在录制夹具上的契约（不触网、不需要凭据；夹具来自私有沙箱的只读查询）。保护的不变量：
- * (1) 共享 Development 契约套件在真实平台形状上通过，回放未命中即 reject、账本为空；
+ * (1) 录制的只读操作回放未命中即 reject；共享创建契约在独立严格合成平台执行；
  * (2) 夹具不失真：node id 必须已登记（provenance）、查询文本变了必须重录（漂移）、查询不取个人字段；
  * (3) Start Work 分支谱系：只按 head 分支（同仓库、字节精确）找 PR，从不按标题、不混入 fork 同名分支或放宽过滤带出的 PR；
  * (4) 身份：仓库引用用宿主配置的本地键，PR 用 node id（与规划夹具同值），仓库 node id 不出现在任何输出；
@@ -17,7 +17,6 @@ import { effectiveCapabilities, isComparableSourceVersion, sourceVersionFromTime
 import { branchNameFor } from '@harness-projects/core'
 import { createGithubDevelopmentProvider, DEVELOPMENT_QUERIES, GITHUB_DEVELOPMENT_DEFINITION } from '@harness-projects/provider-development-github'
 import { createReplay, loadFixture } from './fixtures/github-projects/replay.js'
-import { developmentContractSuite } from './suites/development.js'
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/github-development/sandbox.json', import.meta.url), 'utf8'))
 const exchangesOf = (operationName) => fixture.exchanges.filter((entry) => entry.operationName === operationName)
@@ -54,24 +53,6 @@ const ok = (data) => ({ status: 200, headers: {}, body: { data } })
 const prPage = (nodes, pageInfo = { hasNextPage: false, endCursor: null }) => ok({ repository: { pullRequests: { pageInfo, nodes } } })
 const branchPage = (nodes, pageInfo) => ok({ repository: { refs: { pageInfo, nodes } } })
 const prNode = (id, overrides = {}) => ({ ...PR_NODE, id, ...overrides })
-
-developmentContractSuite({
-  label: 'GitHub Development provider（录制夹具）',
-  makeProvider(scenario = {}) {
-    if (scenario.faults?.offline) return scripted(async () => { throw new Error('offline') })
-    if (scenario.faults?.permissionDenied) return scripted(() => denied)
-    return replayProvider()
-  },
-  expect: {
-    repository: repositoryRef, baseBranch: 'main', headCommit: GAMMA_HEAD, pageSize: 1,
-    // 三个工作树字段只是套件装配所需的占位：本 provider 省略全部工作树方法，套件只会在「未声明」路径上读到它们。
-    worktreeBranch: 'fixture/gamma', worktreeDupBranch: 'main', worktreePath: 'unused-worktree-path',
-    worktreeRef: { bindingId, objectKind: 'worktree', externalId: 'unused-worktree', url: undefined },
-    preparedChangeRequest: { ref: PR_REF, headBranch: 'fixture/gamma', reviewState: 'unknown' },
-    // 本 provider 只读：账本里不该出现查询集合之外的操作或 mutation。不用全量账本，`declares()` 的探针请求会让前后快照不同。
-    objects: (provider) => ledgers.get(provider).filter((request) => !Object.hasOwn(DEVELOPMENT_QUERIES, request.operationName) || /^\s*mutation\b/.test(request.query)),
-  },
-})
 
 test('start-work-branch-lineage（录制）：按 head 分支读回 PR，头部提交与分支头相等', async () => {
   const provider = replayProvider()
@@ -262,14 +243,14 @@ const MESSAGES = { permission_denied: 'GitHub 拒绝了当前凭据的访问', n
 const readAll = async (provider) => [await provider.getRepository(repositoryRef), await provider.listBranches({ repository: repositoryRef, cursor: undefined, limit: 10 }),
   await provider.getCommit(commitRef(GAMMA_HEAD)), await provider.getChangeRequest(PR_REF), await provider.listChangeRequests({ repository: repositoryRef, cursor: undefined, limit: 10 })]
 const accessOf = async (provider) => Object.fromEntries(effectiveCapabilities(await provider.describeCapabilities()).map(({ key, access }) => [key, access]))
-const bothAre = (level) => ({ [READ_KEYS[0]]: level, [READ_KEYS[1]]: level })
+const bothAre = (level, create = 'degraded') => ({ [READ_KEYS[0]]: level, [READ_KEYS[1]]: level, 'development.change_request.create': create })
 
 test('permission-loss-degrades（录制 + 合成）：失去读权限时快照降级、五个读方法结构化失败、恢复后回到可用', async () => {
   const invisible = replayProvider({ externalId: LOCAL_REPOSITORY_KEY, owner: OWNER, name: ABSENT_NAME })
   const lost = await invisible.getRepository(repositoryRef)
   assert.deepEqual([lost.ok, lost.error.code, lost.error.retryable], [false, 'not_found', false], '录制的「仓库不可见」回答')
   const snapshot = await invisible.describeCapabilities()
-  assert.deepEqual(snapshot.capability, bothAre('available'), '只声明两个读 key，不声明 review.read 与任何写 key')
+  assert.deepEqual(snapshot.capability, bothAre('available', 'available'), '声明两个读 key 与独立 create，不声明 review.read')
   assert.deepEqual(snapshot.permission, bothAre('degraded'))
   assert.deepEqual(await accessOf(invisible), bothAre('degraded'))
 

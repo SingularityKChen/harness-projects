@@ -33,10 +33,10 @@ const POLICY = { allowedSecretHandles: new Set(), configurations: new Map([LOCAL
 let files = 0
 const ADAPTERS = [['替身 Storage', () => createFakeStorage(emptyStorageData(), POLICY)], ['SQLite Storage', () => createSqliteStorage(join(dir, `r-${files++}.sqlite`), POLICY)]]
 
-/** Local Git 只声明仓库读、建分支、建工作树与读工作树；GitHub Development 只声明仓库读与变更请求读（F4）。替身的其余开关按此关掉。 */
+/** Local Git 只声明仓库读、建分支、建工作树与读工作树；GitHub Development 声明仓库读、变更请求读与创建。替身的其余开关按此关掉。 */
 const FLAGS = {
   'local-git': { worktreeRemove: false, changeRequestCreate: false },
-  github: { branchCreate: false, worktreeCreate: false, worktreeRead: false, worktreeRemove: false, changeRequestCreate: false },
+  github: { branchCreate: false, worktreeCreate: false, worktreeRead: false, worktreeRemove: false },
 }
 const withoutChangeRequestRead = (levels) => Object.fromEntries(Object.entries(levels).filter(([key]) => key !== CapabilityKey.DevelopmentChangeRequestRead))
 
@@ -50,7 +50,10 @@ function typedFake(type, implementationKey, bindingId, before = {}) {
       const value = Reflect.get(target, key, target)
       if (typeof value !== 'function') return value
       if (key !== 'describeCapabilities') return (...args) => { calls.push(String(key)); return before[key] === undefined ? value.apply(target, args) : before[key]().then(() => value.apply(target, args)) }
-      if (type === 'github') return () => value.call(target)
+      if (type === 'github') return async () => {
+        const snapshot = await value.call(target)
+        return { ...snapshot, permission: { ...snapshot.permission, [CapabilityKey.DevelopmentChangeRequestCreate]: 'degraded' } }
+      }
       return async () => { const snapshot = await value.call(target); return { ...snapshot, capability: withoutChangeRequestRead(snapshot.capability), permission: withoutChangeRequestRead(snapshot.permission) } }
     },
   })
