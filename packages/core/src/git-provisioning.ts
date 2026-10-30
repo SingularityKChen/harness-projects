@@ -2,7 +2,7 @@
  *
  */
 import {
-  CapabilityKey, ProjectErrorCode, projectError, type ExternalObjectRef, type ProjectError, type ResolvedBinding,
+  CapabilityKey, ProjectErrorCode, projectError, type ExternalObjectRef, type ProjectError, type ResolvedBinding, type StartWorkExternalOperation,
 } from '@harness-projects/capabilities'
 import { ExecutionContextStatus, ProviderErrorCode, type ExecutionContextId, type ProviderBindingId } from '@harness-projects/domain'
 import { toProjectError, unsupportedCapability } from './capabilities.ts'
@@ -43,6 +43,7 @@ export interface GitOutcome {
  * core 也不允许出现第二个写者。
  */
 export type RecordStep = (outcome: GitOutcome) => Promise<void>
+type BeforeExternalWrite = (operation: StartWorkExternalOperation) => Promise<void>
 
 /** 归一化后的 slug；`undefined` 表示这个 id 归一化之后为空（退化输入）。 */
 function slugOrUndefined(raw: string): string | undefined {
@@ -121,7 +122,7 @@ function stepRecord(
 
 export async function provisionGit(
   context: CoreContext, request: StartWorkRequest, names: Names, contextId: ExecutionContextId,
-  recordStep: RecordStep = async () => {}, frozenRoute?: DevelopmentRoute,
+  recordStep: RecordStep = async () => {}, frozenRoute?: DevelopmentRoute, beforeExternalWrite: BeforeExternalWrite = async () => {},
 ): Promise<GitOutcome> {
   const route = frozenRoute ?? await routeDevelopment(context, request.repositoryId, CapabilityKey.DevelopmentWorktreeCreate, 'write')
   if (!route.ok) return gitFailure(contextId, markFailed(beginWrite(names.path ?? names.worktreeKey), route.error), undefined, undefined)
@@ -149,7 +150,7 @@ export async function provisionGit(
   const target = await preflightWorktree(provider, repository, preflightIntent)
   if (!target.ok) return gitFailure(contextId, target.report, bindingId, decided)
   const branch = decided === undefined
-    ? await ensureBranch(provider, repository, names.branch)
+    ? await ensureBranch(provider, repository, names.branch, beforeExternalWrite)
     : {
       report: confirmWrite(markWriting(beginWrite(decided)), decided),
       ok: true, value: decided,
@@ -162,7 +163,7 @@ export async function provisionGit(
   // 工作树步本身**故意不跳过**——它必须重跑才能保证工作树真的在（PR #160 的 F1 教训）；幂等由稳定的
   // 实体身份提供，不由跳过提供。
   await recordStep(stepRecord(contextId, branch.report, bindingId, branch.value, branch.headCommit))
-  const worktree = await ensureWorktree(provider, repository, branch.value, intent, target.path)
+  const worktree = await ensureWorktree(provider, repository, branch.value, intent, target.path, beforeExternalWrite)
   if (!worktree.ok || worktree.value === undefined) {
     return gitFailure(contextId, worktree.report, bindingId, branch.value, branch.headCommit)
   }
@@ -175,13 +176,17 @@ export async function provisionGit(
   return done
 }
 
-async function ensureBranch(provider: Development, repository: ExternalObjectRef, name: string): Promise<StepOutcome> {
+async function ensureBranch(provider: Development, repository: ExternalObjectRef, name: string, before: BeforeExternalWrite): Promise<StepOutcome> {
   if (provider.createBranch === undefined) {
     return { report: markFailed(beginWrite(name), unsupportedCapability(CapabilityKey.DevelopmentBranchCreate)), ok: false, value: undefined }
   }
   const base = await baseRef(provider, repository)
   if (!base.ok) return { report: markFailed(beginWrite(name), base.error), ok: false, value: undefined }
-  const result = await provider.createBranch({ repository, name, fromRef: base.value })
+  const input = { repository: { ...repository, url: undefined }, name, fromRef: base.value }
+  await before({ operation: 'createBranch', input })
+  let result
+  try { result = await provider.createBranch(structuredClone(input)) }
+  catch (error) { return { report: markUnknown(markWriting(beginWrite(name)), projectError(ProjectErrorCode.ResultUnknown, String(error))), ok: false, value: undefined } }
   if (result.ok) {
     return { report: confirmWrite(markWriting(beginWrite(name)), name), ok: true, value: name, headCommit: result.value.headCommit }
   }
@@ -205,13 +210,17 @@ async function ensureBranch(provider: Development, repository: ExternalObjectRef
 }
 
 async function ensureWorktree(
-  provider: Development, repository: ExternalObjectRef, branch: string, names: Names, target: string | undefined,
+  provider: Development, repository: ExternalObjectRef, branch: string, names: Names, target: string | undefined, before: BeforeExternalWrite,
 ): Promise<StepOutcome> {
   if (provider.createWorktree === undefined) {
     return { report: markFailed(beginWrite(target ?? names.worktreeKey), unsupportedCapability(CapabilityKey.DevelopmentWorktreeCreate)), ok: false, value: undefined }
   }
   const canonicalPath = target ?? names.path
-  const result = await provider.createWorktree({ repository, worktreeKey: names.worktreeKey, branch, ...(canonicalPath === undefined ? {} : { path: canonicalPath }) })
+  const input = { repository: { ...repository, url: undefined }, worktreeKey: names.worktreeKey, branch, ...(canonicalPath === undefined ? {} : { path: canonicalPath }) }
+  await before({ operation: 'createWorktree', input })
+  let result
+  try { result = await provider.createWorktree(structuredClone(input)) }
+  catch (error) { return { report: markUnknown(markWriting(beginWrite(target ?? names.worktreeKey)), projectError(ProjectErrorCode.ResultUnknown, String(error))), ok: false, value: undefined } }
   if (!result.ok) {
     if (result.error.code === ProviderErrorCode.Conflict) {
       if (provider.getWorktree === undefined) {
@@ -224,13 +233,16 @@ async function ensureWorktree(
       }
       return { report: markFailed(beginWrite(target ?? names.worktreeKey), observed.ok ? projectError(ProjectErrorCode.Conflict, '工作树冲突但分支不匹配') : toProjectError(observed.error)), ok: false, value: undefined }
     }
-    if (result.error.code !== ProviderErrorCode.AmbiguousResult || provider.getWorktree === undefined) {
+    if (result.error.code !== ProviderErrorCode.AmbiguousResult) {
       return { report: markFailed(beginWrite(target ?? names.worktreeKey), toProjectError(result.error)), ok: false, value: undefined }
     }
+    if (provider.getWorktree === undefined) return { report: markUnknown(markWriting(beginWrite(target ?? names.worktreeKey)), toProjectError(result.error)), ok: false, value: undefined }
     // 结果不确定：与分支步同一个对账出口（评审 P3）——读回同路径，检出同一分支即 reconciled，确定不存在才 failed，读失败仍是 unknown。
     const handle = target ?? names.path ?? names.worktreeKey
     const unknown = markUnknown(markWriting(beginWrite(handle)), toProjectError(result.error))
-    const observed = await provider.getWorktree({ worktree: { bindingId: repository.bindingId, objectKind: 'worktree', externalId: handle, url: undefined } })
+    let observed
+    try { observed = await provider.getWorktree({ worktree: { bindingId: repository.bindingId, objectKind: 'worktree', externalId: handle, url: undefined } }) }
+    catch (error) { return { report: markUnknown(markWriting(beginWrite(handle)), projectError(ProjectErrorCode.ResultUnknown, String(error))), ok: false, value: undefined } }
     if (observed.ok && observed.value.branch !== branch) return { report: markFailed(beginWrite(handle), projectError(ProjectErrorCode.Conflict, `创建结果不确定，对账读到的工作树检出 ${observed.value.branch}，不是 ${branch}`)), ok: false, value: undefined } // 与 conflict 路径同判 Failed
     const probe = { found: observed.ok, value: observed.ok ? handle : undefined, error: observed.ok || observed.error.code === ProviderErrorCode.NotFound ? undefined : toProjectError(observed.error) }
     const report = reconcileWrite(unknown, probe)
@@ -276,7 +288,9 @@ const PROBE_MAX_PAGES = 1000
 async function branchProbe(provider: Development, repository: ExternalObjectRef, name: string): Promise<BranchProbe> {
   let cursor: string | undefined
   for (let page = 0; page < PROBE_MAX_PAGES; page += 1) {
-    const listed = await provider.listBranches({ repository, cursor, limit: PROBE_PAGE_SIZE })
+    let listed
+    try { listed = await provider.listBranches({ repository, cursor, limit: PROBE_PAGE_SIZE }) }
+    catch (error) { return { probe: { found: false, value: undefined, error: projectError(ProjectErrorCode.ResultUnknown, String(error)) }, headCommit: undefined } }
     if (!listed.ok) return { probe: { found: false, value: undefined, error: toProjectError(listed.error) }, headCommit: undefined }
     const found = listed.value.items.find((item) => item.name === name)
     if (found !== undefined) return { probe: { found: true, value: found.name, error: undefined }, headCommit: found.headCommit }

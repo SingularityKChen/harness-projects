@@ -11,13 +11,14 @@ import '../fixtures/resolution-preflight.mjs';
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
+import { providerErr, providerError } from '@harness-projects/capabilities'
 import { ExecutionContextStatus } from '@harness-projects/domain'
 import { startWork } from '@harness-projects/core'
 import { defaultGitRunner } from '@harness-projects/provider-development-local-git'
 
 import {
   LEASE_EXPIRED_MS, REPOSITORY_ID, addDecoyBranches, controllableClock, coreContextFor, fixtureFor,
-  interruptAfterBranchStep, providerFor, registerWorkItem, repositoryRef, worktreePaths,
+  providerFor, registerWorkItem, repositoryRef, worktreePaths,
 } from './local-git-fixture.js'
 
 /** 目标前面有 DECOYS 个诱饵加 `main`，下标是 DECOYS + 1；`git-provisioning.ts` 的 `PROBE_PAGE_SIZE` 为 100 时
@@ -31,12 +32,13 @@ const workBranches = async (fixture) => (await fixture.run(['for-each-ref', '--f
 test('接管：目标分支排在第一页之外时，头提交仍被报出（P1）', async (t) => {
   const fixture = await fixtureFor(t)
   await addDecoyBranches(fixture, DECOYS)
-  const provider = providerFor(fixture)
+  const provider = providerFor(fixture), create = provider.createWorktree.bind(provider); let refused = false
+  provider.createWorktree = async (input) => { if (!refused) { refused = true; return providerErr(providerError('unavailable', '确定未创建工作树')) } return create(input) }
   const time = controllableClock()
-  const { context, storage, workspaceId } = await coreContextFor(fixture, { development: interruptAfterBranchStep(provider) }, { clock: time.clock })
+  const { context, storage, workspaceId } = await coreContextFor(fixture, { development: provider }, { clock: time.clock })
   await registerWorkItem(storage, workspaceId, 'wi-probe')
 
-  await assert.rejects(() => startWork(context, request('wi-probe', 'k-1')), '注入的中断必须真的打断供应')
+  assert.equal((await startWork(context, request('wi-probe', 'k-1'))).writeState, 'failed', '明确未创建允许恢复，分支 ack 已落盘')
   const firstPage = await provider.listBranches({ repository: repositoryRef, cursor: undefined, limit: 100 })
   assert.equal(firstPage.value.items.some((branch) => branch.name === 'work/wi-probe'), false, '前置条件：目标分支不在第一页')
   assert.notEqual(firstPage.value.nextCursor, undefined, '前置条件：还有下一页')

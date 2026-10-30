@@ -106,7 +106,7 @@ export function storageExecutionSuite(adapter, register = test) {
 
   // 一行一键（2026-09-24 评审：旧模型在 DDL / 端口 / 替身 / core 之间有四种说法）：同 (工作区, 幂等键) 只有一行，
   // 状态原地推进；`id` 在工作区内唯一，跨工作区同键同 id 互不影响。
-  register(`${label}：写尝试一行一键，状态原地推进且 id 在工作区内唯一`, async () => {
+  register(`${label}：写尝试一行一键，状态原地推进且 id 在工作区内唯一`, async (t) => {
     const storage = makeStorage(); await seedWorkspace(storage); await seedWorkspace(storage, 'ws-2')
     await storage.putProviderBinding(binding('binding-1'))
     await storage.putProviderBinding({ ...binding('binding-1'), workspaceId: 'ws-2' })
@@ -134,6 +134,39 @@ export function storageExecutionSuite(adapter, register = test) {
     }
     await storage.putMutationAttempt({ ...bound, state: 'saved' })
     assert.deepEqual(await storage.findMutationAttempt(WORKSPACE, 'bound'), { ...bound, state: 'saved' })
+    {
+    const externalIntent = { contextId: 'context-1', ownerGeneration: 1, bindingId: 'binding-1', state: 'pending', operation: 'createBranch', input: { repository: { bindingId: 'binding-1', objectKind: 'repository', externalId: 'repo-1', url: undefined }, name: 'work/item', fromRef: 'main' } }
+    const receipt = { id: 'intent', workspaceId: WORKSPACE, bindingId: 'binding-1', commandName: 'startWork', requestFingerprint: 'fixed', idempotencyKey: 'intent', state: 'pending', expectedSourceVersion: undefined, errorCode: undefined, externalIntent }
+    await storage.putMutationAttempt(receipt)
+    externalIntent.input.name = 'caller mutation'
+    const read = await storage.findMutationAttempt(WORKSPACE, 'intent')
+    assert.equal(read.externalIntent.input.name, 'work/item'); read.externalIntent.input.name = 'reader mutation'
+    assert.equal((await storage.findMutationAttempt(WORKSPACE, 'intent')).externalIntent.input.name, 'work/item')
+    for (const patch of [{ ownerGeneration: 0 }, { operation: 'unknown' }, { state: 'bogus' }, { input: {} }]) await assert.rejects(storage.putMutationAttempt({ ...receipt, externalIntent: { ...externalIntent, ...patch } }), /intent/)
+    for (const operation of ['createBranch', 'createWorktree', 'startRun', 'startFallbackRun']) await t.test(`getter 快照只读一次：${operation}`, async () => {
+      const expected = { contextId: 'context-1', ownerGeneration: 1, bindingId: 'binding-1', state: 'pending', operation,
+        input: operation === 'createBranch' ? { repository: { bindingId: 'binding-1', objectKind: 'repository', externalId: 'repo-1', url: undefined }, name: 'work/item', fromRef: 'main' }
+          : operation === 'createWorktree' ? { repository: { bindingId: 'binding-1', objectKind: 'repository', externalId: 'repo-1', url: undefined }, worktreeKey: 'item', branch: 'work/item', path: '.worktrees/item' }
+            : { workingDirectory: '.worktrees/item', context: { bindingId: 'binding-1', objectKind: 'execution_context', externalId: 'context-1', url: undefined }, command: 'harness run work/item', environment: {} } }
+      const reads = [], once = (record) => Object.fromEntries(Object.entries(record).map(([key, value]) => {
+        const counter = { key, count: 0 }; reads.push(counter)
+        return [key, { enumerable: true, get() { counter.count++; return counter.count === 1 ? value : key === 'ownerGeneration' && counter.count === 2 ? 1 : key === 'operation' ? 'startRun' : null } }]
+      }))
+      const refKey = operation.startsWith('create') ? 'repository' : 'context'
+      const input = { ...expected.input, [refKey]: Object.defineProperties({}, once(expected.input[refKey])) }
+      const value = Object.defineProperties({}, once({ ...expected, input: Object.defineProperties({}, once(input)) }))
+      const error = await storage.putMutationAttempt({ ...receipt, externalIntent: value }).then(() => undefined, (failure) => failure)
+      assert.equal(error, undefined, '首读合法值必须整体落为同一个快照')
+      assert.ok(reads.filter((r) => r.key !== 'url').every((r) => r.count === 1), JSON.stringify(reads))
+      assert.deepEqual((await storage.findMutationAttempt(WORKSPACE, 'intent')).externalIntent, expected)
+    })
+    const beforeGetterFailure = await storage.findMutationAttempt(WORKSPACE, 'intent')
+    for (const key of ['ownerGeneration', 'operation', 'input']) {
+      const value = { ...beforeGetterFailure.externalIntent }; Object.defineProperty(value, key, { get() { throw Error('getter failed') } })
+      await assert.rejects(storage.putMutationAttempt({ ...receipt, externalIntent: value }), /getter failed/)
+      assert.deepEqual(await storage.findMutationAttempt(WORKSPACE, 'intent'), beforeGetterFailure, 'getter 拒绝不覆盖现有收据')
+    }
+    }
   })
 
 
@@ -147,6 +180,7 @@ export function storageExecutionSuite(adapter, register = test) {
   register(`${label}：悬空父边与非法枚举必须被拒绝（两个实现已对齐的引用完整性）`, async () => {
     const storage = makeStorage()
     await seedExecutionPrereqs(storage)
+
     const base = { workspaceId: WORKSPACE, workItemId: 'entity-1', repositoryId: 'repo-1', branchExternalId: undefined, worktreeExternalId: undefined, provisioningStartedAt: undefined }
     const run = (overrides) => ({ id: 'run-1', workspaceId: WORKSPACE, contextId: 'context-1', status: 'running', updatedAt: '2026-09-20T00:00:00Z', ...overrides })
     const attempt = (overrides) => ({ id: 'attempt-1', workspaceId: WORKSPACE, bindingId: 'binding-1', commandName: 'updatePlanningFields',

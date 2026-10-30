@@ -635,7 +635,7 @@ test('谱系写者不写命令边：开始工作的最终事务失败后刷新�
   const core = await compose(providers)
   const workItemId = await workItemIdOf(core)
   // 最终事务（settle）写写账本：让它抛错，开始工作就停在 Provisioning，已建的分支与工作树留在外部。
-  const restore = throwInside(providers, 'putMutationAttempt', '注入的最终事务失败', false, (attempt) => attempt.state !== 'pending')
+  const restore = throwInside(providers, 'putExecutionContext', '注入的最终事务失败', false, (record) => record.status === 'ready')
   await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'lineage-half-commit' })
   restore()
   const view = await core.queries.getExecutionContext({ workItemId, repositoryId: REPOSITORY })

@@ -48,21 +48,20 @@ for (const kind of ['Fake', 'SQLite']) {
   })
   test(`${kind}: Pending exact replay observes without lease takeover and new observation keys bind`, async () => {
     const w = await setup(kind); const d = w.providers.development; const create = d.createWorktree.bind(d)
-    d.createWorktree = async () => { throw Error('interrupt after branch ack') }
-    await assert.rejects(start(w), /interrupt/)
-    const pending = await w.storage.findMutationAttempt(w.workspace.id, 'first'); assert.equal(pending.state, 'pending')
-    const before = local(w.storage); const external = counts(w)
-    conflict(await start(w, { workItemId: w.items[1] })); assert.equal(local(w.storage), before)
-    for (const advance of [0, 60_000]) { w.time.advance(advance); assert.equal((await start(w)).writeState, 'pending'); assert.equal(local(w.storage), before) }
-    assert.deepEqual(counts(w), external)
-    w.time.advance(-60_000); assert.equal((await start(w, { idempotencyKey: 'observer' })).writeState, 'pending')
-    conflict(await start(w, { idempotencyKey: 'observer', repositoryId: 'missing' }))
-    w.time.advance(60_000); d.createWorktree = create
-    assert.equal((await start(w, { idempotencyKey: 'recovery' })).writeState, 'saved')
-    assert.equal((await start(w)).writeState, 'saved', 'Pending follows the now-ready context')
+    const entered = gate(), release = gate(); d.createWorktree = async (...args) => { entered.release(); await release.wait; return create(...args) }
+    const running = start(w); await entered.wait
+    try {
+      const pending = await w.storage.findMutationAttempt(w.workspace.id, 'first'); assert.equal(pending.state, 'pending')
+      const before = local(w.storage), external = counts(w)
+      conflict(await start(w, { workItemId: w.items[1] })); assert.equal(local(w.storage), before)
+      for (const advance of [0, 60_000]) { w.time.advance(advance); assert.equal((await start(w)).writeState, 'pending'); assert.equal(local(w.storage), before) }
+      assert.deepEqual(counts(w), external)
+      assert.equal((await start(w, { idempotencyKey: 'observer' })).writeState, 'pending')
+      assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'observer'), undefined, '未决外部步骤不消费观察新键')
+    } finally { release.release(); await running }
+    assert.equal((await start(w)).writeState, 'saved')
     assert.equal((await start(w, { idempotencyKey: 'ready-observer' })).writeState, 'saved')
     conflict(await start(w, { idempotencyKey: 'ready-observer', workItemId: w.items[1] }))
-    assert.equal((await w.storage.findMutationAttempt(w.workspace.id, 'observer')).requestFingerprint, pending.requestFingerprint)
   })
   test(`${kind}: admitted route stays frozen through supply when repository routing changes after commit`, async () => {
     const w = await setup(kind); await start(w)
@@ -141,12 +140,12 @@ for (const stage of ['pending', 'branch ack', 'settled']) test(`SQLite: close/re
   const w = await setup('SQLite'); const d = w.providers.development
   const method = stage === 'pending' ? 'createBranch' : 'createWorktree'; const create = d[method].bind(d)
   if (stage !== 'settled') d[method] = async () => { throw Error('process interruption') }
-  if (stage === 'settled') await start(w); else await assert.rejects(start(w), /interruption/)
+  if (stage === 'settled') await start(w); else assert.equal((await start(w)).writeState, 'unknown')
   const row = await w.storage.findMutationAttempt(w.workspace.id, 'first'); w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w)
   assert.deepEqual(await w.storage.findMutationAttempt(w.workspace.id, 'first'), row)
   const before = local(w.storage); conflict(await start(w, { workItemId: w.items[1] })); assert.equal(local(w.storage), before)
-  w.time.advance(60_000); const external = counts(w); assert.equal((await start(w)).writeState, stage === 'settled' ? 'saved' : 'pending'); assert.deepEqual(counts(w), external)
-  d[method] = create; if (stage !== 'settled') assert.equal((await start(w, { idempotencyKey: 'recover' })).writeState, 'saved')
+  w.time.advance(60_000); const external = counts(w); assert.equal((await start(w)).writeState, stage === 'settled' ? 'saved' : 'unknown'); assert.deepEqual(counts(w), external)
+  d[method] = create; if (stage !== 'settled') { assert.equal((await start(w, { idempotencyKey: 'recover' })).writeState, 'unknown'); assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'recover'), undefined) }
 })
 test('SQLite: dual handles read no attempt before cross-context admission; one wins, loser cannot mutate', async () => {
   const w = await setup('SQLite'); const second = sqlite(w.storage.location); const other = await composeCore({ ...w, storage: second })

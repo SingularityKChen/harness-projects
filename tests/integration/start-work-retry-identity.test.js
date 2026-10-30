@@ -185,14 +185,8 @@ test('在途：分支步已回填且租约未过期时仍被拒，接管只针�
   // 中途写入的 `saveContext` 也才真的跑过。注入在 `createBranch` 里时 `recordStep` 从未执行，
   // 「中途写入是否保留租约起点」这条承重逻辑就没有任何用例覆盖（把它改成清空租约，测试仍全绿）。
   const originalWorktree = providers.development.createWorktree.bind(providers.development)
-  let interrupted = true
-  providers.development.createWorktree = async (input) => {
-    if (interrupted) {
-      interrupted = false
-      throw new Error('注入中断：进程死在分支步之后、工作树步之中')
-    }
-    return originalWorktree(input)
-  }
+  const entered = Promise.withResolvers(), release = Promise.withResolvers()
+  providers.development.createWorktree = async (input) => { entered.resolve(); await release.promise; return originalWorktree(input) }
   let branchStepCalls = 0
   const originalBranch = providers.development.createBranch.bind(providers.development)
   providers.development.createBranch = async (input) => {
@@ -200,7 +194,8 @@ test('在途：分支步已回填且租约未过期时仍被拒，接管只针�
     return originalBranch(input)
   }
 
-  await assert.rejects(() => core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'inflight-1' }))
+  const running = core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'inflight-1' }); await entered.promise
+  try {
   const [record] = contextsOf(providers)
   assert.equal(record.status, ExecutionContextStatus.Provisioning)
   assert.equal(
@@ -216,6 +211,7 @@ test('在途：分支步已回填且租约未过期时仍被拒，接管只针�
     '在途期间不得重新尝试供应：分支步已记录，它不得被重跑',
   )
   assert.equal(contextsOf(providers)[0].status, ExecutionContextStatus.Provisioning)
+  } finally { release.resolve(); await running }
 })
 
 test('身份：失败后重试只留下一条 has_worktree 关系与一个工作树实体（#165）', async () => {
