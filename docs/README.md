@@ -33,6 +33,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-30-delivery-read-fence](exec-plan/completed/2026-10-30-delivery-read-fence.md) | Delivery 跨 owner 已提交读 fence（#468） |
 | [2026-10-30-planning-runtime-access](exec-plan/completed/2026-10-30-planning-runtime-access.md) | Planning 运行时撤权、离线与恢复（#465 / #457） |
 | [2026-10-30-github-pr-creation](exec-plan/completed/2026-10-30-github-pr-creation.md) | 原生 GitHub PR 创建、独立写权限与不确定回执（#436） |
 | [2026-10-30-durable-write-intent](exec-plan/completed/2026-10-30-durable-write-intent.md) | Start Work 写前意图与不确定结果结算（#204） |

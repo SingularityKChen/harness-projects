@@ -16,6 +16,7 @@ import { worktreeEntityId, type DeliveryScopeInput } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
 import { CHANGE_REQUEST_READ_ROUTE, selectDevelopment } from './development-route.ts'
 import { contextIdFor } from './execution-context.ts'
+import { committedFence } from './runtime-access.ts'
 import { EdgeProvenance, asEntityId } from './relations.ts'
 
 export type DeliveryScope = string | DeliveryScopeInput
@@ -116,8 +117,9 @@ export async function deliveryMasks(context: CoreContext, scope: DeliveryScopeIn
 }
 export async function readDeliveryProjection(context: CoreContext, scope: DeliveryScopeInput): Promise<DeliveryProjection> {
   for (;;) {
-    const epoch = context.runtimeAccess.deliveryEpoch, value = await deliveryProjection(context, scope)
-    if (epoch === context.runtimeAccess.deliveryEpoch) return value
+    const epoch = context.runtimeAccess.deliveryEpoch, fence = committedFence(context.storage), value = await deliveryProjection(context, scope)
+    const currentFence = committedFence(context.storage)
+    if (epoch === context.runtimeAccess.deliveryEpoch && fence === currentFence) return value
   }
 }
 async function deliveryProjection(context: CoreContext, scope: DeliveryScopeInput): Promise<DeliveryProjection> {

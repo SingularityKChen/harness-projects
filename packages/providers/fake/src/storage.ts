@@ -1,6 +1,7 @@
 /** 内存 Storage 实现：A2 冻结的 Storage port（事务 / 工作区与绑定 / 身份 / 规划 / 工程 / 执行 / 关系 / 同步 / 写尝试 / 投影修订号）。只读写本地控制事实，不做外部调用，也不持久化；导出/导入内部状态让"换一个实例读同一份内容"能模拟重启。 */
 import * as cap from '@harness-projects/capabilities'
 import * as domain from '@harness-projects/domain'
+import { AsyncLocalStorage } from 'node:async_hooks'
 export interface FakeProviderBindingAnchor {
   id: domain.ProviderBindingId
   implementationKey: string
@@ -81,11 +82,14 @@ const RELATION_STATES: readonly string[] = Object.values(domain.RelationState)
 const RELATION_SOURCES: readonly string[] = Object.values(domain.RelationSource)
 const isActiveContext = (status: domain.ExecutionContextStatus): boolean =>
   status !== domain.ExecutionContextStatus.Closed && status !== domain.ExecutionContextStatus.Failed
+type MemoryTransactionToken = { owner: MemoryStorage; active: boolean }
+const TRANSACTION_SCOPE = new AsyncLocalStorage<MemoryTransactionToken>()
 export class MemoryStorage implements cap.Storage {
   /** 内部状态；只应由本文件的导出/导入函数与测试读取，写入一律走 port 方法。 */
   data: FakeStorageData
   /** 事务队列：重叠事务按调用顺序串行，每个事务在前一个 settle 后才克隆状态。 */
   #queue: Promise<unknown> = Promise.resolve()
+  #state = { commits: 0, dirty: false }
   /** 事务作用域标记：类型层的 `StorageTransaction = Omit<Storage, 'transaction'>` 不会在运行时移除方法，嵌套事务必须在这里被显式拒绝（L3 计划遗留「嵌套事务在运行时静默吞写」的收口条件）。 */
   #transactionScope: boolean
   /** 受信校验策略的**独立副本**：构造时快照，此后调用方再改自己的策略对象不能扩权（#126）。 */
@@ -123,19 +127,27 @@ export class MemoryStorage implements cap.Storage {
       if (!this.data.accounts.some((candidate) => candidate.id === link.accountId)) throw new RangeError('connector account does not exist')
     }
   }
-  #mutate<T>(fn: () => T | PromiseLike<T>): Promise<T> {
-    const run = this.#queue.then(fn)
+  #mutate<T>(fn: () => T | PromiseLike<T>, write = true): Promise<T> {
+    const run = this.#queue.then(async () => { if (this.#transactionScope && write) this.#state.dirty = true; const result = await fn(); if (!this.#transactionScope && write) this.#state.commits++; return result })
     this.#queue = run.then(() => undefined, () => undefined); return run
   }
+  committedReadFence(): string { const scope = TRANSACTION_SCOPE.getStore(); if (this.#transactionScope || (scope?.owner === this && scope.active)) throw new Error('嵌套事务不被支持：事务内必须用 tx.*'); return String(this.#state.commits) }
   /** 事务内抛错即整体回滚：草稿只在 work 成功返回后替换正式状态；克隆与执行都排在队列里，因此后到的事务看到的是前一个事务提交后的状态，不会用旧快照覆盖已提交写入。事务作用域内的实例拒绝嵌套，避免内层写入被静默丢弃。 */
   async transaction<T>(work: (tx: cap.StorageTransaction) => Promise<T>): Promise<T> {
     if (this.#transactionScope) throw new Error('嵌套事务不被支持：一个事务内不得再开事务')
     return this.#mutate(async () => {
       const draft = structuredClone(this.data)
-      const result = await work(new MemoryStorage(draft, true, this.#policy))
-      this.data = draft
-      return result
-    })
+      const staged = new MemoryStorage(draft, true, this.#policy)
+      const token: MemoryTransactionToken = { owner: this, active: true }
+      let result
+      try { result = await TRANSACTION_SCOPE.run(token, () => work(staged)) }
+      finally { token.active = false }
+      try {
+        this.data = draft
+        if (staged.#state.dirty) this.#state.commits++
+        return result
+      } catch (error) { throw error }
+    }, false)
   }
   async getWorkspacePlanningMapping(workspaceId: domain.WorkspaceId): Promise<cap.WorkspacePlanningMappingRecord | undefined> {
     return structuredClone(this.data.planningMappings.find((record) => record.workspaceId === workspaceId))

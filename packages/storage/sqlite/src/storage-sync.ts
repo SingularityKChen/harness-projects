@@ -124,15 +124,15 @@ export class SqliteSyncSurface {
   /** 实例级写队列：直接写入、事务与读排同一条队列，因此同一实例只有一个串行点。 */
   #queue: Promise<unknown> = Promise.resolve()
   /** 作用域实例与根实例**共用**同一份状态（2026-09-24 评审）：否则 `close()` 之后 work 里的 `tx.*` 仍打到已关闭的句柄上。 */
-  #state: { closed: boolean }
+  #state: { closed: boolean; commits: number; dirty: boolean }
   /** 本实例作为作用域实例时所持的令牌；根实例上写入它没有读者（根实例认 `TX_SCOPE` 里的令牌）。 */
   #token: TransactionToken | undefined
   /** 受信校验策略的独立只读副本（外部评审 P1）：原型上的 getter 让 `instance.policy = …` 抛 TypeError 且不进 `Object.keys`。 */
   #policy!: StorageValidationPolicy
   protected get policy(): StorageValidationPolicy { return this.#policy }
-  constructor(location: string, db: WorkspaceDatabase, scoped = false, state?: { closed: boolean }, token?: TransactionToken, policy: StorageValidationPolicy = EMPTY_POLICY) {
+  constructor(location: string, db: WorkspaceDatabase, scoped = false, state?: { closed: boolean; commits: number; dirty: boolean }, token?: TransactionToken, policy: StorageValidationPolicy = EMPTY_POLICY) {
     this.location = location; this.db = db; this.scoped = scoped
-    this.#state = state ?? { closed: false }; this.#token = token
+    this.#state = state ?? { closed: false, commits: 0, dirty: false }; this.#token = token
     // 失败一律关句柄（P2-R1）；工厂已快照过一次（P3-R3），复用副本以免二次读有状态 getter。
     if (!scoped) {
       try { this.#policy = snapshotPolicy(policy); this.#assertRewrittenSchema(); this.#assertConnectorAccountSchema(); this.#assertStoredMetadata() } catch (error) { closeQuietly(this.db); throw error }
@@ -166,20 +166,27 @@ export class SqliteSyncSurface {
    * 而不是被静默并进事务、随回滚一起消失，也不会读到未提交的值。作用域实例已持有队列、直接执行；在 work 里调
    * 外层实例会队列内自等，命中事务作用域标记即拒；关闭后一律快速失败。
    */
-  protected mutate<T>(fn: () => T | PromiseLike<T>): Promise<T> {
+  protected mutate<T>(fn: () => T | PromiseLike<T>, write = true): Promise<T> {
     if (this.#state.closed) return Promise.reject(new Error(CLOSED_MESSAGE))
     if (this.scoped) {
       // 作用域实例只在所属事务的**动态范围**内有效：结算之后再用它就是误用（泄漏出 work 的 tx、漏写 await）。执行时再查一次：fn 推迟一个微任务，未 await 的写入否则会在 ROLLBACK 之后以自动提交落库（第五轮评审）。
       if (this.#token === undefined || !this.#token.active) return Promise.reject(new Error(SETTLED_TRANSACTION_MESSAGE))
-      const token = this.#token; return Promise.resolve().then(() => { if (!token.active) throw new Error(SETTLED_TRANSACTION_MESSAGE); return fn() })
+      const token = this.#token; return Promise.resolve().then(() => { if (!token.active) throw new Error(SETTLED_TRANSACTION_MESSAGE); if (write) this.#state.dirty = true; return fn() })
     }
     const token = TX_SCOPE.getStore()
     if (token !== undefined && token.owner === this && token.active) return Promise.reject(new Error(OUTER_INSTANCE_MESSAGE))
-    const run = this.#queue.then(() => { if (this.#state.closed) throw new Error(CLOSED_MESSAGE); return fn() })
+    const run = this.#queue.then(async () => { if (this.#state.closed) throw new Error(CLOSED_MESSAGE); const result = await fn(); if (write) this.#state.commits++; return result })
     this.#queue = run.then(() => undefined, () => undefined); return run
   }
   /** 读入口：复用**同一条**队列（不是第二个串行点）。读与写在同一个 `mutate` 上排队，外部读因此只看到已结算的值。 */
-  protected read<T>(fn: () => T): Promise<T> { return this.mutate(fn) }
+  protected read<T>(fn: () => T): Promise<T> { return this.mutate(fn, false) }
+  committedReadFence(): string {
+    if (this.#state.closed) throw new Error(CLOSED_MESSAGE)
+    if (this.scoped) throw new Error(OUTER_INSTANCE_MESSAGE)
+    const scope = TX_SCOPE.getStore()
+    if (scope?.owner === this && scope.active) throw new Error(OUTER_INSTANCE_MESSAGE)
+    return `${this.#state.commits}:${(this.db.prepare('PRAGMA data_version').get() as { data_version: number }).data_version}`
+  }
   /** 单语句变更：与多语句变更走同一条队列，方法体因此不必各自包一层 `mutate`。 */
   protected write(sql: string, ...params: readonly WriteParam[]): Promise<void> {
     return this.mutate(() => { this.db.prepare(sql).run(...params) })
@@ -192,7 +199,7 @@ export class SqliteSyncSurface {
    */
   protected atomic<T>(fn: () => T, preflight?: () => void): Promise<T> {
     if (this.scoped) return this.mutate(() => { preflight?.(); return fn() })
-    return this.#transact(async () => fn(), preflight)
+    return this.#transact(async () => fn(), preflight, true)
   }
 
   /**
@@ -201,18 +208,19 @@ export class SqliteSyncSurface {
    * 失败，而不是悄悄把根实例当作用域实例用（那会让 work 里的 `tx.*` 排到自己后面，队列内自等）。作用域实例必须
    * 拿到**共用**的关闭标记与本事务的令牌，否则结算后的 `tx.*` 会绕开队列。
    */
-  protected scopedInstance(_state: { closed: boolean }, _token: TransactionToken): StorageTransaction {
+  protected scopedInstance(_state: { closed: boolean; commits: number; dirty: boolean }, _token: TransactionToken): StorageTransaction {
     throw new Error('SqliteSyncSurface 的子类必须实现 scopedInstance()：作用域实例不能由基类构造')
   }
 
   /** 事务在队列内持有 BEGIN IMMEDIATE 到提交/回滚：重叠事务按调用顺序串行，不会撞上"事务里再开事务"的驱动级错误。失败一律 ROLLBACK——半写行重开句柄就再也读不到（集成用例的判别点）；关闭时未提交的事务以 CLOSED_MESSAGE 失败，而不是驱动文案。 */
   async transaction<T>(work: (tx: StorageTransaction) => Promise<T>): Promise<T> {
     if (this.scoped) throw new Error(NESTED_TRANSACTION_MESSAGE)
-    return this.#transact(work)
+    return this.#transact(work, undefined, false)
   }
   /** `transaction` 与根实例的 `atomic` **共用**的唯一事务体（令牌、队列、提交 / 回滚只此一份）；`preflight` 在槽内、`BEGIN` 之前，抛错即不开事务。 */
-  #transact<T>(work: (tx: StorageTransaction) => Promise<T>, preflight?: () => void): Promise<T> {
+  #transact<T>(work: (tx: StorageTransaction) => Promise<T>, preflight?: () => void, commitOnSuccess = false): Promise<T> {
     return this.mutate(async () => {
+      this.#state.dirty = false
       preflight?.()
       this.db.exec('BEGIN IMMEDIATE')
       const token: TransactionToken = { owner: this, active: true }
@@ -220,9 +228,10 @@ export class SqliteSyncSurface {
       try {
         const result = await TX_SCOPE.run(token, () => work(this.scopedInstance(this.#state, token)))
         if (this.#state.closed) throw new Error(CLOSED_MESSAGE)
-        this.db.exec('COMMIT'); return result
-      } catch (error) { rollbackQuietly(this.db); throw error } finally { token.active = false }
-    })
+        this.db.exec('COMMIT'); if (commitOnSuccess || this.#state.dirty) this.#state.commits++
+        return result
+      } catch (error) { rollbackQuietly(this.db); this.#state.dirty = false; throw error } finally { token.active = false }
+    }, false)
   }
   /** 关闭底层句柄：重启用例必须真的关掉再打开。它不是端口方法（内存替身没有这一步）。**幂等**；调用方必须先在途事务结算，未结算就关时在途事务与已排队变更都以 CLOSED_MESSAGE 快速失败。 */
   close(): void { if (this.#state.closed) return; this.#state.closed = true; this.db.close() }
