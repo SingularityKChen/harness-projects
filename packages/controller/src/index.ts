@@ -14,6 +14,7 @@ export const packageId = '@harness-projects/controller' as const
 export * from './wire.ts'
 export * from './queries.ts'
 export * from './commands.ts'
+export * from './connection-commands.ts'
 export * from './watch.ts'
 
 export interface ControllerOptions {

@@ -1,4 +1,6 @@
 /** 单工作区 setup source：Host 是事实源；这里只缓存读数、提交 intent 与安全失败。 */
+import { parseConnectionFailure, type ConnectionFailure } from './connection-failure.ts'
+export type { ConnectionFailure } from './connection-failure.ts'
 import type { ActorRef } from '@harness-projects/controller'
 import type { ProjectError, ProjectErrorCode, Recovery } from '@harness-projects/domain'
 export interface WorkspaceSetupDTO {
@@ -18,7 +20,7 @@ export interface WorkspaceSetupPort {
   installExecutionBindings(actor: ActorRef, key: string): Promise<unknown>
   refreshPlanning(actor: ActorRef): Promise<unknown>
 }
-export interface WorkspaceSetupSnapshot { readonly setup?: WorkspaceSetupDTO; readonly pending: boolean; readonly error?: ProjectError; readonly failure?: 'read' | 'reconcile' | 'create' | 'connect' | 'install' }
+export interface WorkspaceSetupSnapshot { readonly setup?: WorkspaceSetupDTO; readonly pending: boolean; readonly error?: ProjectError; readonly connectionFailure?: ConnectionFailure; readonly failure?: 'read' | 'reconcile' | 'create' | 'connect' | 'install' }
 export interface WorkspaceSetupSource {
   subscribe(listener: () => void): () => void
   getSnapshot(): WorkspaceSetupSnapshot
@@ -59,14 +61,17 @@ export function parseWorkspaceSetup(value: unknown): WorkspaceSetupDTO {
   return Object.freeze({ workspace: workspace === null ? null : Object.freeze({ id: text(workspace.id), name: text(workspace.name) }), planning: Object.freeze({ state, ...binding, ...project }),
     ...(dto.executionInstalled === undefined ? {} : { executionInstalled: dto.executionInstalled as boolean }), ...(dto.mappingOrigin === undefined ? {} : { mappingOrigin: dto.mappingOrigin }), ...(activationError ? { activationError } : {}), ...(error ? { error } : {}) })
 }
-function command(value: unknown, valueKey?: string): { id?: string; error?: ProjectError; definitive?: boolean } {
-  const dto = record(value, ['writeState', 'saving', 'authoritative', 'value', 'error', 'activationError'])
+function command(value: unknown, valueKey?: string): { id?: string; error?: ProjectError; definitive?: boolean; connectionFailure?: ConnectionFailure } {
+  const dto = record(value, ['writeState', 'saving', 'authoritative', 'value', 'error', 'activationError', 'connectionFailure'])
   if (typeof dto.writeState !== 'string' || !['pending', 'local_only', 'confirmed', 'reconciled', 'failed', 'conflict', 'unknown'].includes(dto.writeState) || dto.saving !== (dto.writeState === 'pending') || dto.authoritative !== (dto.writeState === 'confirmed' || dto.writeState === 'reconciled')) throw new TypeError('设置命令不合契约')
   const commandError = parseError(dto.error), activationError = parseError(dto.activationError), error = commandError ?? activationError
+  const connectionFailure = parseConnectionFailure(dto, commandError)
+  if (connectionFailure && valueKey !== 'accountId' && valueKey !== 'bindingId') throw new TypeError('连接失败 scope 不合契约')
+  const detail = connectionFailure ? { connectionFailure } : {}
   const id = valueKey === undefined || dto.value === undefined ? undefined : text(record(dto.value, [valueKey])[valueKey])
-  if (valueKey && dto.writeState !== 'local_only') return { error: commandError ?? safeError(dto.writeState === 'unknown' || dto.writeState === 'pending' ? 'result_unknown' : dto.writeState === 'conflict' ? 'conflict' : 'unavailable'), definitive: commandError !== undefined && (dto.writeState === 'failed' || dto.writeState === 'conflict') }
+  if (valueKey && dto.writeState !== 'local_only') return { ...detail, error: commandError ?? safeError(dto.writeState === 'unknown' || dto.writeState === 'pending' ? 'result_unknown' : dto.writeState === 'conflict' ? 'conflict' : 'unavailable'), definitive: commandError !== undefined && (dto.writeState === 'failed' || dto.writeState === 'conflict') }
   if (!commandError && valueKey && !id) throw new TypeError('设置命令缺少结果')
-  return { ...(id ? { id } : {}), ...(error ? { error } : {}), definitive: commandError !== undefined && activationError === undefined && (dto.writeState === 'failed' || dto.writeState === 'conflict') }
+  return { ...detail, ...(id ? { id } : {}), ...(error ? { error } : {}), definitive: commandError !== undefined && activationError === undefined && (dto.writeState === 'failed' || dto.writeState === 'conflict') }
 }
 type Stage = 'create' | 'account' | 'bind'
 type Intent = { payload: string; key: string; attempts: Partial<Record<Stage, number>> }
@@ -83,7 +88,7 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
   }
   const publish = (next: WorkspaceSetupSnapshot): void => { if (!disposed) { snapshot = Object.freeze(next); listeners.forEach((listener) => listener()) } }
   const read = async (): Promise<WorkspaceSetupDTO> => parseWorkspaceSetup(await port.getWorkspaceSetup())
-  const run = (kind: 'read' | 'reconcile' | 'create' | 'connect' | 'install', action: () => Promise<ProjectError | undefined>): Promise<void> => {
+  const run = (kind: 'read' | 'reconcile' | 'create' | 'connect' | 'install', action: () => Promise<ProjectError | undefined>, detail?: () => ConnectionFailure | undefined): Promise<void> => {
     if (disposed) return Promise.resolve()
     const current = ++revision
     publish({ ...(snapshot.setup ? { setup: snapshot.setup } : {}), pending: true })
@@ -100,7 +105,8 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
           else {
             // 只用已 ack 意图之后开始且仍属当前版本的读数结算；普通 refresh 也能完成读回恢复。
             if (!error && confirmation && setup.executionInstalled && !setup.activationError && !setup.error) finishExecutionIntent(confirmation)
-            publish({ setup, pending: false, ...(error ? { error, failure: kind } : {}) })
+            const connectionFailure = kind === 'connect' && error ? detail?.() : undefined
+            publish({ setup, pending: false, ...(error ? { error, failure: kind } : {}), ...(connectionFailure ? { connectionFailure } : {}) })
           }
         }
       } catch { if (current === revision) publish({ ...(snapshot.setup ? { setup: snapshot.setup } : {}), pending: false, error: safeError(), failure }) }
@@ -110,7 +116,7 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
     if (disposed) return Promise.resolve()
     if (mutationPending) return mutationPending
     const payload = raw.trim()
-    if (!payload) { publish({ ...snapshot, error: safeError('invalid_input'), failure: kind }); return Promise.resolve() }
+    if (!payload) { publish({ ...(snapshot.setup ? { setup: snapshot.setup } : {}), pending: false, error: safeError('invalid_input'), failure: kind }); return Promise.resolve() }
     let intent = kind === 'create' ? createIntent : connectIntent
     if (!intent || intent.payload !== payload) intent = { payload, key: key(), attempts: {} }
     if (kind === 'create') createIntent = intent; else connectIntent = intent
@@ -123,13 +129,16 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
       return result
     }
     readPending = undefined
+    let connectionFailure: ConnectionFailure | undefined
     const promise = run(kind, async () => {
       if (kind === 'create') return accept('create', await port.createWorkspace(options.actorRef, stageKey('create'), payload), 'workspaceId').error
       const account = accept('account', await port.connectAccount(options.actorRef, stageKey('account')), 'accountId')
+      connectionFailure = account.connectionFailure
       if (account.error || disposed || !account.id) return account.error
       const bound = accept('bind', await port.bindPlanningSource(options.actorRef, stageKey('bind'), account.id, payload), 'bindingId')
+      connectionFailure = bound.connectionFailure
       return bound.error
-    })
+    }, () => connectionFailure)
     mutationPending = promise
     void promise.then(() => { if (mutationPending === promise) mutationPending = undefined })
     return promise
@@ -181,5 +190,5 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
   return { subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } }, getSnapshot: () => snapshot,
     create: (name) => submit('create', name), connect: (project) => submit('connect', project),
     refresh, installExecution,
-    dispose: () => { disposed = true; revision += 1; listeners.clear() } }
+    dispose: () => { disposed = true; revision += 1; const { connectionFailure: _detail, ...rest } = snapshot; snapshot = Object.freeze(rest); listeners.clear() } }
 }
