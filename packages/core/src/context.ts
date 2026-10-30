@@ -19,6 +19,7 @@ import { createQueries, type CoreQueries } from './queries.ts'
 import { collectBindings, type CoreProviderTable } from './registry.ts'
 import { confirmRelation, type RecordedEdge, type RelationRef } from './relations.ts'
 import { startWork } from './start-work.ts'
+import { createRuntimeAccess, type RuntimeAccess } from './runtime-access.ts'
 import {
   StatusPolicyMode, writePlanningStatus, type PlanningStatusCommand, type StatusDecision,
 } from './status-policy.ts'
@@ -77,6 +78,7 @@ export interface CoreDeps {
 export interface CoreContext {
   readonly storage: Storage
   readonly workspaceId: WorkspaceId
+  readonly runtimeAccess: RuntimeAccess
   readonly registry: ProviderRegistry
   readonly clock: () => string
   readonly ids: IdFactory
@@ -148,8 +150,9 @@ export async function createContext(deps: CoreDeps): Promise<CoreContext | undef
     await tx.putWorkspace(workspace)
     for (const record of prepared.records) await tx.putProviderBinding(record)
   })
+  const runtimeAccess = createRuntimeAccess(providerRegistry(prepared.bindings))
   return {
-    storage, workspaceId: workspace.id, registry: providerRegistry(prepared.bindings),
+    storage, workspaceId: workspace.id, runtimeAccess, get registry() { return runtimeAccess.registry },
     clock: deps.clock ?? (() => new Date().toISOString()),
     ids: deps.ids ?? defaultIdFactory, policy,
     projectRef: deps.workspace.project, projectTitle: undefined, planningFieldMapping, planningMappingOrigin: planningFieldMapping === undefined ? undefined : deps.workspace.planningMappingOrigin, diagnostics: deps.diagnostics,
@@ -169,8 +172,10 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
     reportSyncRoundFailure(context, error)
   }
   let refreshInFlight: Promise<BootstrapResult> | undefined
+  let refreshEpoch = context.runtimeAccess.epoch
   const refreshPlanning = (): Promise<BootstrapResult> => {
-    if (refreshInFlight !== undefined) return refreshInFlight
+    if (refreshInFlight !== undefined && refreshEpoch === context.runtimeAccess.epoch) return refreshInFlight
+    refreshEpoch = context.runtimeAccess.epoch
     let task: Promise<BootstrapResult>
     task = bootstrapWorkspace(context).finally(() => {
       if (refreshInFlight === task) refreshInFlight = undefined

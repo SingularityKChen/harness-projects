@@ -1,6 +1,6 @@
 # Planning 运行时访问撤销与恢复 ExecPlan
 
-> 状态：Active；创建：2026-10-30（Asia/Singapore）。
+> 状态：Active（本地实现与 A 行为验证完成；独立复核及最终远端门尚未完成）；创建：2026-10-30（Asia/Singapore）。
 > 范围：同一 Host 内 Planning 拒读、离线保留、迟到结果、直接命令拒绝及显式恢复。
 > 关联：Refs #457；Closes #465。
 > 本文按仓库根 `PLANS.md` 维护；设计、实施和验证共用这一份活文档。
@@ -47,7 +47,7 @@ Offline、Unavailable、RateLimited 和普通暂态失败保留原许可内容�
 
 ### 命令与客户端
 
-`startTargetError` 在最早目标检查和现有写前事务内复用当前 Planning 访问/同步判断，先于 replay、ledger、context、Provider 调用。撤权后重放旧 saved key 也拒绝。这个 PR 只改该 helper 及其事务参数；已开始的外部步骤逐步门属于后续 operation 闭环，与 #204 的 admission/provision/execution 修改顺序集成。
+`startTargetError` 在最早目标检查和现有写前事务内复用当前 Planning 访问/同步判断，先于 replay、ledger、context、Provider 调用。撤权后重放旧 saved key 也拒绝。这个 PR 只改该 helper 及其事务参数；已开始的外部步骤逐步门属于后续 operation 闭环，与 #204 的 admission/provision/execution 修改顺序集成。**Superseded by Decision Log「独立对抗复验与首次写门」（2026-10-30）**：真实反例证明 helper 返回后的准入与 replay 等待同样属于 A，须覆盖事务提交前、重放返回前及首次实际外部写前。
 
 client/UI 允许 connected、存在 Planning 挂载且不 pending 时调用已有 refreshPlanning；允许探测不等于允许业务写。纯断连仍不发 RPC。失败文案区分 permission denial 与暂态离线，使用安全固定原因说明 `planning.item.read`、拒绝层、仍可浏览的本地工程信息和显式重新验证。成功恢复仅由新 Host 确认帧驱动，不凭 RPC resolve 设置内容、Saved 或确认时间。
 
@@ -62,12 +62,15 @@ client/UI 允许 connected、存在 Planning 挂载且不 pending 时调用已�
 - `packages/core/src/registry.ts`：仅抽取既有声明校验和求交。
 - `packages/core/src/bootstrap.ts`：拒读、完整恢复及原子投影。
 - `packages/core/src/queries.ts`：一致遮罩与来源信息。
-- `packages/core/src/start-work.ts`：仅 startTargetError 与其事务调用。
+- `packages/core/src/start-work.ts`：目标门、准入 epoch、事务提交与重放返回 fence。
+- `packages/core/src/git-provisioning.ts`：复用 #204 的既有 `BeforeExternalWrite(operation)`，当前相对 stack base 无文件变化，不增加平行 API。
 - `packages/client/src/planning-refresh.ts`：安全恢复入口与失败说明。
 - `packages/ui/src/work-item-app.ts`：恢复交互接线。
 - `packages/ui-model/src/work-item-list-view.ts`：仅必要安全原因。
 - `tests/integration/runtime-planning-access.test.js`（新）：Core/fake/SQLite 判别矩阵。
 - `tests/integration/harness-plugin-runtime-access.test.js`（新）：生产 Host/client/apply。
+- `tests/integration/github-projects-bootstrap.test.js`：已有源级拒读必须遮罩的精确断言。
+- `tests/integration/harness-plugin-workspace-setup.test.js`：runtime deny 优先于被改写的游标；保留未知错误脱敏负例。
 - `tests/integration/planning-round-order.test.js`：受影响精确断言。
 - `tests/integration/planning-snapshot.test.js`：受影响精确断言。
 - `tests/integration/harness-plugin-host-planning-refresh.test.js`：受影响精确断言。
@@ -160,12 +163,26 @@ client/UI 允许 connected、存在 Planning 挂载且不 pending 时调用已�
 
 - [x] 2026-10-30（Asia/Singapore）：独立比较两份设计，检查 owning source，确定 Planning 纵切与后续完整验收边界。
 - [x] 2026-10-30（Asia/Singapore）：创建本计划，记录基线漂移、拒读 epoch 与恢复顺序。
-- [ ] Batch 1：新判别用例先红，确认复用后预算。
-- [ ] Batch 2：Core 权威闭环和 fake/SQLite 通过。
-- [ ] Batch 3：生产 Host/client/交互与负控通过。
-- [ ] Batch 4：严格规模、发布面、远端回读与 ready；完成后移至 completed 并更新索引。
+- [x] Batch 1：fake/SQLite 12 项新行为断言先红（修正夹具调用后为 revision、旧内容与旧 Saved 失败）；生产 Host recovery 按钮真实 RED 为 disabled。
+- [x] Batch 2：Core 本地实现完成；最初 151 项相关回归通过。独立 review 推翻 helper 后仍可沿用准入的假设；新增 replay、claim、首写与 standalone sync 反例均先 RED 后修复，当前 runtime 23 项与 Host 5 项通过。
+- [x] 2026-10-30：Batch 3：真 Host/SQLite/remote/client.apply/render 的正常拒读恢复与事务失败 gap→同修订安全 baseline 已通过；gate、epoch、redaction 三个隔离副本负控分别按期失败。
+- [x] Batch 4：完整本地2660+7、独立原/首写窗口探针12/12及组合426、协调者双方301通过；源head5163bcb的PR Fast Gate/Verify/Merge Gate/规则已回读成功。归档最终head仍需重新回读检查、双向closing和全部线程后才ready；不合并。
 
 ## Surprises & Discoveries
+
+首轮 `pnpm verify` 的 2575 项测试有 3 项失败：GitHub Projects 两个 Storage 的旧断言要求 PermissionDenied 保留明文；workspace setup 旧断言要求游标篡改能覆盖内存 deny。已修正精确预期，同时保留普通离线内容与未知错误脱敏检查。
+
+实际 SQLite 的 redacted 行省略 `planningFields`，不能显式置为 undefined 后与读回直接深比较；`redactPlanning` 删除该属性，使重复 denial 不额外推进 revision。
+
+磁盘 redaction 事务故障时 Core 保持内存拒读，controller 的现有同修订业务变化守卫发 gap，真实 client.apply 在同一 source 重开 gen2 的安全 baseline；SQLite revision 没有虚增。证据为新 Host runtime 测试的 `gap r=1 → baseline r=1 gen=2 → 磁盘恢复后 delta r=2`。
+
+恢复来源标题被移除时，客户端须保留最近一次真实挂载 scope，不能把 name 缺失当作工作区切换；没有挂载的全 unavailable key 列表仍不发 refresh RPC。已拒读后的 offline 重试继续显示拒权原因，不回退为许可缓存的文案。
+
+`writePlanningStatus` 是尚未发货的独立 Core 入口：在 redaction 落库失败且 host_authoritative 的旧投影仍在时，只检查旧投影可能改写本地隐藏行。当前 Host `OPERATIONS` 没有暴露该命令；A 明确只闭合 Start Work 新请求与重放，后续 #457 C 必须评估该最小 runtime 写门。本切片没有修改 Status 或 policy，也不声称全部 Core 规划命令已闭合。
+
+独立评审在 `f55e0166b5a0671ee05a9eb74a4ebbcfa5ded7fa` 发现两项 P1、一项 P2：helper 返回后 ledger/claim 等待可跨越 deny；旧 epoch PermissionDenied 状态虽被忽略，错误原文却经真实 remote 外发；独立 getPlanningSync 的 healthy cursor 等待可返回旧 fresh。将原 6 个反例和额外首次 preflight 等待窗口纳入回归，7 项行为断言真实 RED。修复后原 6 个只读外部探针全部 GREEN，未修改探针、Controller 结果或合成 baseline。
+
+事务内捕获的 admission epoch 在提交前复验，失效则整笔回滚；已合法提交的 admission 在后来首次写被拒时保留，返回 local context 的未确认状态，不谎报控制事实也为零。首次 Provider 写已经发起后的步骤不在本次撤回，不新增 C 的逐步门。组合版 latch 在既有 typed `BeforeExternalWrite(operation)` 首次回调先检查当前 epoch，再写 owned durable intent，事务尾与 ack 后再复验；后续回调只保留 #204 的持久化意图机制。若在 intent 事务中等待期间撤权，intent 回滚，但此前合法提交的 admission 保留。所有 PermissionDenied 按 code 固定安全消息，与其状态观察是否获当前 epoch 接受分开。独立 sync 仅复用 epoch 重读，不占 publication 队列；内容快照/详情仍保持原短 publication 排队。
 
 既有刷新失败只更新 cursor，不能达到撤权；证据为 `bootstrap.ts::fail` 与 `queries.ts::planningSnapshot`。既有 recovery 同时被 client 和 UI 的 readable 前置挡住，故只改 Core 会形成无法自行恢复的产品。
 
@@ -185,6 +202,10 @@ client/UI 允许 connected、存在 Planning 挂载且不 pending 时调用已�
   Rationale：保留完整验收，同时让每 PR 严格少于 800 行成为实际可检查门。
   Date/Author：2026-10-30（Asia/Singapore）/ 独立计划评审者；用户已授权持续执行。
 
+- Decision：独立对抗复验与首次写门：A 必须覆盖 helper 后的准入与 Saved replay，以及实际首次 Provider 写调用；随后 stack 到 #204 / PR #467 的 `fix/durable-write-intent`，复用其既有 `BeforeExternalWrite(operation)`，不保留平行永久 hook。
+  Rationale：真实 Provider deferred 已证明 claim 前后均可撤权，首次写前还会等待 preflight/baseRef；这是 A 的零副作用边界，逐步写门仍属于 C。首次本地修复用独立 callback 证明；已在 `fix/durable-write-intent` 的 `e7a723fdc25a4183964565bb6c3c32e37260ec8a` 上完成 rebase 与冲突整合，平行 callback 已删除，实际在同一 durable hook 中执行一次授权 latch。
+  Date/Author：2026-10-30（Asia/Singapore）/ 协调者按用户已授权范围裁决。
+
 ## Idempotence and Recovery
 
 refresh 可重复，重复 denial 不重建身份、重复完整成功不因内容未变推进 revision；reconciledAt 仅完整提交更新。失败探测不清 deny latch。publication 异常后保持拒读，再次 refresh 可重试；禁止通过删库或新 workspace 逃避状态。
@@ -197,13 +218,23 @@ Node ≥22、pnpm workspace、现有 fake/SQLite、Host typed remote 和 client 
 
 新增内部 owner 的最小契约是当前访问读取、I/O epoch 捕获/比较、可信拒读观察、完整成功提交后恢复，以及短 publication 的一致读；具体函数名由实现者选择，但不得新增公共重验证 command。`startTargetError` 的事务 storage 参数必须显式传入同一 authority，不在 transaction 回调调用根 Storage。
 
-#204 仅拥有 admission/provision/execution，本 PR 仅与其协调 helper/调用参数；后续逐步写门在其稳定基线上串行接入。本 PR 必须自行推进 redaction revision；若组合测试暴露既有 client ordering 缺陷，显式记录并修复，不能以未验证的外部改动掩盖此责任。
+#204 仅拥有 admission/provision/execution，本 PR 仅与其协调 helper/调用参数（**Superseded by Decision Log「独立对抗复验与首次写门」，2026-10-30**：A 将 stack 到 #204 稳定 hook 上）；后续逐步写门在其稳定基线上串行接入。本 PR 必须自行推进 redaction revision；若组合测试暴露既有 client ordering 缺陷，显式记录并修复，不能以未验证的外部改动掩盖此责任。
+
+当前内部 API 为 `epoch` / `denied` / `registry` / `probeRegistry`、`deny(captured)`、`recover(captured, verified?)`、`error()` 与 `local(work)`；它只负责当前唯一 Planning 挂载的 `planning.item.read`。deny 在 captured epoch 仍当前时立即递增 epoch；完整落库后 recover 再递增；普通成功不改变 epoch，round 继续裁决普通快照顺序。`local` 只串行化短本地 publication 和一致查询，Provider I/O 均在队列之外。`collectBindings` 原实现用于恢复时的严格重验证，不新增验证闭集或公共命令。后续 Delivery 如需 target scope，必须按其真实需求扩充，A 未预造通用平台。
 
 没有接受新的技术债；Delivery、写门和 browser 是 #457 的后续独立范围，不能当作已完成。若实现为预算延期本切片必要安全行为，先更新 `docs/exec-plan/tech-debt-tracker.md` 与本计划并重新裁定，不以 debt 代替本表验收。
 
 ## Outcomes & Retrospective
 
-当前仅完成独立设计/计划评审与落盘，尚未实施或执行产品验证。结束时写入实际 head/base、通过命令、负控与严格规模结果，说明与预测差异；只有 Validation 全部通过才关闭 Planning 子 issue。真实浏览器总验收继续由 #457 后续切片负责。
+本切片完成 Planning 运行期拒读、离线只读、权限恢复、来源/locator遮罩、Start Work准入/重放/真实首写前fence，以及真实 Host/SQLite/watch/remote/client.apply/render 的一致闭环。独立完整审读发现的2P1+1P2均已以真实RED修复，组合head `5163bcb7ad7c3e2aa878e3ebc2deaea879da8773` 限定复评原探针9/9、新首写窗口3/3、必要组合426/426，无新阻塞。
+
+独立反例促成必要依赖：本PR以 `fix/durable-write-intent` 为base，复用其唯一 BeforeExternalWrite，不保留平行Git hook；A贡献非docs A+D720。父#204从e7a723f归档为47de6df时只改文档，本分支重放为7629792，packages/tests/scripts与已评审5163bcb逐字一致。
+
+在A工作树完整 `pnpm verify` 2660+7、双方意图/Storage210、A48、九类负控、boundaries9、workflow8、发布面与diff检查通过；协调者另在组合运行301项通过。源码head的PR Fast Gate、Verify、Merge Gate与规则成功；CodeQL曾在平台上传阶段Server Error，最终归档head重新运行并在ready前核对，不将该故障写成代码分析通过。
+
+本计划归档只改变文档；最终push后回读准确head/base/checks/双向closing465/全部线程后才置ready，保留人类合并决定。实际文档按最终size重算须<1300。当前证据是本地软件与hosted CI；不声称真实账号撤权、已安装Host UAT、完整#457/144或R1发布接受。Delivery与逐步门/唯一生产浏览器总验收仍在#457后续层。
+
+外部actor=SingularityKChen，目标GitHub repository/project10，幂等键 `2026-10-30:465:delivery`；维护同一PR466及其双向关联、字段，规划Status和原生依赖未写。
 
 ### Artifacts and Notes
 
@@ -214,3 +245,13 @@ Node ≥22、pnpm workspace、现有 fake/SQLite、Host typed remote 和 client 
 - Change Note (2026-10-30 SGT)：初版；综合两份独立调查，收敛 Planning 完整纵切，明确可信拒读/旧失败的 epoch 顺序，排除伪 browser authority，保留全部后续 #457 验收。
 
 - 2026-10-30（Asia/Singapore）：协调者按用户授权创建 Planning 子 issue #465 并关联父 #457；外部 actor=SingularityKChen、目标 GitHub repository/project10、幂等键=2026-10-30:457:planning-child；结果为创建成功及父子关联，未改 Status 或原生 blocked-by。
+
+- Change Note (2026-10-30 SGT)：记录 Batch 1–3 的真实 RED/GREEN 与首轮全套旧断言冲突；扩充两个受语义修复影响的拥有者测试文件，不增产品范围。
+
+- Change Note (2026-10-30 SGT)：本地 A 验证与三类隔离负控完成，记录 2579+7 完整验证、同 revision 磁盘失败恢复、后续 C 的未发货状态入口边界；独立复核和最终远端门未完成，保留 active，全部门通过后由协调者归档。
+
+- Change Note (2026-10-30 SGT)：记录独立 2P1+1P2、7 个真实 RED 回归与 2586+7 GREEN；修正 helper-only 范围，保留首次已提交 admission 的真实边界；root 裁决 A 依赖 #204 并复用唯一写 hook，计划仍 Active 等组合后 scoped recheck。
+
+- Change Note (2026-10-30 SGT)：A 已有界整合 #204 e7a723f，删除平行首次写 hook，改为同一 typed durable hook 的一次授权 latch与事务尾复验；补 intent-commit 回归和九类负控，记录210两方回归与组合完整验证，仍Active待scopedrecheck。
+
+Change Note (2026-10-30 11:55 SGT)：记录独立三项修复、必要#204钩子整合与限定复评，源代码不变情况下归档A计划，最终新head门禁继续回读。

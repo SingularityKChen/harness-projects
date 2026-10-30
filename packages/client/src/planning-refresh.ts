@@ -39,7 +39,12 @@ export function createPlanningRefreshSource(options: {
   let snapshot: PlanningRefreshSnapshot = Object.freeze({ pending: false }), disposed = false, epoch = 0
   let pending: Promise<unknown> | undefined, failedAt = Number.NEGATIVE_INFINITY
   const listeners = new Set<() => void>()
-  const scopeOf = (): string => JSON.stringify([options.source.getSnapshot()?.workspace.id, options.source.getSnapshot()?.planningSource?.bindingId])
+  let sourceBinding: string | undefined
+  const scopeOf = (): string => {
+    const read = options.source.getSnapshot()
+    sourceBinding = read?.planningSource?.bindingId ?? sourceBinding
+    return JSON.stringify([read?.workspace.id, sourceBinding])
+  }
   let scope = scopeOf()
   const publish = (next: PlanningRefreshSnapshot): void => { snapshot = Object.freeze(next); listeners.forEach((listener) => listener()) }
   const stop = options.source.subscribe(() => {
@@ -56,17 +61,19 @@ export function createPlanningRefreshSource(options: {
     refresh(): Promise<unknown> {
       if (pending) return pending
       const read = options.source.getSnapshot()
-      if (disposed || !read?.connection.connected || !readable(read)) return Promise.resolve()
+      if (disposed || !read?.connection.connected || !(readable(read) || read.reason === 'permission_denied')) return Promise.resolve()
       const current = epoch, requestedScope = scope
       const active = (): boolean => !disposed && current === epoch && requestedScope === scopeOf()
+      let denied = false
       const task = Promise.resolve().then(() => active() ? options.refreshPlanning() : undefined).then((result) => {
         if (!active()) return undefined
+        denied = !!result && typeof result === 'object' && 'error' in result && !!result.error && typeof result.error === 'object' && 'code' in result.error && result.error.code === 'permission_denied'
         assertCommittedRefresh(result)
         return result
       }).catch(() => {
         if (active()) {
           failedAt = confirmationTime(options.source.getSnapshot())
-          publish({ pending: false, error: '暂时无法刷新规划，显示的是最后已知值。' })
+          publish({ pending: false, error: denied || options.source.getSnapshot()?.reason === 'permission_denied' ? 'Core 读取层拒绝 planning.item.read；本地工程信息仍可浏览，请恢复授权后重新验证。' : '暂时无法刷新规划，显示的是最后已知值。' })
         }
         return undefined
       }).finally(() => {

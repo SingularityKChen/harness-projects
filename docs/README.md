@@ -25,13 +25,13 @@
 
 | 计划 | 用途 |
 |---|---|
-| [2026-10-30-planning-runtime-access](exec-plan/active/2026-10-30-planning-runtime-access.md) | Planning 运行时撤权、离线与恢复（#465 / #457） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-30-planning-runtime-access](exec-plan/completed/2026-10-30-planning-runtime-access.md) | Planning 运行时撤权、离线与恢复（#465 / #457） |
 | [2026-10-30-durable-write-intent](exec-plan/completed/2026-10-30-durable-write-intent.md) | Start Work 写前意图与不确定结果结算（#204） |
 | [2026-10-29-mmp-ui-frame](exec-plan/completed/2026-10-29-mmp-ui-frame.md) | Host主题工作区视觉框架（#446） |
 | [2026-10-29-membership-duplicate-content](exec-plan/completed/2026-10-29-membership-duplicate-content.md) | 成员替换重复内容契约（#337） |
