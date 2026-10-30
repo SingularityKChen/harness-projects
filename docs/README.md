@@ -25,13 +25,13 @@
 
 | 计划 | 用途 |
 |---|---|
-| [2026-10-30-operation-runtime-browser](exec-plan/active/2026-10-30-operation-runtime-browser.md) | 逐步操作准入与唯一生产浏览器总验收（#457） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-30-operation-runtime-browser](exec-plan/completed/2026-10-30-operation-runtime-browser.md) | 逐步操作准入与唯一生产浏览器总验收（#457） |
 | [2026-10-30-delivery-runtime-access](exec-plan/completed/2026-10-30-delivery-runtime-access.md) | Delivery 按能力与目标拒读、离线与恢复（#468 / #457） |
 | [2026-10-30-planning-runtime-access](exec-plan/completed/2026-10-30-planning-runtime-access.md) | Planning 运行时撤权、离线与恢复（#465 / #457） |
 | [2026-10-30-durable-write-intent](exec-plan/completed/2026-10-30-durable-write-intent.md) | Start Work 写前意图与不确定结果结算（#204） |

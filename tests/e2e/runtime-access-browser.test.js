@@ -28,7 +28,7 @@ test('browser unary bridge reaches installed strict service and rejects undeclar
   assert.equal(baseline.ok, true)
   assert.ok(baseline.value.entities.some((row) => row.content.title === browserScenario.title))
   assert.equal((await remote(h, 'getWorkspaceSetup')).value.planning.state, 'confirmed', 'production setup must admit the seeded workspace into the actual app')
-  for (const [name, input] of [['watch', {}], ['writePlanningStatus', {}], ['getExecutionContext', { workItemId: h.itemId, repositoryId: 'repo-alpha', extra: true }]]) {
+  for (const [name, input] of [['watch', {}], ['writePlanningStatus', {}], ['applyPlanningStatus', {}], ['cancelExecutionRun', {}], ['setSourcePolicy', {}], ['getExecutionContext', { workItemId: h.itemId, repositoryId: 'repo-alpha', extra: true }]]) {
     assert.equal((await remote(h, name, input)).ok, false)
   }
   const dto = await remote(h, 'getExecutionContext', { workItemId: h.itemId, repositoryId: 'repo-alpha' })
@@ -66,4 +66,17 @@ test('aborting a browser stream releases its Host watch while Provider promises 
   assert.equal(state.streams, 0); assert.equal(state.held, 1)
   await control('release'); assert.equal((await pending).ok, true)
   const next = await openWatch(h); assert.equal((await next.next()).kind, 'baseline'); next.close()
+})
+test('single-key Provider permissions deny only that write while retained acknowledgements survive explicit retry', async (t) => {
+  const h = await startExecutionServer(); t.after(h.close)
+  const control = (action, value) => post(h, '/control', { action, value })
+  const baseline = (await remote(h, 'baseline')).value
+  const item = baseline.entities.find(row => row.content.title === '规划项 issue-2').entityId
+  await control('permission', { domain: 'development', key: 'development.worktree.create', enabled: false })
+  const answer = await remote(h, 'startWork', { actorRef: { kind: 'user' }, idempotencyKey: 'browser-operation-denied', workItemId: item, repositoryId: 'repo-alpha' })
+  assert.equal(answer.value.error?.code, 'permission_denied', 'single-key Provider refusal must reach the actual operation gate')
+  const options = await remote(h, 'getStartWorkOptions', { workItemId: item })
+  assert.equal(options.value.repositories[0].available, false)
+  await control('permission', { domain: 'development', key: 'development.worktree.create', enabled: true })
+  assert.equal((await remote(h, 'getStartWorkOptions', { workItemId: item })).value.repositories[0].available, true)
 })

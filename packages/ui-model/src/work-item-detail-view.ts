@@ -6,7 +6,7 @@ import { deriveWorkItemListView, type VisibleListRow, type WorkItemListReadInput
 
 export interface ExecutionTarget { readonly workspaceId: string; readonly workItemId: string; readonly repositoryIds: readonly string[] }
 
-export interface StartWorkRepository { readonly id: string; readonly available: boolean; readonly access: string }
+export interface StartWorkRepository { readonly id: string; readonly available: boolean; readonly access: string; readonly reason?: string | undefined }
 
 export type WorkItemDetailTarget = { readonly projectId: string; readonly itemId: string }
 
@@ -65,7 +65,7 @@ export function deriveWorkItemDetailView(input: WorkItemListReadInput, target: W
         ...(input.read.repositories?.length ? { startWorkRepositories: input.read.repositories.map((repository) => {
           // Development 四门必须来自选中仓库的路由；缺少元数据时不能借工作区里另一个连接放行。
           const { available, access } = startWorkAvailability(repositoryAccessIndex([], repository.capabilities ?? []))
-          return { id: repository.id, available, access }
+          return { id: repository.id, available, access, ...(!available ? { reason: repository.capabilities?.find(entry => entry.reason)?.reason } : {}) }
         }) } : {}),
         executionTarget: { workspaceId: target.projectId, workItemId: target.itemId, repositoryIds: [...new Set(input.read.repositories?.map((repository) => repository.id) ?? [])].sort() },
       } : {}),

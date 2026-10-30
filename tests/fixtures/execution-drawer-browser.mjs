@@ -12,13 +12,14 @@ import { createHostComposition } from '../../apps/harness-plugin/src/host-compos
 import { catalogOf, hostStoragePolicy } from '../../apps/harness-plugin/src/host-providers.ts'
 import { installHostRemote } from '../../apps/harness-plugin/src/remote.ts'
 import { OPERATIONS, exactRecord, parseInput } from '../../apps/harness-plugin/src/host-operations.ts'
+import { AccessLevel, providerErr, providerError } from '@harness-projects/capabilities'
 export async function createExecutionFixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'execution-drawer-')), dataPath = path.join(root, 'workspace.sqlite')
   const mounted = [], byDomain = {}, providers = createFakeProviders(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: { projectNodeId: { kind: 'string', required: false, pattern: '.+', maxLength: 100 } }, create: async ({ binding }) => { const provider = createFakeProviders({ [binding.domain]: { bindingId: binding.id } })[binding.domain]; byDomain[binding.domain] = provider; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
   const workspaceId = '00000000-0000-4000-8000-000000000282'
   const storage = createSqliteStorage(dataPath, hostStoragePolicy(catalog)), core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture' }, providers, storage })
   await storage.putBindingConfiguration({ ref: { workspaceId, bindingId: providers.planning.bindingId, domain: 'planning' }, configuration: { projectNodeId: providers.planning.state.projects[0].ref.externalId } })
-  const itemId = (await core.queries.listPlanningItems()).find((item) => item.content.contentKind === 'work_item').entityId
+  const itemId = (await core.queries.listPlanningItems()).find((item) => item.content.title === '规划项 issue-1').entityId
   await core.commands.startWork({ workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
   const id = contextIdFor(workspaceId, itemId, 'repo-alpha'), runId = runIdFor(id)
   await storage.putExecutionRun({ ...(await storage.getExecutionRun(runId)), fallback: true })
@@ -64,6 +65,18 @@ export async function mount(root) {
 /** 真实浏览器与 Node 测试共用同一个 Host。HTTP 只是 fixture 的 JSON 载体，不替代产品 reader 或 apply。 */
 export async function startExecutionServer() {
   const h = await createExecutionFixture(), requests = [], held = [], holds = new Set(), wrapped = new Set(), streams = new Set()
+  const permissionMethods = { development: { createBranch: 'development.branch.create', createWorktree: 'development.worktree.create', getRepository: 'development.repository.read', preflightWorktree: 'development.worktree.read' },
+    delivery: { listPipelineRuns: 'delivery.pipeline.read', listChecks: 'delivery.check.read' }, execution: { startRun: 'execution.run.start' } }
+  const denied = new Set()
+  for (const [domain, methods] of Object.entries(permissionMethods)) {
+    const provider = h.byDomain[domain], describe = provider.describeCapabilities.bind(provider)
+    provider.describeCapabilities = async () => { const snapshot = await describe(); return { ...snapshot, permission: { ...snapshot.permission,
+      ...Object.fromEntries(Object.values(methods).filter(key => denied.has(key)).map(key => [key, AccessLevel.Unavailable])) } } }
+    for (const [method, key] of Object.entries(methods)) {
+      const run = provider[method].bind(provider)
+      provider[method] = (...args) => denied.has(key) ? Promise.resolve(providerErr(providerError('permission_denied', 'fixture Provider permission revoked'))) : run(...args)
+    }
+  }
   const { build } = createRequire(path.join(repoRoot, 'apps/harness-plugin/package.json'))('esbuild')
   const bundle = await build({ stdin: { contents: ENTRY, resolveDir: repoRoot }, absWorkingDir: repoRoot, platform: 'browser', bundle: true, format: 'cjs', external: ['react'], write: false, metafile: true })
   const vendor = async (id, file) => readFile(path.join(path.dirname(uiRequire.resolve(id)), 'umd', file), 'utf8')
@@ -97,13 +110,18 @@ export async function startExecutionServer() {
         // 既有执行状态 seam 只用于 drawer 正控，不用于证明权限事实。
         if (input.action === 'status') await h.storage.putExecutionRun({ ...(await h.storage.getExecutionRun(h.runId)), status: input.value })
         if (input.action === 'fault') h.byDomain[input.value.domain].faultsSwitch.set(input.value.kind, input.value.enabled)
+        if (input.action === 'permission') {
+          if (!Object.values(permissionMethods[input.value.domain] ?? {}).includes(input.value.key)) throw new TypeError('Unknown fixture permission')
+          input.value.enabled ? denied.delete(input.value.key) : denied.add(input.value.key)
+        }
         if (input.action === 'hold') {
           const { domain, method, enabled } = input.value, key = `${domain}.${method}`, provider = h.byDomain[domain]
           if (!wrapped.has(key)) { const run = provider[method].bind(provider); provider[method] = async (...args) => { const result = await run(...args); if (holds.has(key)) await new Promise(resolve => held.push(resolve)); return result }; wrapped.add(key) }
           enabled ? holds.add(key) : holds.delete(key)
         }
         if (input.action === 'release') { holds.clear(); held.splice(0).forEach((resolve) => resolve()) }
-        result = { requests, held: held.length, streams: streams.size, workspaceId: h.workspaceId, itemId: h.itemId }
+        result = { requests, held: held.length, streams: streams.size, workspaceId: h.workspaceId, itemId: h.itemId,
+          external: { branches: h.byDomain.development.state.branches.length, worktrees: h.byDomain.development.state.worktrees.length, runs: h.byDomain.execution.state.runs.length } }
       }
       else { response.writeHead(404); response.end(); return }
       response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(result))

@@ -18,7 +18,7 @@ import { cancelExecutionRun, refreshExecutionRun, type RefreshExecutionRunResult
 import { createQueries, type CoreQueries } from './queries.ts'
 import { collectBindings, type CoreProviderTable } from './registry.ts'
 import { confirmRelation, type RecordedEdge, type RelationRef } from './relations.ts'
-import { startWork } from './start-work.ts'
+import { startWork, validateStartWork } from './start-work.ts'
 import { createRuntimeAccess, type RuntimeAccess } from './runtime-access.ts'
 import {
   StatusPolicyMode, writePlanningStatus, type PlanningStatusCommand, type StatusDecision,
@@ -95,6 +95,7 @@ export interface CoreContext {
 }
 
 export interface CoreCommands {
+  validateStartWork(workItemId: string): ReturnType<typeof validateStartWork>
   /** 既有引导命令：每次调用独立一轮，不进 `refreshPlanning` 的单飞槽；与刷新并发时由 #305 的轮次栅栏裁决，后开始的一轮胜出。 */
   bootstrapWorkspace(): Promise<BootstrapResult>
   /** 显式 Planning 全量刷新；与 scheduler 共用单飞槽，不进入 controller replay。 */
@@ -189,6 +190,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
       bootstrapWorkspace: () => bootstrapWorkspace(context),
       refreshPlanning,
       startWork: (request: StartWorkRequest) => startWork(context, request),
+      validateStartWork: (workItemId: string) => validateStartWork(context, workItemId),
       refreshExecutionRun: (query: ExecutionContextQuery) => refreshExecutionRun(context, query),
       cancelExecutionRun: (query: ExecutionContextQuery) => cancelExecutionRun(context, query),
       confirmRelation: (ref: RelationRef) => confirmRelation(context, ref),
@@ -224,6 +226,7 @@ export function unavailableCore(reason: string): CoreApi {
       ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0, revision: 0, degraded: true, error,
     }),
     startWork: async () => startWorkUnavailable(error),
+    validateStartWork: async () => [],
     refreshExecutionRun: async () => ({ ok: false, applied: false, error }),
     cancelExecutionRun: async () => ({ status: undefined, runExternalId: undefined, error }),
     confirmRelation: async () => undefined,

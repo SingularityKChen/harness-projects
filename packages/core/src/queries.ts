@@ -20,7 +20,7 @@ import type { CoreContext } from './context.ts'
 import {
   getDeliveryProjection, type DeliveryLineageHop, type DeliveryProjection, type DeliveryScope,
 } from './delivery.ts'
-import { CHANGE_REQUEST_READ_ROUTE, START_WORK_ROUTE, repositoryReferences, routeDevelopment } from './development-route.ts'
+import { CHANGE_REQUEST_READ_ROUTE, START_WORK_ROUTE, repositoryReferences, routeDevelopment, selectDevelopment } from './development-route.ts'
 import { readExecutionContext, type ExecutionContextQuery, type ExecutionContextView } from './execution-context.ts'
 import {
   toPlanningItemView,
@@ -187,7 +187,9 @@ async function repositoryMetadata(context: CoreContext, storage: StorageTransact
     const registry = context.runtimeAccess.deliveryRegistry(record.id)
     const capabilities: EffectiveCapability[] = []
     for (const { anchor, earlier, reports } of [START_WORK_ROUTE, CHANGE_REQUEST_READ_ROUTE]) {
-      const route = await routeDevelopment({ workspaceId: context.workspaceId, registry, storage }, record.id, anchor[0], anchor[1], earlier)
+      const source = { workspaceId: context.workspaceId, registry, storage }
+      const route = anchor[0] === START_WORK_ROUTE.anchor[0] ? await selectDevelopment(source, record.id, anchor[0])
+        : await routeDevelopment(source, record.id, anchor[0], anchor[1], earlier)
       capabilities.push(...(route.ok
         ? route.binding.capabilities.filter((entry) => reports.includes(entry.key))
         : reports.map((key) => ({ key, access: AccessLevel.Unavailable, reason: route.error.message, bindingId: undefined, externalActionUrl: undefined }))))
