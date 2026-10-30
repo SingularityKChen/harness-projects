@@ -26,6 +26,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-10-30-ui-detail-text-reflow](exec-plan/completed/2026-10-30-ui-detail-text-reflow.md) | 实际App样式归属、放大文字标题重排（#479） |
+| [2026-10-30-durable-write-intent](exec-plan/active/2026-10-30-durable-write-intent.md) | Start Work 写前意图与不确定结果结算（#204） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
