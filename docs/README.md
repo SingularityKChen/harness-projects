@@ -32,6 +32,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-10-30-ui-workspace-shell](exec-plan/completed/2026-10-30-ui-workspace-shell.md) | 有界 Host 滚动、设置返回、草稿与未决请求保留（#482/#483） |
 | [2026-10-30-github-pr-creation](exec-plan/completed/2026-10-30-github-pr-creation.md) | 原生 GitHub PR 创建、独立写权限与不确定回执（#436） |
 | [2026-10-30-durable-write-intent](exec-plan/completed/2026-10-30-durable-write-intent.md) | Start Work 写前意图与不确定结果结算（#204） |
 | [2026-10-29-mmp-ui-frame](exec-plan/completed/2026-10-29-mmp-ui-frame.md) | Host主题工作区视觉框架（#446） |

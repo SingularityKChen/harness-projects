@@ -63,7 +63,7 @@ export async function startExecutionServer() {
 /* 仅本地 fixture 的 Host token 与文字大小输入，不代表安装 Host。 */
 :root { --dsw-focus-ring-color:#4176e6; --dsw-focus-ring-width:2px; --dsw-alias-state-business-primary:#4176e6; color-scheme:light; color:#20242c; background:#fff; font:15px/1.5 system-ui,sans-serif }
 :root[data-theme=dark] { --dsw-focus-ring-color:#7aaaff; --dsw-alias-state-business-primary:#7aaaff; color-scheme:dark; color:#e3e5eb; background:#191b20 }
-html,body { margin:0; padding:0; min-width:0 } #app { min-width:0; max-width:100% }
+html,body { margin:0; padding:0; min-width:0; height:100%; overflow:hidden } body { display:grid; grid-template-rows:minmax(0,1fr) } #app { display:flex; flex-direction:column; min-height:0; min-width:0; max-width:100%; overflow:hidden }
 </style><div id="app"></div><script src="/react.js"></script><script src="/react-dom.js"></script><script>const params=new URLSearchParams(location.search);document.documentElement.dataset.theme=params.get('theme')==='dark'?'dark':'light';if(params.get('font')==='200')document.documentElement.style.fontSize='30px';window.require=()=>React;var module={exports:{}};var exports=module.exports</script><script src="/bundle.js"></script><script>module.exports.mount(ReactDOM.createRoot(document.getElementById("app"))).then(value=>window.fixture=value)</script></html>`
   const server = createServer(async (request, response) => {
     try {

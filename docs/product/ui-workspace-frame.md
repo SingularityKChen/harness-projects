@@ -13,3 +13,7 @@
 本地浏览器、同构建包报告和官方Web profile呈现检查各自有证据边界。完整安装Host产品接受、运行时权限和R1仍分别验收。实现记录见[工作区视觉框架计划](../exec-plan/completed/2026-10-29-mmp-ui-frame.md)。
 
 规划来源的只读提示仅说明规划内容的读取边界。开始工作仍由当前仓库的 Development 能力独立决定；只读规划不等于禁用工程执行。相关组合验证见[实施计划](../exec-plan/completed/2026-10-30-ui-planning-readonly-scope.md)。
+
+工作区壳从实际 Host slot 继承有界高度，标题与本地返回动作位于正文之外，正文拥有纵向滚动；页面 body 不作为插件 scroller。极短高度保留正文最小空间，并允许局部根滚动以保持可达。表格横滚和详情正文滚动仍归各自 owner。
+
+“返回工作区”不随 setup pending 或 Planning 确认禁用；有同 scope 可读数据才回工作项，否则回真实安全摘要。导航不提交、解绑或取消请求，隐藏设置完成不抢焦点。实现与安装边界见[工作区壳计划](../exec-plan/completed/2026-10-30-ui-workspace-shell.md)。
