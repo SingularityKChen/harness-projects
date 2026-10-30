@@ -100,6 +100,10 @@ browser `$stream` 消费服务端真实 `host.watch` 帧：baseline/delta/metada
 
 隔离负控取消真实 query mask 或 epoch fence，实际 browser 的同 canary/late-response 场景应失败；恢复并重跑。不能用只隐藏按钮的负控替代。回滚 fixture/test coherence，已存在 A/B 安全实现保留。
 
+2026-10-30 第一阶段本地证据：在 `fix/operation-runtime-browser` 的 `2f04105` 上，仅修改 fixture、新增浏览器桥契约和导出场景，未进入 Core/UI 的并发区域。`pnpm test:file tests/e2e/runtime-access-browser.test.js` 先因真实 `/remote` 与 `/watch` 未实现而失败；替换后新三项桥契约、既有三项 drawer 正控与两项 runtime access 集成共 8/8 通过。新增 `getWorkspaceSetup` 的 `confirmed` 断言进一步复现旧 seed 缺真实 `projectNodeId` 导致页面困在 setup，已通过 SQLite `putBindingConfiguration` 和受信 fixture schema 补齐，未覆盖 Host setup 返回。运行命令使用仓库固定的 pnpm 10.28.2。
+
+浏览器复现入口仍是 `node tests/fixtures/execution-drawer-browser.mjs`；页面挂载后 `window.fixture.command(action,value)` 仅控制 mounted Provider `fault`（`domain/kind/enabled`）、真实 Provider Promise 的 `hold`（`domain/method/enabled`）和 `release`。`inspect` 返回请求记录与活动 stream/held 计数；`status` 是既有非权限执行正控 seam。`window.fixture.remote` 是从 `OPERATIONS` 推导的全部 unary，HTTP `/remote` 以 `{name,input}` 转调真实 installed service，`/watch` 透传真实 installed watch。`tests/fixtures/runtime-access-browser-scenarios.mjs` 导出同页操作步骤与实际 DOM 文本断言，浏览器由协调者集中执行；目前真实浏览器矩阵仍待验证，不以 Node 通过替代。
+
 ### Batch 4 · 全问题收口
 
 主文件为本计划与 docs 索引。在实际 stack base 上运行 narrow suite 后运行完整 verify；整理提交、五类发布面扫描、严格规模及最终远端 head/base/checks/issue/threads 回读。A/B 合并后才把 origin/main 当基线，未合并时写实际 parent branch 的可复制命令。
@@ -131,6 +135,7 @@ browser `$stream` 消费服务端真实 `host.watch` 帧：baseline/delta/metada
 - [ ] Batch 1：红测试与最小消费者接线。
 - [ ] Batch 2：逐步门、部分ack、局部恢复与负控。
 - [ ] Batch 3：唯一生产carrier、真实browser全矩阵与负控。
+  - 2026-10-30：第一阶段 carrier 替换及 Node 8/8 通过，真实 setup seed 缺口已按有效 RED→GREEN 修复；等待实际 A/B 父层接口与协调者浏览器证据。
 - [ ] Batch 4：全问题验收、发布面、严格规模、远端回读与ready。
 
 ## Surprises & Discoveries
@@ -138,6 +143,8 @@ browser `$stream` 消费服务端真实 `host.watch` 帧：baseline/delta/metada
 既有 frozen route 同时携初始 capability 快照，故其身份稳定性不证明当前授权；Execution resolve 后仍有 await，门必须贴实际副作用。已有 client `StartWorkResult` 丢弃 error，泛化“失败可重试”不能完成 key/layer 解释。
 
 既有 browser `$stream` 将手工 baseline 包装为新 generation，controller visibility 也被覆盖；这只证明展示守卫，不证明生产权限。替换会同时计删除与新增，C 的规模风险主要在此，必须保留实际 diff 准入门。
+
+实际浏览器首先暴露旧 fixture 虽有投影但没有持久 `BindingConfiguration.projectNodeId`，导致 Host 真实 setup 状态为 `degraded`，页面无法进入列表。直接 unary/watch 契约此前未覆盖 setup 准入，新增真实 setup 断言后修复 seed；不能从 baseline 含业务行推断生产页面可达。
 
 ## Decision Log
 
@@ -175,3 +182,5 @@ OPERATIONS 是唯一声明，HTTP bridge 从它推导 unary；stream 直接转�
 - 2026-10-30（Asia/Singapore）：初版；分离完整Delivery读侧后，集中已发货逐步写门、诚实恢复与单carrier真实browser总验收，允许规模事实推动额外完整切片而不减验收。
 
 Change Note (2026-10-30 SGT)：按实际独立反例更新依赖链为 #204→Planning→Delivery→本切片；保留完整 #457 验收，先在不共享区域改唯一 production browser carrier，实际接口稳定后再接逐步权限。A 发现未发货 Core writePlanningStatus 在 redaction 持久失败时未读 runtime 门，本切片需证实 Host allowlist 继续拒绝并评估最小 Core 门，不声称父范围提前完成。
+
+Change Note (2026-10-30 SGT)：记录第一阶段真实 Host carrier 的 RED→GREEN、8/8 本地验证、真实浏览器发现的 setup seed 反例及修复；导出同页场景与 Provider 控制接口，浏览器总验收和逐步门保持未完成。
