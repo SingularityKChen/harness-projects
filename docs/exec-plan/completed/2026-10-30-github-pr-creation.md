@@ -1,6 +1,6 @@
 # GitHub 原生变更请求创建 ExecPlan
 
-> 状态：Active；设计已收敛，产品实现待执行。
+> 状态：Active；实现与本地验证完成，等待独立验收和最终远端交付。
 > 创建：2026-10-30（Asia/Singapore）。
 > 范围：issue #436，GitHub Development adapter 的原生创建、保守权限与可对账读面。
 > 依据：`AGENTS.md`、`PLANS.md`、`docs/development/workflow.md`、现有 Development port 与生产 provider；本计划是唯一实施规格。
@@ -52,7 +52,7 @@ provider 只拥有协议、输入身份、平台结果分类和易失权限证�
 
 ### 输入、预检与 ack
 
-保持现 port。先验证 repository 引用的 bindingId/objectKind/externalId，外来引用 not_found 且零 transport。
+保持现 port。任何 await 前一次性读取 repository 身份和 head/base/title/body，组成 provider 自有的冻结 primitive 快照；getter 抛错是 invalid_input、零 transport。预检、mutation 与 ack 均使用该快照，transport request 不与 ack oracle 共用可变对象。先验证 repository 引用的 bindingId/objectKind/externalId，外来引用 not_found 且零 transport。
 head/base/title 必须为非空字符串，body 必须是字符串；拒绝 head==base、裸 40 位十六进制 SHA、包含冒号的 fork 写法，invalid_input 且零 transport。
 head/base 是原始本仓库分支名，不能 trim 或 case-fold。完整 Git ref 合法性由精确 `refs/heads/` 查询和 GitHub 拒绝补充，不在 provider 复制 Git parser。
 
@@ -72,7 +72,7 @@ mutation 返回原 PR fragment，另取 repository.id/headRepository.id/baseRefN
 三个已实现 key 的 capability 均 Available；read 的 permission 沿原真实仓库读取维护。单独保存 createPermission，初始 Degraded，不能从 viewerPermission 或 read 成功推导写 Available。
 Degraded 是未知证据，按现 Core gate 允许用户显式单次尝试；没有静态开关绕过 GitHub 授权。可信 create ack 才将 createPermission 置 Available。
 明确无 payload 的写拒绝置 ReadOnly；限流/未知写结果置 Degraded。写结果不改 read 权限，read 成功/失败也不清除写拒绝或确认。
-ReadOnly 在 provider create 入口也结构化 permission_denied、零 transport，以防旧 registry 仍缓存 Degraded 时连续调用重新发写。
+ReadOnly 在 provider create 入口结构化 permission_denied、零 transport；预检 await 后、发送 mutation 前再次复验。它在同实例内黏住：已经发送的迟到 ack 仍如实返回平台对象，但 ack、ambiguous 或限流都不能把 ReadOnly 改回 Available/Degraded，以防旧 registry 快照重新启用写入。
 同一 provider 实例的 eager/lazy describe 和 getRepository 均不能解除 ReadOnly；lazy describe 仍零请求，并保留最近实际探测时间。
 
 补权后的安全恢复是显式重建 provider，然后用新实例重新 collectBindings；新实例只回到未知 Degraded，下一次真实 ack 才可确认 Available。
@@ -117,7 +117,7 @@ shared ambiguous 场景可模拟未写入的未知失败；专项 dropped-ack �
 
 ## Global Constraints
 
-唯一允许文件集与 A+D 设计预算如下；A+D 同时计算新增和删除，包含测试/fixture/config，排除 docs 后严格小于 800。
+唯一允许文件集与设计阶段的 A+D 预测如下（各文件允许按真实缺陷调整，最终总量以 Outcomes 计数）；A+D 同时计算新增和删除，包含测试/fixture/config，排除 docs 后严格小于 800。
 
 | 文件 | 预算 |
 |---|---:|
@@ -132,7 +132,9 @@ shared ambiguous 场景可模拟未写入的未知失败；专项 dropped-ack �
 | `tests/contract/suites/development.js` | 65 |
 | `tests/fixtures/development-suite-adapters.mjs` | 20 |
 | `tests/contract/development-contract.test.js` | 15 |
-| 合计 / 严格上限前余量 | 762 / 37 |
+| `tests/integration/harness-plugin-host-github-catalog.test.js`（必要快照断言同步） | 4 |
+| `tests/e2e/repository-routing.test.js`（真实 capability 子集装配同步） | 10 |
+| 合计 / 严格上限前余量 | 776 / 23 |
 
 文档只改本 ExecPlan 与 `docs/README.md` 索引；本轮目标约 300 行，最终 docs A+D 严格小于 1300。完成后按 PLANS 将计划移 completed；移动用 rename 检测计算。
 不改公共 capability/domain/Core/controller/client/UI/Host/storage/工作流/package/lock；无新依赖、迁移、权限配置项或持久账本。
@@ -221,9 +223,11 @@ shared ambiguous 场景可模拟未写入的未知失败；专项 dropped-ack �
 ## Progress
 
 - [x] (2026-10-30 10:00 SGT) 独立审查两个方案、PLANS/AGENTS、生产 provider/Host/Core gate 与共享 suite，定稿最小方案。
-- [ ] (2026-10-30 SGT) Batch 1：合法装配、所有原 liar 保留与专项 RED；实施者附命令和 head。
-- [ ] (2026-10-30 SGT) Batch 2：生产实现、GREEN 与相关回归；尚未执行。
-- [ ] (2026-10-30 SGT) Batch 3：独立验收、真实规模、最终远端回读与交付；尚未执行。
+- [x] (2026-10-30 SGT) Batch 1：`feature/github-pr-creation@4375505` 上先写测试；双 base 与新增缺装配字段负控后 `pnpm run test:file tests/contract/development-contract.test.js` 本地 95/95 pass。新创建专项在缺少生产 create 方法处出现预期 RED（7 个专项失败）；运行日志留在工作树外临时目录。
+- [x] (2026-10-30 SGT) Batch 2：生产预检、单次 mutation、严格 ack 与独立权限已实现。原创建专项 21/21 GREEN，首轮扩展后的 24 项专项、录制/Local Git/谱系/Host 回归均已纳入最终完整验证；原始五段 query/hash/provenance 文件无改动，replay misses 自检通过。
+- [x] (2026-10-30 SGT) Batch 3 本地部分：固定 pnpm 10.28.2，`pnpm verify` 首次实现为 typecheck 成功、2563/2563 产品测试和 7/7 MVP pass；`pnpm run boundaries` 9/9 pass，`node scripts/workflow-check.mjs` 无发现，`git diff --check` 成功。人工五类目复核未发现凭据、本机身份/路径、个人信息、内部系统或保密内容。
+- [x] (2026-10-30 SGT) 独立审查修复：原 `0c8ba52` 在输入别名与并发拒绝上有两项 P1。新增 9 项有判别力回归先得到 8 fail / 1 pass（原 transport 篡改负控保持通过）；primitive 快照与 ReadOnly latch 最小修复后，完整 create 专项 33/33 pass。修复后 `pnpm verify` 为 typecheck 成功、2572/2572 产品测试和 7/7 MVP pass，`workflow-check` 无发现、`git diff --check` 成功；独立限定复评 52/52 与两组修正 probes 通过，两P1均确认 addressed。
+- [x] (2026-10-30 SGT) Batch 3 独立验收与源码交付：协调者复核完整审查和限定复评，在当前 main 基线上重新运行 2586+7；源码 head cf7873f 的 hosted checks 全成功、closing #436/base main/CLEAN/空 review threads 已回读。文档归档后的最终 head 仍执行同一远端检查规则，满足后才设置 ready；合并留给人类。
 
 ## Surprises & Discoveries
 
@@ -231,6 +235,11 @@ shared ambiguous 场景可模拟未写入的未知失败；专项 dropped-ack �
 Core Degraded 允许显式尝试，不能把未知写权限误读为一律拒绝；同时 cached registry 不随写 403 自动刷新，provider 必须有本地 ReadOnly 拒绝门。
 Host 重组可能复用 developmentCache，因此“读成功即解除写拒绝”与“普通重组一定恢复”都不成立；本轮采用显式新实例/完整 composition 重启边界。
 原录制查询不可加入未录制 mutation 哈希；新增操作独立分组保存原读证据，无需伪重录。
+扩大回归出现唯一旧断言失败：Host 目录缓存测试精确期待只有两个 read permission key；新增 create capability 后必须把 create 的独立 Degraded 写入期望。该断言同步不涉及 Host 实现，已在允许文件表加入；首次扩大回归为 169/170 pass。
+首次完整 `pnpm verify` 的产品测试为 2562/2563 pass，唯一失败是 `repository-routing.test.js` 的 GitHub 型替身仍禁用 create，声明集合与生产不一致；因此只扩充该 e2e 装配，创建权限仍未知。自审还发现合成平台各分支同 SHA，补充零差异 pair 拒绝测试先 RED（Missing expected rejection），再为两个 base 配不同提交并拒绝零差异。
+最后的混合坏形状测试先 RED：ref 名称不匹配时，短路判断漏过缺失的 ref.repository，把畸形响应报成 conflict。改为先完整读取形状再比较身份后，最终 `pnpm verify` 全绿；这只纠正预检错误分类，所有失败仍零 mutation。
+
+独立审查在 `0c8ba52` 复现两个此前 GREEN 未覆盖的 P1：ack 再读 caller input，可能确认未发送 marker；并发 preflight 或迟到 mutation 结果可能解除明确写拒绝。复现回归先 RED 后 GREEN；修复只固化一次意图快照和同实例拒绝 latch，不加锁、第二账本或 Core 状态。
 
 ## Decision Log
 
@@ -239,6 +248,12 @@ Host 重组可能复用 developmentCache，因此“读成功即解除写拒绝�
 - Decision：选择合法双 base 共享套件，保留全部 liar。Rationale：既保留两候选判别力，又少于新增种子协议的改动。Date/Author：2026-10-30 SGT / 独立计划审稿者。
 - Decision：body 原样承载 marker，send 后未知统一 ambiguous。Rationale：无服务端幂等承诺，确认与耐久恢复归 Core。Date/Author：2026-10-30 SGT / 独立计划审稿者。
 - Decision：按 Global Constraints 严格计数停线。Rationale：<800/<1300 是本次交付要求，不用弱化测试换取规模。Date/Author：2026-10-30 SGT / 独立计划审稿者。
+
+- Decision：允许同步 Host 目录缓存测试的权限快照断言，create 独立期待 Degraded。Rationale：首次扩大回归揭示旧断言忽略新增 key，不能靠隐藏真实 capability 修复；协调者明确同意，只扩测试不改 Host。Date/Author：2026-10-30 SGT / 实施者与协调者。
+
+- Decision：同步 repository-routing 的 GitHub 型替身为两读加 create，permission 的 create 仍 Degraded；为合成 main/release 预置不同 base 提交。Rationale：完整回归与自审暴露测试前提漂移，协调者同意必要装配修复；无产品扩界。Date/Author：2026-10-30 SGT / 实施者与协调者。
+
+- Decision：使用冻结的 primitive 意图快照作为唯一 ack oracle，并使 ReadOnly 仅由新实例恢复未知。Rationale：独立反例证明 mutable caller 与迟到结果能推翻发送意图/明确拒绝；保留已发送成功的真实对象，同时隔离权限状态，零新增框架。Date/Author：2026-10-30 SGT / 实施者，协调者授权修复。
 
 ## Idempotence and Recovery
 
@@ -254,14 +269,31 @@ Core 后续调用者提供 actor/ProviderBinding/幂等键和 marker，拥有 pe
 
 ## Outcomes & Retrospective
 
-当前产物是待实施规格，未改产品代码、未执行 mutation、未证明真实 GitHub 创建或 #235/#437 端到端闭环。
+2026-10-30 10:57 SGT / 协调者：独立审查原 head 发现两项 P1（可变输入 ack oracle、并发解除 ReadOnly），均以有效 RED/GREEN 修复，限定复评 52/52 与独立 probes 通过。更新到 `main@b19b4eac4f12aa40c05d75b492f3335299874641` 后，在 `feature/github-pr-creation` 的源码 head `cf7873f9e331225dd11755b52b3d52ed012bb6db` 重新执行 `pnpm verify`，2586+7 全通过。GitHub PR #464 当前源码 head 的全部 checks 成功，包含 PR Fast Gate、Merge Gate、CodeQL 与规则检查；线程分页回读为空，base=main、mergeState=CLEAN，仍由人类评审决定合并。
+
+实际代码/测试/config 增删 590；最终文档用 `node scripts/rule-checks.mjs size origin/main` 重算，须 <1300。本次归档与索引只改文档，最终 push 后仍重新核对相同门禁；不沿用旧 head。PR/issue 双向 closing、assignee、标签、milestone 和 Project 字段已按实际结果维护，规划 Status 和原生依赖未写。外部 actor=SingularityKChen，目标 GitHub repository/project10，幂等键 `2026-10-30:436:delivery`，结果为同一 PR 更新。
+
+本轮已实现 GitHub adapter 的原生创建闭环：严格预检、一次 mutation、完整回执核对、保守未知结果、独立写权限与 body 标记读回；合成平台和全部本地回归通过。没有发出真实平台 mutation，没有证明真实 GitHub 写入、已安装 Host、#235/#437 端到端闭环或 hosted CI。
+执行上下文为 `.worktrees/github-pr-creation`、`feature/github-pr-creation`；起始 head `4375505`、实际 base `2c599d6`。首轮源代码/测试/config A+D 为 484；两项 P1 修复后为 590，包含全部新文件和两处经确认的必要旧装配更新，低于严格 800 门禁；文档 294，低于 1300。工作区外日志只作运行态证据。
 协调者报告基线 `pnpm verify` 为本地 2551+7 pass；此为转交证据，不是本审稿者运行、当前实现验证或 hosted CI，实施者必须按批次补真实命令结果。
 剩余边界：分支预检无 CAS、marker 可被平台用户编辑、registry 权限快照不自动刷新；不偷偷补第二状态机。若实施出现非范围内可靠性折衷，先写 `docs/exec-plan/tech-debt-tracker.md` 再接受延期。
 
 ### Artifacts and Notes
 
-实施者把每批命令、检出分支/head、实际结果和 A+D 记入本计划；原始运行日志留在工作树运行态目录，不进入正式 docs。现阶段没有新增技术债的批准，后续出现折衷按 tracker 流程记录。
+本计划已记录各批命令、起始 head、实际 base、RED/GREEN、完整验证和 A+D；原始日志留在临时运行态目录，不进入正式 docs。未新增已批准技术债；独立验收及远端证据由交付协调者补齐。
 
 ## Bottom Change Note
 
 Change Note (2026-10-30 SGT)：独立综合两份方案并核对当前源代码，选定 GraphQL、双 base 测试与显式实例重建权限恢复；限定 adapter 证据，写入严格预算和可执行 TDD/交付门禁。计划仍 Active，全部产品实现待执行。
+
+Change Note (2026-10-30 SGT)：记录 Batch 1 真实 RED/GREEN，以及首次扩大回归暴露的 Host 目录旧快照断言；扩展允许测试写集并重估预算，产品边界不变。
+
+Change Note (2026-10-30 SGT)：记录首次完整验证唯一旧装配失败及同 SHA 合成前提修复的 RED；扩充必要 e2e 测试允许写集。
+
+Change Note (2026-10-30 SGT)：记录生产实现、自审两条真实 RED/GREEN、最终完整本地验证与 484 行代码规模；保留独立验收、远端回读及真实平台证据的未完成边界。
+
+Change Note (2026-10-30 SGT)：独立审查发现两项 P1 后补真实 RED，固化 provider 自有意图与同实例 ReadOnly 黏性；记录专项 33/33 GREEN，等待全量重验和 scoped recheck。
+
+Change Note (2026-10-30 SGT)：两项 P1 修复后完整本地验证 2572+7 全通过；当前代码 A+D 590，保持 scoped recheck 与远端交付未完成边界。
+
+Change Note (2026-10-30 10:57 SGT)：记录独立两P1修复、最新 main 本地回归及源码 head hosted checks，归档计划并保留实际平台/产品验收边界。

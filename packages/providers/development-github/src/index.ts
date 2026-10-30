@@ -1,7 +1,7 @@
 /**
  * @harness-projects/provider-development-github —— GitHub 研发 Provider
  *
- * Responsibility: 实现 Development 能力契约的只读部分（#231）：仓库、分支、提交、按 head 分支读变更请求与观察流；写入与工作树不在此包。
+ * Responsibility: 实现仓库、分支、提交、变更请求读取与观察，以及原生 PR 单次创建；工作树不在此包。
  * Allowed imports: @harness-projects/domain、@harness-projects/capabilities
  */
 
