@@ -465,7 +465,7 @@ test('交付：刷新命令的结果会原样到达 wire，provider 的错误文
   assert.equal(started.writeState, CommandWriteState.Confirmed)
   providers.delivery.listPipelineRuns = async () => ({ ok: false, error: { code: 'unavailable', message: 'RAW-PROVIDER-TEXT token=SECRET-VALUE /secret/path' } })
   const outage = await controller.commands.refreshDeliveryFacts({ workItemId: items[0].entityId, repositoryId: REPOSITORY }, { actorRef })
-  assert.deepEqual(outage.value.gaps, [{ key: 'delivery.pipeline.read' }], '缺口只带能力键')
+  assert.deepEqual(outage.value.gaps, [{ key: 'delivery.pipeline.read', code: 'unavailable' }], '缺口只带能力键与安全结构码')
   assert.ok(!JSON.stringify(outage).includes('RAW-PROVIDER-TEXT'), 'provider 的错误文字（可能带路径或令牌）不得进入 wire')
   // writeState 只说明没有外部写入、本地没有失败（local_only）；是否真的提交了新事实看 value.applied / anchored / gaps。
   const noop = await controller.commands.refreshDeliveryFacts({ workItemId: items[1].entityId, repositoryId: REPOSITORY }, { actorRef })

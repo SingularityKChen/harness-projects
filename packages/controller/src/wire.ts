@@ -68,7 +68,7 @@ export interface WireCapabilityEntry { readonly key: CapabilityKey; readonly acc
  * 可能点名仓库键、连接 id 与外部身份 id（#385；缺路由的拒绝原样带上仓库挂载指向的 `externalIdentityId`）——与开始工作结果里的文案相同；
  * 连接 id 与外部身份 id 都是内部不透明 id、不是凭据或平台 id，实体的 `content.bindingId` 本来就下发连接 id。
  */
-export interface WireRepositoryEntry { readonly id: string; readonly capabilities: readonly WireCapabilityEntry[] }
+export interface WireRepositoryEntry { readonly accessVersion?: string; readonly id: string; readonly capabilities: readonly WireCapabilityEntry[] }
 
 /** 规划来源（#383）：已组合的规划挂载的绑定 id 与显示名（引导读到的项目标题）；不带账号、句柄或配置。页面没给来源名时 ui-model 用 `name`。 */
 export interface WirePlanningSource { readonly bindingId: ProviderBindingId; readonly name: string; readonly mappingOrigin?: 'derived' | 'user' }
@@ -161,7 +161,7 @@ export function toWireSnapshot(
     .sort((left, right) => (left.entityId < right.entityId ? -1 : 1))
   const revision = workspaceRevision ?? revisionOf(entities)
   const wireCapability = ({ key, access, reason }: EffectiveCapability): WireCapabilityEntry => ({ key, access, reason })
-  const repositories = metadata.repositories.map(({ id, capabilities }) => ({ id, capabilities: capabilities.map(wireCapability) }))
+  const repositories = metadata.repositories.map(({ id, capabilities, accessVersion }) => ({ ...(accessVersion === undefined ? {} : { accessVersion }), id, capabilities: capabilities.map(wireCapability) }))
   const planning = metadata.planningSource
   return {
     generation, revision,

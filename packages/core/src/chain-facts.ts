@@ -10,7 +10,8 @@ import {
   CapabilityKey, providerErr, providerError, providerOk,
   type ExternalObjectRef, type ProviderNativeIdentity, type ProjectError, type ProviderPage, type ProviderResult, type ResolvedBinding,
 } from '@harness-projects/capabilities'
-import { EngineeringFactKind, EntityKind, ProviderErrorCode, type EntityId, type WorkspaceId } from '@harness-projects/domain'
+import { EngineeringFactKind, EntityKind, ProjectErrorCode, ProviderErrorCode, type EntityId, type WorkspaceId } from '@harness-projects/domain'
+import type { DeliveryReadTicket } from './runtime-access.ts'
 import { gateCommand } from './capabilities.ts'
 import { CHANGE_REQUEST_READ_ROUTE, routeDevelopment } from './development-route.ts'
 import type { CoreContext } from './context.ts'
@@ -19,7 +20,7 @@ import { changeRequestEntityId, validNativeIdentity } from './identity.ts'
 import { branchNameFor, worktreeKeyFor } from './git-provisioning.ts'
 import { asEntityId, chainEntityId, type ChainNode } from './relations.ts'
 
-export interface CapabilityGap { readonly key: CapabilityKey; readonly reason: string }
+export interface CapabilityGap { readonly key: CapabilityKey; readonly reason: string; readonly code?: ProjectErrorCode; readonly bindingId?: string }
 export interface DeliveryScopeInput { readonly workItemId: string; readonly repositoryId: string | undefined }
 
 export interface ChainFacts {
@@ -27,6 +28,7 @@ export interface ChainFacts {
   readonly changeRequest: ChainNode; readonly pipelines: readonly ChainNode[]; readonly checks: readonly ChainNode[]
   /** 仅本次确认的 PR 定位与声明；写者在同一事务内登记并复验，不作为快照身份权威。 */
   readonly changeRequestIdentity: Pick<ChangeRequestFact, 'ref' | 'nativeIdentity'> | undefined
+  readonly reads: readonly DeliveryReadTicket[]
   readonly gaps: readonly CapabilityGap[]
 }
 
@@ -148,7 +150,7 @@ function factFor(status: string, conclusion: string | undefined): EngineeringFac
 }
 
 /** 一次读取的路由结论：成功时带服务这次读取的挂载，Development 读取另带该连接下的仓库引用（调用方只用它调 provider）。 */
-type ReadRoute = { readonly ok: true; readonly binding: ResolvedBinding; readonly repository?: ExternalObjectRef } | { readonly ok: false; readonly error: ProjectError | undefined }
+type ReadRoute = { readonly access?: { context: CoreContext; target: string; reads: DeliveryReadTicket[] }; readonly ok: true; readonly binding: ResolvedBinding; readonly repository?: ExternalObjectRef } | { readonly ok: false; readonly error: ProjectError | undefined }
 
 /** key 级解析：能力被策略摘掉或没有绑定时，路由失败，调用方折成缺口。 */
 function readRoute(context: CoreContext, key: CapabilityKey): ReadRoute {
@@ -170,12 +172,20 @@ async function developmentReadBinding(context: CoreContext, repositoryId: string
  */
 async function gated<T>(route: ReadRoute, key: CapabilityKey,
   run: (binding: ResolvedBinding, repository: ExternalObjectRef | undefined) => Promise<ProviderResult<T>> | undefined): Promise<ReadResult<T>> {
-  if (!route.ok) return { value: undefined, gap: { key, reason: route.error?.message ?? '能力不可用' } }
+  if (!route.ok) return { value: undefined, gap: { key, ...(route.error === undefined ? {} : { code: route.error.code }), reason: route.error?.message ?? '能力不可用' } }
+  const ticket = route.access?.context.runtimeAccess.captureDelivery(route.binding.ref.bindingId, key, route.access.target)
+  if (ticket) { await route.access!.context.runtimeAccess.beginDelivery(ticket); route.access!.reads.push(ticket) }
   const pending = run(route.binding, route.repository)
-  if (pending === undefined) return { value: undefined, gap: { key, reason: '绑定没有该域的 provider 实例' } }
-  const result = await pending
-  if (!result.ok) return { value: undefined, gap: { key, reason: result.error.message } }
-  if (!Array.isArray(result.value)) return { value: undefined, gap: { key, reason: '分页未读完' } }
+  if (pending === undefined) return { value: undefined, gap: { key, bindingId: route.binding.ref.bindingId, code: ProjectErrorCode.NotSupported, reason: '绑定没有该域的 provider 实例' } }
+  let result: Awaited<typeof pending>
+  try { result = await pending } catch (error) { if (ticket) await route.access!.context.runtimeAccess.settleDelivery(ticket, false); throw error }
+  if (!result.ok) {
+    if (result.error.code === ProjectErrorCode.PermissionDenied && ticket) route.access!.context.runtimeAccess.denyDelivery(ticket)
+    if (ticket) await route.access!.context.runtimeAccess.settleDelivery(ticket, result.error.code === ProjectErrorCode.PermissionDenied)
+    return { value: undefined, gap: { key, bindingId: route.binding.ref.bindingId, code: result.error.code, reason: '读取未完成' } }
+  }
+  if (ticket) await route.access!.context.runtimeAccess.settleDelivery(ticket, false)
+  if (!Array.isArray(result.value)) return { value: undefined, gap: { key, bindingId: route.binding.ref.bindingId, code: ProjectErrorCode.Unavailable, reason: '分页未读完' } }
   return { value: result.value, gap: undefined }
 }
 
@@ -221,8 +231,8 @@ function refFor(binding: ResolvedBinding, kind: string, externalId: string): Ext
   return { bindingId: binding.ref.bindingId, objectKind: kind, externalId, url: undefined }
 }
 
-async function readPipelines(context: CoreContext, repositoryId: string, commit: string, gaps: CapabilityGap[]): Promise<readonly ChainNode[]> {
-  const read = await gated(readRoute(context, CapabilityKey.DeliveryPipelineRead), CapabilityKey.DeliveryPipelineRead, (binding) => {
+async function readPipelines(context: CoreContext, repositoryId: string, commit: string, gaps: CapabilityGap[], reads: DeliveryReadTicket[]): Promise<readonly ChainNode[]> {
+  const read = await gated(observeRoute(context, readRoute(context, CapabilityKey.DeliveryPipelineRead), repositoryId, reads), CapabilityKey.DeliveryPipelineRead, (binding) => {
     const delivery = binding.delivery
     if (delivery === undefined) return undefined
     return collectDeliveryPages(commit, (cursor) => delivery.listPipelineRuns({ repository: refFor(binding, 'repository', repositoryId), commit, cursor, limit: PAGE_LIMIT }))
@@ -235,8 +245,8 @@ async function readPipelines(context: CoreContext, repositoryId: string, commit:
   ))
 }
 
-async function readChecks(context: CoreContext, repositoryId: string, commit: string, gaps: CapabilityGap[]): Promise<readonly ChainNode[]> {
-  const read = await gated(readRoute(context, CapabilityKey.DeliveryCheckRead), CapabilityKey.DeliveryCheckRead, (binding) => {
+async function readChecks(context: CoreContext, repositoryId: string, commit: string, gaps: CapabilityGap[], reads: DeliveryReadTicket[]): Promise<readonly ChainNode[]> {
+  const read = await gated(observeRoute(context, readRoute(context, CapabilityKey.DeliveryCheckRead), repositoryId, reads), CapabilityKey.DeliveryCheckRead, (binding) => {
     const delivery = binding.delivery
     if (delivery === undefined) return undefined
     return collectDeliveryPages(commit, (cursor) => delivery.listChecks({ repository: refFor(binding, 'repository', repositoryId), commit, cursor, limit: PAGE_LIMIT }))
@@ -301,10 +311,13 @@ function skeleton(context: CoreContext, kind: EntityKind, slot: string, label: s
 type ChainView = Awaited<ReturnType<typeof readExecutionContext>>
 
 /** 交付链的全部节点：真实事实优先，缺失的部分保留骨架节点，让"缺哪一跳"是可查询的。 */
+function observeRoute(context: CoreContext, route: ReadRoute, target: string, reads: DeliveryReadTicket[]): ReadRoute {
+  return route.ok ? { ...route, access: { context, target, reads } } : route
+}
 export async function readChainFacts(context: CoreContext, scope: DeliveryScopeInput): Promise<ChainFacts> {
-  const gaps: CapabilityGap[] = []
+  const gaps: CapabilityGap[] = [], reads: DeliveryReadTicket[] = []
   const view = await readExecutionContext(context, { workItemId: scope.workItemId, repositoryId: scope.repositoryId ?? '' })
-  const route = scope.repositoryId === undefined ? undefined : await developmentReadBinding(context, scope.repositoryId)
+  const route = scope.repositoryId === undefined ? undefined : observeRoute(context, await developmentReadBinding(context, scope.repositoryId), scope.repositoryId, reads)
   if (route?.ok === false) collect(gaps, { key: CapabilityKey.DevelopmentRepositoryRead, reason: route.error?.message ?? '不能定位仓库绑定的 capability' })
   const repository = route?.ok === true ? route.repository : undefined
   const worktree = worktreeNode(context, scope, view)
@@ -318,9 +331,9 @@ export async function readChainFacts(context: CoreContext, scope: DeliveryScopeI
   const changeRequest = changeRequestNode(context, repository, branch, crFact)
   // 事实必须挂在已观察到的锚点上（ExecPlan D4）：head 未观察到就不读流水线，也不得以 commit: undefined 读取整个仓库的运行；
   // 检查同理，没有已观察到的变更请求就不读。此时只保留"缺哪一跳"的骨架，骨架不进谱系。
-  const pipelines = head === undefined || scope.repositoryId === undefined ? [] : await readPipelines(context, scope.repositoryId, head, gaps)
+  const pipelines = head === undefined || scope.repositoryId === undefined ? [] : await readPipelines(context, scope.repositoryId, head, gaps, reads)
   const checks = crFact === undefined || head === undefined || scope.repositoryId === undefined
-    ? [] : await readChecks(context, scope.repositoryId, head, gaps)
+    ? [] : await readChecks(context, scope.repositoryId, head, gaps, reads)
   const slot = scope.repositoryId ?? 'unbound'
   return {
     workItem: await workItemNode(context, scope.workItemId),
@@ -331,6 +344,6 @@ export async function readChainFacts(context: CoreContext, scope: DeliveryScopeI
     changeRequestIdentity: crFact,
     pipelines: pipelines.length > 0 ? pipelines : [skeleton(context, EntityKind.PipelineRun, `${slot}|${branch}|pipeline`, branch, '流水线事实尚未观察到')],
     checks: checks.length > 0 ? checks : [skeleton(context, EntityKind.CheckRun, `${slot}|${branch}|check`, branch, '检查事实尚未观察到')],
-    gaps,
+    reads, gaps,
   }
 }

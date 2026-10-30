@@ -154,7 +154,7 @@ export async function createContext(deps: CoreDeps): Promise<CoreContext | undef
   const cursor = planning === undefined ? undefined : await storage.getSyncCursor(workspace.id, planning.ref.bindingId, PLANNING_SYNC_SCOPE)
   const denied = (cursor?.state === 'syncing' && cursor.lastErrorCode !== undefined)
     || (cursor?.state !== 'healthy' && cursor?.lastErrorCode === ProjectErrorCode.PermissionDenied)
-  const runtimeAccess = createRuntimeAccess(providerRegistry(prepared.bindings), denied)
+  const runtimeAccess = createRuntimeAccess(providerRegistry(prepared.bindings), storage, workspace.id, denied)
   return {
     storage, workspaceId: workspace.id, runtimeAccess, get registry() { return runtimeAccess.registry },
     clock: deps.clock ?? (() => new Date().toISOString()),
@@ -206,6 +206,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
 export function unavailableCore(reason: string): CoreApi {
   const error = projectError(ProjectErrorCode.NotSupported, reason)
   const queries: CoreQueries = {
+    getDeliveryAccessVersion: () => '0:0:0',
     getStartWorkTargetError: async () => error,
     listProviderBindings: async () => [],
     getPlanningSnapshot: async () => ({ views: [], revision: 0, sync: { degraded: true, stale: true, reason }, metadata: { workspace: undefined, capabilities: [], repositories: [], planningSource: undefined } }),

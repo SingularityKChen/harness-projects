@@ -11,9 +11,10 @@ import {
 import {
   EntityKind, RelationSource, RelationState, RelationType, WriteState, type EngineeringFactKind, type EntityId, type Relation,
 } from '@harness-projects/domain'
-import { gateCommand, resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
+import { gateBinding, gateCommand, resolveWriteTarget, toProjectError, unsupportedCapability } from './capabilities.ts'
 import { worktreeEntityId, type DeliveryScopeInput } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
+import { CHANGE_REQUEST_READ_ROUTE, selectDevelopment } from './development-route.ts'
 import { contextIdFor } from './execution-context.ts'
 import { EdgeProvenance, asEntityId } from './relations.ts'
 
@@ -40,9 +41,9 @@ export interface DeliveryCapabilityState { readonly key: CapabilityKey; readonly
 export interface DeliveryFreshness { readonly kind: DeliveryFactSetKind; readonly confirmedAt: string | undefined; readonly stale: boolean }
 
 /** 链上没有跳的位置为什么没有跳（#222）：读时由本地事实算出，不落库，也不进关系表。 */
-export const DeliveryGapReason = { NotStarted: 'not_started', NotObserved: 'not_observed', NotRefreshed: 'not_refreshed', Unconfirmed: 'unconfirmed' } as const
+export const DeliveryGapReason = { NotStarted: 'not_started', NotObserved: 'not_observed', NotRefreshed: 'not_refreshed', Unconfirmed: 'unconfirmed', PermissionDenied: 'permission_denied' } as const
 export type DeliveryGapReason = (typeof DeliveryGapReason)[keyof typeof DeliveryGapReason]
-export interface DeliveryGap { readonly entityKind: EntityKind; readonly reason: DeliveryGapReason }
+export interface DeliveryGap { readonly entityKind: EntityKind; readonly reason: DeliveryGapReason; readonly key?: CapabilityKey; readonly layer?: 'permission' | 'capability' | 'policy' }
 
 export interface DeliveryProjection {
   /** 作用域无效（缺失、工作项不是字符串）时为 undefined，同时带 `invalid_input`。 */
@@ -94,7 +95,32 @@ function optionalCapabilities(context: CoreContext): readonly DeliveryCapability
  * 只读已提交事实（#221）：执行上下文记录、关系表、交付事实快照与本地 registry；不调 provider，不写任何东西。
  * tracks / has_worktree 只在开始工作写过时出现；其余每一跳是快照里的一个节点加上它在关系表里的那条边（身份沿谱系传播，不重新识别）。
  */
+/** 当前目标的门只读本地 authority；锚点拒读沿集合依赖传播。 */
+export async function deliveryMasks(context: CoreContext, scope: DeliveryScopeInput): Promise<ReadonlyMap<string, Pick<DeliveryGap, 'key' | 'layer'>>> {
+  const masks = new Map<string, Pick<DeliveryGap, 'key' | 'layer'>>()
+  await context.runtimeAccess.syncDelivery(scope.repositoryId ?? '')
+  const registry = context.runtimeAccess.deliveryRegistry(scope.repositoryId ?? '', scope.workItemId)
+  const { anchor } = CHANGE_REQUEST_READ_ROUTE
+  const route = await selectDevelopment({ ...context, registry: context.runtimeAccess.probeRegistry }, scope.repositoryId ?? '', anchor[0])
+  const dev = route.ok ? registry.bindings.find((binding) => binding.ref.bindingId === route.binding.ref.bindingId) : undefined
+  for (const [key, kinds] of [
+    [CapabilityKey.DevelopmentRepositoryRead, ['commit', 'change_request', 'pipeline_run', 'check_run']],
+    [CapabilityKey.DevelopmentChangeRequestRead, ['change_request', 'check_run']],
+    [CapabilityKey.DeliveryPipelineRead, ['pipeline_run']], [CapabilityKey.DeliveryCheckRead, ['check_run']],
+  ] as const) {
+    const gate = key.startsWith('development.') ? gateBinding(dev, key, 'read') : gateCommand(registry, key, 'read')
+    const entry = (key.startsWith('development.') ? dev : registry.bindings.find((binding) => binding.capabilities.some((entry) => entry.key === key)))?.capabilities.find((entry) => entry.key === key)
+    if (!gate.allowed) for (const kind of kinds) if (!masks.has(kind)) masks.set(kind, { key, layer: entry?.reason?.includes('permission') || gate.error?.code === ProjectErrorCode.PermissionDenied ? 'permission' : context.policy[key] === 'unavailable' ? 'policy' : 'capability' })
+  }
+  return masks
+}
 export async function readDeliveryProjection(context: CoreContext, scope: DeliveryScopeInput): Promise<DeliveryProjection> {
+  for (;;) {
+    const epoch = context.runtimeAccess.deliveryEpoch, value = await deliveryProjection(context, scope)
+    if (epoch === context.runtimeAccess.deliveryEpoch) return value
+  }
+}
+async function deliveryProjection(context: CoreContext, scope: DeliveryScopeInput): Promise<DeliveryProjection> {
   const contextId = contextIdFor(context.workspaceId, scope.workItemId, scope.repositoryId ?? '')
   const contextEntity = asEntityId(contextId)
   const record = await context.storage.getExecutionContext(contextId)
@@ -110,6 +136,7 @@ export async function readDeliveryProjection(context: CoreContext, scope: Delive
   }]
   // 缺口：链的六个位置里没有跳的那些，按链的顺序，原因由本地事实算出（不落库）。上下文记录不存在是没开始；记录在而命令边不在是没观察到
   // （开始工作的最终事务失败，TD-009）；其余四个位置看快照：没有快照是从未刷新，集合从未完整读到是未确认，否则是完整读到而为空（确认为没有）。
+  const masks = record === undefined ? new Map() : await deliveryMasks(context, scope)
   const gaps: DeliveryGap[] = []
   const missing = (found: DeliveryLineageHop[], entityKind: EntityKind, reason: DeliveryGapReason): DeliveryLineageHop[] => { if (found.length === 0) gaps.push({ entityKind, reason }); return found }
   const commandReason = record === undefined ? DeliveryGapReason.NotStarted : DeliveryGapReason.NotObserved
@@ -119,6 +146,8 @@ export async function readDeliveryProjection(context: CoreContext, scope: Delive
     ...missing(record === undefined ? [] : hop(relations.find((relation) => relation.type === RelationType.HasWorktree && relation.from === contextEntity && relation.to === worktreeId), EntityKind.Worktree,
       { externalId: record.worktreeExternalId, label: record.branchExternalId }, EdgeProvenance.Command), EntityKind.Worktree, commandReason),
     ...SETS.flatMap(({ kind, entity, edge, key }) => {
+      const mask = masks.get(kind)
+      if (mask) { gaps.push({ entityKind: entity, reason: DeliveryGapReason.PermissionDenied, ...mask }); return [] }
       const set = snapshot?.sets.find((candidate) => candidate.kind === kind)
       return missing((set?.nodes ?? []).flatMap((node) => hop(relations.find((candidate) => candidate.from === node.entityId && candidate.type === edge && candidate.to === set?.anchorId),
         entity, node, EdgeProvenance.ProviderRead, set?.stale, key)), entity, record === undefined ? DeliveryGapReason.NotStarted : set === undefined ? DeliveryGapReason.NotRefreshed
@@ -127,8 +156,8 @@ export async function readDeliveryProjection(context: CoreContext, scope: Delive
   ]
   return {
     workItemId: scope.workItemId, repositoryId: scope.repositoryId, hops, optional: optionalCapabilities(context),
-    degraded: record !== undefined && (snapshot === undefined || snapshot.sets.some((set) => set.stale)), error: undefined,
-    attemptedAt: snapshot?.attemptedAt, freshness: (snapshot?.sets ?? []).map(({ kind, confirmedAt, stale }) => ({ kind, confirmedAt, stale })), gaps,
+    degraded: record !== undefined && (masks.size > 0 || snapshot === undefined || snapshot.sets.some((set) => set.stale)), error: undefined,
+    attemptedAt: snapshot?.attemptedAt, freshness: (snapshot?.sets ?? []).map(({ kind, confirmedAt, stale }) => ({ kind, confirmedAt: masks.has(kind) ? undefined : confirmedAt, stale: masks.has(kind) || stale })), gaps,
   }
 }
 

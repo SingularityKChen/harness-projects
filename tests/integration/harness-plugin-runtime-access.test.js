@@ -5,17 +5,18 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { FaultKind, fixtureProjectRef, createFakeDevelopmentProvider } from '@harness-projects/provider-fake'
+import { FaultKind, fixtureProjectRef, createFakeDevelopmentProvider, createFakeDeliveryProvider, refOf } from '@harness-projects/provider-fake'
 import { defaultIdFactory } from '@harness-projects/core'
 import { registerRepository } from '../../packages/core/src/development-route.ts'
 import { SqliteStorage } from '@harness-projects/storage-sqlite'
-import { WorkItemApp } from '@harness-projects/ui'
+import { WorkItemApp, DeliveryLineageSection } from '@harness-projects/ui'
 import { createHostComposition } from '../../apps/harness-plugin/src/host-composition.ts'
 import { apply } from '../../apps/harness-plugin/src/client.ts'
 import { catalogOf } from '../../apps/harness-plugin/src/host-providers.ts'
 import { installHostRemote } from '../../apps/harness-plugin/src/remote.ts'
 import { createCarrier, createConnection, loadRemoteStream } from '../fixtures/remote-stream-double.js'
 import { WORKSPACE, dump, fakePlanningEntry, mount, seed, seedWorkspace } from './fixtures/host-seed.js'
+import { deriveWorkItemDetailView } from '@harness-projects/ui-model'
 const require = createRequire(new URL('../../packages/ui/package.json', import.meta.url))
 const React = require('react'), { renderToStaticMarkup } = require('react-dom/server')
 const turn = () => new Promise((resolve) => setTimeout(resolve, 5))
@@ -23,14 +24,15 @@ async function until(predicate) { for (let n = 0; n < 200 && !predicate(); n++) 
 async function open(t) {
   const root = await mkdtemp(path.join(tmpdir(), 'runtime-host-')), dataPath = path.join(root, 'workspace.sqlite')
   let planning, Panel
-  const development = createFakeDevelopmentProvider()
+  const development = createFakeDevelopmentProvider(), delivery = createFakeDeliveryProvider()
   const entry = fakePlanningEntry((provider) => { planning = provider }), createPlanning = entry.create
-  entry.create = (input) => input.binding.domain === 'development' ? development : createPlanning(input)
+  entry.create = (input) => input.binding.domain === 'development' ? development : input.binding.domain === 'delivery' ? delivery : createPlanning(input)
   const catalog = catalogOf([entry])
   await seed(dataPath, catalog, async (storage) => {
     await seedWorkspace(storage)
     await storage.putProviderBinding(mount('00000000-0000-4000-8000-0000000000b1', 'planning', 'harness.fake'))
     await storage.putProviderBinding(mount(development.gate.bindingId, 'development', 'harness.fake'))
+    await storage.putProviderBinding(mount(delivery.gate.bindingId, 'delivery', 'harness.fake'))
     await registerRepository(storage, defaultIdFactory, WORKSPACE, 'repo-alpha', [development.gate.bindingId])
   })
   const host = await createHostComposition({ dataPath, workspaceId: WORKSPACE, catalog, resolveCredential: async () => undefined, watchIntervalMs: 5 })
@@ -48,7 +50,7 @@ async function open(t) {
   t.after(async () => { for (const stop of effects.reverse()) await stop?.(); await installed.dispose(); await host.dispose(); await rm(root, { recursive: true, force: true }) })
   const props = Panel().props
   await until(() => props.source.getSnapshot()?.connection.connected)
-  return { development, host, service: installed.service, installed, effects, planning, carrier, connection, rpc, props, dataPath, catalog }
+  return { development, delivery, host, service: installed.service, planning, carrier, connection, rpc, props, dataPath, catalog, installed, effects }
 }
 
 test('production Host/SQLite/remote/client.apply masks list and an open detail, then explicitly revalidates the same source', async (t) => {
@@ -161,6 +163,137 @@ test('ignored older denial returns fixed safe errors over the real remote', asyn
   release[0].resolve(); const result = await old
   assert.doesNotMatch(JSON.stringify(result), /protected-source-canary|native-locator-canary/)
   assert.equal((await h.service.baseline()).source.reason, 'permission_denied')
+})
+
+function openedSection(props) {
+  const cells = []; let cursor, last, effects = []
+  const cell = (make) => cells[cursor++] ?? (cells[cursor - 1] = make())
+  const dispatcher = { useRef: (value) => cell(() => ({ current: value })), useState: (value) => { const state = cell(() => ({ value })); return [state.value, (next) => { state.value = typeof next === 'function' ? next(state.value) : next }] }, useEffect: (run, deps) => { const state = cell(() => ({})); if (!state.deps || deps.some((value, index) => value !== state.deps[index])) effects.push(() => { state.cleanup?.(); state.cleanup = run() }); state.deps = deps } }
+  return { props, html() { cursor = 0; const shared = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED, previous = shared.ReactCurrentDispatcher.current; shared.ReactCurrentDispatcher.current = dispatcher; let element; try { element = DeliveryLineageSection(props) } finally { shared.ReactCurrentDispatcher.current = previous } last = element; return renderToStaticMarkup(element) }, refresh() { last.props.children.at(-1).props.onClick() }, flush() { const pending = effects; effects = []; pending.forEach((run) => run()) }, close() { cells.forEach((state) => state.cleanup?.()) } }
+}
+for (const reject of [false, true]) test(`production Delivery Host/watch/apply invalidates an open section before a late ${reject ? 'rejection' : 'success'} and recovers`, async (t) => {
+  const h = await open(t), read = () => h.props.source.getSnapshot()
+  const target = read().store.list().find((row) => row.entity.content.contentKind === 'work_item').entityId
+  const scope = { workspaceId: WORKSPACE, workItemId: target, repositoryId: 'repo-alpha' }
+  const started = await h.service.startWork({ kind: 'user' }, 'delivery-host', target, scope.repositoryId, undefined)
+  assert.equal(started.writeState, 'confirmed')
+  const context = await h.service.getExecutionContext(target, scope.repositoryId)
+  await h.development.createChangeRequest({ repository: refOf(h.development.gate.bindingId, 'repository', scope.repositoryId), head: context.context.branchExternalId, base: 'main', title: 'host-pr-canary', body: '' })
+  const token = () => JSON.stringify(read().repositories), reader = h.props.deliveryReader
+  let hold = false, finish
+  const section = openedSection({ scope, connected: true, accessToken: token(), reader: { refresh: (scope) => reader.refresh(scope), read: async (scope) => { const value = await reader.read(scope); if (hold) { hold = false; await new Promise((resolve, fail) => { finish = () => reject ? fail(new Error('late-private-canary')) : resolve() }) } return value } } })
+  t.after(section.close); section.html(); section.flush(); await until(() => /data-position="pipeline_run".*data-state=/.test(section.html()))
+  const beforePlanning = JSON.stringify(read().store.list()), beforeToken = token()
+  hold = true; section.refresh(); await until(() => finish !== undefined)
+  h.delivery.listPipelineRuns = async () => ({ ok: false, error: { code: 'permission_denied', message: 'private-provider-canary' } })
+  await reader.refresh(scope); await until(() => token() !== beforeToken)
+  section.props.accessToken = token()
+  assert.doesNotMatch(section.html(), /completed: success/, 'first render must discard old protected labels before effects')
+  section.flush(); await until(() => /delivery.pipeline.read/.test(section.html()))
+  finish(); await turn()
+  const hidden = section.html(); assert.match(hidden, /delivery.pipeline.read/); assert.match(hidden, /检查/); assert.doesNotMatch(hidden, /late-private-canary|private-provider-canary|completed: success/)
+  assert.equal(JSON.stringify(read().store.list()), beforePlanning)
+  assert.ok((await reader.read(scope)).projection.hops.some((hop) => hop.entityKind === 'check_run'))
+  h.delivery.listPipelineRuns = Object.getPrototypeOf(h.delivery).listPipelineRuns.bind(h.delivery)
+  const deniedToken = token(); await reader.refresh(scope); await until(() => token() !== deniedToken)
+  section.props.accessToken = token(); section.html(); section.flush(); await until(() => /completed: success/.test(section.html()))
+  assert.equal(h.carrier.opened, 1)
+})
+const nodes=(view,kind)=>view.hops.filter(hop=>hop.entityKind===kind)
+const tick=()=>new Promise(done=>setImmediate(done))
+const denied=()=>({ok:false,error:{code:'permission_denied',message:'synthetic-provider-canary'}})
+async function prepare(h, index=0) {
+ const target=h.props.source.getSnapshot().store.list().filter(row=>row.entity.content.contentKind==='work_item')[index].entityId
+ const scope={workspaceId:WORKSPACE,workItemId:target,repositoryId:'repo-alpha'}
+ assert.equal((await h.service.startWork({kind:'user'},'delivery-'+index,target,'repo-alpha',undefined)).writeState,'confirmed')
+ const context=await h.service.getExecutionContext(target,'repo-alpha')
+ await h.development.createChangeRequest({repository:refOf(h.development.gate.bindingId,'repository','repo-alpha'),head:context.context.branchExternalId,base:'main',title:'synthetic-pr-'+index,body:''})
+ await h.props.deliveryReader.refresh(scope)
+ assert.ok(nodes((await h.props.deliveryReader.read(scope)).projection,'pipeline_run').length)
+ return scope
+}
+async function reconnect(t,h) {
+ for(const stop of h.effects.reverse()) await stop?.()
+ await h.installed.dispose(); await h.host.dispose()
+ const host=await createHostComposition({dataPath:h.dataPath,workspaceId:WORKSPACE,catalog:h.catalog,resolveCredential:async()=>undefined,watchIntervalMs:60_000})
+ const installed=await installHostRemote({invocation:{peer:{id:'restarted-peer'}},provide:()=>()=>{},typert:{register:()=>()=>{}}},host)
+ const {RemoteStream,RemoteStreamCarrierError}=await loadRemoteStream(),carrier=createCarrier(RemoteStreamCarrierError),connection=createConnection()
+ const effects=[];let Panel
+ const remote=new Proxy({},{get:(_,name)=>name==='watch'?(signal)=>carrier.open(installed.service,signal):async(...args)=>({ok:true,value:await installed.service[name](...args)})})
+ const child={remote:{harnessProjects:remote,$stream:options=>new RemoteStream(connection,options)},effect(callback){effects.push(callback())},slots:{inject(_name,callback){callback()},register(meta,component){if(meta.name==='main')Panel=component}}}
+ await apply({remote:{$mount:async()=>{}},inject(_names,callback){callback(child)}})
+ const props=Panel().props
+ await until(()=>props.source.getSnapshot()?.connection.connected)
+ t.after(async()=>{for(const stop of effects.reverse())await stop?.();await installed.dispose();await host.dispose()})
+ return{host,service:installed.service,props}
+}
+
+test('real Host restart and client.apply do not revive untouched historical CI after another scope denial',async(t)=>{
+ const h=await open(t),current=await prepare(h,0),history=await prepare(h,1)
+ h.delivery.listPipelineRuns=async()=>denied()
+ await h.props.deliveryReader.refresh(current)
+ assert.equal(nodes((await h.props.deliveryReader.read(history)).projection,'pipeline_run').length,0)
+ const resumed=await reconnect(t,h)
+ const value=await resumed.props.deliveryReader.read(history)
+ t.diagnostic(JSON.stringify({newHostHistoricalPipelineNodes:nodes(value.projection,'pipeline_run').length,newClientRepositories:resumed.props.source.getSnapshot().repositories}))
+ assert.equal(nodes(value.projection,'pipeline_run').length,0,'a real new Host/client must retain the historical scope denial')
+})
+
+test('real Host restart after rejected SQLite redaction retains denied scope',async(t)=>{
+ const h=await open(t),scope=await prepare(h),put=SqliteStorage.prototype.putDeliveryFacts
+ const mocked=t.mock.method(SqliteStorage.prototype,'putDeliveryFacts',function(record){
+   if(record.sets.some(set=>set.kind==='pipeline_run'&&set.nodes.length===0))throw new Error('synthetic-disk-fault')
+   return put.call(this,record)
+ })
+ h.delivery.listPipelineRuns=async()=>denied()
+ const result=await h.service.refreshDeliveryFacts({kind:'user'},scope.workItemId,scope.repositoryId)
+ assert.equal(result.value.applied,false)
+ assert.equal(nodes((await h.props.deliveryReader.read(scope)).projection,'pipeline_run').length,0)
+ mocked.mock.restore()
+ const resumed=await reconnect(t,h),value=await resumed.props.deliveryReader.read(scope)
+ t.diagnostic(JSON.stringify({failedRefresh:result.value,newHostPipelineNodes:nodes(value.projection,'pipeline_run').length}))
+ assert.equal(nodes(value.projection,'pipeline_run').length,0,'a new real Host must not restore a collection after its redaction failed')
+})
+
+test('real Host projection remains current through its final visibility confirmation',async(t)=>{
+ const h=await open(t),scope=await prepare(h),inProvider=deferred(),releaseProvider=deferred(),inVisibility=deferred(),releaseVisibility=deferred()
+ h.delivery.listPipelineRuns=async()=>{inProvider.resolve();await releaseProvider.promise;return denied()}
+ // The provider call starts before the query and remains deferred until its final local visibility read.
+ const refresh=h.host.controller.commands.refreshDeliveryFacts({workItemId:scope.workItemId,repositoryId:scope.repositoryId},{actorRef:{kind:'user'}})
+ await inProvider.promise
+ const list=SqliteStorage.prototype.listPlanningProjections;let count=0
+ const mocked=t.mock.method(SqliteStorage.prototype,'listPlanningProjections',async function(...args){
+   const value=await list.apply(this,args)
+   if(++count===3){inVisibility.resolve();await releaseVisibility.promise}
+   return value
+ })
+ const reading=h.props.deliveryReader.read(scope)
+ await inVisibility.promise
+ releaseProvider.resolve();await tick()
+ releaseVisibility.resolve()
+ const value=await reading
+ mocked.mock.restore();await refresh
+ const next=await h.props.deliveryReader.read(scope)
+ t.diagnostic(JSON.stringify({returnedPipelineNodes:nodes(value.projection,'pipeline_run').length,nextReadPipelineNodes:nodes(next.projection,'pipeline_run').length,returnedPipelineFacts:nodes(value.projection,'pipeline_run').map(row=>row.fact)}))
+ assert.equal(nodes(next.projection,'pipeline_run').length,0)
+ assert.equal(nodes(value.projection,'pipeline_run').length,0,'the final scope confirmation must not let a prior protected projection escape')
+})
+
+test('coalesced available-denied-available metadata changes the real detail token and cannot revive historical cached CI', async (t) => {
+  const h = await open(t), current = await prepare(h, 0), history = await prepare(h, 1), pipeline = h.delivery.listPipelineRuns.bind(h.delivery)
+  const snapshot = () => h.props.source.getSnapshot()
+  const token = () => deriveWorkItemDetailView({ read: snapshot(), metadata: { sourceNames: {} }, phase: 'received', refreshing: false }, { projectId: WORKSPACE, itemId: current.workItemId }).body.deliveryAccessTokens['repo-alpha']
+  const initial = token(), section = openedSection({ scope: current, reader: h.props.deliveryReader, connected: true, accessToken: initial })
+  t.after(section.close); section.html(); section.flush(); await until(() => /completed: success/.test(section.html()))
+  h.delivery.listPipelineRuns = async () => denied(); await h.props.deliveryReader.refresh(current)
+  h.delivery.listPipelineRuns = pipeline; await h.props.deliveryReader.refresh(history)
+  const expected = (await h.service.baseline()).repositories[0].accessVersion
+  await until(() => snapshot().repositories[0].accessVersion === expected)
+  assert.notEqual(token(), initial, 'equal available fields still require a different access generation')
+  section.props.accessToken = token()
+  assert.doesNotMatch(section.html(), /completed: success/, 'the production token must distinguish equal availability before and after denial')
+  section.flush(); await until(() => /delivery.pipeline.read/.test(section.html()))
+  assert.equal(nodes((await h.props.deliveryReader.read(current)).projection, 'pipeline_run').length, 0)
 })
 
 for (const denied of [false, true]) test(`real Host restart ${denied ? 'keeps failed Planning redaction hidden' : 'retains ordinary offline cache'}`, async (t) => {
