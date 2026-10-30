@@ -23,8 +23,8 @@
 - [x] 锁定当前 head/base、checks 和所有现有 review threads（均为空）。
 - [x] 在逐文件检查前建立 P0–P3 风险矩阵。
 - [x] 完成独立代码/产品语义/架构/判别性测试评审和相关 issue 排重；视觉与实际 Host 组合仍由主评审综合。
-- [ ] 一次提交所有 inline 意见及 review。
-- [ ] 按严重度和实现 owner 执行修复、复审与授权收尾。
+- [x] 一次提交所有 inline 意见及 review。（2026-11-02 已完成）
+- [x] 2026-11-02：P2 修复与独立复评完成；#486/#488 已原子 rebase 合并，#487 的最终 CI/批准/合并按下文当前版本门执行。
 验证：在上述检出运行最窄相关测试；修改后按风险扩大。回滚：本阶段仅恢复本评审文档。
 
 ## Validation and Acceptance
@@ -99,7 +99,7 @@
 依赖 GitHub 当前 PR/issue/check/thread 事实、Host 安装与 UI 入口。研究参考仅作设计输入，正式证据应自包含。
 
 ## Outcomes & Retrospective
-独立子评审在当前head未发现确定新增缺陷。导航/草稿/intent/恢复语义与判别性证据已完成；主评审仍须综合实际Host视觉、原生键盘、组合、安装与远端检查，review尚未发布。
+独立子评审在当前head未发现确定新增缺陷。导航/草稿/intent/恢复语义与判别性证据已完成；主评审仍须综合实际Host视觉、原生键盘、组合、安装与远端检查，review尚未发布。 Superseded by 主评审综合与收尾门（2026-11-02）。
 
 ## Bottom Change Note
 2026-11-02：先于逐文件检查建立风险矩阵与可恢复评审流程。
@@ -121,3 +121,5 @@ F487-1：直接订阅既有 PlanningRefreshSource；matching workspace+binding �
 共享历史恢复锚点为 `refs/backup/pr<N>-before-mmp-review-20261102`。最终 push 使用精确旧 head lease；回读当前 head/base/checks/threads、issue 双向关联后重新批准，再以 `merge_method=rebase` 合并。所有公开内容经机械扫描与凭据/本机身份/个人信息/内部系统/保密五类人工检查。最终易失结果以当前回读为准，不预写合并成功。
 
 2026-11-02 +08 最终本地组合：`pnpm verify` 为 2734+7 全通过、零 skip。修复负对照通过仓库 `review-mutate.mjs` 最终整表复跑：恢复虚假等待、移除 refresh 订阅、吞掉 pending→failed 公告、移除 matching scope 四项全部由具名测试 KILLED，还原基线 GREEN。当前 head 的 hosted CI 与批准仍须最终 push 后回读。
+
+2026-11-02 +08 收尾订正：本 PR 已原子 rebase 合并；对应 issue 已回读 CLOSED。新官方组合安装烟测的可复现版本、产物 hash、几何与明确边界见 `pr-487-mmp-review.md` 的实际接合与新安装烟测段；该记录不代替 #449/R1。

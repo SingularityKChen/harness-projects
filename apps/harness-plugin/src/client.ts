@@ -5,7 +5,7 @@
  * `remote.harnessProjects` 与 `slots`；根 Context 不直接读取 namespace（M17）。
  */
 import { createPlanningMappingSource, createPlanningRefreshSource, createExecutionContextReader, createWorkspaceSetupSource, createRepositoryBindingSource, createStartWork, createDeliveryLineageReader } from '@harness-projects/client'
-import { HARNESS_PANEL_TITLE, PlaceholderIcon, bindWorkspaceSetupApp } from '@harness-projects/ui'
+import { HARNESS_PANEL_TITLE, PlaceholderIcon, bindWorkspaceStatusApp } from '@harness-projects/ui'
 import type { ClientContext, RemoteResult } from './host-surface.ts'
 import { CLIENT_REMOTE } from './remote.ts'
 import { openWorkspaceWatch } from './workspace-watch.ts'
@@ -69,7 +69,7 @@ export async function apply(ctx: ClientContext): Promise<void> {
       read: ({ workItemId, repositoryId }) => unwrap(remote.getDeliveryProjection(workItemId, repositoryId)),
       refresh: ({ workItemId, repositoryId }) => unwrap(remote.refreshDeliveryFacts({ kind: 'user' }, workItemId, repositoryId)),
     })
-    const Panel = bindWorkspaceSetupApp(setup, workspace, reader, { repositoryBindingSource: repositoryBinding, startWork, deliveryReader, mappingSource: mapping, refreshSource: planningRefresh })
+    const Panel = bindWorkspaceStatusApp(setup, workspace, reader, { repositoryBindingSource: repositoryBinding, startWork, deliveryReader, mappingSource: mapping, refreshSource: planningRefresh })
     child.slots.inject('main', () => child.slots.register({ name: 'main', key: PANEL_ID }, Panel))
     child.slots.inject('sidebar.panellist', () =>
       child.slots.register(
