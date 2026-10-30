@@ -36,6 +36,7 @@
 | [2026-10-29-demo-user-guide](exec-plan/completed/2026-10-29-demo-user-guide.md) | Demo 用户路径、限制与人工走查准备（#444） |
 | [2026-10-29-worktree-conflict-contract](exec-plan/completed/2026-10-29-worktree-conflict-contract.md) | 可复用工作树冲突契约（#200） |
 | [2026-10-29-truthful-readable-list](exec-plan/completed/2026-10-29-truthful-readable-list.md) | 可见行新鲜度与主题列表闭环（#366/#429） |
+| [2026-10-30-ui-planning-readonly-scope](exec-plan/completed/2026-10-30-ui-planning-readonly-scope.md) | 规划只读说明与独立工程能力（#475） |
 | [2026-10-29-mmp-ui-detail](exec-plan/completed/2026-10-29-mmp-ui-detail.md) | 响应式详情闭环（#430） |
 | [2026-10-28-pr438-pr440-review-followup](exec-plan/completed/2026-10-28-pr438-pr440-review-followup.md) | PR #438–#440 MMP 评审、非阻塞修复与授权收尾 |
 | [2026-10-28-execution-run-refresh](exec-plan/completed/2026-10-28-execution-run-refresh.md) | 签发者运行刷新、变化式健康度与详情读回（#365） |

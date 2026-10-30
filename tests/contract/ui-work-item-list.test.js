@@ -162,7 +162,7 @@ test('部分读取（#382）：状态区说部分条目未确认；没有「最�
 
 test('独立标记只在为真的状态出现：degraded 与只读只在可读内容旁，loading 不带降级，不可用页都不带', () => {
   assert.match(H.degraded, /读取能力降级/)
-  assert.match(H.readOnly, /只读：/)
+  assert.match(H.readOnly, /只读：规划来源仅允许读取，此处展示规划内容。/)
   assert.doesNotMatch(H.content, /读取能力降级|只读：|最后已知值/)
   assert.doesNotMatch(H.loadingDegraded, /降级|保守|最后已知/)
   assert.doesNotMatch(H.permissionReadOnly, /只读：|降级/)
