@@ -170,3 +170,23 @@ test('mapping failure focuses its submitted summary and a background read cannot
   finish({ writeState: 'failed', saving: false, authoritative: false, error: { code: 'unavailable' } }); await new Promise(resolve => setImmediate(resolve)); render(); render.flush(); assert.equal(focused, 1)
   broken = true; await f.source.refresh(dto.scope); render(); render.flush(); assert.equal(focused, 1); f.source.dispose()
 })
+
+test('same-scope explicit definition refresh preserves unsent mapping with a visible unapplied notice', async () => {
+  const f = fixture(); await f.source.refresh(dto.scope); const render = mount(f.source)
+  find(render(), 'select')[0].props.onChange({ target: { value: 's2' } })
+  f.set({ ...dto, fields: [...dto.fields] }); await f.source.refresh(dto.scope)
+  assert.equal(find(render(), 'select')[0].props.value, 's2')
+  assert.match(renderToStaticMarkup(render()), /未应用/)
+  const other = { ...dto, scope: { ...dto.scope, projectExternalId: 'next' } }; f.set(other); await f.source.refresh(other.scope)
+  assert.equal(find(render(), 'select')[0].props.value, 's', 'new scope receives its own authoritative mapping')
+  find(render(), 'form')[0].props.onSubmit({ preventDefault() {} }); await new Promise(resolve => setImmediate(resolve))
+  assert.equal(f.calls[0][3], 'next')
+})
+
+test('an acknowledged mapping draft stops masking a later authoritative same-scope definition read', async () => {
+  const f = fixture(); await f.source.refresh(dto.scope); const render = mount(f.source)
+  find(render(), 'select')[0].props.onChange({ target: { value: 's2' } })
+  find(render(), 'form')[0].props.onSubmit({ preventDefault() {} }); await new Promise(resolve => setImmediate(resolve)); render(); render.flush()
+  f.set({ ...dto, mapping: { targetDateFieldId: 'd' } }); await f.source.refresh(dto.scope)
+  assert.equal(find(render(), 'select')[0].props.value, ''); assert.equal(find(render(), 'select')[2].props.value, 'd')
+})

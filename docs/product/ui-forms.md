@@ -8,7 +8,7 @@
 
 pending、configured、local_only、unknown、failed、active各自使用现有安全source结果；Provider确认/重验前不称已保存。unknown要求确认，失败保留草稿，重试沿用既有意图键和scope规则。
 
-离开表单只取消当前本地尝试，不解绑已确认配置。凭据由Host管理，不新增密钥输入或回显句柄。列表组合保持外层frame覆盖动作，直接嵌套app清零重复padding。
+同一 source、工作区与绑定/项目 scope 下，返回工作区或重入设置只改变可见性，保留项目、映射和仓库草稿及未决 intent。真实卸载表单才结束该本地尝试的观察，不撤销已接纳的远端操作，也不解绑已确认配置。凭据由Host管理，不新增密钥输入或回显句柄。列表组合保持外层frame覆盖动作，直接嵌套app清零重复padding。
 
 Host确认与完整发布UAT分别记录，详见[实施计划](../exec-plan/completed/2026-10-29-mmp-ui-forms.md)。
 
