@@ -1,5 +1,6 @@
 export type { BindRepositoryInput, CommandResult } from '@harness-projects/controller'
 import type { ExternalObjectRef, PlanningProvider, ProviderPlanningFieldDefinition, Storage, WorkspacePlanningMappingRecord } from '@harness-projects/capabilities'
+import { CapabilityKey } from '@harness-projects/capabilities'
 import { mkdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { createWorkspaceSetup, composeCore, unavailableCore, createPlanningReconciler, type PlanningReconciler, type PlanningReconcilerTimers, type CoreApi } from '@harness-projects/core'
@@ -61,7 +62,7 @@ async function assertDeliveryScope(controller: Controller, scope: { workItemId: 
 const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness'): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts'>, Controller> => ({
   getStartWorkOptions: async (controller, input) => {
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
-    return { workspaceId, workItemId: input.workItemId, executionMode: mode() }
+    return { workspaceId, workItemId: input.workItemId, executionMode: mode(), repositories: await controller.commands.validateStartWork(input.workItemId) }
   },
   startWork: async (controller, input) => {
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item'
@@ -70,7 +71,10 @@ const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness')
     const { branchName, ...request } = input
     const result = await controller.commands.startWork({ ...request, ...(branchName === undefined ? {} : { branchName }) })
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
-    return { ...result, ...(result.error === undefined ? {} : { error: projectError(result.error.code, '开始工作未确认，请按恢复动作处理') }) }
+    const reason = result.error?.message.match(/^(capability|permission|policy) 层拒绝 ([a-z._]+)；/)
+    return { ...result, ...(result.error === undefined ? {} : { error: projectError(result.error.code, reason
+      && Object.values(CapabilityKey).some(key => key === reason[2]) ? `${reason[1]} 层拒绝 ${reason[2]}；其它获准操作仍可用，请恢复授权后重新验证并显式重试`
+      : '开始工作未确认，请按恢复动作处理') }) }
   },
   getDeliveryProjection: async (controller, input) => {
     for (;;) {

@@ -133,6 +133,7 @@ async function runConfirmRelation(core: CoreApi, ref: RelationRef): Promise<Comm
 }
 
 export interface ControllerCommands {
+  validateStartWork(workItemId: string): ReturnType<CoreApi['commands']['validateStartWork']>
   /** 生命周期命令：引导只做本地水合，没有外部写入，因此报 local_only。 */
   bootstrapWorkspace(envelope: CommandEnvelope): Promise<CommandResult<BootstrapResult>>
   /** 显式 Planning 刷新：每次都真实读取，不使用幂等重放账本。 */
@@ -250,6 +251,7 @@ export function createControllerCommands(core: CoreApi): ControllerCommands {
       return resultOf(result.ok ? CommandWriteState.LocalOnly : CommandWriteState.Failed, result, result.error)
     },
 
+    validateStartWork: (workItemId) => core.commands.validateStartWork(workItemId),
     startWork: async (input) => {
       let captured: StartWorkCommandInput
       try {

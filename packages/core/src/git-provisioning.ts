@@ -2,11 +2,12 @@
  *
  */
 import {
-  CapabilityKey, ProjectErrorCode, projectError, type ExternalObjectRef, type ProjectError, type ResolvedBinding, type StartWorkExternalOperation,
+  CapabilityKey, ProjectErrorCode, projectError, providerErr, providerError, type ExternalObjectRef, type ProjectError, type ResolvedBinding, type StartWorkExternalOperation,
 } from '@harness-projects/capabilities'
 import { ExecutionContextStatus, ProviderErrorCode, type ExecutionContextId, type ProviderBindingId } from '@harness-projects/domain'
 import { toProjectError, unsupportedCapability } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
+import { operationDeniedReason } from './runtime-access.ts'
 import { routeDevelopment, type DevelopmentRoute } from './development-route.ts'
 import { StartWorkFallback, type StartOutcome, type StartWorkRequest } from './execution-context.ts'
 import {
@@ -15,10 +16,33 @@ import {
 } from './write-machine.ts'
 
 type Development = NonNullable<ResolvedBinding['development']>
+/** 每次真实读均在冻结挂载/仓库上重新采样；预检仅观察 worktree.create 拒绝，不以读成功清写拒绝。 */
+export function guardedDevelopmentReads(context: CoreContext, route: Extract<DevelopmentRoute, { ok: true }>): Development {
+  const keys = new Map<PropertyKey, CapabilityKey>([['getRepository', CapabilityKey.DevelopmentRepositoryRead], ['listBranches', CapabilityKey.DevelopmentRepositoryRead], ['getWorktree', CapabilityKey.DevelopmentWorktreeRead], ['preflightWorktree', CapabilityKey.DevelopmentWorktreeCreate]])
+  return new Proxy(route.provider, { get(provider, method) {
+    const run = Reflect.get(provider, method), key = keys.get(method)
+    if (typeof run !== 'function') return run
+    if (!key) return run.bind(provider)
+    return async (...args: unknown[]) => {
+      const binding = route.binding.ref.bindingId, target = route.repository.externalId, version = context.runtimeAccess.operationVersion(binding, key, target)
+      const error = await context.runtimeAccess.operation(route.binding, key, target, context.policy, key === CapabilityKey.DevelopmentWorktreeCreate ? 'write' : 'read', version)
+      if (error) return providerErr(providerError(error.code === ProjectErrorCode.PermissionDenied ? ProviderErrorCode.PermissionDenied : error.code === ProjectErrorCode.NotSupported ? ProviderErrorCode.NotSupported : ProviderErrorCode.Unavailable, error.message))
+      const result = await run.apply(provider, args)
+      if (!result.ok && result.error.code === ProviderErrorCode.PermissionDenied) {
+        context.runtimeAccess.observeOperation(binding, key, target, true)
+        return providerErr(providerError(ProviderErrorCode.PermissionDenied, operationDeniedReason(key)))
+      }
+      if (result.ok && context.runtimeAccess.operationVersion(binding, key, target) !== version) return providerErr(providerError(ProviderErrorCode.Unavailable, `${key} 准入版本变化，请重新验证`))
+      if (result.ok && key !== CapabilityKey.DevelopmentWorktreeCreate) context.runtimeAccess.observeOperation(binding, key, target, false, version)
+      return result
+    }
+  } })
+}
 
 export interface Names { readonly branch: string; readonly path: string | undefined; readonly worktreeKey: string }
 interface StepOutcome {
   readonly report: WriteReport; readonly ok: boolean; readonly value: string | undefined
+  readonly failureKey?: CapabilityKey | undefined
   /** 被接管分支的头提交；只有分支步产得出它，工作树步为 undefined。 */
   readonly headCommit?: string | undefined
 }
@@ -126,7 +150,7 @@ export async function provisionGit(
 ): Promise<GitOutcome> {
   const route = frozenRoute ?? await routeDevelopment(context, request.repositoryId, CapabilityKey.DevelopmentWorktreeCreate, 'write')
   if (!route.ok) return gitFailure(contextId, markFailed(beginWrite(names.path ?? names.worktreeKey), route.error), undefined, undefined)
-  const { provider, repository } = route
+  const { repository } = route, provider = guardedDevelopmentReads(context, route)
   const bindingId = repository.bindingId
   // 恢复：上下文里已经记录了分支步的结果就**整个跳过它**——不解析 `fromRef`，因此「基线是否
   // 前进」不进入判定。分支名是身份，我们记录的那一行是所有权（批次计划 D1 / D2）。
@@ -149,24 +173,34 @@ export async function provisionGit(
   const preflightIntent: Names = decided === undefined ? intent : { ...intent, branch: decided }
   const target = await preflightWorktree(provider, repository, preflightIntent)
   if (!target.ok) return gitFailure(contextId, target.report, bindingId, decided)
+  const branchVersion = context.runtimeAccess.operationVersion(bindingId, CapabilityKey.DevelopmentBranchCreate, request.repositoryId)
+  const prior = decided === undefined ? undefined : await branchProbe(provider, repository, decided)
+  if (prior?.probe.error?.code === ProjectErrorCode.PermissionDenied) return gitFailure(contextId, markFailed(beginWrite(decided), prior.probe.error), bindingId, decided)
   const branch = decided === undefined
     ? await ensureBranch(provider, repository, names.branch, beforeExternalWrite)
     : {
       report: confirmWrite(markWriting(beginWrite(decided)), decided),
       ok: true, value: decided,
-      headCommit: (await branchProbe(provider, repository, decided)).headCommit,
+      headCommit: prior?.headCommit,
     }
-  if (!branch.ok || branch.value === undefined) return gitFailure(contextId, branch.report, bindingId, undefined)
+  if (!branch.ok || branch.value === undefined) {
+    if (!branch.failureKey && branch.report.error?.code === ProjectErrorCode.PermissionDenied) context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentBranchCreate, request.repositoryId, true)
+    return gitFailure(contextId, branch.report, bindingId, undefined)
+  }
+  if (decided === undefined) context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentBranchCreate, request.repositoryId, false, branchVersion)
   // 分支步已经成功：立刻回填，然后才跑工作树步。中断在两步之间时，重放因此能跳过它。
   // 工作树步用的是**序列已经决定的分支**（`branch.value`），不是本次请求重新算出来的 `names.branch`：
   // 序列一旦决定了身份，后续每一步都必须用它，否则「报出去的」与「落盘的」会指向两个分支。
   // 工作树步本身**故意不跳过**——它必须重跑才能保证工作树真的在（PR #160 的 F1 教训）；幂等由稳定的
   // 实体身份提供，不由跳过提供。
   await recordStep(stepRecord(contextId, branch.report, bindingId, branch.value, branch.headCommit))
+  const worktreeVersion = context.runtimeAccess.operationVersion(bindingId, CapabilityKey.DevelopmentWorktreeCreate, request.repositoryId)
   const worktree = await ensureWorktree(provider, repository, branch.value, intent, target.path, beforeExternalWrite)
   if (!worktree.ok || worktree.value === undefined) {
+    if (!worktree.failureKey && worktree.report.error?.code === ProjectErrorCode.PermissionDenied) context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentWorktreeCreate, request.repositoryId, true)
     return gitFailure(contextId, worktree.report, bindingId, branch.value, branch.headCommit)
   }
+  context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentWorktreeCreate, request.repositoryId, false, worktreeVersion)
   const done: GitOutcome = {
     contextId, report: worktree.report, ok: true, bindingId, status: ExecutionContextStatus.Ready,
     branchExternalId: branch.value, worktreeExternalId: worktree.value, branchHeadCommit: branch.headCommit,
@@ -181,7 +215,7 @@ async function ensureBranch(provider: Development, repository: ExternalObjectRef
     return { report: markFailed(beginWrite(name), unsupportedCapability(CapabilityKey.DevelopmentBranchCreate)), ok: false, value: undefined }
   }
   const base = await baseRef(provider, repository)
-  if (!base.ok) return { report: markFailed(beginWrite(name), base.error), ok: false, value: undefined }
+  if (!base.ok) return { report: markFailed(beginWrite(name), base.error), ok: false, value: undefined, failureKey: CapabilityKey.DevelopmentRepositoryRead }
   const input = { repository: { ...repository, url: undefined }, name, fromRef: base.value }
   await before({ operation: 'createBranch', input })
   let result
@@ -197,7 +231,7 @@ async function ensureBranch(provider: Development, repository: ExternalObjectRef
       return { report: confirmWrite(markWriting(beginWrite(name)), name), ok: true, value: name, headCommit: found.headCommit }
     }
     if (found.probe.error !== undefined) {
-      return { report: markUnknown(markWriting(beginWrite(name)), found.probe.error), ok: false, value: undefined }
+      return { report: markUnknown(markWriting(beginWrite(name)), found.probe.error), ok: false, value: undefined, failureKey: CapabilityKey.DevelopmentRepositoryRead }
     }
   }
   if (result.error.code !== ProviderErrorCode.AmbiguousResult) {
@@ -206,7 +240,7 @@ async function ensureBranch(provider: Development, repository: ExternalObjectRef
   const probed = await branchProbe(provider, repository, name)
   const report = reconcileWrite(markUnknown(markWriting(beginWrite(name)), error), probed.probe)
   const reconciled = report.phase === WritePhase.Reconciled
-  return { report, ok: reconciled, value: reconciled ? name : undefined, headCommit: probed.headCommit }
+  return { report, ok: reconciled, value: reconciled ? name : undefined, headCommit: probed.headCommit, failureKey: probed.probe.error ? CapabilityKey.DevelopmentRepositoryRead : undefined }
 }
 
 async function ensureWorktree(
@@ -231,7 +265,7 @@ async function ensureWorktree(
       if (observed.ok && observed.value.branch === branch) {
         return { report: confirmWrite(markWriting(beginWrite(target ?? names.worktreeKey)), observed.value.path), ok: true, value: observed.value.path }
       }
-      return { report: markFailed(beginWrite(target ?? names.worktreeKey), observed.ok ? projectError(ProjectErrorCode.Conflict, '工作树冲突但分支不匹配') : toProjectError(observed.error)), ok: false, value: undefined }
+      return { report: markFailed(beginWrite(target ?? names.worktreeKey), observed.ok ? projectError(ProjectErrorCode.Conflict, '工作树冲突但分支不匹配') : toProjectError(observed.error)), ok: false, value: undefined, failureKey: CapabilityKey.DevelopmentWorktreeRead }
     }
     if (result.error.code !== ProviderErrorCode.AmbiguousResult) {
       return { report: markFailed(beginWrite(target ?? names.worktreeKey), toProjectError(result.error)), ok: false, value: undefined }
@@ -246,7 +280,7 @@ async function ensureWorktree(
     if (observed.ok && observed.value.branch !== branch) return { report: markFailed(beginWrite(handle), projectError(ProjectErrorCode.Conflict, `创建结果不确定，对账读到的工作树检出 ${observed.value.branch}，不是 ${branch}`)), ok: false, value: undefined } // 与 conflict 路径同判 Failed
     const probe = { found: observed.ok, value: observed.ok ? handle : undefined, error: observed.ok || observed.error.code === ProviderErrorCode.NotFound ? undefined : toProjectError(observed.error) }
     const report = reconcileWrite(unknown, probe)
-    return report.phase === WritePhase.Reconciled && observed.ok ? { report, ok: true, value: observed.value.path } : { report, ok: false, value: undefined }
+    return report.phase === WritePhase.Reconciled && observed.ok ? { report, ok: true, value: observed.value.path } : { report, ok: false, value: undefined, failureKey: CapabilityKey.DevelopmentWorktreeRead }
   }
   return { report: confirmWrite(markWriting(beginWrite(result.value.path)), result.value.path), ok: true, value: result.value.path }
 }
@@ -257,7 +291,8 @@ async function preflightWorktree(
   if (provider.preflightWorktree === undefined) return { ok: true, path: undefined }
   const result = await provider.preflightWorktree({ repository, worktreeKey: names.worktreeKey, branch: names.branch, ...(names.path === undefined ? {} : { path: names.path }) })
   if (result.ok) return { ok: true, path: result.value.path }
-  return { ok: false, report: markFailed(beginWrite(names.path ?? names.worktreeKey), toProjectError(result.error)) }
+  return { ok: false, report: markFailed(beginWrite(names.path ?? names.worktreeKey), result.error.code === ProviderErrorCode.PermissionDenied
+    ? projectError(ProjectErrorCode.PermissionDenied, operationDeniedReason(CapabilityKey.DevelopmentWorktreeCreate)) : toProjectError(result.error)) }
 }
 
 /** 基线分支读不到不是致命错误：用约定名继续，创建失败会得到结构化结果。 */

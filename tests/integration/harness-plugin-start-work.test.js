@@ -8,7 +8,7 @@ test('Host options and command reject closed wire/scope and invisible targets be
   const input = { actorRef: { kind: 'user' }, idempotencyKey: 'start', workItemId: h.itemId, repositoryId: 'repo-alpha' }
   assert.equal(typeof h.installed.service.getStartWorkOptions, 'function')
   const options = await h.installed.service.getStartWorkOptions(h.itemId)
-  assert.deepEqual(options, { workspaceId: h.workspaceId, workItemId: h.itemId, executionMode: 'manual' })
+  assert.deepEqual(options, { workspaceId: h.workspaceId, workItemId: h.itemId, executionMode: 'manual', repositories: [{ id: 'repo-alpha', available: true }] })
   let writes = 0; const start = h.host.controller.commands.startWork
   h.host.controller.commands.startWork = (...args) => { writes++; return start(...args) }
   for (const invalid of [{ ...input, workspaceId: 'other' }, { ...input, branchName: 1 }, { ...input, extra: 1 }]) await assert.rejects(() => h.host.call('startWork', invalid), TypeError)

@@ -43,6 +43,25 @@ const clickOf = (element) => {
 }
 const drawer = (view) => renderToStaticMarkup(createElement(ui.WorkItemDetailDrawer, { view, onClose: () => undefined }))
 
+test('执行区兄弟 key 唯一且 Planning 遮蔽后恢复保持各自身份', () => {
+  const internals = uiRequire('react').__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED, previous = internals.ReactCurrentDispatcher.current
+  internals.ReactCurrentDispatcher.current = { useState: (value) => [value, () => undefined], useRef: (value) => ({ current: value }), useId: () => ':r:', useEffect: () => undefined }
+  try {
+    let priorKeys
+    for (const entity of [wire('ent-aa'), redacted('ent-aa'), wire('ent-aa'), redacted('ent-aa'), wire('ent-aa')]) {
+      const { detailView } = views([entity])
+      const tree = ui.WorkItemDetailDrawer({ view: detailView, onClose() {}, executionReader: async () => null, startWork: { options: async () => ({}), submit: async () => ({}) } })
+      const sections = tree.props.children.at(-1).props.children.filter(node => node?.type === ui.ExecutionContextSection || node?.type === ui.StartWorkSection)
+      if (detailView.body.kind !== 'content') { assert.equal(sections.length, 0); continue }
+      assert.deepEqual(sections.map(node => node.type), [ui.ExecutionContextSection, ui.StartWorkSection])
+      const keys = sections.map(node => node.key)
+      assert.equal(new Set(keys).size, 2, '两个同时渲染的执行区必须有独立 key，恢复不能复用另一组件身份')
+      if (priorKeys) assert.deepEqual(keys, priorKeys, '同一目标恢复后各执行区身份保持稳定')
+      priorKeys = keys
+    }
+  } finally { internals.ReactCurrentDispatcher.current = previous }
+})
+
 test('same-drawer-from-both-entries：两个入口显示同一导出抽屉；列表 anchor 的 open 与深链 detailView 都到达它', () => {
   const visible = wire('ent-aa', { content: { title: 'VISIBLE-TITLE' } })
   const { listView, detailView } = views([visible, redacted()])
