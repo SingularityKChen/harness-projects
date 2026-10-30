@@ -190,3 +190,27 @@ test('an acknowledged mapping draft stops masking a later authoritative same-sco
   f.set({ ...dto, mapping: { targetDateFieldId: 'd' } }); await f.source.refresh(dto.scope)
   assert.equal(find(render(), 'select')[0].props.value, ''); assert.equal(find(render(), 'select')[2].props.value, 'd')
 })
+
+test('mapping task names confirmation only for the currently applied values', async () => {
+  const f = fixture(); await f.source.refresh(dto.scope); const render = mount(f.source)
+  assert.match(renderToStaticMarkup(render()), /当前字段映射已确认/)
+  find(render(), 'select')[0].props.onChange({ target: { value: 's2' } })
+  assert.doesNotMatch(renderToStaticMarkup(render()), /当前字段映射已确认/)
+  assert.match(renderToStaticMarkup(render()), /草稿尚未应用/)
+})
+
+test('cached mapping confirmation does not claim current success during a held definition read', async () => {
+  let release, held = false
+  const f = fixture({ getPlanningMapping: async () => held ? new Promise(resolve => { release = resolve }) : dto })
+  await f.source.refresh(dto.scope); held = true
+  const pending = f.source.refresh(dto.scope)
+  assert.doesNotMatch(html(f.source), /当前字段映射已确认/)
+  release(dto); await pending; assert.match(html(f.source), /当前字段映射已确认/)
+})
+test('cached mapping confirmation does not contradict a failed same-scope read', async () => {
+  let broken = false
+  const f = fixture({ getPlanningMapping: async () => { if (broken) throw Error('RAW'); return dto } })
+  await f.source.refresh(dto.scope); broken = true; await f.source.refresh(dto.scope)
+  assert.doesNotMatch(html(f.source), /当前字段映射已确认/)
+  assert.match(html(f.source), /来源尚未确认，请重试/)
+})

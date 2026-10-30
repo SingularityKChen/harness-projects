@@ -17,7 +17,7 @@ export function RepositoryBindingForm({ source }: { readonly source: RepositoryB
     void task.then(() => { if (submitted.current === task) { submitted.current = undefined; if (source.getSnapshot().error) focusFormError(form.current) } })
   }
   return h('form', { className: 'hp-form', ref: form, 'aria-busy': pending, 'aria-label': '绑定仓库', onSubmit: (event: { preventDefault(): void }) => { event.preventDefault(); bind() } },
-    h('style', null, FORM_STYLES), h('h3', null, '绑定仓库'),
+    h('style', null, FORM_STYLES), h('h3', null, '绑定仓库'), snapshot.state === 'idle' ? h('p', null, '尚未绑定仓库。') : null,
     ...([['localPath', '本地仓库路径'], ['owner', 'GitHub owner'], ['name', 'GitHub name']] as const).map(([field, label]) => h('div', { key: field, className: 'hp-field' },
       h('label', { htmlFor: `repository-${field}` }, label),
       h('input', { id: `repository-${field}`, 'aria-describedby': `repository-${field}-help${snapshot.error ? ' repository-error' : ''}`, value: draft[field], required: true, disabled: pending, onChange: (event: { target: { value: string } }) => { source.reset(); setDraft({ ...draft, [field]: event.target.value }) } }), h('p', { id: `repository-${field}-help` }, field === 'localPath' ? '填写宿主可访问的绝对路径，保留现有仓库内容。' : field === 'owner' ? '填写 GitHub 组织或用户名称。' : '填写仓库名称，不含 owner 或 URL。'))),
