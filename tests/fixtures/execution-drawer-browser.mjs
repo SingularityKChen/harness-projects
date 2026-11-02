@@ -12,20 +12,31 @@ import { createHostComposition } from '../../apps/harness-plugin/src/host-compos
 import { catalogOf, hostStoragePolicy } from '../../apps/harness-plugin/src/host-providers.ts'
 import { installHostRemote } from '../../apps/harness-plugin/src/remote.ts'
 import { OPERATIONS, exactRecord, parseInput } from '../../apps/harness-plugin/src/host-operations.ts'
+import { WEB_ENTRY } from './composed-workspace-browser.mjs'
 import { AccessLevel, providerErr, providerError } from '@harness-projects/capabilities'
-export async function createExecutionFixture() {
+export async function createExecutionFixture({ seed } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'execution-drawer-')), dataPath = path.join(root, 'workspace.sqlite')
-  const mounted = [], byDomain = {}, providers = createFakeProviders(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: { projectNodeId: { kind: 'string', required: false, pattern: '.+', maxLength: 100 } }, create: async ({ binding }) => { const provider = createFakeProviders({ [binding.domain]: { bindingId: binding.id } })[binding.domain]; byDomain[binding.domain] = provider; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
+  const make = (options) => { const p = createFakeProviders(options); if (seed === 'read') p.planning.addItem(p.planning.state.projects[0].ref, 'draft', '规划项 draft-1', 'draft-1 正文占位'); return p }
+  const mounted = [], byDomain = {}, providers = make(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: { projectNodeId: { kind: 'string', required: false, pattern: '.+', maxLength: 100 } }, create: async ({ binding }) => { const provider = make({ [binding.domain]: { bindingId: binding.id } })[binding.domain]; byDomain[binding.domain] = provider; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
   const workspaceId = '00000000-0000-4000-8000-000000000282'
-  const storage = createSqliteStorage(dataPath, hostStoragePolicy(catalog)), core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture' }, providers, storage })
-  await storage.putBindingConfiguration({ ref: { workspaceId, bindingId: providers.planning.bindingId, domain: 'planning' }, configuration: { projectNodeId: providers.planning.state.projects[0].ref.externalId } })
-  const itemId = (await core.queries.listPlanningItems()).find((item) => item.content.title === '规划项 issue-1').entityId
-  await core.commands.startWork({ workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
-  const id = contextIdFor(workspaceId, itemId, 'repo-alpha'), runId = runIdFor(id)
-  await storage.putExecutionRun({ ...(await storage.getExecutionRun(runId)), fallback: true })
-  const host = await createHostComposition({ dataPath, workspaceId, catalog, resolveCredential: async () => undefined, watchIntervalMs: 5 })
-  const installed = await installHostRemote({ invocation: { peer: { id: 'fixture-peer' } }, provide: () => () => {}, typert: { register: () => () => {} } }, host)
-  return { workspaceId, itemId, runId, storage, host, installed, mounted, byDomain, close: async () => { await installed.dispose(); await host.dispose(); storage.close(); await rm(root, { recursive: true, force: true }) } }
+  const storage = createSqliteStorage(dataPath, hostStoragePolicy(catalog))
+  let host, installed
+  const rebuild = async () => {
+    await installed?.dispose(); await host?.dispose()
+    host = await createHostComposition({ dataPath, workspaceId, catalog, resolveCredential: async () => undefined, fetch: async () => { throw new Error('Business network forbidden') }, watchIntervalMs: 5 })
+    installed = await installHostRemote({ invocation: { peer: { id: 'fixture-peer' } }, provide: () => () => {}, typert: { register: () => () => {} } }, host)
+  }
+  let itemId, runId
+  if (seed !== 'empty') {
+    const core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture' }, providers, storage })
+    await storage.putBindingConfiguration({ ref: { workspaceId, bindingId: providers.planning.bindingId, domain: 'planning' }, configuration: { projectNodeId: providers.planning.state.projects[0].ref.externalId } })
+    itemId = (await core.queries.listPlanningItems()).find((item) => item.content.title === '规划项 issue-1').entityId
+    await core.commands.startWork({ workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
+    const id = contextIdFor(workspaceId, itemId, 'repo-alpha'); runId = runIdFor(id)
+    await storage.putExecutionRun({ ...(await storage.getExecutionRun(runId)), fallback: true })
+  }
+  await rebuild()
+  return { dataPath, workspaceId, itemId, runId, storage, get host() { return host }, get installed() { return installed }, rebuild, mounted, byDomain, close: async () => { await installed.dispose(); await host.dispose(); storage.close(); await rm(root, { recursive: true, force: true }) } }
 }
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url)), uiRequire = createRequire(path.join(repoRoot, 'packages/ui/package.json'))
@@ -34,9 +45,10 @@ const ENTRY = `
 import { createElement } from 'react'
 import { apply } from './apps/harness-plugin/src/client.ts'
 import { OPERATIONS } from './apps/harness-plugin/src/host-operations.ts'
+${WEB_ENTRY}
 export async function mount(root) {
   let disconnect
-  const disposers = [], streams = new Set()
+  const disposers = [], streams = new Set(), observations = []
   const load = (url, options) => fetch(url + location.search, options)
   const command = async (action, value) => (await load('/control', { method: 'POST', body: JSON.stringify({ action, value }) })).json()
   const remote = Object.fromEntries(Object.values(OPERATIONS).filter(op => op.mode === 'unary').map(op => [op.name, async (...args) =>
@@ -53,7 +65,7 @@ export async function mount(root) {
     $stream: (options) => { let abort, stopped = false, restart = false, generation = 0
       const stream = { restart() { restart = true; abort?.abort() }, dispose: async () => { stopped = true; abort?.abort(); streams.delete(stream) }, async *[Symbol.asyncIterator]() {
         while (!stopped) { abort = new AbortController(); restart = false; let accepted = false; generation++
-          try { for await (const value of options.open(abort.signal)) yield { generation, value, accept() { accepted = true } } }
+          try { for await (const value of options.open(abort.signal)) yield { generation, value, accept() { accepted = true; const frame = value.baseline ?? value.delta ?? value.metadata; if (frame) observations.push({ kind: value.kind, generation: frame.generation, revision: frame.revision }) } } }
           catch (error) { if (!stopped && !restart) throw error }
           if (!stopped && !restart) throw options.ended(accepted)
         }
@@ -61,24 +73,32 @@ export async function mount(root) {
       streams.add(stream); disconnect = () => { options.carrierFailed?.(new Error('fixture disconnect')); abort?.abort() }; return stream
     },
   } }
-  await apply({ remote: { $mount: async () => {} }, inject: (_, run) => run(child) })
-  return { command, remote, disconnect: () => disconnect?.(), unmount: async () => { root.unmount(); await Promise.all(disposers.reverse().map((run) => run())); await Promise.all([...streams].map(stream => stream.dispose())) } }
+  if (location.pathname.startsWith('/projects/')) mountWeb(root, child, disposers)
+  else await apply({ remote: { $mount: async () => {} }, inject: (_, run) => run(child) })
+  return { command, remote, observations: () => observations.slice(), disconnect: () => disconnect?.(), unmount: async () => { root.unmount(); await Promise.all(disposers.reverse().map((run) => run())); await Promise.all([...streams].map(stream => stream.dispose())) } }
 }`
 /** 真实浏览器与 Node 测试共用同一个 Host。HTTP 只是 fixture 的 JSON 载体，不替代产品 reader 或 apply。 */
-export async function startExecutionServer() {
-  const h = await createExecutionFixture(), requests = [], held = [], holds = new Set(), wrapped = new Set(), streams = new Set()
-  const permissionMethods = { development: { createBranch: 'development.branch.create', createWorktree: 'development.worktree.create', getRepository: 'development.repository.read', preflightWorktree: 'development.worktree.read' },
+export async function startExecutionServer(options) {
+  const h = await createExecutionFixture(options), requests = [], held = [], holds = new Set(), wrapped = new Set(), streams = new Set()
+  let descriptor = {}, rebuilding = false
+  const pause = key => holds.has(key) ? new Promise(resolve => held.push(resolve)) : Promise.resolve()
+  const permissionMethods = { planning: { listPlanningItems: 'planning.item.read', getPlanningItem: 'planning.item.read' }, development: { createBranch: 'development.branch.create', createWorktree: 'development.worktree.create', getRepository: 'development.repository.read', preflightWorktree: 'development.worktree.read' },
     delivery: { listPipelineRuns: 'delivery.pipeline.read', listChecks: 'delivery.check.read' }, execution: { startRun: 'execution.run.start' } }
-  const denied = new Set()
-  for (const [domain, methods] of Object.entries(permissionMethods)) {
-    const provider = h.byDomain[domain], describe = provider.describeCapabilities.bind(provider)
-    provider.describeCapabilities = async () => { const snapshot = await describe(); return { ...snapshot, permission: { ...snapshot.permission,
-      ...Object.fromEntries(Object.values(methods).filter(key => denied.has(key)).map(key => [key, AccessLevel.Unavailable])) } } }
-    for (const [method, key] of Object.entries(methods)) {
-      const run = provider[method].bind(provider)
-      provider[method] = (...args) => denied.has(key) ? Promise.resolve(providerErr(providerError('permission_denied', 'fixture Provider permission revoked'))) : run(...args)
+  const denied = new Set(), calls = {}
+  let disconnected = false
+  const wrapProviders = () => {
+    for (const [domain, methods] of Object.entries(permissionMethods)) {
+      const provider = h.byDomain[domain]; if (!provider) continue
+      const describe = provider.describeCapabilities.bind(provider)
+      provider.describeCapabilities = async () => { const snapshot = await describe(); return { ...snapshot, permission: { ...snapshot.permission,
+        ...Object.fromEntries(Object.values(methods).filter(key => denied.has(key)).map(key => [key, AccessLevel.Unavailable])) } } }
+      for (const [method, key] of Object.entries(methods)) {
+        const run = provider[method].bind(provider)
+        provider[method] = (...args) => { calls[domain + '.' + method] = (calls[domain + '.' + method] ?? 0) + 1; return denied.has(key) ? Promise.resolve(providerErr(providerError('permission_denied', 'fixture Provider permission revoked'))) : run(...args) }
+      }
     }
   }
+  wrapProviders()
   const { build } = createRequire(path.join(repoRoot, 'apps/harness-plugin/package.json'))('esbuild')
   const bundle = await build({ stdin: { contents: ENTRY, resolveDir: repoRoot }, absWorkingDir: repoRoot, platform: 'browser', bundle: true, format: 'cjs', external: ['react'], write: false, metafile: true })
   const vendor = async (id, file) => readFile(path.join(path.dirname(uiRequire.resolve(id)), 'umd', file), 'utf8')
@@ -95,12 +115,13 @@ html,body { margin:0; padding:0; min-width:0; height:100%; overflow:hidden } bod
       const url = new URL(request.url, 'http://fixture.invalid'), route = url.pathname, scenario = url.searchParams.get('scenario')
       const showcase = ['all', 'unknown', 'failed', 'succeeded', 'missing', 'stale'].includes(scenario)
       if (scripts[route]) { response.setHeader('content-type', 'text/javascript'); response.end(scripts[route]); return }
-      if (route === '/') { response.setHeader('content-type', 'text/html;charset=utf-8'); response.end(page); return }
+      if (route === '/' || route.startsWith('/projects/')) { response.setHeader('content-type', 'text/html;charset=utf-8'); response.end(page); return }
       const displayBaseline = (baseline) => ({ ...baseline, repositories: [...baseline.repositories, { ...baseline.repositories[0], id: LONG_REPOSITORY }] })
       if (route === '/watch') {
-        const abort = new AbortController(); streams.add(abort); response.on('close', () => abort.abort())
+        if (disconnected) { response.writeHead(503); response.end(); return }
+        const abort = new AbortController(); streams.add(abort); response.on('close', () => abort.abort()); abort.signal.addEventListener('abort', () => response.end(), { once: true })
         response.setHeader('content-type', 'application/x-ndjson'); response.flushHeaders()
-        try { for await (const frame of h.installed.service.watch(abort.signal)) response.write(JSON.stringify(showcase && frame.kind === 'baseline' ? { ...frame, baseline: displayBaseline(frame.baseline) } : frame) + '\n') }
+        try { for await (const frame of h.installed.service.watch(abort.signal)) { await pause('watch.' + frame.kind); if (!abort.signal.aborted) response.write(JSON.stringify(showcase && frame.kind === 'baseline' ? { ...frame, baseline: displayBaseline(frame.baseline) } : frame) + '\n') } }
         finally { streams.delete(abort); response.end() }
         return
       }
@@ -152,18 +173,21 @@ html,body { margin:0; padding:0; min-width:0; height:100%; overflow:hidden } bod
         }
         if (input.action === 'hold') {
           const { domain, method, enabled } = input.value, key = `${domain}.${method}`, provider = h.byDomain[domain]
-          if (!wrapped.has(key)) { const run = provider[method].bind(provider); provider[method] = async (...args) => { const result = await run(...args); if (holds.has(key)) await new Promise(resolve => held.push(resolve)); return result }; wrapped.add(key) }
+          if (domain !== 'watch' && !wrapped.has(key)) { const run = provider[method].bind(provider); provider[method] = async (...args) => { const result = await run(...args); if (holds.has(key)) await new Promise(resolve => held.push(resolve)); return result }; wrapped.add(key) }
           enabled ? holds.add(key) : holds.delete(key)
         }
+        if (input.action === 'disconnect') { disconnected = input.value; if (disconnected) for (const abort of streams) abort.abort() }
+        if (input.action === 'rebuild') { rebuilding = true; await h.rebuild(); wrapped.clear(); wrapProviders(); rebuilding = false }
         if (input.action === 'release') { holds.clear(); held.splice(0).forEach((resolve) => resolve()) }
-        result = { requests, held: held.length, streams: streams.size, workspaceId: h.workspaceId, itemId: h.itemId,
-          external: { branches: h.byDomain.development.state.branches.length, worktrees: h.byDomain.development.state.worktrees.length, runs: h.byDomain.execution.state.runs.length } }
+        if (!rebuilding) { const baseline = await h.installed.service.baseline(); descriptor = { generation: baseline.generation, revision: baseline.revision } }
+        result = { calls, ...descriptor, rebuilding, requests, held: held.length, streams: streams.size, workspaceId: h.workspaceId, itemId: h.itemId,
+          external: { branches: h.byDomain.development?.state.branches.length ?? 0, worktrees: h.byDomain.development?.state.worktrees.length ?? 0, runs: h.byDomain.execution?.state.runs.length ?? 0 } }
       }
       else { response.writeHead(404); response.end(); return }
       response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(result))
     } catch (error) { response.writeHead(500); response.end(JSON.stringify({ error: error.message })) }
   })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  return { ...h, requests, inputs: Object.keys(bundle.metafile.inputs), url: `http://127.0.0.1:${server.address().port}`, close: async () => { holds.clear(); held.splice(0).forEach((resolve) => resolve()); for (const abort of streams) abort.abort(); server.closeIdleConnections(); await new Promise((resolve) => server.close(resolve)); await h.close() } }
+  return { ...h, get host() { return h.host }, get installed() { return h.installed }, requests, inputs: Object.keys(bundle.metafile.inputs), url: `http://127.0.0.1:${server.address().port}`, close: async () => { holds.clear(); held.splice(0).forEach((resolve) => resolve()); for (const abort of streams) abort.abort(); server.closeIdleConnections(); await new Promise((resolve) => server.close(resolve)); await h.close() } }
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) { const h = await startExecutionServer(); console.log(h.url); process.on('SIGINT', async () => { await h.close(); process.exit(0) }) }

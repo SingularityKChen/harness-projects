@@ -25,16 +25,17 @@
 
 | 计划 | 用途 |
 |---|---|
-| [2026-11-02-storage-committed-read-fence](exec-plan/completed/2026-11-02-storage-committed-read-fence.md) | Storage 同步已提交读取围栏与两连接合同 |
-| [2026-10-30-planning-runtime-access](exec-plan/completed/2026-10-30-planning-runtime-access.md) | Planning 当前只读准入与恢复（#465 / #457） |
-| [2026-10-30-operation-runtime-browser](exec-plan/completed/2026-10-30-operation-runtime-browser.md) | 共享读拒绝与只读恢复的跨表面闭环（#457） |
-| [2026-10-30-ui-detail-text-reflow](exec-plan/completed/2026-10-30-ui-detail-text-reflow.md) | 实际App样式归属、放大文字标题重排（#479） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-02-composed-workspace-browser](exec-plan/completed/2026-11-02-composed-workspace-browser.md) | 单一生产载体的真实浏览器创建、读取、导航与恢复回归（#498） |
+| [2026-11-02-storage-committed-read-fence](exec-plan/completed/2026-11-02-storage-committed-read-fence.md) | Storage 同步已提交读取围栏与两连接合同 |
+| [2026-10-30-planning-runtime-access](exec-plan/completed/2026-10-30-planning-runtime-access.md) | Planning 当前只读准入与恢复（#465 / #457） |
+| [2026-10-30-operation-runtime-browser](exec-plan/completed/2026-10-30-operation-runtime-browser.md) | 共享读拒绝与只读恢复的跨表面闭环（#457） |
+| [2026-10-30-ui-detail-text-reflow](exec-plan/completed/2026-10-30-ui-detail-text-reflow.md) | 实际App样式归属、放大文字标题重排（#479） |
 | [2026-11-02-core-release-criteria](exec-plan/completed/2026-11-02-core-release-criteria.md) | Core分期范围、Host声明与保留的12+10证据责任（#500） |
 | [2026-11-02-start-work-execution-recovery](exec-plan/completed/2026-11-02-start-work-execution-recovery.md) | 执行回执先持久化、原操作恢复与完整 Ready 校验（#193） |
 | [2026-11-02-start-work-execution-uniqueness](exec-plan/completed/2026-11-02-start-work-execution-uniqueness.md) | 公开命令的外部执行唯一性、重启与接管证明（#421） |
