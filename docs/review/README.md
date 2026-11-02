@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [2026-11-02-pr501-pr504-mmp-review](2026-11-02-pr501-pr504-mmp-review.md) | 当前指南、Core准则、组合浏览器与持续CI | 各自矩阵与当前head门禁；必要上游栈保持独立验收 |
 | [2026-10-30-pr476-pr480-mmp-review](2026-10-30-pr476-pr480-mmp-review.md) | 四项UI反馈、只读范围、连接诊断与详情重排 | 首轮无P0/P1；两P2由本会话修复、独立复评后按逐PR当前门禁与直接条件授权rebase收尾 |
 | [2026-10-30-pr464-pr472-mmp-review](2026-10-30-pr464-pr472-mmp-review.md) | 原生 PR 创建、持久意图及运行期访问安全栈 | 首轮两 P1 交原 owner 修复；非阻塞项由评审会话收尾，逐当前 head 复评后 rebase |
 | [2026-10-30-pr461-pr463-mmp-review](2026-10-30-pr461-pr463-mmp-review.md) | Host 视觉框架、响应式详情与连接表单三个闭环 | 首轮无 P0/P1；两 P2 与一 P3 修复独立复评，逐 PR 当前 head 门禁及条件授权 rebase 收尾；#446 人类参数确认与发布门保持 |

@@ -43,6 +43,7 @@
 | [2026-10-30-ui-workspace-status](exec-plan/completed/2026-10-30-ui-workspace-status.md) | 持续状态摘要、来源作用域与单一公告责任（#484） |
 | [2026-10-29-membership-duplicate-content](exec-plan/completed/2026-10-29-membership-duplicate-content.md) | 成员替换重复内容契约（#337） |
 | [2026-10-29-demo-user-guide](exec-plan/completed/2026-10-29-demo-user-guide.md) | Demo 用户路径、限制与人工走查准备（#444） |
+| [2026-11-02-demo-guide-refresh](exec-plan/completed/2026-11-02-demo-guide-refresh.md) | 当前PR创建、原操作读回与未完人类验收的指南事实修订（#499） |
 | [2026-10-29-worktree-conflict-contract](exec-plan/completed/2026-10-29-worktree-conflict-contract.md) | 可复用工作树冲突契约（#200） |
 | [2026-10-29-truthful-readable-list](exec-plan/completed/2026-10-29-truthful-readable-list.md) | 可见行新鲜度与主题列表闭环（#366/#429） |
 | [2026-10-30-ui-planning-readonly-scope](exec-plan/completed/2026-10-30-ui-planning-readonly-scope.md) | 规划只读说明与独立工程能力（#475） |
