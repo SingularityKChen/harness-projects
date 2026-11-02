@@ -21,7 +21,7 @@
  * 带请求指纹的身份在原子写作用域内检查、再 UPSERT，查与写之间没有窗口。DDL 的 `created_at` / `updated_at` 是 NOT NULL 而端口记录没有时间戳，
  * 插入时用同一个 ISO-8601 UTC 时刻填两列（覆盖时保留 `created_at`）；端口不读回这两列，因此它们不构成第二套事实。
  */
-import { externalIntentSnapshot, StorageInputError, type DeliveryFactsRecord, type ExecutionContextRecord, type ExecutionRunRecord, type MutationAttemptRecord } from '@harness-projects/capabilities'
+import { externalIntentSnapshot, validateExternalIntentCommand, StorageInputError, type DeliveryFactsRecord, type ExecutionContextRecord, type ExecutionRunRecord, type MutationAttemptRecord } from '@harness-projects/capabilities'
 import type { EntityId, ExecutionContextId, ExecutionRunId, Relation, WorkspaceId } from '@harness-projects/domain'
 import { optional, rowToDeliveryFacts, rowToExecutionContext, rowToExecutionRun, rowToMutationAttempt, rowToRelation, type Row } from './storage-rows.ts'
 import { SqliteSyncSurface } from './storage-sync.ts'
@@ -158,8 +158,9 @@ export class SqliteExecutionSurface extends SqliteSyncSurface {
    */
   putMutationAttempt(record: MutationAttemptRecord): Promise<void> {
     return this.atomic(() => {
-      if (record.externalIntent !== undefined && record.commandName !== 'startWork') throw new TypeError('external intent requires Start Work')
-      const intent = record.externalIntent === undefined ? null : JSON.stringify(externalIntentSnapshot(record.externalIntent))
+      record = record.externalIntent === undefined ? record : { ...record, externalIntent: externalIntentSnapshot(record.externalIntent) }
+      validateExternalIntentCommand(record)
+      const intent = record.externalIntent === undefined ? null : JSON.stringify(record.externalIntent)
       const previous = this.db.prepare('SELECT request_fingerprint, command_name, binding_id FROM mutation_attempt WHERE workspace_id = ? AND idempotency_key = ?').get(record.workspaceId, record.idempotencyKey) as Row | undefined
       if (previous?.request_fingerprint != null && (previous.request_fingerprint !== record.requestFingerprint || previous.command_name !== record.commandName || previous.binding_id !== record.bindingId)) throw new Error('mutation attempt request identity is immutable')
       this.db.prepare(`INSERT INTO mutation_attempt (${ATTEMPT_COLUMNS}, created_at, updated_at)

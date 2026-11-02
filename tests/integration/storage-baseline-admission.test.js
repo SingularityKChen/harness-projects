@@ -33,6 +33,7 @@ const incompatible = (reason) => (error) => {
 const withoutOwner = (sql) => sql.replace(/^.*provisioning_generation.*\n/gm, '')
 const withoutIntent = (sql) => sql.replace(/^.*external_intent_json.*\n/gm, '')
 const cases = [
+  ['prior-start-work-only-intent-check', (db) => fixture(db, versions.length, (sql) => sql.replace(/external_intent_json TEXT CHECK[^\n]+/, "external_intent_json TEXT CHECK (external_intent_json IS NULL OR (command_name = 'startWork' AND json_valid(external_intent_json) AND json_type(external_intent_json) = 'object')),")), 'schema_shape'],
   ['old-generation-two', (db) => { fixture(db, versions.length, withoutIntent); db.exec("INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=2") }, 'generation'],
   ...[0, 3].map((generation) => [`masked-old-intent-shape-${generation}`, (db) => { fixture(db, versions.length, withoutIntent); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
   ['old-generation-one', (db) => { fixture(db, versions.length, withoutOwner); db.exec("INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=1") }, 'generation'],
