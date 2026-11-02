@@ -45,8 +45,7 @@ const endless = (delivery, method) => { const list = delivery[method].bind(deliv
 function throwInside(providers, method, message, once = false, reject = () => true) {
   const transaction = providers.storage.transaction.bind(providers.storage)
   const restore = stub(providers.storage, 'transaction', (work) => {
-    if (once) restore()
-    return transaction((tx) => work(new Proxy(tx, { get: (target, key) => key === method ? async (...args) => { if (reject(...args)) throw new Error(message); return target[key](...args) } : typeof target[key] === 'function' ? target[key].bind(target) : target[key] })))
+    return transaction((tx) => work(new Proxy(tx, { get: (target, key) => key === method ? async (...args) => { if (reject(...args)) { if (once) restore(); throw new Error(message) }; return target[key](...args) } : typeof target[key] === 'function' ? target[key].bind(target) : target[key] })))
   })
   return restore
 }
@@ -236,7 +235,7 @@ const CI_SETS = ['check_run', 'pipeline_run']
 // 查找（分支、变更请求）在 100 个端口页内找到即完整（#233）；后页可读是正控，目标被推后且游标成环才是缺口。变更请求仍先按本分支过滤（#287）；Delivery 完整集合与 Development 查找都将坏页降级，路由失败没有 Provider 调用（K3）。
 const COMPLETENESS = [
   ['Delivery 离线', (providers) => { providers.delivery.faultsSwitch.set(FaultKind.Offline, true) }, { stale: CI_SETS }],
-  ['Delivery 权限被拒', (providers) => { providers.delivery.faultsSwitch.set(FaultKind.PermissionDenied, true) }, { stale: CI_SETS }],
+  ['Delivery 权限被拒', (providers) => { providers.delivery.faultsSwitch.set(FaultKind.PermissionDenied, true) }, { stale: CI_SETS, ci: () => false, kinds: ['change_request', 'commit', 'execution_context', 'worktree'] }],
   ['Development 离线', (providers) => { providers.development.faultsSwitch.set(FaultKind.Offline, true) }, { stale: DELIVERY_SETS }],
   ['检查分页读不完', (providers) => endless(providers.delivery, 'listChecks'), { stale: ['check_run'] }],
   ['流水线页形非法', (providers) => stub(providers.delivery, 'listPipelineRuns', async () => ({ ok: true, value: { items: null, nextCursor: undefined } })), { stale: ['pipeline_run'] }],
@@ -252,11 +251,11 @@ const COMPLETENESS = [
   ['分支头部提交缺失', (providers) => providers.development.state.branches.filter((branch) => branch.name !== 'main').forEach((branch) => { branch.headCommit = undefined }), { stale: DELIVERY_SETS }],
   // 端口约定 provider 失败是结构化的；违约抛出裸异常时，写者也不得把它转给查询，更不得转发原文（K2）。
   ['provider 抛出裸异常', (providers) => { providers.delivery.listPipelineRuns = async () => { throw new Error('PROVIDER-RAW /secret/path') } }, { stale: DELIVERY_SETS, error: 'unavailable' }],
-  ['Development 读能力被摘掉', undefined, { policy: CapabilityKey.DevelopmentRepositoryRead, stale: DELIVERY_SETS }],
-  ['流水线读能力被摘掉', undefined, { policy: CapabilityKey.DeliveryPipelineRead, stale: ['pipeline_run'], unavailable: ['pipeline_run'] }],
-  ['检查读能力被摘掉', undefined, { policy: CapabilityKey.DeliveryCheckRead, stale: ['check_run'], unavailable: ['check_run'] }],
+  ['Development 读能力被摘掉', undefined, { policy: CapabilityKey.DevelopmentRepositoryRead, stale: DELIVERY_SETS, ci: () => false, kinds: ['execution_context', 'worktree'] }],
+  ['流水线读能力被摘掉', undefined, { policy: CapabilityKey.DeliveryPipelineRead, stale: ['pipeline_run'], ci: (fact) => fact.startsWith('check-'), kinds: ['change_request', 'check_run', 'commit', 'execution_context', 'worktree'] }],
+  ['检查读能力被摘掉', undefined, { policy: CapabilityKey.DeliveryCheckRead, stale: ['check_run'], ci: (fact) => fact.startsWith('run-'), kinds: ['change_request', 'commit', 'execution_context', 'pipeline_run', 'worktree'] }],
   // 完整 CR 操作门在远端 head 读取前拒绝（#297）：四集合均不能重新确认。
-  ['完整操作门拒绝：变更请求读能力被摘掉', undefined, { policy: CapabilityKey.DevelopmentChangeRequestRead, stale: DELIVERY_SETS }],
+  ['完整操作门拒绝：变更请求读能力被摘掉', undefined, { policy: CapabilityKey.DevelopmentChangeRequestRead, stale: DELIVERY_SETS, ci: (fact) => fact.startsWith('run-'), kinds: ['commit', 'execution_context', 'pipeline_run', 'worktree'] }],
   // 命令事实（tracks / has_worktree）不随上下文状态隐藏（TD-009）。
   ['上下文 Failed', async (providers, chain, storage) => { const record = await storage.getExecutionContext(chain.started.executionContextId); await storage.putExecutionContext({ ...record, status: 'failed', provisioningStartedAt: undefined }) }, { stale: [] }],
   // 正控：完整读到的空集合才删除；锚点被完整读到并确认不存在时，下游一并删除。
@@ -268,7 +267,7 @@ const COMPLETENESS = [
     { stale: [], ci: (fact) => fact.startsWith('run-'), kinds: ['commit', 'execution_context', 'pipeline_run', 'worktree'] }],
 ]
 for (const [label, { open, reopen }] of STORAGES) {
-  test(`离线保留（${label}）：离线、权限被拒、分页读不完、查找未尽、头部提交缺失、读异常、路由失败与上下文 Failed 都不把最后确认的事实记成不存在，逐跳标陈旧，重启后仍在；只有完整读到的空集合才删除（#221 验收 1、3）`, async () => {
+  test(`离线保留（${label}）：离线、拒读局部遮罩、分页读不完、查找未尽、头部提交缺失、读异常、路由失败与上下文 Failed 普通失败保留最后确认事实，明确拒读遮罩其集合，逐跳标陈旧，重启后仍在；只有完整读到的空集合才删除（#221 验收 1、3）`, async () => {
     for (const [name, inject, expected] of COMPLETENESS) {
       const providers = createFakeProviders()
       const storage = open(providers)
@@ -286,7 +285,7 @@ for (const [label, { open, reopen }] of STORAGES) {
       assert.deepEqual([[...new Set(projection.hops.map((hop) => hop.entityKind))].sort(), projection.degraded, projection.hops.filter((hop) =>
         hop.stale !== expected.stale.includes(hop.entityKind) || hop.unavailable !== (expected.unavailable ?? []).includes(hop.entityKind))],
       [expected.kinds ?? [...DELIVERY_SETS, 'execution_context', 'worktree'].sort(), expected.stale.length > 0, []], `${name}：保留的跳、降级，以及逐跳的陈旧与 unavailable`)
-      const restarted = await compose(providers, { storage: reopen(storage) })
+      const restarted = await compose(providers, { storage: reopen(storage), ...(expected.policy === undefined ? {} : { policy: { [expected.policy]: AccessLevel.Unavailable } }) })
       assert.deepEqual(ciFacts(await restarted.queries.getDeliveryProjection(chain.scope)), ciFacts(projection), `${name}：重启后仍读到同样的事实`)
     }
   })
@@ -385,7 +384,7 @@ test('唯一写者：交付事实与谱系边只经 refreshDeliveryFacts 在一�
   const { providers, core, chain } = await chainOf('lineage-single-writer', { ingested: false })
   const revision = () => providers.storage.currentRevision(WORKSPACE.id)
   const state = async () => [(await providers.storage.listRelations(WORKSPACE.id)).length, await revision()]
-  const cursors = () => JSON.stringify(['cursors', 'reconcileCursors'].map((key) => exportFakeStorageState(providers.storage)[key]))
+  const cursors = () => JSON.stringify(['cursors', 'reconcileCursors'].map((key) => exportFakeStorageState(providers.storage)[key]?.filter((row) => !row.scopeKey?.startsWith('["delivery.read"'))))
   const [untouched, planning, initial] = [cursors(), await planningSnapshot(core), await revision()]
   const calls = [] // 事务内的写入走事务自己的实例，不经过这里的包装
   for (const method of ['putRelation', 'putEntity', 'putDeliveryFacts', 'transaction']) {
@@ -393,7 +392,7 @@ test('唯一写者：交付事实与谱系边只经 refreshDeliveryFacts 在一�
     providers.storage[method] = (...args) => { calls.push(method); return original(...args) }
   }
   await ingest(core, chain.scope)
-  assert.deepEqual(calls, ['transaction'], '一次刷新恰好一个事务，事务之外没有任何关系、实体或交付事实写入')
+  assert.ok(calls.length > 1 && calls.every((method) => method === 'transaction'), '读健康另有短事务；关系、实体与事实只在摄入事务内写入')
   assert.equal(await revision(), initial, '首次刷新写了关系与快照，也不推进修订号（K1）')
   const [once, facts] = [await state(), ciFacts(await core.queries.getDeliveryProjection(chain.scope))]
   await ingest(core, chain.scope)
@@ -408,7 +407,7 @@ test('唯一写者：交付事实与谱系边只经 refreshDeliveryFacts 在一�
   await providers.storage.putExecutionContext({ ...original, worktreeExternalId: undefined })
   assert.equal((await ingest(core, chain.scope)).anchored, false)
   assert.equal(await revision(), initial, '没有锚点而把快照标陈旧的刷新同样不推进修订号')
-  assert.equal(cursors(), untouched, '交付写者不写同步游标与对账游标（CONTRACTS K5）')
+  assert.equal(cursors(), untouched, 'Delivery read-health 不改 Planning 同步游标或对账游标')
 })
 
 test('提交失败：写者事务被拒时返回结构化结果，已确认事实逐字保留并标陈旧（#221、CONTRACTS K2）', async () => {
@@ -471,7 +470,7 @@ test('刷新结果与快照时刻：没有锚点什么也不写，完整集合�
   let restore = stub(providers.storage, 'transaction', () => Promise.reject(new Error('注入的提交失败 /secret/path')))
   const failed = await refreshDeliveryFacts(context, chain.scope)
   restore()
-  assert.deepEqual([failed.ok, failed.anchored, failed.applied, failed.error?.code], [false, true, false, 'unavailable'], '提交失败是结构化结果，不裸抛；锚点在提交之前已确认')
+  assert.deepEqual([failed.ok, failed.anchored, failed.applied, failed.error?.code], [false, false, false, 'unavailable'], '读健康起点提交失败是结构化结果，不裸抛；锚点在提交之前已确认')
   assert.ok(!JSON.stringify(failed).includes('/secret/path'), '不转发异常原文')
   restore = stub(providers.storage, 'getDeliveryFacts', () => Promise.reject(new Error('注入的读失败 /secret/path')))
   const unreadable = await refreshDeliveryFacts(context, chain.scope) // 取令牌用的那次读失败：退回墙钟与本对象的上一次时刻
@@ -566,7 +565,7 @@ for (const [clockName, makeClock, objects] of CLOCKS) {
       providers.delivery.state.runs.find((run) => run.ref.externalId === 'run-1').conclusion = 'failure'
       if (offline) providers.development.faultsSwitch.set(FaultKind.Offline, true)
       await ingest(b, chain.scope) // 较新的读取先提交：run-1 现在是失败（Development 离线时这次读取四个集合都不完整，run-1 仍是最后确认的通过）
-      if (!commits) { const restore = stub(providers.storage, 'transaction', () => (restore(), Promise.reject(new Error('注入的提交失败')))) } // 只拒绝较旧读取的那一次提交
+      if (!commits) throwInside(providers, 'getDeliveryFacts', '注入的提交失败', true) // 只拒绝较旧读取的那一次提交
       release()
       const dropped = await older
       const record = () => exportFakeStorageState(providers.storage).deliveryFacts[0]
@@ -626,7 +625,7 @@ test('刷新结果不转发 provider 文字：缺口只带能力键，读到的�
   const chain = await startChain(providers, core, 'lineage-gap-text')
   providers.delivery.listPipelineRuns = async () => ({ ok: false, error: { code: 'unavailable', message: 'RAW-PROVIDER-TEXT token=SECRET-VALUE /secret/path' } })
   const refreshed = await ingest(core, chain.scope)
-  assert.deepEqual([refreshed.ok, refreshed.gaps], [true, [{ key: 'delivery.pipeline.read' }]], 'provider 读不全是缺口，不是失败；缺口只带能力键')
+  assert.deepEqual([refreshed.ok, refreshed.gaps], [true, [{ key: 'delivery.pipeline.read', code: 'unavailable' }]], 'provider 读不全是缺口，不是失败；缺口只带能力键')
   assert.ok(!JSON.stringify(refreshed).includes('RAW-PROVIDER-TEXT'), '刷新命令的结果会原样到达 controller 的 wire：provider 的错误文字（可能带路径或令牌）不得进入')
 })
 

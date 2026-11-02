@@ -213,6 +213,7 @@ export function unavailableCore(reason: string): CoreApi {
   const error = projectError(ProjectErrorCode.NotSupported, reason)
   const queries: CoreQueries = {
     getChangeRequestOperation: async () => ({ kind: 'blocked', reason: 'unavailable' }),
+    getDeliveryAccessVersion: () => '0:0:0',
     getStartWorkTargetError: async () => error,
     listProviderBindings: async () => [],
     getPlanningSnapshot: async () => ({ views: [], revision: 0, sync: { degraded: true, stale: true, reason }, metadata: { workspace: undefined, capabilities: [], repositories: [], planningSource: undefined } }),

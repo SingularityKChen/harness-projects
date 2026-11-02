@@ -13,6 +13,7 @@ export type WorkItemDetailTarget = { readonly projectId: string; readonly itemId
 /** 安全详情的精确字段面；`identity` / `derived` / `lastUpdatedAt` 可省略，其余恒有。 */
 export type WorkItemDetailContent = {
   readonly executionTarget?: ExecutionTarget
+  readonly deliveryAccessTokens?: Readonly<Record<string, string>>
   readonly startWorkRepositories?: readonly StartWorkRepository[]
   readonly kind: 'content'
   readonly title: string
@@ -68,6 +69,7 @@ export function deriveWorkItemDetailView(input: WorkItemListReadInput, target: W
         }) } : {}),
         executionTarget: { workspaceId: target.projectId, workItemId: target.itemId, repositoryIds: [...new Set(input.read.repositories?.map((repository) => repository.id) ?? [])].sort() },
       } : {}),
+      ...(input.read.repositories === undefined ? {} : { deliveryAccessTokens: Object.fromEntries(input.read.repositories.map(({ id, capabilities, accessVersion }) => [id, JSON.stringify([capabilities, accessVersion])])) }),
       kind: 'content', title: row.title, body: detail.planning.body || '正文未提供',
       planningStatus: row.planningStatus, iteration: row.iteration, targetDate: row.targetDate,
       source: row.source, authority: row.authority,

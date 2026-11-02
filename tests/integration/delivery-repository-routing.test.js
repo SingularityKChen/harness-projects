@@ -255,7 +255,7 @@ for (const label of STORAGES) {
     w.remote.controls.failCR = true
     w.local.calls.length = w.remote.calls.length = w.ciCalls.length = 0
     const result = await w.core.commands.refreshDeliveryFacts(w.scope)
-    assert.deepEqual([result.error, result.gaps], [undefined, [{ key: CapabilityKey.DevelopmentChangeRequestRead }]])
+    assert.deepEqual([result.error, result.gaps], [undefined, [{ key: CapabilityKey.DevelopmentChangeRequestRead, code: 'unavailable' }]])
     assert.equal(JSON.stringify(result).includes('raw-private-provider-error'), false)
     const after = await w.record()
     assert.deepEqual(after.sets.map(({ kind, stale }) => [kind, stale]), [['commit', false], ['change_request', true], ['pipeline_run', false], ['check_run', true]])

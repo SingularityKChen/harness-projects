@@ -23,6 +23,8 @@ import {
 import { GITHUB_PROJECTS_PROVIDER_DEFINITION, createGithubProjectsPlanningProvider } from '@harness-projects/provider-planning-github-projects'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
 
+import { createRuntimeAccess } from '../../packages/core/src/runtime-access.ts'
+
 const WS = 'ws-1'
 const SHARED = 'conn-shared'
 const KEY = 'harness.fake'
@@ -76,7 +78,7 @@ const mountOf = async (domain, port, { patch = (s) => s, workspaceId = WS } = {}
   planning: undefined, development: undefined, delivery: undefined, execution: undefined, storage: undefined, [domain]: port,
 })
 const minimal = (storage, mounts, workspaceId = WS) =>
-  ({ storage, workspaceId, registry: providerRegistry(mounts), clock: () => '2026-10-02T00:00:00Z', policy: {} })
+  ({ storage, workspaceId, registry: providerRegistry(mounts), runtimeAccess: createRuntimeAccess(providerRegistry(mounts)), clock: () => '2026-10-02T00:00:00Z', policy: {} })
 const executionContext = (id, overrides) => ({
   id, workspaceId: WS, workItemId: 'wi-1', repositoryId: 'repo-1', status: 'ready',
   branchExternalId: 'work/wi-1', worktreeExternalId: 'wt-1', provisioningStartedAt: undefined, ...overrides,

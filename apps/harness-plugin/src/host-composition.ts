@@ -99,11 +99,15 @@ const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness',
     return finishChangeRequest(controller, { workItemId: input.workItemId, repositoryId: input.repositoryId }, result)
   },
   getDeliveryProjection: async (controller, input) => {
-    await assertDeliveryScope(controller, input)
-    const projection = await controller.queries.getDeliveryProjection(input)
-    await assertDeliveryScope(controller, input)
-    if (projection.workItemId !== input.workItemId || projection.repositoryId !== input.repositoryId) throw new Error('谱系作用域不可用')
-    return { workspaceId, ...input, projection, now: new Date().toISOString() }
+    for (;;) {
+      const version = controller.queries.getDeliveryAccessVersion()
+      await assertDeliveryScope(controller, input)
+      const projection = await controller.queries.getDeliveryProjection(input)
+      await assertDeliveryScope(controller, input)
+      if (version !== controller.queries.getDeliveryAccessVersion()) continue
+      if (projection.workItemId !== input.workItemId || projection.repositoryId !== input.repositoryId) throw new Error('谱系作用域不可用')
+      return { workspaceId, ...input, projection, now: new Date().toISOString() }
+    }
   },
   refreshDeliveryFacts: async (controller, { actorRef, ...scope }) => {
     await assertDeliveryScope(controller, scope)
