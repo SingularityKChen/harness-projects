@@ -6,7 +6,7 @@
 
 | workflow | 触发与职责 | 门禁 |
 |---|---|---|
-| CI | pull_request、push main、手动运行；执行 install、typecheck、测试并发布 PR Fast Gate | PR Fast Gate 是唯一必需状态 |
+| CI | pull_request、push main、手动运行；Verify 与 Browser 并行执行，PR Fast Gate 汇总两条 lane | PR Fast Gate 是唯一必需状态 |
 | Merge Gate | pull_request（不声明 base 过滤器）、push main；四条 lane 各跑一层测试并点名它保护的不变量，聚合 job 发布 Merge Gate | advisory；是否加入分支保护由人类伙伴决定 |
 | Issue policy | issue / PR 事件；检查标题、标签和 issue 关联 | advisory |
 | Rule checks | PR 事件；发布面和 PR 体量 | advisory |
@@ -16,6 +16,26 @@
 | GitHub review session | ready_for_review 的 pull_request_target；只转发 payload，不 checkout PR 代码；按 head 提交去重 | 不属于合并门禁 |
 
 Board invariants 只从默认分支按日运行，使用 Project token，发现偏离就失败；它不 checkout PR ref，也不进入分支保护。Review session 是特例：它运行在 self-hosted runner 上，默认分支 workflow 固定定义，权限为空，secret 只经 env 进入签名过程，响应体写 $RUNNER_TEMP。普通 PR 代码 lane 使用 pull_request；不得把 pull_request_target 用作执行不可信 PR 代码的入口。
+
+### 生产组合浏览器 lane
+
+`ci.yml` 的 `browser` job 在 Ubuntu hosted runner 上与 `verify` 并行。它依次执行：
+
+    pnpm install --frozen-lockfile
+    pnpm exec playwright install --with-deps chromium
+    pnpm test:browser
+
+Node 版本来自 `.nvmrc`，pnpm 版本来自 `package.json`；lockfile 的精确 Playwright devDependency 与本次安装的 Chromium 对齐。browser job 的十分钟上界包含依赖与系统包安装，下载成本由这条 lane 承担，正常命令不添加 retry、grep 或 skip。真实安装/执行耗时应从当前 head 的 Actions job 回读，不能把本地耗时当作 hosted 成本。
+
+普通 `pnpm test` / `pnpm verify` 保持 Node 契约、集成和既有 E2E 的反馈；浏览器命令通过 `scripts/run-test-layer.mjs` 运行 `tests/browser`，空文件集、零执行/全 skip、摘要解析失败或缺少 binary 均非零。CI 新增的反馈是 Chromium 中生产组合的读取与恢复行为；它不替代安装后的 Harness 人类走查、写入链路验收或 R1 裁决。
+
+`PR Fast Gate` 的 `needs` 包含 `verify` 和 `browser`。聚合 job 继续只输出 lane 结论，不 checkout、引用 secret 或执行候选代码；任一 lane 为 failure、cancelled 或 skipped 都不放行。取消整个运行时仍以平台的 cancelled 状态为准。`tests/contract/ci-browser-workflow.test.js` 固定入口顺序、依赖与失败闭合；action pin、凭据、权限和通用超时继续由 W1–W7 检查。
+
+浏览器失败后，pinned `actions/upload-artifact` 仅上传 `test-results/composed-browser` 下生成的 PNG 截图和 ZIP trace，保留七天，不包含隐藏文件。工具准备或 browser launch 失败时可能没有截图，缺少文件不会覆盖原失败；上传失败也不会吞掉测试失败。产物只应包含隔离 fixture 的生成数据，不能加入真实账号、凭据或业务数据。
+
+触发器仍保留 `pull_request: branches: [main]`、push main 和 `workflow_dispatch`。native stack 是否触发必须读取该 head 的真实运行；缺席时由协调者对选定分支手动 dispatch，并校验 run 的 `head_sha`。Merge Gate 仍只有四条执行 lane，保持 advisory。
+
+门禁的 hosted 负控在隔离临时 ref 上，仅给 `pnpm test:browser` 步骤添加 `PLAYWRIGHT_BROWSERS_PATH=.superpowers/missing-browser-negative-control`，安装步骤仍使用正常目录。先确认 Verify 绿、实际浏览器用例因缺少 binary 非零、Browser 与 PR Fast Gate 红，再恢复正式 head 并重新取两条 lane 和聚合的绿色证据。最终分支不得留下该 env 或调试提交；本地 16 种 needs 结果测试只能证明仓库的聚合表达式，不能代替平台运行证据。
 
 Board invariants 的 `on` **刻意只有 `schedule`**，由 `tests/contract/check-board-workflows-live.test.js` 钉在 `['schedule']` 上。`workflow_dispatch` 带一个 ref 选择器，而被选中的 ref 同时决定 workflow 定义与 checkout 出来的脚本——这两个 job 都持有长效 PAT，于是手选一个 PR 分支就能拿 token 执行任意代码。`merge-gate.yml` 可以用 `workflow_dispatch`，是因为那条 workflow 不读任何 secret；这条区分不是风格，是提权边界。
 
