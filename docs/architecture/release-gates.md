@@ -4,6 +4,8 @@
 > 它回答"这个版本能不能发"，不回答"每次改动要跑哪些检查"——后者是 `AGENTS.md` §9 的执行门禁（`PR Fast Gate` / `Merge Gate`）。两者生命周期不同：R1 修订只改本文件，执行门禁修订只改 `AGENTS.md` §9 与 CI。
 > 依据 `AGENTS.md` §3（文档与事实源）：本文件自包含，不引用任何不随仓库分发的外部输入。
 
+MMP-Core 与后续工作台的范围映射见 [core-release-scope.md](../product/core-release-scope.md)。范围分期不豁免本文件任一 R1 条件、十项不变量或原判定者；`Post-Core`、known issues、测试存在、历史快照和子项关闭都不能替代当前候选证据或人类裁决。无法判定仍按 §1 等同于不满足。范围页的证据矩阵是核对入口，不是另一份 R1 通过表。
+
 原生 Node 文件、目录与前缀回读均由受管测试的首 import 解析 preflight 保护，layer runner 在启动子进程前检查同一边界。未安装检出或深层 shadow 会先于工作区模块 body 失败；按诊断清理残留并在该检出根执行 `pnpm install --frozen-lockfile`。普通取证也可用 `pnpm test:file <path>`，前缀回读保留无 `--test` 的零匹配反例。完整范围见 [测试说明](../../tests/README.md)。
 
 ## 1. 门禁的形态
