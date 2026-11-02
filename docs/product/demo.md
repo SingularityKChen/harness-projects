@@ -4,9 +4,9 @@
 
 ## 证据边界
 
-安装指南记录了 2026 年 10 月 26 日在官方 Harness `0.2.0-rc.2` Web profile 中从构建产物安装、打开 Projects 入口并卸载的过程。该次操作没有配置模型密钥，也没有发送 prompt。另一次 2026 年 10 月 27 日的接线验证使用临时 SQLite 数据库、真实本地 Git 仓库和会话录制响应；没有运行真实模型，也没有重新完成 Harness 内的完整走查。
+安装指南记录了 2026 年 10 月 26 日在官方 Harness `0.2.0-rc.2` Web profile 中从构建产物安装、打开 Projects 入口并卸载的过程。该次操作没有配置模型密钥，也没有发送 prompt。另一次 2026 年 10 月 27 日的接线验证使用临时 SQLite 数据库、真实本地 Git 仓库和会话录制响应；没有运行真实模型，也没有重新完成 Harness 内的完整走查。2026 年 11 月 2 日合入 main 的详情 PR 创建与恢复实现已由源码和对应交付记录核对；这不是已安装产品验收，也没有新增真实 GitHub PR 创建或人工走查证据。
 
-完整 sandbox 走查尚未记录，见 [issue #143](https://github.com/SingularityKChen/harness-projects/issues/143)。Desktop 安装、真实模型会话和完整用户路径的端到端验收也未验证。下表中的目标观察是人工走查时要核对的内容，不表示每步已经通过。测试、录制会话和 Web 安装不能替代人工走查或 R1 发布裁决。
+完整 sandbox 走查尚未记录，见 [issue #143](https://github.com/SingularityKChen/harness-projects/issues/143)。[#236](https://github.com/SingularityKChen/harness-projects/issues/236) 仍开放；由非作者只依本指南在干净 profile 完成的独立安装尚未执行。已有安装记录和本次指南修订都不满足该项验收。Desktop 安装、真实模型会话和完整用户路径的端到端验收也未验证。下表中的目标观察是人工走查时要核对的内容，不表示每步已经通过。测试、录制会话和 Web 安装不能替代人工走查或 R1 发布裁决。
 
 ## 准备
 
@@ -14,7 +14,7 @@
 
 Harness 执行需要显式启用。界面显示“Harness 执行绑定已启用”只确认配置已写入，不代表会话服务、模型凭据或人工备用密钥可用。安装指南说明了稳定的人工 issuer key，以及如何测试强制会话启动失败。不要在本记录中填写凭据、会话 URL 或仓库访问令牌。
 
-演示版读取规划状态，规划字段请直接在 GitHub 修改；它不提供规划写入或通用 Board/Kanban 视图。开始工作必须由用户显式操作，打开工作项不会自动启动执行。插件内没有专用的 PR 创建入口。第 9 步可在 GitHub 或 Harness session 中创建演示 PR，再回到插件查看分支谱系。只读规划边界、Board/Kanban 范围和专用 PR 创建分别由 [#71](https://github.com/SingularityKChen/harness-projects/issues/71)、[#145](https://github.com/SingularityKChen/harness-projects/issues/145) 和 [#235](https://github.com/SingularityKChen/harness-projects/issues/235) 跟踪。
+演示版读取规划状态，规划字段请直接在 GitHub 修改；它不提供规划写入或通用 Board/Kanban 视图。开始工作必须由用户显式操作，打开工作项不会自动启动执行。工作项详情中已有专用的 **创建 PR** 操作：从当前执行上下文填写目标分支、标题和正文后显式提交。GitHub 或 Harness session 中创建 PR 仍是第 9 步允许的替代路径。只读规划边界、Board/Kanban 范围和 PR 创建父项分别由 [#71](https://github.com/SingularityKChen/harness-projects/issues/71)、[#145](https://github.com/SingularityKChen/harness-projects/issues/145) 和 [#235](https://github.com/SingularityKChen/harness-projects/issues/235) 跟踪；#235 仍开放不代表详情入口缺失。
 
 ## 走查步骤
 
@@ -27,10 +27,10 @@ Harness 执行需要显式启用。界面显示“Harness 执行绑定已启用�
 | 3 | 等待首次项目读取/同步。 | 项目条目载入；Issue、Draft、PR 身份保持区分，已有 PR-backed 工作项不重复出现。 | 缺失或重复的条目、仍在加载的状态及最后确认值。 |
 | 4 | 查看工作项列表。 | GitHub Project 条目、规划字段和内容类型可见。 | 列表为空、不可用、不完整或陈旧的情况，以及对应来源。 |
 | 5 | 打开一个 Issue-backed 工作项的详情抽屉。 | 规划字段、来源身份和执行/交付谱系区域可用。 | 抽屉是否打开，哪些值或谱系位置缺失、陈旧或未知。 |
-| 6 | 点击 **开始工作** 打开表单，选择已绑定到此工作区的仓库；可选填写分支名，然后点击 **提交开始工作**。 | 工作只在提交后开始；所选仓库对该工作区可用。表单显示“正在提交”，随后显示确认、失败、冲突或结果未知等状态。 | 是否出现开始工作入口、所选仓库、可选分支、提交按钮结果及结构化拒绝信息。结果为 `pending` 或 `unknown` 时，用表单中的 **读回并恢复** 查询已有状态；不要重新提交或盲目启动第二次。 |
+| 6 | 点击 **开始工作** 打开表单，选择已绑定到此工作区的仓库；可选填写分支名，然后点击 **提交开始工作**。 | 工作只在提交后开始；所选仓库对该工作区可用。表单显示“正在提交”，随后显示确认、失败、冲突或结果未知等状态。 | 是否出现开始工作入口、所选仓库、可选分支、提交按钮结果及拒绝/不可用提示。结果为 `pending` 或 `unknown` 且 **读回并恢复** 按钮可用时，保持原仓库和分支，用该按钮按原 intent 读取现有执行上下文并观察返回状态。若按钮因连接或所选仓库写路由/权限不可用而禁用，记录当前可见的已确认上下文与状态提示；通过工作区 **连接设置** 恢复或重新核对同一仓库的访问后，重新打开此工作项、选择原仓库和分支，再继续恢复。不要点击禁用按钮、改选仓库或分支，或另起请求绕过原 intent。已交付的 #204/#421 修复分别补齐 pending intent 记录与接管/丢失回执下的执行唯一性，但不把未知状态说成成功。 |
 | 7 | 提交开始工作后，等待本地 Git 操作完成。 | 分支和真实工作树对应所选工作项；不会覆盖已有的脏工作树。 | 分支/工作树是否创建成功、错误信息，以及原有仓库内容是否保留。 |
-| 8 | 查看已配置的执行方式。 | 显示 Harness session 或诚实的人工备用状态；若会话明确无法启动，执行上下文和工作树仍保留。 | 会话状态、备用状态及上下文/工作树是否保留。若 session 已接纳 prompt 但结果未知，恢复前必须先读回。 |
-| 9 | 在 GitHub 或 Harness session 中创建 sandbox PR，再回到插件。 | 插件通过分支谱系将 PR 与工作项关联；插件没有专用 PR 创建动作。 | PR 创建位置、分支、插件是否找到关联及任何不确定结果；外部创建结果不明时先对账再重试。 |
+| 8 | 查看已配置的执行方式。 | 显示 Harness session 或诚实的人工备用状态；若会话明确无法启动，执行上下文和工作树仍保留。 | 会话状态、备用状态及上下文/工作树是否保留。若 session 已接纳 prompt 但结果未知，使用现有恢复路径先读回；不能仅凭 UI 状态推断模型已经执行。 |
+| 9 | 在当前作用域没有原 PR 请求时，打开工作项详情中的 **创建 PR** 表单，填写目标分支、标题和正文并显式提交；也可在 GitHub 或 Harness session 中创建 sandbox PR，再回到插件。 | 新请求前会读取当前作用域的原操作；只有确认不存在原操作时才显示可提交表单。若读回发现待决或已保存的原操作，显示请求摘要和 **读回原操作**；页面重载后无需重新输入正文，恢复不会再次提交创建请求。作用域失效或读取权限不可用时阻止新创建。PR 确认与谱系刷新状态分别显示。 | 记录创建入口、分支、表单结果、原请求摘要和恢复结果。原操作读取失败时可用 **重新读取** 重试；权限不足时使用界面提供的 **打开连接设置**；作用域失效时先检查连接和执行上下文，不要创建新请求绕过保护。GitHub/session 的替代路径仍可用，其结果需按实际情况对账。 |
 | 10 | 在详情抽屉查看 PR 的 Actions run 和 checks。 | 显示实际运行和检查状态；未知、不可用、陈旧或失败不能显示成通过。 | 实际观察到的 checks，以及数据是否陈旧、缺失、不可用或未知。 |
 | 11 | 在详情抽屉查看谱系。 | 可见链路连接工作项、执行上下文、分支、PR 和可读取的 CI 事实；缺失关系明确显示为缺口。 | 逐一记录存在的关联，以及缺失或不确定的关联；缺口不等于成功。 |
 | 12 | 回到 GitHub 重新打开规划条目并比较规划字段。 | GitHub 仍是规划事实源；开始工作、CI 和 PR 活动没有改写规划状态。 | 记录变更前后值和任何意外写入；规划值发生变化属于阻塞人工走查的问题。 |
@@ -52,17 +52,18 @@ Harness 执行需要显式启用。界面显示“Harness 执行绑定已启用�
 
 ## 已知限制
 
-以下 issue owner 和 milestone 于 2026 年 10 月 29 日回读。#223 和 #283 属于 M2.1；列出它们是因为会影响演示数据完整性或恢复，即使它们不符合 #236 旧验收文字所要求的 M4.1 或更后 milestone。本页如实列出当前归属，不修改 issue 的 milestone。之后用于发布裁决前，应重新读取 issue 状态。表中的步骤编号表示受影响路径；跨多步或启动期限制以“启动/全程”标明。
+以下 issue 状态和 milestone 于 2026 年 11 月 2 日回读。#223 和 #283 属于 M2.1；列出它们是因为会影响演示数据完整性或恢复，不因其阶段归属从清单移除。本页记录实际 issue 归属，不修改 milestone；发布裁决前应重新读取状态。表中的步骤编号表示受影响路径；跨多步或启动期限制以“启动/全程”标明。
+
+截至该日，[#204](https://github.com/SingularityKChen/harness-projects/issues/204)（pending intent 记录）由 [#467](https://github.com/SingularityKChen/harness-projects/pull/467) 关闭，[#421](https://github.com/SingularityKChen/harness-projects/issues/421)（接管与丢失回执下的 Start Work 执行唯一性）由 [#492](https://github.com/SingularityKChen/harness-projects/pull/492) 关闭；这些机制不消除所有 Provider/session 的未知结果，也不把待确认结果变成成功。PR 创建方面，[#437](https://github.com/SingularityKChen/harness-projects/issues/437) 与 [#494](https://github.com/SingularityKChen/harness-projects/issues/494) 分别由 [#491](https://github.com/SingularityKChen/harness-projects/pull/491) 与 [#495](https://github.com/SingularityKChen/harness-projects/pull/495) 关闭，详情创建入口及持久原操作读取/恢复已在当前源码中接线。[#235](https://github.com/SingularityKChen/harness-projects/issues/235) 仍开放；issue 当前 milestone 为 M4.1，其正文的当前发布处置仍写 TargetRelease: MMP-Core。父项保持开放，不等于详情入口未实现，也不表示本指南已完成其余父项验收。
 
 | 限制 | 受影响步骤 | 用户影响与当前建议 | 开放 owner |
 |---|---|---|---|
 | Draft 转为 Issue 后的身份提升尚不完整。后续同步可能创建新的工作项，使原执行上下文与转换后的 Issue 脱离。如果需要原上下文继续关联，请勿转换演示用 Draft。 | 3–5 | 记录 Draft、Issue ID 以及是否出现第二个工作项。这是已知的数据谱系限制，不表示支持规划写入。 | [#283，M2.1](https://github.com/SingularityKChen/harness-projects/issues/283) |
 | Provider 离线和权限撤销后的跨域降级行为尚不完整。已建立连接后 Provider 离线，与建立连接时的失败分类是两个问题。 | 2–8 | 保留最后确认值，并记录受影响的 Provider、能力和恢复提示。不要把凭据无效、缺少权限或项目不可见视为同一种情况。 | [#144，M4.1](https://github.com/SingularityKChen/harness-projects/issues/144)；[#278，M4.1](https://github.com/SingularityKChen/harness-projects/issues/278) |
 | 不同预发布数据库代际之间没有自动迁移兼容承诺。当前 storage admission 会在业务写入前拒绝不兼容代际或 schema，并返回 `back_up_and_rebuild`；不会静默删除旧库。 | 启动、全程及重启观察 | 数据库位于各 profile 的插件数据目录，不是 Harness native workspace 的 Documents 目录。所支持的 Web profile 使用 `$DSH_HOME/profiles/web/harness-projects/workspace.sqlite`；自定义 profile 的实际位置以[安装指南](demo-install.md#当前数据根与旧库保留)中的宿主权威目录为准。停止所有使用实际数据根的 Harness 进程。将该 profile 的整个 `harness-projects` 目录复制到尚不存在的备份目标；对比源与备份的文件清单及每个文件的 SHA-256，确认一致后仍保留原目录。旧版共享数据目录也保持不动。重建时由操作者在新 profile / 新数据位置决定如何开始；不要删除或覆盖原库，不要把不兼容数据库复制进新位置、修改代际标记或执行修复 SQL。重建不会自动恢复旧执行上下文；仓库、分支和工作树须一并保留。回滚须使用匹配旧 artifact 的原库副本。 | [#223，M2.1](https://github.com/SingularityKChen/harness-projects/issues/223) |
-| Start Work 的外部启动响应丢失和不确定结果恢复仍有边界，不能承诺外部恰好执行一次。 | 6–8；会话启动失败观察 | 若结果为 `pending` 或 `unknown`，点击 **读回并恢复** 查询已有上下文和 run，再决定恢复动作。不能仅因响应丢失就重新提交外部启动。持久 owner 围栏只保护本地结算，不代替外部执行对账。 | [#204，M2.1](https://github.com/SingularityKChen/harness-projects/issues/204) |
-| 插件没有专用 PR 创建命令。 | 9–11 | 在 GitHub 或 Harness session 中创建 PR，再按第 9 步查看分支谱系关联。 | [#235，M4.1](https://github.com/SingularityKChen/harness-projects/issues/235) |
+| PR 创建父项仍开放；不能据此判断详情入口是否已实现，也不能将子项关闭视为父项所有验收完成。 | 9–11 | 可在详情中使用 **创建 PR** 和 **读回原操作**；读回失败、权限不足或作用域失效时分别按第 9 步处理并记录结果。GitHub/Harness session 创建仍是允许的替代路径。 | [#235，M4.1](https://github.com/SingularityKChen/harness-projects/issues/235)；正文当前发布处置为 MMP-Core |
 
-[#420](https://github.com/SingularityKChen/harness-projects/issues/420) 的持久 owner 围栏已随 #455 交付并关闭，旧调用不能覆盖接管后的本地结算；外部唯一性仍由 [#421](https://github.com/SingularityKChen/harness-projects/issues/421) 等既有问题跟踪。
+[#420](https://github.com/SingularityKChen/harness-projects/issues/420) 的持久 owner 围栏已随 #455 交付并关闭，旧调用不能覆盖接管后的本地结算；#421 现已关闭，详见上面的状态记录。关闭这些工程问题不替代重新连接时对陈旧状态的人工核对。
 
 [#218](https://github.com/SingularityKChen/harness-projects/issues/218) 已关闭，因此不列为开放缺陷；该修复不能代替人工核对重新连接时的陈旧状态。规划写入和通用 Board/Kanban 不在演示版范围内，分别由 #71 和 #145 跟踪。
 
