@@ -170,7 +170,7 @@ test('fallback 只在主执行**确定**起不来时承接，只当 fallback、�
     ['主执行 start 无权限：fallback 绑定不得被当成主执行选中', { permissionDenied: true }, {}, ['running', `${HUMAN_BINDING}-fallback`, true, ...degraded]],
     ['主执行结果不确定：它可能已在跑，不得再起第二个执行者，也不把它记成失败 + 人工降级（记 unknown，ADR-0007）', { ambiguousCreate: true }, {}, ['unknown', undefined, undefined, undefined, undefined]],
     ['fallback 被策略设为只读：写命令不得成功', { harnessFailure: true }, { [CapabilityKey.ExecutionRunFallback]: 'read_only' }, ['failed', undefined, true, ...degraded]],
-    ['fallback ack 的不是 running：不得当成人工运行落库', { harnessFailure: true }, {}, ['failed', undefined, true, ...degraded], acking('succeeded')],
+    ['fallback ack 不是 running：状态仍 Failed，持久 journal 保留 ack 身份', { harnessFailure: true }, {}, ['failed', 'binding-human-execution-fallback', true, ...degraded], acking('succeeded')],
     ['主执行 ack 了 failed：那是运行失败，不是降级（不从 failed 反推）', {}, {}, ['failed', 'binding-fake-primary', undefined, undefined, undefined], undefined, acking('failed')],
     ['主执行 start 被策略设为只读（permission_denied）：fallback 承接', {}, { [CapabilityKey.ExecutionRunStart]: 'read_only' }, ['running', `${HUMAN_BINDING}-fallback`, true, ...degraded]],
     ['主执行自己也声明 fallback：只当主执行，承接的是真正的 fallback 绑定', () => createHumanExecutionProvider({ bindingId: 'binding-fake-primary', issuerKey: HUMAN_ISSUER_KEY, fallback: true, faults: { startUnavailable: true } }), {}, ['running', `${HUMAN_BINDING}-fallback`, true, ...degraded]],

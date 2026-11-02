@@ -101,7 +101,7 @@ for (const kind of ['Fake', 'SQLite']) {
     provider.startRun = async (input) => { const r = await call(input); return { ...r, value: { ...r.value, status } } }
     const result = await start(w), row = await receipt(w)
     assert.equal(row.state, status === 'mystery' ? 'unknown' : 'saved'); assert.equal(row.externalIntent.state, row.state)
-    if (status === 'mystery') { unknown(result); assert.equal(result.runExternalId, provider.state.runs.at(-1).ref.externalId); unknown(await start(w, 'new-key')) }
+    if (status === 'mystery') { unknown(result); assert.equal(result.runExternalId, provider.state.runs.at(-1).ref.externalId); assert.equal((await start(w, 'new-key')).writeState, 'saved', '显式命令沿持久引用读回 running 后结算原 receipt') }
     else if (fallback) assert.deepEqual([result.fallback, result.error?.code, result.runExternalId], ['manual_fallback', 'unavailable', undefined], '确定降级结果沿用原契约，结果规范化属于 #458')
   })
   test(`${kind}: committed intent before call interruption remains conservative`, async () => {

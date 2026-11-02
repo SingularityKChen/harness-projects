@@ -10,7 +10,8 @@
 
 `startWork` 有一条补偿序列：认领上下文 → 建分支 → 建工作树 → 启动执行。它今天**只能从头跑**：中断了不能续、失败了不能重试、重试还会因为基线前进而硬失败。完成后：
 
-1. **中断能续**：进程在序列中途死掉后，下一次 `startWork` 从**已完成的那一步之后**继续，不重新推导输入；
+1. **中断能续（限已持久步骤）**：已落库的分支身份可供后续步骤使用；执行启动若已有持久 run 引用，可由显式命令沿原 binding 核对并结算原 receipt。没有引用时只能明确 Unknown，不再次 start，也不保证全局 exactly-once；
+   > **Superseded by**（2026-11-02）：执行恢复边界与证据以 [Start Work 执行回执恢复计划](2026-11-02-start-work-execution-recovery.md) 为准。
 2. **失败能重试**：一次失败不再把 (工作项, 仓库) 永久锁死；
 3. **一份工作树只有一个身份**：恢复路径不再写出第二条 `has_worktree` 关系。
 
@@ -385,7 +386,7 @@ node scripts/workflow-check.mjs
 | P2 | 没有 provider 的那条失败路径把已记录的 `branchExternalId` 抹成 `undefined`，重试回到 #183 的卡死（S8，已复现） | #183 剩余项 |
 | P2 | `branchProbe` 只读第一页、controller 丢掉 `branchHeadCommit`（S10，已复现） | #183 剩余项 |
 | P2 | 工作树步失败仍写 confirmed `has_worktree`，磁盘上 0 份（S3，`main` 上同样存在） | #192 |
-| P2 | 第三步（启动执行）不可续（`main` 上同样存在，需设计） | #193 |
+| P2 | 第三步（启动执行）不可续（当时 `main` 上同样存在，需设计） | #193；**Superseded by**（2026-11-02）：有持久引用可显式核对，无引用保持 Unknown，见执行回执恢复计划 |
 | P2 | 同 key 换请求返回假 `saved`（即下方遗留 §2） | #194 |
 | P2 | `docs/README.md` 的 Active 表被整段改写：8 个 completed 计划从索引消失、两行重复 | 就地修：恢复 `main` 的表，只加本计划一行 |
 | P3 | `chain-facts.ts` 骨架节点注释与实现相反；`tests/integration/README.md` 把"第一批将落地"改成"既有"；`tests/README.md` 集成层描述删掉了"本地 Git 操作"；"每个批次可独立 revert"不成立 | 就地修 |
@@ -407,7 +408,7 @@ node scripts/workflow-check.mjs
 8. **`Closed` 也被当作可接管**，等于替 #138 提前做了"放弃之后能否再开始"的模型决定，且没有用例（变异"`Closed` 不可接管"仍全绿）。收口条件：由 #138 决定语义并补用例。
 9. **工作树路径没有被"决定"**：崩在 `worktree add` 之后换一个路径重试会一直硬失败；记录的分支被人删掉后只有 `not_found`，没有恢复指引。
 10. **旧 key 重放在重试成功之后**得到 `status=ready` 与 `writeState=failed` 并存的结果——账本记录与当前状态的关系与 #194 同源。
-11. 工作树步失败仍写 confirmed `has_worktree`（#192）；第三步不可续（#193）。
+11. 工作树步失败仍写 confirmed `has_worktree`（#192）；第三步不可续（#193）。**Superseded by**（2026-11-02）：#193 改为先持久 run 引用再结算 receipt；重启可沿原签发者核对该引用，没有引用仍是 Unknown，不能靠重试证明未执行。
 
 ## Bottom Change Note
 
