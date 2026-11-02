@@ -48,6 +48,89 @@ function harness(props, Component = ui.StartWorkSection) {
 }
 const nodes = (element) => !element || typeof element !== 'object' ? [] : [element, ...React.Children.toArray(element.props?.children).flatMap(nodes)]
 const find = (h, type) => nodes(h.render()).find((node) => node.type === type)
+test('permission explanation and explicit validation enable only the current scoped attempt', async () => {
+  const reason = 'permission 层拒绝 development.branch.create；其它获准操作仍可用，请恢复授权后重新验证并显式重试'
+  const options = { workspaceId: scope.workspaceId, workItemId: scope.workItemId, executionMode: 'manual', repositories: [{ id: 'repo-a', available: true }] }
+  const api = client.createStartWork({ getStartWorkOptions: async () => options, startWork: async () => result('failed', { error: { code: 'permission_denied', message: reason } }) }, async () => null, { kind: 'user' })
+  assert.equal((await api.options(scope)).repositories[0].available, true)
+  assert.equal((await api.submit(scope)).reason, reason)
+  const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: false, access: 'unavailable', reason }], connected: true, onStarted() {}, startWork: api })
+  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } })
+  assert.match(h.html(), /permission 层拒绝 development.branch.create/)
+  assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, true)
+  options.repositories = [{ id: 'repo-a', available: true }]
+  nodes(h.render()).find(node => node.type === 'button' && node.props.children === '重新验证权限').props.onClick(); await settle()
+  assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, false)
+  h.close()
+})
+test('a write denial expires prior validation and requires explicit revalidation before retry', async () => {
+  const reason = 'permission 层拒绝 development.worktree.create；其它获准操作仍可用，请恢复授权后重新验证并显式重试'
+  const options = { workspaceId: scope.workspaceId, workItemId: scope.workItemId, executionMode: 'manual', repositories: [{ id: 'repo-a', available: true }] }
+  const keys = []; let sequence = 0, refreshed = 0, release
+  const api = client.createStartWork({ getStartWorkOptions: async () => options, startWork: (_actor, key) => { keys.push(key); return new Promise(done => { release = done }) } }, async () => null, { kind: 'user' }, () => `denial-${++sequence}`)
+  const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: false, access: 'unavailable', reason }], connected: true, onStarted: () => refreshed++, startWork: api })
+  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } })
+  const validate = () => nodes(h.render()).find(node => node.type === 'button' && node.props.children === '重新验证权限').props.onClick()
+  validate(); await settle(); assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, false)
+  find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
+  release(result('local_only', { value: { executionContextId: 'ctx', status: 'failed', branchExternalId: 'retained-branch', degraded: true }, error: { code: 'permission_denied', message: reason } })); await settle()
+  assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, true, 'actual denial must expire the prior validation ticket')
+  assert.match(h.html(), /permission 层拒绝 development.worktree.create/); assert.match(h.html(), /（降级）/); assert.equal(refreshed, 1)
+  find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle(); assert.equal(keys.length, 1)
+  options.repositories = [{ id: 'repo-a', available: false, reason }]
+  h.props.repositories = [{ id: 'repo-a', available: false, access: 'unavailable', reason: `${reason}（新观察）` }]
+  h.render(); h.flush(); await settle()
+  validate(); await settle(); assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, true)
+  assert.match(h.html(), /（降级）/, 'revalidation must retain the acknowledged attempt result')
+  options.repositories = [{ id: 'repo-a', available: true }]
+  validate(); await settle(); assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, false)
+  find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle(); assert.deepEqual(keys, ['denial-1', 'denial-2'])
+  release(result('confirmed', { value: { executionContextId: 'ctx', degraded: false } })); await settle(); assert.match(h.html(), /开始工作已确认/); h.close()
+})
+test('Unknown and Pending survive access metadata changes and retain original-key readback eligibility', async () => {
+  for (const state of ['unknown', 'pending']) {
+    const reason = 'permission 层拒绝 development.worktree.create；其它获准操作仍可用，请恢复授权后重新验证并显式重试'
+    const keys = []; let reads = 0, sequence = 0
+    const api = client.createStartWork({ getStartWorkOptions: async () => ({ workspaceId: scope.workspaceId, workItemId: scope.workItemId, executionMode: 'manual' }), startWork: async (_actor, key) => { keys.push(key); return result(state, { error: { code: 'permission_denied', message: reason } }) } }, async () => { reads++; return null }, { kind: 'user' }, () => `uncertain-${++sequence}`)
+    const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: true, access: 'available' }], connected: true, onStarted() {}, startWork: api })
+    find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } })
+    find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
+    assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, false)
+    assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.children, '读回并恢复')
+    h.props.repositories = [{ id: 'repo-a', available: false, access: 'unavailable', reason }]
+    h.render(); h.flush(); await settle()
+    assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.children, '读回并恢复')
+    assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, true)
+    nodes(h.render()).find(node => node.type === 'button' && node.props.children === '重新验证权限').props.onClick(); await settle()
+    assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, true, 'missing confirmation cannot override the current access denial')
+    h.props.repositories = [{ id: 'repo-a', available: true, access: 'available' }]
+    h.render(); h.flush(); await settle()
+    find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
+    assert.equal(reads, 1); assert.deepEqual(keys, ['uncertain-1', 'uncertain-1']); h.close()
+  }
+})
+test('same-scope access denial preserves the in-flight command and rejects late options without restoring write eligibility', async () => {
+  let finish, oldOptions, calls = 0, refreshed = 0
+  const options = { workspaceId: scope.workspaceId, workItemId: scope.workItemId, executionMode: 'manual', repositories: [{ id: 'repo-a', available: true }] }
+  const api = { options: async () => options, submit: () => { calls++; return new Promise(done => { finish = done }) } }
+  const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: true, access: 'available' }], connected: true, onStarted: () => refreshed++, startWork: api })
+  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } })
+  find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
+  h.props.repositories = [{ id: 'repo-a', available: false, access: 'unavailable', reason: 'permission 层拒绝 development.worktree.create；重新验证' }]
+  h.render(); h.flush(); await settle()
+  assert.equal(find(h, 'select').props.disabled, true, 'metadata is not completion of the pending command')
+  assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.children, '正在提交')
+  finish({ writeState: 'confirmed', degraded: false }); await settle()
+  assert.match(h.html(), /开始工作已确认/); assert.equal(refreshed, 1)
+  assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, true, 'late real success must not restore write eligibility')
+  api.options = () => new Promise(done => { oldOptions = done })
+  nodes(h.render()).find(node => node.type === 'button' && node.props.children === '重新验证权限').props.onClick()
+  h.props.repositories = [{ ...h.props.repositories[0], reason: 'permission 层拒绝 development.worktree.create；更新拒绝' }]
+  api.options = async () => ({ ...options, repositories: [{ id: 'repo-a', available: false }] })
+  h.render(); h.flush(); await settle(); oldOptions(options); await settle()
+  assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, true, 'old validation cannot restore a newer denial')
+  find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle(); assert.equal(calls, 1); h.close()
+})
 test('form opens without starting, only bound repositories, four-gate refusal and no-route navigation; unknown recovery and late target isolated', async () => {
   assert.equal(typeof ui.StartWorkSection, 'function')
   let submits = 0, refreshed = 0, bound = 0, focused = 0, resolve, sent
@@ -175,8 +258,12 @@ for (const writeState of ['unknown', 'failed']) test(`keyboard submission recove
   f.h.render(); f.h.flush(); assert.equal(f.focuses, 1); assert.equal(f.listeners.size, 0)
 })
 test('moving focus away permanently cancels recovery even after a later blur to body', async (t) => {
-  const f = await focusFixture(t); await f.submit(); f.moveFocus(f.outside); f.doc.activeElement = f.body; await f.finish()
+  const f = await focusFixture(t); await f.submit(); f.moveFocus(f.outside)
+  f.h.props.repositories = [{ id: 'repo-a', available: false, access: 'unavailable' }]; f.h.render(); f.h.flush(); await settle()
+  assert.equal(f.doc.activeElement, f.outside, 'access metadata must not steal focus from an explicit user move')
+  f.doc.activeElement = f.body; await f.finish()
   assert.equal(f.focuses, 0); assert.equal(f.doc.activeElement, f.body); assert.equal(f.listeners.size, 0)
+  f.h.props.repositories = [{ id: 'repo-a', available: true, access: 'available' }]; f.h.render(); f.h.flush(); await settle()
   await f.submit(f.outside); await f.finish('failed', 1); assert.equal(f.focuses, 0, 'programmatic submit without form focus must not arm recovery')
 })
 for (const boundary of ['close', 'disconnect', 'unmount']) test(`focus recovery cancels at ${boundary} and ignores its late result`, async (t) => {

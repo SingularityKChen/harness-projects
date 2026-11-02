@@ -440,3 +440,36 @@ test('real Host return fence retries after another Host commits denial during fi
   assert.ok(nodes(projection, 'check_run').length, 'the permitted check collection remains visible')
   assert.ok(nodes(projection, 'check_run').every((hop) => hop.fact !== 'ci_passed'), 'no success fact may survive in this response')
 })
+
+
+test('real Hosts share operation read refusal and recover the same Delivery scope without resource creation', async t => {
+  const h = await open(t, 60_000), scope = await prepare(h), hosts = [h.service]
+  const openOwner = async () => {
+    const host = await createHostComposition({ dataPath: h.dataPath, workspaceId: WORKSPACE, catalog: h.catalog, resolveCredential: async () => undefined, watchIntervalMs: 60_000 })
+    const installed = await installHostRemote({ invocation: { peer: { id: 'operation-read-owner' } }, provide: () => () => {}, typert: { register: () => () => {} } }, host)
+    t.after(async () => { await installed.dispose(); await host.dispose() }); hosts.push(installed.service); return installed.service
+  }
+  const existing = await openOwner(), item = (await h.service.baseline()).entities.find(row => row.content.contentKind === 'work_item' && row.entityId !== scope.workItemId).entityId
+  const repository = h.development.getRepository.bind(h.development)
+  h.development.getRepository = async () => denied()
+  assert.equal((await h.service.startWork({ kind: 'user' }, 'actual-read-denial', item, 'repo-alpha', undefined)).error.code, 'permission_denied')
+  await openOwner()
+  const assertHidden = async () => {
+    for (const service of hosts) {
+      const view = (await service.getDeliveryProjection(scope.workItemId, scope.repositoryId)).projection
+      for (const kind of ['commit', 'change_request', 'pipeline_run', 'check_run']) assert.equal(nodes(view, kind).length, 0)
+      assert.doesNotMatch(JSON.stringify(view), /synthetic-pr-|ci_passed/)
+    }
+  }
+  await assertHidden(); h.development.getRepository = repository
+  assert.equal((await h.service.getStartWorkOptions(item)).repositories[0].available, true)
+  await assertHidden()
+  const counts = [h.development.state.branches.length, h.development.state.worktrees.length]
+  const rollback = t.mock.method(SqliteStorage.prototype, 'putDeliveryFacts', async () => { throw Error('operation-recovery-rollback') })
+  assert.equal((await existing.refreshDeliveryFacts({ kind: 'user' }, scope.workItemId, scope.repositoryId)).value.applied, false)
+  rollback.mock.restore(); await assertHidden()
+  const result = await existing.refreshDeliveryFacts({ kind: 'user' }, scope.workItemId, scope.repositoryId)
+  assert.equal(result.value.applied, true); assert.deepEqual(result.value.gaps, [])
+  for (const service of hosts) assert.ok(nodes((await service.getDeliveryProjection(scope.workItemId, scope.repositoryId)).projection, 'pipeline_run').length)
+  assert.deepEqual([h.development.state.branches.length, h.development.state.worktrees.length], counts)
+})

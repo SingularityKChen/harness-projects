@@ -1,5 +1,6 @@
 export type { BindRepositoryInput, CommandResult } from '@harness-projects/controller'
 import type { ExternalObjectRef, PlanningProvider, ProviderPlanningFieldDefinition, Storage, WorkspacePlanningMappingRecord } from '@harness-projects/capabilities'
+import { CapabilityKey } from '@harness-projects/capabilities'
 import { mkdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { createWorkspaceSetup, composeCore, unavailableCore, createPlanningReconciler, type PlanningReconciler, type PlanningReconcilerTimers, type CoreApi } from '@harness-projects/core'
@@ -70,7 +71,7 @@ async function finishChangeRequest(controller: Controller, scope: { workItemId: 
 const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness', targetError: CoreApi['queries']['getStartWorkTargetError']): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts' | 'createChangeRequest' | 'getChangeRequestOperation' | 'resumeChangeRequest'>, Controller> => ({
   getStartWorkOptions: async (controller, input) => {
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
-    return { workspaceId, workItemId: input.workItemId, executionMode: mode() }
+    return { workspaceId, workItemId: input.workItemId, executionMode: mode(), repositories: await controller.commands.validateStartWork(input.workItemId) }
   },
   startWork: async (controller, input) => {
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item'
@@ -82,9 +83,12 @@ const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness',
     const result = await controller.commands.startWork({ ...request, ...(branchName === undefined ? {} : { branchName }) })
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
     const currentError = await targetError(input.workItemId), error = currentError ?? result.error
+    const reason = error?.message.match(/^(capability|permission|policy) 层拒绝 ([a-z._]+)；/)
     return { ...result, ...(currentError && result.authoritative ? { writeState: 'unknown' as const, authoritative: false } : {}),
       ...(error === undefined ? {} : { error: projectError(error.code, currentError && result.authoritative
-        ? '已确认资源保留；当前规划只读准入不再确认本次请求，请恢复后用原键读回' : '开始工作未确认，请按恢复动作处理') }) }
+        ? '已确认资源保留；当前规划只读准入不再确认本次请求，请恢复后用原键读回' : reason
+          && Object.values(CapabilityKey).some(key => key === reason[2]) ? `${reason[1]} 层拒绝 ${reason[2]}；其它获准操作仍可用，请恢复授权后重新验证并显式重试`
+          : '开始工作未确认，请按恢复动作处理') }) }
   },
   createChangeRequest: async (controller, input) => {
     await assertDeliveryScope(controller, input)

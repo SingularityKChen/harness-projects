@@ -30,6 +30,16 @@ function snapshot(w) {
   const db = openDatabase(w.storage.location)
   try { return JSON.stringify(db.prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name").all().map(({ name }) => [name, db.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all()])) } finally { db.close() }
 }
+function neutralReadSnapshot(w) {
+  const state = JSON.parse(snapshot(w)), sqlite = !!w.storage.location
+  const rows = sqlite ? state.find(([table]) => table === 'sync_cursor')[1] : state.cursors
+  const row = rows.find(row => (row.workspaceId ?? row.workspace_id) === w.workspace.id && (row.bindingId ?? row.binding_id) === w.providers.development.gate.bindingId && (row.scopeKey ?? row.scope_key) === JSON.stringify(['delivery.read', 'development.repository.read', 'repo-alpha']))
+  const field = sqlite ? 'cursor_value' : 'cursorValue', health = JSON.parse(row[field])
+  assert.deepEqual({ ...health, version: 0 }, { version: 0, denialVersion: 0, confirmedVersion: 0, denied: false, scopes: [], pending: 0 })
+  assert.equal(row.state, 'healthy'); assert.equal(row.lastErrorCode ?? row.last_error_code ?? undefined, undefined)
+  row[field] = JSON.stringify({ ...health, version: 0 })
+  return [JSON.stringify(state), health.version]
+}
 const barrier = () => ({ entered: Promise.withResolvers(), release: Promise.withResolvers(), hits: 0 })
 function holdAck(provider, method) {
   const gate = barrier(), call = provider[method].bind(provider)
@@ -159,9 +169,9 @@ for (const kind of ['Fake', 'SQLite']) {
         w.time.advance(31_000); const before = snapshot(w); assert.equal((await start(w, 'winner')).writeState, 'pending'); assert.equal(snapshot(w), before)
         await w.storage.putExecutionContext({ ...await w.storage.getExecutionContext(w.contextId), provisioningGeneration: 2 })
       }
-      const winner = snapshot(w); gate.release.resolve(); const result = await old
+      const [winner, readVersion] = takeover ? neutralReadSnapshot(w) : [snapshot(w), 0]; gate.release.resolve(); const result = await old
       assert.deepEqual([result.writeState, result.confirmed, result.branchExternalId], ['unknown', false, undefined], '没有已知句柄也不能把不确定外部结果改称 conflict/reapply')
-      if (takeover) { assert.equal(snapshot(w), winner); assert.deepEqual([result.error.code, result.error.recovery], ['result_unknown', 'refresh']) }
+      if (takeover) { assert.deepEqual(neutralReadSnapshot(w), [winner, readVersion + 1]); assert.deepEqual([result.error.code, result.error.recovery], ['result_unknown', 'refresh']) }
     } finally { gate.release.resolve(); await old }
   })
 

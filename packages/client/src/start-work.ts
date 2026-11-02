@@ -1,10 +1,11 @@
 /** 局部提交 intent；执行事实始终由既有 reader/Host 拥有。 */
 import { ExecutionContextStatus } from '@harness-projects/domain/values'
+import { CapabilityKey } from './keys.ts'
 import type { ActorRef, CommandWriteState } from '@harness-projects/controller'
 import type { ExecutionContextReader, ExecutionContextScope } from './execution-context.ts'
 export interface StartWorkIntent extends ExecutionContextScope { readonly branchName?: string | undefined }
-export interface StartWorkOptions { readonly workspaceId: string; readonly workItemId: string; readonly executionMode: 'manual' | 'harness' }
-export interface StartWorkResult { readonly writeState: CommandWriteState; readonly degraded: boolean; readonly fallback?: 'manual_fallback'; readonly contextStatus?: ExecutionContextStatus }
+export interface StartWorkOptions { readonly workspaceId: string; readonly workItemId: string; readonly executionMode: 'manual' | 'harness'; readonly repositories?: readonly { id: string; available: boolean; reason?: string }[] }
+export interface StartWorkResult { readonly writeState: CommandWriteState; readonly degraded: boolean; readonly fallback?: 'manual_fallback'; readonly contextStatus?: ExecutionContextStatus; readonly reason?: string }
 export interface StartWorkPort {
   getStartWorkOptions(workItemId: string): Promise<unknown>
   startWork(actorRef: ActorRef, key: string, workItemId: string, repositoryId: string, branchName?: string): Promise<unknown>
@@ -26,7 +27,9 @@ function result(value: unknown): StartWorkResult {
   if (['confirmed', 'reconciled'].includes(dto.writeState as string) && !view?.executionContextId) throw new TypeError('开始工作缺少确认结果')
   const error = dto.error === undefined ? undefined : record(dto.error, ['code', 'message', 'recovery', 'retryable', 'confirmedValue', 'attemptedValue'])
   if (error && (typeof error.code !== 'string' || typeof error.message !== 'string')) throw new TypeError('开始工作错误不合契约')
+  const denied = (error?.message as string | undefined)?.match(/^(capability|permission|policy) 层拒绝 ([a-z._]+)；/)
   return { writeState: dto.writeState as CommandWriteState, degraded: view?.degraded === true,
+    ...(denied && Object.values(CapabilityKey).some(key => key === denied[2]) ? { reason: `${denied[1]} 层拒绝 ${denied[2]}；其它获准操作仍可用，请恢复授权后重新验证并显式重试` } : {}),
     ...(view?.status === undefined ? {} : { contextStatus: view.status as ExecutionContextStatus }),
     ...(view?.fallback === 'manual_fallback' ? { fallback: 'manual_fallback' } : {}) }
 }
@@ -34,8 +37,12 @@ export function createStartWork(port: StartWorkPort, reader: ExecutionContextRea
   let attempt: { identity: string; key: string; uncertain: boolean; finished: boolean; pending?: Promise<StartWorkResult> | undefined } | undefined
   return {
     async options(scope) {
-      const dto = record(await port.getStartWorkOptions(scope.workItemId), ['workspaceId', 'workItemId', 'executionMode'])
+      const dto = record(await port.getStartWorkOptions(scope.workItemId), ['workspaceId', 'workItemId', 'executionMode', 'repositories'])
       if (dto.workspaceId !== scope.workspaceId || dto.workItemId !== scope.workItemId || !['manual', 'harness'].includes(dto.executionMode as string)) throw new TypeError('开始工作范围不合契约')
+      if (dto.repositories !== undefined && (!Array.isArray(dto.repositories) || dto.repositories.some(value => {
+        const entry = record(value, ['id', 'available', 'reason'])
+        return typeof entry.id !== 'string' || typeof entry.available !== 'boolean' || (entry.reason !== undefined && typeof entry.reason !== 'string')
+      }))) throw new TypeError('开始工作验证不合契约')
       return dto as unknown as StartWorkOptions
     },
     submit(intent) {

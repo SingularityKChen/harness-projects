@@ -116,8 +116,8 @@ for (const kind of ['Fake', 'SQLite']) {
     assert.deepEqual(JSON.parse((await get(w.workspace.id, 'first')).requestFingerprint).slice(3), [['agent', 'one'], w.request.workItemId, 'repo-alpha', 'work/frozen', '.worktrees/frozen'])
   })
   test(`${kind}: atomic admission rollback leaves key, context and parents untouched`, async () => {
-    const w = await setup(kind); const before = local(w.storage); const transaction = w.storage.transaction.bind(w.storage); let hit = 0
-    w.storage.transaction = (work) => transaction((tx) => work(new Proxy(tx, { get(target, key) { const fn = Reflect.get(target, key); return key === 'putExecutionContext' ? async (...args) => { await fn.apply(target, args); hit++; throw Error('admission rollback') } : typeof fn === 'function' ? fn.bind(target) : fn } })))
+    const w = await setup(kind); let before; const transaction = w.storage.transaction.bind(w.storage); let hit = 0
+    w.storage.transaction = (work) => transaction((tx) => work(new Proxy(tx, { get(target, key) { const fn = Reflect.get(target, key); return key === 'putExecutionContext' ? async (...args) => { before ??= local(w.storage); await fn.apply(target, args); hit++; throw Error('admission rollback') } : typeof fn === 'function' ? fn.bind(target) : fn } })))
     assert.equal((await start(w)).error?.code, 'unavailable'); assert.equal(hit, 1); assert.equal(local(w.storage), before); assert.deepEqual(counts(w), [0, 0, 0])
     w.storage.transaction = transaction; assert.equal((await start(w)).writeState, 'saved')
   })
@@ -156,7 +156,13 @@ test('SQLite: dual handles read no attempt before cross-context admission; one w
   const first = start(w); await readers[0].wait
   const loser = start(w, { workItemId: w.items[1] }, other); await readers[1].wait
   release[0].release(); await branchEntered.wait; const before = local(w.storage)
-  release[1].release(); try { conflict(await loser); assert.equal(local(w.storage), before); assert.equal(branches, 1)
+  release[1].release(); try { conflict(await loser)
+    const previous = JSON.parse(before), current = JSON.parse(local(w.storage))
+    const cursor = data => data.find(([table]) => table === 'sync_cursor')[1].find(row => row.workspace_id === w.workspace.id && row.binding_id === w.providers.development.gate.bindingId && row.scope_key === JSON.stringify(['delivery.read', 'development.repository.read', 'repo-alpha']))
+    const previousCursor = cursor(previous), currentCursor = cursor(current), health = JSON.parse(previousCursor.cursor_value)
+    assert.deepEqual({ ...health, version: 0 }, { version: 0, denialVersion: 0, confirmedVersion: 0, denied: false, scopes: [], pending: 1 })
+    assert.deepEqual(currentCursor, { ...previousCursor, state: 'healthy', cursor_value: JSON.stringify({ ...health, pending: 0 }) })
+    Object.assign(previousCursor, currentCursor); assert.equal(JSON.stringify(current), JSON.stringify(previous)); assert.equal(branches, 1)
     assert.equal(await second.getExecutionContext(contextIdFor(w.workspace.id, w.items[1], 'repo-alpha')), undefined)
   } finally { branchRelease.release(); await first }
   assert.equal((await first).writeState, 'saved'); assert.deepEqual(counts(w), [1, 1, 1])

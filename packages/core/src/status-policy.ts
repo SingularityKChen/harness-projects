@@ -86,6 +86,9 @@ export async function writePlanningStatus(context: CoreContext, command: Plannin
   return context.storage.transaction(async (tx) => {
     const projection = await tx.getPlanningProjection(context.workspaceId, command.entityId)
     const policy = workspacePolicy(await tx.getWorkspace(context.workspaceId))
+    const denied = context.runtimeAccess.error()
+    if (denied) return { entityId: command.entityId, status: NormalizedStatus.Unknown, derived: [], wrote: false,
+      policy, mode: modeFor(policy), reason: denied.message, error: denied }
     // 可见性先于策略：缺失与 redacted 是同一前置条件的两种失败，统一以不可重试的 not_found 拒绝
     if (projection === undefined || projection.content.contentKind === ContentKind.Redacted) {
       return {
