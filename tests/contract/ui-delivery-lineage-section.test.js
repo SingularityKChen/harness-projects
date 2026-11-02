@@ -165,3 +165,11 @@ test('unconfirmed malformed time is never labelled as a last confirmation', asyn
   const slot = text(f.h).match(/<li data-position="pipeline_run">[\s\S]*?<\/li>/)[0]
   assert.match(slot, /未知/); assert.doesNotMatch(slot, /最后确认：|2026-02-30|data-state="passed"/); f.h.close()
 })
+
+test('PR confirmation reloads existing lineage with a pure read and no duplicate refresh', async (t) => {
+  const f = fixture(t); f.h.props.creator = { submit: async () => ({ writeState: 'confirmed' }) }
+  await f.open()
+  f.h.render().props.children.at(-2).props.onConfirmed(); await settle()
+  assert.deepEqual(f.calls, ['refresh', 'read', 'read'])
+  f.h.close()
+})

@@ -57,8 +57,17 @@ async function assertDeliveryScope(controller: Controller, scope: { workItemId: 
     || !(await controller.baseline()).repositories?.some((repository) => repository.id === scope.repositoryId)) throw new Error('谱系作用域不可用')
 }
 
+/** Core 已持久确认后，最后一个 await 仅观察原操作及当前目标；不再启动外部刷新。 */
+async function finishChangeRequest(controller: Controller, scope: { workItemId: string; repositoryId: string }, result: Awaited<ReturnType<Controller['commands']['createChangeRequest']>>) {
+  const operation = result.value?.operationId === undefined ? undefined : await controller.queries.getChangeRequestOperation({ ...scope, operationId: result.value.operationId })
+  if (result.authoritative && (operation?.kind !== 'operation' || operation.state !== 'saved' || !operation.currentTarget || operation.targetStamp !== result.value?.targetStamp)) {
+    return { writeState: 'conflict', saving: false, authoritative: false, error: projectError(ProjectErrorCode.Conflict, 'PR 当前目标已变化，请读取原操作') }
+  }
+  return { ...result, ...(result.error === undefined ? {} : { error: projectError(result.error.code, 'PR 未确认，请按恢复动作处理') }) }
+}
+
 /** 工作区身份来自 Host；执行记录只在读取前后均可见的工作项上投影允许字段。 */
-const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness'): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts'>, Controller> => ({
+const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness'): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts' | 'createChangeRequest' | 'getChangeRequestOperation' | 'resumeChangeRequest'>, Controller> => ({
   getStartWorkOptions: async (controller, input) => {
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
     return { workspaceId, workItemId: input.workItemId, executionMode: mode() }
@@ -71,6 +80,18 @@ const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness')
     const result = await controller.commands.startWork({ ...request, ...(branchName === undefined ? {} : { branchName }) })
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
     return { ...result, ...(result.error === undefined ? {} : { error: projectError(result.error.code, '开始工作未确认，请按恢复动作处理') }) }
+  },
+  createChangeRequest: async (controller, input) => {
+    await assertDeliveryScope(controller, input)
+    const result = await controller.commands.createChangeRequest(input)
+    return finishChangeRequest(controller, { workItemId: input.workItemId, repositoryId: input.repositoryId }, result)
+  },
+  getChangeRequestOperation: async (controller, { actorRef: _actorRef, operationId, ...scope }) => ({ workspaceId, ...scope,
+    operation: await controller.queries.getChangeRequestOperation({ ...scope, ...(operationId === undefined ? {} : { operationId }) }),
+  }),
+  resumeChangeRequest: async (controller, input) => {
+    const result = await controller.commands.resumeChangeRequest(input)
+    return finishChangeRequest(controller, { workItemId: input.workItemId, repositoryId: input.repositoryId }, result)
   },
   getDeliveryProjection: async (controller, input) => {
     await assertDeliveryScope(controller, input)

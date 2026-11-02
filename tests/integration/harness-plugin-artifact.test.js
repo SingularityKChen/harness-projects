@@ -125,7 +125,7 @@ async function evaluateClientBundle(clientFile, console = globalThis.console, { 
   const loadCalls = []
   const requested = []
   const window = { __ModuleLoader__: { load: (descriptor) => loadCalls.push(descriptor) } }
-  const context = vm.createContext({ window, console, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout })
+  const context = vm.createContext({ window, console, crypto: globalThis.crypto, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout })
   vm.runInContext(code, context, { filename: clientFile })
 
   const stubRequire = (id) => {
@@ -298,6 +298,8 @@ describe('Harness 插件安装件契约', () => {
       try {
         await hostModule.apply(context)
         const service = services.get('harnessProjects')
+        assert.equal(typeof service.createChangeRequest, 'function', '当前 Host 产物含真实 PR 操作')
+        assert.equal(typeof service.getChangeRequestOperation, 'function'); assert.equal(typeof service.resumeChangeRequest, 'function')
         assert.equal((await service.baseline()).workspace, undefined, '干净数据根：零工作区')
         assert.equal((await service.bootstrapWorkspace({ kind: 'agent', id: 'packaged-host' }, 'packaged-host-1')).writeState, 'failed', '没有工作区时命令是结构化失败')
         const db = new DatabaseSync(path.join(process.env.DSH_HOME, 'harness-projects', 'workspace.sqlite'), { readOnly: true })
@@ -405,7 +407,7 @@ describe('Harness 插件安装件契约', () => {
      * 桩流只交付 `frame`（若有）这一个开场 baseline 项，之后挂起（next 永不结算），`ends` 时改为正常结束；`streamError` 让 `$stream` 同步抛错。
      * 页面用真实 React；监督者的计时器记入 `seen.timers`（不真等），`cancelled` 记取消。
      */
-    async function applyClient({ frame, ends, streamError, setup } = {}) {
+    async function applyClient({ frame, ends, streamError, setup, createChangeRequest, getChangeRequestOperation, resumeChangeRequest } = {}) {
       const seen = { registrations: [], live: new Set(), injectedNames: [], contextNames: [], logs: [], streams: [], timers: [], fiberErrors: [] }
       const record = (level) => (...args) => seen.logs.push([level, ...args])
       const clock = {
@@ -423,7 +425,7 @@ describe('Harness 插件安装件契约', () => {
             seen.streams.push(stream)
             return stream
           },
-          harnessProjects: { watch: (signal) => signal, // 原样返回 signal，供断言 open 转交的是同一个；Gateway JSON解码属于bundle所在realm
+          harnessProjects: { getChangeRequestOperation: async (...args) => json(JSON.stringify({ ok: true, value: await getChangeRequestOperation(...args) })), resumeChangeRequest: async (...args) => json(JSON.stringify({ ok: true, value: await resumeChangeRequest(...args) })), createChangeRequest: async (...args) => json(JSON.stringify({ ok: true, value: await createChangeRequest(...args) })), watch: (signal) => signal, // 原样返回 signal，供断言 open 转交的是同一个；Gateway JSON解码属于bundle所在realm
             getWorkspaceSetup: async () => json(JSON.stringify({ ok: true, value: setup ?? (frame ? { workspace: frame.baseline.workspace, planning: { state: 'confirmed', bindingId: 'binding-1', projectNodeId: 'PVT_artifact' } } : { workspace: null, planning: { state: 'unbound' } }) })) },
         },
         effect: (execute, label) => fiberCtx.effect(execute, label),
@@ -525,6 +527,19 @@ describe('Harness 插件安装件契约', () => {
       const icon = registrations.find((entry) => entry.options.name === 'sidebar.panellist').component()
       assert.equal(icon.type, 'svg')
       assert.equal(String(icon.props['aria-hidden']), 'true')
+    })
+
+    it('当前 bundle 的独立 creator 可到达真实 Remote primitive 合同', async () => {
+      const calls = [], reads = [], resumes = [], seen = await applyClient({ frame: BASELINE_FRAME, getChangeRequestOperation: async (...args) => { reads.push(args); return { workspaceId: 'workspace-1', workItemId: 'entity-1', repositoryId: 'repo', operation: { kind: 'operation', operationId: 'artifact-op', state: 'unknown', targetStamp: 'artifact-target', currentTarget: true, head: 'feature/work', base: 'main', title: 'Artifact PR' } } }, resumeChangeRequest: async (...args) => { resumes.push(args); return { writeState: 'unknown', saving: false, authoritative: false } }, createChangeRequest: async (...args) => { calls.push(args); return { writeState: 'confirmed', saving: false, authoritative: true, value: { phase: 'confirmed', operationId: 'artifact-op', targetStamp: 'artifact-target', entityId: 'native-pr', ref: { bindingId: 'dev', objectKind: 'change_request', externalId: 'PR_1' } } } } })
+      try {
+        const creator = seen.registrations.find((entry) => entry.options.name === 'main').component().props.changeRequestCreator
+        const result = await creator.submit({ workspaceId: 'workspace-1', workItemId: 'entity-1', repositoryId: 'repo', base: 'main', title: 'Artifact PR', body: '' })
+        assert.equal(result.writeState, 'confirmed'); assert.equal(calls.length, 1)
+        assert.deepEqual([...calls[0].slice(2)], ['entity-1', 'repo', 'main', 'Artifact PR', ''])
+        const scope = { workspaceId: 'workspace-1', workItemId: 'entity-1', repositoryId: 'repo' }
+        assert.equal((await creator.operation(scope)).operation.operationId, 'artifact-op'); assert.equal((await creator.resume(scope, 'artifact-op')).writeState, 'unknown')
+        assert.deepEqual([...reads[0].slice(1)], ['entity-1', 'repo', undefined]); assert.deepEqual([...resumes[0].slice(1)], ['entity-1', 'repo', 'artifact-op'])
+      } finally { await seen.unload() }
     })
 
     it('新构建入口即使已有watch也受setup gate约束：空库可创建，local_only配置不伪报已连接', async () => {

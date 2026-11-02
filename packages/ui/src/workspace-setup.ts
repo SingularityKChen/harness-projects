@@ -1,6 +1,6 @@
 import { createElement as h, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
-import type { PlanningMappingSource, PlanningRefreshSource, WorkspaceSetupSource, ExecutionContextReader, RepositoryBindingSource, StartWork, DeliveryLineageReader } from '@harness-projects/client'
+import type { PlanningMappingSource, PlanningRefreshSource, WorkspaceSetupSource, ExecutionContextReader, RepositoryBindingSource, StartWork, DeliveryLineageReader, ChangeRequestCreator } from '@harness-projects/client'
 import { workspaceSetupView } from '@harness-projects/ui-model'
 import { PlanningMappingForm } from './planning-mapping.ts'
 import { RepositoryBindingForm } from './repository-binding.ts'
@@ -11,7 +11,7 @@ import { FORM_STYLES, focusFormError } from './form-presentation.ts'
 import type { DOMElement } from './work-item-detail.ts'
 type SettingsScrollElement = DOMElement & { scrollTop: number; getBoundingClientRect?(): { top: number; bottom: number } }
 /** 唯一工作区设置门：仅持草稿与导航；确认状态和工作区 identity 全部来自 Host。 */
-export function WorkspaceSetupGate({ setupSource, source, executionReader, repositoryBindingSource, startWork, deliveryReader, mappingSource, refreshSource, announceListStatus }: { readonly announceListStatus?: boolean | undefined; readonly mappingSource?: PlanningMappingSource | undefined; readonly refreshSource?: PlanningRefreshSource | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly startWork?: StartWork | undefined; readonly repositoryBindingSource?: RepositoryBindingSource | undefined; readonly setupSource: WorkspaceSetupSource; readonly source: WorkspaceSource; readonly executionReader?: ExecutionContextReader | undefined }): ReactElement {
+export function WorkspaceSetupGate({ setupSource, source, executionReader, repositoryBindingSource, startWork, deliveryReader, changeRequestCreator, mappingSource, refreshSource, announceListStatus }: { readonly announceListStatus?: boolean | undefined; readonly mappingSource?: PlanningMappingSource | undefined; readonly refreshSource?: PlanningRefreshSource | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly changeRequestCreator?: ChangeRequestCreator | undefined; readonly startWork?: StartWork | undefined; readonly repositoryBindingSource?: RepositoryBindingSource | undefined; readonly setupSource: WorkspaceSetupSource; readonly source: WorkspaceSource; readonly executionReader?: ExecutionContextReader | undefined }): ReactElement {
   const snapshot = useSyncExternalStore(setupSource.subscribe, setupSource.getSnapshot, setupSource.getSnapshot)
   const read = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot)
   const [editScope, setEditScope] = useState<string | undefined>(undefined)
@@ -109,7 +109,7 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
     ] }))
   }
   if (snapshot.pending) children.push(h('p', { key: 'pending', role: 'status', 'aria-live': 'polite' }, '正在处理，请稍候。'))
-  const workspace = list ? h(WorkItemApp, { source, refreshSource, announceListStatus, executionReader, deliveryReader, startWork, onBindRepository: enter }) : h('section', { 'aria-label': '工作区摘要' },
+  const workspace = list ? h(WorkItemApp, { source, refreshSource, announceListStatus, executionReader, deliveryReader, changeRequestCreator, startWork, onBindRepository: enter }) : h('section', { 'aria-label': '工作区摘要' },
     h('p', { role: 'status' }, setup?.workspace ? confirmed ? read?.workspace.id !== setup.workspace.id ? '正在等待工作项。' : read.capabilities?.some(entry => entry.key === 'planning.item.read' && entry.access === 'unavailable') ? '当前无法读取工作项，请检查连接设置中的读取能力。' : '工作项读取能力尚未确认，请检查连接设置。' : '来源尚未确认，尚无可读工作项。' : '欢迎使用 Harness Projects。尚无可读工作区。'),
     setup?.workspace ? h('p', null, `当前工作区：${setup.workspace.name}`) : null,
     setup?.workspace && setup.planning.state === 'unbound' ? h('button', { type: 'button', className: 'hp-action', onClick: enter }, '继续连接项目') : null)
@@ -122,6 +122,6 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
       !settings ? h('div', null, workspace, errorSummary('workspace-error')) : null))
 
 }
-export function bindWorkspaceSetupApp(setupSource: WorkspaceSetupSource, source: WorkspaceSource, executionReader?: ExecutionContextReader, options: { readonly mappingSource?: PlanningMappingSource | undefined; readonly refreshSource?: PlanningRefreshSource | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly startWork?: StartWork | undefined; readonly repositoryBindingSource?: RepositoryBindingSource | undefined } = {}): () => ReactElement {
-  return () => h(WorkspaceSetupGate, { setupSource, source, executionReader, repositoryBindingSource: options.repositoryBindingSource, startWork: options.startWork, deliveryReader: options.deliveryReader, mappingSource: options.mappingSource, refreshSource: options.refreshSource })
+export function bindWorkspaceSetupApp(setupSource: WorkspaceSetupSource, source: WorkspaceSource, executionReader?: ExecutionContextReader, options: { readonly mappingSource?: PlanningMappingSource | undefined; readonly refreshSource?: PlanningRefreshSource | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly changeRequestCreator?: ChangeRequestCreator | undefined; readonly startWork?: StartWork | undefined; readonly repositoryBindingSource?: RepositoryBindingSource | undefined } = {}): () => ReactElement {
+  return () => h(WorkspaceSetupGate, { setupSource, source, executionReader, repositoryBindingSource: options.repositoryBindingSource, startWork: options.startWork, deliveryReader: options.deliveryReader, changeRequestCreator: options.changeRequestCreator, mappingSource: options.mappingSource, refreshSource: options.refreshSource })
 }

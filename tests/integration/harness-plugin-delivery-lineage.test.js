@@ -100,11 +100,11 @@ test('production plugin binds an unwrapped delivery reader and App carries it to
   const stream = { restart() {}, dispose: async () => abort.abort(), async *[Symbol.asyncIterator]() { for await (const value of h.host.watch(abort.signal)) yield { generation: 1, value: json(value), accept() {} } } }
   const child = { remote: { harnessProjects: remote, $stream: () => stream }, effect: (run) => disposers.push(run()), slots: { inject: (_, run) => run(), register: (slot, component) => { if (slot.name === 'main') Panel = component } } }
   await apply({ remote: { $mount: async () => {} }, inject: (_, run) => run(child) })
-  const panel = Panel(), reader = panel.props.deliveryReader, scope = { workspaceId: h.workspaceId, workItemId: h.itemId, repositoryId: 'repo-alpha' }
-  assert.equal(typeof reader.read, 'function'); assert.equal(typeof reader.refresh, 'function')
+  const panel = Panel(), reader = panel.props.deliveryReader, creator = panel.props.changeRequestCreator, scope = { workspaceId: h.workspaceId, workItemId: h.itemId, repositoryId: 'repo-alpha' }
+  assert.equal(typeof creator.submit, 'function'); assert.equal(typeof reader.read, 'function'); assert.equal(typeof reader.refresh, 'function')
   assert.equal((await reader.read(scope)).projection.hops.length, 2)
   const { WorkItemApp } = await import('@harness-projects/ui'), baseline = await h.host.controller.baseline(), store = client.createEntityStore(); store.applyBaseline(baseline)
   const source = { subscribe: () => () => {}, getSnapshot: () => ({ ...baseline, workspace: { id: h.workspaceId, name: 'Fixture' }, store, connection: { connected: true } }) }
-  const markup = renderToStaticMarkup(React.createElement(WorkItemApp, { source, deliveryReader: reader, initialPath: `/projects/${h.workspaceId}/items/${h.itemId}` }))
-  assert.match(markup, /aria-label="交付谱系"/); assert.match(markup, /刷新交付谱系/)
+  const markup = renderToStaticMarkup(React.createElement(WorkItemApp, { source, deliveryReader: reader, changeRequestCreator: creator, initialPath: `/projects/${h.workspaceId}/items/${h.itemId}` }))
+  assert.match(markup, /aria-label="交付谱系"/); assert.match(markup, /刷新交付谱系/); assert.match(markup, /aria-label="创建变更请求"/)
 })

@@ -1,5 +1,5 @@
 /** 唯一只读详情抽屉（issue #130）：原生 `<dialog>` showModal 承担焦点进入/背景 inert/焦点限制/Escape（W3C H102）。 */
-import type { ExecutionContextReader, StartWork, DeliveryLineageReader } from '@harness-projects/client'
+import type { ExecutionContextReader, StartWork, DeliveryLineageReader, ChangeRequestCreator } from '@harness-projects/client'
 import { StartWorkSection } from './start-work-section.ts'
 import { DeliveryLineageSection } from './delivery-lineage-section.ts'
 import { ExecutionContextSection } from './execution-context-section.ts'
@@ -70,7 +70,7 @@ function cycleFocus(dialog: DOMElement, title: DOMElement | null, shiftKey: bool
  * 唯一详情抽屉：view 变化只更新内容；Escape 只走原生 cancel（preventDefault 后一次 onClose）；cleanup 不导航。
  * `notice` 是页面级说明（如断开重连）：模态打开时背景 inert，所以抽屉在自己稳定的状态区里再说一次，打开期间出现也会被宣告。
  */
-export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, connected, startWork, onBindRepository, deliveryReader, refresh, layoutRoot }: { readonly layoutRoot?: { readonly current: LayoutRoot | null } | undefined; readonly refresh?: { readonly pending: boolean; readonly disabled: boolean; readonly run: () => void } | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; startWork?: StartWork | undefined; onBindRepository?: (() => void) | undefined; executionReader?: ExecutionContextReader | undefined; connected?: boolean | undefined; view: WorkItemDetailView; notice?: string | undefined; onClose: () => void }): ReactElement {
+export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, connected, startWork, onBindRepository, deliveryReader, changeRequestCreator, refresh, layoutRoot }: { readonly layoutRoot?: { readonly current: LayoutRoot | null } | undefined; readonly refresh?: { readonly pending: boolean; readonly disabled: boolean; readonly run: () => void } | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly changeRequestCreator?: ChangeRequestCreator | undefined; startWork?: StartWork | undefined; onBindRepository?: (() => void) | undefined; executionReader?: ExecutionContextReader | undefined; connected?: boolean | undefined; view: WorkItemDetailView; notice?: string | undefined; onClose: () => void }): ReactElement {
   const dialog = useRef<DOMElement | null>(null)
   const title = useRef<DOMElement | null>(null)
   const titleId = useId()
@@ -114,7 +114,7 @@ export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, c
     target === undefined || deliveryReader === undefined ? null
       : target.repositoryIds.length === 0 ? createElement('p', null, '仓库信息尚未提供')
       : target.repositoryIds.map((repositoryId) => createElement(DeliveryLineageSection, { key: repositoryId,
-        scope: { workspaceId: target.workspaceId, workItemId: target.workItemId, repositoryId }, reader: deliveryReader, connected: connected === true })),
+        scope: { workspaceId: target.workspaceId, workItemId: target.workItemId, repositoryId }, reader: deliveryReader, creator: changeRequestCreator, onConnect: onBindRepository, connected: connected === true })),
     view.body.kind !== 'content' || view.body.executionTarget === undefined || executionReader === undefined ? null
       : createElement(ExecutionContextSection, { key: JSON.stringify(view.body.executionTarget), target: view.body.executionTarget, reader: executionReader, connected: connected === true, refreshToken: executionRefresh }),
     view.body.kind !== 'content' || !view.body.executionTarget || !startWork ? null : createElement(StartWorkSection, { key: JSON.stringify(view.body.executionTarget), target: view.body.executionTarget, repositories: view.body.startWorkRepositories ?? [], startWork, connected: connected === true, onStarted: () => setExecutionRefresh((value) => value + 1), onBindRepository })))

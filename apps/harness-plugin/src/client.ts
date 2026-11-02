@@ -4,7 +4,7 @@
  * 先在根 Context 上挂载 Remote，再在 `ctx.inject` 子 Context 中同时读取
  * `remote.harnessProjects` 与 `slots`；根 Context 不直接读取 namespace（M17）。
  */
-import { createPlanningMappingSource, createPlanningRefreshSource, createExecutionContextReader, createWorkspaceSetupSource, createRepositoryBindingSource, createStartWork, createDeliveryLineageReader } from '@harness-projects/client'
+import { createPlanningMappingSource, createPlanningRefreshSource, createExecutionContextReader, createWorkspaceSetupSource, createRepositoryBindingSource, createStartWork, createDeliveryLineageReader, createChangeRequestCreator } from '@harness-projects/client'
 import { HARNESS_PANEL_TITLE, PlaceholderIcon, bindWorkspaceStatusApp } from '@harness-projects/ui'
 import type { ClientContext, RemoteResult } from './host-surface.ts'
 import { CLIENT_REMOTE } from './remote.ts'
@@ -65,11 +65,12 @@ export async function apply(ctx: ClientContext): Promise<void> {
       getStartWorkOptions: (...args) => unwrap(remote.getStartWorkOptions(...args)),
       startWork: (...args) => unwrap(remote.startWork(...args)),
     }, reader, { kind: 'user' })
+    const changeRequestCreator = createChangeRequestCreator({ create: (...args) => unwrap(remote.createChangeRequest(...args)), operation: (...args) => unwrap(remote.getChangeRequestOperation(...args)), resume: (...args) => unwrap(remote.resumeChangeRequest(...args)) }, { kind: 'user' })
     const deliveryReader = createDeliveryLineageReader({
       read: ({ workItemId, repositoryId }) => unwrap(remote.getDeliveryProjection(workItemId, repositoryId)),
       refresh: ({ workItemId, repositoryId }) => unwrap(remote.refreshDeliveryFacts({ kind: 'user' }, workItemId, repositoryId)),
     })
-    const Panel = bindWorkspaceStatusApp(setup, workspace, reader, { repositoryBindingSource: repositoryBinding, startWork, deliveryReader, mappingSource: mapping, refreshSource: planningRefresh })
+    const Panel = bindWorkspaceStatusApp(setup, workspace, reader, { repositoryBindingSource: repositoryBinding, startWork, deliveryReader, changeRequestCreator, mappingSource: mapping, refreshSource: planningRefresh })
     child.slots.inject('main', () => child.slots.register({ name: 'main', key: PANEL_ID }, Panel))
     child.slots.inject('sidebar.panellist', () =>
       child.slots.register(
