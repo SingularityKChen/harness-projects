@@ -87,6 +87,7 @@ function instrument(storage) {
     get(object, key) {
       const value = Reflect.get(object, key, object)
       if (typeof value !== 'function') return value
+      if (key === 'committedReadFence') return value.bind(object)
       return async (...args) => {
         const who = actor.getStore()
         const atomic = scoped || holding.has(who)
