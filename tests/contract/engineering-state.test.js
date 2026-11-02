@@ -485,7 +485,7 @@ test('特权 reconcile 只由默认分支 workflow 运行，并显式 checkout �
   const checkout = workflow.jobs.sync.steps.find((step) => step.uses?.startsWith('actions/checkout@'))
   const setupNode = workflow.jobs.sync.steps.find((step) => step.uses?.startsWith('actions/setup-node@'))
   assert.equal(checkout.uses, 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1')
-  assert.equal(setupNode.uses, 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020')
+  assert.equal(setupNode.uses, 'actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1')
   assert.deepEqual(workflow.permissions, { contents: 'read', actions: 'read' })
   assert.equal(workflow.jobs.sync.steps.find((step) => step.uses?.startsWith('actions/download-artifact@')), undefined)
   assert.equal(checkout.with.ref, '${{ github.event.repository.default_branch }}')
