@@ -18,10 +18,11 @@
 | 文档 | 回答的问题 |
 |---|---|
 | [board-semantics.md](board-semantics.md) | `Status` 与 `Engineering` 分别属于规划轴还是工程轴、谁写、不变量 3 在看板上如何被满足 |
+| [core-release-scope.md](core-release-scope.md) | MMP-Core 首发与后续工作台范围，以及 R1 / 十项不变量的证据责任和未完成缺口 |
 | [demo.md](demo.md) | Harness Projects 预发布 Demo 的用户路径、验收边界、已知限制与人工走查记录 |
 | [vertical-path.md](vertical-path.md) | 纵向链路的步骤枚举、MVP-0 / MVP-1 / 首发范围各自的判定方式、MVP-0 的非目标 |
 
-尚未补齐的主题：独立术语表、页面与交互的目标形态、MVP / V1 / 后续版本的范围分级。在这些补齐之前，产品结论以本索引中的文档与 `AGENTS.md` §1 为准。
+尚未补齐的主题：独立术语表、页面与交互的目标形态。MMP-Core 与后续工作台的发布范围见 `core-release-scope.md`；它不替代各产品能力原有的验收，也不代替 R1 判定。
 
 ## 约束
 

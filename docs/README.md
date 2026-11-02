@@ -32,6 +32,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-02-core-release-criteria](exec-plan/completed/2026-11-02-core-release-criteria.md) | Core分期范围、Host声明与保留的12+10证据责任（#500） |
 | [2026-11-02-start-work-execution-recovery](exec-plan/completed/2026-11-02-start-work-execution-recovery.md) | 执行回执先持久化、原操作恢复与完整 Ready 校验（#193） |
 | [2026-11-02-start-work-execution-uniqueness](exec-plan/completed/2026-11-02-start-work-execution-uniqueness.md) | 公开命令的外部执行唯一性、重启与接管证明（#421） |
 | [2026-11-02-pull-request-detail-creation](exec-plan/completed/2026-11-02-pull-request-detail-creation.md) | 详情创建、真实重载与新连接原操作恢复（#437） |
@@ -202,6 +203,7 @@
 | [board-semantics.md](product/board-semantics.md) | `Status` 与 `Engineering` 字段分别属于规划轴还是工程轴、谁写、不变量 3 在看板上如何被满足、全部内置工作流该开该关、`Size` 为什么是信号而不是控制 |
 | [demo.md](product/demo.md) | Harness Projects 预发布 Demo 的用户路径、验收边界、已知限制与人工走查记录 |
 | [ui-forms.md](product/ui-forms.md) | 连接表单的布局、状态与可访问交互约定 |
+| [core-release-scope.md](product/core-release-scope.md) | Core首发与后续工作台范围、R1和不变量的当前候选证据责任 |
 | [vertical-path.md](product/vertical-path.md) | 纵向链路的步骤枚举、MVP-0 / MVP-1 / 首发范围各自的判定方式、MVP-0 的非目标 |
 | [ui-detail.md](product/ui-detail.md) | 响应式详情的布局、状态与可访问交互约定 |
 | [2026-10-26-host-recomposition](exec-plan/completed/2026-10-26-host-recomposition.md) | 提交设置即时重组、同流连续读取与延迟权限探测（#354） |
