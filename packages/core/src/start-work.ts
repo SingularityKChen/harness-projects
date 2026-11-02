@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 /**
  *
  * `git-provisioning.ts`。
@@ -18,6 +19,7 @@ import {
   startWorkUnavailable, toResult,
   type StartWorkRequest, type StartWorkResult,
 } from './execution-context.ts'
+import { runReadGate, validRunRef } from './execution-run.ts'
 import { namesFor, namesProblem, outcomeOf, provisionGit, type GitOutcome } from './git-provisioning.ts'
 import { EdgeProvenance, asEntityId, recordEdges, type DiscoveredEdge, type RelationStore } from './relations.ts'
 import { bindingConflict, requestFingerprint, requestMismatch, snapshotRequest } from './start-work-request.ts'
@@ -71,15 +73,18 @@ export async function startWork(context: CoreContext, input: StartWorkRequest): 
   }
   if (claimed.kind === 'replay') return replayRequest(context, contextId, request, claimed.attempt)
   if (claimed.kind === 'conflict') return conflictResult(claimed.error)
+  if (claimed.kind === 'observe') return recoverAttempt(context, contextId, claimed.attempt)
   if (claimed.kind === 'rejected') return claimed.result
   if (claimed.kind !== 'new' && claimed.kind !== 'resume') return existingResult(context, contextId, undefined)
   // 本地结算故障只由 localWrite 转换；外部创建的 throw 在各调用点保留为 Unknown。
+  const owners = activeOwners.get(context) ?? new Set<string>(); activeOwners.set(context, owners); owners.add(contextId)
   return provision(context, request, contextId, claimed.route, claimed.generation).catch((error) => {
     if (error instanceof OwnerLost) return ownerLostResult(error)
     if (error instanceof LocalWriteFailed) return unknownAfterAck(error)
     throw error
-  })
+  }).finally(() => owners.delete(contextId))
 }
+const activeOwners = new WeakMap<CoreContext, Set<string>>()
 
 function conflictResult(error: ProjectError): StartWorkResult {
   const report = reportFor(WritePhase.Conflict, { attemptedValue: undefined, lastKnownAuthoritative: undefined }, error)
@@ -89,11 +94,56 @@ async function replayRequest(context: CoreContext, contextId: ExecutionContextId
   if (requestMismatch(context.workspaceId, request, attempt)) return conflictResult(bindingConflict('idempotency_request_mismatch'))
   const route = await selectDevelopment(context, request.repositoryId, START_WORK_ROUTE.anchor[0])
   if (!route.ok || route.binding.ref.bindingId !== attempt.bindingId) return conflictResult(bindingConflict('idempotency_target_changed'))
+  if (unresolved(attempt) && executionIntent(attempt)) return recoverAttempt(context, contextId, attempt)
   const supplied = attempt.state === 'pending' && !unresolved(attempt) ? undefined : await createWriteLedger(context.storage).replay(context.workspaceId, request.idempotencyKey)
   return existingResult(context, contextId, supplied)
 }
 function unresolved(attempt: MutationAttemptRecord): boolean {
   return attempt.externalIntent !== undefined && (['pending', 'unknown'].includes(attempt.externalIntent.state) || attempt.state === 'unknown')
+}
+
+function executionIntent(attempt: MutationAttemptRecord) {
+  const intent = attempt.externalIntent
+  return attempt.commandName === 'startWork' && intent !== undefined && (intent.operation === 'startRun' || intent.operation === 'startFallbackRun') ? intent : undefined
+}
+/** 显式命令才读签发者；原 receipt、owner 与完整 run 快照一起复核，迟到读不能覆盖后继。 */
+async function recoverAttempt(context: CoreContext, contextId: ExecutionContextId, attempt: MutationAttemptRecord): Promise<StartWorkResult> {
+  const intent = executionIntent(attempt), record = await context.storage.getExecutionContext(contextId)
+  const run = await context.storage.getExecutionRun(runIdFor(contextId))
+  const original = await createWriteLedger(context.storage).replay(context.workspaceId, attempt.idempotencyKey)
+  if (intent === undefined || activeOwners.get(context)?.has(contextId)) return existingResult(context, contextId, original)
+  const error = projectError(ProjectErrorCode.ResultUnknown, '执行回执暂时无法核对；保留原目标与句柄，不再次启动运行')
+  const uncertain = async () => {
+    const result = await existingResult(context, contextId, reportFor(WritePhase.Unknown, original?.values ?? beginWrite(undefined).values, error), false)
+    return intent.operation === 'startFallbackRun' ? { ...result, fallback: StartWorkFallback.Manual } : result
+  }
+  if (attempt.workspaceId !== context.workspaceId || intent.contextId !== contextId || record?.workspaceId !== context.workspaceId
+    || contextIdFor(record.workspaceId, record.workItemId, record.repositoryId) !== contextId || record.provisioningGeneration !== intent.ownerGeneration || run?.workspaceId !== context.workspaceId || run.contextId !== contextId
+    || !validRunRef(run.providerRef) || run.providerRef.bindingId !== intent.bindingId || (run.fallback === true) !== (intent.operation === 'startFallbackRun')) return uncertain()
+  const gate = runReadGate(context, run)
+  if (!gate?.allowed || gate.binding?.execution === undefined) return uncertain()
+  let status: ExecutionRunStatus
+  try {
+    const read = await gate.binding.execution.getRun(run.providerRef)
+    if (!read.ok || !validRunRef(read.value?.ref) || read.value.ref.bindingId !== run.providerRef.bindingId
+      || read.value.ref.objectKind !== run.providerRef.objectKind || read.value.ref.externalId !== run.providerRef.externalId
+      || (status = runStatusFor(read.value.status)) === ExecutionRunStatus.Unknown) return uncertain()
+  } catch { return uncertain() }
+  try {
+    const applied = await context.storage.transaction(async (tx) => {
+      const current = await tx.findMutationAttempt(context.workspaceId, attempt.idempotencyKey)
+      if (!isDeepStrictEqual(current, attempt) || !isDeepStrictEqual(await tx.getExecutionContext(contextId), record)
+        || !isDeepStrictEqual(await tx.getExecutionRun(run.id), run)) return false
+      await tx.putExecutionRun({ ...run, status, updatedAt: context.clock() })
+      await tx.putMutationAttempt({ ...attempt, state: 'saved', errorCode: undefined, externalIntent: { ...intent, state: 'saved' } })
+      return true
+    })
+    if (!applied) {
+      const latest = await createWriteLedger(context.storage).replay(context.workspaceId, attempt.idempotencyKey)
+      return latest?.saving ? uncertain() : await existingResult(context, contextId, latest)
+    }
+    return await existingResult(context, contextId, reportFor(WritePhase.Reconciled, original?.values ?? beginWrite(undefined).values, undefined))
+  } catch { return uncertain() }
 }
 
 class GenerationExhausted extends Error { constructor() { super('开始工作的 owner 代际已耗尽，未发起外部写入') } }
@@ -122,20 +172,20 @@ function ownerLostResult({ acked, runExternalId }: OwnerLost): StartWorkResult {
 /** ack 之后的本地写失败：只由 `localWrite`（显式的本地写调用点，不包 Provider 调用）抛出，带着最后一个已 ack 的步骤结果（其 `status` 是本地记录此刻的状态）；run 记录的失败还带着已 ack 的 run 句柄。 */
 class LocalWriteFailed extends Error {
   readonly acked: GitOutcome
-  readonly runExternalId: string | undefined
-  constructor(acked: GitOutcome, cause: unknown, runExternalId?: string) { super(cause instanceof Error ? cause.message : String(cause), { cause }); this.acked = acked; this.runExternalId = runExternalId }
+  readonly runExternalId: string | undefined; readonly fallback: boolean
+  constructor(acked: GitOutcome, cause: unknown, runExternalId?: string, fallback = false) { super(cause instanceof Error ? cause.message : String(cause), { cause }); this.acked = acked; this.runExternalId = runExternalId; this.fallback = fallback }
 }
-async function localWrite<T>(acked: GitOutcome, write: () => Promise<T>, runExternalId?: string): Promise<T> {
-  try { return await write() } catch (error) { if (error instanceof OwnerLost) throw new OwnerLost(acked, runExternalId); throw new LocalWriteFailed(acked, error, runExternalId) }
+async function localWrite<T>(acked: GitOutcome, write: () => Promise<T>, runExternalId?: string, fallback = false): Promise<T> {
+  try { return await write() } catch (error) { if (error instanceof OwnerLost) throw new OwnerLost(acked, runExternalId); throw new LocalWriteFailed(acked, error, runExternalId, fallback) }
 }
 
 /** 本地写失败的结果是 Unknown，不是 Failed 或 Saved：外部资源存在、不自动删除，句柄取最后已 ack 的，不起 run；`markUnknown` 对 Confirmed 原样返回，所以用 `reportFor` 建报告。 */
-function unknownAfterAck({ acked, message, runExternalId }: LocalWriteFailed): StartWorkResult {
+function unknownAfterAck({ acked, message, runExternalId, fallback }: LocalWriteFailed): StartWorkResult {
   // 文案按事实陈述：有分支句柄才说已 ack（工作树与 run 的 ack 都在分支之后）；失败结算时本次外部调用的原始失败一并带上，不被「本地结算失败」盖掉。
   const acks = acked.branchExternalId !== undefined
   const failure = acked.report.error === undefined ? '' : `；本次外部调用的失败：${acked.report.error.code}：${acked.report.error.message}`
   const error = projectError(ProjectErrorCode.ResultUnknown, `本地结算失败，${acks ? '已 ack 的外部资源保留、不自动删除，需先对账、不要盲目重试' : '本次没有外部写入被 ack'}：${message}${failure}`)
-  return toResult(reportFor(WritePhase.Unknown, acked.report.values, error), outcomeOf(acked, undefined, runExternalId), error)
+  return toResult(reportFor(WritePhase.Unknown, acked.report.values, error), outcomeOf(acked, fallback ? StartWorkFallback.Manual : undefined, runExternalId), error)
 }
 function unknownRun(git: GitOutcome, why: string, runExternalId: string | undefined): StartWorkResult {
   const error = projectError(ProjectErrorCode.ResultUnknown, `运行状态未知（${why}），已 ack 的外部资源保留、不自动删除，需先对账、不要盲目重试`)
@@ -231,6 +281,7 @@ function needsSupply(record: ExecutionContextRecord, now: string): boolean {
 
 /** workspace/key 与 context 租约在同一事务认领；先占键，再写父行与 context，失败整笔回滚。 */
 type Claim = { readonly kind: 'replay'; readonly attempt: MutationAttemptRecord } | { readonly kind: 'conflict'; readonly error: ProjectError }
+  | { readonly kind: 'observe'; readonly attempt: MutationAttemptRecord }
   | { readonly kind: 'rejected'; readonly result: StartWorkResult }
   | { readonly kind: 'new' | 'resume'; readonly route: Extract<DevelopmentRoute, { ok: true }>; readonly generation: number }
   | { readonly kind: 'in-flight' | 'existing'; readonly route: DevelopmentRoute }
@@ -247,14 +298,8 @@ async function claimContext(
     const current = await selectDevelopment(source, request.repositoryId, START_WORK_ROUTE.anchor[0])
     if (!current.ok || current.binding.ref.bindingId !== selected.binding.ref.bindingId) return { kind: 'conflict', error: bindingConflict('idempotency_target_changed') }
     const existing = await tx.getExecutionContext(contextId)
-    const pending = (await tx.listMutationAttempts(context.workspaceId)).find((row) => row.externalIntent?.contextId === contextId && unresolved(row))
-    if (pending !== undefined) {
-      const report = await createWriteLedger(tx).replay(context.workspaceId, pending.idempotencyKey)
-      return { kind: 'rejected', result: toResult(report!, existing === undefined ? undefined : {
-        contextId, status: existing.status, branchExternalId: existing.branchExternalId, worktreeExternalId: existing.worktreeExternalId,
-        branchHeadCommit: undefined, fallback: undefined, runExternalId: (await tx.getExecutionRun(runIdFor(contextId)))?.providerRef?.externalId,
-      }, report?.error) }
-    }
+    const pending = (await tx.listMutationAttempts(context.workspaceId)).find((row) => row.commandName === 'startWork' && row.externalIntent?.contextId === contextId && unresolved(row))
+    if (pending !== undefined) return { kind: 'observe', attempt: pending }
     const supplying = existing === undefined || needsSupply(existing, now)
     const generation = supplying ? nextGeneration(existing) : existing?.provisioningGeneration
     const route = supplying ? await routeDevelopment(source, request.repositoryId, ...START_WORK_ROUTE.anchor) : current
@@ -386,6 +431,7 @@ async function startExecution(
     await localWrite(git, () => owned(context, contextId, generation, (tx) => writeReceipt(tx, context, request, 'pending', 'failed', error.code)))
     return manualFallback(context, request, contextId, git, generation, error)
   }
+  if (!validRunRef(run.value.ref) || run.value.ref.bindingId !== target.binding.ref.bindingId) return finish(unknownRun(git, 'ack 的运行引用不属于原执行连接', undefined), ExecutionRunStatus.Unknown)
   const status = runStatusFor(run.value.status)
   return finish(status === ExecutionRunStatus.Unknown ? unknownRun(git, `ack 的状态 ${run.value.status} 不是已知取值`, run.value.ref.externalId)
     : toResult(git.report, outcomeOf(git, undefined, run.value.ref.externalId), undefined), status, run.value.ref)
@@ -403,7 +449,7 @@ async function manualFallback(
   context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, git: GitOutcome, generation: number, error: ProjectError,
 ): Promise<StartWorkResult> {
   const finish = (result: StartWorkResult, status?: ExecutionRunStatus, ref?: ExternalObjectRef) =>
-    localWrite(git, () => recordRun(context, request, contextId, generation, result, status, ref, true), ref?.externalId)
+    localWrite(git, () => recordRun(context, request, contextId, generation, status === undefined ? result : { ...result, fallback: StartWorkFallback.Manual, degraded: true }, status, ref, true), ref?.externalId, true)
   const existing = await localWrite(git, () => owned(context, contextId, generation, (tx) => tx.getExecutionRun(runIdFor(contextId))))
   if (existing !== undefined) return finish(existingRun(git, existing))
   if (git.worktreeExternalId === undefined) return finish(unknownRun(git, '缺少 Git ack 的工作目录，不能人工接管', undefined))
@@ -416,10 +462,11 @@ async function manualFallback(
     }, true)
     if (!run.ok && run.error.code === ProviderErrorCode.AmbiguousResult) return finish(unknownRun(git, run.error.message, undefined), ExecutionRunStatus.Unknown)
     if (run.ok) {
+      if (!validRunRef(run.value.ref) || run.value.ref.bindingId !== fallback.ref.bindingId) return finish(unknownRun(git, 'ack 的运行引用不属于原执行连接', undefined), ExecutionRunStatus.Unknown)
       const status = runStatusFor(run.value.status)
       if (status === ExecutionRunStatus.Unknown) return finish(unknownRun(git, `ack 的状态 ${run.value.status} 不是已知取值`, run.value.ref.externalId), status, run.value.ref)
       if (status !== ExecutionRunStatus.Running) return localWrite(git, () => recordRun(context, request, contextId, generation,
-        toResult(git.report, outcomeOf(git, StartWorkFallback.Manual), error), ExecutionRunStatus.Failed, undefined, true), run.value.ref.externalId)
+        toResult(git.report, outcomeOf(git, StartWorkFallback.Manual), error), ExecutionRunStatus.Failed, run.value.ref, true), run.value.ref.externalId, true)
       return finish(toResult(git.report, outcomeOf(git, StartWorkFallback.Manual, run.value.ref.externalId), undefined), status, run.value.ref)
     }
     await localWrite(git, () => owned(context, contextId, generation, (tx) => writeReceipt(tx, context, request, 'pending', 'failed', run.error.code as ProjectErrorCode)))
@@ -429,14 +476,19 @@ async function manualFallback(
 
 async function recordRun(context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, generation: number, result: StartWorkResult,
   status?: ExecutionRunStatus, providerRef?: ExternalObjectRef, fallback = false): Promise<StartWorkResult> {
-  return owned(context, contextId, generation, async (tx) => {
+  const pending = await owned(context, contextId, generation, async (tx) => {
     if (status !== undefined) await tx.putExecutionRun({
       id: runIdFor(contextId), workspaceId: context.workspaceId, contextId, status, updatedAt: context.clock(),
       ...(providerRef === undefined ? {} : { providerRef }), ...(fallback ? { fallback } : {}),
     })
-    await writeReceipt(tx, context, request, result.writeState, result.writeState, result.error?.code)
-    return result
+    return tx.findMutationAttempt(context.workspaceId, request.idempotencyKey)
   })
+  const applied = await owned(context, contextId, generation, async (tx) => {
+    if (!isDeepStrictEqual(await tx.findMutationAttempt(context.workspaceId, request.idempotencyKey), pending)) return false
+    await writeReceipt(tx, context, request, result.writeState, result.writeState, result.error?.code)
+    return true
+  })
+  return applied ? result : existingResult(context, contextId, await createWriteLedger(context.storage).replay(context.workspaceId, request.idempotencyKey))
 }
 
 async function saveContext(
