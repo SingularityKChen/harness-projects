@@ -180,3 +180,18 @@ test('run refresh exposes only actor and explicit work/repository IDs without re
   assert.deepEqual(operation.params.map((parameter) => parameter.name), ['actorRef', 'workItemId', 'repositoryId'])
   for (const parameter of operation.params.slice(1)) for (const value of ['', null, 7]) assert.throws(() => parameter.parse(value), TypeError)
 })
+
+test('PR create ABI has only explicit user fields and cannot carry provider authority', () => {
+  const operation = OPERATIONS.createChangeRequest
+  assert.deepEqual(operation.params.map((param) => param.name), ['actorRef', 'idempotencyKey', 'workItemId', 'repositoryId', 'base', 'title', 'body'])
+  assert.equal(operation.params.at(-1).parse(''), '')
+  assert.throws(() => operation.params.at(-1).parse({}), TypeError)
+})
+
+test('PR operation lookup and resume reject authority and require explicit selector only for resume', () => {
+  assert.deepEqual(OPERATIONS.getChangeRequestOperation.params.map((p) => p.name), ['actorRef', 'workItemId', 'repositoryId', 'operationId'])
+  assert.deepEqual(OPERATIONS.resumeChangeRequest.params.map((p) => p.name), ['actorRef', 'workItemId', 'repositoryId', 'operationId'])
+  assert.equal(OPERATIONS.getChangeRequestOperation.params.at(-1).acceptsUndefined, true)
+  assert.equal(OPERATIONS.getChangeRequestOperation.params.at(-1).parse(undefined), undefined)
+  assert.throws(() => OPERATIONS.resumeChangeRequest.params.at(-1).parse(undefined), TypeError)
+})

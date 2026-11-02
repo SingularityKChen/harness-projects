@@ -36,10 +36,10 @@ test('typed remote contribution exposes the same strict descriptors (settings un
   assert.deepEqual([REMOTE_PACKAGE, HOST_REMOTE.package, HOST_REMOTE.face], ['@harness-projects/app-harness-plugin', '@harness-projects/app-harness-plugin', 'host'])
   assert.deepEqual(CLIENT_REMOTE, { package: REMOTE_PACKAGE, descriptors: HOST_REMOTE.invocations })
   assert.deepEqual(HOST_REMOTE.invocations.filter(({ method }) => !['getExecutionContext', 'refreshExecutionRun'].includes(method)).map(({ namespace, method }) => `${namespace}/${method}`), [
-    `${REMOTE_NAMESPACE}/baseline`, `${REMOTE_NAMESPACE}/bootstrapWorkspace`, `${REMOTE_NAMESPACE}/refreshPlanning`, `${REMOTE_NAMESPACE}/getStartWorkOptions`, `${REMOTE_NAMESPACE}/startWork`, `${REMOTE_NAMESPACE}/createWorkspace`, `${REMOTE_NAMESPACE}/connectAccount`, `${REMOTE_NAMESPACE}/bindPlanningSource`, `${REMOTE_NAMESPACE}/bindRepository`, `${REMOTE_NAMESPACE}/installExecutionBindings`, `${REMOTE_NAMESPACE}/getWorkspaceSetup`, `${REMOTE_NAMESPACE}/getPlanningMapping`, `${REMOTE_NAMESPACE}/setPlanningMapping`, `${REMOTE_NAMESPACE}/getDeliveryProjection`, `${REMOTE_NAMESPACE}/refreshDeliveryFacts`, `${REMOTE_NAMESPACE}/watch`,
+    `${REMOTE_NAMESPACE}/baseline`, `${REMOTE_NAMESPACE}/bootstrapWorkspace`, `${REMOTE_NAMESPACE}/refreshPlanning`, `${REMOTE_NAMESPACE}/getStartWorkOptions`, `${REMOTE_NAMESPACE}/startWork`, `${REMOTE_NAMESPACE}/createChangeRequest`, `${REMOTE_NAMESPACE}/getChangeRequestOperation`, `${REMOTE_NAMESPACE}/resumeChangeRequest`, `${REMOTE_NAMESPACE}/createWorkspace`, `${REMOTE_NAMESPACE}/connectAccount`, `${REMOTE_NAMESPACE}/bindPlanningSource`, `${REMOTE_NAMESPACE}/bindRepository`, `${REMOTE_NAMESPACE}/installExecutionBindings`, `${REMOTE_NAMESPACE}/getWorkspaceSetup`, `${REMOTE_NAMESPACE}/getPlanningMapping`, `${REMOTE_NAMESPACE}/setPlanningMapping`, `${REMOTE_NAMESPACE}/getDeliveryProjection`, `${REMOTE_NAMESPACE}/refreshDeliveryFacts`, `${REMOTE_NAMESPACE}/watch`,
   ])
   assert.deepEqual(HOST_REMOTE.invocations.filter(({ method }) => !['getExecutionContext', 'refreshExecutionRun'].includes(method)).map(({ mode, cancellation, parameters }) => [mode, cancellation, parameters.length]),
-    [[undefined, undefined, 0], [undefined, undefined, 2], [undefined, undefined, 1], [undefined, undefined, 1], [undefined, undefined, 5], [undefined, undefined, 3], [undefined, undefined, 2], [undefined, undefined, 4], [undefined, undefined, 4], [undefined, undefined, 2], [undefined, undefined, 0], [undefined, undefined, 0], [undefined, undefined, 5], [undefined, undefined, 2], [undefined, undefined, 3], ['stream', { parameter: 'signal' }, 0]], 'unary 没有 mode；watch 是带 signal 取消、无业务参数的 stream')
+    [[undefined, undefined, 0], [undefined, undefined, 2], [undefined, undefined, 1], [undefined, undefined, 1], [undefined, undefined, 5], [undefined, undefined, 7], [undefined, undefined, 4], [undefined, undefined, 4], [undefined, undefined, 3], [undefined, undefined, 2], [undefined, undefined, 4], [undefined, undefined, 4], [undefined, undefined, 2], [undefined, undefined, 0], [undefined, undefined, 0], [undefined, undefined, 5], [undefined, undefined, 2], [undefined, undefined, 3], ['stream', { parameter: 'signal' }, 0]], 'unary 没有 mode；watch 是带 signal 取消、无业务参数的 stream')
   // Host 网关对 strict 结果只调 `encode`（参数才走 `create().parse`）：非 JSON 值必须在边界报错，而不是被序列化静默降级。
   const nonJson = [JSON.parse('{"__proto__":{"injected":true}}'), new Date(0), { at: new Map() }, [undefined], Number.NaN]
   for (const descriptor of HOST_REMOTE.invocations) {
@@ -137,5 +137,18 @@ test('optional Start Work branch survives descriptor-derived named JSON serializ
     await installed.service.startWork(...decode(wire)); assert.equal(calls[0][1].branchName, undefined)
     await installed.service.startWork(...decode({ ...wire, branchName: ' work/verbatim ' })); assert.equal(calls[1][1].branchName, ' work/verbatim ')
     for (const branchName of [null, '', 1, {}]) assert.throws(() => decode({ ...wire, branchName }), TypeError)
+  } finally { await installed.dispose() }
+})
+
+test('operation lookup and resume use admitted observer and strict selector without create envelope', async () => {
+  const calls = [], { ctx } = recordingContext()
+  const installed = await installHostRemote(ctx, { call: async (name, input) => { calls.push([name, input]); return {} } })
+  try {
+    await installed.service.getChangeRequestOperation({ kind: 'forged' }, 'wi', 'repo')
+    await installed.service.resumeChangeRequest({ kind: 'forged' }, 'wi', 'repo', 'op')
+    assert.deepEqual(calls, [['getChangeRequestOperation', { actorRef: { kind: 'harness_peer', id: 'adapter-peer' }, workItemId: 'wi', repositoryId: 'repo', operationId: undefined }], ['resumeChangeRequest', { actorRef: { kind: 'harness_peer', id: 'adapter-peer' }, workItemId: 'wi', repositoryId: 'repo', operationId: 'op' }]])
+    delete ctx.invocation.peer
+    await assert.rejects(() => installed.service.getChangeRequestOperation({ kind: 'user' }, 'wi', 'repo'), /identity/)
+    await assert.rejects(() => installed.service.resumeChangeRequest({ kind: 'user' }, 'wi', 'repo', 'op'), /identity/)
   } finally { await installed.dispose() }
 })

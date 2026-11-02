@@ -1,5 +1,6 @@
 import { createElement as h, useEffect, useRef, useState } from 'react'
-import type { DeliveryLineageRead, DeliveryLineageReader, DeliveryLineageScope } from '@harness-projects/client'
+import type { ChangeRequestCreator, DeliveryLineageRead, DeliveryLineageReader, DeliveryLineageScope } from '@harness-projects/client'
+import { CreateChangeRequestSection } from './create-change-request-section.ts'
 import { deriveDeliveryLineageStrip, deliverySetFreshness } from '@harness-projects/ui-model'
 import { executionBadge, executionSource, executionStyles } from './execution-presentation.ts'
 const LABELS = { execution_context: '执行上下文', worktree: '工作树（分支）', commit: '提交', change_request: '变更请求', pipeline_run: '流水线', check_run: '检查' }
@@ -8,11 +9,11 @@ const STATES = { observed: '已观察', passed: '通过', failed: '失败', unkn
 type Refresh = { key: string; reader: DeliveryLineageReader; task?: Promise<boolean> }
 type State = { key: string; reader: DeliveryLineageReader; thresholdMs: number | undefined; read?: DeliveryLineageRead; pending: boolean; failed: boolean }
 /** 每个明确仓库 scope 一个消费者：只有 open/manual 才摄入；时间边界与恢复只纯读 Host。 */
-export function DeliveryLineageSection({ scope, reader, connected, thresholdMs }: { readonly scope: DeliveryLineageScope; readonly reader: DeliveryLineageReader; readonly connected: boolean; readonly thresholdMs?: number }) {
+export function DeliveryLineageSection({ scope, reader, connected, thresholdMs, creator, onConnect }: { readonly scope: DeliveryLineageScope; readonly reader: DeliveryLineageReader; readonly connected: boolean; readonly thresholdMs?: number; readonly creator?: ChangeRequestCreator | undefined; readonly onConnect?: (() => void) | undefined }) {
   const key = JSON.stringify([scope.workspaceId, scope.workItemId, scope.repositoryId])
   const [state, setState] = useState<State>({ key, reader, thresholdMs, pending: true, failed: false })
   const refreshing = useRef<Refresh | undefined>(undefined)
-  const opened = useRef<string | undefined>(undefined), action = useRef<(() => void) | undefined>(undefined)
+  const opened = useRef<string | undefined>(undefined), action = useRef<((refresh?: boolean) => void) | undefined>(undefined)
   useEffect(() => {
     const source: Refresh = refreshing.current?.key === key && refreshing.current.reader === reader ? refreshing.current : { key, reader }
     refreshing.current = source
@@ -47,7 +48,7 @@ export function DeliveryLineageSection({ scope, reader, connected, thresholdMs }
     const doc = (globalThis as { document?: { visibilityState?: string; addEventListener?: (name: string, listener: () => void) => void; removeEventListener?: (name: string, listener: () => void) => void } }).document
     const win = (globalThis as { window?: { addEventListener?: (name: string, listener: () => void) => void; removeEventListener?: (name: string, listener: () => void) => void } }).window
     const resume = () => { if (doc?.visibilityState === 'hidden') mark(); else void load(false) }
-    action.current = () => { void load(true) }
+    action.current = (refresh = true) => { void load(refresh) }
     const first = opened.current !== key; opened.current = key
     void load(first)
     doc?.addEventListener?.('visibilitychange', resume); win?.addEventListener?.('pageshow', resume)
@@ -69,5 +70,6 @@ export function DeliveryLineageSection({ scope, reader, connected, thresholdMs }
             node.label && node.externalId ? h('p', null, '外部标识：', node.externalId) : null,
             h('p', null, node.relationState === 'candidate' ? '候选关系' : node.relationState === 'confirmed' ? '已确认关系' : '已拒绝关系')))
       })))),
+    creator === undefined ? null : h(CreateChangeRequestSection, { key, scope, creator, connected, onConnect, onConfirmed: () => { action.current?.(false) } }),
     h('button', { className: 'hp-action', type: 'button', disabled: !connected, onClick: () => action.current?.() }, '刷新交付谱系'))
 }
