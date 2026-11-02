@@ -29,6 +29,7 @@ for (const [name, open] of [['Fake', createFakeStorage], ['SQLite', () => create
     const wrap = (target, inTransaction = false) => new Proxy(target, { get(object, key) {
       const fn = Reflect.get(object, key)
       if (typeof fn !== 'function') return fn
+      if (key === 'committedReadFence') return fn.bind(object)
       if (key === 'transaction') return (work) => fn.call(object, (tx) => work(wrap(tx, true)))
       return async (...args) => {
         if ((armed || entered) && !inTransaction && ['getWorkspace', 'listRepositories', 'listIdentitiesForEntity', 'findExternalIdentity'].includes(key)) rootMetadataReads++

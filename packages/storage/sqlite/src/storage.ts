@@ -26,7 +26,7 @@ const ACCOUNT_COLUMNS = 'id, platform_family, platform_origin, identity_kind, ex
 /** 地基面。事务作用域与存储实例共用同一连接与同一条队列，因此同一个类同时充当 Storage 与 StorageTransaction；作用域实例（`scoped`）已持有队列，它的读写直接执行。 */
 export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   /** 作用域实例就是本类的一个 `scoped` 副本：同一个连接、同一条队列、**共用**的关闭标记与本事务的令牌（见基类的 `transaction()`），并传同一份受信策略。 */
-  protected override scopedInstance(state: { closed: boolean }, token: TransactionToken): StorageTransaction { return new SqliteStorage(this.location, this.db, true, state, token, this.policy) }
+  protected override scopedInstance(state: { closed: boolean; commits: number; dirty: boolean }, token: TransactionToken): StorageTransaction { return new SqliteStorage(this.location, this.db, true, state, token, this.policy) }
 
   getWorkspacePlanningMapping(workspaceId: WorkspaceId): Promise<WorkspacePlanningMappingRecord | undefined> {
     return this.read(() => optional(this.db.prepare('SELECT workspace_id, binding_id, project_external_id, origin, mapping_json FROM workspace_planning_mapping WHERE workspace_id = ?').get(workspaceId), (row) => structuredClone(planningMappingRecordSnapshot({

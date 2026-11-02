@@ -1,0 +1,86 @@
+{
+  "command": [
+    "node",
+    "--test",
+    "tests/integration/storage-committed-read-fence.test.js"
+  ],
+  "mutants": [
+    {
+      "id": "F-atomic",
+      "file": "packages/storage/sqlite/src/storage-sync.ts",
+      "anchor": "return this.#transact(async () => fn(), preflight, true)",
+      "replacement": "return this.#transact(async () => fn(), preflight, false)",
+      "killedBy": "SQLite atomic SQL writes advance the committed fence"
+    },
+    {
+      "id": "F-memory-lifetime",
+      "file": "packages/providers/fake/src/storage.ts",
+      "anchor": "token.owner === owner && token.active",
+      "replacement": "token.owner === owner",
+      "killedBy": "memory settled commit callback can read the fence"
+    },
+    {
+      "id": "F-sqlite-lifetime",
+      "file": "packages/storage/sqlite/src/storage-sync.ts",
+      "anchor": "token.owner === owner && token.active",
+      "replacement": "token.owner === owner",
+      "killedBy": "sqlite settled commit callback can read the fence"
+    },
+    {
+      "id": "F-sqlite-own-commit",
+      "file": "packages/storage/sqlite/src/storage-sync.ts",
+      "anchor": "this.db.exec('COMMIT'); if (commitOnSuccess || this.#state.dirty) this.#state.commits++",
+      "replacement": "this.db.exec('COMMIT')",
+      "killedBy": "SQLite atomic SQL writes advance the committed fence"
+    },
+    {
+      "id": "F-memory-readonly",
+      "file": "packages/providers/fake/src/storage.ts",
+      "anchor": "if (staged.#state.dirty) this.#state.commits++",
+      "replacement": "this.#state.commits++",
+      "killedBy": "memory committed read fence changes after commit and survives rollback"
+    },
+    {
+      "id": "F-sync-return",
+      "file": "packages/providers/fake/src/storage.ts",
+      "anchor": "committedReadFence(): string {",
+      "replacement": "async committedReadFence(): Promise<string> {",
+      "killedBy": "memory committed read fence changes after commit and survives rollback"
+    },
+    {
+      "id": "F-Memory-ancestor",
+      "file": "packages/providers/fake/src/storage.ts",
+      "anchor": "for (let token = TRANSACTION_SCOPE.getStore(); token; token = token.parent)",
+      "replacement": "for (let token = TRANSACTION_SCOPE.getStore(); token; token = undefined)",
+      "killedBy": "memory another root transaction cannot hide an active ancestor transaction"
+    },
+    {
+      "id": "F-SQLite-ancestor",
+      "file": "packages/storage/sqlite/src/storage-sync.ts",
+      "anchor": "for (let token = TX_SCOPE.getStore(); token; token = token.parent)",
+      "replacement": "for (let token = TX_SCOPE.getStore(); token; token = undefined)",
+      "killedBy": "sqlite another root transaction cannot hide an active ancestor transaction"
+    },
+    {
+      "id": "F-direct-window",
+      "file": "packages/storage/sqlite/src/storage-sync.ts",
+      "anchor": "const value = result && typeof (result as PromiseLike<T>).then === 'function' ? await result : result",
+      "replacement": "const value = await result",
+      "killedBy": "SQLite root fence detects a committed direct write before accepting a delayed old read"
+    },
+    {
+      "id": "F-dirty-transaction",
+      "file": "packages/storage/sqlite/src/storage-sync.ts",
+      "anchor": "if (commitOnSuccess || this.#state.dirty) this.#state.commits++",
+      "replacement": "if (commitOnSuccess) this.#state.commits++",
+      "killedBy": "sqlite dirty transaction advances only after commit"
+    },
+    {
+      "id": "F-memory-dirty-transaction",
+      "file": "packages/providers/fake/src/storage.ts",
+      "anchor": "if (staged.#state.dirty) this.#state.commits++",
+      "replacement": "if (false && staged.#state.dirty) this.#state.commits++",
+      "killedBy": "memory dirty transaction advances only after commit"
+    }
+  ]
+}
