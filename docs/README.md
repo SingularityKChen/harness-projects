@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-02-composed-browser-ci](exec-plan/completed/2026-11-02-composed-browser-ci.md) | 生产组合浏览器持续准入、失败闭合与托管正负控（#450） |
 | [2026-11-02-composed-workspace-browser](exec-plan/completed/2026-11-02-composed-workspace-browser.md) | 单一生产载体的真实浏览器创建、读取、导航与恢复回归（#498） |
 | [2026-11-02-storage-committed-read-fence](exec-plan/completed/2026-11-02-storage-committed-read-fence.md) | Storage 同步已提交读取围栏与两连接合同 |
 | [2026-10-30-planning-runtime-access](exec-plan/completed/2026-10-30-planning-runtime-access.md) | Planning 当前只读准入与恢复（#465 / #457） |
