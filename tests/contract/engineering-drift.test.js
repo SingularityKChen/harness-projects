@@ -503,7 +503,7 @@ test('漂移 job 挂在 Board invariants 上，且不引入手选 ref 的入口'
   assert.equal(workflow.permissions.contents, 'read')
   assert.equal(job.steps[0].uses, 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1')
   assert.equal(job.steps[0].with['persist-credentials'], false)
-  assert.equal(job.steps[1].uses, 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020')
+  assert.equal(job.steps[1].uses, 'actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1')
 
   const runStep = job.steps.find((step) => step.run)
   assert.equal(runStep.run, 'node scripts/check-engineering-drift-live.mjs')

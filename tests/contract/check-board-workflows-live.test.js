@@ -150,7 +150,7 @@ test('带 PAT 的 workflow 只有 schedule 入口，且 token 只进入 adapter 
   assert.deepEqual(job.env, { PROJECT_OWNER: 'SingularityKChen', PROJECT_NUMBER: 10 })
   assert.equal(job.if, undefined)
   assert.equal(job.steps[0].uses, 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1')
-  assert.equal(job.steps[1].uses, 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020')
+  assert.equal(job.steps[1].uses, 'actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1')
 
   const runStep = job.steps.find((step) => step.run)
   assert.equal(runStep.run, 'node scripts/check-board-workflows-live.mjs')
