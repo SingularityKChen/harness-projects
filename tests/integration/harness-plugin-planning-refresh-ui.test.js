@@ -73,6 +73,13 @@ test('scope change and dispose ignore late refresh completion and failure; read 
   assert.equal(calls, 1)
 })
 
+test('unavailable keys without a mounted Planning source never send a refresh RPC', async () => {
+  const read = { workspace: { id: 'empty' }, connection: { connected: true }, capabilities: [{ key: 'planning.item.read', access: 'unavailable' }], reason: '没有默认 Planning 绑定' }
+  let calls = 0
+  const refresh = createPlanningRefreshSource({ source: { getSnapshot: () => read, subscribe: () => () => {} }, refreshPlanning: async () => { calls++ } })
+  await refresh.refresh(); assert.equal(calls, 0); refresh.dispose()
+})
+
 test('disposed pending source absorbs late rejection without publishing a new snapshot', async () => {
   const source = { getSnapshot: () => ({ workspace: { id: 'a' }, connection: { connected: true }, capabilities: [{ key: 'planning.item.read', access: 'available' }] }), subscribe: () => () => {} }
   const gate = deferred(), refresh = createPlanningRefreshSource({ source, refreshPlanning: () => gate.promise })

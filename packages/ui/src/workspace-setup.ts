@@ -37,7 +37,11 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   const settings = navigation?.source === setupSource ? navigation.view === 'settings' : !setup || setup.workspace === null || !['unbound', 'confirmed'].includes(setup.planning.state)
   const mounted = settings || visited === scope || (setup?.planning.state === 'unbound' && repositoryBindingSource !== undefined)
   const readable = read?.capabilities?.some(entry => entry.key === 'planning.item.read' && ['available', 'read_only', 'degraded'].includes(entry.access)) === true
-  const list = confirmed && read?.workspace.id === setup.workspace.id && readable && !settings
+  // 拒读帧会隐藏来源名；保留同一确认挂载的安全容器，权限仍由 Host 与读模型裁决。
+  const recoverable = setup?.planning.bindingId !== undefined && read?.reason === 'permission_denied'
+    && (read.planningSource === undefined || read.planningSource.bindingId === setup.planning.bindingId)
+    && read.capabilities?.some(entry => entry.key === 'planning.item.read' && entry.access === 'unavailable') === true
+  const list = confirmed && read?.workspace.id === setup.workspace.id && (readable || recoverable) && !settings
   const stage = settings ? setup === undefined ? 'loading' : setup.workspace === null ? 'create' : 'connect' : list ? 'list' : 'summary'
   useEffect(() => {
     if (mounted && mappingSource && setup?.workspace && setup.planning.bindingId && setup.planning.projectNodeId) void mappingSource.refresh({ workspaceId: setup.workspace.id, bindingId: setup.planning.bindingId, projectExternalId: setup.planning.projectNodeId })
