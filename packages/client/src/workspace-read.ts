@@ -81,9 +81,9 @@ function validRepositories(repositories: unknown): boolean {
   const ids = new Set<string>()
   return repositories === undefined || (Array.isArray(repositories) && repositories.every((entry: WireRepositoryEntry) => {
     if (typeof entry !== 'object' || entry === null || typeof entry.id !== 'string' || entry.id === '' || ids.has(entry.id)
-      || !validCapabilityList(entry.capabilities)) return false
+      || (entry.accessVersion !== undefined && typeof entry.accessVersion !== 'string') || !validCapabilityList(entry.capabilities)) return false
     ids.add(entry.id)
-    return Object.keys(entry).every((key) => key === 'id' || key === 'capabilities')
+    return Object.keys(entry).every((key) => key === 'id' || key === 'capabilities' || key === 'accessVersion')
   }))
 }
 
