@@ -5,11 +5,12 @@
  * 调用方拿不到 provider 的实例、ref 形状或平台字段。
  */
 import type {
-  CoreApi, DeliveryLineageHop, DeliveryProjection, DeliveryScope, ExecutionContextQuery, ExecutionContextView,
+  CoreApi, PrOperationQuery, PrOperationView, DeliveryLineageHop, DeliveryProjection, DeliveryScope, ExecutionContextQuery, ExecutionContextView,
 } from '@harness-projects/core'
 import { toWireEntity, toWireSnapshot, type WireAuthority, type WireEntity, type WireSnapshot } from './wire.ts'
 
 export interface ControllerQueries {
+  getChangeRequestOperation(query: PrOperationQuery): Promise<PrOperationView>
   /** 当前修订上的完整投影；修订号是客户端增量订阅的起点。 */
   snapshot(): Promise<WireSnapshot>
   getEntity(entityId: string): Promise<WireEntity | undefined>
@@ -37,6 +38,7 @@ export function createControllerQueries(
       const view = views.find((item) => item.entityId === entityId)
       return view === undefined ? undefined : toWireEntity(view, authority)
     },
+    getChangeRequestOperation: (query) => core.queries.getChangeRequestOperation(query),
     getExecutionContext: (query) => core.queries.getExecutionContext(query),
     getDeliveryLineage: (scope) => core.queries.getDeliveryLineage(scope),
     getDeliveryProjection: (scope) => core.queries.getDeliveryProjection(scope),

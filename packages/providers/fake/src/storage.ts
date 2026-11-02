@@ -105,8 +105,9 @@ export class MemoryStorage implements cap.Storage {
     for (const record of this.data.contexts) validateGeneration(record)
     this.data.attempts = this.data.attempts.map((record) => {
       if (record.externalIntent === undefined) return record
-      if (record.commandName !== 'startWork') throw new TypeError('external intent requires Start Work')
-      return { ...record, externalIntent: cap.externalIntentSnapshot(record.externalIntent) }
+      const captured = { ...record, externalIntent: cap.externalIntentSnapshot(record.externalIntent) }
+      cap.validateExternalIntentCommand(captured)
+      return captured
     })
     this.#transactionScope = transactionScope
     // 导入时校验已存元数据与引用完整性（对抗验证 P3-2）：配置必须有挂载、账号关联必须指向存在的账号，否则孤儿状态会被导入。
@@ -508,8 +509,8 @@ export class MemoryStorage implements cap.Storage {
   async putMutationAttempt(record: cap.MutationAttemptRecord): Promise<void> {
     return this.#mutate(() => {
       if (record.externalIntent !== undefined) {
-        if (record.commandName !== 'startWork') throw new TypeError('external intent requires Start Work')
         record = { ...record, externalIntent: cap.externalIntentSnapshot(record.externalIntent) }
+        cap.validateExternalIntentCommand(record)
       }
       if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('mutation attempt workspace does not exist')
       if (!this.data.providerBindings.some((binding) => binding.id === record.bindingId)) throw new Error('mutation attempt binding does not exist')

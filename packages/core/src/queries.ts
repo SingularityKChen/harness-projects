@@ -12,6 +12,7 @@ import {
   type ProviderBindingRecord, type StorageTransaction,
 } from '@harness-projects/capabilities'
 import { IdentityRole, type EntityId, type ProjectError, type ProviderBindingId, type WorkspaceId } from '@harness-projects/domain'
+import { getChangeRequestOperation, type PrOperationQuery, type PrOperationView } from './create-change-request.ts'
 import { startTargetError } from './start-work.ts'
 import { gateCommand } from './capabilities.ts'
 import { PLANNING_SYNC_SCOPE } from './bootstrap.ts'
@@ -49,6 +50,7 @@ export interface RepositoryMetadata {
 }
 
 export interface CoreQueries {
+  getChangeRequestOperation(query: PrOperationQuery): Promise<PrOperationView>
   /** Start Work 的只读目标预检：复用 Core 准入守卫，不依赖展示身份，不发外部调用或落控制事实。 */
   getStartWorkTargetError(workItemId: string): Promise<ProjectError | undefined>
   listProviderBindings(): Promise<readonly ProviderBindingRecord[]>
@@ -67,6 +69,7 @@ export interface CoreQueries {
 
 export function createQueries(context: CoreContext): CoreQueries {
   return {
+    getChangeRequestOperation: (query) => getChangeRequestOperation(context, query),
     getStartWorkTargetError: (workItemId) => startTargetError(context, workItemId),
     listProviderBindings: () => context.storage.listProviderBindings(context.workspaceId),
 

@@ -34,6 +34,7 @@
 |---|---|
 | [2026-11-02-start-work-execution-recovery](exec-plan/completed/2026-11-02-start-work-execution-recovery.md) | 执行回执先持久化、原操作恢复与完整 Ready 校验（#193） |
 | [2026-11-02-start-work-execution-uniqueness](exec-plan/completed/2026-11-02-start-work-execution-uniqueness.md) | 公开命令的外部执行唯一性、重启与接管证明（#421） |
+| [2026-11-02-pull-request-command-recovery](exec-plan/completed/2026-11-02-pull-request-command-recovery.md) | 持久 PR 创建、操作发现与原操作只读恢复（#494） |
 | [2026-10-30-ui-workspace-shell](exec-plan/completed/2026-10-30-ui-workspace-shell.md) | 有界 Host 滚动、设置返回、草稿与未决请求保留（#482/#483） |
 | [2026-10-30-github-pr-creation](exec-plan/completed/2026-10-30-github-pr-creation.md) | 原生 GitHub PR 创建、独立写权限与不确定回执（#436） |
 | [2026-10-30-durable-write-intent](exec-plan/completed/2026-10-30-durable-write-intent.md) | Start Work 写前意图与不确定结果结算（#204） |

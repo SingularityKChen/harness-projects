@@ -378,9 +378,9 @@ const callers = (pattern) => callSites(repoRoot, ['packages', 'apps'], pattern)
 
 test('唯一写者：交付事实与谱系边只经 refreshDeliveryFacts 在一个事务里写入；重复刷新收敛，关系、事实与修订号不变，不写游标、不改规划状态；首次刷新、标陈旧的刷新与没有锚点的刷新也都不推进修订号（#221、#222、CONTRACTS K1、K5）', async () => {
   assert.deepEqual(callers(/\.putDeliveryFacts\(/), ['core/src/delivery-facts.ts'], '交付事实只有一个写入调用点')
-  assert.deepEqual(callers(/(?<!function )\brecordEdges\(/), ['core/src/delivery-facts.ts', 'core/src/start-work.ts'], '谱系边只由开始工作与交付写者记录')
+  assert.deepEqual(callers(/(?<!function )\brecordEdges\(/), ['core/src/create-change-request.ts', 'core/src/delivery-facts.ts', 'core/src/start-work.ts'], '谱系边只由显式命令与交付刷新写者记录')
   assert.deepEqual(callers(/\.putRelation\(/), ['core/src/relations.ts'], '关系只经 recordEdges 与 confirmRelation 写入：没有第二个谱系写者绕过它们直接写关系（ADR-0011 第 4 条）')
-  assert.deepEqual(callers(/\brefreshDeliveryFacts\(context,/), ['core/src/context.ts'], '摄入只经刷新命令，查询不调用写者（#222）')
+  assert.deepEqual(callers(/\brefreshDeliveryFacts\(context,/), ['core/src/context.ts', 'core/src/create-change-request.ts'], '显式创建后复用唯一摄入写者，查询不调用写者（#222）')
   assert.deepEqual(callers(/\.refreshDeliveryFacts\(/), ['controller/src/commands.ts', 'harness-plugin/src/client.ts', 'harness-plugin/src/host-composition.ts'], '显式刷新沿 client → Host → controller 命令转发；core 与 controller 查询不调用写者（#222、#234）')
   const { providers, core, chain } = await chainOf('lineage-single-writer', { ingested: false })
   const revision = () => providers.storage.currentRevision(WORKSPACE.id)

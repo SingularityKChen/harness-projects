@@ -18,6 +18,7 @@ import { cancelExecutionRun, refreshExecutionRun, type RefreshExecutionRunResult
 import { createQueries, type CoreQueries } from './queries.ts'
 import { collectBindings, type CoreProviderTable } from './registry.ts'
 import { confirmRelation, type RecordedEdge, type RelationRef } from './relations.ts'
+import { createChangeRequest, resumeChangeRequest, type ResumeChangeRequestRequest, type CreateChangeRequestRequest, type CreateChangeRequestResult } from './create-change-request.ts'
 import { startWork } from './start-work.ts'
 import {
   StatusPolicyMode, writePlanningStatus, type PlanningStatusCommand, type StatusDecision,
@@ -97,6 +98,8 @@ export interface CoreCommands {
   bootstrapWorkspace(): Promise<BootstrapResult>
   /** 显式 Planning 全量刷新；与 scheduler 共用单飞槽，不进入 controller replay。 */
   refreshPlanning(): Promise<BootstrapResult>
+  resumeChangeRequest(request: ResumeChangeRequestRequest): Promise<CreateChangeRequestResult>
+  createChangeRequest(request: CreateChangeRequestRequest): Promise<CreateChangeRequestResult>
   startWork(request: StartWorkRequest): Promise<StartWorkResult>
   /** 按运行身份取消：已取消原样返回，否则路由回签发者、ack 后原子替换状态与引用。 */
   refreshExecutionRun(query: ExecutionContextQuery): Promise<RefreshExecutionRunResult>
@@ -183,6 +186,8 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
     commands: namespace({
       bootstrapWorkspace: () => bootstrapWorkspace(context),
       refreshPlanning,
+      resumeChangeRequest: (request: ResumeChangeRequestRequest) => resumeChangeRequest(context, request),
+      createChangeRequest: (request: CreateChangeRequestRequest) => createChangeRequest(context, request),
       startWork: (request: StartWorkRequest) => startWork(context, request),
       refreshExecutionRun: (query: ExecutionContextQuery) => refreshExecutionRun(context, query),
       cancelExecutionRun: (query: ExecutionContextQuery) => cancelExecutionRun(context, query),
@@ -197,6 +202,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
 export function unavailableCore(reason: string): CoreApi {
   const error = projectError(ProjectErrorCode.NotSupported, reason)
   const queries: CoreQueries = {
+    getChangeRequestOperation: async () => ({ kind: 'blocked', reason: 'unavailable' }),
     getStartWorkTargetError: async () => error,
     listProviderBindings: async () => [],
     getPlanningSnapshot: async () => ({ views: [], revision: 0, sync: { degraded: true, stale: true, reason }, metadata: { workspace: undefined, capabilities: [], repositories: [], planningSource: undefined } }),
@@ -217,6 +223,8 @@ export function unavailableCore(reason: string): CoreApi {
     refreshPlanning: async () => ({
       ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0, revision: 0, degraded: true, error,
     }),
+    resumeChangeRequest: async () => ({ phase: 'failed', error }),
+    createChangeRequest: async () => ({ phase: 'failed', error }),
     startWork: async () => startWorkUnavailable(error),
     refreshExecutionRun: async () => ({ ok: false, applied: false, error }),
     cancelExecutionRun: async () => ({ status: undefined, runExternalId: undefined, error }),

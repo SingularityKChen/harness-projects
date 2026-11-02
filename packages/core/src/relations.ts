@@ -52,13 +52,21 @@ export function sourceForProvenance(provenance: EdgeProvenance): RelationSource 
 /** 记录边只用工作区与两个存储方法：事务里传 `{ workspaceId, storage: tx }`，不必有完整的 CoreContext。 */
 export interface RelationStore { readonly workspaceId: WorkspaceId; readonly storage: Pick<Storage, 'listRelations' | 'putRelation'> }
 
-/** 批量记录：一次读取现有边，只写缺失的那些，避免同一批里互相覆盖。 */
+/** 批量记录：一次读取现有边，写缺失边或由显式命令确认的既有候选；其它关系原样保留。 */
 export async function recordEdges(context: RelationStore, edges: readonly DiscoveredEdge[]): Promise<readonly RecordedEdge[]> {
   const known = [...(await context.storage.listRelations(context.workspaceId))]
   const results: RecordedEdge[] = []
   for (const edge of edges) {
     const existing = findRelation(known, edge)
-    if (existing !== undefined) { results.push({ relation: existing, created: false }); continue }
+    if (existing !== undefined) {
+      const relation = edge.provenance === EdgeProvenance.Command && existing.source !== RelationSource.Explicit
+        && (existing.state === RelationState.Candidate || existing.state === RelationState.Confirmed)
+        ? { ...existing, source: RelationSource.Explicit, state: RelationState.Confirmed } : existing
+      if (relation !== existing) await context.storage.putRelation(context.workspaceId, relation)
+      known.splice(known.indexOf(existing), 1, relation)
+      results.push({ relation, created: false })
+      continue
+    }
     const source = sourceForProvenance(edge.provenance)
     const relation = makeRelation({ from: edge.from, to: edge.to, type: edge.type, source, inheritedState: undefined })
     await context.storage.putRelation(context.workspaceId, relation)
@@ -68,7 +76,7 @@ export async function recordEdges(context: RelationStore, edges: readonly Discov
   return results
 }
 
-/** 显式确认：唯一把 candidate 变成 confirmed 的入口；边不存在时返回 undefined，不凭空造关系。 */
+/** 人工确认既有候选：边不存在时不造关系；显式命令产物由 recordEdges 确认。 */
 export async function confirmRelation(context: CoreContext, ref: RelationRef): Promise<RecordedEdge | undefined> {
   const relations = await context.storage.listRelations(context.workspaceId)
   const existing = findRelation(relations, ref)

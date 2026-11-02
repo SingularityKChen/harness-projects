@@ -24,7 +24,7 @@ import type {
 import type { BindingConfigurationRecord, ConnectorAccountRecord } from './connector-account.ts'
 import type { CapabilityDomain } from './capability-keys.ts'
 import type { ExternalObjectRef, ProviderObservation } from './observation.ts'
-import type { ProviderCreateBranchInput, ProviderCreateWorktreeInput } from './development-provider.ts'
+import type { ProviderCreateBranchInput, ProviderCreateWorktreeInput, ProviderCreateChangeRequestInput } from './development-provider.ts'
 import type { ProviderStartRunInput } from './execution-provider.ts'
 import { ProjectErrorCode, projectError, type ProjectError } from './result.ts'
 
@@ -108,7 +108,7 @@ export interface MutationAttemptRecord {
   /** Start Work 必填；首次请求身份与 command/binding 不可改写，只有状态可推进。 */
   readonly requestFingerprint?: string
   /** Start Work 当前外部步骤；根 state 直到完整命令结束前保持 pending。 */
-  readonly externalIntent?: StartWorkExternalIntent
+  readonly externalIntent?: ExternalIntent
 }
 
 export type StartWorkExternalOperation = { readonly operation: 'createBranch'; readonly input: ProviderCreateBranchInput }
@@ -117,8 +117,20 @@ export type StartWorkExternalOperation = { readonly operation: 'createBranch'; r
 export type StartWorkExternalIntent = StartWorkExternalOperation & {
   readonly contextId: ExecutionContextId; readonly ownerGeneration: number; readonly bindingId: ProviderBindingId; readonly state: WriteState
 }
+export type ChangeRequestExternalIntent = {
+  readonly operation: 'createChangeRequest'; readonly input: ProviderCreateChangeRequestInput
+  readonly contextId: ExecutionContextId; readonly ownerGeneration: number; readonly bindingId: ProviderBindingId; readonly state: WriteState
+  readonly worktree: string; readonly confirmedRef?: ExternalObjectRef
+}
+export type ExternalIntent = StartWorkExternalIntent | ChangeRequestExternalIntent
+export function validateExternalIntentCommand(record: MutationAttemptRecord): void {
+  if (record.externalIntent?.operation === 'createChangeRequest' && (!record.requestFingerprint || record.externalIntent.bindingId !== record.bindingId)) throw new TypeError('invalid PR attempt identity')
+  if (record.externalIntent !== undefined && record.commandName !== (record.externalIntent.operation === 'createChangeRequest' ? 'createChangeRequest' : 'startWork')) throw new TypeError('external intent command mismatch')
+}
 /** 持久输入白名单：字段只读一次，不接收任意 environment、不保存访问 URL；两个 Storage 共用同一复制与校验。 */
-export function externalIntentSnapshot(value: StartWorkExternalIntent): StartWorkExternalIntent {
+export function externalIntentSnapshot(value: StartWorkExternalIntent): StartWorkExternalIntent
+export function externalIntentSnapshot(value: ExternalIntent): ExternalIntent
+export function externalIntentSnapshot(value: ExternalIntent): ExternalIntent {
   const fail = (): never => { throw new TypeError('invalid Start Work external intent') }
   const text = (v: unknown): string => typeof v === 'string' && v.length > 0 ? v : fail()
   const ref = (v: ExternalObjectRef, kind: string): ExternalObjectRef => {
@@ -132,6 +144,15 @@ export function externalIntentSnapshot(value: StartWorkExternalIntent): StartWor
   if (!Number.isSafeInteger(ownerGeneration) || ownerGeneration < 1 || !['pending', 'saved', 'unknown', 'conflict', 'failed'].includes(state)
     || input === null || typeof input !== 'object') return fail()
   const base = { contextId: text(contextId) as ExecutionContextId, ownerGeneration, bindingId: text(bindingId) as ProviderBindingId, state }
+  if (operation === 'createChangeRequest') {
+    if (Object.keys(value).some((key) => !['operation', 'input', 'contextId', 'ownerGeneration', 'bindingId', 'state', 'worktree', 'confirmedRef'].includes(key))
+      || Object.keys(input).some((key) => !['repository', 'head', 'base', 'title', 'body'].includes(key))) return fail()
+    const { repository, head, base: targetBase, title, body } = input
+    const { worktree, confirmedRef } = value
+    if (typeof body !== 'string') return fail()
+    return { ...base, operation, worktree: text(worktree), input: { repository: ref(repository, 'repository'), head: text(head), base: text(targetBase), title: text(title), body },
+      ...(confirmedRef === undefined ? {} : { confirmedRef: ref(confirmedRef, 'change_request') }) }
+  }
   if (operation === 'createBranch') {
     const { repository, name, fromRef } = input
     return { ...base, operation, input: { repository: ref(repository, 'repository'), name: text(name), fromRef: text(fromRef) } }

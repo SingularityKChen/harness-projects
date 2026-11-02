@@ -12,7 +12,7 @@ import { ProjectErrorCode, projectError } from '@harness-projects/capabilities'
 import type { ExternalObjectRef, ProjectError } from '@harness-projects/capabilities'
 import type { ConnectorAccountId, EntityId, NormalizedStatus, ProviderBindingId, WorkspaceId } from '@harness-projects/domain'
 import {
-  WritePhase, type ExecutionContextQuery, type RefreshExecutionRunResult,
+  WritePhase, type CreateChangeRequestRequest, type CreateChangeRequestResult, type ResumeChangeRequestRequest, type ExecutionContextQuery, type RefreshExecutionRunResult,
   type BindPlanningSourceRequest, type BindRepositoryRequest, type BootstrapResult, type ConnectAccountRequest, type CoreApi, type CreateWorkspaceRequest, type DeliveryRefreshResult,
   type DeliveryScope, type DeliveryWriteAttempt, type RecordedEdge, type RelationRef, type RepositoryBinding, type SetupOutcome, type StartWorkResult, type StatusDecision,
   type WorkspaceSetup, type SetPlanningMappingRequest, type ExecutionBindingPair, type InstallExecutionRequest,
@@ -132,7 +132,13 @@ async function runConfirmRelation(core: CoreApi, ref: RelationRef): Promise<Comm
   )
 }
 
+export type CreateChangeRequestInput = Omit<CreateChangeRequestRequest, 'actor'> & CommandEnvelope
+
+export type ResumeChangeRequestInput = Omit<ResumeChangeRequestRequest, 'observer'> & { readonly actorRef: ActorRef }
+
 export interface ControllerCommands {
+  resumeChangeRequest(input: ResumeChangeRequestInput): Promise<CommandResult<CreateChangeRequestResult>>
+  createChangeRequest(input: CreateChangeRequestInput): Promise<CommandResult<CreateChangeRequestResult>>
   /** 生命周期命令：引导只做本地水合，没有外部写入，因此报 local_only。 */
   bootstrapWorkspace(envelope: CommandEnvelope): Promise<CommandResult<BootstrapResult>>
   /** 显式 Planning 刷新：每次都真实读取，不使用幂等重放账本。 */
@@ -248,6 +254,20 @@ export function createControllerCommands(core: CoreApi): ControllerCommands {
     refreshPlanning: async (_request) => {
       const result = await core.commands.refreshPlanning()
       return resultOf(result.ok ? CommandWriteState.LocalOnly : CommandWriteState.Failed, result, result.error)
+    },
+
+    resumeChangeRequest: async (input) => {
+      if (input === null || typeof input !== 'object' || Object.values(Object.getOwnPropertyDescriptors(input)).some((field) => field.get !== undefined || field.set !== undefined)) return resultOf<CreateChangeRequestResult>(CommandWriteState.Failed, undefined, projectError(ProjectErrorCode.InvalidInput, 'PR 恢复请求不能含存取器'))
+      const { actorRef, ...request } = input
+      const result = await core.commands.resumeChangeRequest({ ...request, observer: actorRef })
+      return resultOf(result.phase, result, result.error)
+    },
+    createChangeRequest: async (input) => {
+      if (input === null || typeof input !== 'object' || Object.values(Object.getOwnPropertyDescriptors(input)).some((field) => field.get !== undefined || field.set !== undefined)) return resultOf<CreateChangeRequestResult>(CommandWriteState.Failed, undefined, projectError(ProjectErrorCode.InvalidInput, 'PR 请求不能含存取器'))
+      if (Object.keys(input).some((key) => !['actorRef', 'idempotencyKey', 'workItemId', 'repositoryId', 'base', 'title', 'body'].includes(key))) return resultOf<CreateChangeRequestResult>(CommandWriteState.Failed, undefined, projectError(ProjectErrorCode.InvalidInput, '未知 PR 请求字段'))
+      const { actorRef, ...request } = input
+      const result = await core.commands.createChangeRequest({ ...request, actor: actorRef })
+      return resultOf(result.phase, result, result.error)
     },
 
     startWork: async (input) => {

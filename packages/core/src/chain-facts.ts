@@ -14,6 +14,7 @@ import { EngineeringFactKind, EntityKind, ProviderErrorCode, type EntityId, type
 import { gateCommand } from './capabilities.ts'
 import { CHANGE_REQUEST_READ_ROUTE, routeDevelopment } from './development-route.ts'
 import type { CoreContext } from './context.ts'
+import { matchesPrTarget } from './change-request-target.ts'
 import { contextIdFor, readExecutionContext } from './execution-context.ts'
 import { changeRequestEntityId, validNativeIdentity } from './identity.ts'
 import { branchNameFor, worktreeKeyFor } from './git-provisioning.ts'
@@ -195,8 +196,36 @@ async function readHeadCommit(route: ReadRoute, branch: string, gaps: Capability
 }
 
 /** 只认头部提交匹配的变更请求：不匹配就当没观察到，绝不把别的分支的提交挂到本链上。 */
-async function readChangeRequest(context: CoreContext, route: ReadRoute, branch: string, head: string, gaps: CapabilityGap[]): Promise<ChangeRequestFact | undefined> {
+async function readChangeRequest(context: CoreContext, route: Extract<ReadRoute, { ok: true }>, branch: string, head: string, gaps: CapabilityGap[], worktreeId: EntityId, scope: DeliveryScopeInput): Promise<ChangeRequestFact | undefined> {
   const key = CapabilityKey.DevelopmentChangeRequestRead
+  let explicit = (await context.storage.listRelations(context.workspaceId)).filter((edge) => edge.to === worktreeId && edge.type === 'produced_by' && edge.source === 'explicit' && edge.state === 'confirmed')
+  const record = await context.storage.getExecutionContext(contextIdFor(context.workspaceId, scope.workItemId, scope.repositoryId ?? ''))
+  const operations = (await context.storage.listMutationAttempts(context.workspaceId)).filter((attempt) => attempt.commandName === 'createChangeRequest'
+    && attempt.externalIntent?.operation === 'createChangeRequest' && matchesPrTarget(context.workspaceId, scope, record, attempt.externalIntent)
+    && ['pending', 'unknown', 'saved'].includes(attempt.state))
+  // 未确认且尚无显式边时仍允许 ProviderRead 发现 candidate；有显式历史后不能靠同 SHA 重新猜身份。
+  if (operations.length > 0 && (explicit.length > 0 || operations.some((attempt) => attempt.state === 'saved'))) {
+    const attempt = operations.length === 1 ? operations[0] : undefined, intent = attempt?.externalIntent
+    const ref = attempt?.state === 'saved' && intent?.operation === 'createChangeRequest' && intent.state === 'saved' && attempt.bindingId === intent.bindingId ? intent.confirmedRef : undefined
+    const identity = ref?.bindingId === route.binding.ref.bindingId && ref.objectKind === 'change_request'
+      ? await context.storage.findExternalIdentity(ref.bindingId, 'change_request', ref.externalId) : undefined
+    explicit = identity === undefined ? [] : explicit.filter((edge) => edge.from === identity.entityId)
+    if (explicit.length !== 1) { collect(gaps, { key, reason: '当前 PR 操作不唯一或未确认精确身份' }); return undefined }
+  }
+  if (explicit.length > 0) {
+    const identities = explicit.length === 1 ? (await context.storage.listIdentitiesForEntity(explicit[0]!.from)).filter((identity) => identity.bindingId === route.binding.ref.bindingId && identity.externalKind === 'change_request') : []
+    if (identities.length === 1 && route.binding.development !== undefined) {
+      const identity = identities[0]!
+      const result = await route.binding.development.getChangeRequest({ bindingId: identity.bindingId, objectKind: 'change_request', externalId: identity.externalId, url: undefined })
+      if (result.ok && result.value.ref.bindingId === identity.bindingId && result.value.ref.objectKind === 'change_request' && result.value.ref.externalId === identity.externalId
+        && result.value.headBranch === branch && result.value.sourceVersion === head && validNativeIdentity(result.value.nativeIdentity)
+        && (result.value.nativeIdentity === undefined || changeRequestEntityId(result.value.ref, result.value.nativeIdentity) === identity.entityId)) {
+        return { ref: result.value.ref, entityId: identity.entityId, label: `#${result.value.number} ${result.value.title}`, nativeIdentity: result.value.nativeIdentity }
+      }
+    }
+    collect(gaps, { key, reason: '显式 PR 身份不唯一、不可读或头部不符' })
+    return undefined
+  }
   const read = await gated(route, key, (binding, repository) =>
     repository === undefined || binding.development === undefined ? undefined : findDevelopment(
       (cursor) => binding.development!.listChangeRequests({ repository, headBranch: branch, cursor, limit: PAGE_LIMIT }),
@@ -314,7 +343,7 @@ export async function readChainFacts(context: CoreContext, scope: DeliveryScopeI
   // `work/<workItemId>` here would let an unrelated/manual branch manufacture lineage for a missing context.
   const hasObservedWorktree = view?.worktreeExternalId !== undefined
   const head = route?.ok !== true || !hasObservedWorktree ? undefined : await readHeadCommit(route, branch, gaps)
-  const crFact = route?.ok !== true || head === undefined ? undefined : await readChangeRequest(context, route, branch, head, gaps)
+  const crFact = route?.ok !== true || head === undefined ? undefined : await readChangeRequest(context, route, branch, head, gaps, worktree.id, scope)
   const changeRequest = changeRequestNode(context, repository, branch, crFact)
   // 事实必须挂在已观察到的锚点上（ExecPlan D4）：head 未观察到就不读流水线，也不得以 commit: undefined 读取整个仓库的运行；
   // 检查同理，没有已观察到的变更请求就不读。此时只保留"缺哪一跳"的骨架，骨架不进谱系。
