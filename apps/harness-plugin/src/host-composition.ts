@@ -67,7 +67,7 @@ async function finishChangeRequest(controller: Controller, scope: { workItemId: 
 }
 
 /** 工作区身份来自 Host；执行记录只在读取前后均可见的工作项上投影允许字段。 */
-const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness'): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts' | 'createChangeRequest' | 'getChangeRequestOperation' | 'resumeChangeRequest'>, Controller> => ({
+const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness', targetError: CoreApi['queries']['getStartWorkTargetError']): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts' | 'createChangeRequest' | 'getChangeRequestOperation' | 'resumeChangeRequest'>, Controller> => ({
   getStartWorkOptions: async (controller, input) => {
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
     return { workspaceId, workItemId: input.workItemId, executionMode: mode() }
@@ -76,10 +76,15 @@ const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness')
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item'
       || !(await controller.baseline()).repositories?.some((repository) => repository.id === input.repositoryId)) throw new Error('开始工作范围无效')
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
+    const before = await targetError(input.workItemId)
+    if (before) return { writeState: 'failed' as const, saving: false, authoritative: false, value: undefined, error: projectError(before.code, '开始工作未确认，请按恢复动作处理') }
     const { branchName, ...request } = input
     const result = await controller.commands.startWork({ ...request, ...(branchName === undefined ? {} : { branchName }) })
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
-    return { ...result, ...(result.error === undefined ? {} : { error: projectError(result.error.code, '开始工作未确认，请按恢复动作处理') }) }
+    const currentError = await targetError(input.workItemId), error = currentError ?? result.error
+    return { ...result, ...(currentError && result.authoritative ? { writeState: 'unknown' as const, authoritative: false } : {}),
+      ...(error === undefined ? {} : { error: projectError(error.code, currentError && result.authoritative
+        ? '已确认资源保留；当前规划只读准入不再确认本次请求，请恢复后用原键读回' : '开始工作未确认，请按恢复动作处理') }) }
   },
   createChangeRequest: async (controller, input) => {
     await assertDeliveryScope(controller, input)
@@ -153,7 +158,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   }
   let storage: SqliteStorage | undefined
   let closed = false
-  type Assembly = { mapping?: ReturnType<typeof createHostPlanningMapping>; controller: Controller; disabled: readonly DisabledBinding[]; lifetime: ReturnType<typeof createPlanningLifetime>; reconciler?: PlanningReconciler; leases: Set<Promise<unknown>>; retired?: boolean; cache: Map<string, object>; executionMode: 'manual' | 'harness' }
+  type Assembly = { mapping?: ReturnType<typeof createHostPlanningMapping>; controller: Controller; targetError: CoreApi['queries']['getStartWorkTargetError']; disabled: readonly DisabledBinding[]; lifetime: ReturnType<typeof createPlanningLifetime>; reconciler?: PlanningReconciler; leases: Set<Promise<unknown>>; retired?: boolean; cache: Map<string, object>; executionMode: 'manual' | 'harness' }
   let developmentCache = new Map<string, object>()
   let current: Assembly
   let barrier: Promise<void> | undefined, epoch = 0, tail: Promise<unknown> = Promise.resolve(), activeFingerprint = ''
@@ -212,7 +217,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     }))])
     const assemble = async (): Promise<Assembly> => {
       const lifetime = createPlanningLifetime(options.planningReadTimeoutMs)
-      const assembly: Assembly = { controller: undefined!, disabled: [], lifetime, leases: new Set(), cache: new Map(developmentCache), executionMode: 'manual' }
+      const assembly: Assembly = { controller: undefined!, targetError: undefined!, disabled: [], lifetime, leases: new Set(), cache: new Map(developmentCache), executionMode: 'manual' }
       try {
         const workspace = await storage!.getWorkspace(options.workspaceId)
         const { table, disabled } = workspace === undefined ? { table: {}, disabled: [] } : await restoreProviders(storage!, workspace.id, options.catalog, {
@@ -237,7 +242,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
           providers, diagnostics,
         })
         const controller = createController(core, { workspaceRevision: () => storage!.currentRevision(options.workspaceId) })
-        assembly.controller = controller; assembly.disabled = disabled
+        assembly.controller = controller; assembly.targetError = core.queries.getStartWorkTargetError; assembly.disabled = disabled
         const start = (await controller.baseline()).capabilities.find((entry) => entry.key === 'execution.run.start')
         assembly.executionMode = table.execution?.definition.implementationKey === 'execution.harness' && ['available', 'degraded'].includes(start?.access ?? '') ? 'harness' : 'manual'
         if (table.planning !== undefined) {
@@ -312,7 +317,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         return { workspace, planning: workspace === null ? { state: 'unbound' } : { state: 'degraded', ...(bindingId === undefined ? {} : { bindingId }), ...(projectNodeId === undefined ? {} : { projectNodeId }) }, ...activation, error: failure() }
       }
     })
-    const dispatch = dispatchOf<typeof OPERATIONS, Controller>(OPERATIONS, { ...handlersFor(options.workspaceId, () => current.executionMode), baseline: () => source.baseline(), getWorkspaceSetup,
+    const dispatch = dispatchOf<typeof OPERATIONS, Controller>(OPERATIONS, { ...handlersFor(options.workspaceId, () => current.executionMode, (id) => current.targetError(id)), baseline: () => source.baseline(), getWorkspaceSetup,
       getPlanningMapping: () => read(async (assembly) => ({ ...await assembly.mapping!.load(), confirmed: await fingerprint() === activeFingerprint && (await assembly.controller.baseline()).source.freshness === 'fresh' })),
       setPlanningMapping: (_controller, input) => configure(async () => {
         const error = await current.mapping!.validate(input.expectedBindingId, input.expectedProjectExternalId, input.mapping)

@@ -51,7 +51,7 @@ function canonical(workspace: string, actor: Actor, intent: ChangeRequestExterna
 }
 async function readRoute(context: CoreContext, storage: StorageTransaction, scope: PrScope, bindingId?: string): Promise<Route> {
   const repo = (await storage.listRepositories(context.workspaceId)).find((repo) => repo.id === scope.repositoryId)
-  if (repo === undefined || await startTargetError({ workspaceId: context.workspaceId, storage }, scope.workItemId) !== undefined) throw invalid()
+  if (repo === undefined || await startTargetError({ ...context, storage }, scope.workItemId) !== undefined) throw invalid()
   const selected = bindingId === undefined ? await selectDevelopment({ ...context, storage }, scope.repositoryId, CapabilityKey.DevelopmentChangeRequestCreate) : undefined
   const binding = bindingId === undefined ? selected?.ok ? selected.binding : undefined : context.registry.bindings.find((binding) => binding.ref.bindingId === bindingId && binding.ref.workspaceId === context.workspaceId && binding.ref.domain === 'development' && binding.enabled)
   if (binding?.development === undefined || !(await storage.listProviderBindings(context.workspaceId)).some((row) => row.id === binding.ref.bindingId && row.enabled)
@@ -65,7 +65,7 @@ async function readRoute(context: CoreContext, storage: StorageTransaction, scop
 /** 同一个本地 resolver 服务发现、恢复及最后短事务；从不调用 Provider。 */
 async function resolveOperation(context: CoreContext, query: PrOperationQuery, storage: StorageTransaction = context.storage): Promise<Resolution> {
   try { plain(query, ['workItemId', 'repositoryId', 'operationId']); if (!text(query.workItemId) || !text(query.repositoryId) || (query.operationId !== undefined && !text(query.operationId))) throw invalid() } catch { return { kind: 'blocked', reason: 'invalid_operation' } }
-  if (await startTargetError({ workspaceId: context.workspaceId, storage }, query.workItemId) !== undefined || !(await storage.listRepositories(context.workspaceId)).some((repo) => repo.id === query.repositoryId)) return { kind: 'blocked', reason: 'unavailable' }
+  if (await startTargetError({ ...context, storage }, query.workItemId) !== undefined || !(await storage.listRepositories(context.workspaceId)).some((repo) => repo.id === query.repositoryId)) return { kind: 'blocked', reason: 'unavailable' }
   try {
     const contextId = contextIdFor(context.workspaceId, query.workItemId, query.repositoryId), rows = await storage.listMutationAttempts(context.workspaceId), record = await storage.getExecutionContext(contextId)
     const candidates = rows.filter((row) => query.operationId === undefined ? row.commandName === 'createChangeRequest' && row.externalIntent?.contextId === contextId

@@ -7,15 +7,14 @@ import {
   SyncState,
   bindingForCapability,
   bindingsForDomain,
-  singlePlanningBinding,
   type EffectiveCapability,
   type ProviderBindingRecord, type StorageTransaction,
 } from '@harness-projects/capabilities'
 import { IdentityRole, type EntityId, type ProjectError, type ProviderBindingId, type WorkspaceId } from '@harness-projects/domain'
 import { getChangeRequestOperation, type PrOperationQuery, type PrOperationView } from './create-change-request.ts'
 import { startTargetError } from './start-work.ts'
+import { redactPlanning } from './runtime-access.ts'
 import { gateCommand } from './capabilities.ts'
-import { PLANNING_SYNC_SCOPE } from './bootstrap.ts'
 import type { CoreContext } from './context.ts'
 import {
   getDeliveryProjection, type DeliveryLineageHop, type DeliveryProjection, type DeliveryScope,
@@ -77,18 +76,20 @@ export function createQueries(context: CoreContext): CoreQueries {
     listPlanningItems: async () => (await planningSnapshot(context)).views,
 
     async getItemDetail(entityId: EntityId): Promise<PlanningItemDetail | undefined> {
-      const projection = await context.storage.getPlanningProjection(context.workspaceId, entityId)
-      if (projection === undefined) return undefined
-      const identities = await context.storage.listIdentitiesForEntity(entityId)
-      const primary = identities.find((identity) => identity.role === IdentityRole.Primary)
-      if (primary === undefined) return undefined
-      const sync = await syncSummary(context)
-      return { ...toPlanningItemView(projection, primary, sync), identities }
+      return consistentRead(context, async () => {
+        const projection = await context.storage.getPlanningProjection(context.workspaceId, entityId)
+        if (projection === undefined) return undefined
+        const identities = await context.storage.listIdentitiesForEntity(entityId)
+        const primary = identities.find((identity) => identity.role === IdentityRole.Primary)
+        if (primary === undefined) return undefined
+        const access = await context.runtimeAccess.planning(context.storage), sync = await syncSummary(context, context.storage, access)
+        return { ...toPlanningItemView(access.masked ? redactPlanning(projection) : projection, primary, sync), identities }
+      })
     },
 
     getExecutionContext: (query) => readExecutionContext(context, query),
-    getPlanningSync: () => syncSummary(context),
-    getWorkspaceMetadata: () => workspaceMetadata(context),
+    getPlanningSync: () => epochRead(context, () => syncSummary(context)),
+    getWorkspaceMetadata: () => consistentRead(context, () => workspaceMetadata(context)),
     getDeliveryProjection: (scope) => getDeliveryProjection(context, scope),
 
     async getDeliveryLineage(scope: DeliveryScope): Promise<readonly DeliveryLineageHop[]> {
@@ -97,33 +98,46 @@ export function createQueries(context: CoreContext): CoreQueries {
   }
 }
 
-/** Planning 与存储 metadata 的一致读作用域；registry 固定于 Core，tx 内不调用 Provider 或根 Storage。 */
 async function planningSnapshot(context: CoreContext) {
-  return context.storage.transaction(async (tx) => {
-    const sync = await syncSummary(context, tx)
+  return consistentRead(context, () => context.storage.transaction(async (tx) => {
+    const access = await context.runtimeAccess.planning(tx), sync = await syncSummary(context, tx, access)
     const projections = await tx.listPlanningProjections(context.workspaceId)
     const views: PlanningItemView[] = []
     for (const projection of projections) {
       const identity = (await tx.listIdentitiesForEntity(projection.entityId)).find((entry) => entry.role === IdentityRole.Primary)
-      if (identity !== undefined) views.push(toPlanningItemView(projection, identity, sync))
+      if (identity !== undefined) views.push(toPlanningItemView(access.masked ? redactPlanning(projection) : projection, identity, sync))
     }
-    return { views: views.sort((left, right) => left.entityId < right.entityId ? -1 : 1), sync, revision: await tx.currentRevision(context.workspaceId), metadata: await workspaceMetadata(context, tx) }
-  })
+    return { views: views.sort((left, right) => left.entityId < right.entityId ? -1 : 1), sync, revision: await tx.currentRevision(context.workspaceId), metadata: await workspaceMetadata(context, tx, access) }
+  }))
+}
+
+async function consistentRead<T>(context: CoreContext, read: () => Promise<T>): Promise<T> {
+  return context.runtimeAccess.local(() => epochRead(context, read))
+}
+
+async function epochRead<T>(context: CoreContext, read: () => Promise<T>): Promise<T> {
+  for (;;) {
+    const epoch = context.runtimeAccess.epoch, fence = context.runtimeAccess.fence(context.storage), value = await read()
+    if (epoch === context.runtimeAccess.epoch && fence === context.runtimeAccess.fence(context.storage)) return value
+  }
 }
 
 /** 能力门与当前绑定的同步状态决定 freshness；已提交轮次才允许暴露 workspace 确认时间；composeCore 还要求本代轮次已提交，旧 healthy cursor 不能充当新映射成功证明。 */
-async function syncSummary(context: CoreContext, storage: StorageTransaction = context.storage): Promise<SyncSummary> {
+type PlanningDisposition = Awaited<ReturnType<CoreContext['runtimeAccess']['planning']>>
+async function syncSummary(context: CoreContext, storage: StorageTransaction = context.storage, access?: PlanningDisposition): Promise<SyncSummary> {
+  access ??= await context.runtimeAccess.planning(storage)
   const gate = gateCommand(context.registry, CapabilityKey.PlanningItemRead, 'read')
-  if (!gate.allowed) return { degraded: true, stale: true, reason: gate.error?.message ?? '规划读取能力不可用' }
-  const binding = singlePlanningBinding(context.registry)
+  if (!gate.allowed && !context.runtimeAccess.denied) return { degraded: true, stale: true, reason: gate.error?.message ?? '规划读取能力不可用' }
+  const binding = access.binding
   if (binding === undefined) return { degraded: true, stale: true, reason: '没有默认 Planning 绑定' }
-  const round = await storage.getPlanningSyncRound(context.workspaceId, binding.ref.bindingId, PLANNING_SYNC_SCOPE)
+  const round = access.round
   const reconciledAt = round?.latestCommittedRound === undefined ? undefined : (await storage.getReconcileCursor(context.workspaceId))?.lastReconciledAt
   const confirmation = reconciledAt === undefined ? {} : { reconciledAt }
-  const cursor = await storage.getSyncCursor(context.workspaceId, binding.ref.bindingId, PLANNING_SYNC_SCOPE)
-  // syncing（一轮在途）今天没有写者，读侧语义待 #134 的调度器定义（TD-034）；这里只让「没有成功证据」的两种形态一致地读作陈旧。
+  if (access.masked) return { ...confirmation, degraded: true, stale: true, reason: access.error?.code }
+  const cursor = access.cursor
+  // syncing 是读前持久 marker；当前 owner 的在途读保留许可缓存，新 owner 在 createContext 恢复拒读。
   if (cursor === undefined || cursor.state === SyncState.Idle) return { ...confirmation, degraded: true, stale: true, reason: SyncState.Idle }
-  if (cursor.state === SyncState.Degraded || cursor.state === SyncState.Failed) {
+  if (['degraded', 'failed'].includes(access.state)) {
     return { ...confirmation, degraded: true, stale: true, reason: cursor.lastErrorCode ?? cursor.state }
   }
   if (context.planningReadBaseline !== undefined) {
@@ -137,16 +151,21 @@ async function syncSummary(context: CoreContext, storage: StorageTransaction = c
  * 逐个已知 key 按 `bindingForCapability` 路由到唯一挂载并读取其已求交的 access；没有目标的 key 明确 unavailable，不让备用覆盖主目标。
  * storage 域不经外部挂载，registry 里没有它的目标，因此不在此报告（报 unavailable 会说错）。
  */
-async function workspaceMetadata(context: CoreContext, storage: StorageTransaction = context.storage): Promise<WorkspaceMetadata> {
+async function workspaceMetadata(context: CoreContext, storage: StorageTransaction = context.storage, access?: PlanningDisposition): Promise<WorkspaceMetadata> {
+  access ??= await context.runtimeAccess.planning(storage)
   const record = await storage.getWorkspace(context.workspaceId)
   const keys = Object.values(CapabilityKey).filter((key) => !key.startsWith(`${CapabilityDomain.Storage}.`))
-  const planning = singlePlanningBinding(context.registry)
+  const planning = access.binding, readOnly = ['degraded', 'failed'].includes(access.state)
   return {
     workspace: record === undefined ? undefined : { id: record.id, name: record.name },
-    capabilities: keys.map((key) => bindingForCapability(context.registry, key)?.capabilities.find((entry) => entry.key === key)
-      ?? { key, access: AccessLevel.Unavailable, reason: `没有挂载提供能力 ${key}`, bindingId: undefined, externalActionUrl: undefined }),
+    capabilities: keys.map((key) => {
+      const entry = bindingForCapability(context.registry, key)?.capabilities.find((entry) => entry.key === key)
+        ?? { key, access: AccessLevel.Unavailable, reason: `没有挂载提供能力 ${key}`, bindingId: undefined, externalActionUrl: undefined }
+      return key === CapabilityKey.PlanningItemRead && access.masked ? { ...entry, access: AccessLevel.Unavailable, reason: access.error?.message } : key === CapabilityKey.PlanningItemRead && readOnly && entry.access !== AccessLevel.Unavailable
+        ? { ...entry, access: AccessLevel.ReadOnly, reason: 'Planning 本轮读取未完成，保留最后确认内容；当前只读，请重新验证' } : entry
+    }),
     repositories: await repositoryMetadata(context, storage),
-    planningSource: planning === undefined || !context.projectTitle ? undefined : { bindingId: planning.ref.bindingId, name: context.projectTitle, ...(context.planningMappingOrigin === undefined ? {} : { mappingOrigin: context.planningMappingOrigin }) },
+    planningSource: access.masked || planning === undefined || !context.projectTitle ? undefined : { bindingId: planning.ref.bindingId, name: context.projectTitle, ...(context.planningMappingOrigin === undefined ? {} : { mappingOrigin: context.planningMappingOrigin }) },
   }
 }
 

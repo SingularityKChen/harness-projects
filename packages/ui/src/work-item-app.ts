@@ -52,9 +52,10 @@ function screenOf(read: WorkspaceRead | undefined, path: string | undefined, set
   }
   const sourceNotice = observation === '读取不完整' ? '规划来源读取不完整，显示的是最后已知值。' : observation === '读取不可用' ? '当前无法读取规划来源。' : observation === '读取状态未知' ? '规划来源读取状态尚未确认。' : sourceAnnouncement?.current.notice
   const notice = refresh.error ?? (refresh.pending ? '正在刷新，当前显示的是最后已知值' : read.connection.connected ? sourceNotice : DISCONNECTED)
+  const denied = read.reason === 'permission_denied' && read.capabilities?.some((entry) => entry.key === 'planning.item.read' && entry.access === 'unavailable')
   const input: WorkItemListReadInput = { read, metadata: { sourceNames: {}, ...(notice ? { safeNotice: notice } : {}) },
-    ...(refresh.error ? { phase: 'failed', hasReceivedSnapshot: true, cacheVisibility: 'authorized', failure: { kind: 'error' } } as const : { phase: 'received', refreshing: refresh.pending } as const) }
-  const readable = read.capabilities?.some((entry) => entry.key === 'planning.item.read' && ['available', 'read_only', 'degraded'].includes(entry.access)) === true
+    ...(denied || refresh.error ? { phase: 'failed', hasReceivedSnapshot: true, cacheVisibility: 'authorized', failure: { kind: denied ? 'permission_denied' : 'error' } } as const : { phase: 'received', refreshing: refresh.pending } as const) }
+  const canRefresh = read.reason === 'permission_denied' || read.capabilities?.some((entry) => entry.key === 'planning.item.read' && ['available', 'read_only', 'degraded'].includes(entry.access)) === true
   const listView = deriveWorkItemListView(input)
   // 只公告连续可读期间的安全数量变化；权限未知/不可用立即清空，不把旧数量留在 AX tree。
   if (countAnnouncement) {
@@ -70,7 +71,7 @@ function screenOf(read: WorkspaceRead | undefined, path: string | undefined, set
       detailView: itemId === undefined ? undefined : deriveWorkItemDetailView(input, { projectId, itemId }),
       navigation: { href: (id) => `#${itemPath({ projectId, itemId: id })}`, open: (id) => setPath(itemPath({ projectId, itemId: id })) },
       onCloseDetail: () => setPath(undefined), executionReader, deliveryReader, changeRequestCreator, startWork, onBindRepository, connected: read.connection.connected,
-      refresh: refreshSource === undefined ? undefined : { pending: refresh.pending, disabled: refresh.pending || !read.connection.connected || !readable, run: () => { void refreshSource.refresh() } },
+      refresh: refreshSource === undefined ? undefined : { pending: refresh.pending, disabled: refresh.pending || !read.connection.connected || !canRefresh, run: () => { void refreshSource.refresh() } },
     })],
   }
 }

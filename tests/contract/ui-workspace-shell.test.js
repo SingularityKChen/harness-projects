@@ -117,3 +117,17 @@ test('safe workspace summary distinguishes unavailable and unobserved reads from
   const waiting = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
   assert.match(renderToStaticMarkup(waiting.render()), /正在等待工作项/)
 })
+
+
+test('only the confirmed same-source denial retains the recoverable work-item container', async () => {
+  const f = fixture('confirmed'); await f.source.refresh()
+  for (const [bindingId, reason, count] of [['b', 'permission_denied', 1], ['foreign', 'permission_denied', 0], [undefined, 'permission_denied', 1], ['b', undefined, 0]]) {
+    const read = { workspace: { id: 'ws' }, planningSource: bindingId ? { bindingId, name: 'Source' } : undefined, reason,
+      connection: { connected: true }, capabilities: [{ key: 'planning.item.read', access: 'unavailable' }] }
+    const app = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => read } })
+    assert.equal(find(app.render(), WorkItemApp).length, count, String(bindingId) + '/' + String(reason))
+  }
+  f.set(setup('unbound')); await f.source.refresh()
+  const read = { workspace: { id: 'ws' }, reason: 'permission_denied', capabilities: [{ key: 'planning.item.read', access: 'unavailable' }] }
+  assert.equal(find(mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => read } }).render(), WorkItemApp).length, 0)
+})
