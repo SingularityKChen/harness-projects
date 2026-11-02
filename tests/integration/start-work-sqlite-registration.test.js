@@ -337,7 +337,7 @@ for (const [label, makeStorage] of ADAPTERS) {
   const denied = (key, level) => ({ policy: { [key]: level }, code: level === AccessLevel.ReadOnly ? 'permission_denied' : 'not_supported', ack: false })
   const REJECTIONS = [
     ['仓库不存在', { code: 'not_found', ack: true, request: { repositoryId: 'no-such-repo' } }],
-    ['仓库读无权限', { code: 'permission_denied', ack: true, tamper: (p) => p.development.faultsSwitch.set(FaultKind.PermissionDenied, true) }],
+    ['仓库读无权限', { code: 'permission_denied', ack: false, tamper: (p) => p.development.faultsSwitch.set(FaultKind.PermissionDenied, true) }],
     ...['bindingId', 'objectKind', 'externalId'].map((field) => [`ack 回显的 ${field} 不符`, { code: 'conflict', ack: true, tamper: forged(field) }]),
     ['仓库读能力不可用', denied(CapabilityKey.DevelopmentRepositoryRead, AccessLevel.Unavailable)],
     ['工作树读能力不可用', denied(CapabilityKey.DevelopmentWorktreeRead, AccessLevel.Unavailable)],
