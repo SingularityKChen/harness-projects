@@ -180,7 +180,7 @@ test('事件回调机械判据：Escape 只有 cancel 单次关闭；Tab 接受 
     const focused = []
     const first = { hasAttribute: () => false, focus: () => focused.push('first') }
     const last = { hasAttribute: () => false, focus: () => focused.push('last') }
-    refs[refs.length - 2].current = { querySelectorAll: () => ({ length: 2, 0: first, 1: last }) }
+    tab.ref.current = { querySelectorAll: () => ({ length: 2, 0: first, 1: last }) }
     let tabPrevented = 0
     globalThis.document = { activeElement: last }
     tab.props.onKeyDown({ key: 'Tab', shiftKey: false, preventDefault: () => { tabPrevented += 1 } })
@@ -225,15 +225,15 @@ test('responsive-detail：真实布局根裁剪到 viewport，1200 预留，1199
     const cleanups = effects.map((fn) => fn()).filter(Boolean)
     assert.equal(attributes.get('data-detail-layout'), 'wide', '1200px 的实际工作区进入预留模式')
     assert.equal(observed, root, '观察实际工作区，而不是全窗口')
-    assert.deepEqual([...writes.values()], ['960px', '80px', '340px', '720px'], '右340px落在可见工作区矩形内')
+    assert.deepEqual([...writes.values()], ['844px', '80px', '456px', '720px', '456px'], '38%预览落在可见工作区矩形内，并提供列表占位宽度')
     assert.equal(tree.props.className.includes('hp-detail'), true)
     rect = { left: 100, top: 80, right: 1299, bottom: 800 }; resize()
     assert.equal(attributes.get('data-detail-layout'), 'overlay', '1199px 覆盖，不能挤压主列表')
     rect = { left: 300, top: 20, right: 1300, bottom: 1200 }; resize()
-    assert.deepEqual([...writes.values()], ['960px', '20px', '340px', '880px'], '窗口宽1440但Host主区1000仍覆盖，底部裁到viewport')
+    assert.deepEqual([...writes.values()], ['920px', '20px', '380px', '880px', '380px'], '窗口宽1440但Host主区1000仍覆盖，底部裁到viewport')
     assert.equal(attributes.get('data-detail-layout'), 'overlay')
     rect = { left: -20, top: -10, right: 300, bottom: 500 }; listeners.get('scroll')()
-    assert.deepEqual([...writes.values()], ['0px', '0px', '300px', '500px'], '320宽容器被viewport裁剪后不得出屏')
+    assert.deepEqual([...writes.values()], ['0px', '0px', '300px', '500px', '300px'], '320宽容器被viewport裁剪后以Host宽度优先，不得出屏')
     assert.deepEqual([opens, closes], [1, 0], 'resize/scroll只更新表现，不showModal或导航')
     cleanups.forEach((fn) => fn())
     assert.deepEqual([disconnects, listeners.size, attributes.size, writes.size], [1, 0, 0, 0], '卸载释放观察器/监听和表现属性')

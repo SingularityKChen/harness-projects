@@ -32,6 +32,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-11-03-safe-markdown](exec-plan/completed/2026-11-03-safe-markdown.md) | 安全GFM正文、无自动媒体与深层输入保护（#505） |
+| [2026-11-03-detail-expand](exec-plan/completed/2026-11-03-detail-expand.md) | 同实例详情展开、还原与当前阅读进度（#506） |
 | [2026-11-02-setup-node-v7-contracts](exec-plan/completed/2026-11-02-setup-node-v7-contracts.md) | setup-node v7升级、精确安全契约与新Browser调用点对齐（#400） |
 | [2026-11-02-composed-browser-ci](exec-plan/completed/2026-11-02-composed-browser-ci.md) | 生产组合浏览器持续准入、失败闭合与托管正负控（#450） |
 | [2026-11-02-composed-workspace-browser](exec-plan/completed/2026-11-02-composed-workspace-browser.md) | 单一生产载体的真实浏览器创建、读取、导航与恢复回归（#498） |
