@@ -1,3 +1,4 @@
+import { jsxRuntimeScript } from './markdown-vm.mjs'
 /** SQLite → Host → typed remote 的离线执行抽屉夹具；真实浏览器入口复用生产 apply。 */
 import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -102,14 +103,14 @@ export async function startExecutionServer(options) {
   const { build } = createRequire(path.join(repoRoot, 'apps/harness-plugin/package.json'))('esbuild')
   const bundle = await build({ stdin: { contents: ENTRY, resolveDir: repoRoot }, absWorkingDir: repoRoot, platform: 'browser', bundle: true, format: 'cjs', external: ['react'], write: false, metafile: true })
   const vendor = async (id, file) => readFile(path.join(path.dirname(uiRequire.resolve(id)), 'umd', file), 'utf8')
-  const [react, reactDOM] = await Promise.all([vendor('react', 'react.development.js'), vendor('react-dom/client', 'react-dom.development.js')])
-  const scripts = { '/react.js': react, '/react-dom.js': reactDOM, '/bundle.js': bundle.outputFiles[0].text }
+  const [react, reactDOM, jsxText] = await Promise.all([vendor('react', 'react.development.js'), vendor('react-dom/client', 'react-dom.development.js'), jsxRuntimeScript()])
+  const scripts = { '/jsx-runtime.js': jsxText, '/react.js': react, '/react-dom.js': reactDOM, '/bundle.js': bundle.outputFiles[0].text }
   const page = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>执行抽屉</title><style>
 /* 仅本地 fixture 的 Host token 与文字大小输入，不代表安装 Host。 */
 :root { --dsw-focus-ring-color:#4176e6; --dsw-focus-ring-width:2px; --dsw-alias-state-business-primary:#4176e6; color-scheme:light; color:#20242c; background:#fff; font:15px/1.5 system-ui,sans-serif }
 :root[data-theme=dark] { --dsw-focus-ring-color:#7aaaff; --dsw-alias-state-business-primary:#7aaaff; color-scheme:dark; color:#e3e5eb; background:#191b20 }
 html,body { margin:0; padding:0; min-width:0; height:100%; overflow:hidden } body { display:grid; grid-template-rows:minmax(0,1fr) } #app { display:flex; flex-direction:column; min-height:0; min-width:0; max-width:100%; overflow:hidden }
-</style><div id="app"></div><script src="/react.js"></script><script src="/react-dom.js"></script><script>const params=new URLSearchParams(location.search);document.documentElement.dataset.theme=params.get('theme')==='dark'?'dark':'light';if(params.get('font')==='200')document.documentElement.style.fontSize='30px';window.require=()=>React;var module={exports:{}};var exports=module.exports</script><script src="/bundle.js"></script><script>module.exports.mount(ReactDOM.createRoot(document.getElementById("app"))).then(value=>window.fixture=value)</script></html>`
+</style><div id="app"></div><script src="/react.js"></script><script src="/jsx-runtime.js"></script><script src="/react-dom.js"></script><script>const params=new URLSearchParams(location.search);document.documentElement.dataset.theme=params.get('theme')==='dark'?'dark':'light';if(params.get('font')==='200')document.documentElement.style.fontSize='30px';window.require=id=>{if(id==='react')return React;if(id==='react/jsx-runtime')return window.ReactJSX;throw Error(id)};var module={exports:{}};var exports=module.exports</script><script src="/bundle.js"></script><script>module.exports.mount(ReactDOM.createRoot(document.getElementById("app"))).then(value=>window.fixture=value)</script></html>`
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://fixture.invalid'), route = url.pathname, scenario = url.searchParams.get('scenario')

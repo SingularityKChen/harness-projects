@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-03-safe-markdown](exec-plan/completed/2026-11-03-safe-markdown.md) | 安全GFM正文、无自动媒体与深层输入保护（#505） |
 | [2026-11-02-setup-node-v7-contracts](exec-plan/completed/2026-11-02-setup-node-v7-contracts.md) | setup-node v7升级、精确安全契约与新Browser调用点对齐（#400） |
 | [2026-11-02-composed-browser-ci](exec-plan/completed/2026-11-02-composed-browser-ci.md) | 生产组合浏览器持续准入、失败闭合与托管正负控（#450） |
 | [2026-11-02-composed-workspace-browser](exec-plan/completed/2026-11-02-composed-workspace-browser.md) | 单一生产载体的真实浏览器创建、读取、导航与恢复回归（#498） |
@@ -215,3 +216,5 @@
 | [ui-detail.md](product/ui-detail.md) | 响应式详情的布局、状态与可访问交互约定 |
 | [2026-10-26-host-recomposition](exec-plan/completed/2026-10-26-host-recomposition.md) | 提交设置即时重组、同流连续读取与延迟权限探测（#354） |
 | [2026-10-26-plugin-workspace-setup](exec-plan/completed/2026-10-26-plugin-workspace-setup.md) | 插件单工作区创建/连接与真实 Harness Web 沙箱验收（#131） |
+
+2026-11-03：本轮八 PR 风险矩阵、组合接合与逐层授权收尾见 [MMP 评审记录](review/2026-11-03-pr512-pr525-mmp-review.md)。各 PR 评审位于 `docs/review/pr-<n>-mmp-review.md`。

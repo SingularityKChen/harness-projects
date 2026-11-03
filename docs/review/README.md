@@ -143,6 +143,8 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 | [2026-10-27-pr406-pr409-mmp-review](2026-10-27-pr406-pr409-mmp-review.md) | 安装包、仓库绑定、Start Work、谱系四能力 MMP 评审 | 初审无P0/P1，两P2与两P3；修复、独立复评、组合验证及授权整合见记录 |
 | [2026-10-27-pr410-pr412-mmp-review](2026-10-27-pr410-pr412-mmp-review.md) | 字段映射、Harness 执行安装、一致规划刷新三能力 MMP 评审 | 无 P0/P1，四项 P2 已修复；独立复评、2157+7 组合、28 项变异与授权串行交付见记录 |
 
+| [2026-11-03-pr512-pr525-mmp-review](2026-11-03-pr512-pr525-mmp-review.md) | 安全正文、详情还原、表格链和原生关联链的 MMP 交付评审与授权收尾 | 首轮两项 P1、两项 P2；修复独立复评、当前组合/安装/逐层门禁与合并回读见记录 |
+
 单 PR 的记录（`pr-NN-mvp-review.md`、现行的 `pr-NN-mmp-review.md` 与 `2026-09-21-pr-NN-risk-matrix.md`）同样放在本目录，但不进上表——判据就是上面那条：**跨多个 PR、且删掉之后接手的人会缺失决策依据**的才登记。
 
 记录按 `PLANS.md` §3 的 ExecPlan 章节写——评审本身也是一次有批次、有验收、有决策的工作。

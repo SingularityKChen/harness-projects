@@ -4,13 +4,14 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { test } from 'node:test'
 import vm from 'node:vm'
+import { markdownDocument, markdownRequire } from '../fixtures/markdown-vm.mjs'
 import { buildWorkspaceFrameBundle } from '../fixtures/workspace-frame-browser.mjs'
 
 const uiRequire = createRequire(new URL('../../packages/ui/package.json', import.meta.url))
 
 async function fixtureExports() {
   const result = await buildWorkspaceFrameBundle()
-  const sandbox = { module: { exports: {} }, require: (id) => id === 'react' ? uiRequire('react') : assert.fail(id),
+  const sandbox = { module: { exports: {} }, require: markdownRequire, document: markdownDocument,
     window: { ReactDOMServer: uiRequire('react-dom/server') } }
   vm.runInNewContext(result.outputFiles[0].text, sandbox)
   return { result, fixture: sandbox.module.exports }

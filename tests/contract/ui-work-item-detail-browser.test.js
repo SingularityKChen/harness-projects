@@ -10,6 +10,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
+import { markdownDocument, markdownRequire, markdownDependencyInputs } from '../fixtures/markdown-vm.mjs'
 
 import { NEGATIVE_ENTRY, buildBundle, startServer } from '../fixtures/work-item-detail-browser.mjs'
 
@@ -23,18 +24,19 @@ const REQUIRED = ['packages/ui/src/item-route.ts', 'apps/web/src/index.ts', 'pac
 test('完整路径：meta 触达 adapter → 投影 → 组合页，只外置 react，禁止 node:* 与 core/controller/client 运行时', async () => {
   const result = await buildBundle()
   const [output] = Object.values(result.metafile.outputs)
-  assert.deepEqual([...new Set(output.imports.filter((entry) => entry.external).map((entry) => entry.path))], ['react'])
+  assert.deepEqual([...new Set(output.imports.filter((entry) => entry.external).map((entry) => entry.path))], ['react', 'react/jsx-runtime'])
   const inputs = Object.keys(result.metafile.inputs).filter((file) => file !== '<stdin>')
-  assert.ok(inputs.every((file) => ALLOWED.test(file)), `输入必须只落在 domain / ui-model / ui / apps-web 与能力 key 纯值叶子：${inputs}`)
+  const dependencyInputs = await markdownDependencyInputs()
+  assert.ok(inputs.every((file) => dependencyInputs.has(file) || ALLOWED.test(file)), `输入必须只落在 domain / ui-model / ui / apps-web 与能力 key 纯值叶子：${inputs}`)
   for (const file of REQUIRED) assert.ok(inputs.includes(file), file)
-  assert.match(result.outputFiles[0].text, /function mount\(element, port = browserHistoryPort\(\)/, 'fixture 的浏览器 mount 默认必须用产品 browserHistoryPort，而不是手写 port')
+  assert.match(result.outputFiles[0].text, /function mount\(element\d*, port = browserHistoryPort\(\)/, 'fixture 的浏览器 mount 默认必须用产品 browserHistoryPort，而不是手写 port')
   const negative = await buildBundle(NEGATIVE_ENTRY).then(() => undefined, (error) => String(error.message ?? error))
   assert.match(negative ?? '', /node:crypto/, 'domain 根出口的 node:crypto 必须不可解析，不能靠外置 node:* 掩盖')
 })
 
 test('vm SSR 正控：产物在隔离 vm 里执行，标题非空、来源与派生前缀存在、遮蔽场景无 canary 且无写控件', async () => {
   const result = await buildBundle()
-  const sandbox = { module: { exports: {} }, require: (id) => (id === 'react' ? React : assert.fail(`意外的 require：${id}`)), ReactDOMServer: uiRequire('react-dom/server'), ReactDOMClient: uiRequire('react-dom/client') }
+  const sandbox = { module: { exports: {} }, require: markdownRequire, document: markdownDocument, ReactDOMServer: uiRequire('react-dom/server'), ReactDOMClient: uiRequire('react-dom/client') }
   vm.runInNewContext(result.outputFiles[0].text, sandbox)
   const { renderStatic } = sandbox.module.exports
   const html = renderStatic('content')
@@ -82,7 +84,7 @@ test('同源 HTTP：两个 canonical pathname 与深链都交给同一入口，�
 // Catches: fixture scenario targets overriding the closed list route, which masks product focus restoration.
 test('遮蔽场景关闭：canonical列表路由不再保留详情，深链仍命中真实遮蔽目标', async () => {
   const result = await buildBundle()
-  const sandbox = { module: { exports: {} }, require: (id) => (id === 'react' ? React : assert.fail(id)), ReactDOMServer: uiRequire('react-dom/server'), ReactDOMClient: uiRequire('react-dom/client') }
+  const sandbox = { module: { exports: {} }, require: markdownRequire, document: markdownDocument, ReactDOMServer: uiRequire('react-dom/server'), ReactDOMClient: uiRequire('react-dom/client') }
   vm.runInNewContext(result.outputFiles[0].text, sandbox)
   const { renderStatic } = sandbox.module.exports
   assert.match(renderStatic('redacted', '/projects/ws-1/items/ent-aa'), /<dialog[^]*内容不可见/)
