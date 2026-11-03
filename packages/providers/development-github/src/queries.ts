@@ -1,6 +1,6 @@
 /**
  * 五段查询文本是契约：改动它就要重录夹具（夹具带着文本哈希，见 tests/contract）。
- * 不取 author、login、email、creator、assignees 一类个人字段；仓库查询不取 `id`（仓库 node id 只在变更请求的成员关系核对里出现）。
+ * 不取 author、login、email、creator、assignees 一类个人字段；仓库查询以真实 node id 声明独立 canonical source identity；Host 仓库键保持独立。
  * 两个变更请求操作在文本末尾拼接同一个片段（GraphQL 要求片段定义与操作在同一文档），所以 list 与 get 解码的是同一组字段。
  */
 const CHANGE_REQUEST_FIELDS = `fragment DevelopmentChangeRequestFields on PullRequest {
@@ -8,7 +8,7 @@ const CHANGE_REQUEST_FIELDS = `fragment DevelopmentChangeRequestFields on PullRe
 }`
 
 const DEVELOPMENT_REPOSITORY = `query DevelopmentRepository($owner: String!, $name: String!) {
-  repository(owner: $owner, name: $name) { name updatedAt defaultBranchRef { name } }
+  repository(owner: $owner, name: $name) { id name nameWithOwner updatedAt defaultBranchRef { name } }
 }`
 
 const DEVELOPMENT_BRANCHES = `query DevelopmentBranches($owner: String!, $name: String!, $first: Int!, $after: String) {

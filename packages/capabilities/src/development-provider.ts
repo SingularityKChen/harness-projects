@@ -24,7 +24,11 @@ import type { ExternalObjectRef, ProviderNativeIdentity, ProviderObservation, Pr
 import type { ProviderPage, ProviderResult } from './result.ts'
 import type { ProviderDefinition } from './registry.ts'
 
+/** 来源仓库的 canonical identity；只作相等比较，与 Host 仓库键及 PR identity 分离。 */
+export interface ProviderSourceRepositoryIdentity { readonly namespace: string; readonly id: string }
+
 export interface ProviderRepository {
+  readonly sourceRepositoryIdentity?: ProviderSourceRepositoryIdentity
   readonly ref: ExternalObjectRef; readonly name: string
   readonly defaultBranch: string | undefined; readonly sourceUpdatedAt: string | undefined
 }
@@ -95,6 +99,7 @@ export interface DevelopmentProvider {
   getRepository(ref: ExternalObjectRef): Promise<ProviderResult<ProviderRepository>>
   listBranches(input: ProviderListBranchesInput): Promise<ProviderResult<ProviderPage<ProviderBranch>>>
   getCommit(ref: ExternalObjectRef): Promise<ProviderResult<ProviderCommit>>
+  getChangeRequestByNativeIdentity?(input: { readonly repository: ExternalObjectRef; readonly identity: ProviderNativeIdentity }): Promise<ProviderResult<ProviderChangeRequest>>
   getChangeRequest(ref: ExternalObjectRef): Promise<ProviderResult<ProviderChangeRequest>>
   listChangeRequests(input: ProviderListChangeRequestsInput): Promise<ProviderResult<ProviderPage<ProviderChangeRequest>>>
   createBranch?(input: ProviderCreateBranchInput): Promise<ProviderResult<ProviderBranch>>

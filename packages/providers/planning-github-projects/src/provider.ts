@@ -1,6 +1,6 @@
 /**
  * GitHub Projects 只读 Planning provider。失败一律是结构化 `ProviderResult`，任何路径都不抛错（`composeCore` 会吞掉裸异常
- * 且不写 degraded）。平台查询参数只有 project node id 与游标（R7），`getPlanningItem` 因此用扫描实现。
+ * 且不写 degraded）。旧读取面只接受 project node id 与游标，`getPlanningItem` 用扫描实现；closing port 独立回证当前 primary Issue。
  * 字段（#133）只报告原生事实：条目的值随条目读回，定义与迭代来自一次 `PlanningFields`；写入（#71）、调度与退避（#134）不在这里。
  */
 import {
@@ -10,6 +10,7 @@ import {
 import { MembershipContentKind, ProviderErrorCode, type ProviderBindingId } from '@harness-projects/domain'
 import { classifyResponse, failure } from './classify.ts'
 import { decodeFieldDefinitions, decodeItemsPage, decodeProject, projectNode, type ItemRow, type Obj } from './decode.ts'
+import { issueClosingLinks } from './issue-closing-links.ts'
 import { PLANNING_QUERIES } from './queries.ts'
 import type { GraphqlRequest, GraphqlTransport } from './transport.ts'
 
@@ -91,7 +92,9 @@ export function createGithubProjectsPlanningProvider({ bindingId, projectNodeId,
     return cursor === undefined ? providerOk(rows) : providerErr(failure(ProviderErrorCode.Unavailable, undefined, 'malformed_response'))
   }
 
+  const closing = issueClosingLinks(bindingId, projectNodeId, transport, now)
   const provider: PlanningProvider = {
+    listIssueClosingLinks: closing.read,
     definition: GITHUB_PROJECTS_PROVIDER_DEFINITION,
     async describeCapabilities() {
       const probe = await provider.getProject(project)
@@ -101,8 +104,8 @@ export function createGithubProjectsPlanningProvider({ bindingId, projectNodeId,
       // 只声明已实现的读取：条目与迭代（#133，`listIterations`）共用同一次探针，调用方按 key 分支而不是按 provider 名字。
       const keys = [CapabilityKey.PlanningItemRead, CapabilityKey.PlanningIterationRead]
       return {
-        bindingId, capability: Object.fromEntries(keys.map((key) => [key, AccessLevel.Available])),
-        permission: Object.fromEntries(keys.map((key) => [key, permission])), observedAt: new Date(now()).toISOString(),
+        bindingId, capability: { ...Object.fromEntries(keys.map((key) => [key, AccessLevel.Available])), [CapabilityKey.PlanningIssueClosingLinksRead]: AccessLevel.Available },
+        permission: { ...Object.fromEntries(keys.map((key) => [key, permission])), [CapabilityKey.PlanningIssueClosingLinksRead]: closing.permission() }, observedAt: new Date(now()).toISOString(),
       }
     },
     async getProject(ref) {

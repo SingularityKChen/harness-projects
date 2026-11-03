@@ -1,6 +1,6 @@
 /**
  * 三段查询文本是契约：改动它就要重录夹具（夹具带着文本哈希，见 tests/contract）。
- * 平台查询参数只有 project node id 与分页游标，从不拿内容 id 去问平台（R7）。
+ * 旧三段读取面只用 project node id 与分页游标；独立 closing port 回证当前 primary membership，R7 的 historical alias 不可回查约束仍成立。
  * 不取 creator、assignees、login 一类个人字段；`archivedStates` 用平台默认值。
  *
  * 字段（#133）：GitHub 一个 Project 至多 50 个字段（含系统字段），所以 `fieldValues` 与 `fields` 按 100 取一页必然读全；
@@ -77,3 +77,23 @@ const PLANNING_FIELDS = `query PlanningFields($project: ID!, $first: Int!, $afte
 }`
 
 export const PLANNING_QUERIES = { PlanningProject: PLANNING_PROJECT, PlanningItems: PLANNING_ITEMS, PlanningFields: PLANNING_FIELDS } as const
+
+/** 独立来源 query，不改三段已录制读取面的文本哈希。 */
+export const PLANNING_ISSUE_CLOSING_LINKS = `query PlanningIssueClosingLinks($project: ID!, $membership: ID!, $issue: ID!, $first: Int!, $after: String) {
+  project: node(id: $project) { __typename ... on ProjectV2 { id } }
+  membership: node(id: $membership) {
+    __typename ... on ProjectV2Item {
+      id type project { id }
+      content { __typename ... on Issue { id repository { id nameWithOwner } } }
+    }
+  }
+  issue: node(id: $issue) {
+    __typename ... on Issue {
+      id repository { id nameWithOwner }
+      closedByPullRequestsReferences(first: $first, after: $after, includeClosedPrs: true, userLinkedOnly: false, excludeUserLinked: false) {
+        pageInfo { hasNextPage endCursor }
+        nodes { __typename id number title url state isDraft repository { id nameWithOwner } }
+      }
+    }
+  }
+}`
