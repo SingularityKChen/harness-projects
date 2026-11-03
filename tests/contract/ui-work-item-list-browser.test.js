@@ -62,7 +62,7 @@ test('完整路径：meta 触达 derive → page view → renderer → 纯值 le
   assert.equal(deriveWorkItemList(read).rows.length, 1)
   const html = renderToStaticMarkup(React.createElement(Page, props))
   assert.match(html, /<h2>浏览器工作区<\/h2>/)
-  assert.match(html, /<th scope="row"[^>]*>Browser Visible<\/th>/)
+  assert.match(html, /<th scope="row"[^>]*><details><summary[^>]*>Browser Visible<\/summary><\/details><\/th>/)
   assert.match(html, /来源一（提供方权威）/)
 })
 

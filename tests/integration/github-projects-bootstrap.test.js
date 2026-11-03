@@ -164,7 +164,7 @@ async function listRow(core, contentId) {
   const read = { workspace: snapshot.workspace, store, connection: { connected: true }, lastUpdatedAt: '2026-10-07T00:00:00.000Z', capabilities: snapshot.capabilities }
   const view = deriveWorkItemListView({ read, metadata: { planningSourceName: '规划源', sourceNames: {} }, phase: 'received', refreshing: false })
   const title = nodes.find((node) => node.content.id === contentId).content.title
-  const row = renderToStaticMarkup(h(WorkItemListPage, { view })).split('<tr').find((markup) => markup.includes(`>${title}</th>`))
+  const row = renderToStaticMarkup(h(WorkItemListPage, { view })).split('<tr').find((markup) => markup.match(/<summary[^>]*>([^<]*)<\/summary>/)?.[1] === title)
   const cells = [...row.matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((match) => match[1].replace(/<[^>]+>/g, ''))
   return { cells, entityId: store.list().find((entry) => entry.entity.content.externalId === contentId).entity.entityId }
 }
