@@ -33,7 +33,7 @@ const openWorkItem = (snapshot) => openWorkItems(snapshot)[0]
 async function composeDelivery(clock) {
   const providers = createFakeProviders()
   const core = await composeCore({ workspace: { id: newWorkspaceId(), name: 'MVP-0' }, providers, ...(clock === undefined ? {} : { clock }) })
-  return { providers, controller: createController(core) }
+  return { core, providers, controller: createController(core) }
 }
 
 const writeStatus = (controller, target, status, idempotencyKey) => controller.commands.applyPlanningStatus({
@@ -489,20 +489,72 @@ test('交付：刷新命令不进重放账本，同一请求两次都真的刷�
   assert.ok(repeated !== first && repeated.value.applied && (await stamp()) > before, '同一请求再调一次：重新读取并提交，attemptedAt 前移，不返回首次的结果')
 })
 
-test('交付：字符串作用域、{ workItemId } 与 { workItemId, repositoryId: undefined } 归一成同一个作用域，刷新与读取都一致；整个作用域缺失是结构化失败（#222）', async () => {
-  const { controller } = await composeDelivery()
+test('交付：对象作用域的单契约可省略仓库；字符串和畸形作用域在查询/命令中结构化拒绝且不读取 Provider（#222）', async () => {
+  const { core, providers, controller } = await composeDelivery()
   const [item] = openWorkItems(await controller.baseline())
   const actorRef = { kind: 'agent', id: 'agent-1' }
-  const forms = [item.entityId, { workItemId: item.entityId }, { workItemId: item.entityId, repositoryId: undefined }]
+  const forms = [{ workItemId: item.entityId }, { workItemId: item.entityId, repositoryId: undefined }]
   const results = await Promise.all(forms.map((scope) => controller.commands.refreshDeliveryFacts(scope, { actorRef })))
-  assert.deepEqual([results[0].writeState, results[0].value.ok, results[0].value.error], ['local_only', true, undefined], '字符串作用域先归一成 { workItemId }：没开始工作是 local_only，不是 invalid_input')
-  assert.deepEqual(results.slice(1), [results[0], results[0]], '三种写法的刷新结果相同')
+  assert.deepEqual([results[0].writeState, results[0].value.ok, results[0].value.error], ['local_only', true, undefined], '没有开始工作时合法对象作用域仍返回 local_only')
+  assert.deepEqual(results[1], results[0], 'repositoryId: undefined 与省略 repositoryId 同义')
   const projections = await Promise.all(forms.map((scope) => controller.queries.getDeliveryProjection(scope)))
-  assert.deepEqual(projections.slice(1), [projections[0], projections[0]], '三种写法读到同一个投影')
-  for (const missing of [undefined, null]) {
-    const result = await controller.commands.refreshDeliveryFacts(missing, { actorRef })
-    assert.deepEqual([result.writeState, result.value.ok, result.error?.code], ['failed', false, 'invalid_input'], `作用域为 ${missing}：同步抛出的 TypeError 不是结构化结果`)
+  assert.deepEqual(projections[1], projections[0], '等价对象作用域读到同一个投影')
+
+  let providerReads = 0
+  for (const provider of [providers.development, providers.delivery]) {
+    for (const [key, value] of Object.entries(provider)) {
+      if (typeof value !== 'function' || !key.startsWith('list')) continue
+      provider[key] = async (...args) => { providerReads++; return value(...args) }
+    }
   }
+  const accessor = Object.defineProperty({}, 'workItemId', { get() { throw new Error('getter must not run') } })
+  const undefinedAccessor = Object.defineProperty({ workItemId: item.entityId }, 'repositoryId', {
+    get: undefined, set: undefined, enumerable: true,
+  })
+  const invalid = [
+    item.entityId, null, undefined, [], {}, { workItemId: '  ' }, { workItemId: 4 },
+    { workItemId: item.entityId, repositoryId: 4 }, { workItemId: item.entityId, unexpected: true }, accessor, undefinedAccessor,
+  ]
+  for (const scope of invalid) {
+    assert.equal((await core.commands.refreshDeliveryFacts(scope)).error?.code, 'invalid_input', `Core 命令拒绝作用域 ${String(scope)}`)
+    const result = await controller.commands.refreshDeliveryFacts(scope, { actorRef })
+    assert.deepEqual([result.writeState, result.value.ok, result.error?.code], ['failed', false, 'invalid_input'], `命令拒绝作用域 ${String(scope)}`)
+    assert.equal((await controller.queries.getDeliveryProjection(scope)).error?.code, 'invalid_input', `查询拒绝作用域 ${String(scope)}`)
+    assert.equal((await core.queries.getDeliveryProjection(scope)).error?.code, 'invalid_input', `Core 查询拒绝作用域 ${String(scope)}`)
+  }
+  assert.equal(providerReads, 0, '无效作用域不得摄入任何 Provider 事实')
+})
+
+test('交付：撤销 Proxy 在 Core/controller 查询与命令中结构化拒绝，且不触及 Provider 或 Storage（#418）', async t => {
+  const { core, providers, controller } = await composeDelivery()
+  const before = exportFakeStorageState(providers.storage)
+  let boundaryCalls = 0
+  for (const provider of [providers.development, providers.delivery, providers.storage]) {
+    const keys = new Set()
+    for (let owner = provider; owner !== null && owner !== Object.prototype; owner = Object.getPrototypeOf(owner)) {
+      for (const key of Reflect.ownKeys(owner)) keys.add(key)
+    }
+    for (const key of keys) {
+      const value = provider[key]
+      if (key === 'constructor' || typeof value !== 'function') continue
+      provider[key] = (...args) => { boundaryCalls++; return Reflect.apply(value, provider, args) }
+    }
+  }
+  await providers.storage.getWorkspace(before.workspaces[0].id)
+  assert.equal(boundaryCalls, 1, '计数正控必须捕获原型上的一次 Storage 读取')
+  boundaryCalls = 0
+  const revoked = Proxy.revocable({}, {})
+  revoked.revoke()
+  for (const [name, invoke] of [
+    ['Core query', () => core.queries.getDeliveryProjection(revoked.proxy)],
+    ['controller query', () => controller.queries.getDeliveryProjection(revoked.proxy)],
+    ['Core command', () => core.commands.refreshDeliveryFacts(revoked.proxy)],
+    ['controller command', () => controller.commands.refreshDeliveryFacts(revoked.proxy, { actorRef: { kind: 'agent' } })],
+  ]) await t.test(name, async () => {
+    assert.equal((await invoke()).error?.code, 'invalid_input')
+    assert.equal(boundaryCalls, 0, '无效作用域须在 Provider/Storage 边界之前拒绝')
+    assert.deepEqual(exportFakeStorageState(providers.storage), before, '无效作用域不改变已提交事实')
+  })
 })
 
 test('交付：core 不可用时刷新命令报 failed，查询带结构化错误且新增字段为空（#222）', async () => {

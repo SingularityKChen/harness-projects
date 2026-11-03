@@ -19,7 +19,7 @@ import { contextIdFor } from './execution-context.ts'
 import { committedFence } from './runtime-access.ts'
 import { EdgeProvenance, asEntityId } from './relations.ts'
 
-export type DeliveryScope = string | DeliveryScopeInput
+export interface DeliveryScope { readonly workItemId: string; readonly repositoryId?: string | undefined }
 
 export interface DeliveryLineageHop {
   readonly relationType: RelationType; readonly source: RelationSource // source 恒为 lineage：沿已记录关系走到的，不是重新识别
@@ -65,13 +65,28 @@ export interface DeliveryWriteAttempt {
   readonly confirmed: boolean; readonly error: ProjectError | undefined
 }
 
-/** 归一后的作用域：整个作用域缺失（`undefined` / `null`）或工作项不是字符串时 `workItemId` 为 `undefined`，不在这里抛 TypeError；用之前必须过 `isDeliveryScope`。 */
+/** 归一后的作用域：任何结构不合法的输入都变成无效 scope，由共同守卫返回结构化 invalid_input。 */
 export interface NormalizedDeliveryScope { readonly workItemId: string | undefined; readonly repositoryId: string | undefined }
-export function normalizeScope(scope: DeliveryScope | null | undefined): NormalizedDeliveryScope {
-  if (typeof scope === 'string') return { workItemId: scope, repositoryId: undefined }
-  return { workItemId: typeof scope?.workItemId === 'string' ? scope.workItemId : undefined, repositoryId: scope?.repositoryId }
+export function normalizeScope(scope: unknown): NormalizedDeliveryScope {
+  const invalid = { workItemId: undefined, repositoryId: undefined }
+  if (scope === null || typeof scope !== 'object') return invalid
+  let descriptors: PropertyDescriptorMap
+  try {
+    if (Array.isArray(scope)) return invalid
+    descriptors = Object.getOwnPropertyDescriptors(scope)
+  } catch {
+    return invalid
+  }
+  const keys = Reflect.ownKeys(descriptors)
+  if (keys.some((key) => typeof key !== 'string' || !['workItemId', 'repositoryId'].includes(key))) return invalid
+  if (Object.values(descriptors).some((field) => !Object.hasOwn(field, 'value'))) return invalid
+  const workItemId = descriptors.workItemId?.value
+  const repositoryId = descriptors.repositoryId?.value
+  if (typeof workItemId !== 'string' || workItemId.trim() === '') return invalid
+  if (repositoryId !== undefined && (typeof repositoryId !== 'string' || repositoryId.trim() === '')) return invalid
+  return { workItemId, repositoryId }
 }
-/** 写者与查询共用的作用域守卫：工作项是非空字符串才有效，tsc 据此把归一后的作用域收窄成 `DeliveryScopeInput`；不过守卫就拿不到 `string`。 */
+/** 写者与查询共用的作用域守卫；归一失败时 workItemId 为 undefined。 */
 export const isDeliveryScope = (scope: NormalizedDeliveryScope): scope is DeliveryScopeInput => scope.workItemId !== undefined && scope.workItemId.trim() !== ''
 
 /** 集合 → 它的实体种类、谱系边类型；流水线与检查的能力键用来在本地 registry 上报 unavailable。 */

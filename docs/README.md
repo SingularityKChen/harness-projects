@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-03-core-namespaces](exec-plan/completed/2026-11-03-core-namespaces.md) | 普通 Core 命名空间、唯一对象交付作用域与无副作用非法输入拒绝（#418） |
 | [2026-11-03-safe-markdown](exec-plan/completed/2026-11-03-safe-markdown.md) | 安全GFM正文、无自动媒体与深层输入保护（#505） |
 | [2026-11-03-detail-expand](exec-plan/completed/2026-11-03-detail-expand.md) | 同实例详情展开、还原与当前阅读进度（#506） |
 | [2026-11-03-table-query](exec-plan/completed/2026-11-03-table-query.md) | 安全局部查询/排序/显示；实际Host光暗五宽与reset独立性接受，native200%边界明确保留（#516） |
