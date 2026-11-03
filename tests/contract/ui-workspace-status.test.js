@@ -17,7 +17,7 @@ function fixture(t) {
   const repos = createRepositoryBindingSource({ connectAccount: async () => result({ accountId: 'account' }), bindRepository: async () => repoResult, baseline: async () => ({ repositories: [] }) }, { actorRef, key: () => 'repo-intent' })
   t.after(() => { source.dispose(); maps.dispose(); repos.dispose() })
   const store = createEntityStore(); store.applyBaseline({ revision: 0, entities: [], source: { revision: 0, freshness: 'fresh', authority: 'provider' } })
-  const read = { workspace: { id: 'workspace', name: 'DO-NOT-USE-READ-NAME' }, connection: { connected: true }, planningSource: { bindingId: 'binding', name: 'Current project' }, reconciledAt: timestamp, lastUpdatedAt: '2099-01-01T00:00:00Z', store }
+  const read = { capabilities: [{ key: 'planning.item.read', access: 'available' }], workspace: { id: 'workspace', name: 'DO-NOT-USE-READ-NAME' }, connection: { connected: true }, planningSource: { bindingId: 'binding', name: 'Current project' }, reconciledAt: timestamp, lastUpdatedAt: '2099-01-01T00:00:00Z', store }
   return { source, maps, repos, read, set: value => { current = value }, mapResult: value => { mapResult = value }, repoResult: value => { repoResult = value }, command: value => { command = value }, finish: value => finish(value),
     view: (reading = read, extra = {}) => deriveWorkspaceStatus({ setup: source.getSnapshot(), read: reading, mapping: maps.getSnapshot(), repository: repos.getSnapshot(), ...extra }) }
 }
@@ -103,7 +103,7 @@ test('outer freshness owner preserves explicit refresh pending/error and initial
   reject(new Error('RAW-ERROR-CANARY')); await pending
   assert.match(page(), /暂时无法刷新规划，显示的是最后已知值/); assert.doesNotMatch(page(), /aria-live="polite"[^>]*>暂时无法刷新/)
   assert.doesNotMatch(page(), /RAW-ERROR-CANARY/)
-  const unknown = { subscribe: () => () => {}, getSnapshot: () => f.read }
+  const unknown = { subscribe: () => () => {}, getSnapshot: () => ({ ...f.read, capabilities: [] }) }
   const unavailable = renderToStaticMarkup(React.createElement(WorkItemApp, { source: unknown, announceListStatus: false }))
   assert.match(unavailable, /aria-live="off"[^>]*>无法读取工作项/); assert.doesNotMatch(unavailable, /aria-live="polite"[^>]*>无法读取工作项/)
 })
@@ -151,7 +151,7 @@ test('current source observation follows matched read capability and degradation
     ['unavailable', undefined, timestamp, '读取不可用'], [undefined, undefined, timestamp, '读取状态未知'], ['available', undefined, undefined, '读取状态未知'],
   ]) {
     const view = f.view({ ...f.read, reason, lastUpdatedAt: at, capabilities: access === undefined ? [] : [{ key: 'planning.item.read', access }] })
-    assert.equal(view.sourceObservation, expected); assert.equal(view.planning, '已确认'); assert.equal(view.confirmedAt, timestamp)
+    assert.equal(view.sourceObservation, expected); assert.equal(view.planning, '已确认'); assert.equal(view.confirmedAt, access && access !== 'unavailable' ? timestamp : undefined)
     assert.doesNotMatch(JSON.stringify(view), /RAW-REASON/)
   }
 })
@@ -234,4 +234,32 @@ test('persistent summary retains real refresh pending failure and recovery while
   assert.match(summary(), /当前读取已确认/); assert.doesNotMatch(summary(), /正在刷新规划|规划刷新未完成/)
   const stale = deriveWorkspaceStatus({ setup: f.source.getSnapshot(), read: { ...read, planningSource: { bindingId: 'old', name: 'STALE-CANARY' } }, refresh: { pending: true } })
   assert.doesNotMatch(JSON.stringify(stale), /正在刷新规划|STALE-CANARY/)
+})
+
+// Permission metadata must disappear even if a same-scope wire frame retains it; do not pre-clean the fixture.
+test('status projects source/mapping/time only for explicit readable capability, including authorized offline and partial frames', async t => {
+  const f = fixture(t); await f.source.refresh()
+  const metadata = { bindingId: 'binding', name: 'RETAINED-SOURCE-CANARY', mappingOrigin: 'user' }
+  for (const access of ['available', 'read_only', 'degraded']) for (const connected of [true, false]) for (const reason of [undefined, 'permission_denied', 'stale']) {
+    const read = { ...f.read, planningSource: metadata, capabilities: [{ key: 'planning.item.read', access }], connection: { connected }, reason }
+    const view = f.view(read)
+    assert.equal(view.source, 'RETAINED-SOURCE-CANARY'); assert.equal(view.mappingSource, '用户配置'); assert.equal(view.confirmedAt, timestamp)
+    assert.equal(view.sourceObservation, !connected ? '最后已知值' : reason || access === 'degraded' ? '读取不完整' : '当前读取已确认')
+  }
+})
+
+test('unknown/unavailable status clears same-scope residual metadata before considering transport', async t => {
+  const f = fixture(t); await f.source.refresh()
+  const metadata = { bindingId: 'binding', name: 'RETAINED-SOURCE-CANARY', mappingOrigin: 'user' }
+  for (const access of [undefined, 'unavailable']) for (const connected of [true, false]) for (const reason of [undefined, 'permission_denied']) {
+    const read = { ...f.read, planningSource: metadata, capabilities: access ? [{ key: 'planning.item.read', access }] : [], connection: { connected }, reason }
+    const view = f.view(read)
+    assert.equal(view.sourceObservation, access ? '读取不可用' : '读取状态未知', 'unreadable capability takes precedence over transport')
+    assert.equal(view.source, '当前来源观测未知'); assert.equal(view.mappingSource, undefined); assert.equal(view.confirmedAt, undefined)
+    assert.doesNotMatch(JSON.stringify(view), /RETAINED-SOURCE-CANARY|用户配置|2026-10-30T/)
+  }
+  for (const changed of [{ workspace: { id: 'other', name: 'old' } }, { planningSource: { ...metadata, bindingId: 'other' } }]) {
+    const view = f.view({ ...f.read, planningSource: metadata, ...changed })
+    assert.doesNotMatch(JSON.stringify(view), /RETAINED-SOURCE-CANARY|用户配置|2026-10-30T/)
+  }
 })

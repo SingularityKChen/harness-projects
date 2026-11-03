@@ -16,6 +16,9 @@ export const WORKSPACE_STYLES: string = `
 .hp-workspace[data-workspace-setup] { display:flex; flex-direction:column; flex:1 1 0; block-size:100%; max-block-size:100%; min-block-size:0; min-inline-size:0; overflow:auto }
 .hp-workspace-header { flex:none; display:flex; align-items:start; justify-content:space-between; gap:var(--hp-space-3); flex-wrap:wrap }
 .hp-workspace-header h2 { margin:0 }
+.hp-list-toolbar { display:flex; flex-wrap:wrap; align-items:start; justify-content:space-between; gap:.5rem }
+.hp-list-toolbar h2 { margin:0 }
+.hp-list-actions { display:flex; flex-wrap:wrap; gap:.5rem }
 .hp-workspace-body { flex:1 1 auto; min-block-size:3rem; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; margin-block-start:var(--hp-space-3) }
 .hp-workspace[data-workspace-setup] .hp-workspace-body > div > .hp-workspace { padding:0 }
 .hp-workspace :where(section,div,header,nav,form,p,h2) { box-sizing:border-box; min-width:0; max-width:100% }

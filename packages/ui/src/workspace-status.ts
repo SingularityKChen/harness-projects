@@ -1,19 +1,22 @@
 import { createElement as h, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
 import { deriveWorkspaceStatus } from '@harness-projects/ui-model'
+import { ObservedTime } from './observed-time.ts'
 import { WorkspaceSetupGate, bindWorkspaceSetupApp } from './workspace-setup.ts'
 const idleRefresh = { pending: false }
 const noRefresh = { subscribe: (_listener: () => void) => () => {}, getSnapshot: () => idleRefresh }
 const noSource = { subscribe: (_listener: () => void) => () => {}, getSnapshot: () => undefined }
 const styles = `
-.hp-status-panel{display:flex;flex-direction:column;block-size:100%;min-block-size:0;min-inline-size:0;color:inherit;font:inherit}
-.hp-status-summary{position:relative;flex:0 1 auto;box-sizing:border-box;min-block-size:0;max-block-size:50%;overflow:auto;overscroll-behavior:contain;padding:.4rem .5rem;border-block-end:1px solid color-mix(in srgb,currentColor 22%,transparent);overflow-wrap:anywhere}
-.hp-status-summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,currentColor);outline-offset:-3px}
-.hp-status-summary dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:.15rem 1rem;margin:0}
+.hp-status-panel{container:hp-status / inline-size;display:flex;flex-direction:column;block-size:100%;min-block-size:0;min-inline-size:0;color:inherit;font:inherit}
+.hp-status-summary{position:relative;flex:0 1 auto;box-sizing:border-box;min-block-size:0;max-block-size:50%;overflow:auto;overscroll-behavior:contain;border-block-end:1px solid color-mix(in srgb,currentColor 22%,transparent);overflow-wrap:anywhere}
+.hp-status-summary summary{padding:.6rem .75rem;min-block-size:44px;box-sizing:border-box;cursor:pointer}
+.hp-status-line{display:inline-grid;align-items:start;grid-template-columns:minmax(0,1fr) auto auto;gap:0 .75em;inline-size:calc(100% - 1.5em);vertical-align:top}
+@container hp-status (max-width:40rem){.hp-status-line{grid-template-columns:repeat(2,minmax(0,1fr))}.hp-status-line>span:first-child{grid-column:1/-1;grid-row:2}}
+.hp-status-summary :focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,currentColor);outline-offset:-3px}
+.hp-status-summary dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:.25rem 1rem;margin:.5rem .75rem}
 .hp-status-summary dl>div{display:flex;flex-wrap:wrap;gap:0 .4em;min-inline-size:0;max-inline-size:100%}
-.hp-status-summary dt{min-inline-size:0;flex-shrink:0}.hp-status-summary dt::after{content:"："}.hp-status-summary dd{margin:0;min-inline-size:0}
-.hp-status-confirmed{flex-direction:column}
-.hp-status-summary p{margin:.25rem 0 0}
+.hp-status-summary dt::after{content:"："}.hp-status-summary dd{margin:0;min-inline-size:0}
+.hp-status-summary p{margin:.25rem .75rem}
 .hp-status-body{display:flex;flex-direction:column;flex:1;min-block-size:0;min-inline-size:0;overflow:auto}
 .hp-status-body>.hp-workspace{flex:1;min-block-size:0}
 .hp-status-announcement{position:absolute;inline-size:1px;block-size:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
@@ -43,10 +46,12 @@ function WorkspaceStatusPanel(props: Props): ReactElement {
   }, [scope, observation])
   const fact = (label: string, value: string): ReactElement => h('div', { key: label }, h('dt', null, label), h('dd', null, value))
   return h('section', { className: 'hp-status-panel', 'aria-label': 'Harness Projects' }, h('style', null, styles),
-    h('section', { className: 'hp-status-summary', 'aria-label': '工作区状态', tabIndex: 0 },
-      h('dl', null, fact('工作区', view.workspace), fact('规划', view.planning), fact('宿主', view.transport === '连接状态未知' ? '状态未知' : view.transport), fact('来源', view.source === '当前来源观测未知' ? '观测未知' : view.source), fact('读取', view.sourceObservation),
-        ...(view.confirmedAt ? [h('div', { key: 'confirmed', className: 'hp-status-confirmed' }, h('dt', null, '来源最后确认'), h('dd', null, h('time', { dateTime: view.confirmedAt }, view.confirmedAt)))] : [])),
+    h('section', { className: 'hp-status-summary', 'aria-label': '工作区状态' },
       ...view.operations.map(text => h('p', { key: text }, text)),
+      h('details', { key: scope }, h('summary', null, h('span', { className: 'hp-status-line' }, h('span', null, view.workspace), h('span', null, `宿主：${view.transport}`), h('span', null, `来源：${view.sourceObservation}`))),
+        h('dl', null, fact('规划', view.planning), fact('来源', view.source),
+          ...(view.mappingSource ? [fact('字段映射', view.mappingSource)] : []),
+          ...(view.confirmedAt ? [h('div', { key: 'confirmed' }, h('dt', null, '来源最后完整确认'), h('dd', null, h(ObservedTime, { at: view.confirmedAt }), h('span', null, `（${view.confirmedAt}）`)))] : []))),
       h('span', { className: 'hp-status-announcement', 'aria-live': 'polite', 'aria-atomic': true }, announcement)),
     h('div', { className: 'hp-status-body' }, h(WorkspaceSetupGate, { ...props, announceListStatus: false })))
 }

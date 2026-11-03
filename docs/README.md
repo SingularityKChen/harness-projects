@@ -57,6 +57,7 @@
 | [2026-10-30-durable-write-intent](exec-plan/completed/2026-10-30-durable-write-intent.md) | Start Work 写前意图与不确定结果结算（#204） |
 | [2026-10-29-mmp-ui-frame](exec-plan/completed/2026-10-29-mmp-ui-frame.md) | Host主题工作区视觉框架（#446） |
 | [2026-10-30-ui-workspace-status](exec-plan/completed/2026-10-30-ui-workspace-status.md) | 持续状态摘要、来源作用域与单一公告责任（#484） |
+| [2026-11-03-workspace-header](exec-plan/completed/2026-11-03-workspace-header.md) | 唯一工作区身份/工具栏、安全状态披露与时区时间、完整组合创建回归（#528） |
 | [2026-10-29-membership-duplicate-content](exec-plan/completed/2026-10-29-membership-duplicate-content.md) | 成员替换重复内容契约（#337） |
 | [2026-10-29-demo-user-guide](exec-plan/completed/2026-10-29-demo-user-guide.md) | Demo 用户路径、限制与人工走查准备（#444） |
 | [2026-11-02-demo-guide-refresh](exec-plan/completed/2026-11-02-demo-guide-refresh.md) | 当前PR创建、原操作读回与未完人类验收的指南事实修订（#499） |

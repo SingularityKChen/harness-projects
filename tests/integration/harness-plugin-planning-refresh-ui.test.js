@@ -42,7 +42,8 @@ test('real controller confirmation reaches list and open drawer; double click sh
   assert.equal((await sync.poll()).kind, 'metadata'); publish()
   const updated = html()
   assert.match(updated.slice(updated.indexOf('<dialog')), /刷新规划/, 'open modal retains an accessible refresh action')
-  assert.equal(updated.split(`dateTime="${T(2)}"`).length - 1, 2, 'list and already open drawer share source confirmation')
+  assert.equal(updated.split(`dateTime="${T(2)}"`).length - 1, 1, 'bare App has one drawer confirmation; persistent source disclosure belongs to StatusPanel')
+  assert.equal(read.reconciledAt, T(2), 'drawer reflects the actual Host source confirmation')
   const saved = read.reconciledAt, revision = sync.revision, titles = read.store.list().map((row) => row.entity.content.title)
   fault = true; await refreshSource.refresh()
   assert.match(html(), /暂时无法刷新规划/)
@@ -228,7 +229,7 @@ for (const recovery of ['metadata', 'reconnect']) {
   const html = h.html(), drawer = html.slice(html.indexOf('<dialog'))
   assert.doesNotMatch(html, /暂时无法刷新规划|当前结果尚未确认，最后已知值不是当前值/)
   assert.doesNotMatch(drawer, /最后已知值，当前结果尚未确认/)
-  assert.equal(html.split(`dateTime="${T(2)}"`).length - 1, 2)
+  assert.equal(html.split(`dateTime="${T(2)}"`).length - 1, 1, 'bare App keeps one confirmation in the open drawer')
   h.refresh.dispose()
   })
 }
@@ -269,7 +270,7 @@ test('committed partial refresh keeps visible rows fresh and table degraded in l
   assert.match(html, /部分条目尚未确认，已显示的条目是当前值/)
   assert.doesNotMatch(html, /暂时无法刷新规划/)
   assert.doesNotMatch(drawer, /最后已知值，当前结果尚未确认/)
-  assert.equal(html.split(`dateTime="${T(2)}"`).length - 1, 2)
+  assert.equal(html.split(`dateTime="${T(2)}"`).length - 1, 1, 'bare App keeps one confirmation in the open drawer')
   h.refresh.dispose()
 })
 

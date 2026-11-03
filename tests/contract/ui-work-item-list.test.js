@@ -117,13 +117,12 @@ test('内容：原生 table 语义、稳定状态区在 busy 容器外、规划�
   const [, unmapped] = cells(render({ phase: 'received', refreshing: false, entities: [wire('ent-dd', { planningStatus: 'unknown' })] }))
   assert.deepEqual(unmapped.slice(1, 4), ['未知', '—', '—'], '无映射的默认路径：unknown 且没有展示事实时显示「未知」')
   assert.match(H.content, /<div role="status" aria-live="polite" aria-atomic="true">已读取当前快照，共 2 项可读条目<\/div>/)
-  assert.match(H.content, /规划来源：(<[^>]+>)?规划源.*<time dateTime="2026-10-01T08:00:00.000Z">2026-10-01T08:00:00.000Z<\/time>/)
+  assert.doesNotMatch(H.content, /规划来源：|规划来源最后确认：/, 'source disclosure belongs to workspace status')
   const never = render({ ...SCENARIOS.content, lastUpdatedAt: null })
   assert.match(never, /来源：(<[^>]+>)?规划源.*最后已知值（最后读取时间未知）/)
   assert.equal(never.match(/最后读取时间未知/g).length, 1, '时间只在横幅里说明一次')
   const times = render({ ...SCENARIOS.content, reconciledAt: '2026-10-01T07:59:00.000Z' })
-  assert.match(times, /规划来源最后确认：<time dateTime="2026-10-01T07:59:00.000Z">/)
-  assert.match(times, /最后读取：<time dateTime="2026-10-01T08:00:00.000Z">/, '来源确认与本地接收时间分别保留')
+  assert.doesNotMatch(times, /<time/, 'confirmed source time is owned by the persistent status disclosure')
 })
 
 test('长迭代与多条工程事实：完整文字各在原始列，不截断或合并到相邻事实', () => {
@@ -141,7 +140,7 @@ test('陈旧 / 刷新 / 降级 / 缺口：保行；状态区只宣告一次，�
   for (const name of ['stale', 'degraded', 'gap', 'offlineKept', 'refreshing']) assert.equal(H[name].match(/尚未确认|正在刷新/g).length, 1, `${name} 只宣告一次`)
   for (const name of ['stale', 'degraded', 'gap', 'offlineKept', 'refreshing', 'staleEmpty', 'refreshingEmpty']) {
     assert.match(H[name], banner, name)
-    assert.match(H[name], /<p[^>]*>规划来源：<span[^>]*>规划源<\/span><\/p>/, `${name} 的页首不再单独声明新鲜度`)
+    assert.doesNotMatch(H[name], /规划来源：/, `${name} 不重复状态披露来源`)
   }
   assert.equal(status(H.refreshing), '正在刷新，当前显示的是最后已知值')
   assert.doesNotMatch(H.refreshing, /当前值/, '刷新页没有任何“当前值”')
@@ -152,7 +151,7 @@ test('陈旧 / 刷新 / 降级 / 缺口：保行；状态区只宣告一次，�
 test('部分读取（#382）：状态区说部分条目未确认；没有「最后已知值」横幅，页首与已确认的行一样是当前值并带时刻', () => {
   assert.equal(H.partial.match(/<div role="status"[^>]*>(.*?)<\/div>/)[1], '部分条目尚未确认，已显示的条目是当前值')
   assert.doesNotMatch(H.partial, /最后已知值/, '可见行都已确认：横幅与行都不说最后已知值')
-  assert.match(H.partial, /<p[^>]*>规划来源：<span[^>]*>规划源<\/span>；<span[^>]*>当前值（最后读取：<time dateTime="2026-10-01T08:00:00.000Z">/, '确认时刻仍在页首给出')
+  assert.doesNotMatch(H.partial, /规划来源：|<time/, 'complete confirmation time belongs to workspace disclosure')
 })
 
 test('独立标记只在为真的状态出现：degraded 与只读只在可读内容旁，loading 不带降级，不可用页都不带', () => {
@@ -189,7 +188,7 @@ test('不可用：权限 / 不支持 / 未知 / 离线 / 错误说明各不相�
     assert.match(shownRemaining, remaining, `${name} 的第二段写出还能做什么 / 怎样恢复`)
     assert.doesNotMatch(`${shownMessage}${shownRemaining}`, /仍会显示|但会显示|会显示此前的缓存/, `${name} 不得承诺显示此前的缓存`)
     assert.doesNotMatch(H[name], /Visible A|<table|<tr/, name)
-    assert.match(H[name], /<h2>工作区<\/h2><p[^>]*>规划来源：<span[^>]*>规划源<\/span><\/p>/, `${name} 仍显示剩余可见的工作区与来源`)
+    assert.match(H[name], /<h2>工作项<\/h2>/, `${name} 保留安全列表回焦标题`)
   }
 })
 
@@ -204,7 +203,7 @@ test('泄漏面：全部场景的完整 HTML 不含被遮蔽字段与内部标�
 
 test('转义：恶意来源名、提示、工作区名按文字转义，不产生标签', () => {
   const evil = render({
-    ...SCENARIOS.content, workspace: '<i>W</i>',
+    ...SCENARIOS.stale, workspace: '<i>W</i>',
     metadata: { planningSourceName: '<img src=x onerror=alert(1)>', sourceNames: { 'bind-1': '<b>来源</b>' }, safeNotice: '<script>alert(1)</script>' },
   })
   assert.match(evil, /&lt;img src=x onerror=alert\(1\)&gt;/)
