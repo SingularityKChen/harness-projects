@@ -1,5 +1,6 @@
 /** 唯一只读详情抽屉（issue #130）：原生 `<dialog>` showModal 承担焦点进入/背景 inert/焦点限制/Escape（W3C H102）。 */
-import type { ExecutionContextReader, StartWork, DeliveryLineageReader, ChangeRequestCreator } from '@harness-projects/client'
+import type { ExecutionContextReader, StartWork, DeliveryLineageReader, IssueClosingLinksReader, ChangeRequestCreator } from '@harness-projects/client'
+import { IssueClosingLinksSection } from './issue-closing-links-section.ts'
 import { StartWorkSection } from './start-work-section.ts'
 import { DeliveryLineageSection } from './delivery-lineage-section.ts'
 import { ExecutionContextSection } from './execution-context-section.ts'
@@ -71,7 +72,7 @@ function cycleFocus(dialog: DOMElement, title: DOMElement | null, shiftKey: bool
  * 唯一详情抽屉：view 变化只更新内容；Escape 只走原生 cancel（preventDefault 后一次 onClose）；cleanup 不导航。
  * `notice` 是页面级说明（如断开重连）：模态打开时背景 inert，所以抽屉在自己稳定的状态区里再说一次，打开期间出现也会被宣告。
  */
-export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, connected, startWork, onBindRepository, deliveryReader, changeRequestCreator, refresh, layoutRoot }: { readonly layoutRoot?: { readonly current: LayoutRoot | null } | undefined; readonly refresh?: { readonly pending: boolean; readonly disabled: boolean; readonly run: () => void } | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly changeRequestCreator?: ChangeRequestCreator | undefined; startWork?: StartWork | undefined; onBindRepository?: (() => void) | undefined; executionReader?: ExecutionContextReader | undefined; connected?: boolean | undefined; view: WorkItemDetailView; notice?: string | undefined; onClose: () => void }): ReactElement {
+export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, connected, startWork, onBindRepository, deliveryReader, issueClosingLinksReader, changeRequestCreator, refresh, layoutRoot }: { readonly layoutRoot?: { readonly current: LayoutRoot | null } | undefined; readonly refresh?: { readonly pending: boolean; readonly disabled: boolean; readonly run: () => void } | undefined; readonly issueClosingLinksReader?: IssueClosingLinksReader | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly changeRequestCreator?: ChangeRequestCreator | undefined; startWork?: StartWork | undefined; onBindRepository?: (() => void) | undefined; executionReader?: ExecutionContextReader | undefined; connected?: boolean | undefined; view: WorkItemDetailView; notice?: string | undefined; onClose: () => void }): ReactElement {
   const dialog = useRef<DOMElement | null>(null)
   const title = useRef<DOMElement | null>(null)
   const titleId = useId()
@@ -132,6 +133,8 @@ export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, c
     createElement('div', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, notice),
     ...(refresh === undefined ? [] : [createElement('button', { type: 'button', disabled: refresh.disabled, 'aria-busy': refresh.pending, onClick: refresh.run }, refresh.pending ? '正在刷新规划' : '刷新规划')]),
     panelBody(view.body),
+    view.body.kind !== 'content' || view.body.issueClosingLinksTarget === undefined || issueClosingLinksReader === undefined ? null
+      : createElement(IssueClosingLinksSection, { target: view.body.issueClosingLinksTarget, reader: issueClosingLinksReader, connected: connected === true }),
     target === undefined || deliveryReader === undefined ? null
       : target.repositoryIds.length === 0 ? createElement('p', null, '仓库信息尚未提供')
       : target.repositoryIds.map((repositoryId) => createElement(DeliveryLineageSection, { key: repositoryId,

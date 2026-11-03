@@ -1,4 +1,5 @@
 /** 唯一安全投影（issue #130）：scope → 既有列表门 → 安全行 → 白名单 content；次序固定、阻断态不借缓存、纯函数。 */
+import type { IssueClosingLinksTarget } from './issue-closing-links-view.ts'
 import { repositoryAccessIndex, startWorkAvailability } from './capability-access.ts'
 import { ContentKind } from '@harness-projects/domain/values'
 import { deriveWorkItemDetail } from './derive.ts'
@@ -12,6 +13,7 @@ export type WorkItemDetailTarget = { readonly projectId: string; readonly itemId
 
 /** 安全详情的精确字段面；`identity` / `derived` / `lastUpdatedAt` 可省略，其余恒有。 */
 export type WorkItemDetailContent = {
+  readonly issueClosingLinksTarget?: IssueClosingLinksTarget
   readonly executionTarget?: ExecutionTarget
   readonly deliveryAccessTokens?: Readonly<Record<string, string>>
   readonly startWorkRepositories?: readonly StartWorkRepository[]
@@ -61,6 +63,9 @@ export function deriveWorkItemDetailView(input: WorkItemListReadInput, target: W
   const derived = row.engineering === '无' ? undefined : `派生提示：${row.engineering}`
   return {
     body: {
+      ...(primary?.externalKind === 'issue' && primary.bindingId === input.read.planningSource?.bindingId ? { issueClosingLinksTarget: { workspaceId: target.projectId, workItemId: target.itemId,
+        sourceToken: JSON.stringify([input.read.generation, primary]),
+        accessToken: JSON.stringify([input.read.generation, input.read.nativeAccessVersion, primary, input.read.planningSource, input.read.capabilities, input.read.repositories]) } } : {}),
       ...(detail.planning.contentKind === ContentKind.WorkItem ? {
         ...(input.read.repositories?.length ? { startWorkRepositories: input.read.repositories.map((repository) => {
           // Development 四门必须来自选中仓库的路由；缺少元数据时不能借工作区里另一个连接放行。

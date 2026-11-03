@@ -24,6 +24,8 @@ import { CapabilityKey } from './keys.ts'
 export interface ClientWorkspaceRead {
   /** Native 准入变更时使已打开页面的旧来源观察同步失效；只有显式实际读取才能恢复事实。 */
   readonly nativeAccessVersion?: string | undefined
+  /** 已接受帧的 Host 代际；仅用于使按需观察失效，不从 scopeToken 推断。 */
+  readonly generation?: string | undefined
   readonly workspace: WireWorkspaceDescriptor
   readonly store: EntityStore
   readonly connection: { readonly connected: boolean }

@@ -241,7 +241,7 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       const degraded = head.source.freshness === WireFreshness.Degraded
       return {
         ...(head.nativeAccessVersion === undefined ? {} : { nativeAccessVersion: head.nativeAccessVersion }),
-        workspace: head.workspace, store, connection: { connected }, lastUpdatedAt,
+        generation: head.generation, workspace: head.workspace, store, connection: { connected }, lastUpdatedAt,
         ...(head.source.reconciledAt === undefined ? {} : { reconciledAt: head.source.reconciledAt }), capabilities: head.capabilities,
         ...(head.repositories === undefined ? {} : { repositories: head.repositories }),
         ...(head.planningSource === undefined ? {} : { planningSource: head.planningSource }),
