@@ -11,13 +11,14 @@ export interface WorkspaceStatusInput {
   /** 仅表示呈现期间观察到 workspace 换代，不赋予仓库操作任何 workspace 归属。 */
   readonly repositoryFromEarlierWorkspace?: boolean | undefined
 }
+const READABLE: readonly string[] = [AccessLevel.Available, AccessLevel.ReadOnly, AccessLevel.Degraded]
 /** 已有读数的安全观察；不决定权限、不枚举实体、不回显 Provider reason。 */
 export function workspaceSourceObservation(read: ClientWorkspaceRead | undefined) {
   if (!read) return '读取状态未知'
-  if (!read.connection.connected) return '最后已知值'
   const access = accessIndex(read.capabilities ?? []).get(CapabilityKey.PlanningItemRead)
-  return access === undefined ? '读取状态未知' : access === AccessLevel.Unavailable ? '读取不可用'
-    : read.reason !== undefined || access === AccessLevel.Degraded ? '读取不完整'
+  if (access === undefined || !READABLE.includes(access)) return access === AccessLevel.Unavailable ? '读取不可用' : '读取状态未知'
+  if (!read.connection.connected) return '最后已知值'
+  return read.reason !== undefined || access === AccessLevel.Degraded ? '读取不完整'
     : read.lastUpdatedAt === undefined ? '读取状态未知' : '当前读取已确认'
 }
 const unknown = (code: string | undefined): boolean => code === 'result_unknown' || code === 'ambiguous_result'
@@ -26,6 +27,9 @@ export function deriveWorkspaceStatus({ setup: snapshot, read, mapping, reposito
   const setup = snapshot.setup, workspace = setup?.workspace
   const sameWorkspace = workspace != null && read?.workspace.id === workspace.id
   const matched = sameWorkspace && setup?.planning.bindingId !== undefined && read?.planningSource?.bindingId === setup.planning.bindingId
+  const access = accessIndex(read?.capabilities ?? []).get(CapabilityKey.PlanningItemRead)
+  const disclose = matched && access !== undefined && READABLE.includes(access)
+  const mappingSource = !disclose ? undefined : read?.planningSource?.mappingOrigin === 'derived' ? '自动派生' : read?.planningSource?.mappingOrigin === 'user' ? '用户配置' : undefined
   const transport = !sameWorkspace ? '连接状态未知' : read?.connection.connected ? '已连接' : '连接中断'
   const refreshStatus = !matched ? undefined : refresh?.pending ? '正在刷新规划，当前显示的是最后已知值' : refresh?.error ? '规划刷新未完成，显示的是最后已知值' : undefined
   const observed = matched ? workspaceSourceObservation(read) : '读取状态未知'
@@ -48,5 +52,5 @@ export function deriveWorkspaceStatus({ setup: snapshot, read, mapping, reposito
     if (fact) operations.push(`${repositoryFromEarlierWorkspace ? '先前' : ''}仓库操作${fact}`)
   }
   return { workspace: workspace === undefined ? '工作区状态未知' : workspace === null ? '尚未创建工作区' : workspace.name,
-    planning, transport, sourceObservation, refreshStatus, source: matched ? read!.planningSource!.name : '当前来源观测未知', confirmedAt: matched ? read?.reconciledAt : undefined, operations }
+    planning, transport, sourceObservation, refreshStatus, source: disclose ? read!.planningSource!.name : '当前来源观测未知', mappingSource, confirmedAt: disclose ? read?.reconciledAt : undefined, operations }
 }

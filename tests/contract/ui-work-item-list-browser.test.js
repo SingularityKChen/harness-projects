@@ -61,7 +61,7 @@ test('完整路径：meta 触达 derive → page view → renderer → 纯值 le
   const props = { read, metadata: { sourceNames: { 'bind-1': '来源一' } }, phase: 'received', refreshing: false }
   assert.equal(deriveWorkItemList(read).rows.length, 1)
   const html = renderToStaticMarkup(React.createElement(Page, props))
-  assert.match(html, /<h2>浏览器工作区<\/h2>/)
+  assert.match(html, /<h2>工作项<\/h2>/)
   assert.match(html, /<th scope="row"[^>]*><details><summary[^>]*>Browser Visible<\/summary><\/details><\/th>/)
   assert.doesNotMatch(html, /来源一（提供方权威）/, '来源为默认隐藏的可选列')
 })
@@ -86,7 +86,7 @@ test('框架 fixture 打包真实 app 和 store；状态、来源时刻、长事
     assert.doesNotMatch(html, /CANARY-|2099-12-31/, scenario)
     if (['content', 'stale', 'offline'].includes(scenario)) assert.match(html, /可见工作项/, scenario)
   }
-  assert.match(out('content'), /2026-10-01T07:59:00.000Z/)
+  assert.doesNotMatch(out('content'), /2026-10-01T07:59:00.000Z/, 'workspace status owns source confirmation time')
   assert.match(out('long'), /IterationWithoutSpacesIterationWithoutSpaces/)
   assert.match(out('empty'), /当前快照没有工作项/)
   assert.doesNotMatch(out('loading'), /<table|当前快照没有工作项/)

@@ -105,6 +105,18 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 ## 4. 当前队列
 
+### PR #529–#531（2026-11-04）
+
+本轮评审与人类条件授权见 `docs/review/2026-11-04-pr529-pr531-mmp-review.md`；初始base `f5ae377d98c43ed216f680cb72e5f35d73a2b8e1`。上述三个初始head的六顺序树相同，临时clone线性预演无冲突；当前main移动后仍须逐条重锁，不沿用旧批准。
+
+| 位置 | PR | 分支 | 交付 | 依赖 | 已知冲突点与解法 |
+|---|---|---|---|---|---|
+| 1 | #529 | `fix/workspace-header` | #528：唯一工作区状态/工具栏 | 无 | 窄Host slot P2已修且独立复评通过；最终head检查与批准通过才合并，不代替#446/#449人验 |
+| 2 | #530 | `chore/core-namespaces` | #418：普通namespace/显式scope | 无硬依赖 | revoked Proxy P2已修且独立复评通过；接在#529后并重锁真实main |
+| 3 | #531 | `fix/run-result-consistency` | #458：运行事实同源 | 无硬依赖 | 当前P1未修前禁止合并；原实现owner修复后独立复评，不关闭#215 |
+
+### 历史队列（2026-09-18）
+
 五个 PR 属于同一份 ExecPlan（`docs/exec-plan/completed/2026-09-18-rule-semantics-and-checker-convergence.md`）的五个批次，另有两个来自**其它会话**的 PR 与它们交织。
 
 顺序在 2026-09-18 的验收阶段按实测修订过一次，修订理由见位置 1 那一行——它是本文件第 6 节那条新增教训的来源。

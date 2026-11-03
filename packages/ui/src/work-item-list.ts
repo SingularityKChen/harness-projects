@@ -5,7 +5,7 @@
  * 本文件用 `createElement` 而不是 JSX（tsconfig 不启用 jsx）。
  */
 import { Fragment, createElement, useState } from 'react'
-import type { CSSProperties, ReactElement } from 'react'
+import type { CSSProperties, ReactElement, ReactNode } from 'react'
 import { defaultLocalTableConditions, queryVisibleWorkItems, type LocalTableConditions, type LocalTableResult, type LocalTableSort, type VisibleListRow, type WorkItemListView } from '@harness-projects/ui-model'
 import { EmptyState, FreshnessBadge, LoadingState, LIST_STYLES, SourceBadge, StaleBanner, UnavailableState } from './list-states.ts'
 
@@ -66,7 +66,7 @@ function bodyOf({ body, planningSourceName }: WorkItemListView, query: QueryCont
     body.rows.length === 0 ? createElement(EmptyState, { confirmed: !notConfirmed }) : createElement(ItemTable, { rows: query.result.rows, navigation, query, sizes }))
 }
 
-export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnnouncement, presentationScopeKey }: { presentationScopeKey?: string | undefined; view: WorkItemListView; navigation?: ItemNavigation | undefined; headingTabIndex?: number | undefined; statusAnnouncement?: string | undefined }): ReactElement {
+export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnnouncement, presentationScopeKey, actions }: { actions?: ReactNode; presentationScopeKey?: string | undefined; view: WorkItemListView; navigation?: ItemNavigation | undefined; headingTabIndex?: number | undefined; statusAnnouncement?: string | undefined }): ReactElement {
   const sizes=useColumnWidths(presentationScopeKey)
   const { body } = view
   const [local, setLocal] = useState({ scopeKey:presentationScopeKey, conditions:defaultLocalTableConditions(), adjusted:false })
@@ -77,17 +77,11 @@ export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnno
   const query: QueryControls = { result:{...computed,conditionsAdjusted:computed.conditionsAdjusted || (sameScope && local.adjusted)},
     onChange:conditions => setLocal({scopeKey:presentationScopeKey,conditions,adjusted:false}) }
   const busy = body.kind === 'loading' || (body.kind === 'content' && body.refreshing)
-  // 新鲜度只在已确认的内容旁声明（部分读取的可见内容也已确认）；未确认时由状态区宣告、横幅点名来源与时刻，页首不再重复。
-  const confirmed = body.kind === 'content' && (!body.stale || body.partial === true) && !body.refreshing
   return createElement('section', { 'aria-label': '工作项列表', className: 'hp-work-items' },
     createElement('style', null, LIST_STYLES),
     createElement('div', { className: 'hp-list-context', role: 'region', 'aria-label': '工作项上下文', tabIndex: 0 },
-    createElement('h2', { tabIndex: headingTabIndex }, view.workspaceName),
+    createElement('header', { className: 'hp-list-toolbar' }, createElement('h2', { tabIndex: headingTabIndex }, '工作项'), actions),
     body.kind === 'content' && body.rows.length > 0 ? createElement('div',{className:'hp-column-tools'},createElement('button',{type:'button',onClick:sizes.reset},'重置列宽'),createElement('span',null,'拖动列边界，或聚焦边界后用方向键调整。')):null,
-    createElement('p', { className: 'hp-list-meta' }, '规划来源：', createElement(SourceBadge, { name: view.planningSourceName }),
-      ...(view.mappingSourceText === undefined ? [] : ['；', view.mappingSourceText]),
-      ...(confirmed ? ['；', createElement(FreshnessBadge, { stale: false, at: body.lastUpdatedAt ?? null })] : [])),
-    body.kind === 'content' ? createElement('p', { className: 'hp-list-meta' }, '规划来源最后确认：', body.reconciledAt === undefined ? '未知' : createElement('time', { dateTime: body.reconciledAt }, body.reconciledAt)) : null,
     view.readOnly ? createElement('p', null, '只读：规划来源仅允许读取，此处展示规划内容。') : null,
     view.degraded ? createElement('p', null, '读取能力降级：显示的是保守的最后已知值。') : null,
     createElement('div', { role: 'status', 'aria-live': statusAnnouncement === undefined ? 'polite' : 'off', 'aria-atomic': 'true' }, view.statusText),

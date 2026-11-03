@@ -28,18 +28,18 @@ const summary = html => html.match(/<section[^>]*aria-label="工作区状态"[^]
 
 test('actual apply main Panel persists truthful summary across configured/confirmed settings and list', async t => {
   const f = await open(t), initial = f.render()
-  assert.match(summary(initial), /Current workspace[^]*配置已记录，待确认[^]*宿主[^]*状态未知/)
+  assert.match(summary(initial), /Current workspace[^]*宿主[^]*状态未知[^]*配置已记录，待确认/)
   assert.doesNotMatch(summary(initial), /Saved|已保存|已确认/)
   await f.frame(); assert.match(summary(f.render()), /已连接/)
   f.set(setup('confirmed')); f.disconnect(); await f.frame()
-  assert.match(summary(f.render()), /Current workspace[^]*已确认[^]*已连接[^]*Current project/)
+  assert.match(summary(f.render()), /Current workspace[^]*已连接[^]*已确认[^]*Current project/)
   assert.match(f.render(), /工作项/); assert.deepEqual(f.calls.map(call => call.length), [1, 1], 'status subscriptions cannot introduce port requests')
   assert.equal((summary(f.render()).match(/aria-live/g) ?? []).length, 1)
 })
 
 test('actual transport loss preserves source confirmation, recovery rereads setup and rejects old binding timestamp', async t => {
   const f = await open(t, 'confirmed'); await f.frame(); f.disconnect()
-  assert.match(summary(f.render()), /最后已知已确认[^]*连接中断[^]*2026-10-30T00:00:00Z/)
+  assert.match(summary(f.render()), /连接中断[^]*最后已知已确认[^]*2026-10-30T00:00:00Z/)
   await f.frame('old-binding'); const stale = summary(f.render())
   assert.match(stale, /已连接[^]*观测未知/); assert.doesNotMatch(stale, /OLD-PROJECT|2026-10-30T/)
   await f.frame(); assert.match(summary(f.render()), /Current project[^]*2026-10-30T00:00:00Z/)
@@ -49,7 +49,7 @@ test('actual apply continuous same-time frames expose degradation, unavailable a
   const f = await open(t, 'confirmed'); await f.frame()
   assert.match(summary(f.render()), /当前读取已确认/)
   await f.frame('binding', { degraded: true }); let view = summary(f.render())
-  assert.match(view, /已确认[^]*已连接[^]*读取不完整/); assert.doesNotMatch(view, /RAW-REASON/)
+  assert.match(view, /已连接[^]*读取不完整[^]*已确认/); assert.doesNotMatch(view, /RAW-REASON/)
   await f.frame('binding', { access: 'unavailable' }); assert.match(summary(f.render()), /读取不可用/)
   await f.frame('binding', { access: 'unknown' }); assert.match(summary(f.render()), /读取状态未知/)
   await f.frame(); view = summary(f.render()); assert.match(view, /当前读取已确认/); assert.match(view, /2026-10-30T00:00:00Z/)

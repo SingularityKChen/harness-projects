@@ -71,7 +71,7 @@ test('dispose absorbs late rejection and stops account continuation; malformed c
   const read = late.source.refresh(); await Promise.resolve(); late.source.dispose(); reject(new Error('RAW-CANARY')); await read
   assert.equal(late.source.getSnapshot().setup, undefined)
 })
-const html = (source, read) => renderToStaticMarkup(React.createElement(ui.WorkspaceSetupGate, { setupSource: source, source: { subscribe: () => () => {}, getSnapshot: () => read } }))
+const html = (source, read) => renderToStaticMarkup(React.createElement(ui.bindWorkspaceStatusApp(source, { subscribe: () => () => {}, getSnapshot: () => read })))
 test('real source renders labeled creation, unique workspace and configured recovery without success; watch id fences list', async () => {
   const f = fixture(); assert.equal(typeof ui.WorkspaceSetupGate, 'function')
   assert.match(html(f.source), /正在读取工作区设置/)
@@ -312,6 +312,6 @@ test('confirmed list keeps heading and settings action inside shared workspace p
   const f = fixture(); f.set(setup('confirmed')); await f.source.refresh()
   const store = client.createEntityStore(); store.applyBaseline({ revision: 0, entities: [], source: { revision: 0, freshness: 'fresh', authority: 'provider' } })
   const out = html(f.source, { workspace: { id: 'ws-1', name: 'Fixture' }, store, connection: { connected: true }, capabilities: [] })
-  const opening = out.slice(0, out.indexOf('>') + 1)
+  const opening = out.match(/<section[^>]*data-workspace-setup[^>]*>/)?.[0] ?? ''
   assert.match(opening, /class="[^"]*hp-workspace/); assert.match(out, /class="hp-action"[^>]*>连接设置<\/button>/)
 })

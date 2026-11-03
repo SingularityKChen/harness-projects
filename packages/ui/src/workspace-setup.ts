@@ -60,7 +60,7 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
       returnFocus.current = false
       const target = initiator.current
       if (target?.isConnected !== false && target?.focus && !target.closest?.('[hidden],[inert]')) target.focus()
-      else root.current?.querySelector?.('h2')?.focus?.()
+      else (root.current?.querySelector?.('[data-workspace-settings]') ?? root.current?.querySelector?.('h2'))?.focus?.()
     } else if (previous && previous !== stage && (!doc?.activeElement || doc.activeElement === doc.body || doc.activeElement.isConnected === false || doc.activeElement.closest?.('[hidden],[inert]'))) root.current?.querySelector?.('h2')?.focus?.()
     if (taskEntry.current) {
       taskEntry.current = false
@@ -115,11 +115,10 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   if (snapshot.pending) children.push(h('p', { key: 'pending', role: 'status', 'aria-live': 'polite' }, '正在处理，请稍候。'))
   const workspace = list ? h(WorkItemApp, { source, refreshSource, announceListStatus, executionReader, deliveryReader, issueClosingLinksReader, changeRequestCreator, startWork, onBindRepository: enter }) : h('section', { 'aria-label': '工作区摘要' },
     h('p', { role: 'status' }, setup?.workspace ? confirmed ? read?.workspace.id !== setup.workspace.id ? '正在等待工作项。' : read.capabilities?.some(entry => entry.key === 'planning.item.read' && entry.access === 'unavailable') ? '当前无法读取工作项，请检查连接设置中的读取能力。' : '工作项读取能力尚未确认，请检查连接设置。' : '来源尚未确认，尚无可读工作项。' : '欢迎使用 Harness Projects。尚无可读工作区。'),
-    setup?.workspace ? h('p', null, `当前工作区：${setup.workspace.name}`) : null,
     setup?.workspace && setup.planning.state === 'unbound' ? h('button', { type: 'button', className: 'hp-action', onClick: enter }, '继续连接项目') : null)
   return h('section', { className: 'hp-workspace', 'data-workspace-setup': true, 'aria-label': 'Harness Projects', ref: root },
     h('style', null, WORKSPACE_STYLES + FORM_STYLES),
-    h('header', { className: 'hp-workspace-header' }, h('h2', { tabIndex: -1 }, settings ? stage === 'create' ? '创建工作区' : '连接设置' : list ? '工作项' : '工作区'),
+    list ? null : h('header', { className: 'hp-workspace-header' }, h('h2', { tabIndex: -1 }, settings ? stage === 'create' ? '创建工作区' : '连接设置' : '工作区'),
       h('button', { className: 'hp-action', type: 'button', disabled: false, onClick: settings ? leave : enter }, settings ? '返回工作区' : '连接设置')),
     h('div', { className: 'hp-workspace-body', ref: body, role: 'region', 'aria-label': settings ? '连接设置内容' : '工作区内容', tabIndex: 0 },
       mounted ? h('div', { key: scope, hidden: !settings }, ...children) : null,

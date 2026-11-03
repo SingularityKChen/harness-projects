@@ -9,7 +9,6 @@ export const TABLE_STYLES = `
   display:flex; flex-direction:column; flex:1 1 0; min-block-size:0; min-height:0; max-block-size:100%; overflow:hidden;
 }
 .hp-workspace:has(> .hp-project) > .hp-project { padding:0 }
-.hp-project:has(.hp-list-scroll) > .hp-project-refresh { float:none; flex:none; align-self:flex-end }
 .hp-work-items { display:flex; flex-direction:column; flex:1 1 0; min-block-size:0; max-block-size:100%; container-type:inline-size }
 .hp-work-items .hp-list-context { flex:0 1 auto; min-block-size:3rem; max-block-size:50%; overflow:auto }
 .hp-work-items .hp-list-body { display:flex; flex-direction:column; flex:1 0 9.5rem; min-block-size:9.5rem }

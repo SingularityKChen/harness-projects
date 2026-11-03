@@ -6,7 +6,7 @@ import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
-import { WorkItemListPage } from '@harness-projects/ui'
+import { bindWorkspaceStatusApp } from '@harness-projects/ui'
 import { test } from 'node:test'
 
 import { CapabilityKey } from '@harness-projects/capabilities'
@@ -233,13 +233,16 @@ test('#133 双层剥离：toWireEntity 不把 redacted 行的字段事实发出 
 })
 
 
-test('字段映射来源在真实列表来源旁渲染，未配置时缺席', () => {
+test('字段映射来源由真实状态披露呈现，未配置和异来源时缺席', () => {
   const require = createRequire(new URL('../../packages/ui/package.json', import.meta.url))
   const { createElement } = require('react'), { renderToStaticMarkup } = require('react-dom/server')
   for (const [mappingOrigin, text] of [['derived', '字段映射：自动派生'], ['user', '字段映射：用户配置'], [undefined, undefined]]) {
-    const result = received({ read: { planningSource: { bindingId: 'bind-1', name: '项目', ...(mappingOrigin === undefined ? {} : { mappingOrigin }) } } })
+    const input = make('received', { refreshing: false, read: { planningSource: { bindingId: 'bind-1', name: '项目', ...(mappingOrigin === undefined ? {} : { mappingOrigin }) } } })
+    const result = deriveWorkItemListView(input)
     assert.equal(result.mappingSourceText, text)
-    const markup = renderToStaticMarkup(createElement(WorkItemListPage, { view: result }))
-    if (text) assert.ok(markup.includes(text)); else assert.doesNotMatch(markup, /字段映射/)
+    const snapshot = { pending: false, setup: { workspace: input.read.workspace, planning: { state: 'confirmed', bindingId: 'bind-1', projectNodeId: 'project' } } }
+    const markup = () => renderToStaticMarkup(createElement(bindWorkspaceStatusApp({ subscribe: () => () => {}, getSnapshot: () => snapshot }, { subscribe: () => () => {}, getSnapshot: () => input.read })))
+    if (text) assert.match(markup(), new RegExp('字段映射</dt><dd>' + text.split('：')[1])); else assert.doesNotMatch(markup(), /字段映射/)
+    input.read.planningSource.bindingId = 'foreign-binding'; assert.doesNotMatch(markup(), /字段映射|项目<\/dd>/, 'old source mapping cannot survive scope mismatch')
   }
 })

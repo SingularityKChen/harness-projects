@@ -112,13 +112,14 @@ test('host watch：载体断开的同一回调内整表 stale 且页面出现重
   const items = (online.match(/<a href=/g) ?? []).length
   assert.deepEqual([items > 0, online.includes(NOTICE), badges(online, '当前值'), badges(online, '最后已知值')], [true, false, 0, 0], '在线：默认隐藏新鲜度可选列，没有重连说明')
   // #383：规划来源名经 snapshot 头的 planningSource 到达真实插件页面（项目标题，不是实现键或 binding id）。
-  assert.match(online, /规划来源：<span>项目 Alpha<\/span>/)
+  assert.equal(h.workspace.getSnapshot().planningSource.name, '项目 Alpha')
   h.connection.setOnline(false)
   h.carrier.break()
   await until(() => h.lost.length === 1, '载体失败回调')
   assert.deepEqual(h.lost[0], { ...before, connected: false, current: 0, reason: DISCONNECTED })
   const [stale] = h.losses
   assert.ok(stale.includes(NOTICE), '同一回调内页面已读到断开：有重连说明')
+  assert.match(stale, /来源：<span>项目 Alpha<\/span>/, 'bare App 的陈旧横幅仍点名真实来源；正常身份由 StatusPanel 披露')
   assert.deepEqual([badges(stale, '当前值'), badges(stale, '最后已知值')], [0, 0], '默认列不渲染逐行新鲜度；show后的真实badge由browser验收')
   h.connection.setOnline(true)
   await until(() => h.baselineAt(2), '重连后的 baseline')

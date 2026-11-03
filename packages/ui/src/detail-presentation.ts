@@ -1,8 +1,6 @@
 /** 私有详情呈现：只读取工作区矩形并写入 CSS，不保存业务或主题状态。 */
 export const DETAIL_STYLES = `
 .hp-project { position:relative; min-height:24rem }
-.hp-project > .hp-project-refresh { float:right; margin:0 0 var(--hp-space-3) var(--hp-space-3) }
-.hp-project > .hp-project-list { clear:both }
 .hp-project[data-detail-layout="wide"] > .hp-project-list { padding-right:calc(var(--hp-detail-preview-width) + 1rem) }
 .hp-workspace.hp-detail {
   position:fixed; inset:auto 0 auto auto; top:0; margin:0; box-sizing:border-box;
