@@ -4,28 +4,21 @@
  */
 import { createElement } from 'react'
 import type { ReactElement } from 'react'
+import { TABLE_STYLES } from './table-presentation.ts'
 
 /** 局部样式只继承 Host 字体/前景/背景；焦点消费公开主题 token，无主题状态或额外导入。 */
-export const LIST_STYLES = `
+export const LIST_STYLES = TABLE_STYLES + `
 .hp-work-items { min-width:0; max-width:100% }
 .hp-work-items h2 { margin:0 0 .75rem; font-size:1.55rem; line-height:1.35; font-weight:650; overflow-wrap:anywhere }
 .hp-work-items p { margin:.5rem 0; overflow-wrap:anywhere }
 .hp-work-items .hp-list-meta { font-size:.93em }
 .hp-work-items [role=status] { margin:1rem 0 .75rem; padding:.25rem .75rem; border-inline-start:2px solid var(--hp-border,currentColor); overflow-wrap:anywhere }
-.hp-work-items .hp-list-scroll { box-sizing:border-box; min-width:0; max-width:100%; overflow-x:auto; border:1px solid var(--hp-border,currentColor); border-radius:var(--hp-radius,.5rem) }
-.hp-work-items table { width:100%; min-width:76rem; border-collapse:collapse; table-layout:auto; font:inherit }
-.hp-work-items caption { padding:.75rem 1rem; text-align:left; font-size:.93em; font-weight:600 }
-.hp-work-items th, .hp-work-items td { padding:.75rem 1rem; text-align:left; vertical-align:top; border-top:1px solid var(--hp-border,currentColor) }
-.hp-work-items thead th { font-size:.93em; font-weight:600; white-space:nowrap; background:var(--hp-surface,transparent) }
-.hp-work-items tbody th { font-weight:600 }
-.hp-work-items td { white-space:nowrap }
 .hp-work-items .hp-list-wrap { white-space:normal; overflow-wrap:anywhere }
 .hp-work-items a { color:inherit; text-underline-offset:3px; text-decoration-thickness:1px }
 .hp-work-items a:hover { text-decoration-thickness:2px }
 .hp-work-items :focus-visible { outline:var(--hp-focus-width,var(--dsw-focus-ring-width,2px)) solid var(--hp-focus-color,var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,currentColor))); outline-offset:3px }
 .hp-work-items .hp-list-scroll:focus-visible { outline-offset:2px }
 .hp-work-items .hp-list-state { padding:.75rem 1rem; border-inline-start:3px solid currentColor; background:var(--hp-surface,transparent) }
-.hp-work-items td:last-child { font-size:.93em }
 `
 
 const SKELETON_BAR = { height: '1rem', margin: '0.5rem 0', background: 'currentColor', opacity: 0.12 } as const

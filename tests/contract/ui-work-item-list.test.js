@@ -109,7 +109,7 @@ test('内容：原生 table 语义、稳定状态区在 busy 容器外、规划�
   const columns = [...H.content.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1])
   assert.deepEqual(columns, ['工作项', '内容身份', '规划状态', '迭代', '目标日期', '工程提示', '来源', '新鲜度'])
   assert.match(H.content, /<caption>[^<]+<\/caption>/)
-  assert.match(H.content, /<th scope="row"[^>]*>Visible A<\/th>/)
+  assert.match(H.content, /<th scope="row"[^>]*><details><summary[^>]*>Visible A<\/summary><\/details><\/th>/)
   const [, visible, hidden, long] = cells(H.content)
   assert.deepEqual(visible, ['Visible A', 'Issue', '进行中', 'E1 Sprint 1', '2026-09-24', 'CI 失败', '来源一（提供方权威）', '当前值'], '已映射：显示规范状态，迭代 title 与日期原样')
   assert.deepEqual(hidden, ['内容不可见', '—', '—', '—', '—', '—', '—', '—'])
@@ -117,7 +117,7 @@ test('内容：原生 table 语义、稳定状态区在 busy 容器外、规划�
   assert.equal(long[6], `${LONG}（提供方权威）`)
   const [, unmapped] = cells(render({ phase: 'received', refreshing: false, entities: [wire('ent-dd', { planningStatus: 'unknown' })] }))
   assert.deepEqual(unmapped.slice(2, 5), ['未知', '—', '—'], '无映射的默认路径：unknown 且没有展示事实时显示「未知」')
-  assert.match(H.content, /<div role="status" aria-live="polite" aria-atomic="true">已读取当前快照，共 3 项<\/div><div aria-busy="false">/)
+  assert.match(H.content, /<div role="status" aria-live="polite" aria-atomic="true">已读取当前快照，共 3 项<\/div><\/div><div aria-busy="false"[^>]*>/)
   assert.match(H.content, /规划来源：(<[^>]+>)?规划源.*<time dateTime="2026-10-01T08:00:00.000Z">2026-10-01T08:00:00.000Z<\/time>/)
   const never = render({ ...SCENARIOS.content, lastUpdatedAt: null })
   assert.match(never, /来源：(<[^>]+>)?规划源.*最后已知值（最后读取时间未知）/)
@@ -170,13 +170,13 @@ test('独立标记只在为真的状态出现：degraded 与只读只在可读�
 
 test('版式：原生表格在独立滚动区；长文字有换行规则、单元格间距与 Host 焦点 token', () => {
   assert.match(H.content, /<div role="region" aria-label="[^"]+" tabindex="0" class="hp-list-scroll"><table/)
-  assert.match(H.content, /overflow-x:auto/)
+  assert.match(H.content, /<colgroup>(<col[^>]+\/>){8}<\/colgroup>/)
   assert.match(H.content, /overflow-wrap:anywhere/)
-  assert.match(H.content, /padding:\.75rem 1rem/)
+  assert.match(H.content, /padding:\.75rem/)
   assert.match(H.content, /:focus-visible/)
   assert.match(H.content, /var\(--dsw-focus-ring-width,2px\)/)
   assert.match(H.content, /var\(--dsw-focus-ring-color,var\(--dsw-alias-state-business-primary,currentColor\)\)/)
-  assert.equal((H.content.match(/class="hp-list-wrap"/g) ?? []).length, 6, '每行标题与来源都可换行，redacted 占位仍在原列')
+  assert.equal((H.content.match(/class="hp-list-wrap"/g) ?? []).length, 9, '每行标题、迭代与来源都可换行，redacted 占位仍在原列')
 })
 
 test('不可用：权限 / 不支持 / 未知 / 离线 / 错误说明各不相同，不借缓存，没有行；每类都写出还能做什么，读门已观测不可用不说尚未确认', () => {
@@ -186,7 +186,7 @@ test('不可用：权限 / 不支持 / 未知 / 离线 / 错误说明各不相�
     gateUnavailable: [/读取工作项的能力（planning\.item\.read）当前不可用，原因未提供/, /工作区与规划来源仍可查看.*读取能力恢复之前不显示条目.*也不显示此前的缓存/],
     offlineNone: [/无法连接规划来源/, /连接恢复后会重新读取/], error: [/读取工作项失败/, /稍后重试/],
   }
-  const parts = (html) => html.match(/<div aria-busy="false"><div[^>]*><p>([^<]*)<\/p><p>([^<]*)<\/p><\/div><\/div>/)?.slice(1) ?? []
+  const parts = (html) => html.match(/<div aria-busy="false"[^>]*><div[^>]*><p>([^<]*)<\/p><p>([^<]*)<\/p><\/div><\/div>/)?.slice(1) ?? []
   assert.doesNotMatch(H.gateUnavailable, /尚未确认/)
   for (const [name, [message, remaining]] of Object.entries(expected)) {
     const [shownMessage = '', shownRemaining = ''] = parts(H[name])

@@ -9,9 +9,10 @@ import type { ReactElement } from 'react'
 import type { VisibleListRow, WorkItemListView } from '@harness-projects/ui-model'
 import { EmptyState, FreshnessBadge, LoadingState, LIST_STYLES, SourceBadge, StaleBanner, UnavailableState } from './list-states.ts'
 
-const COLUMNS = ['工作项', '内容身份', '规划状态', '迭代', '目标日期', '工程提示', '来源', '新鲜度'] as const
-// 八列比例是自动布局的宽度提示：实际事实可扩列，标题/来源换行；窄宽度只滚动表格区域。
-const WIDTHS = ['26%', '8%', '9%', '10%', '11%', '9%', '17%', '10%'] as const
+import { TABLE_COLUMNS } from './table-columns.ts'
+
+const columnWidth = (column: typeof TABLE_COLUMNS[number]): string => column.id === 'title' ? 'var(--hp-title-width)' : `var(--hp-column-${column.id},${column.defaultWidth}px)`
+const TABLE_WIDTH = `calc(${TABLE_COLUMNS.map(columnWidth).join(' + ')})`
 
 /** 列表页消费的导航契约（ui 无状态回调）：`href` 供真实 href 与修饰键点击，`open` 只在普通左键点击时调用。 */
 export type ItemNavigation = { readonly href: (itemId: string) => string; readonly open: (itemId: string) => void }
@@ -30,22 +31,23 @@ function TitleLink({ itemId, title, navigation }: { itemId: string; title: strin
 /** redacted 行只显示占位：其它单元格是"—"，不透出是否撤权或删除；行 key 只给框架，不进任何属性。 */
 function ItemRow({ row, navigation }: { row: VisibleListRow; navigation: ItemNavigation | undefined }): ReactElement {
   const cells = row.kind === 'redacted'
-    ? COLUMNS.slice(1).map(() => '—')
+    ? TABLE_COLUMNS.slice(1).map(() => '—')
     : [row.identity, row.planningStatus, row.iteration, row.targetDate, row.engineering,
       createElement(SourceBadge, { name: row.source, authority: row.authority }), createElement(FreshnessBadge, { stale: row.stale })]
   const title = row.kind === 'redacted' ? '内容不可见' : row.title
   return createElement('tr', null,
     createElement('th', { scope: 'row', className: 'hp-list-wrap' },
-      row.kind === 'item' && navigation !== undefined ? createElement(TitleLink, { itemId: row.key, title, navigation }) : title),
-    ...cells.map((cell, index) => createElement('td', { key: index, className: index === 5 ? 'hp-list-wrap' : undefined }, cell)))
+      row.kind === 'item' && navigation !== undefined ? createElement(TitleLink, { itemId: row.key, title, navigation }) : row.kind === 'item' ? createElement('details', null, createElement('summary', { className: 'hp-list-title-text' }, title)) : title),
+    ...cells.map((cell, index) => createElement('td', { key: index, className: index === 2 || index === 5 ? 'hp-list-wrap' : undefined }, cell)))
 }
 
 /** 可聚焦的局部滚动容器，焦点轮廓使用公开 Host token，窄屏保留八列。 */
 function ItemTable({ rows, navigation }: { rows: readonly VisibleListRow[]; navigation: ItemNavigation | undefined }): ReactElement {
-  return createElement('div', { role: 'region', 'aria-label': '工作项表格，可横向滚动', tabIndex: 0, className: 'hp-list-scroll' },
-    createElement('table', null,
+  return createElement('div', { role: 'region', 'aria-label': '工作项表格，可横向和纵向滚动', tabIndex: 0, className: 'hp-list-scroll' },
+    createElement('table', { style: { width: TABLE_WIDTH } },
+      createElement('colgroup', null, ...TABLE_COLUMNS.map(column => createElement('col', { key: column.id, style: { width: columnWidth(column) } }))),
       createElement('caption', null, '工作项列表'),
-      createElement('thead', null, createElement('tr', null, ...COLUMNS.map((name, index) => createElement('th', { key: name, scope: 'col', style: { width: WIDTHS[index] } }, name)))),
+      createElement('thead', null, createElement('tr', null, ...TABLE_COLUMNS.map(column => createElement('th', { key: column.id, scope: 'col' }, column.label)))),
       createElement('tbody', null, ...rows.map((row) => createElement(ItemRow, { key: row.key, row, navigation })))))
 }
 
@@ -66,6 +68,7 @@ export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnno
   const confirmed = body.kind === 'content' && (!body.stale || body.partial === true) && !body.refreshing
   return createElement('section', { 'aria-label': '工作项列表', className: 'hp-work-items' },
     createElement('style', null, LIST_STYLES),
+    createElement('div', { className: 'hp-list-context', role: 'region', 'aria-label': '工作项上下文', tabIndex: 0 },
     createElement('h2', { tabIndex: headingTabIndex }, view.workspaceName),
     createElement('p', { className: 'hp-list-meta' }, '规划来源：', createElement(SourceBadge, { name: view.planningSourceName }),
       ...(view.mappingSourceText === undefined ? [] : ['；', view.mappingSourceText]),
@@ -74,6 +77,6 @@ export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnno
     view.readOnly ? createElement('p', null, '只读：规划来源仅允许读取，此处展示规划内容。') : null,
     view.degraded ? createElement('p', null, '读取能力降级：显示的是保守的最后已知值。') : null,
     createElement('div', { role: 'status', 'aria-live': statusAnnouncement === undefined ? 'polite' : 'off', 'aria-atomic': 'true' }, view.statusText),
-    statusAnnouncement === undefined ? null : createElement('span', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true', style: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' } }, statusAnnouncement),
-    createElement('div', { 'aria-busy': busy }, bodyOf(view, navigation)))
+    statusAnnouncement === undefined ? null : createElement('span', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true', style: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' } }, statusAnnouncement)),
+    createElement('div', { 'aria-busy': busy, className: 'hp-list-body' }, bodyOf(view, navigation)))
 }

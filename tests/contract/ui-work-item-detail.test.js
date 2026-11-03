@@ -197,12 +197,12 @@ test('事件回调机械判据：Escape 只有 cancel 单次关闭；Tab 接受 
   }
 })
 
-test('旧列表回归：没有 navigation 时列表输出完全不变，标题不是 anchor、也没有 href', () => {
+test('独立列表：没有 navigation 时安全标题使用原生全文披露，没有 anchor 或 href', () => {
   const { listView } = views([wire('ent-aa', { content: { title: 'VISIBLE-TITLE' } })])
   const plain = renderToStaticMarkup(createElement(ui.WorkItemListPage, { view: listView }))
   assert.equal(renderToStaticMarkup(createElement(ui.WorkItemListPage, { view: listView, navigation: undefined })), plain)
   assert.doesNotMatch(plain, /<a[ >]|href=/)
-  assert.match(plain, /<th scope="row"[^>]*>VISIBLE-TITLE<\/th>/)
+  assert.match(plain, /<th scope="row"[^>]*><details><summary[^>]*>VISIBLE-TITLE<\/summary><\/details><\/th>/)
 })
 
 

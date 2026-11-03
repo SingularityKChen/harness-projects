@@ -140,7 +140,7 @@ const page = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><met
 /* Host token 的本地主题输入，非安装 Host。font query 以百分比提供等效文字放大。 */
 :root { --dsw-focus-ring-color:#4176e6; --dsw-focus-ring-width:2px; --dsw-alias-state-business-primary:#4176e6; color-scheme:light; color:#20242c; background:#fff; font:15px/1.5 system-ui,sans-serif }
 :root[data-theme=dark] { --dsw-focus-ring-color:#7aaaff; --dsw-alias-state-business-primary:#7aaaff; color-scheme:dark; color:#e3e5eb; background:#191b20 }
-html,body { margin:0; padding:0; min-width:0 } #app { min-width:0; max-width:100% }
+html,body { margin:0; padding:0; min-width:0 } #app { min-width:0; max-width:100%; height:100dvh; display:flex; flex-direction:column }
 </style></head><body><div id="app"></div>
 <script src="/react.js"></script><script src="/jsx-runtime.js"></script><script src="/react-dom.js"></script>
 <script>const params = new URLSearchParams(location.search);document.documentElement.dataset.theme=params.get('theme')==='dark'?'dark':'light'; const font=Number(params.get('font'));if([200,400].includes(font))document.documentElement.style.fontSize=(15*font/100)+'px';window.require=(id)=>{if(id==='react')return React;if(id==='react/jsx-runtime')return window.ReactJSX;throw Error(id)};var module={exports:{}};var exports=module.exports</script>
