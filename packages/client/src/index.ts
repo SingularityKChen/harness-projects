@@ -22,3 +22,4 @@ export * from './planning-mapping.ts'
 export * from './planning-refresh.ts'
 
 export * from './create-change-request.ts'
+export * from './issue-closing-links-reader.ts'
