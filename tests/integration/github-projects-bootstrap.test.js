@@ -177,12 +177,12 @@ test('#133：录制字段经两种 Storage 到达真实列表 HTML；未映射�
   }
   for (const [label, makeStorage] of [['替身 Storage', createFakeStorage], ['SQLite Storage', () => createSqliteStorage(':memory:')]]) {
     const { core } = await assemble(makeStorage(), undefined, { statusPolicy: StatusPolicy.HostAuthoritative, planningFieldMapping })
-    // 单元格顺序：内容身份、规划状态、迭代、目标日期、工程提示、来源、新鲜度。
-    assert.deepEqual((await listRow(core, ALPHA)).cells.slice(1, 4), ['待办', '—', '—'], `${label}：映射的 Todo 显示规范状态`)
+    // 默认单元格顺序：规划状态、迭代、目标日期、工程提示。
+    assert.deepEqual((await listRow(core, ALPHA)).cells.slice(0, 3), ['待办', '—', '—'], `${label}：映射的 Todo 显示规范状态`)
     const before = await listRow(core, WITH_FIELDS)
-    assert.deepEqual(before.cells.slice(1, 4), ['In Progress（未映射）', 'E1 Sprint 1', '2026-09-24'], `${label}：未映射只显示原生名，迭代 title 与目标日期到达 HTML`)
+    assert.deepEqual(before.cells.slice(0, 3), ['In Progress（未映射）', 'E1 Sprint 1', '2026-09-24'], `${label}：未映射只显示原生名，迭代 title 与目标日期到达 HTML`)
     assert.equal((await core.commands.applyPlanningStatus({ entityId: before.entityId, status: 'blocked' })).wrote, true)
-    assert.deepEqual((await listRow(core, WITH_FIELDS)).cells.slice(1, 4), ['已阻塞', 'E1 Sprint 1', '2026-09-24'], `${label}：列表必须跟随 Host 的权威写入`)
+    assert.deepEqual((await listRow(core, WITH_FIELDS)).cells.slice(0, 3), ['已阻塞', 'E1 Sprint 1', '2026-09-24'], `${label}：列表必须跟随 Host 的权威写入`)
   }
 })
 

@@ -17,7 +17,7 @@ import { WEB_ENTRY } from './composed-workspace-browser.mjs'
 import { AccessLevel, providerErr, providerError } from '@harness-projects/capabilities'
 export async function createExecutionFixture({ seed } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'execution-drawer-')), dataPath = path.join(root, 'workspace.sqlite')
-  const make = (options) => { const p = createFakeProviders(options); if (seed === 'read') p.planning.addItem(p.planning.state.projects[0].ref, 'draft', '规划项 draft-1', 'draft-1 正文占位'); return p }
+  const make = (options) => { const p = createFakeProviders(options); if (seed === 'query') for (let i=0;i<120;i++) p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Query '+String(i).padStart(3,'0'), 'Safe query body'); if (seed === 'read') p.planning.addItem(p.planning.state.projects[0].ref, 'draft', '规划项 draft-1', 'draft-1 正文占位'); return p }
   const mounted = [], byDomain = {}, providers = make(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: { projectNodeId: { kind: 'string', required: false, pattern: '.+', maxLength: 100 } }, create: async ({ binding }) => { const provider = make({ [binding.domain]: { bindingId: binding.id } })[binding.domain]; byDomain[binding.domain] = provider; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
   const workspaceId = '00000000-0000-4000-8000-000000000282'
   const storage = createSqliteStorage(dataPath, hostStoragePolicy(catalog))
@@ -32,9 +32,9 @@ export async function createExecutionFixture({ seed } = {}) {
     const core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture' }, providers, storage })
     await storage.putBindingConfiguration({ ref: { workspaceId, bindingId: providers.planning.bindingId, domain: 'planning' }, configuration: { projectNodeId: providers.planning.state.projects[0].ref.externalId } })
     itemId = (await core.queries.listPlanningItems()).find((item) => item.content.title === '规划项 issue-1').entityId
-    await core.commands.startWork({ workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
+    if (seed !== 'query') { await core.commands.startWork({ workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
     const id = contextIdFor(workspaceId, itemId, 'repo-alpha'); runId = runIdFor(id)
-    await storage.putExecutionRun({ ...(await storage.getExecutionRun(runId)), fallback: true })
+    await storage.putExecutionRun({ ...(await storage.getExecutionRun(runId)), fallback: true }) }
   }
   await rebuild()
   return { dataPath, workspaceId, itemId, runId, storage, get host() { return host }, get installed() { return installed }, rebuild, mounted, byDomain, close: async () => { await installed.dispose(); await host.dispose(); storage.close(); await rm(root, { recursive: true, force: true }) } }
@@ -100,6 +100,7 @@ export async function startExecutionServer(options) {
     }
   }
   wrapProviders()
+  for (const [domain, methods] of Object.entries({planning:['createIssueWorkItem','createDraftItem','updatePlanningFields'],development:['createBranch','createWorktree'],execution:['startRun']})) for (const method of methods) { const provider=h.byDomain[domain];if(typeof provider?.[method] !== 'function') continue;const run=provider[method].bind(provider);provider[method]=(...args)=>{calls['write:'+domain+'.'+method]=(calls['write:'+domain+'.'+method]??0)+1;return run(...args)} }
   const { build } = createRequire(path.join(repoRoot, 'apps/harness-plugin/package.json'))('esbuild')
   const bundle = await build({ stdin: { contents: ENTRY, resolveDir: repoRoot }, absWorkingDir: repoRoot, platform: 'browser', bundle: true, format: 'cjs', external: ['react'], write: false, metafile: true })
   const vendor = async (id, file) => readFile(path.join(path.dirname(uiRequire.resolve(id)), 'umd', file), 'utf8')

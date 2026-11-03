@@ -39,7 +39,7 @@ const clickOf = (element) => {
     walk(node.props?.children ?? null)
   }
   const internals = uiRequire('react').__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED, previous = internals.ReactCurrentDispatcher.current
-  internals.ReactCurrentDispatcher.current = { useState: value => [value, () => undefined], useRef: value => ({ current: value }), useEffect: () => undefined }
+  internals.ReactCurrentDispatcher.current = { useState: value => [value, () => undefined], useRef: value => ({ current:value }), useEffect: () => undefined }
   try { walk(element) } finally { internals.ReactCurrentDispatcher.current = previous }
   return found
 }

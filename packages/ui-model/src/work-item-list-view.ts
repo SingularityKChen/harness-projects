@@ -168,7 +168,7 @@ export function deriveWorkItemListView(input: WorkItemListReadInput): WorkItemLi
   const partial = stale && rows.some((row) => row.kind === 'item') && rows.every((row) => row.kind === 'redacted' || !row.stale)
   const statusText = refreshing ? '正在刷新，当前显示的是最后已知值'
     : partial ? '部分条目尚未确认，已显示的条目是当前值'
-    : stale ? '当前结果尚未确认，最后已知值不是当前值' : `已读取当前快照，共 ${rows.length} 项`
+    : stale ? '当前结果尚未确认，最后已知值不是当前值' : `已读取当前快照，共 ${rows.filter(row => row.kind === 'item').length} 项可读条目`
   return {
     ...shell, ...flags, statusText,
     body: {

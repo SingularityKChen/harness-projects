@@ -5,6 +5,12 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { chromium } from 'playwright'
 import { startTableGeometryServer } from '../fixtures/table-geometry-browser.mjs'
 
+async function exposeIdentity(page) {
+  if (!await page.locator('.hp-table-controls').count()) return
+  const menu=page.getByText('选择显示列',{exact:true});await menu.click()
+  await page.getByRole('checkbox',{name:'内容身份',exact:true}).check();await menu.click()
+  await page.locator('[data-workspace-setup]').evaluate(el=>{el.scrollTop=el.scrollHeight})
+}
 async function scene(t,run,{width=1440,height=900,query=''}={}) {
   const server=await startTableGeometryServer()
   let browser,closing
@@ -15,7 +21,7 @@ async function scene(t,run,{width=1440,height=900,query=''}={}) {
     const page=await browser.newPage({viewport:{width,height},hasTouch:true});page.setDefaultTimeout(5000)
     const errors=[];page.on('pageerror',e=>errors.push(e.message))
     await page.route('**/*',route=>new URL(route.request().url()).origin===server.url?route.continue():route.abort())
-    await page.goto(server.url+'/?'+query);await page.locator('tbody tr').last().waitFor()
+    await page.goto(server.url+'/?'+query);await page.locator('tbody tr').last().waitFor();await exposeIdentity(page)
     await run(page);assert.deepEqual(errors,[])
   } finally {await close()}
 }
@@ -62,12 +68,12 @@ test('pointer changes actual geometry; cancel, capture loss and unmount have det
     assert.equal(await width(page),240,'secondary pointer ignored')
     await control.dispatchEvent('pointerdown',{pointerId:3,isPrimary:true,button:2,clientX:0});await control.dispatchEvent('pointermove',{pointerId:3,isPrimary:true,clientX:999})
     assert.equal(await width(page),240,'non-left pointer ignored')
-    await drag(page,control,-50);await page.evaluate(()=>window.tableFixture.unmount());await page.mouse.up();await page.evaluate(()=>window.tableFixture.mount())
+    await drag(page,control,-50);await page.evaluate(()=>window.tableFixture.unmount());await page.mouse.up();await page.evaluate(()=>window.tableFixture.mount());await page.locator('tbody tr').last().waitFor();await exposeIdentity(page)
     await handle(page).waitFor();assert.equal(await width(page),104,'unmount clears active session')
     assert.equal(await page.locator('.hp-resizing').count(),0)
     const fresh=handle(page);await drag(page,fresh,50);await page.getByRole('button',{name:'重置列宽',exact:true}).evaluate(el=>el.click());await page.mouse.up()
     assert.equal(await width(page),104);assert.equal(await page.locator('.hp-resizing').count(),0,'reset terminates captured resize')
-    await drag(page,handle(page),50);await page.evaluate(()=>window.tableFixture.scope('ws-1','bind-2'));await page.mouse.up()
+    await drag(page,handle(page),50);await page.evaluate(()=>window.tableFixture.scope('ws-1','bind-2'));await exposeIdentity(page);await page.mouse.up()
     assert.equal(await width(page),104);assert.equal(await page.locator('.hp-resizing').count(),0,'scope change terminates captured resize')
   })
 })
@@ -81,11 +87,11 @@ test('keyboard and reset share bounds; same scope refresh preserves widths and w
     await page.keyboard.press('End');assert.equal(await width(page),240);assert.equal(await control.getAttribute('aria-valuenow'),'240')
     await page.keyboard.press('ArrowRight');assert.equal(await width(page),240)
     await page.getByRole('button',{name:'刷新规划',exact:true}).click();assert.equal(await width(page),240,'same workspace refresh retains local width')
-    await page.evaluate(()=>window.tableFixture.scope('ws-1','bind-2'));await page.waitForFunction(()=>document.querySelector('thead th:nth-child(2)').getBoundingClientRect().width===104)
-    await control.focus();await page.keyboard.press('End');await page.evaluate(()=>window.tableFixture.scope('ws-2','bind-2'))
+    await page.evaluate(()=>window.tableFixture.scope('ws-1','bind-2'));await exposeIdentity(page);await page.waitForFunction(()=>document.querySelector('thead th:nth-child(2)').getBoundingClientRect().width===104)
+    await control.focus();await page.keyboard.press('End');await page.evaluate(()=>window.tableFixture.scope('ws-2','bind-2'));await exposeIdentity(page)
     await page.waitForFunction(()=>document.querySelector('thead th:nth-child(2)').getBoundingClientRect().width===104)
     await control.focus();await page.keyboard.press('End')
-    await page.evaluate(()=>window.tableFixture.scope('ws-1','bind-1'));await page.waitForFunction(()=>document.querySelector('thead th:nth-child(2)').getBoundingClientRect().width===104)
+    await page.evaluate(()=>window.tableFixture.scope('ws-1','bind-1'));await exposeIdentity(page);await page.waitForFunction(()=>document.querySelector('thead th:nth-child(2)').getBoundingClientRect().width===104)
     await control.focus();await page.keyboard.press('End')
     await page.getByRole('button',{name:'重置列宽',exact:true}).click();assert.equal(await width(page),104)
     await page.getByRole('button',{name:'重置列宽',exact:true}).click();assert.equal(await width(page),104,'reset is idempotent')
