@@ -156,7 +156,7 @@ test('current source observation follows matched read capability and degradation
   }
 })
 
-import { wire } from '../fixtures/work-item-wire.mjs'
+import { wire, redacted } from '../fixtures/work-item-wire.mjs'
 test('list announcer clears protected count on unreadable scope and does not replay count on availability recovery', async t => {
   const f = fixture(t), slots = []; let cursor = 0, reading = { ...f.read, capabilities: [{ key: 'planning.item.read', access: 'available' }] }
   const source = { subscribe: () => () => {}, getSnapshot: () => reading }, cell = make => slots[cursor++] ??= make()
@@ -178,6 +178,8 @@ test('list announcer clears protected count on unreadable scope and does not rep
   }
   f.read.store.applyBaseline({ revision: 2, entities: [wire('ent-status'), wire('ent-status-2')], source: { revision: 2, freshness: 'fresh', authority: 'provider' } }); reading = { ...reading }
   assert.equal(live(render()), '已读取快照，共 2 项')
+  f.read.store.applyBaseline({ revision:3, entities:[wire('ent-status'),wire('ent-status-2'),redacted()], source:{revision:3,freshness:'fresh',authority:'provider'} });reading={...reading}
+  assert.equal(live(render()), '已读取快照，共 2 项', 'redacted rows never enter App count announcement')
   reading = { ...reading, planningSource: { bindingId: 'new-binding', name: 'New source' } }; assert.equal(live(render()), '', 'same-workspace source switch clears old count announcement')
 })
 

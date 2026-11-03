@@ -106,18 +106,17 @@ test('真 empty：只有收到的 revision 0 空 baseline；同 store 的 pendin
 })
 
 test('内容：原生 table 语义、稳定状态区在 busy 容器外、规划状态与工程提示分列、固定时刻与缺失时间', () => {
-  const columns = [...H.content.matchAll(/<span class="hp-column-label">([^<]*)<\/span>/g)].map((match) => match[1])
-  assert.deepEqual(columns, ['工作项', '内容身份', '规划状态', '迭代', '目标日期', '工程提示', '来源', '新鲜度'])
+  const columns = [...H.content.matchAll(/<span class="hp-column-label">(?:<button[^>]*>([^<]*)<\/button>|([^<]*))<\/span>/g)].map((match) => match[1] ?? match[2])
+  assert.deepEqual(columns, ['工作项', '规划状态', '迭代', '目标日期', '工程提示'])
   assert.match(H.content, /<caption>[^<]+<\/caption>/)
   assert.match(H.content, /<th scope="row"[^>]*><details><summary[^>]*>Visible A<\/summary><\/details><\/th>/)
-  const [, visible, hidden, long] = cells(H.content)
-  assert.deepEqual(visible, ['Visible A', 'Issue', '进行中', 'E1 Sprint 1', '2026-09-24', 'CI 失败', '来源一（提供方权威）', '当前值'], '已映射：显示规范状态，迭代 title 与日期原样')
-  assert.deepEqual(hidden, ['内容不可见', '—', '—', '—', '—', '—', '—', '—'])
-  assert.deepEqual(long.slice(0, 5), [LONG, 'PR', 'Done（未映射）', '—', '—'], '未映射：只显示原生名，不归一成「已完成」；缺值占位')
-  assert.equal(long[6], `${LONG}（提供方权威）`)
+  const [, visible, long, hidden] = cells(H.content)
+  assert.deepEqual(visible, ['Visible A', '进行中', 'E1 Sprint 1', '2026-09-24', 'CI 失败'], '已映射：显示规范状态，迭代 title 与日期原样')
+  assert.deepEqual(hidden, ['内容不可见', '—', '—', '—', '—'])
+  assert.deepEqual(long.slice(0, 4), [LONG, 'Done（未映射）', '—', '—'], '未映射：只显示原生名，不归一成「已完成」；缺值占位')
   const [, unmapped] = cells(render({ phase: 'received', refreshing: false, entities: [wire('ent-dd', { planningStatus: 'unknown' })] }))
-  assert.deepEqual(unmapped.slice(2, 5), ['未知', '—', '—'], '无映射的默认路径：unknown 且没有展示事实时显示「未知」')
-  assert.match(H.content, /<div role="status" aria-live="polite" aria-atomic="true">已读取当前快照，共 3 项<\/div><\/div><div aria-busy="false"[^>]*>/)
+  assert.deepEqual(unmapped.slice(1, 4), ['未知', '—', '—'], '无映射的默认路径：unknown 且没有展示事实时显示「未知」')
+  assert.match(H.content, /<div role="status" aria-live="polite" aria-atomic="true">已读取当前快照，共 2 项可读条目<\/div>/)
   assert.match(H.content, /规划来源：(<[^>]+>)?规划源.*<time dateTime="2026-10-01T08:00:00.000Z">2026-10-01T08:00:00.000Z<\/time>/)
   const never = render({ ...SCENARIOS.content, lastUpdatedAt: null })
   assert.match(never, /来源：(<[^>]+>)?规划源.*最后已知值（最后读取时间未知）/)
@@ -132,13 +131,12 @@ test('长迭代与多条工程事实：完整文字各在原始列，不截断�
     planningFields: { iterationTitle: 'Iteration 2026 Platform Integration', targetDate: '2026-11-01' },
     derived: ['ci_failing', 'execution_failed'],
   })] })
-  assert.deepEqual(cells(html)[1].slice(3, 7), ['Iteration 2026 Platform Integration', '2026-11-01', 'CI 失败、执行失败', '来源一（提供方权威）'])
+  assert.deepEqual(cells(html)[1].slice(2, 5), ['Iteration 2026 Platform Integration', '2026-11-01', 'CI 失败、执行失败'])
 })
 
 test('陈旧 / 刷新 / 降级 / 缺口：保行；状态区只宣告一次，横幅只带来源与固定时刻；页首与行都不冒充当前值', () => {
   const status = (html) => html.match(/<div role="status"[^>]*>(.*?)<\/div>/)[1]
   const banner = /来源：(<[^>]+>)?规划源.*最后已知值（最后读取：<time dateTime="2026-10-01T08:00:00.000Z">/
-  const freshness = (name) => cells(H[name]).slice(1).map((row) => row[7])
   for (const name of ['stale', 'degraded', 'gap', 'offlineKept', 'staleEmpty']) assert.equal(status(H[name]), '当前结果尚未确认，最后已知值不是当前值', name)
   for (const name of ['stale', 'degraded', 'gap', 'offlineKept', 'refreshing']) assert.equal(H[name].match(/尚未确认|正在刷新/g).length, 1, `${name} 只宣告一次`)
   for (const name of ['stale', 'degraded', 'gap', 'offlineKept', 'refreshing', 'staleEmpty', 'refreshingEmpty']) {
@@ -147,8 +145,6 @@ test('陈旧 / 刷新 / 降级 / 缺口：保行；状态区只宣告一次，�
   }
   assert.equal(status(H.refreshing), '正在刷新，当前显示的是最后已知值')
   assert.doesNotMatch(H.refreshing, /当前值/, '刷新页没有任何“当前值”')
-  assert.deepEqual(freshness('stale'), ['当前值', '—', '最后已知值'], '只有自身陈旧的行标陈旧')
-  for (const name of ['degraded', 'gap', 'offlineKept', 'refreshing']) assert.deepEqual(freshness(name), ['最后已知值', '—', '最后已知值'], name)
   assert.match(H.refreshing, /aria-busy="true"/)
   assert.match(H.stale, /aria-busy="false"/)
 })
@@ -157,7 +153,6 @@ test('部分读取（#382）：状态区说部分条目未确认；没有「最�
   assert.equal(H.partial.match(/<div role="status"[^>]*>(.*?)<\/div>/)[1], '部分条目尚未确认，已显示的条目是当前值')
   assert.doesNotMatch(H.partial, /最后已知值/, '可见行都已确认：横幅与行都不说最后已知值')
   assert.match(H.partial, /<p[^>]*>规划来源：<span[^>]*>规划源<\/span>；<span[^>]*>当前值（最后读取：<time dateTime="2026-10-01T08:00:00.000Z">/, '确认时刻仍在页首给出')
-  assert.deepEqual(cells(H.partial).slice(1).map((row) => row[7]), ['当前值', '—', '当前值'])
 })
 
 test('独立标记只在为真的状态出现：degraded 与只读只在可读内容旁，loading 不带降级，不可用页都不带', () => {
@@ -170,13 +165,13 @@ test('独立标记只在为真的状态出现：degraded 与只读只在可读�
 
 test('版式：原生表格在独立滚动区；长文字有换行规则、单元格间距与 Host 焦点 token', () => {
   assert.match(H.content, /<div role="region" aria-label="[^"]+" tabindex="0" class="hp-list-scroll"><table/)
-  assert.match(H.content, /<colgroup>(<col[^>]+\/>){8}<\/colgroup>/)
+  assert.match(H.content, /<colgroup>(<col[^>]+\/>){5}<\/colgroup>/)
   assert.match(H.content, /overflow-wrap:anywhere/)
   assert.match(H.content, /padding:\.75rem/)
   assert.match(H.content, /:focus-visible/)
   assert.match(H.content, /var\(--dsw-focus-ring-width,2px\)/)
   assert.match(H.content, /var\(--dsw-focus-ring-color,var\(--dsw-alias-state-business-primary,currentColor\)\)/)
-  assert.equal((H.content.match(/class="hp-list-wrap"/g) ?? []).length, 9, '每行标题、迭代与来源都可换行，redacted 占位仍在原列')
+  assert.equal((H.content.match(/class="hp-list-wrap"/g) ?? []).length, 6, '每行标题与迭代都可换行，redacted 占位仍在原列')
 })
 
 test('不可用：权限 / 不支持 / 未知 / 离线 / 错误说明各不相同，不借缓存，没有行；每类都写出还能做什么，读门已观测不可用不说尚未确认', () => {
@@ -198,13 +193,13 @@ test('不可用：权限 / 不支持 / 未知 / 离线 / 错误说明各不相�
   }
 })
 
-test('泄漏面：全部场景的完整 HTML 不含被遮蔽字段与内部标识，只有本地列宽重置动作，可见行正控存在', () => {
+test('泄漏面：全部场景的完整 HTML 不含被遮蔽字段与内部标识，只有局部查询与排序动作，可见行正控存在', () => {
   for (const [name, html] of Object.entries(H)) {
     for (const canary of CANARIES) assert.ok(!html.includes(canary), `${name}: ${canary}`)
   }
   for (const name of ['content', 'stale', 'refreshing', 'degraded', 'readOnly', 'offlineKept']) assert.ok(H[name].includes('Visible A'), name)
-  for (const html of Object.values(H)) assert.equal((html.match(/<style>/g) ?? []).length, 1, '仅页面自有局部样式，不插入用户样式')
-  assert.doesNotMatch(Object.values(H).join('').replace(/<button type="button">重置列宽<\/button>/g, ''), /<(a|button|input|script)\b|href=|data-|\bid=|\bon[a-z]+=|ent-|bind-/)
+  for (const html of Object.values(H)) assert.equal((html.match(/<style>/g) ?? []).length, html.includes('class="hp-table-controls"') ? 2 : 1, '仅页面与工具栏的固定局部样式')
+  assert.doesNotMatch(Object.values(H).join('').replace(/<button type="button">重置列宽<\/button>/g, '').replace(/<div class="hp-table-controls"[^]*?<\/div>/g, '').replace(/<button type="button" class="hp-column-sort"[^>]*>[^<]*<\/button>/g, ''), /<(a|button|input|script)\b|href=|data-|\bid=|\bon[a-z]+=|ent-|bind-/)
 })
 
 test('转义：恶意来源名、提示、工作区名按文字转义，不产生标签', () => {

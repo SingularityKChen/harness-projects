@@ -41,7 +41,9 @@ test('vm SSR 正控：产物在隔离 vm 里执行，标题非空、来源与派
   const { renderStatic } = sandbox.module.exports
   const html = renderStatic('content')
   for (const expected of ['<h2', 'Fixture 详情标题', '正文-ent-aa', '来源一', '派生提示：']) assert.ok(html.includes(expected), expected)
-  for (const forbidden of ['<input', '<select', '<textarea', '编辑', 'Saved', 'StartWork']) assert.ok(!html.includes(forbidden), forbidden)
+  const detail = html.match(/<dialog[^]*<\/dialog>/)?.[0] ?? assert.fail('detail missing')
+  for (const forbidden of ['<input', '<select', '<textarea', '编辑', 'Saved', 'StartWork']) assert.ok(!detail.includes(forbidden), forbidden)
+  for (const forbidden of ['编辑', 'Saved', 'StartWork']) assert.ok(!html.includes(forbidden), forbidden)
   assert.ok(html.includes('<a href="/projects/ws-1/items/ent-aa">Fixture 详情标题</a>'), 'bundle 内组合页带 navigation 时 visible 行生成 canonical href；无需转义的 id 分不出是否经 codec，codec 判别在 canonical-open-close-idempotent')
 
   assert.match(renderStatic('redacted'), /<dialog[^]*<p>内容不可见<\/p>/, 'redacted 场景的详情 dialog 处于遮蔽态：fixture 的遮蔽条目与场景目标脱钩（退化为 missing）时不得空绿')

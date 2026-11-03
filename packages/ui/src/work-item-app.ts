@@ -59,7 +59,7 @@ function screenOf(read: WorkspaceRead | undefined, path: string | undefined, set
   const listView = deriveWorkItemListView(input)
   // 只公告连续可读期间的安全数量变化；权限未知/不可用立即清空，不把旧数量留在 AX tree。
   if (countAnnouncement) {
-    const before = countAnnouncement.current, count = listView.body.kind === 'content' ? listView.body.rows.length : undefined
+    const before = countAnnouncement.current, count = listView.body.kind === 'content' ? listView.body.rows.filter(row => row.kind === 'item').length : undefined
     countAnnouncement.current = count === undefined ? { readable: false, text: '' } : { readable: true, count,
       text: !before.readable ? '' : count === before.count ? before.text : `已读取快照，共 ${count} 项` }
   }

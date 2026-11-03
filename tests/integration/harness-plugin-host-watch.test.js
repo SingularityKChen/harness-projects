@@ -110,7 +110,7 @@ test('host watch：载体断开的同一回调内整表 stale 且页面出现重
   const entry = h.workspace.getSnapshot().store.get(first.entityId)
   const online = h.render()
   const items = (online.match(/<a href=/g) ?? []).length
-  assert.deepEqual([items > 0, online.includes(NOTICE), badges(online, '当前值'), badges(online, '最后已知值')], [true, false, items, 0], '在线：每个条目行都是当前值，没有重连说明')
+  assert.deepEqual([items > 0, online.includes(NOTICE), badges(online, '当前值'), badges(online, '最后已知值')], [true, false, 0, 0], '在线：默认隐藏新鲜度可选列，没有重连说明')
   // #383：规划来源名经 snapshot 头的 planningSource 到达真实插件页面（项目标题，不是实现键或 binding id）。
   assert.match(online, /规划来源：<span>项目 Alpha<\/span>/)
   h.connection.setOnline(false)
@@ -119,13 +119,13 @@ test('host watch：载体断开的同一回调内整表 stale 且页面出现重
   assert.deepEqual(h.lost[0], { ...before, connected: false, current: 0, reason: DISCONNECTED })
   const [stale] = h.losses
   assert.ok(stale.includes(NOTICE), '同一回调内页面已读到断开：有重连说明')
-  assert.deepEqual([badges(stale, '当前值'), badges(stale, '最后已知值')], [0, items], '每个条目行都标最后已知值')
+  assert.deepEqual([badges(stale, '当前值'), badges(stale, '最后已知值')], [0, 0], '默认列不渲染逐行新鲜度；show后的真实badge由browser验收')
   h.connection.setOnline(true)
   await until(() => h.baselineAt(2), '重连后的 baseline')
   const after = h.workspace.getSnapshot()
   assert.deepEqual([h.streams.length, h.carrier.opened, after.store.get(first.entityId) === entry, after.store.isCurrent(first.entityId), after.connection.connected], [1, 2, true, true, true])
   const back = h.render()
-  assert.deepEqual([back.includes(NOTICE), badges(back, '当前值')], [false, items], '重连后说明消失，行回到当前值')
+  assert.deepEqual([back.includes(NOTICE), badges(back, '当前值')], [false, 0], '重连后说明消失，新鲜度列仍默认隐藏')
   for (const generation of [3, 4]) { // 在线连续两次载体失败：开场 baseline 被接受会清零重试计数，所以流不终止
     h.carrier.break()
     await until(() => h.baselineAt(generation), `第 ${generation} 代 baseline`)

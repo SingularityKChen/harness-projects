@@ -33,6 +33,7 @@
 |---|---|
 | [2026-11-03-safe-markdown](exec-plan/completed/2026-11-03-safe-markdown.md) | 安全GFM正文、无自动媒体与深层输入保护（#505） |
 | [2026-11-03-detail-expand](exec-plan/completed/2026-11-03-detail-expand.md) | 同实例详情展开、还原与当前阅读进度（#506） |
+| [2026-11-03-table-query](exec-plan/completed/2026-11-03-table-query.md) | 安全局部查询/排序/显示；实际Host光暗五宽与reset独立性接受，native200%边界明确保留（#516） |
 | [2026-11-03-table-resize](exec-plan/completed/2026-11-03-table-resize.md) | 可恢复列宽调整；实际安装键盘/刷新保持配置接受，pointer与矩阵保留工程证据（#515） |
 | [2026-11-03-table-geometry](exec-plan/completed/2026-11-03-table-geometry.md) | 稳定列几何与局部双轴滚动；实际安装五宽/标题focus接受，主题缩放保留工程证据边界（#514） |
 | [2026-11-02-setup-node-v7-contracts](exec-plan/completed/2026-11-02-setup-node-v7-contracts.md) | setup-node v7升级、精确安全契约与新Browser调用点对齐（#400） |

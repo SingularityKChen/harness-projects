@@ -63,7 +63,7 @@ test('完整路径：meta 触达 derive → page view → renderer → 纯值 le
   const html = renderToStaticMarkup(React.createElement(Page, props))
   assert.match(html, /<h2>浏览器工作区<\/h2>/)
   assert.match(html, /<th scope="row"[^>]*><details><summary[^>]*>Browser Visible<\/summary><\/details><\/th>/)
-  assert.match(html, /来源一（提供方权威）/)
+  assert.doesNotMatch(html, /来源一（提供方权威）/, '来源为默认隐藏的可选列')
 })
 
 test('负控：入口经 domain 根出口取运行时值时构建失败（node:crypto 不可解析），不能靠外置 node:* 掩盖', async () => {

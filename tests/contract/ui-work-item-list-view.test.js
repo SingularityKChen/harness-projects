@@ -147,7 +147,7 @@ test('行新鲜度 = 行自身新鲜度 或 页面级保守降级：刷新 / Hos
   for (const view of unconfirmed) assert.deepEqual([view.statusText, view.body.partial], ['当前结果尚未确认，最后已知值不是当前值', undefined], '有未确认的可见行（整页降级、断网、冷启动）或没有可见行：仍是整表未确认')
   // D：没有表级原因时，隐藏行 freshness 同样不能控制整页文案。
   const hidden = (freshness) => received({ entities: [wire('e1'), wire('e2', { content: { contentKind: 'redacted' }, source: { freshness } })] }).statusText
-  assert.deepEqual([hidden('fresh'), hidden('degraded')], ['已读取当前快照，共 2 项', '已读取当前快照，共 2 项'])
+  assert.deepEqual([hidden('fresh'), hidden('degraded')], ['已读取当前快照，共 1 项可读条目', '已读取当前快照，共 1 项可读条目'])
 })
 
 test('read_only 与 degraded 是独立标记且只在为真的状态出现：degraded 保守算陈旧，不可用页都不带，loading 不带降级', () => {

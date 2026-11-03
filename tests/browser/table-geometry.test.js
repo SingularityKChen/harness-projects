@@ -6,6 +6,12 @@ import { chromium } from 'playwright'
 import { startTableGeometryServer } from '../fixtures/table-geometry-browser.mjs'
 
 // 删除局部高度、sticky 或标题窄宽夹紧，都会破坏这些实际 DOM 断言。
+async function allColumns(page) {
+  if (!await page.locator('.hp-table-controls').count()) return
+  const menu=page.getByText('选择显示列',{exact:true});await menu.click()
+  for (const name of ['内容身份','来源','新鲜度']) await page.getByRole('checkbox',{name,exact:true}).check()
+  await menu.click()
+}
 async function measure(page) {
   return page.evaluate(() => {
     const surface=document.querySelector('.hp-list-scroll'), box=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,bottom:r.bottom,right:r.right}}
@@ -30,7 +36,7 @@ test('bounded XY surface freezes header/title with shared column geometry across
     const evidence=[]
     for(const width of [320,640,1024,1200,1440]) for(const zoom of [false,true]) for(const dark of [false,true]) for(const height of [320,480,720]) {
       await page.setViewportSize({width,height})
-      await page.goto(url+'/?'+(zoom?'zoom&':'')+(dark?'dark':''));await page.locator('tbody tr').last().waitFor()
+      await page.goto(url+'/?'+(zoom?'zoom&':'')+(dark?'dark':''));await page.locator('tbody tr').last().waitFor();await allColumns(page)
       await page.locator('[data-workspace-setup]').evaluate(el=>{el.scrollTop=el.scrollHeight})
       const before=await measure(page), context=JSON.stringify({width,height,zoom,dark})
       assert.ok(before.surface.y>=0&&before.surface.bottom<=height+1,context+' scroll surface fits actual slot')
@@ -73,7 +79,7 @@ test('classic scrollbar gutter preserves narrow context and final title focus at
   await withPage(t,async(page,url)=>{
     await page.setViewportSize({width:320,height:320})
     for(const zoom of [false,true]) for(const dark of [false,true]) {
-      await page.goto(url+'/?'+(zoom?'zoom&':'')+(dark?'dark':''));await page.locator('tbody tr').last().waitFor()
+      await page.goto(url+'/?'+(zoom?'zoom&':'')+(dark?'dark':''));await page.locator('tbody tr').last().waitFor();await allColumns(page)
       await page.addStyleTag({content:'::-webkit-scrollbar {width:16px;height:16px}'})
       await page.locator('[data-workspace-setup]').evaluate(el=>{el.scrollTop=el.scrollHeight})
       await page.locator('.hp-list-scroll').evaluate(el=>{el.scrollTop=400;el.scrollLeft=400})
@@ -91,14 +97,14 @@ test('classic scrollbar gutter preserves narrow context and final title focus at
 })
 test('full title remains available through focus, navigation and standalone touch disclosure', async t => {
   await withPage(t,async(page,url)=>{
-    await page.setViewportSize({width:320,height:640});await page.goto(url);await page.locator('tbody tr').last().waitFor()
+    await page.setViewportSize({width:320,height:640});await page.goto(url);await page.locator('tbody tr').last().waitFor();await allColumns(page)
     const link=page.locator('tbody tr').first().getByRole('link'), name=await link.textContent()
     assert.ok(name.length>250);assert.match(await link.getAttribute('href'),/items\/item-0$/)
     await link.focus()
     assert.equal(await link.evaluate(el=>el.scrollHeight<=el.clientHeight+1),true,'focus exposes full title')
     await link.click();assert.equal(await page.getByRole('dialog').getByRole('heading',{name,exact:true}).count(),1)
     await page.keyboard.press('Escape');assert.equal(await link.evaluate(el=>el===document.activeElement),true)
-    await page.goto(url+'/?standalone');await page.locator('tbody tr').last().waitFor()
+    await page.goto(url+'/?standalone');await page.locator('tbody tr').last().waitFor();await allColumns(page)
     const summary=page.locator('tbody tr').first().locator('summary');await summary.tap()
     assert.equal(await summary.evaluate(el=>el.parentElement.open),true,'native disclosure opens by click/touch')
     assert.equal(await page.getByRole('columnheader').count(),8)
@@ -109,7 +115,7 @@ test('full title remains available through focus, navigation and standalone touc
 test('negative controls expose unbounded surface, lost frozen header and title consuming the narrow context', async t => {
   await withPage(t,async(page,url)=>{
     await page.setViewportSize({width:320,height:640})
-    const open=async()=>{await page.goto(url);await page.locator('tbody tr').last().waitFor()}
+    const open=async()=>{await page.goto(url);await page.locator('tbody tr').last().waitFor();await allColumns(page)}
     await open()
     await page.addStyleTag({content:'.hp-work-items .hp-list-scroll {flex:none!important;block-size:auto!important;max-block-size:none!important}'})
     const unbounded=await measure(page)

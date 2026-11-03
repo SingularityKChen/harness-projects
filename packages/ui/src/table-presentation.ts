@@ -31,6 +31,7 @@ export const TABLE_STYLES = `
 .hp-work-items summary { cursor:pointer }
 .hp-work-items a, .hp-work-items summary { scroll-margin-block:0; outline-offset:-2px }
 .hp-work-items td:last-child { font-size:.93em }
+.hp-work-items .hp-column-sort { display:block; min-block-size:44px; max-width:100%; padding:0; border:0; color:inherit; background:transparent; font:inherit; font-weight:inherit; text-align:start; white-space:normal; overflow-wrap:anywhere; cursor:pointer }
 .hp-work-items .hp-column-tools { display:flex; align-items:center; flex-wrap:wrap; gap:.5rem; margin-block:.5rem }
 .hp-work-items .hp-column-tools button { min-block-size:44px; padding:.4rem .7rem; color:inherit; background:Canvas; border:1px solid var(--hp-border,currentColor); border-radius:var(--hp-radius,.5rem); font:inherit; cursor:pointer }
 .hp-work-items .hp-column-tools > span { font-size:.85em }
