@@ -1,3 +1,4 @@
+import { jsxRuntimeScript } from './markdown-vm.mjs'
 /** 本地视觉输入：真实 WorkItemApp、client EntityStore 与 ui-model；不替代安装 Host。 */
 import './resolution-preflight.mjs'
 import { readFile } from 'node:fs/promises'
@@ -141,8 +142,8 @@ const page = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><met
 :root[data-theme=dark] { --dsw-focus-ring-color:#7aaaff; --dsw-alias-state-business-primary:#7aaaff; color-scheme:dark; color:#e3e5eb; background:#191b20 }
 html,body { margin:0; padding:0; min-width:0 } #app { min-width:0; max-width:100% }
 </style></head><body><div id="app"></div>
-<script src="/react.js"></script><script src="/react-dom.js"></script>
-<script>const params = new URLSearchParams(location.search);document.documentElement.dataset.theme=params.get('theme')==='dark'?'dark':'light'; const font=Number(params.get('font'));if([200,400].includes(font))document.documentElement.style.fontSize=(15*font/100)+'px';window.require=(id)=>{if(id==='react')return React;throw Error(id)};var module={exports:{}};var exports=module.exports</script>
+<script src="/react.js"></script><script src="/jsx-runtime.js"></script><script src="/react-dom.js"></script>
+<script>const params = new URLSearchParams(location.search);document.documentElement.dataset.theme=params.get('theme')==='dark'?'dark':'light'; const font=Number(params.get('font'));if([200,400].includes(font))document.documentElement.style.fontSize=(15*font/100)+'px';window.require=(id)=>{if(id==='react')return React;if(id==='react/jsx-runtime')return window.ReactJSX;throw Error(id)};var module={exports:{}};var exports=module.exports</script>
 <script src="/bundle.js"></script><script>
 const app=document.getElementById('app');const width=Number(params.get('rootWidth'));if(width>0)app.style.width=width+'px';
 module.exports.mount(app,params.get('scenario')||'content',params)
@@ -150,8 +151,8 @@ module.exports.mount(app,params.get('scenario')||'content',params)
 
 export async function startWorkspaceFrameServer(port = 0) {
   const vendor = (id, file) => readFile(path.join(path.dirname(uiRequire.resolve(id)), 'umd', file), 'utf8')
-  const [bundle, react, reactDOM] = await Promise.all([buildWorkspaceFrameBundle(), vendor('react', 'react.development.js'), vendor('react-dom/client', 'react-dom.development.js')])
-  const scripts = { '/react.js': react, '/react-dom.js': reactDOM, '/bundle.js': bundle.outputFiles[0].text }
+  const [bundle, react, reactDOM, jsxText] = await Promise.all([buildWorkspaceFrameBundle(), vendor('react', 'react.development.js'), vendor('react-dom/client', 'react-dom.development.js'), jsxRuntimeScript()])
+  const scripts = { '/jsx-runtime.js': jsxText, '/react.js': react, '/react-dom.js': reactDOM, '/bundle.js': bundle.outputFiles[0].text }
   const server = createServer((request, response) => {
     const route = new URL(request.url, 'http://fixture.invalid').pathname
     const script = scripts[route]

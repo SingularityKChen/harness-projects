@@ -1,6 +1,6 @@
 import '../fixtures/resolution-preflight.mjs'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
@@ -25,13 +25,8 @@ describe('plugin bundle evidence', () => {
     await mkdir(path.join(root, '.worktrees'), { recursive: true })
     fixture = await mkdtemp(path.join(root, '.worktrees/bundle-report-test-'))
     execFileSync('git', ['-C', root, 'worktree', 'add', '--detach', fixture, 'HEAD'], { stdio: 'pipe' })
-    await mkdir(path.join(fixture, 'node_modules/@harness-projects'), { recursive: true })
-    for (const name of await readdir(path.join(root, 'node_modules/@harness-projects'))) {
-      const target = await realpath(path.join(root, 'node_modules/@harness-projects', name))
-      await symlink(path.join(fixture, path.relative(root, target)), path.join(fixture, 'node_modules/@harness-projects', name))
-    }
-    await mkdir(path.join(fixture, 'apps/harness-plugin/node_modules'), { recursive: true })
-    await symlink(await realpath(path.join(root, 'apps/harness-plugin/node_modules/esbuild')), path.join(fixture, 'apps/harness-plugin/node_modules/esbuild'))
+    assert.equal(execFileSync('pnpm', ['--version'], { encoding: 'utf8' }).trim(), '10.28.2')
+    execFileSync('pnpm', ['install', '--offline', '--frozen-lockfile', '--ignore-scripts'], { cwd: fixture, stdio: 'pipe' })
     return fixture
   }
   after(() => { if (fixture) execFileSync('git', ['-C', root, 'worktree', 'remove', '--force', fixture], { stdio: 'pipe' }) })

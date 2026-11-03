@@ -13,6 +13,7 @@
  */
 
 import '../fixtures/resolution-preflight.mjs';
+import { markdownDocument } from '../fixtures/markdown-vm.mjs'
 
 import assert from 'node:assert/strict'
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile, symlink } from 'node:fs/promises'
@@ -125,13 +126,13 @@ async function evaluateClientBundle(clientFile, console = globalThis.console, { 
   const loadCalls = []
   const requested = []
   const window = { __ModuleLoader__: { load: (descriptor) => loadCalls.push(descriptor) } }
-  const context = vm.createContext({ window, console, crypto: globalThis.crypto, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout })
+  const context = vm.createContext({ window, console, document: markdownDocument, crypto: globalThis.crypto, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout })
   vm.runInContext(code, context, { filename: clientFile })
 
   const stubRequire = (id) => {
     requested.push(id)
     if (!CLIENT_BASELINE.includes(id)) throw new Error(`require("${id}") missed the module table`)
-    return id === 'react' ? react : {}
+    return id === 'react' ? react : id === 'react/jsx-runtime' ? uiRequire(id) : {}
   }
 
   assert.equal(loadCalls.length, 1, 'client bundle 必须恰好调用一次 window.__ModuleLoader__.load')

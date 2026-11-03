@@ -11,6 +11,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
+import { markdownDocument, markdownRequire, markdownDependencyInputs } from '../fixtures/markdown-vm.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 // 构建器与 React 各自从所属 manifest 解析：esbuild 来自插件壳，React / ReactDOM 来自 ui，测试与产物必须是同一个 React 副本。
@@ -48,12 +49,13 @@ test('完整路径：meta 触达 derive → page view → renderer → 纯值 le
   const [output] = Object.values(result.metafile.outputs)
   assert.deepEqual([...new Set(output.imports.filter((entry) => entry.external).map((entry) => entry.path))], ['react'])
   const inputs = Object.keys(result.metafile.inputs).filter((file) => file !== '<stdin>')
+  const dependencyInputs = await markdownDependencyInputs()
   const allowed = /^packages\/(domain|ui-model|ui)\/src\/(?!ids\.ts|identity\.ts)|^packages\/(capabilities\/src\/capability-keys|controller\/src\/keys|client\/src\/keys)\.ts$/
-  assert.ok(inputs.every((file) => allowed.test(file)), `输入必须落在这三个包内，外加能力 key 的三个纯值叶子（capabilities → controller → client）：${inputs}`)
+  assert.ok(inputs.every((file) => dependencyInputs.has(file) || allowed.test(file)), `输入必须落在这三个包内，外加能力 key 的三个纯值叶子（capabilities → controller → client）：${inputs}`)
   for (const file of ['ui-model/src/derive.ts', 'ui-model/src/work-item-list-view.ts', 'ui/src/work-item-list.ts', 'domain/src/browser-values.ts', 'capabilities/src/capability-keys.ts', 'client/src/keys.ts']) {
     assert.ok(inputs.includes(`packages/${file}`), file)
   }
-  const sandbox = { module: { exports: {} }, require: (id) => (id === 'react' ? React : assert.fail(`意外的 require：${id}`)) }
+  const sandbox = { module: { exports: {} }, require: markdownRequire, document: markdownDocument }
   vm.runInNewContext(result.outputFiles[0].text, sandbox)
   const { Page, deriveWorkItemList } = sandbox.module.exports
   const props = { read, metadata: { sourceNames: { 'bind-1': '来源一' } }, phase: 'received', refreshing: false }
@@ -75,7 +77,7 @@ test('框架 fixture 打包真实 app 和 store；状态、来源时刻、长事
   for (const file of ['packages/ui/src/work-item-app.ts', 'packages/ui/src/workspace-presentation.ts', 'packages/client/src/store.ts', 'packages/ui-model/src/work-item-list-view.ts']) {
     assert.ok(Object.keys(built.metafile.inputs).includes(file), file)
   }
-  const sandbox = { module: { exports: {} }, require: (id) => id === 'react' ? React : assert.fail(id) }
+  const sandbox = { module: { exports: {} }, require: markdownRequire, document: markdownDocument }
   vm.runInNewContext(built.outputFiles[0].text, sandbox)
   const out = (scenario) => renderToStaticMarkup(sandbox.module.exports.scene(scenario))
   for (const scenario of ['content', 'long', 'stale', 'offline', 'empty', 'loading', 'unresolved']) {

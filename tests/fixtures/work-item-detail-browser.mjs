@@ -1,3 +1,4 @@
+import { jsxRuntimeScript } from './markdown-vm.mjs'
 /** 浏览器 fixture（issue #130）：同源 HTTP 把两个 canonical pathname 交给同一入口，入口真实使用产品 History adapter、
  * 详情投影与组合页，bundle 只外置 react；静态渲染与浏览器走同一个 mount（固定路径 port + 只捕获 HTML 的 root），路由解析、scope 门与组合只有一处。导出 `buildBundle`/`startServer` 供契约测试；直接执行时打印地址并持续服务。 */
 import { readFile } from 'node:fs/promises'
@@ -90,10 +91,10 @@ body { margin:0 } #controls { padding:16px } #controls { display:flex; flex-wrap
 <div id="controls">${'content long empty loading offline redacted missing denied scoped'.split(' ')
   .map((name) => `<button type="button" data-scenario="${name}">${name}</button>`).join('')}</div>
 <output id="fixture-counts">Fixture refreshes=0 closes=0</output><div id="app"></div>
-<script src="/vendor/react.js"></script><script src="/vendor/react-dom-server.js"></script><script src="/vendor/react-dom-client.js"></script>
+<script src="/vendor/react.js"></script><script src="/jsx-runtime.js"></script><script src="/vendor/react-dom-server.js"></script><script src="/vendor/react-dom-client.js"></script>
 <script>// react-dom/client 与 react-dom 是同一份 UMD；它只装 window.ReactDOM，这里显式补上入口读取的别名。
 window.ReactDOMClient = window.ReactDOM
-window.require = (id) => { if (id === 'react') return window.React; throw new Error('unexpected require: ' + id) }
+window.require = (id) => { if (id === 'react') return window.React; if (id === 'react/jsx-runtime') return window.ReactJSX; throw new Error('unexpected require: ' + id) }
 var module = { exports: {} }; var exports = module.exports</script>
 <script src="/bundle.js"></script>
 <script>window.__fixture = module.exports.mount(document.getElementById('app'))
@@ -125,11 +126,11 @@ attach()</script>`
 /** 启动同源 HTTP 服务：两个 canonical pathname 与任意 `/projects/**` 都交给同一入口。 */
 export async function startServer() {
   const umd = (id, file) => readFile(path.join(path.dirname(uiRequire.resolve(id)), 'umd', file), 'utf8')
-  const [bundle, reactText, serverText, clientText] = await Promise.all([
+  const [bundle, reactText, serverText, clientText, jsxText] = await Promise.all([
     buildBundle().then((result) => result.outputFiles[0].text),
-    umd('react', 'react.development.js'), umd('react-dom/server', 'react-dom-server-legacy.browser.development.js'), umd('react-dom/client', 'react-dom.development.js'),
+    umd('react', 'react.development.js'), umd('react-dom/server', 'react-dom-server-legacy.browser.development.js'), umd('react-dom/client', 'react-dom.development.js'), jsxRuntimeScript(),
   ])
-  const served = { '/vendor/react.js': reactText, '/vendor/react-dom-server.js': serverText, '/vendor/react-dom-client.js': clientText, '/bundle.js': bundle }
+  const served = { '/jsx-runtime.js': jsxText, '/vendor/react.js': reactText, '/vendor/react-dom-server.js': serverText, '/vendor/react-dom-client.js': clientText, '/bundle.js': bundle }
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://fixture.invalid').pathname
     const script = served[pathname]

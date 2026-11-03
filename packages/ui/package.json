@@ -8,9 +8,11 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@harness-projects/domain": "workspace:*",
     "@harness-projects/client": "workspace:*",
-    "@harness-projects/ui-model": "workspace:*"
+    "@harness-projects/domain": "workspace:*",
+    "@harness-projects/ui-model": "workspace:*",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "peerDependencies": {
     "react": "^18.3.1"
