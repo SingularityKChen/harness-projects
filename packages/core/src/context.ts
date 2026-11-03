@@ -119,17 +119,9 @@ export interface CoreCommands {
   applyPlanningStatus(command: PlanningStatusCommand): Promise<StatusDecision>
 }
 
-/**
- */
-export type CoreNamespace<T> = T & (() => T)
-
 export interface CoreApi {
-  readonly queries: CoreNamespace<CoreQueries>
-  readonly commands: CoreNamespace<CoreCommands>
-}
-
-function namespace<T extends object>(members: T): CoreNamespace<T> {
-  return Object.assign(() => members, members)
+  readonly queries: CoreQueries
+  readonly commands: CoreCommands
 }
 
 /** 装配入口的工作区校验：先把省略的 id / statusPolicy 归一为 WorkspaceRecord，再校验闭集，任何写之前拒绝。 */
@@ -195,8 +187,8 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
     return task
   }
   return {
-    queries: namespace(createQueries(context)),
-    commands: namespace({
+    queries: createQueries(context),
+    commands: {
       bootstrapWorkspace: () => bootstrapWorkspace(context),
       refreshPlanning,
       refreshIssueClosingLinks: (scope: IssueClosingLinksScope) => refreshIssueClosingLinks(context, scope),
@@ -210,7 +202,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
       rerunPipeline: (ref: ExternalObjectRef) => rerunPipeline(context, ref),
       refreshDeliveryFacts: (scope: DeliveryScope) => refreshDeliveryFacts(context, normalizeScope(scope)),
       applyPlanningStatus: (command: PlanningStatusCommand) => writePlanningStatus(context, command),
-    }),
+    },
   }
 }
 
@@ -255,5 +247,5 @@ export function unavailableCore(reason: string): CoreApi {
       policy: StatusPolicy.ProviderAuthoritative, mode: StatusPolicyMode.SourceManaged, reason: reason, error,
     }),
   }
-  return { queries: namespace(queries), commands: namespace(commands) }
+  return { queries, commands }
 }

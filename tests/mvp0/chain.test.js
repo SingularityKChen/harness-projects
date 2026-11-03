@@ -7,7 +7,7 @@
  * 为什么失败不是语法或导入错误：包全部存在且可 import，断言只检查"所需导出是否已经存在、链路能不能走通"，
  * 所以现在的失败是 assert 失败，而不是 SyntaxError / TypeError。也不使用 skip——skip 不产生压力（issue #42）。
  *
- * 它当前**必须失败**；每实现一个节点，失败断言数单调下降。Batch C5 让它全绿并把它提升进 `pnpm verify`。
+ * 该链路覆盖当前 MVP0 的可执行能力，并保留节点级诊断，确保 API 收敛不破坏已有闭环。
  * 本文件同时钉下期望的 CoreApi 表面：`composeCore(deps)` → `{ queries, commands }`，方法名沿用
  * capabilities 各 port 的动词。后续批次若不采用某个名字，必须显式改这条断言并说明原因，不允许改成
  * skip 或删除。完整说明见 tests/mvp0/README.md 与 ExecPlan Batch C1。
@@ -42,10 +42,14 @@ function requireNode(node, invariant, condition, missing) {
 /** 读取组合根上的方法；缺失时点名调用方节点，而不是抛 TypeError。 */
 function needMethod(api, methodPath, node, invariant) {
   let cursor = api
-  for (const key of methodPath.split('.')) {
+  const parts = methodPath.split('.')
+  for (const [index, key] of parts.entries()) {
     cursor = cursor?.[key]
-    if (typeof cursor !== 'function') notImplemented(node, `CoreApi.${methodPath} 还不是可调用的方法`, invariant)
+    if (cursor == null) {
+      notImplemented(node, `CoreApi.${methodPath} 缺少命名空间节点「${parts.slice(0, index + 1).join('.')}」`, invariant)
+    }
   }
+  if (typeof cursor !== 'function') notImplemented(node, `CoreApi.${methodPath} 末端不是可调用的方法`, invariant)
   return cursor
 }
 
@@ -77,6 +81,23 @@ async function chainFor(idempotencyKey) {
 }
 
 const has = (domainEnum, value) => Object.values(domainEnum).includes(value)
+
+test('CoreApi 查询与命令是普通对象，链读取器接受对象命名空间并诊断缺失节点', async () => {
+  const api = await composeFor('工作区', 'CoreApi namespace 是普通对象')
+  assert.equal(typeof api.queries, 'object')
+  assert.equal(typeof api.commands, 'object')
+  assert.equal(typeof api.queries.listProviderBindings, 'function')
+  assert.equal(typeof api.commands.bootstrapWorkspace, 'function')
+  const unavailable = core.unavailableCore('offline')
+  assert.equal(typeof unavailable.queries, 'object')
+  assert.equal(typeof unavailable.commands, 'object')
+  assert.equal(typeof unavailable.queries.getDeliveryProjection, 'function')
+  assert.equal(typeof unavailable.commands.refreshDeliveryFacts, 'function')
+  assert.equal(typeof needMethod({ queries: { read: () => 1 } }, 'queries.read', '工作区', '完整路径诊断'), 'function')
+  assert.throws(() => needMethod({ queries: {} }, 'queries.read', '工作区', '缺少叶子'), /工作区.*CoreApi\.queries\.read.*queries\.read.*链路/)
+  assert.throws(() => needMethod({ queries: { read: 1 } }, 'queries.read', '工作区', '末端必须可调用'), /工作区.*CoreApi\.queries\.read.*末端.*链路/)
+  assert.throws(() => needMethod({}, 'queries.read', '工作区', '缺少 namespace'), /工作区.*CoreApi\.queries\.read.*queries.*链路/)
+})
 
 test('节点 1 · 工作区：同一工作空间同一时刻只有一个 Planning 事实源（不变量 1 / tests/README §2.2）', async () => {
   const invariant = '一个工作空间同一时刻只有一个 Planning 事实源'

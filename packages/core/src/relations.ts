@@ -14,7 +14,7 @@ import type { CoreContext } from './context.ts'
 export interface RelationRef { readonly from: EntityId; readonly to: EntityId; readonly type: RelationType }
 
 export const EdgeProvenance = {
-  Command: 'command', ProviderRead: 'provider_read', ChainSkeleton: 'chain_skeleton',
+  Command: 'command', ProviderRead: 'provider_read',
 } as const
 export type EdgeProvenance = (typeof EdgeProvenance)[keyof typeof EdgeProvenance]
 
