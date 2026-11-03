@@ -14,7 +14,7 @@ import type { ConnectorAccountId, EntityId, NormalizedStatus, ProviderBindingId,
 import {
   WritePhase, type CreateChangeRequestRequest, type CreateChangeRequestResult, type ResumeChangeRequestRequest, type ExecutionContextQuery, type RefreshExecutionRunResult,
   type BindPlanningSourceRequest, type BindRepositoryRequest, type BootstrapResult, type ConnectAccountRequest, type CoreApi, type CreateWorkspaceRequest, type DeliveryRefreshResult,
-  type DeliveryScope, type DeliveryWriteAttempt, type RecordedEdge, type RelationRef, type RepositoryBinding, type SetupOutcome, type StartWorkResult, type StatusDecision,
+  type IssueClosingLinksScope, type IssueClosingLinksObservation, type DeliveryScope, type DeliveryWriteAttempt, type RecordedEdge, type RelationRef, type RepositoryBinding, type SetupOutcome, type StartWorkResult, type StatusDecision,
   type WorkspaceSetup, type SetPlanningMappingRequest, type ExecutionBindingPair, type InstallExecutionRequest,
 } from '@harness-projects/core'
 
@@ -157,6 +157,7 @@ export interface ControllerCommands {
    * 天然幂等：没有外部写入，重复调用会重新读取，不重放，所以不进重放账本、不带幂等键；`actorRef` 只是发起方。UI 以重读后的投影为准，不以这个结果为准。
    */
   refreshExecutionRun(scope: ExecutionContextQuery, request: Pick<CommandEnvelope, 'actorRef'>): Promise<CommandResult<RefreshExecutionRunResult>>
+  refreshIssueClosingLinks(scope: IssueClosingLinksScope, request: Pick<CommandEnvelope, 'actorRef'>): Promise<CommandResult<IssueClosingLinksObservation>>
   refreshDeliveryFacts(scope: DeliveryScope, request: Pick<CommandEnvelope, 'actorRef'>): Promise<CommandResult<DeliveryRefreshResult>>
 }
 
@@ -305,6 +306,7 @@ export function createControllerCommands(core: CoreApi): ControllerCommands {
       const result = await core.commands.refreshExecutionRun(scope)
       return resultOf(result.ok ? CommandWriteState.LocalOnly : CommandWriteState.Failed, result, result.error)
     },
+    refreshIssueClosingLinks: async (scope) => resultOf(CommandWriteState.LocalOnly, await core.commands.refreshIssueClosingLinks(scope), undefined),
     refreshDeliveryFacts: async (scope) => {
       const result = await core.commands.refreshDeliveryFacts(scope) // 不经 replay：每次调用都是一次真的读取
       return resultOf(result.ok ? CommandWriteState.LocalOnly : CommandWriteState.Failed, result, result.error)

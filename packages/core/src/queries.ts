@@ -11,6 +11,7 @@ import {
   type ProviderBindingRecord, type StorageTransaction,
 } from '@harness-projects/capabilities'
 import { IdentityRole, type EntityId, type ProjectError, type ProviderBindingId, type WorkspaceId } from '@harness-projects/domain'
+import { getIssueClosingLinks, issueClosingLinksAccessVersion, type IssueClosingLinksScope, type IssueClosingLinksObservation } from './issue-closing-links.ts'
 import { getChangeRequestOperation, type PrOperationQuery, type PrOperationView } from './create-change-request.ts'
 import { startTargetError } from './start-work.ts'
 import { committedFence, redactPlanning } from './runtime-access.ts'
@@ -30,6 +31,7 @@ import {
 
 /** 工作区读取的元数据：descriptor 来自已确认的 Storage 记录，能力来自本 Core 已确认的 registry；不含实例或凭据。 */
 export interface WorkspaceMetadata {
+  readonly nativeAccessVersion?: string
   readonly workspace: { readonly id: WorkspaceId; readonly name: string } | undefined
   readonly capabilities: readonly EffectiveCapability[]
   /** 已登记的仓库，按 id 升序；没有登记时是空数组。 */
@@ -50,6 +52,7 @@ export interface RepositoryMetadata {
 }
 
 export interface CoreQueries {
+  getIssueClosingLinks(scope: IssueClosingLinksScope): Promise<IssueClosingLinksObservation>
   getChangeRequestOperation(query: PrOperationQuery): Promise<PrOperationView>
   /** Start Work 的只读目标预检：复用 Core 准入守卫，不依赖展示身份，不发外部调用或落控制事实。 */
   getDeliveryAccessVersion(): string
@@ -70,6 +73,7 @@ export interface CoreQueries {
 
 export function createQueries(context: CoreContext): CoreQueries {
   return {
+    getIssueClosingLinks: (scope) => getIssueClosingLinks(context, scope),
     getChangeRequestOperation: (query) => getChangeRequestOperation(context, query),
     getDeliveryAccessVersion: () => `${context.runtimeAccess.epoch}:${context.runtimeAccess.deliveryEpoch}:${committedFence(context.storage)}`,
     getStartWorkTargetError: (workItemId) => startTargetError(context, workItemId),
@@ -120,9 +124,9 @@ async function consistentRead<T>(context: CoreContext, read: () => Promise<T>): 
 
 async function epochRead<T>(context: CoreContext, read: () => Promise<T>): Promise<T> {
   for (;;) {
-    const epoch = context.runtimeAccess.epoch, delivery = context.runtimeAccess.deliveryEpoch, fence = committedFence(context.storage), value = await read()
+    const native = issueClosingLinksAccessVersion(context), epoch = context.runtimeAccess.epoch, delivery = context.runtimeAccess.deliveryEpoch, fence = committedFence(context.storage), value = await read()
     const currentFence = committedFence(context.storage)
-    if (epoch === context.runtimeAccess.epoch && delivery === context.runtimeAccess.deliveryEpoch && fence === currentFence) return value
+    if (native === issueClosingLinksAccessVersion(context) && epoch === context.runtimeAccess.epoch && delivery === context.runtimeAccess.deliveryEpoch && fence === currentFence) return value
   }
 }
 
@@ -169,6 +173,7 @@ async function workspaceMetadata(context: CoreContext, storage: StorageTransacti
         ? { ...entry, access: AccessLevel.ReadOnly, reason: 'Planning 本轮读取未完成，保留最后确认内容；当前只读，请重新验证' } : entry
     }),
     repositories: await repositoryMetadata(context, storage),
+    ...(issueClosingLinksAccessVersion(context) === undefined ? {} : { nativeAccessVersion: issueClosingLinksAccessVersion(context)! }),
     planningSource: access.masked || planning === undefined || !context.projectTitle ? undefined : { bindingId: planning.ref.bindingId, name: context.projectTitle, ...(context.planningMappingOrigin === undefined ? {} : { mappingOrigin: context.planningMappingOrigin }) },
   }
 }

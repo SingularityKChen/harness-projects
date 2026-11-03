@@ -101,9 +101,9 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       const frameGeneration = validateFrame(frame, allowGenerationReset)
       const at = confirmed ? readClock(clock) : undefined
       apply()
-      const { workspace, capabilities, repositories, planningSource, source } = frame
+      const { nativeAccessVersion, workspace, capabilities, repositories, planningSource, source } = frame
       const changedScope = head?.workspace?.id !== workspace?.id || head?.planningSource?.bindingId !== planningSource?.bindingId
-      head = { generation: frameGeneration, workspace, capabilities, ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }), source }
+      head = { generation: frameGeneration, ...(nativeAccessVersion === undefined ? {} : { nativeAccessVersion }), workspace, capabilities, ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }), source }
       if (changedScope) lastUpdatedAt = undefined
       if (at !== undefined) lastUpdatedAt = at
       generation = frameGeneration
@@ -240,6 +240,7 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       if (head?.workspace === undefined) return undefined
       const degraded = head.source.freshness === WireFreshness.Degraded
       return {
+        ...(head.nativeAccessVersion === undefined ? {} : { nativeAccessVersion: head.nativeAccessVersion }),
         workspace: head.workspace, store, connection: { connected }, lastUpdatedAt,
         ...(head.source.reconciledAt === undefined ? {} : { reconciledAt: head.source.reconciledAt }), capabilities: head.capabilities,
         ...(head.repositories === undefined ? {} : { repositories: head.repositories }),
