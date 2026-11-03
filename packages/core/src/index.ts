@@ -32,3 +32,5 @@ export {
 export type { SetPlanningMappingRequest } from './planning-mapping.ts'
 
 export * from './create-change-request.ts'
+
+export * from './issue-closing-links.ts'

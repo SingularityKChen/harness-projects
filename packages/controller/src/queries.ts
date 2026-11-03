@@ -5,11 +5,12 @@
  * 调用方拿不到 provider 的实例、ref 形状或平台字段。
  */
 import type {
-  CoreApi, PrOperationQuery, PrOperationView, DeliveryLineageHop, DeliveryProjection, DeliveryScope, ExecutionContextQuery, ExecutionContextView,
+  IssueClosingLinksScope, IssueClosingLinksObservation, CoreApi, PrOperationQuery, PrOperationView, DeliveryLineageHop, DeliveryProjection, DeliveryScope, ExecutionContextQuery, ExecutionContextView,
 } from '@harness-projects/core'
 import { toWireEntity, toWireSnapshot, type WireAuthority, type WireEntity, type WireSnapshot } from './wire.ts'
 
 export interface ControllerQueries {
+  getIssueClosingLinks(scope: IssueClosingLinksScope): Promise<IssueClosingLinksObservation>
   getChangeRequestOperation(query: PrOperationQuery): Promise<PrOperationView>
   /** 当前修订上的完整投影；修订号是客户端增量订阅的起点。 */
   getDeliveryAccessVersion(): string
@@ -30,6 +31,7 @@ export function createControllerQueries(
   if (generation === undefined) { generation = globalThis.crypto.randomUUID(); generations.set(core, generation) }
   const token = generation
   return {
+    getIssueClosingLinks: (scope) => core.queries.getIssueClosingLinks(scope),
     getDeliveryAccessVersion: () => core.queries.getDeliveryAccessVersion(),
     async snapshot(): Promise<WireSnapshot> {
       const { views, revision, sync, metadata } = await core.queries.getPlanningSnapshot()

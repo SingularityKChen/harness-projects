@@ -22,6 +22,8 @@ import { CapabilityKey } from './keys.ts'
  * 可能是机器错误码（如 `unavailable` / `permission_denied`），翻译成展示文字归页面层（#229，TD-025）。
  */
 export interface ClientWorkspaceRead {
+  /** Native 准入变更时使已打开页面的旧来源观察同步失效；只有显式实际读取才能恢复事实。 */
+  readonly nativeAccessVersion?: string | undefined
   readonly workspace: WireWorkspaceDescriptor
   readonly store: EntityStore
   readonly connection: { readonly connected: boolean }
@@ -98,9 +100,9 @@ function validPlanningSource(planning: unknown): boolean {
 export function assertHeader(header: WireWorkspaceHeader): void {
   const malformed = '帧头不合契约：generation / workspace / capabilities / repositories / planningSource / source 形状错误'
   if (typeof header !== 'object' || header === null) throw new TypeError(malformed)
-  const { generation, workspace, capabilities, repositories, planningSource, source } = header
+  const { generation, nativeAccessVersion, workspace, capabilities, repositories, planningSource, source } = header
   const described = workspace === undefined || (typeof workspace.id === 'string' && workspace.id !== '' && typeof workspace.name === 'string')
-  if (typeof generation !== 'string' || generation.trim() === '' || !described || !validCapabilityList(capabilities) || !validRepositories(repositories) || !validPlanningSource(planningSource) || !isSource(source)) {
+  if ((nativeAccessVersion !== undefined && (typeof nativeAccessVersion !== 'string' || !nativeAccessVersion.trim())) || typeof generation !== 'string' || generation.trim() === '' || !described || !validCapabilityList(capabilities) || !validRepositories(repositories) || !validPlanningSource(planningSource) || !isSource(source)) {
     throw new TypeError(malformed)
   }
 }

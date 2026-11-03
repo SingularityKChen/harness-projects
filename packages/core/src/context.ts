@@ -11,6 +11,7 @@ import {
 } from '@harness-projects/domain'
 import { bootstrapWorkspace, PLANNING_SYNC_SCOPE, type BootstrapResult } from './bootstrap.ts'
 import { normalizeScope, rerunPipeline, type DeliveryScope, type DeliveryWriteAttempt } from './delivery.ts'
+import { refreshIssueClosingLinks, type IssueClosingLinksScope, type IssueClosingLinksObservation } from './issue-closing-links.ts'
 import { refreshDeliveryFacts, type DeliveryRefreshResult } from './delivery-facts.ts'
 import { reportSyncRoundFailure } from './diagnostics.ts'
 import { startWorkUnavailable, type ExecutionContextQuery, type StartWorkRequest, type StartWorkResult } from './execution-context.ts'
@@ -96,6 +97,7 @@ export interface CoreContext {
 }
 
 export interface CoreCommands {
+  refreshIssueClosingLinks(scope: IssueClosingLinksScope): Promise<IssueClosingLinksObservation>
   validateStartWork(workItemId: string): ReturnType<typeof validateStartWork>
   /** 既有引导命令：每次调用独立一轮，不进 `refreshPlanning` 的单飞槽；与刷新并发时由 #305 的轮次栅栏裁决，后开始的一轮胜出。 */
   bootstrapWorkspace(): Promise<BootstrapResult>
@@ -197,6 +199,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
     commands: namespace({
       bootstrapWorkspace: () => bootstrapWorkspace(context),
       refreshPlanning,
+      refreshIssueClosingLinks: (scope: IssueClosingLinksScope) => refreshIssueClosingLinks(context, scope),
       resumeChangeRequest: (request: ResumeChangeRequestRequest) => resumeChangeRequest(context, request),
       createChangeRequest: (request: CreateChangeRequestRequest) => createChangeRequest(context, request),
       startWork: (request: StartWorkRequest) => startWork(context, request),
@@ -214,6 +217,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
 export function unavailableCore(reason: string): CoreApi {
   const error = projectError(ProjectErrorCode.NotSupported, reason)
   const queries: CoreQueries = {
+    getIssueClosingLinks: async (scope) => ({ workItemId: scope.workItemId, scopeToken: 'unavailable', state: 'unsupported', links: [], stale: true }),
     getChangeRequestOperation: async () => ({ kind: 'blocked', reason: 'unavailable' }),
     getDeliveryAccessVersion: () => '0:0:0',
     getStartWorkTargetError: async () => error,
@@ -230,6 +234,7 @@ export function unavailableCore(reason: string): CoreApi {
     getDeliveryLineage: async () => [],
   }
   const commands: CoreCommands = {
+    refreshIssueClosingLinks: (scope) => queries.getIssueClosingLinks(scope),
     bootstrapWorkspace: async () => ({
       ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0, revision: 0, degraded: true, error,
     }),

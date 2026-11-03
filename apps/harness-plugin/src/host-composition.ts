@@ -68,7 +68,9 @@ async function finishChangeRequest(controller: Controller, scope: { workItemId: 
 }
 
 /** 工作区身份来自 Host；执行记录只在读取前后均可见的工作项上投影允许字段。 */
-const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness', targetError: CoreApi['queries']['getStartWorkTargetError']): UnaryHandlers<Pick<typeof OPERATIONS, 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts' | 'createChangeRequest' | 'getChangeRequestOperation' | 'resumeChangeRequest'>, Controller> => ({
+const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness', targetError: CoreApi['queries']['getStartWorkTargetError']): UnaryHandlers<Pick<typeof OPERATIONS, 'getIssueClosingLinks' | 'refreshIssueClosingLinks' | 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts' | 'createChangeRequest' | 'getChangeRequestOperation' | 'resumeChangeRequest'>, Controller> => ({
+  getIssueClosingLinks: async (controller, input) => ({ workspaceId, ...input, observation: await controller.queries.getIssueClosingLinks(input) }),
+  refreshIssueClosingLinks: (controller, { actorRef, ...input }) => controller.commands.refreshIssueClosingLinks(input, { actorRef }),
   getStartWorkOptions: async (controller, input) => {
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
     return { workspaceId, workItemId: input.workItemId, executionMode: mode(), repositories: await controller.commands.validateStartWork(input.workItemId) }
@@ -347,7 +349,9 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         if (['baseline', 'getWorkspaceSetup', 'getPlanningMapping', 'setPlanningMapping', 'createWorkspace', 'connectAccount', 'bindPlanningSource', 'bindRepository', 'installExecutionBindings'].includes(name)) return track(dispatch(current.controller, name, input))
         while (barrier) await barrier
         if (closed) throw new Error('host 已关闭')
-        const assembly = current; return lease(assembly, () => dispatch(assembly.controller, name, input))
+        const assembly = current; const result = await lease(assembly, () => dispatch(assembly.controller, name, input))
+        if (['getIssueClosingLinks', 'refreshIssueClosingLinks'].includes(name) && (closed || assembly !== current || assembly.retired)) throw new Error('host 读取已失效')
+        return result
       },
       watch: (signal) => {
         if (closed) throw new Error('host 已关闭')

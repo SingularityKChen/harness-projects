@@ -12,7 +12,7 @@ import { test } from 'node:test'
 
 import { StatusPolicy, newWorkspaceId } from '@harness-projects/domain'
 import { StatusPolicyMode, composeCore } from '@harness-projects/core'
-import { createController, toWireMetadata, watchWorkspace } from '@harness-projects/controller'
+import { createController, diffSnapshots, toWireMetadata, watchWorkspace } from '@harness-projects/controller'
 import * as capabilities from '@harness-projects/capabilities'
 import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
 import { CapabilityKey, intersectAccess } from '@harness-projects/client/keys'
@@ -664,4 +664,22 @@ test('source scope replacement clears inherited confirmation; fresh metadata adv
     received.receive({ kind: 'baseline', baseline: { ...base, source: { ...base.source, reconciledAt } } })
     assert.equal(received.read().reconciledAt, reconciledAt)
   }
+})
+
+test('native access version crosses baseline, metadata and delta without advancing Planning confirmation', async () => {
+  const { controller } = await compose(), baseline = await controller.baseline()
+  const sync = createSync({ fetchBaseline: async () => baseline, poll: async () => undefined, close() {} }, createEntityStore())
+  await sync.connect(); const at = sync.read().lastUpdatedAt
+  const metadata = toWireMetadata({ ...baseline, nativeAccessVersion: 'opaque-native-1' })
+  for (const bad of [null, 1, {}, '', ' ']) {
+    assert.throws(() => sync.receive({ kind: 'metadata', metadata: { ...metadata, nativeAccessVersion: bad } }), TypeError)
+    assert.equal(sync.read().nativeAccessVersion, undefined); assert.equal(sync.read().lastUpdatedAt, at)
+  }
+  sync.receive({ kind: 'metadata', metadata }); assert.equal(sync.read().nativeAccessVersion, 'opaque-native-1')
+  assert.equal(sync.revision, baseline.revision); assert.equal(sync.read().lastUpdatedAt, at)
+  const next = { ...baseline, revision: baseline.revision + 1, source: { ...baseline.source, revision: baseline.revision + 1 }, nativeAccessVersion: 'opaque-native-2' }
+  const delta = diffSnapshots(baseline, next); assert.equal(delta.nativeAccessVersion, 'opaque-native-2')
+  sync.receive({ kind: 'delta', delta }); assert.equal(sync.read().nativeAccessVersion, 'opaque-native-2')
+  sync.receive({ kind: 'baseline', baseline: { ...next, nativeAccessVersion: 'opaque-native-3' } })
+  assert.equal(sync.read().nativeAccessVersion, 'opaque-native-3')
 })

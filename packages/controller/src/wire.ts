@@ -78,6 +78,8 @@ export interface WirePlanningSource { readonly bindingId: ProviderBindingId; rea
  * `repositories` 只在有已登记仓库时出现，`planningSource` 只在规划来源的名字已知时出现（没有时整个字段缺席，wire 与加入它们之前逐字相同）。
  */
 export interface WireWorkspaceHeader {
+  /** Native 来源观察的独立准入版本；不含原生引用，不推进规划修订。 */
+  readonly nativeAccessVersion?: string
   /** Host 出版者实例身份；物理重连保持不变，不透明且不按大小比较。 */
   readonly generation: string
   readonly workspace: WireWorkspaceDescriptor | undefined
@@ -165,6 +167,7 @@ export function toWireSnapshot(
   const planning = metadata.planningSource
   return {
     generation, revision,
+    ...(metadata.nativeAccessVersion === undefined ? {} : { nativeAccessVersion: metadata.nativeAccessVersion }),
     entities,
     workspace: metadata.workspace,
     capabilities: metadata.capabilities.map(wireCapability),
@@ -188,17 +191,17 @@ export function diffSnapshots(previous: WireSnapshot, next: WireSnapshot): WireD
   const upserts = next.entities.filter((entity) => before.get(entity.entityId) !== signature(entity))
   const after = new Set(next.entities.map((entity) => entity.entityId))
   const removed = previous.entities.filter((entity) => !after.has(entity.entityId)).map((entity) => entity.entityId)
-  const { generation, workspace, capabilities, repositories, planningSource, source } = next
+  const { generation, nativeAccessVersion, workspace, capabilities, repositories, planningSource, source } = next
   return {
-    generation, previousRevision: previous.revision, revision: next.revision, upserts, removed, workspace, capabilities,
+    generation, ...(nativeAccessVersion === undefined ? {} : { nativeAccessVersion }), previousRevision: previous.revision, revision: next.revision, upserts, removed, workspace, capabilities,
     ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }), source,
   }
 }
 
 export function toWireMetadata(snapshot: WireSnapshot): WireWorkspaceMetadata {
-  const { generation, revision, workspace, capabilities, repositories, planningSource, source } = snapshot
+  const { generation, revision, nativeAccessVersion, workspace, capabilities, repositories, planningSource, source } = snapshot
   return {
-    generation, revision, workspace, capabilities, ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }),
+    generation, revision, ...(nativeAccessVersion === undefined ? {} : { nativeAccessVersion }), workspace, capabilities, ...(repositories === undefined ? {} : { repositories }), ...(planningSource === undefined ? {} : { planningSource }),
     source, entities: snapshot.entities.map(({ entityId, source }) => ({ entityId, source })),
   }
 }
@@ -213,5 +216,5 @@ export function businessSignature(snapshot: WireSnapshot): string {
 /** 整表头与逐行 source 的规范化签名（能力按 key 排序）；不含当前时钟，完全相同才 idle。 */
 export function sourceSignature(snapshot: WireSnapshot): string {
   const capabilities = [...snapshot.capabilities].sort((left, right) => (left.key < right.key ? -1 : 1))
-  return JSON.stringify([snapshot.workspace, capabilities, snapshot.repositories, snapshot.planningSource, snapshot.source, [...snapshot.entities].sort(byId).map((entity) => [entity.entityId, entity.source])])
+  return JSON.stringify([snapshot.nativeAccessVersion, snapshot.workspace, capabilities, snapshot.repositories, snapshot.planningSource, snapshot.source, [...snapshot.entities].sort(byId).map((entity) => [entity.entityId, entity.source])])
 }
