@@ -7,7 +7,7 @@ import { createElement, useEffect, useId, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { WorkItemDetailView } from '@harness-projects/ui-model'
 import { LoadingState, SourceBadge, UnavailableState } from './list-states.ts'
-import { DETAIL_STYLES, observeDetailLayout, type LayoutRoot } from './detail-presentation.ts'
+import { DETAIL_STYLES, observeDetailLayout, type DetailMode, type LayoutRoot } from './detail-presentation.ts'
 import { WORKSPACE_STYLES } from './workspace-presentation.ts'
 import { SafeMarkdown } from './safe-markdown.ts'
 
@@ -76,6 +76,9 @@ export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, c
   const title = useRef<DOMElement | null>(null)
   const titleId = useId()
   const [executionRefresh, setExecutionRefresh] = useState(0)
+  const [mode, setMode] = useState<DetailMode>('preview')
+  const body = useRef<{ scrollTop: number; readonly scrollHeight: number; readonly clientHeight: number } | null>(null)
+  const restore = useRef<number | undefined>(undefined)
 
   useEffect(() => {
     const element = dialog.current
@@ -90,8 +93,21 @@ export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, c
 
   useEffect(() => {
     const root = layoutRoot?.current
-    return root == null ? undefined : observeDetailLayout(root)
-  }, [layoutRoot])
+    const cleanup = root == null ? undefined : observeDetailLayout(root, mode)
+    const element = body.current
+    if (element !== null && restore.current !== undefined) {
+      // 读取 scrollHeight 使新矩形完成布局，再把读位恢复到可达区间。
+      element.scrollTop = Math.max(0, Math.min(restore.current, element.scrollHeight - element.clientHeight))
+      restore.current = undefined
+    }
+    return cleanup
+  }, [layoutRoot, mode])
+
+  const toggleMode = (): void => {
+    const next = mode === 'preview' ? 'expanded' : 'preview'
+    restore.current = body.current?.scrollTop ?? 0
+    setMode(next)
+  }
 
   const onKeyDown = (event: { key: string; shiftKey?: boolean; preventDefault?: () => void }): void => {
     if (event.key !== 'Tab') return
@@ -101,14 +117,18 @@ export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, c
 
   const target = view.body.kind === 'content' ? view.body.executionTarget : undefined
   return createElement('dialog', {
-    ref: dialog, className: 'hp-workspace hp-detail', 'aria-labelledby': titleId, onKeyDown,
+    ref: dialog, className: 'hp-workspace hp-detail', 'data-detail-mode': mode, 'aria-labelledby': titleId, onKeyDown,
     onCancel: (event: { preventDefault: () => void }) => { event.preventDefault(); onClose() },
   },
   createElement('style', null, WORKSPACE_STYLES, DETAIL_STYLES),
   createElement('header', { className: 'hp-detail-header' },
-    createElement('h2', { className: 'hp-detail-title', id: titleId, ref: title, tabIndex: -1 }, view.body.kind === 'content' ? view.body.title : '工作项详情'),
-    createElement('button', { className: 'hp-action', type: 'button', onClick: onClose }, '关闭详情')),
-  createElement('div', { className: 'hp-detail-body' },
+    createElement('div', { className: 'hp-detail-heading' },
+      createElement('h2', { className: 'hp-detail-title', id: titleId, ref: title, tabIndex: -1 }, view.body.kind === 'content' ? view.body.title : '工作项详情'),
+      createElement('p', { className: 'hp-detail-mode', id: `${titleId}-mode` }, mode === 'preview' ? '当前为预览模式' : '当前为展开模式')),
+    createElement('div', { className: 'hp-detail-actions' },
+      createElement('button', { className: 'hp-action', type: 'button', onClick: toggleMode, 'aria-describedby': `${titleId}-mode` }, mode === 'preview' ? '展开详情' : '还原详情'),
+      createElement('button', { className: 'hp-action', type: 'button', onClick: onClose }, '关闭详情'))),
+  createElement('div', { ref: body, className: 'hp-detail-body' },
     createElement('div', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, notice),
     ...(refresh === undefined ? [] : [createElement('button', { type: 'button', disabled: refresh.disabled, 'aria-busy': refresh.pending, onClick: refresh.run }, refresh.pending ? '正在刷新规划' : '刷新规划')]),
     panelBody(view.body),

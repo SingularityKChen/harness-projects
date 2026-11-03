@@ -50,7 +50,7 @@ export function measureDetailReflow() {
   if (!dialog) return { open: false, failures: ['dialog missing'] }
   const header = dialog.querySelector('.hp-detail-header')
   const title = header.querySelector('h2')
-  const close = header.querySelector('button')
+  const close = [...header.querySelectorAll('button')].find(node => node.textContent === '关闭详情')
   const body = dialog.querySelector('.hp-detail-body')
   const box = (node) => {
     const r = node.getBoundingClientRect(), css = getComputedStyle(node)
