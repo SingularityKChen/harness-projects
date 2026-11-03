@@ -94,8 +94,8 @@ async function compose(storage, workspaceId, fakes) {
   return { core, start, workItemId }
 }
 
-test('AC2 声明一致：两种替身声明的 key 集合分别等于真实 Local Git 与 GitHub Development provider 的声明', async () => {
-  const keysOf = async (port) => Object.keys((await port.describeCapabilities()).capability).sort()
+test('AC2 声明一致：仓库执行路由的 key 集合等于真实 Provider；可选原生读取由独立契约覆盖', async () => {
+  const keysOf = async (port) => Object.keys((await port.describeCapabilities()).capability).filter((key) => key !== CapabilityKey.DevelopmentChangeRequestNativeIdentityRead).sort()
   const [local, remote] = [newProviderBindingId(), newProviderBindingId()]
   const localGit = createLocalGitDevelopmentProvider({ bindingId: local, repository: { externalId: REPOSITORY, path: dir } })
   const github = createGithubDevelopmentProvider({ bindingId: remote, repository: { externalId: REPOSITORY, owner: 'octo', name: REPOSITORY }, transport: async () => { throw new Error('offline') } })

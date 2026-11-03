@@ -36,6 +36,7 @@
 | [2026-11-03-table-query](exec-plan/completed/2026-11-03-table-query.md) | 安全局部查询/排序/显示；实际Host光暗五宽与reset独立性接受，native200%边界明确保留（#516） |
 | [2026-11-03-table-resize](exec-plan/completed/2026-11-03-table-resize.md) | 可恢复列宽调整；实际安装键盘/刷新保持配置接受，pointer与矩阵保留工程证据（#515） |
 | [2026-11-03-table-geometry](exec-plan/completed/2026-11-03-table-geometry.md) | 稳定列几何与局部双轴滚动；实际安装五宽/标题focus接受，主题缩放保留工程证据边界（#514） |
+| [2026-11-03-native-link-provider](exec-plan/completed/2026-11-03-native-link-provider.md) | 原生关闭关联来源读取、仓库身份与PR原生查找桥（#517） |
 | [2026-11-02-setup-node-v7-contracts](exec-plan/completed/2026-11-02-setup-node-v7-contracts.md) | setup-node v7升级、精确安全契约与新Browser调用点对齐（#400） |
 | [2026-11-02-composed-browser-ci](exec-plan/completed/2026-11-02-composed-browser-ci.md) | 生产组合浏览器持续准入、失败闭合与托管正负控（#450） |
 | [2026-11-02-composed-workspace-browser](exec-plan/completed/2026-11-02-composed-workspace-browser.md) | 单一生产载体的真实浏览器创建、读取、导航与恢复回归（#498） |

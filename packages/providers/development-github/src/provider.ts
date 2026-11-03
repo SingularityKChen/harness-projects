@@ -115,7 +115,7 @@ export function createGithubDevelopmentProvider({ bindingId, repository, transpo
   let permission: AccessLevel = AccessLevel.Degraded, observedAt: string | undefined
   const getRepository: DevelopmentProvider['getRepository'] = async (ref) => {
     if (!isRepository(ref)) return notFound()
-    const result = await call(ask('DevelopmentRepository', {}), (data) => decodeRepository(data, repositoryRef))
+    const result = await call(ask('DevelopmentRepository', {}), (data) => decodeRepository(data, repositoryRef, owner, name))
     permission = result.ok ? AccessLevel.Available : AccessLevel.Degraded; observedAt = new Date(now()).toISOString()
     return result
   }
@@ -170,7 +170,31 @@ export function createGithubDevelopmentProvider({ bindingId, repository, transpo
     }
   }
 
+  let nativePermission: AccessLevel = AccessLevel.Degraded, nativeDenialEpoch = 0
   const provider: DevelopmentProvider = {
+    async getChangeRequestByNativeIdentity(input) {
+      let requestedId: string
+      try {
+        const identity = input.identity
+        if (identity.namespace !== 'github.com/graphql/PullRequest') return providerErr(providerError(ProviderErrorCode.NotSupported, '不支持该原生变更请求身份'))
+        const source = input.repository
+        const ref = { bindingId: source.bindingId, objectKind: source.objectKind, externalId: source.externalId, url: undefined }
+        if (!isRepository(ref)) return notFound()
+        requestedId = identity.id
+        if (!nonEmpty(requestedId)) return invalid('原生变更请求身份必须非空')
+      } catch { return invalid('原生变更请求输入无法读取') }
+      const epoch = nativeDenialEpoch
+      const result = await call(ask('DevelopmentChangeRequest', { id: requestedId }), (data) => {
+        const row = decodeChangeRequest(data, bindingId)
+        return row?.item.nativeIdentity?.id === requestedId ? row.item : undefined
+      })
+      // 任一目标的实际拒读都失效本绑定在途证明，只有拒读后启动的严格成功能够恢复。
+      if (!result.ok && result.error.code === ProviderErrorCode.PermissionDenied) { nativeDenialEpoch++; nativePermission = AccessLevel.Unavailable }
+      else if (epoch === nativeDenialEpoch && (result.ok || nativePermission !== AccessLevel.Unavailable)) nativePermission = result.ok ? AccessLevel.Available : AccessLevel.Degraded
+      else return result
+      observedAt = new Date(now()).toISOString()
+      return result
+    },
     definition: GITHUB_DEVELOPMENT_DEFINITION,
     /**
      * eager 每次用 `getRepository` 探测；lazy 只报告最近真实读取，初值 degraded。成功 → available；结构化失败 → degraded。
@@ -182,8 +206,8 @@ export function createGithubDevelopmentProvider({ bindingId, repository, transpo
       observedAt ??= new Date(now()).toISOString()
       const keys = [CapabilityKey.DevelopmentRepositoryRead, CapabilityKey.DevelopmentChangeRequestRead]
       const level = (access: AccessLevel) => Object.fromEntries(keys.map((key) => [key, access]))
-      return { bindingId, capability: { ...level(AccessLevel.Available), [CapabilityKey.DevelopmentChangeRequestCreate]: AccessLevel.Available },
-        permission: { ...level(permission), [CapabilityKey.DevelopmentChangeRequestCreate]: createPermission }, observedAt }
+      return { bindingId, capability: { ...level(AccessLevel.Available), [CapabilityKey.DevelopmentChangeRequestNativeIdentityRead]: AccessLevel.Available, [CapabilityKey.DevelopmentChangeRequestCreate]: AccessLevel.Available },
+        permission: { ...level(permission), [CapabilityKey.DevelopmentChangeRequestNativeIdentityRead]: nativePermission, [CapabilityKey.DevelopmentChangeRequestCreate]: createPermission }, observedAt }
     },
     getRepository,
     createChangeRequest,

@@ -8,6 +8,7 @@ import { ContentKind, type NativePlanningFieldValue, type RedactionReason } from
 import type { ProviderCapabilitySnapshot } from './capability-keys.ts'
 import type { ExternalObjectRef, ProviderNativeIdentity, ProviderObservation, ProviderReconcileScope } from './observation.ts'
 import type { ProviderPage, ProviderResult } from './result.ts'
+import type { ProviderSourceRepositoryIdentity } from './development-provider.ts'
 import type { ProviderDefinition } from './registry.ts'
 
 export interface ProviderProject { readonly ref: ExternalObjectRef; readonly title: string; readonly sourceUpdatedAt: string | undefined }
@@ -94,10 +95,26 @@ export interface ProviderMovePlanningItemInput {
   readonly ref: ExternalObjectRef; readonly targetProject: ExternalObjectRef; readonly expectedSourceVersion: string | undefined
 }
 
+/** 当前 primary Issue 的来源关系页；空页也必须回证 source，不意味着工作区确认了 implements。 */
+export interface ProviderIssueClosingLinksInput {
+  readonly project: ExternalObjectRef; readonly membership: ExternalObjectRef; readonly issue: ExternalObjectRef
+  readonly cursor: string | undefined; readonly limit: number
+}
+export interface ProviderIssueClosingLink {
+  readonly nativeIdentity: ProviderNativeIdentity
+  readonly repository: { readonly identity: ProviderSourceRepositoryIdentity; readonly name: string }
+  readonly number: number; readonly title: string; readonly url: string; readonly state: 'open' | 'closed' | 'merged'; readonly isDraft: boolean
+  readonly provenance: 'source_observed'; readonly relation: 'native_closing'
+}
+export interface ProviderIssueClosingLinksPage extends ProviderPage<ProviderIssueClosingLink> {
+  readonly source: { readonly project: ExternalObjectRef; readonly membership: ExternalObjectRef; readonly issue: ExternalObjectRef; readonly repository: ProviderSourceRepositoryIdentity }
+}
+
 export interface PlanningProvider {
   /** 静态连接实现定义：由实现作者声明，Host 只注入实例与 id（见 `ProviderDefinition`）。 */
   readonly definition: ProviderDefinition
   describeCapabilities(): Promise<ProviderCapabilitySnapshot>
+  listIssueClosingLinks?(input: ProviderIssueClosingLinksInput): Promise<ProviderResult<ProviderIssueClosingLinksPage>>
   getProject(ref: ExternalObjectRef): Promise<ProviderResult<ProviderProject>>
   listPlanningItems(input: ProviderListPlanningItemsInput): Promise<ProviderResult<ProviderPage<ProviderPlanningItem>>>
   getPlanningItem(ref: ExternalObjectRef): Promise<ProviderResult<ProviderPlanningItem>>

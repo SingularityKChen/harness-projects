@@ -55,7 +55,7 @@ export function platform(scenario = {}, options = {}) {
       return options.ack ? options.ack(structuredClone(created)) : ok({ createPullRequest: { pullRequest: structuredClone(created) } })
     }
     if (options.read) return options.read(request, objects)
-    if (operation === 'DevelopmentRepository') return ok({ repository: { name: 'project', updatedAt: '2026-10-30T00:00:00Z', defaultBranchRef: { name: 'main' }, viewerPermission: 'ADMIN' } })
+    if (operation === 'DevelopmentRepository') return ok({ repository: { id: repositoryId, nameWithOwner: 'example/project', name: 'project', updatedAt: '2026-10-30T00:00:00Z', defaultBranchRef: { name: 'main' }, viewerPermission: 'ADMIN' } })
     if (operation === 'DevelopmentBranches') return ok({ repository: { refs: connection(branches.map((name) => ({ name, target: { oid: commitOf(name) } })), v) } })
     if (operation === 'DevelopmentCommit') return ok({ repository: { object: v.oid === sha ? { __typename: 'Commit', oid: sha, messageHeadline: 'head' } : null } })
     if (operation === 'DevelopmentChangeRequest') return ok({ repository: { id: repositoryId }, node: structuredClone(objects.find((item) => item.id === v.id) ?? null) })

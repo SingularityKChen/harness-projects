@@ -39,7 +39,7 @@ test('core 端到端：PR 只经 head 分支挂上谱系，标题 / fork / 大�
     // 诱饵在 CREATED_AT DESC 下排在目标之前：后过滤或平台过滤一旦失守，core「取第一个头部提交相等的项」就会挂错；前置的 60 个 fork 占满首页。
     const nodes = [...Array.from({ length: 60 }, (_, index) => pr(`PR_far_${index}`, 100 + index, branch, { isCrossRepository: true })), pr('PR_title', 4, 'feature/other', { title: branch }), pr('PR_fork', 3, branch, { isCrossRepository: true }), pr('PR_case', 2, branch.toUpperCase()), pr('PR_target', 1, branch)]
     const platform = ({ operationName, variables }) => {
-      if (operationName === 'DevelopmentRepository') return ok({ repository: { name: 'sandbox', updatedAt: '2026-10-15T00:00:00Z', defaultBranchRef: { name: 'main' } } })
+      if (operationName === 'DevelopmentRepository') return ok({ repository: { id: 'R_sandbox', nameWithOwner: `${variables.owner}/${variables.name}`, name: 'sandbox', updatedAt: '2026-10-15T00:00:00Z', defaultBranchRef: { name: 'main' } } })
       if (operationName === 'DevelopmentBranches') return ok({ repository: { refs: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ name: branch, target: { oid: HEAD } }] } } })
       const listed = mode === '精确' ? nodes.filter((node) => node.headRefName === variables.headRefName) : nodes
       const offset = variables.after === null ? 0 : Number(variables.after.slice(1))

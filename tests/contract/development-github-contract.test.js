@@ -3,7 +3,7 @@
  * (1) 录制的只读操作回放未命中即 reject；共享创建契约在独立严格合成平台执行；
  * (2) 夹具不失真：node id 必须已登记（provenance）、查询文本变了必须重录（漂移）、查询不取个人字段；
  * (3) Start Work 分支谱系：只按 head 分支（同仓库、字节精确）找 PR，从不按标题、不混入 fork 同名分支或放宽过滤带出的 PR；
- * (4) 身份：仓库引用用宿主配置的本地键，PR 用 node id（与规划夹具同值），仓库 node id 不出现在任何输出；
+ * (4) 身份：仓库引用用宿主配置的本地键，PR 用 node id（与规划夹具同值），仓库 ref 保留 Host 键，独立 sourceRepositoryIdentity 透出 canonical 仓库身份；
  * (5) 失去读权限：五个读方法结构化失败（固定文案、不回显正文），快照降级为 degraded，恢复后回到 available；
  * (6) 观察：sourceVersion 是定宽规范载体而不是 sha，全有或全无。
  */
@@ -94,13 +94,13 @@ test('start-work-branch-lineage（合成）：Start Work 分支名、标题诱�
 
 const REQUEST_ID = 'ABCD:1234:5678:9ABC'
 
-test('identity-shape：仓库引用用宿主配置的本地键，PR 用 node id 且与规划夹具同值，仓库 node id 不出现在任何输出', async () => {
+test('identity-shape：仓库引用用宿主配置的本地键，PR 用 node id 且与规划夹具同值，仓库 ref 保留 Host 键，独立 sourceRepositoryIdentity 透出 canonical 仓库身份', async () => {
   const replayed = replayTransport()
   const provider = build(async (request) => ({ ...(await replayed(request)), headers: { 'x-github-request-id': REQUEST_ID } }))
   const results = [await provider.getRepository(repositoryRef), await provider.listBranches({ repository: repositoryRef, cursor: undefined, limit: 100 }),
     await provider.getCommit(commitRef(GAMMA_HEAD)), await provider.getChangeRequest(PR_REF), await provider.listChangeRequests({ repository: repositoryRef, cursor: undefined, limit: 100 })]
   assert.deepEqual(results.map((result) => [result.ok, result.requestId]), Array(5).fill([true, REQUEST_ID]), '五个读方法在录制夹具上都成功，并带出形状合法的 requestId')
-  assert.equal(JSON.stringify(results).includes(REPOSITORY_NODE_ID), false, '仓库 node id 不得出现在任何输出')
+  assert.deepEqual(results[0].value.sourceRepositoryIdentity, { namespace: 'github.com/graphql/Repository', id: REPOSITORY_NODE_ID })
   assert.deepEqual(results[0].value.ref, repositoryRef, '仓库 ref 就是 expect.repository：start-work 把它写成主键并比对 ack')
   assert.deepEqual(results[1].value.items.map((branch) => [branch.ref.externalId, branch.name]), [['fixture/gamma', 'fixture/gamma'], ['main', 'main']])
   assert.equal(results[0].value.sourceUpdatedAt, exchangesOf('DevelopmentRepository')[0].body.data.repository.updatedAt)
@@ -243,7 +243,7 @@ const MESSAGES = { permission_denied: 'GitHub 拒绝了当前凭据的访问', n
 const readAll = async (provider) => [await provider.getRepository(repositoryRef), await provider.listBranches({ repository: repositoryRef, cursor: undefined, limit: 10 }),
   await provider.getCommit(commitRef(GAMMA_HEAD)), await provider.getChangeRequest(PR_REF), await provider.listChangeRequests({ repository: repositoryRef, cursor: undefined, limit: 10 })]
 const accessOf = async (provider) => Object.fromEntries(effectiveCapabilities(await provider.describeCapabilities()).map(({ key, access }) => [key, access]))
-const bothAre = (level, create = 'degraded') => ({ [READ_KEYS[0]]: level, [READ_KEYS[1]]: level, 'development.change_request.create': create })
+const bothAre = (level, create = 'degraded') => ({ 'development.change_request.native_identity.read': create === 'available' ? 'available' : 'degraded', [READ_KEYS[0]]: level, [READ_KEYS[1]]: level, 'development.change_request.create': create })
 
 test('permission-loss-degrades（录制 + 合成）：失去读权限时快照降级、五个读方法结构化失败、恢复后回到可用', async () => {
   const invisible = replayProvider({ externalId: LOCAL_REPOSITORY_KEY, owner: OWNER, name: ABSENT_NAME })
@@ -373,7 +373,7 @@ test('projection-pins：录制的未知提交、空仓库、空提交说明与�
   const commit = (object) => scripted(() => ok({ repository: { object } })).getCommit(commitRef(GAMMA_HEAD))
   assert.equal((await commit({ __typename: 'Commit', oid: GAMMA_HEAD, messageHeadline: '' })).value.message, undefined)
   assert.equal((await commit({ __typename: 'Tree' })).error.code, 'not_found')
-  const empty = await scripted(() => ok({ repository: { name: 'empty', updatedAt: '2026-10-15T00:00:00Z', defaultBranchRef: null } })).getRepository(repositoryRef)
+  const empty = await scripted(() => ok({ repository: { id: 'R_empty', nameWithOwner: `${OWNER}/${NAME}`, name: 'empty', updatedAt: '2026-10-15T00:00:00Z', defaultBranchRef: null } })).getRepository(repositoryRef)
   assert.deepEqual([empty.ok, empty.value?.defaultBranch], [true, undefined], '空仓库没有默认分支，不是形状错误')
 })
 
@@ -412,3 +412,150 @@ test('lazy permission never probes in describe, preserves real observation time,
   fail = true; await provider.getRepository(repositoryRef)
   assert.deepEqual((await provider.describeCapabilities()).permission, bothAre('degraded')); assert.equal(calls, 2)
 })
+
+
+test('native identity bridge uses actual repository receipt and exact Provider-owned PR lookup', async () => {
+  const nativeIdentity = { namespace: 'github.com/graphql/PullRequest', id: PR_NODE.id }
+  const provider = scripted((request) => request.operationName === 'DevelopmentRepository'
+    ? ok({ repository: { id: 'R_actual', nameWithOwner: `${OWNER}/${NAME}`, name: NAME, updatedAt: '2026-11-03T00:00:00Z', defaultBranchRef: { name: 'main' } } })
+    : ok({ repository: { id: 'R_actual' }, node: { ...PR_NODE, __typename: 'PullRequest', repository: { id: 'R_actual' } } }))
+  assert.equal(typeof provider.getChangeRequestByNativeIdentity, 'function')
+  const repo = await provider.getRepository(repositoryRef)
+  assert.deepEqual(repo.value.sourceRepositoryIdentity, { namespace: 'github.com/graphql/Repository', id: 'R_actual' })
+  assert.deepEqual(repo.value.ref, repositoryRef)
+  const result = await provider.getChangeRequestByNativeIdentity({ repository: repositoryRef, identity: nativeIdentity })
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.value.nativeIdentity, nativeIdentity)
+  assert.deepEqual(result.value.ref, PR_REF)
+  assert.deepEqual(ledgers.get(provider).map((r) => r.operationName), ['DevelopmentRepository', 'DevelopmentChangeRequest'])
+})
+
+test('native identity bridge rejects foreign namespace/repo/binding before transport and refuses mismatched ack', async () => {
+  const identity = { namespace: 'github.com/graphql/PullRequest', id: PR_NODE.id }
+  const provider = scripted(() => { throw new Error('no transport') })
+  assert.equal(typeof provider.getChangeRequestByNativeIdentity, 'function')
+  for (const namespace of ['github.com/graphql/Issue', 'foreign/PullRequest', '']) {
+    assert.equal((await provider.getChangeRequestByNativeIdentity({ repository: repositoryRef, identity: { ...identity, namespace } })).error.code, 'not_supported')
+  }
+  for (const patch of [{ bindingId: 'foreign' }, { objectKind: 'change_request' }, { externalId: 'foreign' }]) {
+    assert.equal((await provider.getChangeRequestByNativeIdentity({ repository: { ...repositoryRef, ...patch }, identity })).error.code, 'not_found')
+  }
+  assert.equal((await provider.getChangeRequestByNativeIdentity({ repository: repositoryRef, identity: { ...identity, id: '' } })).error.code, 'invalid_input')
+  assert.deepEqual(ledgers.get(provider), [])
+  for (const node of [null, { ...PR_NODE, __typename: 'Issue' }, { ...PR_NODE, __typename: 'PullRequest', id: 'PR_other', repository: { id: 'R_actual' } },
+    { ...PR_NODE, __typename: 'PullRequest', repository: { id: 'R_foreign' } }]) {
+    const result = await scripted(() => ok({ repository: { id: 'R_actual' }, node })).getChangeRequestByNativeIdentity({ repository: repositoryRef, identity })
+    assert.equal(result.ok, false)
+  }
+})
+
+test('native PR permission requires actual PR ack, rejects partial errors, and recovers independently from repository read', async () => {
+  let deny = true
+  const provider = scripted((request) => request.operationName === 'DevelopmentRepository'
+    ? ok({ repository: { id: 'R_actual', nameWithOwner: `${OWNER}/${NAME}`, name: NAME, updatedAt: '', defaultBranchRef: null } })
+    : { ...ok({ repository: { id: 'R_actual' }, node: { ...PR_NODE, __typename: 'PullRequest', repository: { id: 'R_actual' } } }),
+      ...(deny ? { body: { data: { repository: { id: 'R_actual' }, node: PR_NODE }, errors: [{ type: 'FORBIDDEN' }] } } : {}) })
+  assert.equal(typeof provider.getChangeRequestByNativeIdentity, 'function')
+  const args = { repository: repositoryRef, identity: { namespace: 'github.com/graphql/PullRequest', id: PR_NODE.id } }
+  const key = 'development.change_request.native_identity.read'
+  assert.equal((await provider.describeCapabilities()).permission[key], 'degraded')
+  assert.equal((await provider.getChangeRequestByNativeIdentity(args)).error.code, 'permission_denied')
+  assert.equal((await provider.describeCapabilities()).permission[key], 'unavailable')
+  deny = false
+  assert.equal((await provider.getChangeRequestByNativeIdentity(args)).ok, true)
+  assert.equal((await provider.describeCapabilities()).permission[key], 'available')
+})
+
+
+test('canonical repository ack requires its node id and configured owner/name', async () => {
+  for (const patch of [{ id: undefined }, { id: '' }, { nameWithOwner: 'foreign/repository' }]) {
+    const provider = scripted(() => ok({ repository: { id: 'R_actual', nameWithOwner: `${OWNER}/${NAME}`, name: NAME, updatedAt: '', defaultBranchRef: null, ...patch } }))
+    assert.equal((await provider.getRepository(repositoryRef)).ok, false)
+  }
+})
+
+test('late older native PR success cannot erase a newer denial receipt', async () => {
+  let release, calls = 0
+  const gate = new Promise((resolve) => { release = resolve })
+  const provider = scripted(async () => ++calls === 1 ? (await gate, ok({ repository: { id: 'R_actual' }, node: { ...PR_NODE, __typename: 'PullRequest', repository: { id: 'R_actual' } } })) : denied)
+  const args = { repository: repositoryRef, identity: { namespace: 'github.com/graphql/PullRequest', id: PR_NODE.id } }
+  const older = provider.getChangeRequestByNativeIdentity(args)
+  assert.equal((await provider.getChangeRequestByNativeIdentity(args)).error.code, 'permission_denied')
+  release(); await older
+  assert.equal((await provider.describeCapabilities()).permission['development.change_request.native_identity.read'], 'unavailable')
+})
+
+
+test('lazy native permission timestamp advances only on a real native read', async () => {
+  let now = Date.parse('2026-11-03T00:00:00Z')
+  const provider = createGithubDevelopmentProvider({ bindingId, repository: { externalId: LOCAL_REPOSITORY_KEY, owner: OWNER, name: NAME }, permissionMode: 'lazy', now: () => now,
+    transport: async () => ok({ repository: { id: 'R_actual' }, node: { ...PR_NODE, __typename: 'PullRequest', repository: { id: 'R_actual' } } }) })
+  assert.equal((await provider.describeCapabilities()).observedAt, '2026-11-03T00:00:00.000Z')
+  now += 1000
+  await provider.getChangeRequestByNativeIdentity({ repository: repositoryRef, identity: { namespace: 'github.com/graphql/PullRequest', id: PR_NODE.id } })
+  assert.equal((await provider.describeCapabilities()).observedAt, '2026-11-03T00:00:01.000Z')
+})
+
+
+test('native identity malformed input returns safe invalid_input with zero transport', async () => {
+  const provider = scripted(() => { throw new Error('transport must not run') })
+  const identity = { namespace: 'github.com/graphql/PullRequest', id: PR_NODE.id }
+  for (const args of [null, undefined, {}, { repository: repositoryRef, identity: null }, { repository: repositoryRef }, { identity }, { repository: null, identity }]) {
+    const result = await provider.getChangeRequestByNativeIdentity(args)
+    assert.equal(result.ok, false)
+    assert.equal(result.error.code, 'invalid_input')
+  }
+  assert.deepEqual(ledgers.get(provider), [])
+})
+
+test('native identity input accessor failures are safe while unsupported namespace precedes repository access', async () => {
+  const canary = 'raw-private-error-canary'
+  const trap = (value, key) => Object.defineProperty({ ...value }, key, { get() { throw new Error(canary) } })
+  const identity = { namespace: 'github.com/graphql/PullRequest', id: PR_NODE.id }, input = { repository: repositoryRef, identity }
+  const provider = scripted(() => { throw new Error('transport must not run') })
+  for (const args of [trap(input, 'identity'), trap(input, 'repository'), { ...input, identity: trap(identity, 'namespace') },
+    { ...input, identity: trap(identity, 'id') }, { ...input, repository: trap(repositoryRef, 'bindingId') }]) {
+    const result = await provider.getChangeRequestByNativeIdentity(args)
+    assert.equal(result.ok, false)
+    assert.equal(result.error.code, 'invalid_input')
+    assert.equal(JSON.stringify(result).includes(canary), false)
+  }
+  const unsupported = trap({ identity: trap({ namespace: 'foreign/PullRequest' }, 'id') }, 'repository')
+  assert.equal((await provider.getChangeRequestByNativeIdentity(unsupported)).error.code, 'not_supported')
+  assert.deepEqual(ledgers.get(provider), [])
+})
+
+
+for (const scope of ['same target', 'another target']) for (const finish of ['offline', 'success', 'success before denial']) {
+  test(`native actual denial survives newer pending ${scope}: ${finish}; only a post-denial read recovers`, async () => {
+    let resolveOlder, resolveNewer, rejectNewer, calls = 0, newerRequest
+    const olderGate = new Promise((resolve) => { resolveOlder = resolve })
+    const newerGate = new Promise((resolve, reject) => { resolveNewer = resolve; rejectNewer = reject })
+    const replyFor = (request) => ok({ repository: { id: 'R_actual' }, node: { ...PR_NODE, id: request.variables.id, __typename: 'PullRequest', repository: { id: 'R_actual' } } })
+    const provider = createGithubDevelopmentProvider({ bindingId, repository: { externalId: LOCAL_REPOSITORY_KEY, owner: OWNER, name: NAME }, permissionMode: 'lazy',
+      transport: async (request) => { assert.equal(request.operationName, 'DevelopmentChangeRequest'); return ++calls === 2 ? olderGate : calls === 3 ? (newerRequest = request, newerGate) : replyFor(request) } })
+    const args = { repository: repositoryRef, identity: { namespace: 'github.com/graphql/PullRequest', id: PR_NODE.id } }
+    const read = (input = args) => provider.getChangeRequestByNativeIdentity(input)
+    const permission = async () => (await provider.describeCapabilities()).permission['development.change_request.native_identity.read']
+    assert.equal((await read()).ok, true); assert.equal(await permission(), 'available')
+    const older = read(), newer = read(scope === 'same target' ? args : { ...args, identity: { ...args.identity, id: 'PR_other' } })
+    let newerResult
+    if (finish === 'success before denial') {
+      resolveNewer(replyFor(newerRequest)); newerResult = await newer
+      assert.equal(await permission(), 'available')
+    }
+    resolveOlder(denied)
+    assert.equal((await older).error.code, 'permission_denied')
+    const afterDenial = await permission()
+    if (!newerResult) {
+      if (finish === 'offline') rejectNewer(new Error('offline-canary'))
+      else resolveNewer(replyFor(newerRequest))
+      newerResult = await newer
+    }
+    const afterInflight = await permission()
+    assert.equal(newerResult.ok, finish !== 'offline')
+    if (!newerResult.ok) assert.equal(newerResult.error.code, 'unavailable')
+    assert.equal((await read()).ok, true)
+    assert.deepEqual({ afterDenial, afterInflight, recovered: await permission() }, { afterDenial: 'unavailable', afterInflight: 'unavailable', recovered: 'available' })
+  })
+}

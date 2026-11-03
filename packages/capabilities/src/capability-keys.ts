@@ -21,6 +21,7 @@ export type CapabilityDomain = (typeof CapabilityDomain)[keyof typeof Capability
 
 /** 稳定 capability key：调用方唯一的按能力分支依据；取值是跨层契约，增删改名即失败。 */
 export const CapabilityKey = {
+  PlanningIssueClosingLinksRead: 'planning.issue_closing_links.read',
   PlanningItemRead: 'planning.item.read',
   PlanningItemCreateIssue: 'planning.item.create.issue',
   PlanningItemCreateDraft: 'planning.item.create.draft',
@@ -38,6 +39,7 @@ export const CapabilityKey = {
   DevelopmentWorktreeCreate: 'development.worktree.create',
   DevelopmentWorktreeRead: 'development.worktree.read',
   DevelopmentWorktreeRemove: 'development.worktree.remove',
+  DevelopmentChangeRequestNativeIdentityRead: 'development.change_request.native_identity.read',
   DevelopmentChangeRequestRead: 'development.change_request.read',
   DevelopmentChangeRequestCreate: 'development.change_request.create',
   DevelopmentReviewRead: 'development.review.read',

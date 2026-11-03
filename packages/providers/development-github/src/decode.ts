@@ -35,10 +35,11 @@ function pageOf<T>(connection: Obj, after: string | undefined, decodeNode: (raw:
   return nextCursor === after ? fail() : { rows, nextCursor }
 }
 
-export function decodeRepository(data: Obj, ref: ExternalObjectRef): ProviderRepository | undefined {
+export function decodeRepository(data: Obj, ref: ExternalObjectRef, owner: string, name: string): ProviderRepository | undefined {
   const node = repositoryOf(data)
   if (node === undefined) return undefined
-  return { ref, name: id(node.name), defaultBranch: node.defaultBranchRef === null ? undefined : id(obj(node.defaultBranchRef).name), sourceUpdatedAt: str(node.updatedAt) }
+  if (id(node.nameWithOwner).toLowerCase() !== `${owner}/${name}`.toLowerCase()) return undefined
+  return { sourceRepositoryIdentity: { namespace: 'github.com/graphql/Repository', id: id(node.id) }, ref, name: id(node.name), defaultBranch: node.defaultBranchRef === null ? undefined : id(obj(node.defaultBranchRef).name), sourceUpdatedAt: str(node.updatedAt) }
 }
 
 export function decodeBranches(data: Obj, bindingId: ProviderBindingId, after: string | undefined): DecodedPage<ProviderBranch> | undefined {

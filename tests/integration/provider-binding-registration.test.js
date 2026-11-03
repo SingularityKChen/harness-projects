@@ -270,6 +270,8 @@ const SCENARIOS = [
       [{ planning, rogue: development }, /rogue/],
       [{ planning: overridden({ getProject: undefined }) }, /必需方法/],
       [{ planning: overridden({ createIssueWorkItem: 'nope' }) }, /createIssueWorkItem/],
+      [{ planning: overridden({ listIssueClosingLinks: 'nope' }) }, /listIssueClosingLinks/],
+      [{ development: wrap(development, { getChangeRequestByNativeIdentity: 'nope' }) }, /getChangeRequestByNativeIdentity/],
       [{ planning }, /bogus\.key/, { policy: { 'bogus.key': AccessLevel.Available } }],
       [{ planning }, /statusPolicy/, { workspace: { statusPolicy: 'bogus' } }],
       [{ planning }, /workspace\.id/, { workspace: { id: '' } }],
