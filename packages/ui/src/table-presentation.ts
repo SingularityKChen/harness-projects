@@ -23,7 +23,7 @@ export const TABLE_STYLES = `
 .hp-work-items table { border-collapse:separate; border-spacing:0; table-layout:fixed; font:inherit }
 .hp-work-items caption { padding:.75rem 1rem; text-align:left; font-size:.93em; font-weight:600 }
 .hp-work-items th, .hp-work-items td { box-sizing:border-box; padding:.75rem .5rem; text-align:left; vertical-align:top; border-top:1px solid var(--hp-border,currentColor); overflow-wrap:anywhere; white-space:normal }
-.hp-work-items thead th { position:sticky; top:0; z-index:2; background:Canvas; padding:.5rem .4rem; font-size:.8rem; font-weight:600 }
+.hp-work-items thead th { padding-inline-end:28px; height:44px; position:sticky; top:0; z-index:2; background:Canvas; padding-block:.5rem; padding-inline-start:.4rem; font-size:.8rem; font-weight:600 }
 .hp-work-items tbody th { position:sticky; inset-inline-start:0; z-index:1; background:Canvas; font-weight:600 }
 .hp-work-items thead th:first-child { inset-inline-start:0; z-index:3 }
 .hp-work-items .hp-list-title-text, .hp-work-items tbody th > a { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden; overflow-wrap:anywhere }
@@ -31,4 +31,11 @@ export const TABLE_STYLES = `
 .hp-work-items summary { cursor:pointer }
 .hp-work-items a, .hp-work-items summary { scroll-margin-block:0; outline-offset:-2px }
 .hp-work-items td:last-child { font-size:.93em }
+.hp-work-items .hp-column-tools { display:flex; align-items:center; flex-wrap:wrap; gap:.5rem; margin-block:.5rem }
+.hp-work-items .hp-column-tools button { min-block-size:44px; padding:.4rem .7rem; color:inherit; background:Canvas; border:1px solid var(--hp-border,currentColor); border-radius:var(--hp-radius,.5rem); font:inherit; cursor:pointer }
+.hp-work-items .hp-column-tools > span { font-size:.85em }
+.hp-work-items .hp-column-resize { position:absolute; inset-block:0; inset-inline-end:0; inline-size:24px; min-block-size:44px; display:grid; place-items:center; cursor:col-resize; touch-action:none }
+.hp-work-items .hp-column-resize::after { content:''; block-size:1.5rem; border-inline-end:2px solid var(--hp-border,currentColor) }
+.hp-work-items .hp-column-resize:focus-visible { outline-offset:-3px }
+.hp-work-items .hp-list-scroll:has(.hp-resizing) { user-select:none; cursor:col-resize }
 `

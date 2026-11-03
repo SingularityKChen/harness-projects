@@ -35,10 +35,12 @@ const clickOf = (element) => {
     if (node == null || typeof node !== 'object') return
     if (Array.isArray(node)) return node.forEach(walk)
     if (typeof node.type === 'function') return walk(node.type(node.props ?? {}))
-    if (node.props?.onClick) found.push(node.props.onClick)
+    if (node.type === 'a' && node.props?.onClick) found.push(node.props.onClick)
     walk(node.props?.children ?? null)
   }
-  walk(element)
+  const internals = uiRequire('react').__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED, previous = internals.ReactCurrentDispatcher.current
+  internals.ReactCurrentDispatcher.current = { useState: value => [value, () => undefined], useRef: value => ({ current: value }), useEffect: () => undefined }
+  try { walk(element) } finally { internals.ReactCurrentDispatcher.current = previous }
   return found
 }
 const drawer = (view) => renderToStaticMarkup(createElement(ui.WorkItemDetailDrawer, { view, onClose: () => undefined }))

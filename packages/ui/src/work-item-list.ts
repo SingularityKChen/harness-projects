@@ -5,10 +5,11 @@
  * 本文件用 `createElement` 而不是 JSX（tsconfig 不启用 jsx）。
  */
 import { Fragment, createElement } from 'react'
-import type { ReactElement } from 'react'
+import type { CSSProperties, ReactElement } from 'react'
 import type { VisibleListRow, WorkItemListView } from '@harness-projects/ui-model'
 import { EmptyState, FreshnessBadge, LoadingState, LIST_STYLES, SourceBadge, StaleBanner, UnavailableState } from './list-states.ts'
 
+import { ColumnResizeHandle, useColumnWidths } from './column-resize.ts'
 import { TABLE_COLUMNS } from './table-columns.ts'
 
 const columnWidth = (column: typeof TABLE_COLUMNS[number]): string => column.id === 'title' ? 'var(--hp-title-width)' : `var(--hp-column-${column.id},${column.defaultWidth}px)`
@@ -42,26 +43,29 @@ function ItemRow({ row, navigation }: { row: VisibleListRow; navigation: ItemNav
 }
 
 /** 可聚焦的局部滚动容器，焦点轮廓使用公开 Host token，窄屏保留八列。 */
-function ItemTable({ rows, navigation }: { rows: readonly VisibleListRow[]; navigation: ItemNavigation | undefined }): ReactElement {
-  return createElement('div', { role: 'region', 'aria-label': '工作项表格，可横向和纵向滚动', tabIndex: 0, className: 'hp-list-scroll' },
+type WidthControls = ReturnType<typeof useColumnWidths>
+
+function ItemTable({ rows, navigation, sizes }: { rows: readonly VisibleListRow[]; navigation: ItemNavigation | undefined; sizes: WidthControls }): ReactElement {
+  return createElement('div', { role: 'region', 'aria-label': '工作项表格，可横向和纵向滚动', tabIndex: 0, className: 'hp-list-scroll', style: Object.fromEntries(Object.entries(sizes.widths).map(([id, value]) => [`--hp-column-${id}`, `${value}px`])) as CSSProperties },
     createElement('table', { style: { width: TABLE_WIDTH } },
       createElement('colgroup', null, ...TABLE_COLUMNS.map(column => createElement('col', { key: column.id, style: { width: columnWidth(column) } }))),
       createElement('caption', null, '工作项列表'),
-      createElement('thead', null, createElement('tr', null, ...TABLE_COLUMNS.map(column => createElement('th', { key: column.id, scope: 'col' }, column.label)))),
+      createElement('thead', null, createElement('tr', null, ...TABLE_COLUMNS.map(column => createElement('th', { key: column.id, scope: 'col' }, createElement('span', { className: 'hp-column-label' }, column.label), createElement(ColumnResizeHandle, { key: sizes.interactionKey, column, width: sizes.widths[column.id] ?? column.defaultWidth, onChange: value => sizes.setWidth(column, value) }))))),
       createElement('tbody', null, ...rows.map((row) => createElement(ItemRow, { key: row.key, row, navigation })))))
 }
 
-function bodyOf({ body, planningSourceName }: WorkItemListView, navigation?: ItemNavigation): ReactElement {
+function bodyOf({ body, planningSourceName }: WorkItemListView, sizes: WidthControls, navigation?: ItemNavigation): ReactElement {
   if (body.kind === 'loading') return createElement(LoadingState)
   if (body.kind === 'unavailable') return createElement(UnavailableState, { message: body.message, remaining: body.remaining })
   const notConfirmed = (body.stale && !body.partial) || body.refreshing // 部分读取的可见行都已确认：不出「最后已知值」横幅
   return createElement(Fragment, null,
     notConfirmed ? createElement(StaleBanner, { source: planningSourceName, at: body.lastUpdatedAt ?? null }) : null,
     body.notice === undefined ? null : createElement('p', null, body.notice),
-    body.rows.length === 0 ? createElement(EmptyState, { confirmed: !notConfirmed }) : createElement(ItemTable, { rows: body.rows, navigation }))
+    body.rows.length === 0 ? createElement(EmptyState, { confirmed: !notConfirmed }) : createElement(ItemTable, { rows: body.rows, navigation, sizes }))
 }
 
-export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnnouncement }: { view: WorkItemListView; navigation?: ItemNavigation | undefined; headingTabIndex?: number | undefined; statusAnnouncement?: string | undefined }): ReactElement {
+export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnnouncement, presentationScopeKey }: { presentationScopeKey?: string | undefined; view: WorkItemListView; navigation?: ItemNavigation | undefined; headingTabIndex?: number | undefined; statusAnnouncement?: string | undefined }): ReactElement {
+  const sizes = useColumnWidths(presentationScopeKey)
   const { body } = view
   const busy = body.kind === 'loading' || (body.kind === 'content' && body.refreshing)
   // 新鲜度只在已确认的内容旁声明（部分读取的可见内容也已确认）；未确认时由状态区宣告、横幅点名来源与时刻，页首不再重复。
@@ -70,6 +74,7 @@ export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnno
     createElement('style', null, LIST_STYLES),
     createElement('div', { className: 'hp-list-context', role: 'region', 'aria-label': '工作项上下文', tabIndex: 0 },
     createElement('h2', { tabIndex: headingTabIndex }, view.workspaceName),
+    body.kind === 'content' && body.rows.length > 0 ? createElement('div', { className: 'hp-column-tools' }, createElement('button', { type: 'button', onClick: sizes.reset }, '重置列宽'), createElement('span', null, '拖动列边界，或聚焦边界后用方向键调整。')) : null,
     createElement('p', { className: 'hp-list-meta' }, '规划来源：', createElement(SourceBadge, { name: view.planningSourceName }),
       ...(view.mappingSourceText === undefined ? [] : ['；', view.mappingSourceText]),
       ...(confirmed ? ['；', createElement(FreshnessBadge, { stale: false, at: body.lastUpdatedAt ?? null })] : [])),
@@ -78,5 +83,5 @@ export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnno
     view.degraded ? createElement('p', null, '读取能力降级：显示的是保守的最后已知值。') : null,
     createElement('div', { role: 'status', 'aria-live': statusAnnouncement === undefined ? 'polite' : 'off', 'aria-atomic': 'true' }, view.statusText),
     statusAnnouncement === undefined ? null : createElement('span', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true', style: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' } }, statusAnnouncement)),
-    createElement('div', { 'aria-busy': busy, className: 'hp-list-body' }, bodyOf(view, navigation)))
+    createElement('div', { 'aria-busy': busy, className: 'hp-list-body' }, bodyOf(view, sizes, navigation)))
 }

@@ -67,7 +67,7 @@ function screenOf(read: WorkspaceRead | undefined, path: string | undefined, set
   return {
     key: `page:${projectId}`,
     children: [createElement(WorkItemProjectPage, {
-      listView, statusAnnouncement,
+      listView, statusAnnouncement, presentationScopeKey: JSON.stringify([projectId, read.planningSource?.bindingId]),
       detailView: itemId === undefined ? undefined : deriveWorkItemDetailView(input, { projectId, itemId }),
       navigation: { href: (id) => `#${itemPath({ projectId, itemId: id })}`, open: (id) => setPath(itemPath({ projectId, itemId: id })) },
       onCloseDetail: () => setPath(undefined), executionReader, deliveryReader, changeRequestCreator, startWork, onBindRepository, connected: read.connection.connected,

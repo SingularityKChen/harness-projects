@@ -19,13 +19,17 @@ const title='Readable title '+ 'LongUnbrokenTitle'.repeat(18)
 const entities=Array.from({length:120},(_,i)=>wire('item-'+i,{content:{title:i===0?title:'Work item '+i,externalKind:i%2?'change_request':'issue'},planningFields:i%3?{iterationTitle:'IterationWithoutSpaces'.repeat(8),targetDate:'2026-11-03'}:undefined}))
 entities.splice(1,0,redacted('redacted',{},{planningFields:{iterationTitle:'CANARY-ITERATION',targetDate:'2099-12-31'}}))
 store.applyBaseline({revision:0,entities,source:{revision:0,freshness:'fresh',authority:'provider'}})
-const read={workspace:{id:'ws-1',name:'Table workspace'},planningSource:{bindingId:'bind-1',name:'SourceWithoutSpaces'.repeat(10)},store,connection:{connected:true},lastUpdatedAt:'2026-11-03T01:00:00.000Z',capabilities:[{key:'planning.item.read',access:'read_only'}]}
-const source={subscribe:()=>()=>{},getSnapshot:()=>read}
-const setup={pending:false,setup:{workspace:read.workspace,planning:{state:'confirmed',bindingId:'bind-1',projectNodeId:'project-1'}}}
-const setupSource={subscribe:()=>()=>{},getSnapshot:()=>setup,refresh:async()=>{}}
-const refresh={pending:false},refreshSource={subscribe:()=>()=>{},getSnapshot:()=>refresh,refresh:async()=>{}}
+let read={workspace:{id:'ws-1',name:'Table workspace'},planningSource:{bindingId:'bind-1',name:'SourceWithoutSpaces'.repeat(10)},store,connection:{connected:true},lastUpdatedAt:'2026-11-03T01:00:00.000Z',capabilities:[{key:'planning.item.read',access:'read_only'}]}
+const readers=new Set(),setups=new Set()
+const source={subscribe:listener=>{readers.add(listener);return()=>readers.delete(listener)},getSnapshot:()=>read}
+let setup={pending:false,setup:{workspace:read.workspace,planning:{state:'confirmed',bindingId:'bind-1',projectNodeId:'project-1'}}}
+const setupSource={subscribe:listener=>{setups.add(listener);return()=>setups.delete(listener)},getSnapshot:()=>setup,refresh:async()=>{}}
+const refresh={pending:false},refreshSource={subscribe:()=>()=>{},getSnapshot:()=>refresh,refresh:async()=>{read={...read,lastUpdatedAt:'2026-11-03T01:01:00.000Z'};readers.forEach(listener=>listener())}}
 const page=params.has('standalone')?h(WorkItemListPage,{view:deriveWorkItemListView({read,phase:'received',refreshing:false,metadata:{sourceNames:{'bind-1':'SourceWithoutSpaces'.repeat(10)}}})}):params.has('app')?h(WorkItemApp,{source,refreshSource}):h(WorkspaceSetupGate,{source,setupSource,refreshSource})
-window.ReactDOM.createRoot(document.getElementById('app')).render(page)
+window.resizeParentClicks=0
+const wrapped=()=>h('div',{style:{display:'contents'},onClick:()=>{window.resizeParentClicks++}},page)
+let appRoot=window.ReactDOM.createRoot(document.getElementById('app'));appRoot.render(wrapped())
+window.tableFixture={scope:(workspaceId,bindingId)=>{read={...read,workspace:{...read.workspace,id:workspaceId},planningSource:{...read.planningSource,bindingId}};setup={...setup,setup:{...setup.setup,workspace:read.workspace,planning:{...setup.setup.planning,bindingId}}};setups.forEach(listener=>listener());readers.forEach(listener=>listener())},unmount:()=>appRoot.unmount(),mount:()=>{appRoot=window.ReactDOM.createRoot(document.getElementById('app'));appRoot.render(wrapped())}}
 `
 export async function startTableGeometryServer() {
   const vendor = (id, file) => readFile(path.join(path.dirname(uiRequire.resolve(id)), 'umd', file), 'utf8')

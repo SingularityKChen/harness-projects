@@ -106,7 +106,7 @@ test('真 empty：只有收到的 revision 0 空 baseline；同 store 的 pendin
 })
 
 test('内容：原生 table 语义、稳定状态区在 busy 容器外、规划状态与工程提示分列、固定时刻与缺失时间', () => {
-  const columns = [...H.content.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1])
+  const columns = [...H.content.matchAll(/<span class="hp-column-label">([^<]*)<\/span>/g)].map((match) => match[1])
   assert.deepEqual(columns, ['工作项', '内容身份', '规划状态', '迭代', '目标日期', '工程提示', '来源', '新鲜度'])
   assert.match(H.content, /<caption>[^<]+<\/caption>/)
   assert.match(H.content, /<th scope="row"[^>]*><details><summary[^>]*>Visible A<\/summary><\/details><\/th>/)
@@ -198,13 +198,13 @@ test('不可用：权限 / 不支持 / 未知 / 离线 / 错误说明各不相�
   }
 })
 
-test('泄漏面：全部场景的完整 HTML 不含被遮蔽字段与内部标识，没有动作元素，可见行正控存在', () => {
+test('泄漏面：全部场景的完整 HTML 不含被遮蔽字段与内部标识，只有本地列宽重置动作，可见行正控存在', () => {
   for (const [name, html] of Object.entries(H)) {
     for (const canary of CANARIES) assert.ok(!html.includes(canary), `${name}: ${canary}`)
   }
   for (const name of ['content', 'stale', 'refreshing', 'degraded', 'readOnly', 'offlineKept']) assert.ok(H[name].includes('Visible A'), name)
   for (const html of Object.values(H)) assert.equal((html.match(/<style>/g) ?? []).length, 1, '仅页面自有局部样式，不插入用户样式')
-  assert.doesNotMatch(Object.values(H).join(''), /<(a|button|input|script)\b|href=|data-|\bid=|\bon[a-z]+=|ent-|bind-/)
+  assert.doesNotMatch(Object.values(H).join('').replace(/<button type="button">重置列宽<\/button>/g, ''), /<(a|button|input|script)\b|href=|data-|\bid=|\bon[a-z]+=|ent-|bind-/)
 })
 
 test('转义：恶意来源名、提示、工作区名按文字转义，不产生标签', () => {
