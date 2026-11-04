@@ -111,9 +111,9 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 | 位置 | PR | 分支 | 交付 | 依赖 | 已知冲突点与解法 |
 |---|---|---|---|---|---|
-| 1 | #529 | `fix/workspace-header` | #528：唯一工作区状态/工具栏 | 无 | 窄Host slot P2已修且独立复评通过；最终head检查与批准通过才合并，不代替#446/#449人验 |
-| 2 | #530 | `chore/core-namespaces` | #418：普通namespace/显式scope | 无硬依赖 | revoked Proxy P2已修且独立复评通过；接在#529后并重锁真实main |
-| 3 | #531 | `fix/run-result-consistency` | #458：运行事实同源 | 无硬依赖 | 当前P1未修前禁止合并；原实现owner修复后独立复评，不关闭#215 |
+| 1 | #529 | `fix/workspace-header` | #528：唯一工作区状态/工具栏 | 无 | 已于2026-11-04 rebase merge：`fa990de0443aa220d96471ed1bb6dced20e715b5`；#528关闭，#446/#449人验保留 |
+| 2 | #530 | `chore/core-namespaces` | #418：普通namespace/显式scope | 无硬依赖 | 已于2026-11-04 rebase merge：`fb5e411b33de4e3bcbbeea3c17c1e775e2b46048`；#418关闭 |
+| 3 | #531 | `fix/run-result-consistency` | #458：运行事实同源 | 无硬依赖 | 原P1已修并通过独立复评；当前head门禁/批准后rebase merge。`gh pr view 531 -R SingularityKChen/harness-projects --json state,mergeCommit`重建实际状态（期望MERGED）；#215保留 |
 
 ### 历史队列（2026-09-18）
 

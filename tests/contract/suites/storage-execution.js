@@ -38,6 +38,46 @@ export async function seedExecutionPrereqs(storage) {
 export function storageExecutionSuite(adapter, register = test) {
   const { label, makeStorage, restart } = adapter
 
+  register(`${label}：ExecutionRunRecord 只保留声明字段且输入输出与重启均无别名`, async () => {
+    let storage = makeStorage()
+    await seedExecutionPrereqs(storage)
+    await storage.putExecutionContext({ id: 'run-shape-context', workspaceId: WORKSPACE, workItemId: 'entity-1', repositoryId: 'repo-1', status: 'ready' })
+    const base = { id: 'run-shape', workspaceId: WORKSPACE, contextId: 'run-shape-context', status: 'running', updatedAt: '2026-11-03T00:00:00Z' }
+    const ref = { bindingId: 'binding-execution', objectKind: 'execution_run', externalId: 'run-canonical' }
+    const cases = [
+      [{}, {}], [{ fallback: false, providerRef: undefined }, {}], [{ fallback: undefined }, {}],
+      [{ fallback: true, providerRef: { ...ref } }, { fallback: true, providerRef: { ...ref, url: undefined } }],
+      [{ providerRef: { ...ref, url: undefined, extra: 'discard' } }, { providerRef: { ...ref, url: undefined } }],
+      [{ providerRef: { ...ref, url: 'https://example.test/run' } }, { providerRef: { ...ref, url: 'https://example.test/run' } }],
+    ]
+    for (const [fields, canonical] of cases) {
+      const input = { ...base, ...fields, extra: 'discard' }, expected = { ...base, ...canonical }
+      await storage.putExecutionRun(input)
+      assert.deepEqual(await storage.getExecutionRun(base.id), expected, 'false / missing / undefined 与额外字段有同一声明形状')
+      input.status = 'failed'; if (input.providerRef) input.providerRef.externalId = 'mutated-input'
+      assert.deepEqual(await storage.getExecutionRun(base.id), expected, 'put 之后修改调用方对象不能篡改持久运行')
+      const output = await storage.getExecutionRun(base.id)
+      output.status = 'canceled'; if (output.providerRef) output.providerRef.externalId = 'mutated-output'
+      assert.deepEqual(await storage.getExecutionRun(base.id), expected, 'get 的顶层及嵌套引用都是独立快照')
+      storage = await restart(storage)
+      assert.deepEqual(await storage.getExecutionRun(base.id), expected, 'Fake 导出重建与 SQLite 关开保持精确字段')
+    }
+  })
+
+  register(`${label}：ExecutionRunRecord 的 put/get 均隔离顶层与嵌套引用`, async () => {
+    const storage = makeStorage()
+    await seedExecutionPrereqs(storage)
+    await storage.putExecutionContext({ id: 'alias-context', workspaceId: WORKSPACE, workItemId: 'entity-1', repositoryId: 'repo-1', status: 'ready' })
+    const expected = { id: 'alias-run', workspaceId: WORKSPACE, contextId: 'alias-context', status: 'running', updatedAt: '2026-11-03T00:00:00Z', providerRef: { bindingId: 'binding-execution', objectKind: 'execution_run', externalId: 'original', url: undefined } }
+    const input = structuredClone(expected)
+    await storage.putExecutionRun(input)
+    input.status = 'failed'; input.providerRef.externalId = 'input-mutated'
+    assert.deepEqual(await storage.getExecutionRun(input.id), expected, '已写入 run 不保留输入别名')
+    const output = await storage.getExecutionRun(input.id)
+    output.status = 'canceled'; output.providerRef.externalId = 'output-mutated'
+    assert.deepEqual(await storage.getExecutionRun(input.id), expected, '读回 run 不暴露持久对象的别名')
+  })
+
   register(`${label}：同一工作项+仓库最多一个 active 执行上下文`, async () => {
     const storage = makeStorage()
     await seedExecutionPrereqs(storage)

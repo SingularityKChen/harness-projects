@@ -98,11 +98,24 @@ for (const kind of ['Fake', 'SQLite']) {
   })
   for (const fallback of [false, true]) for (const status of ['mystery', 'failed']) test(`${kind}: ${fallback ? 'fallback' : 'primary'} ${status} ack retains root and slot semantics`, async () => {
     const w = await setup(kind, fallback), provider = fallback ? w.providers.executionFallback : w.providers.execution, call = provider.startRun.bind(provider)
-    provider.startRun = async (input) => { const r = await call(input); return { ...r, value: { ...r.value, status } } }
+    let starts = 0
+    provider.startRun = async (input) => { starts++; const r = await call(input); return { ...r, value: { ...r.value, status } } }
     const result = await start(w), row = await receipt(w)
     assert.equal(row.state, status === 'mystery' ? 'unknown' : 'saved'); assert.equal(row.externalIntent.state, row.state)
     if (status === 'mystery') { unknown(result); assert.equal(result.runExternalId, provider.state.runs.at(-1).ref.externalId); assert.equal((await start(w, 'new-key')).writeState, 'saved', '显式命令沿持久引用读回 running 后结算原 receipt') }
-    else if (fallback) assert.deepEqual([result.fallback, result.error?.code, result.runExternalId], ['manual_fallback', 'unavailable', undefined], '确定降级结果沿用原契约，结果规范化属于 #458')
+    else if (fallback) assert.deepEqual([result.fallback, result.error?.code, result.runExternalId], ['manual_fallback', 'unavailable', provider.state.runs.at(-1).ref.externalId], '失败 ack 仍有持久身份，首次结果不得漏掉它（#458）')
+    const run = await w.storage.getExecutionRun((await w.core.queries.getExecutionContext(w.request)).runId)
+    const view = await w.core.queries.getExecutionContext(w.request)
+    assert.deepEqual([result.runExternalId, result.fallback], [run.providerRef.externalId, fallback ? 'manual_fallback' : undefined])
+    assert.deepEqual([view.runExternalId, view.fallback], [run.providerRef.externalId, fallback ? 'manual_fallback' : undefined])
+    if (status === 'failed') {
+      const results = [await start(w), await start(w, 'new-key')]
+      if (kind === 'SQLite') { w.storage.close(); w.storage = sqlite(w.storage.location) }
+      else w.storage = createFakeStorage(exportFakeStorageState(w.storage))
+      w.core = await composeCore(w); results.push(await start(w, 'restart'))
+      for (const r of results) assert.deepEqual([r.runExternalId, r.fallback, r.confirmed], [run.providerRef.externalId, fallback ? 'manual_fallback' : undefined, true])
+    }
+    assert.equal(starts, 1, '直接计 startRun 调用，不靠 Fake 幂等隐藏重复启动')
   })
   test(`${kind}: committed intent before call interruption remains conservative`, async () => {
     const w = await setup(kind), transaction = w.storage.transaction.bind(w.storage); let hit = false

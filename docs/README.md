@@ -116,6 +116,7 @@
 | [2026-09-23-storage-sqlite-port](exec-plan/completed/2026-09-23-storage-sqlite-port.md) | Storage 端口落地（L4 地基面 + L5 同步面 + L6 执行面） |
 | [2026-10-28-storage-baseline-admission](exec-plan/completed/2026-10-28-storage-baseline-admission.md) | 当前世代准入、结构化备份重建拒绝与整体原子初始化（#414） |
 | [2026-10-29-start-work-owner-fencing](exec-plan/completed/2026-10-29-start-work-owner-fencing.md) | 持久 owner 代际、原子 run 回读与旧库拒绝（#420） |
+| [2026-11-03-run-result-consistency](exec-plan/completed/2026-11-03-run-result-consistency.md) | Start Work 返回与持久运行同源、恢复失败与准入竞态保护、两种存储运行快照（#458） |
 | [2026-09-24-engineering-writer-terminal](exec-plan/completed/2026-09-24-engineering-writer-terminal.md) | 2026-09-24-engineering-writer-terminal —— 让 `Engineering` 写入口与观察者共用一份终态选择策略 |
 | [2026-09-24-harness-host-spike](exec-plan/completed/2026-09-24-harness-host-spike.md) | 宿主承载能力探针 |
 | [2026-09-24-human-execution-provider](exec-plan/completed/2026-09-24-human-execution-provider.md) | 2026-09-24-human-execution-provider —— 可绑定的人工执行 provider、降级承接与运行身份 |

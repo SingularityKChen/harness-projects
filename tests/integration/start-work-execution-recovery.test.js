@@ -5,9 +5,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AccessLevel, CapabilityKey } from '@harness-projects/capabilities'
-import { composeCore, contextIdFor, runIdFor } from '@harness-projects/core'
+import { composeCore, contextIdFor, runIdFor, createContext, bootstrapWorkspace, startWork as directStartWork } from '@harness-projects/core'
 import { createFakeProviders, createFakeExecutionProvider, createFakeStorage, exportFakeStorageState, providerFail } from '@harness-projects/provider-fake'
-import { createSqliteStorage } from '@harness-projects/storage-sqlite'
+import { createSqliteStorage, openDatabase } from '@harness-projects/storage-sqlite'
 
 const root = mkdtempSync(join(tmpdir(), 'execution-recovery-')), handles = []; let seq = 0
 after(() => { for (const s of handles) try { s.close() } catch {} rmSync(root, { recursive: true, force: true }) })
@@ -32,6 +32,11 @@ async function setup(kind, fallback = false) {
 }
 const start = (w, key = 'original', extra = {}) => w.core.commands.startWork({ ...w.request, idempotencyKey: key, ...extra })
 const receipt = (w) => w.storage.findMutationAttempt(w.workspace.id, 'original')
+async function assertRunFacts(w, ...results) {
+  const run = await w.storage.getExecutionRun(w.runId), view = await w.core.queries.getExecutionContext(w.request)
+  const expected = [run?.providerRef?.externalId, run?.fallback === true ? 'manual_fallback' : undefined]
+  for (const result of [...results, view]) assert.deepEqual([result.runExternalId, result.fallback], expected, 'command / durable run / Query share execution facts')
+}
 const unknown = (r) => assert.deepEqual([r.writeState, r.confirmed, r.degraded], ['unknown', false, true])
 function inject(w, method, predicate, action = () => { throw Error('receipt disk failure') }) {
   const transaction = w.storage.transaction.bind(w.storage); let hits = 0
@@ -83,9 +88,10 @@ for (const kind of ['Fake', 'SQLite']) {
     }
     const first = await start(w); unknown(first); hit?.()
     assert.equal(first.fallback, fallback ? 'manual_fallback' : undefined)
+    if (loss === 'journal') assert.equal(first.runExternalId, w.provider.state.runs.at(-1).ref.externalId, 'journal 故障保留本次已 ack 句柄，不被空 Query 清除')
     await reopen(w)
     for (const key of ['original', 'replacement']) {
-      const r = await start(w, key); unknown(r); assert.equal(r.fallback, fallback ? 'manual_fallback' : undefined)
+      const r = await start(w, key); unknown(r); assert.equal(r.fallback, fallback && loss !== 'journal' ? 'manual_fallback' : undefined, '没有持久 run 时 intent 不证明人工运行已经发生')
     }
     assert.deepEqual([w.starts, w.reads, (await receipt(w)).externalIntent.operation], [1, 0, fallback ? 'startFallbackRun' : 'startRun'])
     assert.equal((await w.storage.getExecutionRun(w.runId))?.providerRef, undefined)
@@ -233,6 +239,8 @@ for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) for
   const face = [failed ? 'failed' : 'ready', failed ? 'failed' : worktree === 'healthy' ? 'saved' : 'unknown']
   assert.deepEqual([result.status, result.writeState], face)
   assert.deepEqual([next.status, next.writeState], face, 'unchanged external facts give the same answer immediately')
+  await assertRunFacts(w, result, next)
+  assert.equal((await w.storage.getExecutionRun(w.runId)).status, 'running', 'context Failed 不改判运行状态')
   assert.equal(worktreeReads, failed ? 1 : 2)
   assert.deepEqual([w.starts, w.reads], [1, path === 'stale-success' ? 2 : 1])
   if (before) {
@@ -261,6 +269,7 @@ for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) for
   }
   b.release(); const result = await original
   assert.deepEqual([result.status, result.writeState], ['missing', 'wrong-branch'].includes(worktree) ? ['failed', 'failed'] : ['ready', 'unknown'])
+  await assertRunFacts(w, result)
   assert.deepEqual([await receipt(w), await w.storage.getExecutionRun(w.runId)], before)
   assert.deepEqual([hits, w.starts, w.reads, worktreeReads], [1, 1, 1, 1])
 })
@@ -284,4 +293,162 @@ for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) for
   assert.deepEqual([row.state, row.externalIntent.state, run.status, run.providerRef.externalId, run.fallback === true], ['saved', 'saved', 'running', first.runExternalId, fallback])
   assert.deepEqual([throws, w.starts, w.reads], [1, 1, path === 'stale-success' ? 2 : 1])
   if (before) { assert.deepEqual([row, run], before); assert.equal(barrierHits, 2, 'one blocked read and one observer read') }
+})
+
+for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) for (const unavailable of [false, true]) test(`${kind} ${fallback}/${unavailable}: resumed unknown run keeps durable origin and identity`, async () => {
+  const w = await setup(kind, fallback), first = await start(w)
+  const run = await w.storage.getExecutionRun(w.runId), record = await w.storage.getExecutionContext(w.contextId)
+  await w.storage.putExecutionRun({ ...run, status: 'unknown' })
+  await w.storage.putExecutionContext({ ...record, status: 'failed' })
+  await reopen(w)
+  if (unavailable) w.core = await composeCore({ ...w, policy: { [CapabilityKey.ExecutionRunStart]: AccessLevel.Unavailable } })
+  const result = await start(w, 'resume'); unknown(result)
+  await assertRunFacts(w, result, await start(w, 'resume'))
+  assert.equal(result.runExternalId, first.runExternalId); assert.equal(w.starts, 1)
+  assert.equal((await w.storage.getExecutionRun(w.runId)).status, 'unknown')
+})
+for (const kind of ['Fake', 'SQLite']) test(`${kind}: stale fallback intent cannot relabel durable primary run`, async () => {
+  const w = await setup(kind), first = await start(w), row = await receipt(w)
+  const bindingId = w.providers.executionFallback.gate.bindingId
+  await w.storage.putMutationAttempt({ ...row, state: 'unknown', externalIntent: { ...row.externalIntent, operation: 'startFallbackRun', bindingId, state: 'unknown', input: { ...row.externalIntent.input, context: { ...row.externalIntent.input.context, bindingId } } } })
+  await reopen(w)
+  const result = await start(w); unknown(result); await assertRunFacts(w, result)
+  assert.equal(result.runExternalId, first.runExternalId)
+  assert.deepEqual([w.starts, w.reads], [1, 0], '不向错误签发者读回，也不重复启动')
+})
+for (const kind of ['Fake', 'SQLite']) test(`${kind}: run writer stores only declared provider reference fields and binding roles`, async () => {
+  const w = await setup(kind), call = w.provider.startRun.bind(w.provider)
+  w.provider.startRun = async (input) => { const r = await call(input); return { ...r, value: { ...r.value, ref: { ...r.value.ref, injected: 'discard' } } } }
+  const hit = inject(w, 'putExecutionRun', () => true, async (row) => {
+    assert.deepEqual(Object.keys(row.providerRef).sort(), ['bindingId', 'externalId', 'objectKind', 'url'], 'core 单写者在 Storage 规范化之前已挑出四字段')
+  })
+  const result = await start(w), run = await w.storage.getExecutionRun(w.runId); hit()
+  assert.equal(result.writeState, 'saved')
+  assert.deepEqual(Object.keys(run.providerRef).sort(), ['bindingId', 'externalId', 'objectKind', 'url'])
+  await assertRunFacts(w, result)
+  const bindings = await w.storage.listProviderBindings(w.workspace.id)
+  assert.equal(bindings.find((b) => b.id === w.providers.execution.gate.bindingId).isDefault, true)
+  assert.equal(bindings.find((b) => b.id === w.providers.executionFallback.gate.bindingId).isDefault, false)
+})
+
+test('SQLite: run writer discards undeclared reference keys before persistence', async () => {
+  const w = await setup('SQLite'); await start(w)
+  const run = await w.storage.getExecutionRun(w.runId)
+  await w.storage.putExecutionRun({ ...run, providerRef: { ...run.providerRef, extra: 'discard' } })
+  const db = openDatabase(w.storage.location)
+  try {
+    assert.deepEqual(JSON.parse(db.prepare('SELECT provider_ref_json FROM execution_run WHERE id = ?').get(w.runId).provider_ref_json),
+      { bindingId: run.providerRef.bindingId, objectKind: 'execution_run', externalId: run.providerRef.externalId }, '原始持久列也不保存额外输入键，不能靠读映射掩盖')
+  } finally { db.close() }
+  await reopen(w)
+  assert.deepEqual(await w.storage.getExecutionRun(w.runId), run)
+})
+
+for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) for (const fault of ['git-failed', 'unknown-run', 'step-journal', 'intent-receipt', 'settle-receipt', 'run-receipt', 'manual-route-receipt']) test(`${kind} ${fallback}: resumed Git ${fault} retains the owned durable run`, async () => {
+  const w = await setup(kind, fallback), first = await start(w), healthy = w.providers.development.getWorktree.bind(w.providers.development)
+  w.providers.development.getWorktree = async () => providerFail('not_found', 'worktree removed')
+  assert.equal((await start(w)).status, 'failed', '真实验证路径使 context Failed，运行仍存在')
+  if (fault === 'unknown-run') await w.storage.putExecutionRun({ ...await w.storage.getExecutionRun(w.runId), status: 'unknown' })
+  await reopen(w)
+  w.providers.development.getWorktree = healthy
+  if (['git-failed', 'unknown-run', 'settle-receipt'].includes(fault)) w.providers.development.createWorktree = async () => providerFail('unavailable', 'cannot recreate worktree')
+  let hit
+  if (fault === 'step-journal') hit = inject(w, 'putExecutionContext', (r) => r.status === 'provisioning' && r.provisioningGeneration === 2 && r.worktreeExternalId === undefined)
+  if (fault === 'intent-receipt') hit = inject(w, 'putMutationAttempt', (r) => r.externalIntent?.operation === 'createWorktree' && r.externalIntent.state === 'pending')
+  if (fault === 'manual-route-receipt') w.core = await composeCore({ ...w, policy: { [CapabilityKey.ExecutionRunStart]: AccessLevel.Unavailable } })
+  if (['settle-receipt', 'run-receipt', 'manual-route-receipt'].includes(fault)) hit = inject(w, 'putMutationAttempt', (r) => r.state === (fault === 'settle-receipt' ? 'failed' : 'saved'))
+  const run = await w.storage.getExecutionRun(w.runId), result = await start(w, 'resume-after-failure'); hit?.()
+  assert.deepEqual([result.writeState, result.confirmed], [['git-failed', 'unknown-run'].includes(fault) ? 'failed' : 'unknown', false])
+  await assertRunFacts(w, result)
+  assert.equal(result.runExternalId, first.runExternalId)
+  assert.deepEqual(await w.storage.getExecutionRun(w.runId), run, 'Git 失败与本地结算故障不改写运行轴')
+  assert.equal(w.starts, 1, '不重复启动，计 Provider 实际调用')
+})
+for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) test(`${kind} ${fallback}: failed Git resume cannot borrow successor run after owner loss`, async () => {
+  const w = await setup(kind, fallback), first = await start(w), healthy = w.providers.development.getWorktree.bind(w.providers.development)
+  w.providers.development.getWorktree = async () => providerFail('not_found', 'worktree removed')
+  await start(w); w.providers.development.getWorktree = healthy
+  const b = barrier()
+  w.providers.development.createWorktree = async () => { await b.hold(); return providerFail('unavailable', 'cannot recreate') }
+  const pending = start(w, 'old-resume'); await b.entered
+  await w.storage.transaction(async (tx) => {
+    const record = await tx.getExecutionContext(w.contextId), run = await tx.getExecutionRun(w.runId)
+    await tx.putExecutionContext({ ...record, provisioningGeneration: record.provisioningGeneration + 1 })
+    await tx.putExecutionRun({ ...run, providerRef: { ...run.providerRef, externalId: 'winner-run' }, fallback: !fallback })
+  })
+  const before = [await w.storage.getExecutionContext(w.contextId), await w.storage.getExecutionRun(w.runId), await w.storage.findMutationAttempt(w.workspace.id, 'old-resume')]
+  b.release(); const result = await pending; unknown(result)
+  assert.notEqual(result.runExternalId, 'winner-run', '只可保留本次有权已知的信息，不能读取赢家身份')
+  assert.ok(result.runExternalId === undefined || result.runExternalId === first.runExternalId)
+  assert.deepEqual([await w.storage.getExecutionContext(w.contextId), await w.storage.getExecutionRun(w.runId), await w.storage.findMutationAttempt(w.workspace.id, 'old-resume')], before)
+  assert.equal(w.starts, 1)
+})
+for (const kind of ['Fake', 'SQLite']) for (const access of ['unavailable', 'read_only']) test(`${kind}: pre-admission route ${access} retains rejection without reading run`, async () => {
+  const w = await setup(kind, true); await start(w)
+  w.providers.development.getWorktree = async () => providerFail('not_found', 'worktree removed')
+  await start(w)
+  w.core = await composeCore({ ...w, policy: { [CapabilityKey.DevelopmentWorktreeCreate]: access } })
+  const get = w.storage.getExecutionRun.bind(w.storage), run = await get(w.runId), transaction = w.storage.transaction.bind(w.storage); let reads = 0
+  w.storage.getExecutionRun = (...args) => { reads++; return get(...args) }
+  w.storage.transaction = (work) => transaction((tx) => work(new Proxy(tx, { get(target, key) {
+    const fn = Reflect.get(target, key)
+    return key === 'getExecutionRun' ? (...args) => { reads++; return fn.apply(target, args) } : typeof fn === 'function' ? fn.bind(target) : fn
+  } })))
+  const result = await start(w, 'route-rejected')
+  assert.deepEqual([result.writeState, result.confirmed, result.error.code, result.runExternalId, result.fallback, reads],
+    ['failed', false, access === 'read_only' ? 'permission_denied' : 'not_supported', undefined, undefined, 0], '尚未取得供应与 issuer 路由授权的拒绝不补读或回显句柄')
+  assert.deepEqual(await get(w.runId), run); assert.equal(w.starts, 1)
+})
+
+for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) for (const [stage, disk] of [['intent', false], ['intent', true], ['final-receipt', true], ['git-failure', false], ['git-failure', true]]) for (const revoke of [false, true]) test(`${kind} ${fallback}: ${stage} admission revoke=${revoke} disk=${disk} controls run identity`, async () => {
+  const w = await setup(kind, fallback), first = await start(w), healthy = w.providers.development.getWorktree.bind(w.providers.development)
+  w.providers.development.getWorktree = async () => providerFail('not_found', 'removed')
+  assert.equal((await start(w)).status, 'failed'); w.providers.development.getWorktree = healthy
+  if (stage === 'git-failure') w.providers.development.createWorktree = async () => providerFail('unavailable', 'cannot recreate worktree')
+  const context = await createContext(w); await bootstrapWorkspace(context)
+  const b = barrier(), list = w.providers.planning.listPlanningItems.bind(w.providers.planning)
+  w.providers.planning.listPlanningItems = async (...args) => { await b.hold(); return revoke ? providerFail('permission_denied', 'revoked during admitted resume') : list(...args) }
+  const refresh = bootstrapWorkspace(context); await b.entered
+  const run = await w.storage.getExecutionRun(w.runId), transaction = w.storage.transaction.bind(w.storage); let hits = 0
+  w.storage.transaction = (work) => transaction((tx) => work(new Proxy(tx, { get(target, key) {
+    const method = Reflect.get(target, key)
+    return key === 'putMutationAttempt' ? async (row) => {
+      if (row.idempotencyKey === 'revoked-resume' && (stage === 'intent' ? row.externalIntent?.operation === 'createWorktree' && row.externalIntent.state === 'pending' : row.state === (stage === 'git-failure' ? 'failed' : 'saved'))) {
+        hits++; b.release()
+        for (let i = 0; revoke && i < 30 && !context.runtimeAccess.denied; i++) await new Promise((resolve) => setImmediate(resolve))
+        assert.equal(context.runtimeAccess.denied, revoke, '真实 bootstrap permission_denied 先使 runtime 准入失效，再排队持久脱敏')
+        if (disk) throw Error('disk fault races with permission invalidation')
+      }
+      return method.call(target, row)
+    } : typeof method === 'function' ? method.bind(target) : method
+  } })))
+  const result = await directStartWork(context, { ...w.request, idempotencyKey: 'revoked-resume' }); await refresh
+  assert.equal(hits, 1)
+  assert.deepEqual([result.runExternalId, result.fallback], revoke ? [undefined, undefined] : [first.runExternalId, fallback ? 'manual_fallback' : undefined])
+  if (disk) {
+    unknown(result); assert.match(result.error.message, /disk fault races/)
+    assert.equal((await w.storage.findMutationAttempt(w.workspace.id, 'revoked-resume')).state, 'pending', '准入失效只保护身份，不把本地故障 Unknown 或原收据改成 Failed')
+  }
+  if (stage === 'git-failure' && !disk) {
+    assert.deepEqual([result.writeState, result.confirmed, result.status, result.error.code], ['failed', false, 'failed', 'unavailable'])
+    const settled = await w.storage.findMutationAttempt(w.workspace.id, 'revoked-resume')
+    assert.deepEqual([settled.state, settled.errorCode], ['failed', 'unavailable'], '返回身份过滤不改写确定 Git 失败的收据')
+  }
+  assert.deepEqual(await w.storage.getExecutionRun(w.runId), run); assert.equal(w.starts, 1)
+})
+for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) for (const stage of ['receipt', 'git-failure']) test(`${kind} ${fallback}: ${stage} unconfirmable admission redacts identity and preserves the failure`, async () => {
+  const w = await setup(kind, fallback); await start(w)
+  const healthy = w.providers.development.getWorktree.bind(w.providers.development)
+  w.providers.development.getWorktree = async () => providerFail('not_found', 'removed'); await start(w); w.providers.development.getWorktree = healthy
+  const get = w.storage.getPlanningProjection.bind(w.storage); let faulted = false, checks = 0
+  w.storage.getPlanningProjection = (...args) => { if (faulted) { checks++; throw Error('cannot confirm current admission') } return get(...args) }
+  if (stage === 'git-failure') w.providers.development.createWorktree = async () => providerFail('unavailable', 'cannot recreate worktree')
+  const run = await w.storage.getExecutionRun(w.runId)
+  const hit = inject(w, 'putMutationAttempt', (row) => row.state === (stage === 'receipt' ? 'saved' : 'failed'), async () => { faulted = true; if (stage === 'receipt') throw Error('receipt disk fault') })
+  const result = await start(w, 'unconfirmable'); hit()
+  assert.deepEqual([result.runExternalId, result.fallback], [undefined, undefined]); assert.ok(checks > 0)
+  if (stage === 'receipt') { unknown(result); assert.match(result.error.message, /receipt disk fault/) }
+  else assert.deepEqual([result.writeState, result.confirmed, result.status, result.error.code], ['failed', false, 'failed', 'unavailable'])
+  assert.equal((await w.storage.findMutationAttempt(w.workspace.id, 'unconfirmable')).state, stage === 'receipt' ? 'pending' : 'failed')
+  assert.deepEqual(await w.storage.getExecutionRun(w.runId), run); assert.equal(w.starts, 1)
 })
