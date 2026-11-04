@@ -1,3 +1,4 @@
+import { createComposedExecutionPlatform } from './composed-execution-platform.mjs'
 import { jsxRuntimeScript } from './markdown-vm.mjs'
 /** SQLite → Host → typed remote 的离线执行抽屉夹具；真实浏览器入口复用生产 apply。 */
 import { mkdtemp, rm, readFile } from 'node:fs/promises'
@@ -16,6 +17,7 @@ import { OPERATIONS, exactRecord, parseInput } from '../../apps/harness-plugin/s
 import { WEB_ENTRY } from './composed-workspace-browser.mjs'
 import { AccessLevel, providerErr, providerError } from '@harness-projects/capabilities'
 export async function createExecutionFixture({ seed } = {}) {
+  if (seed === 'execution') return createComposedExecutionPlatform()
   const root = await mkdtemp(path.join(tmpdir(), 'execution-drawer-')), dataPath = path.join(root, 'workspace.sqlite')
   const make = (options) => { const p = createFakeProviders(options); if (seed === 'query') for (let i=0;i<120;i++) p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Query '+String(i).padStart(3,'0'), 'Safe query body'); if (seed === 'read') p.planning.addItem(p.planning.state.projects[0].ref, 'draft', '规划项 draft-1', 'draft-1 正文占位'); return p }
   const mounted = [], byDomain = {}, providers = make(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: { projectNodeId: { kind: 'string', required: false, pattern: '.+', maxLength: 100 } }, create: async ({ binding }) => { const provider = make({ [binding.domain]: { bindingId: binding.id } })[binding.domain]; byDomain[binding.domain] = provider; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
@@ -183,13 +185,13 @@ html,body { margin:0; padding:0; min-width:0; height:100%; overflow:hidden } bod
         if (input.action === 'release') { holds.clear(); held.splice(0).forEach((resolve) => resolve()) }
         if (!rebuilding) { const baseline = await h.installed.service.baseline(); descriptor = { generation: baseline.generation, revision: baseline.revision } }
         result = { calls, ...descriptor, rebuilding, requests, held: held.length, streams: streams.size, workspaceId: h.workspaceId, itemId: h.itemId,
-          external: { branches: h.byDomain.development?.state.branches.length ?? 0, worktrees: h.byDomain.development?.state.worktrees.length ?? 0, runs: h.byDomain.execution?.state.runs.length ?? 0 } }
+          external: { branches: h.byDomain.development?.state?.branches.length ?? 0, worktrees: h.byDomain.development?.state?.worktrees.length ?? 0, runs: h.byDomain.execution?.state.runs.length ?? 0 } }
       }
       else { response.writeHead(404); response.end(); return }
       response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(result))
     } catch (error) { response.writeHead(500); response.end(JSON.stringify({ error: error.message })) }
   })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  return { ...h, get host() { return h.host }, get installed() { return h.installed }, requests, inputs: Object.keys(bundle.metafile.inputs), url: `http://127.0.0.1:${server.address().port}`, close: async () => { holds.clear(); held.splice(0).forEach((resolve) => resolve()); for (const abort of streams) abort.abort(); server.closeIdleConnections(); await new Promise((resolve) => server.close(resolve)); await h.close() } }
+  return { ...h, get storage() { return h.storage }, get host() { return h.host }, get installed() { return h.installed }, requests, inputs: Object.keys(bundle.metafile.inputs), url: `http://127.0.0.1:${server.address().port}`, close: async () => { holds.clear(); held.splice(0).forEach((resolve) => resolve()); for (const abort of streams) abort.abort(); server.closeIdleConnections(); await new Promise((resolve) => server.close(resolve)); await h.close() } }
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) { const h = await startExecutionServer(); console.log(h.url); process.on('SIGINT', async () => { await h.close(); process.exit(0) }) }
