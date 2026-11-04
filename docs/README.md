@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-04-backup-rollback-rehearsal](exec-plan/completed/2026-11-04-backup-rollback-rehearsal.md) | 停机备份、匹配产物回滚与同 profile 恢复工程演练（#532） |
 | [2026-11-04-browser-execution-recovery](exec-plan/completed/2026-11-04-browser-execution-recovery.md) | 真实浏览器执行、人工备用、PR恢复与交付事实（#451） |
 | [2026-11-04-host-policy-admission](exec-plan/completed/2026-11-04-host-policy-admission.md) | Core Host 持久策略早期拒绝、原库保留与安全停止（#540） |
 | [2026-11-03-core-namespaces](exec-plan/completed/2026-11-03-core-namespaces.md) | 普通 Core 命名空间、唯一对象交付作用域与无副作用非法输入拒绝（#418） |

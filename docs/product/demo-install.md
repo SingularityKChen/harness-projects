@@ -108,6 +108,8 @@ export HARNESS_PROJECTS_FORCE_SESSION_START_FAILURE=1
 
 ## 卸载与恢复
 
+停机备份、匹配产物回滚与原 profile 恢复的完整操作见[备份与回滚流程](../development/backup-rollback.md)，实际工程记录与人类裁决边界也由该流程链接。
+
 先退出 Web 宿主进程，使用同一个 `DSH_HOME` 和 Web profile：
 
 ```sh
