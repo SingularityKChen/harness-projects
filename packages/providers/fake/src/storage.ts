@@ -77,6 +77,14 @@ function byItemExternalId(left: cap.MembershipRecord, right: cap.MembershipRecor
 /** 状态 / 来源枚举：替身侧按 domain 的取值拒绝未知值，与 003 各表的 CHECK 同语义（枚举只有 domain 一份事实源）。 */
 const CONTEXT_STATUSES: readonly string[] = Object.values(domain.ExecutionContextStatus)
 const RUN_STATUSES: readonly string[] = Object.values(domain.ExecutionRunStatus)
+/** run 边界只保留声明字段；put/get 各自快照，调用方不能改写持久运行。 */
+function runSnapshot(record: cap.ExecutionRunRecord): cap.ExecutionRunRecord {
+  const { id, workspaceId, contextId, status, updatedAt, providerRef, fallback } = record
+  return { id, workspaceId, contextId, status, updatedAt,
+    ...(providerRef === undefined ? {} : { providerRef: { bindingId: providerRef.bindingId, objectKind: providerRef.objectKind, externalId: providerRef.externalId, url: providerRef.url } }),
+    ...(fallback === true ? { fallback: true } : {}) }
+}
+
 const WRITE_STATES: readonly string[] = Object.values(domain.WriteState)
 const RELATION_STATES: readonly string[] = Object.values(domain.RelationState)
 const RELATION_SOURCES: readonly string[] = Object.values(domain.RelationSource)
@@ -423,7 +431,8 @@ export class MemoryStorage implements cap.Storage {
       c.workspaceId === workspaceId && c.workItemId === workItemId && c.repositoryId === repositoryId && isActiveContext(c.status))
   }
   /** 执行运行必须挂在存在的上下文与工作区上、状态必须是已知取值：与 SQLite 的 `execution_run` 两条外键（上下文是 `(workspace_id, context_id)` 复合键：必须在同一工作区）与 `status` 的 CHECK 同语义（L6 评审 F1；第四轮评审补工作区与枚举；第六轮评审补复合键）。 */
-  async putExecutionRun(record: cap.ExecutionRunRecord): Promise<void> {
+  async putExecutionRun(input: cap.ExecutionRunRecord): Promise<void> {
+    const record = runSnapshot(input)
     return this.#mutate(() => {
       if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('execution run workspace does not exist')
       if (!this.data.contexts.some((context) => context.id === record.contextId && context.workspaceId === record.workspaceId)) throw new Error('execution run context does not exist in the run workspace')
@@ -431,7 +440,10 @@ export class MemoryStorage implements cap.Storage {
       upsert(this.data.runs, record, (r) => r.id === record.id)
     })
   }
-  async getExecutionRun(id: domain.ExecutionRunId): Promise<cap.ExecutionRunRecord | undefined> { return this.data.runs.find((r) => r.id === id) }
+  async getExecutionRun(id: domain.ExecutionRunId): Promise<cap.ExecutionRunRecord | undefined> {
+    const record = this.data.runs.find((r) => r.id === id)
+    return record === undefined ? undefined : runSnapshot(record)
+  }
   /**
    * 关系：工作区必须存在，`state` / `source` 必须是 domain 的已知取值，candidate 不接受 `explicit`
    * （`explicit` 按 domain 的 `initialRelationState` 只能进 confirmed）——三条与 SQLite 的

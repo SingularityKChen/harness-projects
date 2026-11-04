@@ -92,6 +92,7 @@ export interface ExecutionContextRecord {
   readonly provisioningStartedAt: string | undefined
 }
 
+/** 往返只保留声明字段；put/get 隔离顶层与嵌套引用。providerRef 缺失/undefined 省略，有引用时保留四字段（含 url: undefined）；fallback 仅 true 保留。 */
 export interface ExecutionRunRecord {
   readonly id: ExecutionRunId; readonly workspaceId: WorkspaceId; readonly contextId: ExecutionContextId
   readonly status: ExecutionRunStatus; readonly updatedAt: string

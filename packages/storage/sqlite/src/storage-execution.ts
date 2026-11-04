@@ -90,7 +90,7 @@ export class SqliteExecutionSurface extends SqliteSyncSurface {
       ON CONFLICT (id) DO UPDATE SET workspace_id = excluded.workspace_id, context_id = excluded.context_id,
         status = excluded.status, updated_at = excluded.updated_at, provider_ref_json = excluded.provider_ref_json, fallback = excluded.fallback`,
       record.id, record.workspaceId, record.contextId, record.status, record.updatedAt,
-      record.providerRef === undefined ? null : JSON.stringify(record.providerRef), record.fallback === true ? 1 : 0)
+      record.providerRef === undefined ? null : JSON.stringify({ bindingId: record.providerRef.bindingId, objectKind: record.providerRef.objectKind, externalId: record.providerRef.externalId, url: record.providerRef.url }), record.fallback === true ? 1 : 0)
   }
 
   getExecutionRun(id: ExecutionRunId): Promise<ExecutionRunRecord | undefined> {
