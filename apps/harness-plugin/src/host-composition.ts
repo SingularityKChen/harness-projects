@@ -18,6 +18,16 @@ import { preflightPlanningConnection, githubViewer, HOST_SECRET_HANDLES, hostSto
 /** Controller 失败上 wire 的唯一文案：原因只写进宿主诊断日志。 */
 const OPERATION_FAILED = 'harness-projects：操作失败，原因已写入宿主诊断日志'
 
+/** Host 支持集拒绝与可恢复的普通装配失败分开；不将持久策略原文带出边界。 */
+class HostPolicyAdmissionError extends Error {
+  readonly code = ProjectErrorCode.NotSupported
+  readonly reason = 'unsupported_workspace_policy'
+  constructor() {
+    super('当前 Core Host 不支持此已存规划策略；原数据库保留，请停止使用并等待支持该策略的版本。')
+    this.name = 'HostPolicyAdmissionError'
+  }
+}
+
 export interface HostCompositionOptions {
   readonly dataPath: string
   readonly workspaceId: WorkspaceId
@@ -226,10 +236,11 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       return [[mount.id, mount.domain, mount.implementationKey, mount.enabled], configuration, accountId === undefined ? undefined : await storage!.getConnectorAccount(accountId)]
     }))])
     const assemble = async (): Promise<Assembly> => {
+      const workspace = await storage!.getWorkspace(options.workspaceId)
+      if (workspace !== undefined && workspace.statusPolicy !== StatusPolicy.ProviderAuthoritative) throw new HostPolicyAdmissionError()
       const lifetime = createPlanningLifetime(options.planningReadTimeoutMs)
       const assembly: Assembly = { controller: undefined!, targetError: undefined!, disabled: [], lifetime, leases: new Set(), cache: new Map(developmentCache), executionMode: 'manual' }
       try {
-        const workspace = await storage!.getWorkspace(options.workspaceId)
         const { table, disabled } = workspace === undefined ? { table: {}, disabled: [] } : await restoreProviders(storage!, workspace.id, options.catalog, {
           // 解析失败（例如宿主凭据服务缺席）只留允许名单字段；provider 随后把它归类为结构化 unavailable，不带原文。
           sessionController: () => { lifetime.assertActive(); return options.sessionController?.() },
@@ -286,7 +297,10 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
               }
               activationError = undefined
             } catch (error) {
-              log.write('activationFailed', describeError(error)); activationError = projectError(ProjectErrorCode.Unavailable, '本地配置已提交，装配尚未激活')
+              log.write('activationFailed', describeError(error))
+              const unsupportedPolicy = error instanceof HostPolicyAdmissionError
+              if (unsupportedPolicy) stop()
+              activationError = projectError(ProjectErrorCode.Unavailable, unsupportedPolicy ? '本地配置已提交，当前 Host 已停止' : '本地配置已提交，装配尚未激活')
               return { ...result, activationError }
             }
           }

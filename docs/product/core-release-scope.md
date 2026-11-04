@@ -4,6 +4,12 @@
 
 ## 首发边界
 
+当前 Core Host 的持久规划策略支持集仅为目标工作区的 `provider_authoritative`；目标缺席时允许设置入口，新建工作区默认使用该策略。`host_authoritative` / `manual_only` 策略会在 Provider 构造、映射发现、首次同步及定时器创建之前明确拒绝，保留业务数据、策略、配置和凭据句柄，等待支持原策略的版本。
+
+Host 策略拒绝的数据库字节原样保证，限定为打开前已标记当前 generation `3`、且通过既有 Storage schema/generation 准入的库。完整合法但未标记（`user_version=0`）的库仍先经过 Storage 既有的 `0→3` 元数据标记，再进入 Host 策略准入；该步骤会改变数据库字节和版本标记。本改动保持这项原合同，不新增迁移、策略转换或删库，也不扩大 legacy/untagged 兼容义务。
+
+每代设置重装配复用同一准入：已检测到不支持策略时停止当前 Host 的旧图和更新流，已提交的设置仍作为已发生事实保留；普通装配失败继续既有回退与重试。该门不轮询任意外部 SQL 变更，也不裁决 #273 的完整 policy × incoming 人类语义矩阵；通用 Core 三策略合同和 R1 判定不因此改写。
+
 MMP-Core 候选路径是：已安装的现代 Harness UI 中，从 GitHub Project 取得类型正确的 WorkItem 和详情，执行 Start Work，进入真实执行会话或诚实的人工备用流程，安全创建 PR，并在详情中查看 PR/CI 谱系；同时提供基础连接、设置、访问和恢复能力。候选仍须以实际源码、构建产物、配置与运行证据确认，不由 Project 的 `TargetRelease` 标签、父项关闭数量或本页的范围映射自动接纳。
 
 原完整工作台范围保留在后续阶段：Planning 写入与编辑、Board/Kanban、Backlog/Sprint、Roadmap/Milestone、LocalPlanning、完整关系与诊断、完整设置与部署能力、工作方法预设和产物契约。后续分类不取消原 issue 或验收，不证明功能在 Host、Provider、存储、策略、数据库或其它入口不可达，也不接受任何已知安全或正确性问题。

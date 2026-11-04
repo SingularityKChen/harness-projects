@@ -79,7 +79,7 @@ test('AC1 空数据根：建库迁移 1–7，零工作区，重启仍为零', a
 test('AC2 AC4 同文件重启：身份不变，凭据按操作解析且只以句柄落库', async () => {
   const { dataDir, dataPath } = await dataRoot()
   await seed(dataPath, PROVIDER_CATALOG, async (storage) => {
-    await seedWorkspace(storage, 'host_authoritative') // 非默认状态策略：重启不得被重置
+    await seedWorkspace(storage, 'provider_authoritative') // 当前 Host 支持集；非默认策略原件保留由 policy-admission 拒绝矩阵证明
     await seedPlanning(storage)
     // 两个对等 development 挂载：默认角色由 Core 按挂载数推导为 0（TD-053），种子直接写成派生值，使首次组合对身份表零改写。
     await seedLocalGit(storage, LOCAL, path.join(dataDir, 'repository-not-created'), { isDefault: false })
