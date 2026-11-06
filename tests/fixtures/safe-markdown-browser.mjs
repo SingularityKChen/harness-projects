@@ -4,14 +4,14 @@ import { fileURLToPath } from 'node:url'
 const require = createRequire(new URL('../../apps/harness-plugin/package.json', import.meta.url))
 const { build } = require('esbuild')
 
-export async function markdownBundle({ production = false } = {}) {
+export async function markdownBundle({ production = false, composite = false } = {}) {
   const result = await build({ stdin: { contents: `
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { flushSync as flush } from 'react-dom'
 import { createEntityStore } from '@harness-projects/client'
 import { deriveWorkItemDetailView } from '@harness-projects/ui-model'
-import { WorkItemDetailDrawer } from '@harness-projects/ui'
+import { WorkItemDetailDrawer, WorkItemApp } from '@harness-projects/ui'
 const root = createRoot(document.getElementById('app'))
 window.setMarkdown = (body, mode = 'content') => {
   const store = createEntityStore()
@@ -22,6 +22,11 @@ window.setMarkdown = (body, mode = 'content') => {
     metadata: { planningSourceName: 'Source', sourceNames: {} }, phase: mode === 'loading' ? 'pending' : 'received', refreshing: false }
   if (mode === 'unavailable') Object.assign(input, { phase: 'failed', hasReceivedSnapshot: true, cacheVisibility: 'authorized', failure: { kind: 'permission_denied' } })
   const view = deriveWorkItemDetailView(input, { projectId: mode === 'wrong-workspace' ? 'wrong' : 'ws-1', itemId: mode === 'unresolved' ? 'missing' : 'ent-aa' })
+  if (${composite}) {
+    const read = input.read, source = { subscribe: () => () => {}, getSnapshot: () => read }
+    flush(() => root.render(createElement(WorkItemApp, { key: body, source, initialPath: '/projects/ws-1/items/ent-aa' })))
+    return
+  }
   flush(() => root.render(createElement(WorkItemDetailDrawer, { view, onClose() { root.render(null) } })))
 }
 `, resolveDir: fileURLToPath(new URL('../../packages/ui', import.meta.url)), sourcefile: 'safe-markdown-browser-entry.js' }, bundle: true, platform: 'browser', format: 'iife', write: false, ...(production ? { define: { 'process.env.NODE_ENV': '"production"' } } : {}) })

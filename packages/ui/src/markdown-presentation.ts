@@ -20,5 +20,10 @@ export const MARKDOWN_STYLES = `
 .hp-markdown th { background:var(--hp-surface) }
 .hp-markdown-image { display:inline-flex; flex-wrap:wrap; gap:var(--hp-space-2); align-items:baseline }
 .hp-markdown input[type="checkbox"] { margin-inline-end:var(--hp-space-2) }
+.hp-markdown .task-list-item { list-style-type:none; position:relative; min-block-size:1lh }
+.hp-markdown .task-list-item > p:first-child { position:relative; min-block-size:1lh }
+.hp-markdown .task-list-item > input[type="checkbox"],.hp-markdown .task-list-item > p:first-child > input[type="checkbox"] {
+  position:absolute; inset-inline-start:-1.4em; inset-block-start:0; inline-size:1em; block-size:1em; margin-block:.3em 0; margin-inline:0;
+}
 .hp-markdown a { color:var(--hp-accent); text-decoration:underline; text-underline-offset:.15em }
 `

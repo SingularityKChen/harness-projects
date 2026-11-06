@@ -111,9 +111,9 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 | 位置 | PR | 分支 | 交付 | 依赖 | 已知冲突点与解法 |
 |---|---|---|---|---|---|
-| 1 | #549 | `feature/start-work-task-handoff` | #547 明确任务交接 | 无 | 承载批次评审、计划与索引；按当前版本门禁收尾 |
-| 2 | #550 | `feature/draft-pull-request` | #548 原生 Draft | 无硬依赖 | 与前序两份 Host ABI 测试冲突：保留 task 和 draft 参数及全部断言；Completed 索引全保留 |
-| 3 | #551 | `fix/markdown-readability` | Refs #538/#542 阅读修复 | 无硬依赖 | P2 字面量修复独立复评；Completed 索引全保留，人工 Desktop AC 保持开放 |
+| 1 | #549 | `feature/start-work-task-handoff` | #547 明确任务交接 | 无 | 2026-11-06 rebase merge `af4a869555759617bf0e84481766b74741519312`，#547 CLOSED |
+| 2 | #550 | `feature/draft-pull-request` | #548 原生 Draft | 无硬依赖 | 2026-11-06 rebase merge `bd7bbbd4e2820b12f1fce474751b42a90f0e06a1`，#548 CLOSED；两份 ABI 保留 task 与 draft 全部断言 |
+| 3 | #551 | `fix/markdown-readability` | Refs #538/#542 阅读修复 | 无硬依赖 | 两项 P2 已修复独立复评，最终源码组合验证通过；Completed 索引全保留，当前 head 门禁后 rebase；#538/#542 人工 AC 保持开放 |
 
 仓库外完整前序初始预演已验证冲突范围；最终修复版本重测。每条合入后 fetch 真实 main，重新核对下一条 head/base、产品树、CI/PR Fast Gate、threads 与 issue 双向关联；不沿用旧批准。共享历史恢复锚点为 `refs/backup/pr<N>-before-mmp-review-20261106`，以精确 lease 发布，只用预期 head 的 rebase merge。父项、模型和 R1 不随工程合入接受。
 
