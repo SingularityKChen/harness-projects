@@ -19,7 +19,7 @@ async function fixture(t, adapter, statusPolicy = 'provider_authoritative') {
   const core = await composeCore(deps), controller = createController(core)
   const workItemId = (await core.queries.listPlanningItems()).find((item) => item.content.contentKind === 'work_item').entityId
   const scope = { workItemId, repositoryId: 'repo-alpha' }
-  await core.commands.startWork({ ...scope, actor: actor.actorRef, idempotencyKey: 'start' })
+  await core.commands.startWork({ task: 'Synthetic explicit task', ...scope, actor: actor.actorRef, idempotencyKey: 'start' })
   const workspaceId = (await controller.baseline()).workspace.id, contextId = contextIdFor(workspaceId, workItemId, scope.repositoryId), runId = runIdFor(contextId)
   const run = await storage.getExecutionRun(runId), writes = []
   const transaction = storage.transaction.bind(storage)

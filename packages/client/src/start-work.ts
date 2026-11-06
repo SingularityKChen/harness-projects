@@ -3,12 +3,12 @@ import { ExecutionContextStatus } from '@harness-projects/domain/values'
 import { CapabilityKey } from './keys.ts'
 import type { ActorRef, CommandWriteState } from '@harness-projects/controller'
 import type { ExecutionContextReader, ExecutionContextScope } from './execution-context.ts'
-export interface StartWorkIntent extends ExecutionContextScope { readonly branchName?: string | undefined }
+export interface StartWorkIntent extends ExecutionContextScope { readonly task: string; readonly branchName?: string | undefined }
 export interface StartWorkOptions { readonly workspaceId: string; readonly workItemId: string; readonly executionMode: 'manual' | 'harness'; readonly repositories?: readonly { id: string; available: boolean; reason?: string }[] }
 export interface StartWorkResult { readonly writeState: CommandWriteState; readonly degraded: boolean; readonly fallback?: 'manual_fallback'; readonly contextStatus?: ExecutionContextStatus; readonly reason?: string }
 export interface StartWorkPort {
   getStartWorkOptions(workItemId: string): Promise<unknown>
-  startWork(actorRef: ActorRef, key: string, workItemId: string, repositoryId: string, branchName?: string): Promise<unknown>
+  startWork(actorRef: ActorRef, key: string, workItemId: string, repositoryId: string, task: string, branchName?: string): Promise<unknown>
 }
 export interface StartWork { options(scope: Pick<ExecutionContextScope, 'workspaceId' | 'workItemId'>): Promise<StartWorkOptions>; submit(intent: StartWorkIntent): Promise<StartWorkResult> }
 const unknown = (): StartWorkResult => ({ writeState: 'unknown', degraded: false })
@@ -29,6 +29,7 @@ function result(value: unknown): StartWorkResult {
   if (error && (typeof error.code !== 'string' || typeof error.message !== 'string')) throw new TypeError('开始工作错误不合契约')
   const denied = (error?.message as string | undefined)?.match(/^(capability|permission|policy) 层拒绝 ([a-z._]+)；/)
   return { writeState: dto.writeState as CommandWriteState, degraded: view?.degraded === true,
+    ...(error?.message === 'existing_execution_task_not_sent' ? { reason: '已有执行，本次任务未发送；请查看现有执行区' } : {}),
     ...(denied && Object.values(CapabilityKey).some(key => key === denied[2]) ? { reason: `${denied[1]} 层拒绝 ${denied[2]}；其它获准操作仍可用，请恢复授权后重新验证并显式重试` } : {}),
     ...(view?.status === undefined ? {} : { contextStatus: view.status as ExecutionContextStatus }),
     ...(view?.fallback === 'manual_fallback' ? { fallback: 'manual_fallback' } : {}) }
@@ -45,15 +46,16 @@ export function createStartWork(port: StartWorkPort, reader: ExecutionContextRea
       }))) throw new TypeError('开始工作验证不合契约')
       return dto as unknown as StartWorkOptions
     },
-    submit(intent) {
-      const identity = JSON.stringify([intent.workspaceId, intent.workItemId, intent.repositoryId, intent.branchName])
+    submit(input) {
+      const intent = { workspaceId: input.workspaceId, workItemId: input.workItemId, repositoryId: input.repositoryId, branchName: input.branchName, task: input.task }
+      const identity = JSON.stringify([intent.workspaceId, intent.workItemId, intent.repositoryId, intent.branchName, intent.task])
       if (!attempt || attempt.identity !== identity || (attempt.finished && !attempt.uncertain)) attempt = { identity, key: makeKey(), uncertain: false, finished: false }
       const current = attempt
       if (current.pending) return current.pending
       current.pending = Promise.resolve().then(async () => {
         try {
           if (current.uncertain) await reader(intent)
-          const answer = result(await port.startWork(actor, current.key, intent.workItemId, intent.repositoryId, intent.branchName))
+          const answer = result(await port.startWork(actor, current.key, intent.workItemId, intent.repositoryId, intent.task, intent.branchName))
           current.uncertain = ['pending', 'unknown'].includes(answer.writeState)
           current.finished = ['failed', 'conflict'].includes(answer.writeState)
             || (answer.writeState === 'local_only' && answer.contextStatus === ExecutionContextStatus.Failed)

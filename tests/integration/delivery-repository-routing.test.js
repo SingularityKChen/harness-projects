@@ -103,7 +103,7 @@ async function world(label, t, order) {
     clock: () => new Date(Date.UTC(2026, 9, 22, 0, 0, tick++)).toISOString() })
   let core = await composeCore(deps(order ? [local, remote] : [local]))
   const workItemId = (await core.queries.listPlanningItems()).find((item) => item.kind === 'work_item' && item.content.contentKind === 'work_item').entityId
-  const started = await core.commands.startWork({ workItemId, repositoryId: REPOSITORY, actor: { kind: 'agent' }, idempotencyKey: 'route-start' })
+  const started = await core.commands.startWork({ task: 'Synthetic explicit task', workItemId, repositoryId: REPOSITORY, actor: { kind: 'agent' }, idempotencyKey: 'route-start' })
   assert.equal(started.confirmed, true, '前置：公开 Start Work 已确认并登记仓库')
   const branch = started.branchExternalId
   seed(local, branch, order ? LOCAL_HEAD : REMOTE_HEAD, order ? 'local-pr' : 'A-pr')

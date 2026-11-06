@@ -153,7 +153,7 @@ for (const dropAck of [false, true]) test(`eligible Saved plus ${dropAck ? 'Unkn
   assert.deepEqual([facts.stale, facts.nodes.map((node) => node.externalId)], [true, ['PR_1']], 'ambiguous current operations cannot select the first or newest PR')
 })
 
-for (const label of ['Fake', 'SQLite']) test(`${label} successor operation refreshes exact PR across a real Start Work generation`, async (t) => {
+for (const label of ['Fake', 'SQLite']) test(`${label} successor operation refreshes exact PR across a durable successor generation fixture`, async (t) => {
   const w = await world(t, label); await ready(w)
   const describe = w.fake.development.describeCapabilities.bind(w.fake.development)
   w.fake.development.describeCapabilities = async () => {
@@ -166,10 +166,10 @@ for (const label of ['Fake', 'SQLite']) test(`${label} successor operation refre
   assert.equal(first.value.lineageStale, false)
   const anchor = (await w.storage.getDeliveryFacts(w.workspace.id, w.record.id)).sets.find((set) => set.kind === 'change_request').anchorId
   w.f.objects[0].state = 'CLOSED'
-  w.fake.development.state.worktrees.length = 0
-  assert.equal((await w.core.commands.startWork({ ...w.scope, branchName: 'feature/topic', actor: { kind: 'user' }, idempotencyKey: 'observe-missing-tree' })).phase, 'failed')
-  assert.equal((await w.core.commands.startWork({ ...w.scope, branchName: 'feature/topic', actor: { kind: 'user' }, idempotencyKey: 'successor-start' })).confirmed, true)
-  assert.equal((await w.storage.getExecutionContext(w.record.id)).provisioningGeneration, 3)
+  // Start Work 不再为已有 run 的新任务接管；这里明确建立后继代际 fixture，单独检验 PR 身份。
+  const current = await w.storage.getExecutionContext(w.record.id)
+  await w.storage.putExecutionContext({ ...current, provisioningGeneration: current.provisioningGeneration + 1 })
+  assert.equal((await w.storage.getExecutionContext(w.record.id)).provisioningGeneration, current.provisioningGeneration + 1)
   const second = await w.run({ idempotencyKey: 'successor-pr', title: 'Second generation PR' })
   assert.equal(second.authoritative, true)
   assert.equal(second.value.lineageStale, false, 'historical explicit relation cannot block the current durable operation')

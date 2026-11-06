@@ -74,7 +74,7 @@ async function world(label, t, storage, workspaceId = newWorkspaceId()) {
   await w.compose()
   const workItemId = (await w.core.queries.listPlanningItems()).find((item) => item.content.identity?.externalId === 'issue-1').entityId
   w.scope = { workItemId, repositoryId: 'repo-alpha' }
-  const started = await w.core.commands.startWork({ ...w.scope, actor: { kind: 'agent' }, idempotencyKey: 'start' })
+  const started = await w.core.commands.startWork({ task: 'Synthetic explicit task', ...w.scope, actor: { kind: 'agent' }, idempotencyKey: 'start' })
   assert.equal(started.confirmed, true)
   w.contextId = started.executionContextId
   const repository = refOf(providers.development.gate.bindingId, 'repository', 'repo-alpha')

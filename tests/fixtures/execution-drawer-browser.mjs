@@ -34,7 +34,7 @@ export async function createExecutionFixture({ seed } = {}) {
     const core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture' }, providers, storage })
     await storage.putBindingConfiguration({ ref: { workspaceId, bindingId: providers.planning.bindingId, domain: 'planning' }, configuration: { projectNodeId: providers.planning.state.projects[0].ref.externalId } })
     itemId = (await core.queries.listPlanningItems()).find((item) => item.content.title === '规划项 issue-1').entityId
-    if (seed !== 'query') { await core.commands.startWork({ workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
+    if (seed !== 'query') { await core.commands.startWork({ task: 'Synthetic explicit task', workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
     const id = contextIdFor(workspaceId, itemId, 'repo-alpha'); runId = runIdFor(id)
     await storage.putExecutionRun({ ...(await storage.getExecutionRun(runId)), fallback: true }) }
   }

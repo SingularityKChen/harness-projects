@@ -27,7 +27,7 @@ async function startChain(key) {
   const core = await composeCore({ workspace: { id: newWorkspaceId(), name: 'MVP-0' }, providers, clock: () => T0 })
   const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item')
   assert.ok(item, 'planning 种子里必须至少有一个工作项')
-  const started = await core.commands.startWork({ repositoryId: REPOSITORY, actor: { kind: 'agent' }, workItemId: item.entityId, idempotencyKey: key })
+  const started = await core.commands.startWork({ task: 'Synthetic explicit task', repositoryId: REPOSITORY, actor: { kind: 'agent' }, workItemId: item.entityId, idempotencyKey: key })
   assert.equal(started.confirmed, true, 'git 步骤拿到 provider ack 才算链路推进')
   const created = await providers.development.createChangeRequest({
     repository: refOf(providers.development.gate.bindingId, 'repository', REPOSITORY), head: started.branchExternalId, base: 'main', title: '谱系条占位', body: '占位正文' })

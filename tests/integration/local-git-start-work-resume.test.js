@@ -22,7 +22,7 @@ import {
   providerFor, recordingRunner, registerWorkItem, worktreePaths,
 } from './local-git-fixture.js'
 
-const request = (workItemId, idempotencyKey) => ({
+const request = (workItemId, idempotencyKey) => ({ task: 'Synthetic explicit task',
   workItemId, repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey,
 })
 

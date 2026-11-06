@@ -100,7 +100,7 @@ const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness',
       ...(error === undefined ? {} : { error: projectError(error.code, currentError && result.authoritative
         ? '已确认资源保留；当前规划只读准入不再确认本次请求，请恢复后用原键读回' : reason
           && Object.values(CapabilityKey).some(key => key === reason[2]) ? `${reason[1]} 层拒绝 ${reason[2]}；其它获准操作仍可用，请恢复授权后重新验证并显式重试`
-          : '开始工作未确认，请按恢复动作处理') }) }
+          : error.message === 'existing_execution_task_not_sent' ? error.message : '开始工作未确认，请按恢复动作处理') }) }
   },
   createChangeRequest: async (controller, input) => {
     await assertDeliveryScope(controller, input)

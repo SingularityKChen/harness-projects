@@ -22,13 +22,14 @@ import {
 import { runReadGate, validRunRef } from './execution-run.ts'
 import { guardedDevelopmentReads, namesFor, namesProblem, outcomeOf, provisionGit, type GitOutcome } from './git-provisioning.ts'
 import { EdgeProvenance, asEntityId, recordEdges, type DiscoveredEdge, type RelationStore } from './relations.ts'
-import { bindingConflict, requestFingerprint, requestMismatch, snapshotRequest } from './start-work-request.ts'
+import { bindingConflict, requestFingerprint, requestMismatch, requestScopeMatches, snapshotRequest } from './start-work-request.ts'
 import { beginWrite, createWriteLedger, markFailed, reportFor, WritePhase, type WriteReport } from './write-machine.ts'
 import { operationDeniedReason } from './runtime-access.ts'
 
 /**
  */
 function validateRequest(request: StartWorkRequest): ProjectError | undefined {
+  if (typeof request.task !== 'string' || request.task.trim() === '' || request.task.length > 16384) return invalid('task 必须是非空字符串且不超过 16384 个 UTF-16 单元')
   if (typeof request.workItemId !== 'string' || request.workItemId.trim() === '') return invalid('workItemId 不能为空')
   if (typeof request.repositoryId !== 'string' || request.repositoryId.trim() === '') return invalid('repositoryId 不能为空')
   if (typeof request.idempotencyKey !== 'string' || request.idempotencyKey.trim() === '') return invalid('idempotencyKey 不能为空')
@@ -54,15 +55,19 @@ export async function startWork(context: CoreContext, input: StartWorkRequest): 
   const replayed = await context.storage.findMutationAttempt(context.workspaceId, request.idempotencyKey)
   const changed = await startTargetError(context, request.workItemId, admissionEpoch)
   if (changed) return startWorkUnavailable(changed)
-  if (replayed !== undefined) return admittedResult(context, admissionEpoch, request.workItemId, replayRequest(context, contextId, request, replayed))
+  if (replayed !== undefined && !await safeResume(context, contextId, request, replayed)) return admittedResult(context, admissionEpoch, request.workItemId, replayRequest(context, contextId, request, replayed))
   // 只有没有 context 记录的新请求才预检、过能力门并 ack；已有记录（终态接管、过期续跑、在途、Ready）沿用原路径。
   const existing = await context.storage.getExecutionContext(contextId)
   const prepared = existing === undefined ? await prepareRegistration(context, request, contextId) : undefined
   if (prepared?.ok === false) return startWorkUnavailable(prepared.error)
-  const observing = existing !== undefined && !needsSupply(existing, context.clock())
   const route = prepared?.route ?? await selectDevelopment(context, request.repositoryId, START_WORK_ROUTE.anchor[0])
+  if (replayed && (!route.ok || route.binding.ref.bindingId !== replayed.bindingId)) return admittedResult(context, admissionEpoch, request.workItemId, replayRequest(context, contextId, request, replayed))
   if (!route.ok) {
-    if (observing) return admittedResult(context, admissionEpoch, request.workItemId, existingResult(context, contextId, undefined))
+    const run = existing === undefined ? undefined : await context.storage.getExecutionRun(runIdFor(contextId)), pending = await pendingClaim(context, context.storage, contextId, request, existing, run)
+    if (pending && requestMismatch(context.workspaceId, request, pending)) return conflictResult(bindingConflict('idempotency_request_mismatch'))
+    if (pending) return admittedResult(context, admissionEpoch, request.workItemId, recoverAttempt(context, contextId, pending))
+    if (existing?.status === ExecutionContextStatus.Ready || run !== undefined) return conflictResult(projectError(ProjectErrorCode.Conflict, 'existing_execution_task_not_sent'))
+    if (existing !== undefined && !needsSupply(existing, context.clock())) return admittedResult(context, admissionEpoch, request.workItemId, existingResult(context, contextId, undefined))
     const gated = await routeDevelopment(context, request.repositoryId, ...START_WORK_ROUTE.anchor)
     return startWorkUnavailable(gated.ok ? route.error : gated.error)
   }
@@ -204,6 +209,21 @@ async function recoverAttempt(context: CoreContext, contextId: ExecutionContextI
     }
     return await existingResult(context, contextId, reportFor(WritePhase.Reconciled, original?.values ?? beginWrite(undefined).values, undefined))
   } catch { return uncertain() }
+}
+
+async function pendingClaim(context: CoreContext, storage: StorageTransaction, contextId: ExecutionContextId, request: StartWorkRequest, existing: ExecutionContextRecord | undefined, run: ExecutionRunRecord | undefined) {
+  return (await storage.listMutationAttempts(context.workspaceId)).find(row => row.commandName === 'startWork'
+      && (row.externalIntent?.contextId === contextId || requestScopeMatches(context.workspaceId, request, row))
+      && (unresolved(row) || row.state === 'pending' || row.state === 'unknown')
+      && (unresolved(row) || existing === undefined || (row.externalIntent === undefined ? run === undefined && existing.status !== ExecutionContextStatus.Ready : row.externalIntent.ownerGeneration === existing.provisioningGeneration)))
+}
+async function safeResume(context: CoreContext, contextId: ExecutionContextId, request: StartWorkRequest, attempt: MutationAttemptRecord, storage: StorageTransaction = context.storage): Promise<boolean> {
+  if (attempt.state !== 'pending' || requestMismatch(context.workspaceId, request, attempt) || unresolved(attempt)) return false
+  const route = await selectDevelopment({ ...context, storage }, request.repositoryId, START_WORK_ROUTE.anchor[0])
+  if (!route.ok || route.binding.ref.bindingId !== attempt.bindingId) return false
+  const record = await storage.getExecutionContext(contextId)
+  return record?.status === ExecutionContextStatus.Provisioning && (attempt.externalIntent === undefined || attempt.externalIntent.ownerGeneration === record.provisioningGeneration) && needsSupply(record, context.clock()) && !await storage.getExecutionRun(runIdFor(contextId))
+    && !(await storage.listMutationAttempts(context.workspaceId)).some(row => row.commandName === 'startWork' && (row.externalIntent?.contextId === contextId || requestScopeMatches(context.workspaceId, request, row)) && unresolved(row))
 }
 
 class GenerationExhausted extends Error { constructor() { super('开始工作的 owner 代际已耗尽，未发起外部写入') } }
@@ -360,16 +380,23 @@ async function claimContext(
     const targetError = await startTargetError({ ...context, storage: tx }, request.workItemId)
     if (targetError !== undefined) return { kind: 'rejected', result: startWorkUnavailable(targetError) }
     const attempt = await tx.findMutationAttempt(context.workspaceId, request.idempotencyKey)
-    if (attempt !== undefined) return { kind: 'replay', attempt }
+    if (attempt !== undefined && !await safeResume(context, contextId, request, attempt, tx)) return { kind: 'replay', attempt }
     const source = { ...context, storage: tx }
     const current = await selectDevelopment(source, request.repositoryId, START_WORK_ROUTE.anchor[0])
     if (!current.ok || current.binding.ref.bindingId !== selected.binding.ref.bindingId) return { kind: 'conflict', error: bindingConflict('idempotency_target_changed') }
     const existing = await tx.getExecutionContext(contextId)
-    const pending = (await tx.listMutationAttempts(context.workspaceId)).find((row) => row.commandName === 'startWork' && row.externalIntent?.contextId === contextId && unresolved(row))
-    if (pending !== undefined) return { kind: 'observe', attempt: pending }
+    const run = existing === undefined ? undefined : await tx.getExecutionRun(runIdFor(contextId))
+    const pending = await pendingClaim(context, tx, contextId, request, existing, run)
+    if (pending !== undefined) {
+      if (requestMismatch(context.workspaceId, request, pending)) return { kind: 'conflict', error: bindingConflict('idempotency_request_mismatch') }
+      if (unresolved(pending) || existing === undefined || !needsSupply(existing, now) || run !== undefined) return { kind: 'observe', attempt: pending }
+      // 已知没有未决外部步骤与 run 的过期 owner 可安全续跑；完整 fingerprint 仍锁住原任务。
+    }
+    if (existing !== undefined && (existing.status === ExecutionContextStatus.Ready || run !== undefined)) return { kind: 'conflict', error: projectError(ProjectErrorCode.Conflict, 'existing_execution_task_not_sent') }
     const supplying = existing === undefined || needsSupply(existing, now)
     const generation = supplying ? nextGeneration(existing) : existing?.provisioningGeneration
     const route = supplying ? await routeDevelopment(source, request.repositoryId, ...START_WORK_ROUTE.anchor) : current
+    if (pending !== undefined && pending.idempotencyKey !== request.idempotencyKey && supplying) await tx.putMutationAttempt({ ...pending, state: 'failed', errorCode: ProjectErrorCode.Conflict })
     if (!route.ok) {
       if (existing === undefined) return { kind: 'rejected', result: startWorkUnavailable(route.error) }
       // 原有续跑拒绝仍结算为 Failed 并清除失效工作树；先复核 key，未获准的请求不占键。
@@ -378,6 +405,7 @@ async function claimContext(
       const git: GitOutcome = { contextId, report, ok: false, bindingId: undefined, status: saved.status, branchExternalId: saved.branchExternalId,
         worktreeExternalId: undefined, branchHeadCommit: undefined }
       await recordStartFacts({ workspaceId: context.workspaceId, storage: tx }, request, contextId, git)
+      if (attempt !== undefined) await writeReceipt(tx, context, request, 'failed', undefined, route.error.code)
       return { kind: 'rejected', result: toResult(report, outcomeOf(git), route.error) }
     }
     await createWriteLedger(tx).record({ workspaceId: context.workspaceId, bindingId: selected.binding.ref.bindingId, commandName: 'startWork', idempotencyKey: request.idempotencyKey,
@@ -527,7 +555,7 @@ async function startExecution(
   const run = await startExternalRun(context, request, contextId, git, generation, provider, target.binding.ref.bindingId, {
     workingDirectory: git.worktreeExternalId,
     context: { bindingId: target.binding.ref.bindingId, objectKind: 'execution_context', externalId: contextId, url: undefined },
-    command: `harness run ${git.branchExternalId ?? namesFor(request).branch}`, environment: {},
+    command: request.task, environment: {},
   }, false, accessEpoch)
   if (!run.ok) {
     const error = toProjectError(run.error)
@@ -576,7 +604,7 @@ async function manualFallback(
     const run = await startExternalRun(context, request, contextId, git, generation, fallback.execution, fallback.ref.bindingId, {
       workingDirectory: git.worktreeExternalId,
       context: { bindingId: fallback.ref.bindingId, objectKind: 'execution_context', externalId: contextId, url: undefined },
-      command: `manual fallback ${git.branchExternalId ?? ''}`.trim(), environment: {},
+      command: request.task, environment: {},
     }, true, accessEpoch)
     if (!run.ok && run.error.code === ProviderErrorCode.AmbiguousResult) return finish(unknownRun(git, run.error.message, undefined), ExecutionRunStatus.Unknown)
     if (run.ok) {

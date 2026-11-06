@@ -70,7 +70,7 @@ async function chainFor(idempotencyKey) {
   await api.commands.bootstrapWorkspace()
   const item = (await api.queries.listPlanningItems()).find((view) => view.kind === EntityKind.WorkItem && view.content.contentKind === ContentKind.WorkItem) // redacted 条目的 kind 也是 work_item（issue-3），但没有可操作的规划条目，不能当开始工作的对象
   requireNode('工作项', '一个外部对象一个稳定内部实体', item != null, '引导后投影里必须有工作项', '规划条目')
-  const request = { workItemId: item.entityId, repositoryId: REPOSITORY, actor: { kind: 'agent' }, idempotencyKey }
+  const request = { task: 'Synthetic explicit task', workItemId: item.entityId, repositoryId: REPOSITORY, actor: { kind: 'agent' }, idempotencyKey }
   const started = await api.commands.startWork(request)
   requireNode('开始工作', '拿到 provider ack 前不得报告为已保存', started.confirmed === true, `startWork 未拿到 provider ack：${started.error?.message}`, '开始工作')
   const created = await providers.development.createChangeRequest({
@@ -148,7 +148,7 @@ test('节点 4 · 开始工作：拿到 provider 确认前不得报告为已保�
   const invariant = '外部写入得到 Provider ack / reconcile 前，本地不得显示权威 Saved'
   const api = await composeFor('开始工作', invariant)
   const startWork = needMethod(api, 'commands.startWork', '开始工作', invariant)
-  const result = await startWork({ ...WORK_ITEM, actor: { kind: 'agent' }, idempotencyKey: 'mvp0-start-work-1' })
+  const result = await startWork({ task: 'Synthetic explicit task', ...WORK_ITEM, actor: { kind: 'agent' }, idempotencyKey: 'mvp0-start-work-1' })
   requireNode('开始工作', invariant, has(WriteState, result?.writeState), 'startWork 必须返回 domain 的 WriteState')
   requireNode(
     '开始工作', invariant,
@@ -164,7 +164,7 @@ test('节点 5 · 执行上下文：同一工作项 + 仓库重复开始不产�
   const getContext = needMethod(api, 'queries.getExecutionContext', '执行上下文', invariant)
   const branches = providers.development.state.branches.length
   const worktrees = providers.development.state.worktrees.length
-  const second = await startWork({ ...scope, actor: { kind: 'agent' }, idempotencyKey: 'mvp0-start-work-2' })
+  const second = await startWork({ task: 'Synthetic explicit task', ...scope, actor: { kind: 'agent' }, idempotencyKey: 'mvp0-start-work-1' })
   const context = await getContext(scope)
   requireNode('执行上下文', invariant, context != null, '按工作项与仓库必须能查回执行上下文')
   requireNode('执行上下文', invariant, has(ExecutionContextStatus, context.status), '执行上下文状态必须是 domain 的 ExecutionContextStatus')

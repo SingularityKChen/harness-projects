@@ -92,7 +92,7 @@ async function workItemIdOf(core) {
 async function startChain(composed, key, withChangeRequest = false) {
   const core = await composed.compose()
   const workItemId = await workItemIdOf(core)
-  const started = await core.commands.startWork({ repositoryId: REPOSITORY, actor: { kind: 'agent' }, workItemId, idempotencyKey: key })
+  const started = await core.commands.startWork({ task: 'Synthetic explicit task', repositoryId: REPOSITORY, actor: { kind: 'agent' }, workItemId, idempotencyKey: key })
   assert.equal(started.confirmed, true, 'git 步骤必须拿到 provider ack 才形成锚点')
   if (withChangeRequest) {
     const created = await composed.providers.development.createChangeRequest({

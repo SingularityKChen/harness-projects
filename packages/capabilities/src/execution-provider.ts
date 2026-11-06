@@ -30,6 +30,7 @@ export interface ProviderExecutionRun {
 
 export interface ProviderStartRunInput {
   readonly workingDirectory: string
+  /** command 是明确填写的单轮任务原文，Provider 不把它作为 shell 执行。 */
   readonly context: ExternalObjectRef; readonly command: string; readonly environment: Readonly<Record<string, string>>
 }
 

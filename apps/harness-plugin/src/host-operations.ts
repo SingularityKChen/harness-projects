@@ -104,6 +104,7 @@ export const OPERATIONS = defineOperations({
   startWork: { mode: 'unary', params: [...ENVELOPE,
     param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId')),
     param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId')),
+    param('task', 'ExecutionTask', (value) => { const task = nonEmptyString(value, 'task'); if (task.trim() === '' || task.length > 16384) throw new TypeError('task 必须非空白且不超过 16384 个 UTF-16 单元'); return task }),
     { ...param('branchName', 'BranchName', (value) => value === undefined ? undefined : nonEmptyString(value, 'branchName')), acceptsUndefined: true },
   ] },
   createChangeRequest: { mode: 'unary', params: [...ENVELOPE,
@@ -158,7 +159,7 @@ export function parseInput(operation: Operation, input: unknown): JsonRecord {
 
 /** live service 方法的位置参数 → 校验过的输入记录（与 Host 侧是同一套校验）。 */
 export function inputOfArguments(operation: Operation, args: readonly unknown[]): JsonRecord {
-  if (operation.name === 'startWork' && (args.length < 4 || args.length > 5)) throw new TypeError('startWork 参数数量不合契约')
+  if (operation.name === 'startWork' && (args.length < 5 || args.length > 6)) throw new TypeError('startWork 参数数量不合契约')
   return parseInput(operation, Object.fromEntries(operation.params.map((p, index) => [p.name, args[index]])))
 }
 

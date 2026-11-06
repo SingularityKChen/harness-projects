@@ -76,6 +76,7 @@ async function start(page, keyboard = false) {
   } else {
     await opener.click(); await repository.selectOption(REPOSITORY); await branch.fill('feature/topic')
   }
+  await page.getByLabel('执行任务', { exact: true }).fill('Synthetic explicit browser task')
   const submit = page.getByRole('button', { name: '提交开始工作', exact: true })
   if (keyboard) await tabTo(page, submit, 'Start Work submit')
   const acknowledgement = page.waitForResponse(response => response.url().endsWith('/remote') && response.request().postDataJSON()?.name === 'startWork')

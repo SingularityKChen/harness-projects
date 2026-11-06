@@ -195,3 +195,9 @@ test('PR operation lookup and resume reject authority and require explicit selec
   assert.equal(OPERATIONS.getChangeRequestOperation.params.at(-1).parse(undefined), undefined)
   assert.throws(() => OPERATIONS.resumeChangeRequest.params.at(-1).parse(undefined), TypeError)
 })
+test('Start Work task ABI preserves exact Unicode and rejects missing, blank and oversized tasks', () => {
+  const operation = OPERATIONS.startWork, task = operation.params.find(param => param.name === 'task')
+  assert.deepEqual(operation.params.map(param => param.name), ['actorRef', 'idempotencyKey', 'workItemId', 'repositoryId', 'task', 'branchName'])
+  assert.equal(task.parse('  明确 🧪\n  '), '  明确 🧪\n  ')
+  for (const value of [undefined, null, 1, {}, '', ' \n', 'x'.repeat(16385)]) assert.throws(() => task.parse(value), TypeError)
+})

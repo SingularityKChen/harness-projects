@@ -1,6 +1,6 @@
 # Start Work 显式任务交接 ExecPlan
 
-> 状态：Active；创建：2026-11-06；执行分支：`feature/start-work-task-handoff`
+> 状态：Completed；创建：2026-11-06；执行分支：`feature/start-work-task-handoff`
 > 范围：#547；Refs #72、#143、#545；遵循根级 `PLANS.md`。
 
 ## Purpose / Big Picture
@@ -139,15 +139,17 @@ GREEN 才接入 UI/client/Host/controller、首次 fingerprint 与 exact command
 ## Progress
 
 - [x] (2026-11-06 SGT) 完成两独立设计综合与源码审读，记录用户范围授权。
-- [ ] (2026-11-06 SGT) Batch 1：设计冻结与 draft PR 远端回读。
-- [ ] (2026-11-06 SGT) Batch 2：RED/GREEN 与恢复判别验证。
-- [ ] (2026-11-06 SGT) Batch 3：独立验收、组合验证与最终 Ready。
+- [x] (2026-11-06 SGT) Batch 1：设计冻结；协调者已创建 Draft PR #549，初始 head `2043f9c731956b7af33004c385f781f73e4fc0c3`，双向关联 #547；基线 41/41。
+- [x] (2026-11-06 SGT) Batch 2：显式任务全链路、首次 claim 与安全恢复完成；相关 321/321、UI/Host 80/80、浏览器 4/4、完整套件 3535/3535；typecheck 与 boundaries 通过。
+- [x] (2026-11-06 SGT) Batch 3：独立验收、组合验证与最终 Ready。
 
 ## Surprises & Discoveries
 
 2026-11-06 源码审读：`claimContext` 的首次 ledger 早于 external intent，原 pending 查询只看 externalIntent.contextId；只改 prompt 会漏掉最早并发窗口。
 2026-11-06 源码审读：`startExecution` 对已有 run 直接返回 existingRun；新增 task 字段本身不能证明新任务已交接。
-上述为当前源码事实，不是新实现已通过的测试；执行者必须用 Batch 2 判别用例证明修复。
+上述缺口已由 Batch 2 的 RED/GREEN 判别用例验证修复。
+2026-11-06 实施：原测试已明确未决外部步骤的观察新键不消费 receipt。这里只绑定真正认领写入的 key，观察者不能替换原任务；尚未消费的观察 key 不成为第二份权威记录。
+2026-11-06 实施：首次 claim 或 Git 已确认步骤后的本地空窗，在没有未决 external slot、没有 run 且 owner lease 到期时允许同完整任务续跑；安全接管在同一事务将旧 claim 结算 failed/conflict。这样后继确定失败后，旧无 intent 认领不会永远挡住新的任务。任何真正未决的旧代 external create/start 仍保持只读，不因 generation 变化而被遗忘。
 
 ## Decision Log
 
@@ -172,11 +174,32 @@ GREEN 才接入 UI/client/Host/controller、首次 fingerprint 与 exact command
 
 ## Outcomes & Retrospective
 
-当前结果仅为审读后的实施契约；未写产品代码、未运行本计划新测试、未创建本能力 PR、未获得 Desktop/模型验收。
-完成工程验收后补入实际结果/偏差并将计划移到 completed，由协调者更新索引；人类复查事项保留独立记录。
+Batch 2 在 `.worktrees/iteration9-task-handoff`、`feature/start-work-task-handoff` 实现。新命令必填 task，原文进入 v2 fingerprint 与 startRun command；Host → controller → core → Harness session 的合成 create/prompt 均只发生一次，cwd 来自真实 Git ack。人工运行与 fallback 继续只说明人工处理。
+RED 先观察到旧合成 command、缺 task 仍写入、首次 claim 异任务漏挡、getter 未捕获；随后对 UI 收起恢复、旧实验 fingerprint、失去 Development 路由、旧 claim 误借权威和后继确定失败分别增加判别 RED，再修复到 GREEN。错误与日志不回显任务内容。
+2026-11-06 本地验证：Batch 2 两组命令分别 321/321 与 80/80；`pnpm test` 3535/3535、`pnpm typecheck`、`pnpm boundaries`（9/9）与生产组合浏览器 4/4 通过。完整套件包含必要 fixture 的显式 synthetic task 更新，没有生产默认值。本地 code/test/config 增删合计 799 行；最终发布扫描与远端 head/checks 由协调者回读。
+替换的旧测试矩阵包括已有 run 后用新 key 重建 Git、借旧 run 报成功、随之进入的 receipt 故障与 admission/owner 路径；这些入口现在拒绝新任务，因此改为 Fake/SQLite、主/备用、Ready/Failed、已知/unknown run 的零写冲突判别。保留原 key 的 unknown/restart、确定失败且尚无 run 的重试、实际不可见/异绑定拒绝及迟到旧 owner 的 fence。PR 后继代际测试使用明确的 Storage fixture，不能再声称已有 run 的 Start Work 会创建后继代际。
+独立审读在 `83735be5` 找到 F1/P1（原 key 安全恢复不可达）与 F2/P2（离线路由分类漏过任务冲突）；同批修复后维护与独立六反例均通过。原 key 在完整任务/原 binding、lease 到期、无 run/任何未决 external slot 时再次于 claim 事务复核并推进 owner；客户端继续保留原 key。路由离线也共享持久 pending 身份与 run 拒绝裁决，不再漏掉 Failed+run 或最早 claim 的异任务。
+最终修复验证：`pnpm verify` exit 0（typecheck、完整 3535/3535、MVP0 8/8），维护恢复用例 52/52、相关覆盖 335/335、独立新增六反例 6/6、浏览器 4/4 与 boundaries 9/9。MVP0 原先的新 key 重复确认预期已改为同原 key/原 task；node4 也明确传入 synthetic task。
+Batch 3 独立复评、三 PR 最终组合验证、最终 push/Ready 尚由协调者办理；未合并，也未获得 Desktop、真实模型或 #72/#143/#449/R1 人类验收。
+
+
+
+2026-11-06 17:21 SGT / 协调者最终工程验收：代码在 `07e966548e20` 已经独立全量审读及修复复评，P0/P1/P2/P3 均无遗留。明确任务逐字交接、原请求可达的安全恢复、确定拒绝回执原子结算和连接变化拒绝均已完成；未决外部效果保持只读。
+最终单次 pnpm verify：3541/3541 与 MVP-0 8/8；相关 385/385、执行/详情 browser 9/9；独立复评 11/11 反例与 50/50 相关用例通过。
+最终三能力组合在 `test/iteration9-critical-path-integration`、观察 head `58259b340fa9` 运行 `pnpm verify`（typecheck、3566/3566、MVP-0 8/8）、`pnpm boundaries`（9/9）、两能力 Host/ABI/恢复定向 243/243，以及 `pnpm test:file tests/browser/workspace-execution.test.js tests/browser/safe-markdown.test.js tests/browser/detail-expand.test.js`（17/17），均通过。组合只在本地模拟；两份 Host ABI 测试冲突保留了 task 与 Draft 两侧断言，不包含仓库 main 合并。
+最终发布 head 仅在上述已审代码上收口本计划、索引及必要用户说明；以 `gh pr view 549 --repo SingularityKChen/harness-projects --json headRefOid,baseRefName,isDraft,mergeStateStatus,statusCheckRollup,closingIssuesReferences`、`gh pr checks 549 --repo SingularityKChen/harness-projects` 和 reviewThreads 回读当前状态；只有最终 head 的 `PR Fast Gate` 通过才转 Ready。不能沿用旧 head 的 checks。
+工程验收完成，计划迁入 completed；真实模型、安装件 Desktop 复查、#72/#143/#449 与 R1 人类裁决继续保留。未新增必须延期的技术债；revert 不撤销已确认的外部资源或未知回执。
 
 ## Bottom Change Note
 
 2026-11-06 SGT：综合两设计与源码，锁定首次 claim、已有 run 未发送、两模式统一显式任务及共享接口串行 ownership，建立三批工程验收路径。
 
 2026-11-06 SGT：按现有入口语义收窄存取器要求为单次 primitive 捕获，增加 required task fixture 的早期规模测量与 synthetic helper 收敛。
+
+2026-11-06 SGT：完成 Batch 2 TDD 与有界验证；明确只观察未决原请求、安全 lease 接管时结算旧认领，以及真正未决旧代 external intent 不失忆的恢复规则。
+
+2026-11-06 SGT：按独立审读 F1/F2 修复原 key 安全 lease 恢复与离线路由拒绝分类；未决旧代 external create/start 保持只读，未在客户端盲目换键。复用既有安全恢复矩阵覆盖实际 client/controller 路径；移除纯内部 provisionGit 测试不消费的无关 task 字段，原断言保持。最终 code/test/config 794 行，完整 verify 含 MVP0 通过。
+
+2026-11-06 SGT：第二轮 scoped 复评 `1036c1d4` 新增 F3/P1（同原 key 的安全续供被确定拒绝后 receipt 仍 pending）与 F4/P2（原 binding 改变时恢复分类退化）。维护 Fake/SQLite × claim/Git-ack × 原键/新键拒绝矩阵，确认 Failed context 与原 receipt 在同一事务结算为确定失败；只有已证明无未决外部效果的安全认领走此分支。`safeResume` 在外层与事务内验证原 binding，正式路由再次改变时回既有 target-changed 重放拒绝。所有旧代 unresolved create/start 保持只读。detail-expand 浏览器 fixture 明确填写 synthetic task，原 draft/pending/focus/AST 断言不变。整理四个被随后同值 spread 覆盖的重复 synthetic task 字段，不删断言或压缩逻辑；最终代码增删 799 行。最终验证与不可变 head 在运行报告记录，Batch 3 仍待独立复评和协调者最终组合/远端回读。
+
+2026-11-06 17:21 SGT：记录最终独立复评与三能力组合证据，迁移完成计划并同步索引及必要演示说明；最终发布按当前 PR head 回读门禁，保留全部人类验收边界。

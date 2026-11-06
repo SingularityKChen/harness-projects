@@ -132,7 +132,7 @@ test('恢复预检必须使用已持久化的分支身份，而不是重放请�
   const provider = withHooks(checked, { createWorktree: (fn) => async (input) => { if (!refused) { refused = true; return { ok: false, error: { code: 'unavailable', message: '确定未创建', retryable: false } } } return fn(input) } })
   const { storage, workspaceId, context } = await coreContextFor(fixture, { development: provider }, { clock: clock.clock })
   await registerWorkItem(storage, workspaceId, 'wi-custom-branch')
-  const firstRequest = {
+  const firstRequest = { task: 'Synthetic explicit task',
     workItemId: 'wi-custom-branch', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' },
     idempotencyKey: 'custom-branch-1', branchName: decidedBranch,
   }
@@ -166,17 +166,17 @@ test('工作树已落盘但 ack 丢失：换 key 省略 branchName 仍被耐久�
   })
   const { storage, workspaceId, context } = await coreContextFor(fixture, { development: provider }, { clock: clock.clock })
   await registerWorkItem(storage, workspaceId, 'wi-landed')
-  const first = { workItemId: 'wi-landed', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'landed-1', branchName: decided }
+  const first = { task: 'Synthetic explicit task', workItemId: 'wi-landed', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'landed-1', branchName: decided }
   assert.equal((await startWork(context, first)).writeState, 'unknown')
   clock.advance(LEASE_EXPIRED_MS)
   const { branchName: _omitted, ...retry } = first
   const result = await startWork(context, { ...retry, idempotencyKey: 'landed-2' })
   assert.deepEqual(
-    [seen, result.status, result.branchExternalId, result.worktreeExternalId, (await worktreePaths(fixture)).length],
-    [[decided], ExecutionContextStatus.Failed, decided, undefined, 2],
+    [seen, result.error.message, result.branchExternalId, result.worktreeExternalId, (await worktreePaths(fixture)).length],
+    [[decided], 'idempotency_request_mismatch', undefined, undefined, 2],
     '丢 ack 后新 key 被阻挡，不新增预检或外部写入；已落盘工作树仍保留'
   )
-  assert.equal(result.writeState, 'unknown'); assert.equal(await storage.findMutationAttempt(workspaceId, 'landed-2'), undefined,
+  assert.equal(result.writeState, 'conflict'); assert.equal(await storage.findMutationAttempt(workspaceId, 'landed-2'), undefined,
   )
 })
 
@@ -229,7 +229,7 @@ test('已持久化的工作树句柄与新默认不同：重放沿用持久化�
   const { storage, workspaceId, context } = await coreContextFor(fixture)
   await registerWorkItem(storage, workspaceId, 'wi-persisted')
   const persisted = path.join(fixture.root, 'persisted-handle')
-  const first = { workItemId: 'wi-persisted', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'persisted-1', worktreePath: persisted }
+  const first = { task: 'Synthetic explicit task', workItemId: 'wi-persisted', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'persisted-1', worktreePath: persisted }
   assert.equal((await startWork(context, first)).status, ExecutionContextStatus.Ready)
   const contextId = contextIdFor(workspaceId, 'wi-persisted', REPOSITORY_ID)
   const record = await storage.getExecutionContext(contextId)
@@ -240,20 +240,14 @@ test('已持久化的工作树句柄与新默认不同：重放沿用持久化�
   assert.deepEqual([record.worktreeExternalId, outcome.ok, outcome.worktreeExternalId], [persisted, true, persisted])
 })
 
-test('恢复供应：同一工作树只保留一条 has_worktree 关系（#165）', async (t) => {
+test('原请求重放：同一工作树只保留一条 has_worktree 关系（#165）', async (t) => {
   const fixture = await fixtureFor(t)
   const { storage, workspaceId, context } = await coreContextFor(fixture)
   await registerWorkItem(storage, workspaceId, 'wi-165')
-  const request = { workItemId: 'wi-165', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'k-1' }
+  const request = { task: 'Synthetic explicit task', workItemId: 'wi-165', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'k-1' }
   const first = await startWork(context, request)
   const stored = await storage.getExecutionContext(first.executionContextId)
-  await storage.putExecutionContext({
-    ...stored, status: ExecutionContextStatus.Provisioning,
-    // 必须比 FROZEN_NOW 早超过 PROVISIONING_LEASE_MS（30 秒），否则 claimContext 走 in-flight 而不是 resume，
-    // 这个用例就不再测恢复了（见夹具里 FROZEN_NOW 的注释）。
-    provisioningStartedAt: '2026-09-23T00:00:00Z',
-  })
-  const second = await startWork(context, { ...request, idempotencyKey: 'k-2' })
+  const second = await startWork(context, request)
   // 恢复必须**真的跑完**：只断言关系数是上界——`provision()` 在 `if (!git.ok)` 返回之前就无条件调用了
   // `recordStartFacts`，而 `worktreeEntityId` 不含路径，所以「恢复成功」「工作树步骤失败」「租约未过期被
   // in-flight 挡住」三种情况下关系数都是 1（第五轮评审 P2，两个变体都独立复现过）。
@@ -353,7 +347,7 @@ test('已 ready 上下文的工作树或分支消失后不得继续报 confirmed
   const fixture = await fixtureFor(t)
   const { storage, workspaceId, context } = await coreContextFor(fixture)
   await registerWorkItem(storage, workspaceId, 'wi-stale')
-  const request = { workItemId: 'wi-stale', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'stale-1' }
+  const request = { task: 'Synthetic explicit task', workItemId: 'wi-stale', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'stale-1' }
   const first = await startWork(context, request)
   assert.equal(first.status, ExecutionContextStatus.Ready)
   await fixture.run(['worktree', 'remove', '--force', first.worktreeExternalId])

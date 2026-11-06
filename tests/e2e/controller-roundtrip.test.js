@@ -80,7 +80,7 @@ test('wire：快照只承载内部对象，并说明新鲜度与权威归属（i
 test('命令：同键重放返回原结果，且取不到乐观 saved（ExecPlan D3）', async () => {
   const { controller } = await compose()
   const target = openWorkItem(await controller.baseline())
-  const input = {
+  const input = { task: 'Synthetic explicit task',
     workItemId: target.entityId, repositoryId: REPOSITORY,
     actorRef: { kind: 'agent', id: 'agent-1' }, idempotencyKey: 'controller-roundtrip-1',
   }
@@ -124,8 +124,8 @@ test('命令：同键绑定完整请求身份，actor/目标/参数变化返回 
     },
     {
       name: 'start work actor and target',
-      invoke: async ({ controller, target }) => controller.commands.startWork({ workItemId: target.entityId, repositoryId: REPOSITORY, actorRef: { kind: 'agent', id: 'a-1' }, idempotencyKey: 'identity-key' }),
-      change: (controller, target) => controller.commands.startWork({ workItemId: target.entityId, repositoryId: 'repo-beta', actorRef: { kind: 'agent', id: 'a-2' }, idempotencyKey: 'identity-key' }),
+      invoke: async ({ controller, target }) => controller.commands.startWork({ task: 'Synthetic explicit task', workItemId: target.entityId, repositoryId: REPOSITORY, actorRef: { kind: 'agent', id: 'a-1' }, idempotencyKey: 'identity-key' }),
+      change: (controller, target) => controller.commands.startWork({ task: 'Synthetic explicit task', workItemId: target.entityId, repositoryId: 'repo-beta', actorRef: { kind: 'agent', id: 'a-2' }, idempotencyKey: 'identity-key' }),
       command: 'startWork',
     },
   ]
@@ -150,10 +150,12 @@ test('命令：canonical identity 忽略对象键序但保留 undefined/null 与
   const controller = createController(counted.core)
   const target = openWorkItem(await controller.baseline())
   const first = await controller.commands.startWork({
+    task: 'Synthetic explicit task',
     workItemId: target.entityId, repositoryId: REPOSITORY, branchName: undefined,
     actorRef: { id: 'a-1', kind: 'agent' }, idempotencyKey: 'canonical-key',
   })
   const reordered = await controller.commands.startWork({
+    task: 'Synthetic explicit task',
     repositoryId: REPOSITORY, workItemId: target.entityId, branchName: undefined,
     actorRef: { kind: 'agent', id: 'a-1' }, idempotencyKey: 'canonical-key',
   })
@@ -161,6 +163,7 @@ test('命令：canonical identity 忽略对象键序但保留 undefined/null 与
   assert.equal(counted.calls.get('startWork'), 1)
 
   const explicitNull = await controller.commands.startWork({
+    task: 'Synthetic explicit task',
     workItemId: target.entityId, repositoryId: REPOSITORY, branchName: null,
     actorRef: { kind: 'agent', id: 'a-1' }, idempotencyKey: 'canonical-key',
   })
@@ -194,10 +197,12 @@ test('命令：canonical identity 保留数组顺序差异（#306）', async () 
   const controller = createController(counted.core)
   const target = openWorkItem(await controller.baseline())
   const first = await controller.commands.startWork({
+    task: 'Synthetic explicit task',
     workItemId: target.entityId, repositoryId: REPOSITORY,
     actorRef: { kind: 'agent', id: 'a-1', metadata: ['one', 'two'] }, idempotencyKey: 'array-key',
   })
   const reordered = await controller.commands.startWork({
+    task: 'Synthetic explicit task',
     workItemId: target.entityId, repositoryId: REPOSITORY,
     actorRef: { kind: 'agent', id: 'a-1', metadata: ['two', 'one'] }, idempotencyKey: 'array-key',
   })
@@ -232,7 +237,7 @@ test('命令：同一完整请求的并发 replay 只调用一次 core（#307）
     },
   })
   const controller = createController(controlled)
-  const input = { workItemId: target.entityId, repositoryId: REPOSITORY, actorRef: { kind: 'agent', id: 'replay-1' }, idempotencyKey: 'inflight-1' }
+  const input = { task: 'Synthetic explicit task', workItemId: target.entityId, repositoryId: REPOSITORY, actorRef: { kind: 'agent', id: 'replay-1' }, idempotencyKey: 'inflight-1' }
   const first = controller.commands.startWork(input)
   while (calls === 0) await Promise.resolve()
   const second = controller.commands.startWork(input)
@@ -281,7 +286,7 @@ test('命令：in-flight 期间同键异请求立即 conflict 且不共享 promi
     },
   })
   const controller = createController(controlled)
-  const input = {
+  const input = { task: 'Synthetic explicit task',
     workItemId: target.entityId, repositoryId: REPOSITORY,
     actorRef: { kind: 'agent', id: 'replay-inflight' }, idempotencyKey: 'inflight-conflict',
   }
@@ -311,7 +316,7 @@ test('命令：Rejected replay 清理 in-flight，下一次同请求可以恢复
     },
   })
   const controller = createController(controlled)
-  const input = { workItemId: target.entityId, repositoryId: REPOSITORY, actorRef: { kind: 'agent', id: 'replay-2' }, idempotencyKey: 'reject-1' }
+  const input = { task: 'Synthetic explicit task', workItemId: target.entityId, repositoryId: REPOSITORY, actorRef: { kind: 'agent', id: 'replay-2' }, idempotencyKey: 'reject-1' }
   await assert.rejects(controller.commands.startWork(input), /injected controller failure/)
   const recovered = await controller.commands.startWork(input)
   assert.equal(recovered.writeState, CommandWriteState.Confirmed, 'reject 不得污染后续 replay')
@@ -335,7 +340,7 @@ test('命令：Start Work 的 Pending/Unknown replay 重新读取 Host 当前结
     startWork: async () => { calls += 1; return calls === 1 ? pending : confirmed },
   })
   const controller = createController(controlled)
-  const input = { workItemId: target.entityId, repositoryId: REPOSITORY, actorRef: { kind: 'agent', id: 'replay-3' }, idempotencyKey: 'pending-1' }
+  const input = { task: 'Synthetic explicit task', workItemId: target.entityId, repositoryId: REPOSITORY, actorRef: { kind: 'agent', id: 'replay-3' }, idempotencyKey: 'pending-1' }
   const first = await controller.commands.startWork(input)
   const replay = await controller.commands.startWork(input)
   assert.equal(first.writeState, CommandWriteState.Pending)
@@ -434,7 +439,7 @@ test('交付：刷新命令报 local_only，查询原样转发陈旧、降级、
   const { providers, controller } = await composeDelivery(() => now)
   const target = openWorkItem(await controller.baseline())
   const actorRef = { kind: 'agent', id: 'agent-1' }
-  await controller.commands.startWork({ workItemId: target.entityId, repositoryId: REPOSITORY, actorRef, idempotencyKey: 'delivery-start-1' })
+  await controller.commands.startWork({ task: 'Synthetic explicit task', workItemId: target.entityId, repositoryId: REPOSITORY, actorRef, idempotencyKey: 'delivery-start-1' })
   const scope = { workItemId: target.entityId, repositoryId: REPOSITORY }
   const refreshed = await controller.commands.refreshDeliveryFacts(scope, { actorRef })
   assert.equal(refreshed.writeState, CommandWriteState.LocalOnly, '刷新只写本地已确认事实，没有外部写入')
@@ -461,7 +466,7 @@ test('交付：刷新命令的结果会原样到达 wire，provider 的错误文
   const { providers, controller } = await composeDelivery()
   const items = openWorkItems(await controller.baseline())
   const actorRef = { kind: 'agent', id: 'agent-1' }
-  const started = await controller.commands.startWork({ workItemId: items[0].entityId, repositoryId: REPOSITORY, actorRef, idempotencyKey: 'wire-start-1' })
+  const started = await controller.commands.startWork({ task: 'Synthetic explicit task', workItemId: items[0].entityId, repositoryId: REPOSITORY, actorRef, idempotencyKey: 'wire-start-1' })
   assert.equal(started.writeState, CommandWriteState.Confirmed)
   providers.delivery.listPipelineRuns = async () => ({ ok: false, error: { code: 'unavailable', message: 'RAW-PROVIDER-TEXT token=SECRET-VALUE /secret/path' } })
   const outage = await controller.commands.refreshDeliveryFacts({ workItemId: items[0].entityId, repositoryId: REPOSITORY }, { actorRef })
@@ -476,7 +481,7 @@ test('交付：刷新命令不进重放账本，同一请求两次都真的刷�
   const { controller } = await composeDelivery()
   const items = openWorkItems(await controller.baseline())
   const actorRef = { kind: 'agent', id: 'agent-1' }
-  await controller.commands.startWork({ workItemId: items[0].entityId, repositoryId: REPOSITORY, actorRef, idempotencyKey: 'scope-start-1' })
+  await controller.commands.startWork({ task: 'Synthetic explicit task', workItemId: items[0].entityId, repositoryId: REPOSITORY, actorRef, idempotencyKey: 'scope-start-1' })
   const [started, idle] = [{ workItemId: items[0].entityId, repositoryId: REPOSITORY }, { workItemId: items[1].entityId, repositoryId: REPOSITORY }]
   const first = await controller.commands.refreshDeliveryFacts(started, { actorRef })
   const other = await controller.commands.refreshDeliveryFacts(idle, { actorRef })

@@ -22,9 +22,9 @@ for (const [label, make] of [['fake', createFakeStorage], ['sqlite', () => creat
   test(`${label}: denial redacts atomically, blocks direct/replayed commands and recovers stable identities`, async (t) => {
     const h = await open(t, make), { providers: p, core, storage: s, workspace: w } = h
     const initial = await core.queries.getPlanningSnapshot(), target = initial.views.find((v) => v.content.contentKind === 'work_item')
-    const request = { workItemId: target.entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' }, idempotencyKey: 'saved-before-denial' }
+    const request = { task: 'Synthetic explicit task', workItemId: target.entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' }, idempotencyKey: 'saved-before-denial' }
     assert.equal((await core.commands.startWork(request)).writeState, 'saved')
-    assert.equal((await h.controller.commands.startWork({ actorRef: request.actor, idempotencyKey: request.idempotencyKey, workItemId: target.entityId, repositoryId: 'repo-alpha' })).writeState, 'confirmed')
+    assert.equal((await h.controller.commands.startWork({ task: 'Synthetic explicit task', actorRef: request.actor, idempotencyKey: request.idempotencyKey, workItemId: target.entityId, repositoryId: 'repo-alpha' })).writeState, 'confirmed')
     const identities = await s.listIdentitiesForEntity(target.entityId), before = await core.queries.getPlanningSnapshot()
     const known = await s.getReconcileCursor(w.id), calls = [p.development.state.branches.length, p.execution.state.runs.length]
     const attempts = await s.listMutationAttempts(w.id), contexts = await s.getExecutionContext(contextIdFor(w.id, target.entityId, 'repo-alpha'))
@@ -38,7 +38,7 @@ for (const [label, make] of [['fake', createFakeStorage], ['sqlite', () => creat
     assert.equal((await core.queries.getItemDetail(target.entityId)).content.body, undefined)
     for (const idempotencyKey of [request.idempotencyKey, 'new-denied']) {
       assert.notEqual((await core.commands.startWork({ ...request, idempotencyKey })).writeState, 'saved')
-      assert.notEqual((await h.controller.commands.startWork({ actorRef: request.actor, idempotencyKey, workItemId: target.entityId, repositoryId: 'repo-alpha' })).writeState, 'saved')
+      assert.notEqual((await h.controller.commands.startWork({ task: 'Synthetic explicit task', actorRef: request.actor, idempotencyKey, workItemId: target.entityId, repositoryId: 'repo-alpha' })).writeState, 'saved')
     }
     assert.deepEqual([p.development.state.branches.length, p.execution.state.runs.length], calls)
     assert.deepEqual(await s.listMutationAttempts(w.id), attempts); assert.deepEqual(await s.getExecutionContext(contextIdFor(w.id, target.entityId, 'repo-alpha')), contexts)
@@ -57,7 +57,7 @@ for (const [label, make] of [['fake', createFakeStorage], ['sqlite', () => creat
     assert.deepEqual(stale.views.map((v) => v.content), before.views.map((v) => v.content)); assert.equal(stale.sync.stale, true)
     assert.equal(stale.metadata.capabilities.find((entry) => entry.key === 'planning.item.read').access, 'read_only')
     assert.deepEqual(await s.getReconcileCursor(w.id), known)
-    assert.notEqual((await core.commands.startWork({ workItemId: before.views.find((v) => v.content.contentKind === 'work_item').entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' }, idempotencyKey: 'offline' })).writeState, 'saved')
+    assert.notEqual((await core.commands.startWork({ task: 'Synthetic explicit task', workItemId: before.views.find((v) => v.content.contentKind === 'work_item').entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' }, idempotencyKey: 'offline' })).writeState, 'saved')
     assert.deepEqual(await s.listMutationAttempts(w.id), [])
   })
   test(`${label}: an unacknowledged read marker prevents Provider I/O`, async (t) => {
@@ -76,7 +76,7 @@ for (const [label, make] of [['fake', createFakeStorage], ['sqlite', () => creat
     p.planning.faultsSwitch.set(FaultKind.Offline, !rowGap); await core.commands.refreshPlanning(); p.planning.faultsSwitch.set(FaultKind.Offline, false)
     const entered = deferred(), release = deferred(), list = p.planning.listPlanningItems.bind(p.planning); p.planning.listPlanningItems = async (...args) => { entered.resolve(); await release.promise; return list(...args) }; const refresh = core.commands.refreshPlanning(); await entered.promise; assert.equal((await s.getSyncCursor(w.id, p.planning.bindingId, 'planning.project')).state, 'syncing')
     const pending = await core.queries.getPlanningSnapshot(); assert.equal(pending.metadata.capabilities.find((entry) => entry.key === 'planning.item.read').access, rowGap ? 'available' : 'read_only'); assert.equal(pending.sync.stale, true)
-    const before = await s.listMutationAttempts(w.id), external = p.development.state.branches.length, request = { workItemId: target.entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' } }, blocked = await core.commands.startWork({ ...request, idempotencyKey: 'marker-fence' }); if (rowGap) assert.equal(blocked.writeState, 'saved'); else { assert.notEqual(blocked.writeState, 'saved'); assert.deepEqual(await s.listMutationAttempts(w.id), before); assert.equal(p.development.state.branches.length, external) }; release.resolve(); assert.equal((await refresh).ok, true); assert.equal((await core.commands.startWork({ ...request, idempotencyKey: 'marker-fence-after' })).writeState, 'saved')
+    const before = await s.listMutationAttempts(w.id), external = p.development.state.branches.length, request = { task: 'Synthetic explicit task', workItemId: target.entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' } }, blocked = await core.commands.startWork({ ...request, idempotencyKey: 'marker-fence' }); if (rowGap) assert.equal(blocked.writeState, 'saved'); else { assert.notEqual(blocked.writeState, 'saved'); assert.deepEqual(await s.listMutationAttempts(w.id), before); assert.equal(p.development.state.branches.length, external) }; release.resolve(); assert.equal((await refresh).ok, true); assert.equal((await core.commands.startWork({ ...request, idempotencyKey: rowGap ? 'marker-fence' : 'marker-fence-after' })).writeState, 'saved')
   })
   for (const initialized of [false, true]) for (const stage of ['read-round', 'before-callback', 'cursor-write', 'round-write', 'marker-commit']) test(`${label}: ${stage} failure ${initialized ? 'cannot overwrite a newer completed read' : 'settles the initial round without Provider I/O'}`, async (t) => {
     const p = createFakeProviders(), s = make(), seen = [], w = { id: 'begin-failure', name: 'begin-failure', project: fixtureProjectRef(p.planning.bindingId) }
@@ -194,9 +194,9 @@ for (const ordinaryFailure of [false, true]) for (const olderDenial of [false, t
   for (const peer of [false, true]) for (const stage of ['preclaim', 'first-write', 'intent-committed', 'last-cursor', 'saved-ledger', 'saved-result', 'existing-result']) for (const state of ['offline', 'denied', 'healthy', 'row-gap', 'healthy-pending']) test(`${label}: ${peer ? 'peer' : 'same owner'} ${stage} revalidates ${state} admission`, async (t) => {
     const { context, core, providers: p, storage: s, workspace: w } = await open(t, make)
     const target = (await core.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item')
-    const request = { workItemId: target.entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' }, idempotencyKey: 'held-admission' }
+    const request = { task: 'Synthetic explicit task', workItemId: target.entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' }, idempotencyKey: 'held-admission' }
     if (stage.includes('saved') || stage === 'existing-result') assert.equal((await core.commands.startWork(request)).writeState, 'saved')
-    if (stage === 'existing-result') request.idempotencyKey = 'existing-admission'
+    // 既有执行的读取使用原请求；新 key 的任务不再假装已经发送。
     const entered = deferred(), release = deferred(), io = deferred(), inProvider = deferred()
     t.after(() => { release.resolve(); io.resolve() })
     let hold = true, intent = false
@@ -304,7 +304,7 @@ for(const [label,make] of [['fake',createFakeStorage],['sqlite',()=>createSqlite
  p.planning.faultsSwitch.set(FaultKind.PermissionDenied,true)
  const refresh=await a.commands.refreshPlanning().catch(error=>({thrown:error.message}))
  const metadata=await b.queries.getWorkspaceMetadata(), rows=await b.queries.listPlanningItems(),cursor=await s.getSyncCursor(w.id,p.planning.bindingId,'planning.project'),round=await s.getPlanningSyncRound(w.id,p.planning.bindingId,'planning.project')
- const precheck=await b.queries.getStartWorkTargetError(target.entityId), result=await b.commands.startWork({workItemId:target.entityId,repositoryId:'repo-alpha',actor:{kind:'user'},idempotencyKey:'peer-denied'})
+ const precheck=await b.queries.getStartWorkTargetError(target.entityId), result=await b.commands.startWork({ task: 'Synthetic explicit task',workItemId:target.entityId,repositoryId:'repo-alpha',actor:{kind:'user'},idempotencyKey:'peer-denied'})
  console.log(JSON.stringify({label,rollback,refresh,source:metadata.planningSource,rows:rows.map(row=>row.content.contentKind),cursor,round,precheck,result,before,after:external()}))
  assert.equal(metadata.planningSource,undefined,'source title is protected Planning content')
  assert.deepEqual(external(),before,'uncertain peer marker cannot authorize first external write')
@@ -331,7 +331,7 @@ for (const sqlite of [false, true]) for (const scenario of ['peer-recovers-local
       assert.equal((await storage.getSyncCursor(workspace.id, p.planning.bindingId, 'planning.project')).state, 'degraded')
       storage.transaction = transaction; assert.equal((await first.commands.refreshPlanning()).ok, true)
     }
-    if (scenario === 'start-after-peer-recovery') assert.equal((await first.commands.startWork({ workItemId: target.entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' }, idempotencyKey: 'direct-recovered' })).writeState, 'saved')
+    if (scenario === 'start-after-peer-recovery') assert.equal((await first.commands.startWork({ task: 'Synthetic explicit task', workItemId: target.entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' }, idempotencyKey: 'direct-recovered' })).writeState, 'saved')
     if (scenario === 'refresh-after-peer-recovery') assert.equal((await first.commands.refreshPlanning()).ok, true)
     const round = await storage.getPlanningSyncRound(workspace.id, p.planning.bindingId, 'planning.project')
     assert.equal(round.latestStartedRound, round.latestCommittedRound)
@@ -373,7 +373,7 @@ for (const sqlite of [false, true]) test(`${sqlite ? 'SQLite' : 'Memory'} beginn
   try {
     const views = await second.queries.listPlanningItems(), metadata = await second.queries.getWorkspaceMetadata()
     const before = [p.development.state.branches.length, p.development.state.worktrees.length, p.execution.state.runs.length]
-    const result = await second.commands.startWork({ workItemId: target.entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' }, idempotencyKey: 'during-unconfirmed-retry' })
+    const result = await second.commands.startWork({ task: 'Synthetic explicit task', workItemId: target.entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' }, idempotencyKey: 'during-unconfirmed-retry' })
     const after = [p.development.state.branches.length, p.development.state.worktrees.length, p.execution.state.runs.length]
     console.log(JSON.stringify({ sqlite, visible: views.some(row => row.entityId === target.entityId && row.content.contentKind === 'work_item'), source: metadata.planningSource, before, after, result }))
     assert.deepEqual(after, before, 'a new own read has not produced the full committed proof needed to clear the old unknown marker')

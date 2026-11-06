@@ -8,7 +8,7 @@ import { composeCore } from '@harness-projects/core'
 import { createFakeProviders, exportFakeStorageState } from '@harness-projects/provider-fake'
 
 const WORKSPACE = { id: newWorkspaceId(), name: 'MVP-0' }
-const REQUEST = { repositoryId: 'repo-alpha', actor: { kind: 'agent' } }
+const REQUEST = { task: 'Synthetic explicit task', repositoryId: 'repo-alpha', actor: { kind: 'agent' } }
 
 async function workItemIdOf(core) {
   const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item') // redacted 条目的 kind 也是 work_item（issue-3），但没有可操作的规划条目，不能当开始工作的对象

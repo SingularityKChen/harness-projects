@@ -33,7 +33,7 @@ test('core 端到端：PR 只经 head 分支挂上谱系，标题 / fork / 大�
     const workspace = { id: newWorkspaceId(), name: `github-development/${mode}`, statusPolicy: StatusPolicy.ManualOnly }
     const first = await composeCore({ workspace, providers })
     const item = (await first.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item')
-    const started = await first.commands.startWork({ repositoryId: REPOSITORY, actor: { kind: 'agent' }, workItemId: item.entityId, idempotencyKey: `lineage-${mode}` })
+    const started = await first.commands.startWork({ task: 'Synthetic explicit task', repositoryId: REPOSITORY, actor: { kind: 'agent' }, workItemId: item.entityId, idempotencyKey: `lineage-${mode}` })
     assert.equal(started.confirmed, true, '前置：Start Work 建出分支与工作树')
     const branch = exportFakeStorageState(providers.storage).contexts[0].branchExternalId
     // 诱饵在 CREATED_AT DESC 下排在目标之前：后过滤或平台过滤一旦失守，core「取第一个头部提交相等的项」就会挂错；前置的 60 个 fork 占满首页。

@@ -159,10 +159,10 @@ for (const label of ['Fake', 'SQLite']) test(`typed PR intent is guarded at writ
 test('unresolved PR intent cannot replace the already-ready Start Work result', async (t) => {
   const w = await world(t, 'SQLite', { dropAck: true })
   const start = await ready(w)
-  const before = await start('ready-before')
+  const before = await start('provision-ready')
   assert.equal(before.confirmed, true)
   assert.equal((await w.run()).writeState, 'unknown')
-  const after = await start('ready-after')
+  const after = await start('provision-ready')
   assert.equal(after.phase, before.phase, JSON.stringify({ before, after }))
   assert.equal(after.confirmed, true); assert.equal(after.executionContextId, before.executionContextId)
   assert.equal(w.f.mutations().length, 1)

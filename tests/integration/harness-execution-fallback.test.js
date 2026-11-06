@@ -41,7 +41,7 @@ for (const fault of ['none', 'create', 'prompt', 'timeout', 'read']) test(`Harne
   const development = createLocalGitDevelopmentProvider({ bindingId: 'git-core', repository: { externalId: 'repo-alpha', path: repo }, allowedRoot: root })
   const core = await composeCore({ workspace: { id: newWorkspaceId(), name: 'Harness integration' }, providers: { ...fakes, development, execution, executionFallback } })
   const item = (await core.queries.listPlanningItems()).find((x) => x.kind === 'work_item' && x.content.contentKind === 'work_item')
-  const request = { repositoryId: 'repo-alpha', workItemId: item.entityId, actor: { kind: 'agent' }, idempotencyKey: `harness-${fault}`, worktreePath: '.worktrees/execution' }
+  const request = { task: 'Synthetic explicit task', repositoryId: 'repo-alpha', workItemId: item.entityId, actor: { kind: 'agent' }, idempotencyKey: `harness-${fault}`, worktreePath: '.worktrees/execution' }
   const result = await core.commands.startWork(request)
   t.diagnostic(JSON.stringify({ actor: request.actor, targetBindingId: 'harness-core', intentKey: [result.executionContextId, request.idempotencyKey],
     requestId, sessionId: fault === 'create' ? undefined : 'session-core', providerAck: fault === 'none' || fault === 'read', readBack: fault === 'none',
@@ -93,7 +93,7 @@ for (const interleaving of ['later-turn-before-cancel', 'later-turn-during-core-
   const core = await composeCore({ workspace: { id: newWorkspaceId(), name: 'Harness stale cancellation' }, providers })
   const item = (await core.queries.listPlanningItems()).find((x) => x.kind === 'work_item' && x.content.contentKind === 'work_item')
   const query = { repositoryId: 'repo-alpha', workItemId: item.entityId }
-  const result = await core.commands.startWork({ ...query, actor: { kind: 'agent' }, idempotencyKey: interleaving, worktreePath: '/workspace/stale-tree' })
+  const result = await core.commands.startWork({ task: 'Synthetic explicit task', ...query, actor: { kind: 'agent' }, idempotencyKey: interleaving, worktreePath: '/workspace/stale-tree' })
   assert.equal(result.confirmed, true)
   assert.equal((await core.queries.getExecutionContext(query)).runStatus, 'running')
   if (interleaving === 'later-turn-before-cancel') later()
