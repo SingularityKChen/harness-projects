@@ -83,11 +83,14 @@ async function start(page, keyboard = false) {
   if (keyboard) await page.keyboard.press('Enter'); else await submit.click()
   await (await acknowledgement).finished()
 }
-async function createPr(page) {
+async function createPr(page, draft = false) {
   await page.getByLabel('目标分支', { exact: true }).fill('main')
   await page.getByLabel('标题', { exact: true }).fill('Browser native PR')
   await page.getByLabel('正文', { exact: true }).fill('  原请求 λ\n\n正文  ')
-  await page.getByRole('button', { name: '创建 PR', exact: true }).click()
+  const checkbox = page.getByRole('checkbox', { name: '创建为草稿', exact: true })
+  assert.equal(await checkbox.isChecked(), false)
+  if (draft) await checkbox.check()
+  await page.getByRole('button', { name: draft ? '创建草稿 PR' : '创建 PR', exact: true }).click()
 }
 describe('production composed browser execution', { timeout: 120000 }, () => {
   test('Start Work dispatch creates one actual Git worktree and run; replay preserves source and keyboard focus', { timeout: 60000 }, async t => {
@@ -129,9 +132,10 @@ describe('production composed browser execution', { timeout: 120000 }, () => {
   test('lost PR acknowledgement recovers the original intent after SQLite reopen and a new Host peer without duplicate creation', { timeout: 60000 }, async t => {
     await scene(t, async ({ h, page }) => {
       await start(page); await visible(page, '开始工作已确认')
-      h.platform.flags.dropAck = true; await createPr(page)
+      h.platform.flags.dropAck = true; await createPr(page, true)
       await visible(page, '已保存原请求，请读回原操作确认')
       const original = rows(h, 'mutation_attempt').find(row => row.command_name === 'createChangeRequest')
+      assert.equal(JSON.parse(original.external_intent_json).input.draft, true)
       assert.equal(original.state, 'unknown'); assert.equal(h.platform.effects().prs, 1)
       assert.match(JSON.parse(original.external_intent_json).input.body, /^  原请求 λ\n\n正文  \n<!-- harness-pr-operation:[a-f0-9]{64} -->$/)
       assert.match(original.request_fingerprint, /execution-peer-1/)
@@ -144,7 +148,7 @@ describe('production composed browser execution', { timeout: 120000 }, () => {
       await assert.rejects(() => oldStorage.getWorkspace(h.workspaceId))
       h.platform.flags.dropAck = false
       await page.reload(); await page.getByRole('link', { name: TITLE, exact: true }).click()
-      await visible(page, '已保存原请求：Browser native PR；feature/topic → main')
+      await visible(page, '已保存原请求（草稿 PR）：Browser native PR；feature/topic → main')
       assert.equal(await page.getByRole('button', { name: '创建 PR', exact: true }).count(), 0)
       await page.getByRole('button', { name: '读回原操作', exact: true }).click(); await visible(page, 'PR 已确认')
       const saved = rows(h, 'mutation_attempt').find(row => row.id === original.id)

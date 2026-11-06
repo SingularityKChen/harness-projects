@@ -124,8 +124,9 @@ export function createGithubDevelopmentProvider({ bindingId, repository, transpo
     let intent: ProviderCreateChangeRequestInput
     try {
       // getter 每项仅读一次；ack oracle 不与 caller 或 transport 的可变对象共享身份。
-      const { repository: ref, head, base, title, body } = input
-      intent = Object.freeze({ repository: Object.freeze({ bindingId: ref.bindingId, objectKind: ref.objectKind, externalId: ref.externalId, url: undefined }), head, base, title, body })
+      const { repository: ref, head, base, title, body, draft } = input
+      if (draft !== undefined && typeof draft !== 'boolean') return invalid('草稿选择必须是布尔值')
+      intent = Object.freeze({ repository: Object.freeze({ bindingId: ref.bindingId, objectKind: ref.objectKind, externalId: ref.externalId, url: undefined }), head, base, title, body, draft: draft ?? false })
     } catch {
       return invalid('创建变更请求输入无法读取')
     }
@@ -150,7 +151,7 @@ export function createGithubDevelopmentProvider({ bindingId, repository, transpo
     try {
       // 一次显式调用只发送一次 mutation；clientMutationId 也不能提供服务端幂等保证。
       const response = await transport({ operationName: 'DevelopmentCreateChangeRequest', query: DEVELOPMENT_CREATE_OPERATIONS.DevelopmentCreateChangeRequest,
-        variables: { input: { repositoryId, headRepositoryId: repositoryId, headRefName: head, baseRefName: base, title, body } } })
+        variables: { input: { repositoryId, headRepositoryId: repositoryId, headRefName: head, baseRefName: base, title, body, draft: intent.draft } } })
       requestId = requestIdOf(response.headers)
       const error = classifyResponse(response, now())
       const data = isRecord(response.body) && isRecord(response.body.data) ? response.body.data : {}

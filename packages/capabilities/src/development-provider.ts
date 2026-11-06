@@ -57,6 +57,8 @@ export interface ProviderChangeRequest {
   readonly nativeIdentity?: ProviderNativeIdentity
   readonly ref: ExternalObjectRef; readonly number: number; readonly title: string; readonly body: string
   readonly state: string
+  /** 来源已知的当前草稿状态；缺失表示未知。 */
+  readonly isDraft?: boolean
   /** 头部提交 sha：谱系只按**相等**比较，不是观察的定序载体（观察只认 `observation.ts` R4 的规范载体）。 */
   readonly sourceVersion: string | undefined
   /** 真实头部**分支身份**；以直接提交 sha 创建（provider 可选支持）、无法精确解析为本仓库分支时为 `undefined`，不按 sha 反推分支。 */
@@ -75,7 +77,7 @@ export interface ProviderGetWorktreeInput { readonly worktree: ExternalObjectRef
 
 /** `head` 是分支名；是否也接受直接提交 sha 由 provider 决定，不接受时答结构化 `invalid_input` 且不留任何对象。 */
 export interface ProviderCreateChangeRequestInput {
-  readonly repository: ExternalObjectRef; readonly head: string; readonly base: string; readonly title: string; readonly body: string
+  readonly repository: ExternalObjectRef; readonly head: string; readonly base: string; readonly title: string; readonly body: string; readonly draft?: boolean
 }
 
 export interface ProviderRemoveWorktreeInput { readonly worktree: ExternalObjectRef }

@@ -1,6 +1,6 @@
 # 原生 Draft PR 创建 ExecPlan
 
-> 状态：Active；创建：2026-11-06；执行分支：`feature/draft-pull-request`
+> 状态：Completed；创建：2026-11-06；执行分支：`feature/draft-pull-request`
 > 范围：#548；Refs #72、#143、#545；遵循根级 `PLANS.md`。
 
 ## Purpose / Big Picture
@@ -43,7 +43,7 @@ GitHub get/list/create 的统一 fragment 携带 isDraft；create ack decoder �
 
 ### pending/unknown 与 saved 的不同确认规则
 
-首次创建 ack 与 pending/unknown observer 均要求已知 isDraft 等于持久期望；缺失、反值、多个匹配、分页不完整都不能 Saved。
+首次创建 ack 与 pending/unknown observer 均要求已知 isDraft 等于持久期望；缺失、反值、多个匹配、分页不完整都不能 Saved。完整扫描先按 repo/head/title/body/marker/native identity 统计身份候选，不以可变 Draft 状态过滤；唯一候选成立后，list 与 exact get 都必须具有已知且匹配的 Draft 事实。
 沿用 repo/head/title/body/marker/native identity 与精确 get 回读；不得仅凭相同标题或一个 Draft 字段确认。
 若 Draft 在首次确认前已被平台转 ready，当前证据无法证明原 Draft 创建，保持 unknown/conflict并提供既有恢复路径；不转回、不重建。
 操作一旦 saved，confirmedRef 已是已确认身份；之后平台 ready 是新的当前事实，不得使原 operation 无效或触发第二创建。
@@ -61,7 +61,7 @@ Host 继续拥有 Saved 权威，只有 Provider ack/reconcile 与本地结算�
 
 ## Global Constraints
 
-唯一完整改动集合：`packages/capabilities/src/{development-provider,storage}.ts`；`packages/core/src/create-change-request.ts`；`packages/providers/development-github/src/{provider,queries,decode}.ts`；`packages/providers/fake/src/development.ts`；`packages/client/src/create-change-request.ts`；`packages/ui/src/create-change-request-section.ts`；下述共享区域；已有 development-github-create/contract、create-change-request、change-request-operation、UI/Host ABI/插件 integration tests 及其直接 fixtures/tapes；本计划及必要用法说明。
+唯一完整改动集合：`packages/capabilities/src/{development-provider,storage}.ts`；`packages/core/src/create-change-request.ts`；`packages/providers/development-github/src/{provider,queries,decode}.ts`；`packages/providers/fake/src/development.ts`；`packages/client/src/create-change-request.ts`；`packages/ui/src/create-change-request-section.ts`；下述共享区域；已有 development-github-create/contract、development-contract、create-change-request、change-request-operation、UI/Host ABI（含 remote adapter）/插件 integration/artifact、workspace-execution browser tests 及其直接 fixtures/tapes；本计划及必要用法说明。
 共享接口唯一 writer 是 #547 handoff owner/integrator：本 PR owner 交付 `packages/controller/src/commands.ts` 的 CreateChangeRequest 类型/whitelist/createChangeRequest 成员、`apps/harness-plugin/src/host-operations.ts` 的 createChangeRequest descriptor、`apps/harness-plugin/src/host-composition.ts` 的 PR handler/summary、`apps/harness-plugin/src/client.ts` 的 create adapter，以及 `tests/contract/harness-host-operations.test.js` 的 PR 专属断言最小 patch。
 integrator 在 Draft worktree 串行应用、验证 patch，不把 task 字段带入本 PR；通用 helper 若需变更由其一次裁决并同步双方，不能并发编辑同一成员。
 两个 feature 分支均独立 main-base，无隐含 stack；最终组合检出验证两 ABI 与状态语义共存。`docs/README.md` 由协调者维护。
@@ -140,17 +140,27 @@ integrator 在三个最终 head 的组合检出运行两 feature integration sui
 ## Progress
 
 - [x] (2026-11-06 SGT) 读两独立设计与 owning code，锁定默认 false 及两类恢复判据。
-- [ ] (2026-11-06 SGT) Batch 1：设计冻结、baseline、draft PR 回读。
-- [ ] (2026-11-06 SGT) Batch 2：判别 RED/GREEN 与持久恢复证据。
-- [ ] (2026-11-06 SGT) Batch 3：独立验收、组合验证、最终 Ready。
+- [x] (2026-11-06 SGT) Batch 1：协调者完成设计冻结、82 条 baseline 与 Draft PR #550 / Closes #548 双向回读；发布计划 head `c67e7f653a0498a1a1cb650287152b371098bdf4`。
+- [x] (2026-11-06 SGT) Batch 2：先观察 Draft 判别 RED，再完成默认/显式布尔、输入捕获、持久摘要、native mutation 与首次/已 Saved 恢复分流；共享接口由 #547 owner 串行应用。相关 305/305、全量 3614/3614、浏览器 4/4 通过；typecheck 与 boundaries 9/9 通过。
+- [x] (2026-11-06 SGT) Batch 3：独立验收、组合验证、最终 Ready。首轮独立审查在 `12c97d67d066` 找到唯一 P1/R1：先过滤 Draft 状态掩盖同 marker 歧义；实施 owner 已补维护中的两种 mixed-state 反例并修复，等待新 head 的独立再评。
 
 ## Surprises & Discoveries
+
+2026-11-06 / 首轮独立审查 R1：初版 valid 同时选择身份候选与验证 Draft。原 PR false/缺失而复制同 marker 的 PR true 时，过滤原 PR 后会将复制者唯一确认。这说明既有全绿套件没有覆盖 mutable-state 混合歧义，不能证明首次身份判据完整。新增两种维护中回归均先 RED（authoritative true ≠ false），修复后 unknown、无 confirmedRef、无 explicit produced_by，且 create count 仍为 1。
+
+2026-11-06 实施：首轮 RED 为 110 条中 17 条失败，核心症状为 mutation/持久摘要缺字段、显式输入被拒、UI checkbox 缺失；另有未通过准入后的后继断言无法执行，不作为独立缺陷证据。随后 client 非布尔零 dispatch 单测明确 RED（4 次 dispatch ≠ 0）；Fake 一次 getter 单测明确 RED（错误 false ≠ true）。
+2026-11-06 回归：首次全量 3610/3614，四项均为需要同步的 DTO/ABI 消费者期望（两条 operation whitelist、remote 参数数、bundle creator 参数）；首轮 browser 3/4 因原请求摘要新增类型标示。修正对应消费者后，完整重跑 3614/3614 与 4/4。未忽略失败。
+2026-11-06 只读重录：按既有录制机制直接发送当前 DEVELOPMENT_QUERIES，以 tape 原变量重取 11 条 PR exchanges，完成于 `2026-11-06T08:09:35.826Z`；变更仅为真实 `isDraft:false`、两个 query hash 与 `draftStateRecordedAt`。不改仓库/分支/提交历史观测；合成 true mutation 与真实只读 false 证据严格分开。
 
 2026-11-06 源码审读：externalIntentSnapshot 白名单会丢弃仅新增到接口的 draft，必须同时扩展保存投影。
 2026-11-06 源码审读：saved resume 已直接走 finish，不重新 observer；保留此边界可正确接受平台后续 ready，而 pending/unknown 必须检查 isDraft。
 2026-11-06 综合发现：给 canonical 增加归一 boolean 会使旧实验 fingerprint 失配；这是本轮显式无兼容范围的已知成本，不能靠再创建掩盖。
 
 ## Decision Log
+
+2026-11-06 / 实施 owner、响应独立审查 R1：拆分 identityCandidate 与 provesCreation。完整扫描用前者统计身份与歧义，唯一后由后者证明 list/精确 get 的 Draft；首次 create ack 仍用完整证明，Saved 的 confirmedRef 分支保持原语义。修复不涉及 ABI、schema、兼容、真实外写或第二谱系机制。
+
+2026-11-06 / 实施 owner：Host composition 已透传完整 input，client adapter 已透传 rest args，operation summary 已透传 Core 视图，故这三处无需人为新增空转改动；实际共享修改是 controller whitelist/布尔归一与 Host append-only descriptor，并同步 ABI 消费者。
 
 2026-11-06 / 人类授权、综合审读者记录：四 issue/三 PR，本计划仅 #548，不挪用 #545 为产品实现 issue。
 2026-11-06 / 协调者确认、综合审读者：checkbox 默认 false；理由是保留已存在普通创建选择，true 具备完整严格验证。
@@ -173,11 +183,34 @@ GitHub `CreatePullRequestInput.draft` 与 `PullRequest.isDraft` 为 Provider 原
 
 ## Outcomes & Retrospective
 
-本次只形成审读后的计划，没有产品实现、新测试运行、真实平台 mutation 或 Desktop/模型验收。
-工程完成后写实际结果/偏差，迁至 completed；协调者维护索引，保留所有未执行人类验收的边界。
+Batch 2 完成端到端原生 Draft 能力：显式 checkbox 默认 false；单次 mutation 发送归一布尔；持久 canonical、snapshot 和操作摘要保留原选择；首次 ack/完整 observer 要求已知匹配 isDraft；Saved 后平台 ready 继续按 confirmedRef 寻址。未增加 DDL、转换/重建重试或历史兼容层；旧实验缺字段账本被保留并诚实阻塞。
+
+实际命令证据（执行上下文 `.worktrees/iteration9-draft-pr`，基于发布计划 head 加本批未提交实现树）：
+
+- Batch 2 两组所列七文件加 `tests/contract/development-contract.test.js`：305/305。
+- `pnpm test`：3614/3614，0 skipped；`pnpm typecheck` exit 0；`pnpm boundaries`：9/9。
+- `pnpm test:file tests/browser/workspace-execution.test.js`：4/4；丢 ack 用例勾选 Draft true，经生产 UI/Host/Core、真实本地 Git 与 SQLite，外部 GitHub 为严格合成 transport；普通创建 false 仍有 Delivery 场景正控。
+
+首轮独立审查 R1 修复后：六文件 covering suite 178/178；评审者对抗探针 5/5；完整 `pnpm test` 3616/3616；生产 browser 4/4；typecheck exit 0、boundaries 9/9、文档 9/9。两个新增 mixed-state 回归已纳入 `tests/integration/change-request-operation.test.js`，初始审查 head `12c97d67d066` 的 3614 全绿不足以覆盖此缺陷，不再作为修复后完整性依据。
+
+真实外部行为仅为上述只读 tape 重录；没有真实创建测试 PR、真实模型、Desktop 安装/UAT 或 R1 裁决。该 Batch 2 时点的 Active 状态已由本节最终工程验收记录取代；最终发布仍执行当前 head 准入规则。未发现需新增的延期技术债。
+
+
+
+2026-11-06 17:21 SGT / 协调者最终工程验收：代码在 `6ee93654c523` 已经独立全量审读及修复复评，P0/P1/P2/P3 均无遗留。草稿选择贯穿持久意图与原生创建；先按操作身份判歧义，再严格证明 Draft，Saved 后平台 ready 仍沿原 confirmedRef 恢复。
+完整 pnpm test 3616/3616；相关 178/178、执行 browser 4/4；独立反例 5/5 与 scoped 正控 15/15 通过；typecheck、boundaries 9/9 通过。
+最终三能力组合在 `test/iteration9-critical-path-integration`、观察 head `58259b340fa9` 运行 `pnpm verify`（typecheck、3566/3566、MVP-0 8/8）、`pnpm boundaries`（9/9）、两能力 Host/ABI/恢复定向 243/243，以及 `pnpm test:file tests/browser/workspace-execution.test.js tests/browser/safe-markdown.test.js tests/browser/detail-expand.test.js`（17/17），均通过。组合只在本地模拟；两份 Host ABI 测试冲突保留了 task 与 Draft 两侧断言，不包含仓库 main 合并。
+最终发布 head 仅在上述已审代码上收口本计划、索引及必要用户说明；以 `gh pr view 550 --repo SingularityKChen/harness-projects --json headRefOid,baseRefName,isDraft,mergeStateStatus,statusCheckRollup,closingIssuesReferences`、`gh pr checks 550 --repo SingularityKChen/harness-projects` 和 reviewThreads 回读当前状态；只有最终 head 的 `PR Fast Gate` 通过才转 Ready。不能沿用旧 head 的 checks。
+工程验收完成，计划迁入 completed；真实模型、安装件 Desktop 复查、#72/#143/#449 与 R1 人类裁决继续保留。未新增必须延期的技术债；revert 不撤销已确认的外部资源或未知回执。
 
 ## Bottom Change Note
 
 2026-11-06 SGT：综合独立设计，采纳默认 false、首次匹配与 saved 后 ready 区分、无历史兼容及单 writer 接口集成规则。
 
 2026-11-06 SGT：收窄 getter 契约为保持既有入口规则与一次捕获，不要求全 Provider 输入拒绝存取器。
+
+2026-11-06 SGT：记录 Batch 2 RED/GREEN、真实只读采集来源、完整回归修正与尚待协调者完成的 Batch 3。
+
+2026-11-06 SGT：响应首轮独立审查唯一 P1/R1，明确先计身份候选、后证明 Draft 的顺序，记录 RED 与 scoped 修复；旧实现 head 保存在 `refs/backup/iteration9/pr550-review-1`。
+
+2026-11-06 17:21 SGT：记录最终独立复评与三能力组合证据，迁移完成计划并同步索引及必要演示说明；最终发布按当前 PR head 回读门禁，保留全部人类验收边界。

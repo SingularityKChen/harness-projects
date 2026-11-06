@@ -113,6 +113,7 @@ export const OPERATIONS = defineOperations({
     param('base', 'BranchName', (value) => nonEmptyString(value, 'base')),
     param('title', 'PullRequestTitle', (value) => nonEmptyString(value, 'title')),
     param('body', 'PullRequestBody', (value) => { if (typeof value !== 'string') throw new TypeError('body 必须是字符串'); return value }),
+    { ...param('draft', 'PullRequestDraft', value => { if (value === undefined) return false; if (typeof value !== 'boolean') throw new TypeError('draft 必须是布尔值'); return value }), acceptsUndefined: true },
   ] },
   getChangeRequestOperation: { mode: 'unary', params: [ENVELOPE[0],
     param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId')),

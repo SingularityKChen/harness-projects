@@ -45,7 +45,7 @@ test('actual Host rebuild admits new peer to query and resume original operation
   const revision = await w.storage.currentRevision(w.workspace.id), reads = w.f.calls.length
   const view = await b.service.getChangeRequestOperation({ kind: 'forged' }, ...args)
   assert.equal(view.operation.operationId, original.id); assert.equal(view.operation.title, '原请求')
-  assert.deepEqual(Object.keys(view.operation).sort(), ['base', 'currentTarget', 'head', 'kind', 'operationId', 'state', 'targetStamp', 'title'])
+  assert.deepEqual(Object.keys(view.operation).sort(), ['base', 'currentTarget', 'draft', 'head', 'kind', 'operationId', 'state', 'targetStamp', 'title'])
   assert.equal(await w.storage.currentRevision(w.workspace.id), revision); assert.equal(w.f.calls.length, reads)
   assert.equal((await b.service.createChangeRequest({ kind: 'user' }, 'peer-key', ...args, 'main', '原请求', body)).writeState, 'conflict')
   const resumed = await b.service.resumeChangeRequest({ kind: 'forged' }, ...args, original.id)
@@ -166,4 +166,20 @@ test('actual Host context rejection remains visible in the PR form', async (t) =
   assert.equal(tree.type, 'form'); assert.match(status, /失败/); assert.match(status, /开始工作|执行上下文|输入/)
   assert.equal(confirmations, 0); assert.equal(w.f.objects.length, 0)
   assert.equal(w.f.mutations().length, 0)
+})
+
+for (const draft of [true, false]) test(`actual form choice traverses client Host Core into one native mutation: ${draft}`, async (t) => {
+  const w = await world(t, 'SQLite'), h = await install(w, 'draft-form-peer'); t.after(h.close)
+  const scope = { workspaceId: w.workspace.id, ...w.scope }
+  const creator = createChangeRequestCreator({ create: (...args) => h.service.createChangeRequest(...args), operation: (...args) => h.service.getChangeRequestOperation(...args), resume: (...args) => h.service.resumeChangeRequest(...args) }, { kind: 'user' }, () => 'form-draft')
+  let result, done; const completed = new Promise((resolve) => { done = resolve })
+  const render = renderOperation({ scope, connected: true, creator: { ...creator, submit: async (intent) => { result = await creator.submit(intent); done(); return result } }, onConfirmed() {} })
+  render(); await new Promise((resolve) => setImmediate(resolve))
+  const fields = render().props.children.flat().filter((node) => node?.type === 'label').map((node) => node.props.children[1])
+  assert.equal(fields.find((node) => node.props.type === 'checkbox').props.checked, false)
+  for (const field of fields) field.props.onChange({ target: { value: field.props.name === 'base' ? 'main' : 'Draft form', checked: draft } })
+  render().props.onSubmit({ preventDefault() {} }); await completed
+  assert.equal(result.writeState, 'confirmed'); assert.equal(w.f.mutations()[0].variables.input.draft, draft)
+  assert.equal(w.f.objects[0].isDraft, draft); assert.equal(w.f.mutations().length, 1)
+  assert.equal((await creator.operation(scope)).operation.draft, draft)
 })

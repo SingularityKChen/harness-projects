@@ -7,7 +7,7 @@ export function CreateChangeRequestSection({ scope, creator, connected, onConfir
   const key = JSON.stringify(scope), owner = useRef({ key, connected, creator, generation: 0, lookup: 0, pending: false })
   if (owner.current.key !== key || owner.current.connected !== connected || owner.current.creator !== creator) owner.current = { key, connected, creator, generation: owner.current.generation + 1, lookup: 0, pending: false }
   const current = owner.current
-  const [fields, setFields] = useState({ base: '', title: '', body: '' })
+  const [fields, setFields] = useState({ base: '', title: '', body: '', draft: false })
   const [view, setView] = useState<{ owner: typeof current; read?: ChangeRequestOperationRead; failed?: boolean } | undefined>(undefined)
   const [result, setResult] = useState<{ owner: typeof current; value: ChangeRequestCreation } | undefined>(undefined), [pending, setPending] = useState(false)
   const valid = (generation: number) => owner.current === current && current.generation === generation && current.connected
@@ -17,7 +17,7 @@ export function CreateChangeRequestSection({ scope, creator, connected, onConfir
     try { const read = await creator.operation(scope, operationId); if (valid(generation) && current.lookup === readId) setView({ owner: current, read }) }
     catch { if (valid(generation) && current.lookup === readId) setView({ owner: current, failed: true }) }
   }
-  useEffect(() => { setFields({ base: '', title: '', body: '' }); if (connected) void lookup(); return () => { current.generation++ } }, [current])
+  useEffect(() => { setFields({ base: '', title: '', body: '', draft: false }); if (connected) void lookup(); return () => { current.generation++ } }, [current])
   const operation = view?.owner === current ? view.read?.operation : undefined
   const value = result?.owner === current ? result.value : undefined, busy = pending && current.pending
   const run = async (resume: boolean) => {
@@ -46,11 +46,12 @@ export function CreateChangeRequestSection({ scope, creator, connected, onConfir
   const status = h('p', { role: 'status' }, message)
   const repair = value?.recovery === 'fix_permission' && onConnect !== undefined ? h('button', { type: 'button', onClick: onConnect }, '打开连接设置') : null
   if (!connected || operation?.kind !== 'none') return h('section', { 'aria-label': '创建变更请求' }, h('h4', null, '创建变更请求'), status,
-    operation?.kind === 'operation' ? h('p', null, `已保存原请求：${operation.title}；${operation.head} → ${operation.base}`) : null, repair,
+    operation?.kind === 'operation' ? h('p', null, `已保存原请求（${operation.draft ? '草稿 PR' : '普通 PR'}）：${operation.title}；${operation.head} → ${operation.base}`) : null, repair,
     h('button', { type: 'button', className: 'hp-action', disabled: !connected || busy || (operation?.kind === 'operation' && !operation.currentTarget), onClick: () => { if (operation?.kind === 'operation') void run(true); else void lookup() } }, operation?.kind === 'operation' ? '读回原操作' : '重新读取'))
   return h('form', { onSubmit: (event: { preventDefault(): void }) => { event.preventDefault(); void run(false) }, 'aria-label': '创建变更请求' },
     h('h4', null, '创建变更请求'),
     ...(['base', 'title', 'body'] as const).map((name) => h('label', { key: name }, { base: '目标分支', title: '标题', body: '正文' }[name],
       h(name === 'body' ? 'textarea' : 'input', { name, value: fields[name], required: name !== 'body', disabled: busy, onChange: (event: { target: { value: string } }) => setFields((old) => ({ ...old, [name]: event.target.value })) }))),
-    status, repair, h('button', { type: 'submit', className: 'hp-action', disabled: busy || fields.base === '' || fields.title === '' }, '创建 PR'))
+    h('label', null, '创建为草稿', h('input', { type: 'checkbox', name: 'draft', checked: fields.draft, disabled: busy, onChange: (event: { target: { checked: boolean } }) => setFields((old) => ({ ...old, draft: event.target.checked })) })),
+    status, repair, h('button', { type: 'submit', className: 'hp-action', disabled: busy || fields.base === '' || fields.title === '' }, fields.draft ? '创建草稿 PR' : '创建 PR'))
 }

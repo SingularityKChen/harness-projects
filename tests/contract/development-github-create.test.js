@@ -37,7 +37,7 @@ test('创建精确原生 ack、marker 与独立写权限；read 和 viewerPermis
   assert.deepEqual([result.value.number, result.value.sourceVersion, result.value.headBranch, result.value.body], [1, sha, input.head, input.body])
   assert.deepEqual(result.value.nativeIdentity, { namespace: 'github.com/graphql/PullRequest', id: 'PR_1' })
   assert.equal((await state(f.provider))[CREATE], 'available')
-  assert.deepEqual(f.mutations()[0].variables.input, { repositoryId, headRepositoryId: repositoryId, headRefName: input.head, baseRefName: input.base, title: input.title, body: input.body })
+  assert.deepEqual(f.mutations()[0].variables.input, { repositoryId, headRepositoryId: repositoryId, headRefName: input.head, baseRefName: input.base, title: input.title, body: input.body, draft: false })
   assert.equal(f.mutations().length, 1)
 })
 
@@ -233,7 +233,7 @@ test('caller 在预检或 mutation 等待期间修改意图，发送与 ack 仍�
       const result = await f.provider.createChangeRequest(mutable)
       if (wrongAck) rejected(result, 'ambiguous_result')
       else assert.equal(result.ok, true, `${phase} 的正确 ack 必须保持成功`)
-      assert.deepEqual(f.mutations()[0].variables.input, { repositoryId, headRepositoryId: repositoryId, headRefName: input.head, baseRefName: input.base, title: input.title, body: input.body })
+      assert.deepEqual(f.mutations()[0].variables.input, { repositoryId, headRepositoryId: repositoryId, headRefName: input.head, baseRefName: input.base, title: input.title, body: input.body, draft: false })
     }
   }
 })
@@ -294,3 +294,34 @@ for (const mode of ['preflight', 'ack', 'ambiguous', 'malformed-ack', 'rate-limi
     assert.equal((await state(f.make()))[CREATE], 'degraded', '新实例才能恢复未知')
   })
 }
+
+for (const draft of [true, false, undefined]) test(`native Draft mutation captures explicit boolean ${draft}`, async () => {
+  const f = platform(), request = { ...input, ...(draft === undefined ? {} : { draft }) }
+  const result = await f.provider.createChangeRequest(request)
+  assert.equal(result.ok, true)
+  assert.equal(f.mutations()[0].variables.input.draft, draft ?? false)
+  assert.equal(result.value.isDraft, draft ?? false)
+})
+test('Draft input rejects nonboolean and throwing getter before transport', async () => {
+  for (const draft of ['true', null, 1, {}]) {
+    const f = platform(); rejected(await f.provider.createChangeRequest({ ...input, draft }), 'invalid_input'); assert.equal(f.calls.length, 0)
+  }
+  const f = platform(); rejected(await f.provider.createChangeRequest({ ...input, get draft() { throw new Error('canary') } }), 'invalid_input'); assert.equal(f.calls.length, 0)
+})
+test('Draft ack requires known matching boolean; ordinary read preserves unknown', async () => {
+  for (const actual of [undefined, false, null, 'true']) {
+    const f = platform({}, { ack: (node) => { if (actual === undefined) delete node.isDraft; else node.isDraft = actual; return ok({ createPullRequest: { pullRequest: node } }) } })
+    rejected(await f.provider.createChangeRequest({ ...input, draft: true }), 'ambiguous_result'); assert.equal(f.mutations().length, 1)
+  }
+  const f = platform(); await f.provider.createChangeRequest(input); delete f.objects[0].isDraft
+  assert.equal((await f.provider.getChangeRequest({ ...repository, objectKind: 'change_request', externalId: 'PR_1' })).value.isDraft, undefined)
+  f.objects[0].isDraft = 'false'
+  rejected(await f.provider.getChangeRequest({ ...repository, objectKind: 'change_request', externalId: 'PR_1' }), 'unavailable')
+})
+test('Draft getter captured once survives caller mutation across preflight', async () => {
+  let reads = 0, draft = true
+  const request = { ...input, get draft() { reads++; return draft } }
+  const f = platform({}, { preflight: async (data) => { await Promise.resolve(); draft = false; return ok(data) } })
+  const result = await f.provider.createChangeRequest(request)
+  assert.equal(result.ok, true); assert.equal(reads, 1); assert.equal(f.mutations()[0].variables.input.draft, true)
+})

@@ -23,7 +23,7 @@ for (const dropAck of [true, false]) test(`local discovery recovers an immutable
   const before = await snapshot(w), view = await query(w)
   assert.equal(before[1][0].state, dropAck ? 'unknown' : 'saved')
   assert.equal(view.kind, 'operation'); assert.equal(view.currentTarget, true); assert.equal(view.state, dropAck ? 'unknown' : 'saved')
-  assert.deepEqual(Object.keys(view).sort(), ['kind', 'operationId', 'state', 'currentTarget', 'targetStamp', 'head', 'base', 'title'].sort())
+  assert.deepEqual(Object.keys(view).sort(), ['kind', 'operationId', 'state', 'currentTarget', 'targetStamp', 'head', 'base', 'title', 'draft'].sort())
   assert.deepEqual(await snapshot(w), before)
   const result = await resume(w, view.operationId), original = before[1][0], saved = (await w.storage.listMutationAttempts(w.workspace.id))[0]
   assert.equal(result.writeState, 'reconciled'); assert.equal(result.value.operationId, view.operationId); assert.equal(result.value.targetStamp, view.targetStamp)
@@ -186,4 +186,72 @@ for (const label of ['Fake', 'SQLite']) test(`${label} successor operation refre
   const resumed = await resume(w, view.operationId), edges = await w.storage.listRelations(w.workspace.id)
   assert.deepEqual([resumed.authoritative, resumed.value.lineageStale, resumed.value.ref.externalId, w.f.mutations().length], [true, false, 'PR_2', 2])
   for (const edge of oldEdges) assert.deepEqual(edges.find((row) => row.from === edge.from && row.to === edge.to && row.type === edge.type), edge)
+})
+
+for (const draft of [true, false, undefined]) test(`durable Draft intent survives SQLite restart: ${draft}`, async (t) => {
+  const w = await world(t, 'SQLite', { dropAck: true })
+  assert.equal((await w.run(draft === undefined ? {} : { draft })).writeState, 'unknown')
+  const row = await w.storage.findMutationAttempt(w.workspace.id, 'create-1')
+  assert.equal(row.externalIntent.input.draft, draft ?? false)
+  assert.equal(JSON.parse(row.requestFingerprint).draft, draft ?? false)
+  await w.reopen(); const view = await query(w)
+  assert.equal(view.draft, draft ?? false)
+  assert.equal((await resume(w, view.operationId)).writeState, 'reconciled')
+  assert.equal(w.f.mutations().length, 1)
+  assert.equal((await w.storage.listRelations(w.workspace.id)).filter((row) => row.type === 'produced_by' && row.state === 'confirmed').length, 1)
+})
+test('changed Draft conflicts for key and unresolved head slot; invalid explicit values never write', async (t) => {
+  const w = await world(t, 'Fake', { dropAck: true })
+  for (const draft of [null, 'true', 0, {}]) assert.equal((await w.run({ draft })).writeState, 'failed')
+  assert.equal(w.f.calls.length, 0)
+  assert.equal((await w.run({ draft: true })).writeState, 'unknown')
+  for (const idempotencyKey of ['create-1', 'another-key']) assert.equal((await w.run({ draft: false, idempotencyKey })).writeState, 'conflict')
+  assert.equal(w.f.mutations().length, 1)
+})
+for (const actual of [undefined, false]) test(`unconfirmed Draft does not become Saved after platform state ${actual}`, async (t) => {
+  const w = await world(t, 'SQLite', { dropAck: true }); assert.equal((await w.run({ draft: true })).writeState, 'unknown'); await w.reopen()
+  if (actual === undefined) delete w.f.objects[0].isDraft; else w.f.objects[0].isDraft = actual
+  const view = await query(w), result = await resume(w, view.operationId)
+  assert.equal(result.writeState, 'unknown'); assert.equal(w.f.mutations().length, 1)
+})
+test('saved Draft remains addressable after platform marks ready', async (t) => {
+  const w = await world(t, 'SQLite'), first = await w.run({ draft: true })
+  assert.equal(first.writeState, 'confirmed'); w.f.objects[0].isDraft = false; await w.reopen()
+  const view = await query(w); assert.equal(view.draft, true)
+  const resumed = await resume(w, view.operationId)
+  assert.equal(resumed.writeState, 'reconciled'); assert.deepEqual(resumed.value.ref, first.value.ref); assert.equal(w.f.mutations().length, 1)
+})
+
+test('Draft exact get must agree after complete list evidence', async (t) => {
+  const w = await world(t, 'SQLite', { dropAck: true }); await w.run({ draft: true })
+  const get = w.f.provider.getChangeRequest
+  w.f.provider.getChangeRequest = async (...args) => { const result = await get(...args); return { ...result, value: { ...result.value, isDraft: false } } }
+  const view = await query(w); assert.equal((await resume(w, view.operationId)).writeState, 'unknown'); assert.equal(w.f.mutations().length, 1)
+})
+test('unsupported legacy Draft-less intent is retained and cannot dispatch', async (t) => {
+  const w = await world(t, 'SQLite', { dropAck: true }); await w.run()
+  const row = await w.storage.findMutationAttempt(w.workspace.id, 'create-1'), intent = structuredClone(row.externalIntent); delete intent.input.draft
+  w.storage.db.prepare('UPDATE mutation_attempt SET external_intent_json = ?').run(JSON.stringify(intent))
+  const before = w.f.calls.length
+  assert.equal((await query(w)).kind, 'blocked'); assert.equal((await resume(w, row.id)).authoritative, false)
+  assert.equal(w.f.calls.length, before); assert.equal(w.f.mutations().length, 1)
+  assert.equal(JSON.parse(w.storage.db.prepare('SELECT external_intent_json FROM mutation_attempt').get().external_intent_json).input.draft, undefined)
+})
+
+for (const actual of [false, undefined]) test(`same-marker ambiguity survives original Draft state ${actual}`, async (t) => {
+  const w = await world(t, 'SQLite', { dropAck: true })
+  assert.equal((await w.run({ draft: true })).writeState, 'unknown')
+  const original = w.f.objects[0]
+  w.f.objects.push({ ...original, id: 'PR_2', number: 2 })
+  original.state = 'CLOSED'
+  if (actual === undefined) delete original.isDraft; else original.isDraft = actual
+  await w.reopen()
+  const view = await query(w), before = w.f.calls.length, result = await resume(w, view.operationId)
+  assert.equal(result.authoritative, false, 'mutable Draft state cannot choose between native identities')
+  assert.equal(result.writeState, 'unknown')
+  const row = await w.storage.findMutationAttempt(w.workspace.id, 'create-1')
+  assert.equal(row.state, 'unknown'); assert.equal(row.externalIntent.confirmedRef, undefined)
+  assert.equal((await w.storage.listRelations(w.workspace.id)).filter((edge) => edge.type === 'produced_by' && edge.source === 'explicit').length, 0)
+  assert.equal(w.f.calls.slice(before).some((call) => call.operationName === 'DevelopmentChangeRequest'), false, 'ambiguous list cannot select an exact PR')
+  assert.equal(w.f.mutations().length, 1)
 })
