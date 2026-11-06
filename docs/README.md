@@ -25,15 +25,16 @@
 
 | 计划 | 用途 |
 |---|---|
-| [2026-11-06-pr549-pr551-review-followup](exec-plan/active/2026-11-06-pr549-pr551-review-followup.md) | 三项能力 MMP 评审、非阻塞修复与条件收尾 |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-06-pr549-pr551-review-followup](exec-plan/completed/2026-11-06-pr549-pr551-review-followup.md) | 三项能力 MMP 评审、非阻塞修复与条件收尾 |
 | [2026-11-06-start-work-task-handoff](exec-plan/completed/2026-11-06-start-work-task-handoff.md) | 明确任务交接、原请求安全恢复与同一回执原子拒绝（#547） |
 | [2026-11-06-draft-pull-request](exec-plan/completed/2026-11-06-draft-pull-request.md) | 原生 Draft 创建、严格首次确认与已确认身份恢复（#548） |
+| [2026-11-06-markdown-readability](exec-plan/completed/2026-11-06-markdown-readability.md) | 任务列表单一标记、空首段行盒与正文注释隐藏（#538/#542） |
 | [2026-11-04-pr534-pr541-review-delivery](exec-plan/completed/2026-11-04-pr534-pr541-review-delivery.md) | 四项 MMP 风险矩阵、独立复评与条件授权交付 |
 | [2026-11-04-core-release-evidence](exec-plan/completed/2026-11-04-core-release-evidence.md) | 当前 Core 操作、准入、风险与发布证据审计（#533） |
 | [2026-11-04-backup-rollback-rehearsal](exec-plan/completed/2026-11-04-backup-rollback-rehearsal.md) | 停机备份、匹配产物回滚与同 profile 恢复工程演练（#532） |
