@@ -19,7 +19,7 @@ async function setup(kind) {
   const workspace = { id: 'request-binding', name: 'request binding' }; const time = controllableClock()
   const options = { providers, storage, workspace, clock: time.clock }; const core = await composeCore(options)
   const items = (await core.queries.listPlanningItems()).filter((v) => v.content.contentKind === 'work_item').map((v) => v.entityId)
-  const request = { workItemId: items[0], repositoryId: 'repo-alpha', actor: { kind: 'agent', id: 'one' }, idempotencyKey: 'first' }
+  const request = { task: 'Synthetic explicit task', workItemId: items[0], repositoryId: 'repo-alpha', actor: { kind: 'agent', id: 'one' }, idempotencyKey: 'first' }
   return { ...options, core, items, request, time, initial: [providers.development.state.branches.length, providers.development.state.worktrees.length, providers.execution.state.runs.length] }
 }
 const start = (w, patch = {}, core = w.core) => core.commands.startWork({ ...w.request, ...patch })
@@ -38,11 +38,11 @@ for (const kind of ['Fake', 'SQLite']) {
   test(`${kind}: first request binds every declared field before settled replay can read or mutate`, async () => {
     const w = await setup(kind); assert.equal((await start(w)).writeState, 'saved')
     const row = await w.storage.findMutationAttempt(w.workspace.id, 'first')
-    assert.equal(typeof row.requestFingerprint, 'string'); assert.deepEqual(JSON.parse(row.requestFingerprint), ['startWork:v1', w.workspace.id, w.providers.development.gate.bindingId, ['agent', 'one'], w.request.workItemId, 'repo-alpha', null, null])
+    assert.equal(typeof row.requestFingerprint, 'string'); assert.deepEqual(JSON.parse(row.requestFingerprint), ['startWork:v2', w.workspace.id, w.providers.development.gate.bindingId, ['agent', 'one'], w.request.workItemId, 'repo-alpha', null, null, w.request.task])
     let calls = 0; const d = w.providers.development
     for (const key of ['getWorktree', 'getRepository', 'createBranch', 'createWorktree']) { const call = d[key].bind(d); d[key] = (...args) => { calls++; return call(...args) } }
     const before = local(w.storage); const external = counts(w)
-    for (const patch of [{ workItemId: w.items[1] }, { repositoryId: 'missing' }, { actor: { kind: 'human', id: 'one' } }, { actor: { kind: 'agent', id: 'two' } }, { actor: { kind: 'agent' } }, { branchName: `work/${w.request.workItemId}` }, { worktreePath: '' }, { worktreePath: ' ' }, { worktreePath: 'a|b"\\中' }]) conflict(await start(w, patch))
+    for (const patch of [{ task: 'different task' }, { workItemId: w.items[1] }, { repositoryId: 'missing' }, { actor: { kind: 'human', id: 'one' } }, { actor: { kind: 'agent', id: 'two' } }, { actor: { kind: 'agent' } }, { branchName: `work/${w.request.workItemId}` }, { worktreePath: '' }, { worktreePath: ' ' }, { worktreePath: 'a|b"\\中' }]) conflict(await start(w, patch))
     assert.equal(calls, 0); assert.equal(local(w.storage), before); assert.deepEqual(counts(w), external)
     assert.equal((await start(w, { actor: { id: 'one', kind: 'agent', toJSON() { throw Error('must not serialize caller') } }, branchName: undefined, worktreePath: undefined })).writeState, 'saved')
   })
@@ -60,8 +60,8 @@ for (const kind of ['Fake', 'SQLite']) {
       assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'observer'), undefined, '未决外部步骤不消费观察新键')
     } finally { release.release(); await running }
     assert.equal((await start(w)).writeState, 'saved')
-    assert.equal((await start(w, { idempotencyKey: 'ready-observer' })).writeState, 'saved')
-    conflict(await start(w, { idempotencyKey: 'ready-observer', workItemId: w.items[1] }))
+    conflict(await start(w, { idempotencyKey: 'ready-observer' }), 'existing_execution_task_not_sent')
+    assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'ready-observer'), undefined)
   })
   test(`${kind}: admitted route stays frozen through supply when repository routing changes after commit`, async () => {
     const w = await setup(kind); await start(w)
@@ -113,7 +113,7 @@ for (const kind of ['Fake', 'SQLite']) {
     const running = w.core.commands.startWork(mutable); await entered.wait
     mutable.actor.id = 'changed'; mutable.workItemId = 'missing'; mutable.branchName = 'work/changed'; mutable.worktreePath = '.worktrees/changed'; release.release()
     assert.equal((await running).writeState, 'saved'); assert.equal(w.providers.development.state.branches.at(-1).name, 'work/frozen')
-    assert.deepEqual(JSON.parse((await get(w.workspace.id, 'first')).requestFingerprint).slice(3), [['agent', 'one'], w.request.workItemId, 'repo-alpha', 'work/frozen', '.worktrees/frozen'])
+    assert.deepEqual(JSON.parse((await get(w.workspace.id, 'first')).requestFingerprint).slice(3), [['agent', 'one'], w.request.workItemId, 'repo-alpha', 'work/frozen', '.worktrees/frozen', w.request.task])
   })
   test(`${kind}: atomic admission rollback leaves key, context and parents untouched`, async () => {
     const w = await setup(kind); let before; const transaction = w.storage.transaction.bind(w.storage); let hit = 0
@@ -143,7 +143,7 @@ for (const stage of ['pending', 'branch ack', 'settled']) test(`SQLite: close/re
   if (stage === 'settled') await start(w); else assert.equal((await start(w)).writeState, 'unknown')
   const row = await w.storage.findMutationAttempt(w.workspace.id, 'first'); w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w)
   assert.deepEqual(await w.storage.findMutationAttempt(w.workspace.id, 'first'), row)
-  const before = local(w.storage); conflict(await start(w, { workItemId: w.items[1] })); assert.equal(local(w.storage), before)
+  const before = local(w.storage); conflict(await start(w, { task: 'changed after restart' })); conflict(await start(w, { workItemId: w.items[1] })); assert.equal(local(w.storage), before)
   w.time.advance(60_000); const external = counts(w); assert.equal((await start(w)).writeState, stage === 'settled' ? 'saved' : 'unknown'); assert.deepEqual(counts(w), external)
   d[method] = create; if (stage !== 'settled') { assert.equal((await start(w, { idempotencyKey: 'recover' })).writeState, 'unknown'); assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'recover'), undefined) }
 })

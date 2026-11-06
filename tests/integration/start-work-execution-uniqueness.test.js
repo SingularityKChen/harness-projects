@@ -6,8 +6,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { CapabilityKey } from '@harness-projects/capabilities'
+import { createControllerCommands } from '@harness-projects/controller'
+import { createStartWork } from '@harness-projects/client'
 import { composeCore, contextIdFor, runIdFor } from '@harness-projects/core'
-import { createFakeProviders, createFakeExecutionProvider, createFakeStorage, exportFakeStorageState, providerFail } from '@harness-projects/provider-fake'
+import { createFakeProviders, createFakeDevelopmentProvider, createFakeExecutionProvider, createFakeStorage, exportFakeStorageState, providerFail } from '@harness-projects/provider-fake'
 import { createSqliteStorage, openDatabase } from '@harness-projects/storage-sqlite'
 import { controllableClock } from './local-git-fixture.js'
 
@@ -54,7 +56,7 @@ async function setup(kind, fallback = false) {
   w.provider = fallback ? spare : providers.execution
   w.core = await composeCore(w)
   const workItemId = (await w.core.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item').entityId
-  w.request = { workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' } }
+  w.request = { task: 'Synthetic explicit task', workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' } }
   w.contextId = contextIdFor(w.workspace.id, workItemId, 'repo-alpha'); w.runId = runIdFor(w.contextId)
   return w
 }
@@ -117,7 +119,7 @@ for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) {
       gate.release(); const late = await original
       assert.equal(snapshot(w.storage), saved, 'late owner must not change complete winner snapshot')
       unknown(late); assert.equal(gate.hits, 1)
-      assert.equal((await receipt(w)).state, 'pending'); assertOne(w)
+      assert.equal((await receipt(w)).state, 'failed'); assertOne(w)
     } finally { gate.release(); await original }
   })
   test(`${label}: durable intent before dispatch blocks public keys and expired second Core`, { timeout: 10_000 }, async () => {
@@ -202,3 +204,45 @@ for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) {
     } finally { gate.release(); await original }
   })
 }
+
+for (const kind of ['Fake', 'SQLite']) for (const stage of ['claim', 'git-ack']) test(`${kind}: restart safely resumes exact task after ${stage} without an unresolved external slot`, async () => {
+  const w = await setup(kind), transaction = w.storage.transaction.bind(w.storage); let interrupted = false
+  w.storage.transaction = async work => {
+    const result = await transaction(work), row = await receipt(w)
+    if (!interrupted && row?.state === 'pending' && (stage === 'claim' ? !row.externalIntent : row.externalIntent?.operation === 'createWorktree' && row.externalIntent.state === 'saved')) { interrupted = true; throw Error('process interrupted after commit') }
+    return result
+  }
+  let commands = createControllerCommands(w.core); const keys = []; let lost = true
+  const client = createStartWork({ getStartWorkOptions: async () => ({}), startWork: async (actorRef, idempotencyKey, workItemId, repositoryId, task) => { keys.push(idempotencyKey); const answer = await commands.startWork({ actorRef, idempotencyKey, workItemId, repositoryId, task }); if (lost) { lost = false; throw Error('response lost') } return answer } }, scope => w.core.queries.getExecutionContext(scope), w.request.actor, () => 'original')
+  const intent = { ...w.request, workspaceId: w.workspace.id }
+  assert.equal((await client.submit(intent)).writeState, 'unknown'); assert.equal(interrupted, true); assert.equal(w.ledger.length, 0)
+  w.storage.transaction = transaction; await reopen(w); w.time.advance(31_000)
+  const moved = await composeCore({ ...w, providers: { ...w.providers, development: createFakeDevelopmentProvider({ bindingId: 'moved' }) } })
+  assert.equal((await start(w, 'original', moved)).error?.message, 'idempotency_target_changed')
+  const changed = await w.core.commands.startWork({ ...w.request, idempotencyKey: 'changed', task: 'changed' })
+  assert.equal(changed.error.message, 'idempotency_request_mismatch')
+  const git = [w.providers.development.state.branches.length, w.providers.development.state.worktrees.length]
+  commands = createControllerCommands(w.core)
+  assert.equal((await client.submit(intent)).writeState, 'confirmed'); assert.deepEqual(keys, ['original', 'original']); assertOne(w)
+  assert.equal(w.ledger[0].input.command, w.request.task)
+  const replacement = await start(w, 'after-resume')
+  assert.equal(replacement.error?.message, 'existing_execution_task_not_sent', '旧 owner 的 pending 不能冒充当前未决任务')
+  if (stage === 'git-ack') assert.deepEqual([w.providers.development.state.branches.length, w.providers.development.state.worktrees.length], git)
+})
+for (const kind of ['Fake', 'SQLite']) for (const stage of ['claim', 'git-ack']) for (const key of ['original', 'successor']) test(`${kind} ${stage}/${key}: known takeover refusal permits a new explicit task`, async () => {
+  const w = await setup(kind), transaction = w.storage.transaction.bind(w.storage); let interrupted = false
+  w.storage.transaction = async work => { const result = await transaction(work); const row = await receipt(w); if (!interrupted && row?.state === 'pending' && (stage === 'claim' ? !row.externalIntent : row.externalIntent?.operation === 'createWorktree' && row.externalIntent.state === 'saved')) { interrupted = true; throw Error('crash after safe gap') } return result }
+  await start(w); w.storage.transaction = transaction; await reopen(w); w.time.advance(31_000)
+  const denied = await composeCore({ ...w, policy: { [CapabilityKey.DevelopmentWorktreeCreate]: 'read_only' } })
+  assert.equal((await start(w, key, denied)).writeState, 'failed'); assert.equal(w.ledger.length, 0)
+  assert.equal((await receipt(w)).state, 'failed')
+  assert.equal((await w.core.commands.startWork({ ...w.request, idempotencyKey: 'new-task', task: 'new task' })).writeState, 'saved')
+  assertOne(w); assert.equal(w.ledger[0].input.command, 'new task')
+})
+for (const kind of ['Fake', 'SQLite']) for (const operation of ['createBranch', 'startRun']) test(`${kind}: old-generation unresolved ${operation} remains read-only`, async () => {
+  const w = await setup(kind), port = operation === 'createBranch' ? w.providers.development : w.provider, execute = port[operation].bind(port); let calls = 0
+  port[operation] = async input => { calls++; await execute(input); throw Error('accepted acknowledgement lost') }
+  unknown(await start(w)); const record = await w.storage.getExecutionContext(w.contextId)
+  await w.storage.putExecutionContext({ ...record, provisioningGeneration: record.provisioningGeneration + 1 })
+  unknown(await start(w, 'replacement')); assert.equal(calls, 1); assert.equal(await receipt(w, 'replacement'), undefined)
+})

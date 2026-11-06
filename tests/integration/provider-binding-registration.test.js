@@ -112,7 +112,7 @@ const routed = async (storage) => {
 async function starter(storage, providers, policy) {
   const core = await composeCore({ workspace: { id: WS, name: '新名' }, providers, storage, policy })
   const workItemId = (await core.queries.listPlanningItems()).find((view) => view.content.contentKind === 'work_item').entityId
-  return () => core.commands.startWork({ workItemId, repositoryId: 'repo-alpha', idempotencyKey: 'shared', actor: { kind: 'agent' } })
+  return () => core.commands.startWork({ task: 'Synthetic explicit task', workItemId, repositoryId: 'repo-alpha', idempotencyKey: 'shared', actor: { kind: 'agent' } })
 }
 const runsOf = (...ports) => ports.map((port) => port.state.runs.length)
 

@@ -210,7 +210,7 @@ test('AC7 命令拒绝映射为固定文案，诊断日志写不进去时也一�
 const seedStartable = (repositoryPath) => (storage) => seedWorkspace(storage)
   .then(() => seedLocalGit(storage, LOCAL, repositoryPath))
   .then(() => registerWorkItem(storage, WORKSPACE, 'wi-1'))
-const startWork = (host) => host.controller.commands.startWork({ workItemId: 'wi-1', repositoryId: REPOSITORY_ID, actorRef: { kind: 'agent' }, idempotencyKey: 'k-1' })
+const startWork = (host) => host.controller.commands.startWork({ task: 'Synthetic explicit task', workItemId: 'wi-1', repositoryId: REPOSITORY_ID, actorRef: { kind: 'agent' }, idempotencyKey: 'k-1' })
 const contextOf = (host) => host.controller.queries.getExecutionContext({ workItemId: 'wi-1', repositoryId: REPOSITORY_ID })
 
 test('AC5 AC6 新进程重启恢复执行上下文与谱系，工作树在检出之外', async (t) => {

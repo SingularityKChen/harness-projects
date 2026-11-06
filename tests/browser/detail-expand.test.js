@@ -101,6 +101,7 @@ test('expand keeps the mounted detail, draft, pending operation, route and focus
     await start.getByRole('button', { name: '开始工作', exact: true }).click()
     await dialog.getByLabel('已绑定仓库').selectOption('repo-alpha')
     await dialog.getByLabel('分支名（可留空）').fill('feature/kept-draft')
+    await dialog.getByLabel('执行任务', { exact: true }).fill('Synthetic explicit expand task')
     await start.getByRole('button', { name: '提交开始工作', exact: true }).click()
     await start.getByRole('button', { name: '正在提交', exact: true }).waitFor()
     await page.evaluate(() => window.fixture.mark())

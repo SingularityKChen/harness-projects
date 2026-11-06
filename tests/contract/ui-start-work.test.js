@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as client from '@harness-projects/client'
 import { repositoryAccessIndex, startWorkAvailability } from '@harness-projects/ui-model'
-const scope = { workspaceId: 'ws-1', workItemId: 'item-a', repositoryId: 'repo-a' }
+const scope = { task: 'Synthetic explicit task', workspaceId: 'ws-1', workItemId: 'item-a', repositoryId: 'repo-a' }
 const gates = ['development.branch.create', 'development.worktree.create', 'development.repository.read', 'development.worktree.read']
 const result = (writeState, extra = {}) => ({ writeState, saving: writeState === 'pending', authoritative: ['confirmed', 'reconciled'].includes(writeState), ...extra })
 test('manual start requires four Development gates and selected repository cannot borrow another connection', () => {
@@ -55,7 +55,7 @@ test('permission explanation and explicit validation enable only the current sco
   assert.equal((await api.options(scope)).repositories[0].available, true)
   assert.equal((await api.submit(scope)).reason, reason)
   const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: false, access: 'unavailable', reason }], connected: true, onStarted() {}, startWork: api })
-  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } })
+  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'textarea').props.onChange({ target: { value: scope.task } })
   assert.match(h.html(), /permission 层拒绝 development.branch.create/)
   assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, true)
   options.repositories = [{ id: 'repo-a', available: true }]
@@ -69,7 +69,7 @@ test('a write denial expires prior validation and requires explicit revalidation
   const keys = []; let sequence = 0, refreshed = 0, release
   const api = client.createStartWork({ getStartWorkOptions: async () => options, startWork: (_actor, key) => { keys.push(key); return new Promise(done => { release = done }) } }, async () => null, { kind: 'user' }, () => `denial-${++sequence}`)
   const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: false, access: 'unavailable', reason }], connected: true, onStarted: () => refreshed++, startWork: api })
-  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } })
+  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'textarea').props.onChange({ target: { value: scope.task } })
   const validate = () => nodes(h.render()).find(node => node.type === 'button' && node.props.children === '重新验证权限').props.onClick()
   validate(); await settle(); assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, false)
   find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
@@ -93,7 +93,7 @@ test('Unknown and Pending survive access metadata changes and retain original-ke
     const keys = []; let reads = 0, sequence = 0
     const api = client.createStartWork({ getStartWorkOptions: async () => ({ workspaceId: scope.workspaceId, workItemId: scope.workItemId, executionMode: 'manual' }), startWork: async (_actor, key) => { keys.push(key); return result(state, { error: { code: 'permission_denied', message: reason } }) } }, async () => { reads++; return null }, { kind: 'user' }, () => `uncertain-${++sequence}`)
     const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: true, access: 'available' }], connected: true, onStarted() {}, startWork: api })
-    find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } })
+    find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'textarea').props.onChange({ target: { value: scope.task } })
     find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
     assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, false)
     assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.children, '读回并恢复')
@@ -114,7 +114,7 @@ test('same-scope access denial preserves the in-flight command and rejects late 
   const options = { workspaceId: scope.workspaceId, workItemId: scope.workItemId, executionMode: 'manual', repositories: [{ id: 'repo-a', available: true }] }
   const api = { options: async () => options, submit: () => { calls++; return new Promise(done => { finish = done }) } }
   const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: true, access: 'available' }], connected: true, onStarted: () => refreshed++, startWork: api })
-  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } })
+  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'textarea').props.onChange({ target: { value: scope.task } })
   find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
   h.props.repositories = [{ id: 'repo-a', available: false, access: 'unavailable', reason: 'permission 层拒绝 development.worktree.create；重新验证' }]
   h.render(); h.flush(); await settle()
@@ -140,10 +140,10 @@ test('form opens without starting, only bound repositories, four-gate refusal an
   assert.equal(focused, 1)
   assert.match(h.html(), /人工执行/); assert.equal(submits, 0)
   assert.deepEqual(nodes(h.render()).filter((node) => node.type === 'option').map((node) => node.props.value), ['', 'repo-a', 'repo-b'])
-  find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); assert.match(h.html(), /绑定仓库/)
+  find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'textarea').props.onChange({ target: { value: scope.task } }); assert.match(h.html(), /绑定仓库/)
   assert.equal(nodes(h.render()).find((node) => node.props.type === 'submit').props.disabled, true)
   nodes(h.render()).find((node) => node.type === 'button' && node.props.children === '绑定仓库').props.onClick(); assert.equal(bound, 1)
-  find(h, 'select').props.onChange({ target: { value: 'repo-b' } }); assert.match(h.html(), /降级/)
+  find(h, 'select').props.onChange({ target: { value: 'repo-b' } }); find(h, 'textarea').props.onChange({ target: { value: scope.task } }); assert.match(h.html(), /降级/)
   find(h, 'input').props.onChange({ target: { value: ' user-branch ' } })
   find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle(); assert.equal(submits, 1)
   assert.equal(sent.branchName, ' user-branch ', 'nonempty user branch name must reach Core unchanged')
@@ -185,7 +185,7 @@ test('transport uncertainty retains original key; failed readback cannot trigger
 test('form distinguishes local-only, pending, failed, confirmed and degraded manual recovery without claiming Saved', async () => {
   for (const [writeState, expected] of [['local_only', '本地已记录'], ['pending', '需读回确认'], ['failed', '开始工作失败'], ['confirmed', '开始工作已确认'], ['reconciled', '开始工作已对账确认']]) {
     const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: true, access: 'available' }], connected: true, onStarted() {}, startWork: { options: async () => ({ ...scope, executionMode: 'manual' }), submit: async () => ({ writeState, degraded: true, fallback: 'manual_fallback' }) } })
-    find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
+    find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'textarea').props.onChange({ target: { value: scope.task } }); find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
     assert.ok(h.html().includes(expected)); if (writeState === 'failed') assert.doesNotMatch(h.html(), /本地记录已保留/); assert.match(h.html(), /降级|人工处理/); assert.doesNotMatch(h.html(), /Saved|已保存/); h.close()
   }
 })
@@ -206,14 +206,14 @@ test('local-only without definite failed context and Unknown/Pending keep their 
 })
 test('local-only failed context shows retained-local-facts recovery and an explicit resubmit action', async () => {
   const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: true, access: 'available' }], connected: true, onStarted() {}, startWork: { options: async () => ({ ...scope, executionMode: 'manual' }), submit: async () => ({ writeState: 'local_only', contextStatus: 'failed', degraded: true }) } })
-  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
+  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'textarea').props.onChange({ target: { value: scope.task } }); find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
   assert.match(h.html(), /开始工作失败/); assert.match(h.html(), /本地记录已保留/); assert.equal(nodes(h.render()).find((node) => node.props.type === 'submit').props.children, '重新提交'); h.close()
 })
 test('a non-route conflict leaves an available repository retryable without false binding guidance', async () => {
   let writes = 0
   const api = client.createStartWork({ getStartWorkOptions: async () => ({ workspaceId: scope.workspaceId, workItemId: scope.workItemId, executionMode: 'manual' }), startWork: async () => ++writes === 1 ? result('conflict', { error: { code: 'conflict', message: 'private conflict detail' } }) : result('confirmed', { value: { executionContextId: 'ctx', degraded: false } }) }, async () => null, { kind: 'user' })
   const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: true, access: 'available' }], connected: true, onStarted() {}, startWork: api })
-  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
+  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'textarea').props.onChange({ target: { value: scope.task } }); find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
   assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, false)
   assert.doesNotMatch(h.html(), /尚无可用路由|请检查仓库绑定|private conflict/)
   find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle(); assert.equal(writes, 2); assert.match(h.html(), /开始工作已确认/); h.close()
@@ -222,7 +222,7 @@ test('a non-route conflict leaves an available repository retryable without fals
 test('write uncertainty and manual handoff remain separate visible facts beside recovery actions', async () => {
   const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: true, access: 'available' }], connected: true, onStarted() {}, startWork: { options: async () => ({ ...scope, executionMode: 'manual' }), submit: async () => ({ writeState: 'unknown', fallback: 'manual_fallback', degraded: true }) } })
   find(h, 'button').props.onClick(); h.render(); h.flush(); await settle()
-  find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
+  find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'textarea').props.onChange({ target: { value: scope.task } }); find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
   const status = nodes(h.render()).find((node) => node.props.role === 'status'), paragraphs = nodes(status).filter((node) => node.type === 'p')
   assert.equal(paragraphs.length, 2, 'write result and manual handoff need independent paragraphs')
   const visible = h.html().replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, '')
@@ -242,12 +242,12 @@ async function focusFixture(t) {
     if (submit?.ref) submit.ref.current = action
     find(h, 'select').ref.current = field
   }
-  bind(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'input').props.onChange({ target: { value: 'feature/keyboard' } }); t.after(h.close)
+  bind(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'textarea').props.onChange({ target: { value: scope.task } }); find(h, 'input').props.onChange({ target: { value: 'feature/keyboard' } }); t.after(h.close)
   return { h, doc, body, outside, action, listeners, get focuses() { return focuses },
     async submit(origin = field) { doc.activeElement = origin; find(h, 'form').props.onSubmit({ preventDefault() {} }); h.render(); doc.activeElement = body; h.flush(); await settle() },
     moveFocus(target) { doc.activeElement = target; for (const listener of listeners) listener({ target }) },
     async finish(state = 'unknown', index = 0, render = true) { pending[index]({ writeState: state, degraded: false }); await settle(); if (render) { h.render(); h.flush() } },
-    async switchTarget() { h.props.target = { ...h.props.target, workItemId: 'item-new' }; h.render(); h.flush(); await settle(); bind() },
+    async switchTarget() { h.props.target = { ...h.props.target, workItemId: 'item-new' }; h.render(); h.flush(); await settle(); bind(); find(h, 'textarea').props.onChange({ target: { value: scope.task } }) },
   }
 }
 for (const writeState of ['unknown', 'failed']) test(`keyboard submission recovers lost focus to the ${writeState} action once`, async (t) => {
@@ -277,4 +277,38 @@ test('late target result cannot clear a newer focus ticket and disconnected acti
   const f = await focusFixture(t); await f.submit(); await f.switchTarget(); await f.submit(); await f.finish('confirmed', 0)
   assert.equal(f.focuses, 0); await f.finish('unknown', 1); assert.equal(f.focuses, 1)
   await f.submit(); f.action.isConnected = false; await f.finish('failed', 2); assert.equal(f.focuses, 1)
+})
+
+test('explicit task is blank initially, frozen through uncertainty, and cleared across owners', async () => {
+  const sent = [], api = { options: async target => ({ ...target, executionMode: 'harness' }), submit: async intent => { sent.push(intent); return { writeState: 'unknown', degraded: false } } }
+  const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: true }], connected: true, onStarted() {}, startWork: api })
+  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle()
+  assert.equal(find(h, 'textarea')?.props.value, '')
+  find(h, 'select').props.onChange({ target: { value: 'repo-a' } })
+  assert.equal(nodes(h.render()).find(node => node.props.type === 'submit').props.disabled, true)
+  const task = '  明确任务 🧪\n  '
+  find(h, 'textarea').props.onChange({ target: { value: task } }); find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
+  assert.equal(sent[0].task, task); assert.equal(find(h, 'textarea').props.disabled, true)
+  find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle(); assert.deepEqual(sent[1], sent[0])
+  h.props.target = { ...h.props.target, workItemId: 'new-owner' }; h.render(); h.flush(); await settle()
+  assert.equal(find(h, 'textarea').props.value, ''); h.close()
+})
+test('closing an unknown task preserves its frozen original while client ownership clears it', async () => {
+  const sent = [], api = { options: async target => ({ ...target, executionMode: 'manual' }), submit: async intent => { sent.push(intent); return { writeState: 'unknown', degraded: false } } }
+  const h = harness({ target: { ...scope, repositoryIds: ['repo-a'] }, repositories: [{ id: 'repo-a', available: true }], connected: true, onStarted() {}, startWork: api })
+  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); find(h, 'select').props.onChange({ target: { value: 'repo-a' } }); find(h, 'textarea').props.onChange({ target: { value: scope.task } })
+  find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle()
+  nodes(h.render()).find(node => node.props.children === '收起表单').props.onClick(); h.render(); h.flush()
+  find(h, 'button').props.onClick(); h.render(); h.flush(); await settle(); assert.equal(find(h, 'textarea').props.disabled, true)
+  find(h, 'form').props.onSubmit({ preventDefault() {} }); await settle(); assert.deepEqual(sent[1], sent[0])
+  h.props.startWork = { ...api }; h.render(); h.flush(); await settle(); assert.equal(find(h, 'textarea').props.value, '')
+  find(h, 'textarea').props.onChange({ target: { value: scope.task } }); h.props.connected = false; h.render(); h.flush(); assert.equal(find(h, 'textarea').props.value, ''); h.close()
+})
+test('client captures task once before its async send and includes task in intent identity', async () => {
+  const calls = []; let current = '  task 🧪\n ', reads = 0, sequence = 0
+  const api = client.createStartWork({ getStartWorkOptions: async () => ({}), startWork: async (...args) => { calls.push(args); return result('pending') } }, async () => null, { kind: 'user' }, () => `task-${++sequence}`)
+  const input = { ...scope, get task() { reads++; return current } }, pending = api.submit(input)
+  input.workItemId = 'changed'; current = 'changed'; await pending
+  assert.deepEqual([reads, calls[0][2], calls[0][4]], [1, scope.workItemId, '  task 🧪\n '])
+  await api.submit({ ...scope, task: 'different' }); assert.notEqual(calls[1][1], calls[0][1])
 })

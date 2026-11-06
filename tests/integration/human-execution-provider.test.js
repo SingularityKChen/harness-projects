@@ -93,7 +93,7 @@ async function composeManualCore({
 const restart = (repository, storage, first, options = {}) =>
   composeManualCore({ repository, storage: createFakeStorage(exportFakeStorageState(storage)), workspaceId: first.workspaceId, ...options })
 
-const startRequest = (workItemId, idempotencyKey) => ({
+const startRequest = (workItemId, idempotencyKey) => ({ task: 'Synthetic explicit task',
   workItemId, repositoryId: REPOSITORY_ID, actor: { kind: 'human' }, idempotencyKey, worktreePath: `.worktrees/${workItemId}`,
 })
 
@@ -157,7 +157,7 @@ test('主执行起不来、fallback 绑定承接：人工运行 running，重启
   await second.storage.putExecutionContext({ ...(await second.storage.getExecutionContext(view.id)), status: ExecutionContextStatus.Failed })
   const third = await restart(repository, second.storage, first, { primary: createFakeExecutionProvider({ bindingId: 'binding-fake-primary', faults: { permissionDenied: true } }), fallbackHuman: true })
   const resumed = await third.core.commands.startWork(startRequest(workItemId, 'manual-fallback-2'))
-  assert.deepEqual([await third.storage.getExecutionRun(view.runId), resumed.runExternalId, resumed.fallback], [run, result.runExternalId, 'manual_fallback'])
+  assert.deepEqual([await third.storage.getExecutionRun(view.runId), resumed.error.message], [run, 'existing_execution_task_not_sent'])
 })
 
 test('fallback 只在主执行**确定**起不来时承接，只当 fallback、不当主执行，且受自己的写门约束', async (t) => {

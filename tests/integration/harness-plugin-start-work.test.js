@@ -5,7 +5,7 @@ import * as client from '@harness-projects/client'
 import { createExecutionFixture } from '../fixtures/execution-drawer-browser.mjs'
 test('Host options and command reject closed wire/scope and invisible targets before writes', async (t) => {
   const h = await createExecutionFixture(); t.after(h.close)
-  const input = { actorRef: { kind: 'user' }, idempotencyKey: 'start', workItemId: h.itemId, repositoryId: 'repo-alpha' }
+  const input = { task: 'Synthetic explicit task', actorRef: { kind: 'user' }, idempotencyKey: 'start', workItemId: h.itemId, repositoryId: 'repo-alpha' }
   assert.equal(typeof h.installed.service.getStartWorkOptions, 'function')
   const options = await h.installed.service.getStartWorkOptions(h.itemId)
   assert.deepEqual(options, { workspaceId: h.workspaceId, workItemId: h.itemId, executionMode: 'manual', repositories: [{ id: 'repo-alpha', available: true }] })
@@ -37,13 +37,13 @@ test('real controller failed ledger needs a new attempt; SQLite and Git writes o
   const core = await composeCore({ workspace: { id: workspaceId, name: 'Start' }, providers, storage }), controller = createController(core)
   const workItemId = (await core.queries.listPlanningItems()).find((item) => item.content.contentKind === 'work_item').entityId
   let writes = 0; const start = core.commands.startWork; core.commands.startWork = (...args) => { writes++; return start(...args) }
-  const keys = [], api = client.createStartWork({ getStartWorkOptions: async () => ({}), startWork: (actorRef, idempotencyKey, workItemId, repositoryId, branchName) => { keys.push(idempotencyKey); return controller.commands.startWork({ actorRef, idempotencyKey, workItemId, repositoryId, branchName }) } }, async () => null, { kind: 'user' })
-  const target = { workspaceId, workItemId, repositoryId: 'repo-alpha' }
+  const keys = [], api = client.createStartWork({ getStartWorkOptions: async () => ({}), startWork: (actorRef, idempotencyKey, workItemId, repositoryId, task, branchName) => { keys.push(idempotencyKey); return controller.commands.startWork({ task, actorRef, idempotencyKey, workItemId, repositoryId, branchName }) } }, async () => null, { kind: 'user' })
+  const target = { task: 'Synthetic explicit task', workspaceId, workItemId, repositoryId: 'repo-alpha' }
   providers.development.faultsSwitch.set(FaultKind.PermissionDenied, true)
   assert.equal((await api.submit(target)).writeState, 'failed')
   providers.development.faultsSwitch.set(FaultKind.PermissionDenied, false)
   // The real controller retains failed results under the old key.
-  assert.equal((await controller.commands.startWork({ actorRef: { kind: 'user' }, idempotencyKey: keys[0], workItemId, repositoryId: 'repo-alpha', branchName: undefined })).writeState, 'failed'); assert.equal(writes, 1)
+  assert.equal((await controller.commands.startWork({ task: 'Synthetic explicit task', actorRef: { kind: 'user' }, idempotencyKey: keys[0], workItemId, repositoryId: 'repo-alpha', branchName: undefined })).writeState, 'failed'); assert.equal(writes, 1)
   const before = [providers.development.state.branches.length, providers.development.state.worktrees.length]
   const first = api.submit(target), duplicate = api.submit(target); assert.equal(first, duplicate)
   assert.equal((await first).writeState, 'confirmed'); assert.equal(writes, 2); assert.notEqual(keys[0], keys[1])
@@ -66,7 +66,7 @@ test('Host execution mode comes from actual selected assembly: no executor and h
     const storage = createSqliteStorage(dataPath, hostStoragePolicy(catalog)), core = await composeCore({ workspace: { id: workspaceId, name: 'Mode' }, providers, storage })
     const item = (await core.queries.listPlanningItems()).find((item) => item.content.contentKind === 'work_item')
     const host = await createHostComposition({ dataPath, workspaceId, catalog, resolveCredential: async () => undefined })
-    if (mode === 'none') { const answer = await core.commands.startWork({ workItemId: item.entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' }, idempotencyKey: 'manual-start' }); assert.equal(answer.fallback, 'manual_fallback'); assert.equal(answer.confirmed, true) }
+    if (mode === 'none') { const answer = await core.commands.startWork({ task: 'Synthetic explicit task', workItemId: item.entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' }, idempotencyKey: 'manual-start' }); assert.equal(answer.fallback, 'manual_fallback'); assert.equal(answer.confirmed, true) }
     try { assert.equal((await host.call('getStartWorkOptions', { workItemId: item.entityId })).executionMode, mode === 'harness' ? 'harness' : 'manual') }
     finally { await host.dispose(); storage.close(); await rm(root, { recursive: true, force: true }) }
   }
@@ -81,43 +81,40 @@ async function recoveryWorld(t) {
   const providers = createFakeProviders(), workspaceId = '00000000-0000-4000-8000-000000000144'
   const core = await composeCore({ workspace: { id: workspaceId, name: 'Recovery' }, providers, storage }), controller = createController(core)
   const workItemId = (await core.queries.listPlanningItems()).find((item) => item.content.contentKind === 'work_item').entityId
-  return { core, controller, providers, providerFail, target: { workspaceId, workItemId, repositoryId: 'repo-alpha' } }
+  return { core, controller, providers, providerFail, target: { task: 'Synthetic explicit task', workspaceId, workItemId, repositoryId: 'repo-alpha' } }
 }
 test('definite worktree failure with an acknowledged branch retries a new attempt through real Core/controller/SQLite', async (t) => {
   const w = await recoveryWorld(t), original = w.providers.development.createWorktree.bind(w.providers.development), keys = []
   let creates = 0, fail = true, sequence = 0
   w.providers.development.createWorktree = async (input) => { creates++; return fail ? w.providerFail('unavailable', 'temporary worktree failure') : original(input) }
-  const api = client.createStartWork({ getStartWorkOptions: async () => ({}), startWork: (actorRef, idempotencyKey, workItemId, repositoryId, branchName) => { keys.push(idempotencyKey); return w.controller.commands.startWork({ actorRef, idempotencyKey, workItemId, repositoryId, branchName }) } }, async () => null, { kind: 'user' }, () => `recovery-${++sequence}`)
+  const api = client.createStartWork({ getStartWorkOptions: async () => ({}), startWork: (actorRef, idempotencyKey, workItemId, repositoryId, task, branchName) => { keys.push(idempotencyKey); return w.controller.commands.startWork({ task, actorRef, idempotencyKey, workItemId, repositoryId, branchName }) } }, async () => null, { kind: 'user' }, () => `recovery-${++sequence}`)
   const first = await api.submit(w.target), context = await w.core.queries.getExecutionContext(w.target)
   assert.equal(first.writeState, 'local_only'); assert.equal(context.status, 'failed'); assert.ok(context.branchExternalId); assert.equal(creates, 1)
   fail = false
   const second = api.submit(w.target), duplicate = api.submit(w.target); assert.equal(second, duplicate)
   const recovered = await second
-  const control = await w.controller.commands.startWork({ actorRef: { kind: 'user' }, idempotencyKey: 'fresh-control', workItemId: w.target.workItemId, repositoryId: w.target.repositoryId })
-  assert.equal(control.writeState, 'confirmed', 'Core recovery is independently possible with a fresh key')
+  const control = await w.controller.commands.startWork({ task: 'Synthetic explicit task', actorRef: { kind: 'user' }, idempotencyKey: 'fresh-control', workItemId: w.target.workItemId, repositoryId: w.target.repositoryId })
+  assert.equal(control.writeState, 'conflict'); assert.equal(control.error.message, 'existing_execution_task_not_sent')
   assert.equal(recovered.writeState, 'confirmed'); assert.equal(creates, 2); assert.notEqual(keys[0], keys[1])
 })
 test('lost confirmed response reads back then replays the original key without starting another execution', async (t) => {
   const w = await recoveryWorld(t), original = w.providers.execution.startRun.bind(w.providers.execution), events = [], keys = []
   let starts = 0, lost = true
   w.providers.execution.startRun = async (input) => { starts++; return original(input) }
-  const api = client.createStartWork({ getStartWorkOptions: async () => ({}), startWork: async (actorRef, idempotencyKey, workItemId, repositoryId, branchName) => {
-    keys.push(idempotencyKey); events.push('write'); const answer = await w.controller.commands.startWork({ actorRef, idempotencyKey, workItemId, repositoryId, branchName })
+  const api = client.createStartWork({ getStartWorkOptions: async () => ({}), startWork: async (actorRef, idempotencyKey, workItemId, repositoryId, task, branchName) => {
+    keys.push(idempotencyKey); events.push('write'); const answer = await w.controller.commands.startWork({ task, actorRef, idempotencyKey, workItemId, repositoryId, branchName })
     if (lost) { lost = false; throw new Error('lost response') } return answer
   } }, async (scope) => { events.push('read'); return w.core.queries.getExecutionContext(scope) }, { kind: 'user' }, () => 'stable-lost-key')
   assert.equal((await api.submit(w.target)).writeState, 'unknown'); assert.equal(starts, 1)
   assert.equal((await api.submit(w.target)).writeState, 'confirmed'); assert.equal(starts, 1)
   assert.deepEqual(keys, ['stable-lost-key', 'stable-lost-key']); assert.deepEqual(events, ['write', 'read', 'write'])
 })
-test('a worktree branch conflict keeps valid binding and retries a new key after external repair', async (t) => {
-  const w = await recoveryWorld(t), actorRef = { kind: 'user' }, input = { actorRef, workItemId: w.target.workItemId, repositoryId: w.target.repositoryId }
+test('new task for an existing run projects a stable not-sent reason through the client', async t => {
+  const w = await recoveryWorld(t), actorRef = { kind: 'user' }, input = { task: w.target.task, actorRef, workItemId: w.target.workItemId, repositoryId: w.target.repositoryId }
+  const before = w.providers.execution.state.runs.length
   assert.equal((await w.controller.commands.startWork({ ...input, idempotencyKey: 'first' })).writeState, 'confirmed')
-  const worktree = w.providers.development.state.worktrees.at(-1), branch = worktree.branch, keys = []
-  worktree.branch = 'other-branch'
-  const api = client.createStartWork({ getStartWorkOptions: async () => ({}), startWork: (actorRef, idempotencyKey, workItemId, repositoryId) => { keys.push(idempotencyKey); return w.controller.commands.startWork({ actorRef, idempotencyKey, workItemId, repositoryId }) } }, async () => null, actorRef)
-  const failed = await api.submit(w.target)
-  assert.equal(failed.writeState, 'local_only'); assert.equal(failed.contextStatus, 'failed'); assert.equal(failed.needsBinding, undefined)
-  worktree.branch = branch
-  assert.equal((await api.submit(w.target)).writeState, 'confirmed'); assert.notEqual(keys[0], keys[1])
-  assert.equal(w.providers.development.state.worktrees.length, 1)
+  const api = client.createStartWork({ getStartWorkOptions: async () => ({}), startWork: (actorRef, idempotencyKey, workItemId, repositoryId, task) => w.controller.commands.startWork({ actorRef, idempotencyKey, workItemId, repositoryId, task }) }, async () => null, actorRef)
+  const answer = await api.submit(w.target)
+  assert.equal(answer.writeState, 'conflict'); assert.match(answer.reason, /已有执行，本次任务未发送/)
+  assert.equal(w.providers.execution.state.runs.length, before + 1)
 })

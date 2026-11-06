@@ -25,7 +25,7 @@ import { callSites } from '../fixtures/source-tree.mjs'
 const WORKSPACE = { id: newWorkspaceId(), name: 'MVP-0' }
 // 替身按仓库种下流水线运行：负向用例必须用这个有 CI 种子的仓库——若换空仓库，无条件读取同样读不到东西，用例就没有判别力。
 const REPOSITORY = 'repo-alpha'
-const REQUEST = { repositoryId: REPOSITORY, actor: { kind: 'agent' } }
+const REQUEST = { task: 'Synthetic explicit task', repositoryId: REPOSITORY, actor: { kind: 'agent' } }
 const CHAIN_TYPES = ['tracks', 'has_worktree', 'derived_from', 'produced_by', 'runs_on']
 
 const compose = (providers, extra = {}) => composeCore({ workspace: WORKSPACE, providers, ...extra })

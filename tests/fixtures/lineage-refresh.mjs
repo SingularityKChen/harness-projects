@@ -23,7 +23,7 @@ export async function fakeChain() {
   const core = await composeCore({ workspace, providers, clock: () => new Date(Date.UTC(2026, 9, 22, 0, 0, ticks++)).toISOString() })
   const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item')
   const scope = { workItemId: item.entityId, repositoryId: 'repo-alpha' }
-  const started = await core.commands.startWork({ ...scope, actor: { kind: 'agent' }, idempotencyKey: 'paging' })
+  const started = await core.commands.startWork({ task: 'Synthetic explicit task', ...scope, actor: { kind: 'agent' }, idempotencyKey: 'paging' })
   assert.equal(started.confirmed, true)
   const development = providers.development
   assert.equal((await development.createChangeRequest({ repository: refOf(development.gate.bindingId, 'repository', scope.repositoryId),
@@ -60,7 +60,7 @@ export async function recordedChain(t, statusPolicy) {
   const initial = await composeCore({ workspace, providers: { ...fake, storage: w.storage }, storage: w.storage })
   const item = (await initial.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item')
   w.scope = { workItemId: item.entityId, repositoryId: 'repo-alpha' }
-  w.started = await initial.commands.startWork({ ...w.scope, branchName: GAMMA_BRANCH, actor: { kind: 'agent' }, idempotencyKey: 'recorded-anchor' })
+  w.started = await initial.commands.startWork({ task: 'Synthetic explicit task', ...w.scope, branchName: GAMMA_BRANCH, actor: { kind: 'agent' }, idempotencyKey: 'recorded-anchor' })
   assert.equal(w.started.confirmed, true)
   const bound = await createWorkspaceSetup(w.storage).bindRepository({ workspaceId: workspace.id, repositoryId: 'repo-alpha',
     references: [{ domain: 'development', implementationKey: 'development.github', configuration: {} }] })

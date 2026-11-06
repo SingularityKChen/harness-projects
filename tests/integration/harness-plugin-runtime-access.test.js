@@ -67,7 +67,7 @@ test('production Host/SQLite/remote/client.apply masks list and an open detail, 
   const target = read().store.list().find((row) => row.entity.content.title === 'runtime-title-canary').entityId
   const html = () => renderToStaticMarkup(React.createElement(WorkItemApp, { ...h.props, initialPath: `/projects/${WORKSPACE}/items/${target}` }))
   assert.match(html(), /runtime-body-canary/)
-  assert.equal((await h.service.startWork({ kind: 'user' }, 'host-saved', target, 'repo-alpha', undefined)).writeState, 'confirmed')
+  assert.equal((await h.service.startWork({ kind: 'user' }, 'host-saved', target, 'repo-alpha', 'Synthetic explicit task', undefined)).writeState, 'confirmed')
   const before = dump(h.dataPath), external = [h.development.state.branches.length, h.development.state.worktrees.length]
   const confirmation = read().reconciledAt, revision = read().store.revision
   h.planning.faultsSwitch.set(FaultKind.PermissionDenied, true)
@@ -84,7 +84,7 @@ test('production Host/SQLite/remote/client.apply masks list and an open detail, 
   assert.doesNotMatch(hidden.match(/<button[^>]*>刷新规划<\/button>/)?.[0] ?? '', /disabled/)
   assert.ok(JSON.parse(dump(h.dataPath).workspace_projection).every((row) => row.content_kind === 'redacted'))
   assert.equal(read().reconciledAt, confirmation)
-  for (const key of ['host-saved', 'new-host-denied']) await assert.rejects(h.service.startWork({ kind: 'user' }, key, target, 'repo-alpha', undefined))
+  for (const key of ['host-saved', 'new-host-denied']) await assert.rejects(h.service.startWork({ kind: 'user' }, key, target, 'repo-alpha', 'Synthetic explicit task', undefined))
   for (const table of ['mutation_attempt', 'execution_context', 'execution_run']) assert.equal(dump(h.dataPath)[table], before[table])
   assert.deepEqual([h.development.state.branches.length, h.development.state.worktrees.length], external)
   h.planning.faultsSwitch.set(FaultKind.Offline, true); await refresh.refresh()
@@ -121,7 +121,7 @@ test('failed SQLite redaction uses same-revision gap and a safe baseline on the 
   assert.ok(h.carrier.frames.some((frame) => frame.kind === 'gap'))
   assert.equal(h.carrier.frames.filter((frame) => frame.kind === 'baseline').length, 2)
   assert.ok(JSON.parse(dump(h.dataPath).workspace_projection).some((row) => row.content_kind === 'work_item'), 'rollback retained old disk contents without publishing them')
-  await assert.rejects(h.service.startWork({ kind: 'user' }, 'disk-denied', target.entityId, 'repo-alpha', undefined))
+  await assert.rejects(h.service.startWork({ kind: 'user' }, 'disk-denied', target.entityId, 'repo-alpha', 'Synthetic explicit task', undefined))
   assert.equal(dump(h.dataPath).mutation_attempt, '[]')
   fail.mock.restore(); await h.service.refreshPlanning({ kind: 'user' })
   await until(() => read().store.revision > revision)
@@ -152,12 +152,12 @@ for (const [phase, fault] of [['claim', FaultKind.PermissionDenied], ['first-wri
     const preflight = h.development.preflightWorktree.bind(h.development)
     h.development.preflightWorktree = async (...args) => { entered.resolve(); await release.promise; return preflight(...args) }
   }
-  const start = h.service.startWork({ kind: 'user' }, 'admission-race', target, 'repo-alpha', undefined).catch(() => undefined)
+  const start = h.service.startWork({ kind: 'user' }, 'admission-race', target, 'repo-alpha', 'Synthetic explicit task', undefined).catch(() => undefined)
   await entered.promise
   h.planning.faultsSwitch.set(fault, true); io.resolve(); if (fault === FaultKind.Offline) await refresh; else await new Promise((done) => setImmediate(done))
   if (fault === FaultKind.Offline) assert.equal((await h.service.baseline()).capabilities.find((entry) => entry.key === 'planning.item.read').access, 'read_only')
   release.resolve();
-  const observed = await h.host.controller.commands.startWork({ actorRef: { kind: 'user' }, idempotencyKey: 'observe-denial', workItemId: target, repositoryId: 'repo-alpha' })
+  const observed = await h.host.controller.commands.startWork({ task: 'Synthetic explicit task', actorRef: { kind: 'user' }, idempotencyKey: 'observe-denial', workItemId: target, repositoryId: 'repo-alpha' })
   assert.equal(observed.error.code, fault === FaultKind.Offline ? 'unavailable' : 'permission_denied')
   const [started] = await Promise.all([start, refresh]); assert.notEqual(started?.writeState, 'confirmed')
   assert.deepEqual([h.development.state.branches.length, h.development.state.worktrees.length], external)
@@ -167,12 +167,12 @@ for (const [phase, fault] of [['claim', FaultKind.PermissionDenied], ['first-wri
 })
 for (const cached of [false, true]) for (const state of ['offline', 'healthy', 'row-gap', 'healthy-pending']) test(`Host ${cached ? 'cached' : 'new'} result revalidates ${state} admission and retains acknowledged handles`, async (t) => {
   const h = await open(t), target = h.props.source.getSnapshot().store.list().find((r) => r.entity.content.contentKind === 'work_item').entityId
-  if (cached) await h.service.startWork({ kind: 'user' }, 'result-race', target, 'repo-alpha', undefined)
+  if (cached) await h.service.startWork({ kind: 'user' }, 'result-race', target, 'repo-alpha', 'Synthetic explicit task', undefined)
   const entered = deferred(), release = deferred(), io = deferred(), inProvider = deferred()
   t.after(() => { release.resolve(); io.resolve() })
   const run = h.host.controller.commands.startWork.bind(h.host.controller.commands); let acknowledged
   t.mock.method(h.host.controller.commands, 'startWork', async (...args) => { acknowledged = await run(...args); entered.resolve(); await release.promise; return acknowledged })
-  const pending = h.service.startWork({ kind: 'user' }, 'result-race', target, 'repo-alpha', undefined); await entered.promise
+  const pending = h.service.startWork({ kind: 'user' }, 'result-race', target, 'repo-alpha', 'Synthetic explicit task', undefined); await entered.promise
   const external = () => [h.development.state.branches.length, h.development.state.worktrees.length], before = external(), runs = dump(h.dataPath).execution_run
   if (state === 'row-gap') h.planning.state.items.push({ ...h.planning.state.items[0], ref: { bindingId: h.planning.bindingId, objectKind: 'project_item', externalId: 'orphan' }, membership: { externalId: 'orphan' }, content: { kind: 'redacted', reason: 'unavailable' } })
   if (state === 'healthy-pending') {
@@ -191,7 +191,7 @@ for (const cached of [false, true]) for (const state of ['offline', 'healthy', '
   if (state === 'offline') {
     assert.match(result.error.message, /已确认资源保留.*原键读回/)
     h.planning.faultsSwitch.set(FaultKind.Offline, false); await h.service.refreshPlanning({ kind: 'user' })
-    assert.equal((await h.service.startWork({ kind: 'user' }, 'result-race', target, 'repo-alpha', undefined)).writeState, 'confirmed')
+    assert.equal((await h.service.startWork({ kind: 'user' }, 'result-race', target, 'repo-alpha', 'Synthetic explicit task', undefined)).writeState, 'confirmed')
     assert.deepEqual(external(), before); assert.equal(dump(h.dataPath).execution_run, runs)
   }
 })
@@ -216,7 +216,7 @@ for (const reject of [false, true]) test(`production Delivery Host/watch/apply i
   const h = await open(t), read = () => h.props.source.getSnapshot()
   const target = read().store.list().find((row) => row.entity.content.contentKind === 'work_item').entityId
   const scope = { workspaceId: WORKSPACE, workItemId: target, repositoryId: 'repo-alpha' }
-  const started = await h.service.startWork({ kind: 'user' }, 'delivery-host', target, scope.repositoryId, undefined)
+  const started = await h.service.startWork({ kind: 'user' }, 'delivery-host', target, scope.repositoryId, 'Synthetic explicit task', undefined)
   assert.equal(started.writeState, 'confirmed')
   const context = await h.service.getExecutionContext(target, scope.repositoryId)
   await h.development.createChangeRequest({ repository: refOf(h.development.gate.bindingId, 'repository', scope.repositoryId), head: context.context.branchExternalId, base: 'main', title: 'host-pr-canary', body: '' })
@@ -246,7 +246,7 @@ const denied=()=>({ok:false,error:{code:'permission_denied',message:'synthetic-p
 async function prepare(h, index=0) {
  const target=h.props.source.getSnapshot().store.list().filter(row=>row.entity.content.contentKind==='work_item')[index].entityId
  const scope={workspaceId:WORKSPACE,workItemId:target,repositoryId:'repo-alpha'}
- assert.equal((await h.service.startWork({kind:'user'},'delivery-'+index,target,'repo-alpha',undefined)).writeState,'confirmed')
+ assert.equal((await h.service.startWork({kind:'user'},'delivery-'+index,target,'repo-alpha','Synthetic explicit task', undefined)).writeState,'confirmed')
  const context=await h.service.getExecutionContext(target,'repo-alpha')
  await h.development.createChangeRequest({repository:refOf(h.development.gate.bindingId,'repository','repo-alpha'),head:context.context.branchExternalId,base:'main',title:'synthetic-pr-'+index,body:''})
  await h.props.deliveryReader.refresh(scope)
@@ -366,7 +366,7 @@ for (const denied of [false, true]) test(`real Host restart ${denied ? 'keeps fa
   else assert.deepEqual(hidden.entities.map((row) => row.content), before.entities.map((row) => row.content))
   assert.equal(hidden.source.reason, denied ? 'permission_denied' : 'unavailable')
   if (denied) assert.equal(JSON.parse(dump(h.dataPath).sync_cursor).find((row) => row.scope_key === 'planning.project').last_error_code, 'permission_denied')
-  const start = resumed.startWork({ kind: 'user' }, 'restarted-denial', target.entityId, 'repo-alpha', undefined)
+  const start = resumed.startWork({ kind: 'user' }, 'restarted-denial', target.entityId, 'repo-alpha', 'Synthetic explicit task', undefined)
   if (denied) await assert.rejects(start); else assert.notEqual((await start).writeState, 'confirmed')
   offline.mock.restore(); await resumed.refreshPlanning({ kind: 'user' })
   assert.equal((await resumed.baseline()).entities.find((row) => row.entityId === target.entityId).content.title, target.content.title)
@@ -385,7 +385,7 @@ test('peer Host actual denial redaction rollback does not reveal or authorize ca
  t.mock.method(SqliteStorage.prototype,'putMutationAttempt',async function(row){const result=await put.call(this,row);if(row.idempotencyKey==='peer-last-cursor'&&row.externalIntent?.operation==='createBranch')intent=true;return result})
  const cursor=SqliteStorage.prototype.getSyncCursor
  t.mock.method(SqliteStorage.prototype,'getSyncCursor',async function(...args){const result=await cursor.apply(this,args);if(intent&&hold&&!this.scoped){hold=false;entered.resolve(result);await release.promise}return result})
- const pending=installed.service.startWork({kind:'user'},'peer-last-cursor',target,'repo-alpha',undefined).catch(error=>({rejected:true,error:String(error)}))
+ const pending=installed.service.startWork({kind:'user'},'peer-last-cursor',target,'repo-alpha','Synthetic explicit task', undefined).catch(error=>({rejected:true,error:String(error)}))
  const captured=await entered.promise;assert.equal(captured.state,'healthy');assert.deepEqual(external(),before)
  const replace = SqliteStorage.prototype.replacePlanningProjections
  t.mock.method(SqliteStorage.prototype, 'replacePlanningProjections', async function(scope, rows) { if (rows.some(row => row.content.contentKind === 'redacted')) throw Error('actual-denial-redaction-rollback'); return replace.call(this, scope, rows) })
@@ -452,7 +452,7 @@ test('real Hosts share operation read refusal and recover the same Delivery scop
   const existing = await openOwner(), item = (await h.service.baseline()).entities.find(row => row.content.contentKind === 'work_item' && row.entityId !== scope.workItemId).entityId
   const repository = h.development.getRepository.bind(h.development)
   h.development.getRepository = async () => denied()
-  assert.equal((await h.service.startWork({ kind: 'user' }, 'actual-read-denial', item, 'repo-alpha', undefined)).error.code, 'permission_denied')
+  assert.equal((await h.service.startWork({ kind: 'user' }, 'actual-read-denial', item, 'repo-alpha', 'Synthetic explicit task', undefined)).error.code, 'permission_denied')
   await openOwner()
   const assertHidden = async () => {
     for (const service of hosts) {

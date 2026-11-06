@@ -70,7 +70,7 @@ test('结果不确定：git 创建返回 ambiguous 时先 reconcile，未落地�
   const workItemId = await workItemIdOf(core)
   const branchesBefore = providers.development.state.branches.length
   const runsBefore = providers.execution.state.runs.length
-  const result = await core.commands.startWork({ workItemId, repositoryId: REPOSITORY, actor: { kind: 'agent' }, idempotencyKey: 'ambiguous-1' })
+  const result = await core.commands.startWork({ task: 'Synthetic explicit task', workItemId, repositoryId: REPOSITORY, actor: { kind: 'agent' }, idempotencyKey: 'ambiguous-1' })
   assert.equal(result.writeState, WriteState.Failed)
   assert.equal(result.confirmed, false)
   assert.equal(result.error.code, 'not_found', 'reconcile 未找到落地分支 → 明确失败，而不是重试创建')
@@ -90,7 +90,7 @@ test('结果不确定：reconcile 找回同值分支后继续，不把已落地�
     repository: refOf(bindingId, 'repository', REPOSITORY), ref: refOf(bindingId, 'branch', branch), name: branch, headCommit: 'sha-1',
   })
   const before = providers.development.state.branches.length
-  const result = await core.commands.startWork({ workItemId, repositoryId: REPOSITORY, actor: { kind: 'agent' }, idempotencyKey: 'ambiguous-2' })
+  const result = await core.commands.startWork({ task: 'Synthetic explicit task', workItemId, repositoryId: REPOSITORY, actor: { kind: 'agent' }, idempotencyKey: 'ambiguous-2' })
   assert.equal(providers.development.state.branches.length, before, 'reconcile 命中后不得再创建分支')
   assert.equal(result.branchExternalId, branch, '分支已落地时 reconcile 必须认出来并带回它，而不是判成未创建')
   // 工作树步同样不确定：替身的 ambiguous 不落地，对账读不到它，才判「创建未生效」（评审 P3：与分支步同一个对账出口）。

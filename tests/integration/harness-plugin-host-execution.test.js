@@ -56,6 +56,7 @@ import { seed, occurrences } from './fixtures/host-seed.js'
 import { fixtureFor, registerWorkItem } from './local-git-fixture.js'
 import { recorded, replay } from '../contract/fixtures/harness-session/replay.js'
 import { contextIdFor, runIdFor } from '@harness-projects/core'
+const task = '  执行 🧪\nKeep exact whitespace.  '
 const actor = { kind: 'user', id: 'execution-test' }, issuer = 'issuer-canary-52a67f3a-324a-4e48-b075-aaf10db8f63e'
 for (const scenario of ['completed', 'error', 'missing', 'forced', 'unknown', 'env-unset', 'env-0', 'env-true']) test(`正式 remote 安装→真实 Git ack→会话/备用→SQLite：${scenario}`, async (t) => {
   const fixture = await fixtureFor(t), dataPath = path.join(fixture.root, 'harness-projects', 'workspace.sqlite')
@@ -69,7 +70,7 @@ for (const scenario of ['completed', 'error', 'missing', 'forced', 'unknown', 'e
   const observation = scenario === 'completed' ? 'O3.1' : undefined
   const exchanges = structuredClone(observation ? recorded.exchanges.filter((entry) => entry.observation === observation && ['create', 'prompt', 'inspect', 'list'].includes(entry.operation)) : recorded.exchanges.filter((entry) => ['O1.1', 'O1.2', 'O2.1', 'O2.2'].includes(entry.observation)))
   for (const entry of exchanges) {
-    if (entry.operation === 'prompt') { entry.request.requestId = id; entry.request.content = [{ type: 'text', text: 'harness run work/wi-1' }] }
+    if (entry.operation === 'prompt') { entry.request.requestId = id; entry.request.content = [{ type: 'text', text: task }] }
     if (entry.operation === 'inspect') for (const event of entry.outcome.value.events) if (event.rpcId) event.rpcId = id
   }
   const recording = replay(exchanges), raw = {
@@ -105,14 +106,15 @@ for (const scenario of ['completed', 'error', 'missing', 'forced', 'unknown', 'e
   assert.equal(installed.writeState, 'local_only'); assert.equal(installed.value.bindingIds.length, 2)
   assert.deepEqual(await remote.service.installExecutionBindings(actor, 'install'), installed)
   assert.equal((await remote.service.getWorkspaceSetup()).executionInstalled, true)
-  const started = await remote.service.startWork(actor, 'start', 'wi-1', 'repo-alpha', undefined)
+  const started = await remote.service.startWork(actor, 'start', 'wi-1', 'repo-alpha', task, undefined)
   const { context: view } = await remote.service.getExecutionContext('wi-1', 'repo-alpha')
   assert.equal(view.status, 'ready', JSON.stringify({ started, view, disabled: host.disabled })); assert.equal(await realpath(view.worktreeExternalId), view.worktreeExternalId)
   const manual = scenario === 'missing' || scenario === 'forced'
   assert.deepEqual([view.runStatus, view.fallback, secrets.length], [manual ? 'running' : scenario === 'unknown' ? 'unknown' : scenario === 'completed' ? 'succeeded' : 'failed', manual ? 'manual_fallback' : undefined, manual ? 1 : 0])
+  if (!manual) assert.deepEqual(calls.find(([name]) => name === 'prompt')[1].content, [{ type: 'text', text: task }])
   if (manual) assert.deepEqual(calls, [], '明确 unavailable 和 force 必须零 create/prompt')
   else assert.equal(calls.filter(([name]) => name === 'create').length, 1)
-  const repeated = await remote.service.startWork(actor, 'start', 'wi-1', 'repo-alpha', undefined)
+  const repeated = await remote.service.startWork(actor, 'start', 'wi-1', 'repo-alpha', task, undefined)
   assert.deepEqual({ ...repeated, value: { ...repeated.value, branchHeadCommit: undefined } }, { ...started, value: { ...started.value, branchHeadCommit: undefined } })
   assert.equal(secrets.length, manual ? 1 : 0, 'unknown/replay 不启动人工执行者')
   assert.equal(calls.filter(([name]) => name === 'create').length, manual ? 0 : 1)
@@ -129,7 +131,7 @@ for (const scenario of ['completed', 'error', 'missing', 'forced', 'unknown', 'e
       assert.equal((await fresh.table.executionFallback.getRun(run.providerRef)).ok, true)
     } finally { reopened.close() }
   }
-  host.stop(); await assert.rejects(() => remote.service.startWork(actor, 'late', 'wi-1', 'repo-alpha', undefined)); assert.equal(await occurrences(path.dirname(dataPath), issuer), 0)
+  host.stop(); await assert.rejects(() => remote.service.startWork(actor, 'late', 'wi-1', 'repo-alpha', task, undefined)); assert.equal(await occurrences(path.dirname(dataPath), issuer), 0)
 })
 
 

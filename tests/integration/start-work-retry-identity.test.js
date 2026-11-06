@@ -29,7 +29,7 @@ import { AccessLevel, EntityKind, ExecutionContextStatus, ProviderErrorCode, Rel
 import { createFakeProviders, exportFakeStorageState, providerFail } from '@harness-projects/provider-fake'
 
 const WORKSPACE = { id: newWorkspaceId(), name: 'Start Work 恢复' }
-const REQUEST = { repositoryId: 'repo-alpha', actor: { kind: 'agent' } }
+const REQUEST = { task: 'Synthetic explicit task', repositoryId: 'repo-alpha', actor: { kind: 'agent' } }
 
 /** 可控时钟：租约是否过期由测试显式决定，不靠真实等待。 */
 function controllableClock() {

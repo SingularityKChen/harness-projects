@@ -75,7 +75,7 @@ test('single-key Provider permissions deny only that write while retained acknow
   const baseline = (await remote(h, 'baseline')).value
   const item = baseline.entities.find(row => row.content.title === '规划项 issue-2').entityId
   await control('permission', { domain: 'development', key: 'development.worktree.create', enabled: false })
-  const answer = await remote(h, 'startWork', { actorRef: { kind: 'user' }, idempotencyKey: 'browser-operation-denied', workItemId: item, repositoryId: 'repo-alpha' })
+  const answer = await remote(h, 'startWork', { task: 'Synthetic explicit task', actorRef: { kind: 'user' }, idempotencyKey: 'browser-operation-denied', workItemId: item, repositoryId: 'repo-alpha' })
   assert.equal(answer.value.error?.code, 'permission_denied', 'single-key Provider refusal must reach the actual operation gate')
   const options = await remote(h, 'getStartWorkOptions', { workItemId: item })
   assert.equal(options.value.repositories[0].available, false)

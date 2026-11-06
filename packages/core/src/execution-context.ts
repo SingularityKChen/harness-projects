@@ -19,6 +19,7 @@ export const StartWorkFallback = { Manual: 'manual_fallback' } as const
 export type StartWorkFallback = (typeof StartWorkFallback)[keyof typeof StartWorkFallback]
 
 export interface StartWorkRequest {
+  readonly task: string
   readonly workItemId: string
   readonly repositoryId: string
   readonly actor: StartWorkActor

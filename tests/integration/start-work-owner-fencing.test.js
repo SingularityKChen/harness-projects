@@ -21,7 +21,7 @@ async function setup(kind, fallback = false) {
   } }
   const workspace = { id: `owner-${serial++}`, name: 'owner fencing' }, options = { providers, storage, workspace, clock: time.clock }
   const core = await composeCore(options), workItemId = (await core.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item').entityId
-  const request = { workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' } }, contextId = contextIdFor(workspace.id, workItemId, 'repo-alpha')
+  const request = { task: 'Synthetic explicit task', workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' } }, contextId = contextIdFor(workspace.id, workItemId, 'repo-alpha')
   return { ...options, core, time, request, contextId, runId: runIdFor(contextId) }
 }
 const start = (w, key, core = w.core) => core.commands.startWork({ ...w.request, idempotencyKey: key })
@@ -76,7 +76,7 @@ for (const kind of ['Fake', 'SQLite']) {
       if (step === 'claim') assert.deepEqual([result.writeState, result.error?.code, result.branchExternalId], ['conflict', 'conflict', undefined], '外部调用前丢失所有权不假称已有 ack')
       else { lost(result); assert.ok(result.branchExternalId, '旧调用已 ack 的分支仍在结果里') }
       assert.equal((await w.storage.getExecutionContext(w.contextId)).provisioningGeneration, 2)
-      assert.equal((await w.storage.findMutationAttempt(w.workspace.id, 'old')).state, 'pending', '不替旧 attempt 伪造结算')
+      assert.equal((await w.storage.findMutationAttempt(w.workspace.id, 'old')).state, step.startsWith('create') ? 'pending' : 'failed', '只在安全接管时结算被取代 claim；未决外部调用保留原收据')
     } finally { gate.release.resolve(); await old }
   })
 
@@ -97,7 +97,7 @@ for (const kind of ['Fake', 'SQLite']) {
     const w = await setup(kind, mode.startsWith('fallback')), gate = barrier()
     let fallbackCalls = 0
     for (const port of [w.providers.execution, w.providers.executionFallback].filter(Boolean)) { const execute = port.startRun.bind(port); port.startRun = async (input) => {
-      const fallback = input.command.startsWith('manual fallback'); if (fallback) fallbackCalls++
+      const fallback = port === w.providers.executionFallback; if (fallback) fallbackCalls++
       if (mode.startsWith('fallback') && !fallback) return providerFail('unavailable', 'primary unavailable')
       const result = mode.endsWith('ambiguous') ? providerFail('ambiguous_result', 'lost ack') : mode.endsWith('failed') ? providerFail('unavailable', 'refused') : await execute(input)
       gate.hits++; gate.entered.resolve(); await gate.release.promise; return result
@@ -207,11 +207,11 @@ for (const kind of ['Fake', 'SQLite']) {
     const read = () => w.storage.getExecutionContext(w.contextId)
     assert.equal((await read()).provisioningGeneration, 1)
     await start(w, 'first'); await start(w, 'observer'); assert.equal((await read()).provisioningGeneration, 1)
-    await w.storage.putExecutionContext({ ...await read(), status: 'failed' }); await start(w, 'retry-same-clock')
-    assert.equal((await read()).provisioningGeneration, 2)
+    await w.storage.putExecutionContext({ ...await read(), status: 'failed' }); assert.equal((await start(w, 'retry-same-clock')).writeState, 'conflict')
+    assert.equal((await read()).provisioningGeneration, 1)
     if (kind === 'Fake') { const valid = exportFakeStorageState(w.storage), invalid = structuredClone(valid); invalid.contexts.find((r) => r.id === w.contextId).provisioningGeneration = 0; assert.throws(() => createFakeStorage(invalid), /positive safe integer/); w.storage = createFakeStorage(valid) }
     else { w.storage.close(); w.storage = sql(w.storage.location) }
-    w.core = await composeCore(w); assert.equal((await read()).provisioningGeneration, 2, '实际存储往返保留代际')
+    w.core = await composeCore(w); assert.equal((await read()).provisioningGeneration, 1, '实际存储往返保留代际')
     await w.storage.putExecutionContext({ ...await read(), status: 'failed', provisioningGeneration: Number.MAX_SAFE_INTEGER })
     const before = snapshot(w), external = JSON.stringify(w.providers.execution.state)
     const refused = await start(w, 'exhausted')

@@ -21,7 +21,7 @@ import { createSqliteStorage } from '@harness-projects/storage-sqlite'
 
 const WORKSPACE = { id: newWorkspaceId(), name: 'MVP-0' }
 const REPOSITORY = 'repo-alpha'
-const REQUEST = { repositoryId: REPOSITORY, actor: { kind: 'agent' } }
+const REQUEST = { task: 'Synthetic explicit task', repositoryId: REPOSITORY, actor: { kind: 'agent' } }
 
 const compose = (providers, storage) =>
   composeCore(storage === undefined ? { workspace: WORKSPACE, providers } : { workspace: WORKSPACE, providers, storage })
@@ -99,7 +99,7 @@ test('重复开始：同一工作项 + 仓库返回既有上下文，不产生�
   assert.equal(first.writeState, WriteState.Saved)
   assert.equal(first.confirmed, true)
   const second = await core.commands.startWork({ ...request, idempotencyKey: 'dup-2' })
-  assert.equal(second.executionContextId, first.executionContextId, '重复开始必须复用同一个上下文 id')
+  assert.equal(second.error.message, 'existing_execution_task_not_sent')
   assert.equal(providers.development.state.branches.length, branches, '不得产生第二个分支')
   assert.equal(providers.development.state.worktrees.length, worktrees, '不得产生第二份工作树')
   const replay = await core.commands.startWork({ ...request, idempotencyKey: 'dup-1' })
@@ -271,7 +271,7 @@ for (const [label, makeStorage] of ADAPTERS) {
     const attempts = (await w.storage.listMutationAttempts(WORKSPACE.id)).map((attempt) => [attempt.commandName, attempt.idempotencyKey, attempt.bindingId, attempt.state]).sort()
     assert.deepEqual(attempts, [['startWork', 'route-a', 'dev-a', 'saved'], ['startWork', 'route-b', 'dev-b', 'saved']], '外部写入记录的目标连接是路由到的那个，不是工作区里的第一个 Development 挂载（AGENTS.md §7）')
     const before = [w.A.calls.length, w.B.calls.length]
-    for (const [repositoryId, idempotencyKey] of [[REPOSITORY, 'route-a-2'], ['repo-beta', 'route-b-2']]) {
+    for (const [repositoryId, idempotencyKey] of [[REPOSITORY, 'route-a'], ['repo-beta', 'route-b']]) {
       const replay = await w.core.commands.startWork({ ...REQUEST, repositoryId, workItemId: w.workItemId, idempotencyKey })
       assert.deepEqual([replay.writeState, replay.status], [WriteState.Saved, ExecutionContextStatus.Ready], `${repositoryId}：新键的读回确认工作树仍在`)
     }
@@ -301,7 +301,7 @@ for (const [label, makeStorage] of ADAPTERS) {
     const mount = (await w.storage.listRepositories(WORKSPACE.id)).find((record) => record.id === 'repo-beta')
     assert.equal((await w.storage.findExternalIdentity('dev-b', 'repository', 'repo-beta'))?.id, mount?.externalIdentityId, '登记下来的仓库挂载指向 dev-b 下的身份')
     const both = await recompose(w, [w.A.proxy, w.B.proxy]) // 第三步：把其余连接挂回来
-    const [replay, fresh] = [await both.commands.startWork({ ...REQUEST, repositoryId: 'repo-beta', workItemId: w.workItemId, idempotencyKey: 'steps-3' }), await both.commands.startWork({ ...REQUEST, repositoryId: 'repo-beta', workItemId: await anotherWorkItem(both, w.workItemId), idempotencyKey: 'steps-4' })]
+    const [replay, fresh] = [await both.commands.startWork({ ...REQUEST, repositoryId: 'repo-beta', workItemId: w.workItemId, idempotencyKey: 'steps-2' }), await both.commands.startWork({ ...REQUEST, repositoryId: 'repo-beta', workItemId: await anotherWorkItem(both, w.workItemId), idempotencyKey: 'steps-4' })]
     assert.deepEqual([replay, fresh].map((result) => [result.writeState, result.status, result.error]), [[WriteState.Saved, ExecutionContextStatus.Ready, undefined], [WriteState.Saved, ExecutionContextStatus.Ready, undefined]], '重放确认 Saved，新工作项照常开始')
     assert.deepEqual(w.A.calls, [], 'repo-beta 属于 dev-b：dev-a 从头到尾一次调用都没收到')
     assert.ok(w.B.calls.length > 0 && w.B.calls.every((call) => call.includes(' dev-b/')), `只进 dev-b：${w.B.calls}`)
@@ -337,7 +337,7 @@ for (const [label, makeStorage] of ADAPTERS) {
     assert.doesNotMatch(refused.error.message, /#\d+|绑定仓库|重新绑定/, '文案只写今天走得通的步骤：不把内部 issue 号当指引，也不许诺 Storage 会拒绝的「重新绑定到当前连接」')
     const replay = await second.commands.startWork({ ...REQUEST, workItemId: w.workItemId, idempotencyKey: 'moved-3' })
     const view = await second.queries.getExecutionContext({ workItemId: w.workItemId, repositoryId: REPOSITORY })
-    assert.deepEqual([replay.status, replay.writeState, view.status], [ExecutionContextStatus.Ready, WriteState.Unknown, ExecutionContextStatus.Ready], '不能确认不等于不存在：不改判 Failed')
+    assert.deepEqual([replay.error.message, replay.writeState, view.status], ['existing_execution_task_not_sent', WriteState.Conflict, ExecutionContextStatus.Ready], '新任务未发送，原执行保持 Ready')
     assert.deepEqual(moved.calls, [], '仓库不属于新连接：新连接一次调用都不收到')
     const lacking = recorded(createFakeDevelopmentProvider({ bindingId: 'dev-moved', capabilities: { branchCreate: false } }))
     const gated = await (await recompose(w, lacking.proxy)).commands.startWork({ ...REQUEST, workItemId: other, idempotencyKey: 'moved-5' })
@@ -346,14 +346,14 @@ for (const [label, makeStorage] of ADAPTERS) {
     const absent = await none.commands.startWork({ ...REQUEST, workItemId: other, idempotencyKey: 'moved-4' })
     assert.deepEqual([absent.error?.code, absent.error?.message], ['not_supported', '没有绑定提供能力 development.branch.create'], '没有任何 Development 挂载：按第一道门报缺能力，不报「绑定 id 变了」')
     const back = await recompose(w, w.providers.development) // 按文案走：让原来的 Development 连接以原绑定 id 挂回来
-    const [confirmed, resumed] = [await back.commands.startWork({ ...REQUEST, workItemId: w.workItemId, idempotencyKey: 'moved-6' }), await back.commands.startWork({ ...REQUEST, workItemId: other, idempotencyKey: 'moved-7' })]
+    const [confirmed, resumed] = [await back.commands.startWork({ ...REQUEST, workItemId: w.workItemId, idempotencyKey: 'moved-1' }), await back.commands.startWork({ ...REQUEST, workItemId: other, idempotencyKey: 'moved-7' })]
     assert.deepEqual([confirmed, resumed].map((result) => [result.writeState, result.status, result.error]), [[WriteState.Saved, ExecutionContextStatus.Ready, undefined], [WriteState.Saved, ExecutionContextStatus.Ready, undefined]], '挂回原连接即恢复：已 Ready 的上下文读回确认为 Saved，被拒的新工作项照常开始')
   })
 
   test(`${label}：工作树读能力只读：已 Ready 的上下文换新键开始工作，读回按读门放行并确认 Saved，不当作「无法确认」（#219 读回的路由模式）`, async () => {
     const w = await readyOnce(makeStorage, 'readonly-1')
     const same = recorded(w.providers.development)
-    const replay = await (await recompose(w, same.proxy, { [CapabilityKey.DevelopmentWorktreeRead]: AccessLevel.ReadOnly })).commands.startWork({ ...REQUEST, workItemId: w.workItemId, idempotencyKey: 'readonly-2' })
+    const replay = await (await recompose(w, same.proxy, { [CapabilityKey.DevelopmentWorktreeRead]: AccessLevel.ReadOnly })).commands.startWork({ ...REQUEST, workItemId: w.workItemId, idempotencyKey: 'readonly-1' })
     assert.deepEqual([replay.writeState, replay.status, same.calls.map((call) => call.split(' ')[0])], [WriteState.Saved, ExecutionContextStatus.Ready, ['getWorktree']], '读回是读门：只读的工作树读照样验证，调一次 getWorktree')
   })
 
@@ -363,10 +363,10 @@ for (const [label, makeStorage] of ADAPTERS) {
     const moved = recorded(createFakeDevelopmentProvider({ bindingId: 'dev-moved' }))
     const refused = await (await recompose(w, moved.proxy)).commands.startWork({ ...REQUEST, workItemId: w.workItemId, idempotencyKey: 'take-2' })
     const status = async () => (await w.storage.getExecutionContext(contextIdFor(WORKSPACE.id, w.workItemId, REPOSITORY))).status
-    assert.deepEqual([refused.writeState, refused.error?.code, await status(), moved.calls], [WriteState.Failed, 'conflict', ExecutionContextStatus.Failed, []], '终态接管也不向新连接建分支、建工作树')
+    assert.deepEqual([refused.writeState, refused.error?.code, await status(), moved.calls], [WriteState.Conflict, 'conflict', ExecutionContextStatus.Failed, []], '已有运行的新任务不向离线连接供应')
     const same = recorded(w.providers.development)
     const readonly = await (await recompose(w, same.proxy, { [CapabilityKey.DevelopmentWorktreeCreate]: AccessLevel.ReadOnly })).commands.startWork({ ...REQUEST, workItemId: w.workItemId, idempotencyKey: 'take-3' })
-    assert.deepEqual([readonly.writeState, readonly.error?.code, await status(), same.calls], [WriteState.Failed, 'permission_denied', ExecutionContextStatus.Failed, []], '接管的锚点是写门：只读即拒绝，不调 provider')
+    assert.deepEqual([readonly.writeState, readonly.error?.code, await status(), same.calls], [WriteState.Conflict, 'conflict', ExecutionContextStatus.Failed, []], '已有 run 的新任务拒绝，不调 provider')
     assert.deepEqual(await attemptKeys(w.storage), ['take-1'], '路由拒绝不记写尝试：没有收到调用的连接不是写入目标（AGENTS.md §7）')
   })
 
@@ -376,7 +376,7 @@ for (const [label, makeStorage] of ADAPTERS) {
     await w.storage.putExecutionContext({ ...(await w.storage.getExecutionContext(id)), status: ExecutionContextStatus.Provisioning, provisioningStartedAt: '2000-01-01T00:00:00.000Z', worktreeExternalId: undefined })
     const moved = recorded(createFakeDevelopmentProvider({ bindingId: 'dev-moved' }))
     const resumed = await (await recompose(w, moved.proxy)).commands.startWork({ ...REQUEST, workItemId: w.workItemId, idempotencyKey: 'stale-2' })
-    assert.deepEqual([resumed.writeState, resumed.error?.code, moved.calls], [WriteState.Failed, 'conflict', []], '续跑与终态接管同走 provisionGit 的路由：不向新连接发 listBranches / createWorktree')
+    assert.deepEqual([resumed.writeState, resumed.error?.code, moved.calls], [WriteState.Conflict, 'conflict', []], '已有运行的新任务不向离线连接发 listBranches / createWorktree')
     assert.deepEqual(await attemptKeys(w.storage), ['stale-1'], '路由拒绝不记写尝试')
   })
 
@@ -388,9 +388,9 @@ for (const [label, makeStorage] of ADAPTERS) {
     const before = [w.A.calls.length, w.B.calls.length]
     const retaken = await w.core.commands.startWork({ ...REQUEST, repositoryId: 'repo-beta', workItemId: w.workItemId, idempotencyKey: 'retake-b-2' })
     const added = [w.A.calls.slice(before[0]), w.B.calls.slice(before[1])]
-    assert.deepEqual([retaken.writeState, retaken.status], [WriteState.Saved, ExecutionContextStatus.Ready])
+    assert.equal(retaken.error.message, 'existing_execution_task_not_sent')
     assert.deepEqual(added[0], [], 'dev-a 一次都没收到')
-    assert.ok(added[1].length > 0 && added[1].every((call) => call.includes(' dev-b/')), `接管的供应只进 dev-b：${added[1]}`)
+    assert.deepEqual(added[1], [], '已有运行不再供应 Git')
   })
 
   test(`${label}：两个 Development 挂载：仓库挂载的身份属于未挂载的连接时 conflict，即使某个挂载下恰有同 id 的别家身份、第一个挂载还缺能力，两个挂载零调用（#219 验收 2，缺路由）`, async () => {

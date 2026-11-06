@@ -90,7 +90,7 @@ async function bindRepository(commands, workspaceId, repositoryId, references) {
 async function compose(storage, workspaceId, fakes) {
   const core = await composeCore({ workspace: { id: workspaceId, name: 'Routing' }, storage, providers: { planning: createFakePlanningProvider(), execution: createFakeExecutionProvider(), development: fakes.map(({ port }) => port) } })
   const workItemId = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item').entityId
-  const start = (idempotencyKey, repositoryId = REPOSITORY) => core.commands.startWork({ workItemId, repositoryId, actor: { kind: 'agent' }, idempotencyKey })
+  const start = (idempotencyKey, repositoryId = REPOSITORY) => core.commands.startWork({ task: 'Synthetic explicit task', workItemId, repositoryId, actor: { kind: 'agent' }, idempotencyKey })
   return { core, start, workItemId }
 }
 

@@ -25,7 +25,7 @@ import {
  *  诱饵数 ≤ 98 就会让目标落进第一页（变异 M9）。页大小只影响调用次数、不影响语义；调大它必须同步调大这里，
  *  否则两个用例退化成单页仍是绿的。 */
 const DECOYS = 110
-const request = (workItemId, idempotencyKey) => ({ workItemId, repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey })
+const request = (workItemId, idempotencyKey) => ({ task: 'Synthetic explicit task', workItemId, repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey })
 const workBranches = async (fixture) => (await fixture.run(['for-each-ref', '--format=%(refname:short)', 'refs/heads/work']))
   .trim().split('\n').filter((name) => name !== '')
 

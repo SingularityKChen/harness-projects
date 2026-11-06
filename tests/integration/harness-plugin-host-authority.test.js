@@ -59,7 +59,7 @@ async function executionSeed(file, fixture) {
     for (const id of ['wi-1', 'wi-2']) await storage.putExternalIdentity({ id: `${id}-identity`, entityId: id, bindingId: bound.value.bindingIds[0], externalKind: 'issue', externalId: id, role: 'primary' })
   })
 }
-const start = (key, item = 'wi-1', actorRef = forged) => ({ actorRef, idempotencyKey: key, workItemId: item, repositoryId: 'repo-alpha' })
+const start = (key, item = 'wi-1', actorRef = forged) => ({ task: 'Synthetic explicit task', actorRef, idempotencyKey: key, workItemId: item, repositoryId: 'repo-alpha' })
 
 test('real Gateway and production Host persist trusted peer, ignore forged actors, bind replay to the connection', async (t) => {
   const fixture = await fixtureFor(t)

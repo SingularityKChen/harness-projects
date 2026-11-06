@@ -314,7 +314,7 @@ test('交付谱系里的 CI 失败只进 derived 块：planningStatus 与内容�
   const workspace = { id: newWorkspaceId(), name: 'MVP-0/ci-failure', statusPolicy: StatusPolicy.ManualOnly }
   const core = await composeCore({ workspace, providers })
   const workItemId = await workItemIdOf(core)
-  const started = await core.commands.startWork({ repositoryId: REPOSITORY, actor: { kind: 'agent' }, workItemId, idempotencyKey: 'ci-failure-1' })
+  const started = await core.commands.startWork({ task: 'Synthetic explicit task', repositoryId: REPOSITORY, actor: { kind: 'agent' }, workItemId, idempotencyKey: 'ci-failure-1' })
   assert.equal(started.confirmed, true, 'git 步骤必须拿到 provider ack')
   providers.delivery.state.runs.push({
     ref: refOf(providers.delivery.gate.bindingId, 'pipeline_run', 'run-fail'),
@@ -350,7 +350,7 @@ test('Harness 所属 turn completed/error：三种状态政策均不写规划，
     const before = await statusOf(core, workItemId)
     const original = providers.planning.updatePlanningFields.bind(providers.planning)
     providers.planning.updatePlanningFields = async (...args) => { writes++; return original(...args) }
-    const result = await core.commands.startWork({ repositoryId: REPOSITORY, workItemId, actor: { kind: 'agent' }, idempotencyKey: `${policy}-${kind}`, worktreePath: '/workspace/policy-tree' })
+    const result = await core.commands.startWork({ task: 'Synthetic explicit task', repositoryId: REPOSITORY, workItemId, actor: { kind: 'agent' }, idempotencyKey: `${policy}-${kind}`, worktreePath: '/workspace/policy-tree' })
     const stored = await core.queries.getExecutionContext({ repositoryId: REPOSITORY, workItemId })
     assert.equal(result.confirmed, true)
     assert.equal(stored.runStatus, want)

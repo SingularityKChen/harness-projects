@@ -15,16 +15,18 @@ export function StartWorkSection({ target, repositories, startWork, connected, o
   readonly target: ExecutionTarget; readonly repositories: readonly StartWorkRepository[]; readonly startWork: StartWork; readonly connected: boolean
   readonly onStarted: () => void; readonly onBindRepository?: (() => void) | undefined
 }) {
-  const [open, setOpen] = useState(false), [repository, setRepository] = useState(''), [branch, setBranch] = useState('')
+  const [open, setOpen] = useState(false), [repository, setRepository] = useState(''), [branch, setBranch] = useState(''), [task, setTask] = useState('')
   const [options, setOptions] = useState<StartWorkOptions | undefined>(undefined), [result, setResult] = useState<StartWorkResult | undefined>(undefined)
   const [pending, setPending] = useState(false), [failedRead, setFailedRead] = useState(false)
   const [validated, setValidated] = useState(false)
   const generation = useRef(0), commandGeneration = useRef(0), field = useRef<DOMElement | null>(null), id = useId()
   const identity = JSON.stringify([target.workspaceId, target.workItemId]), key = JSON.stringify([identity, repositories])
   const form = useRef<FormElement | null>(null), submitAction = useRef<DOMElement | null>(null), focusTicket = useRef<{ readonly version: number } | undefined>(undefined)
+  useEffect(() => { setTask(''); setResult(undefined) }, [identity, connected, startWork])
   useEffect(() => {
     commandGeneration.current++
-    setResult(undefined); setPending(false)
+    if (!open && pending) setResult({ writeState: 'unknown', degraded: false })
+    setPending(false)
     if (open) field.current?.focus?.()
     return () => { commandGeneration.current++; focusTicket.current = undefined }
   }, [identity, open, connected, startWork])
@@ -54,15 +56,16 @@ export function StartWorkSection({ target, repositories, startWork, connected, o
     const version = ++generation.current; setOptions(undefined); setFailedRead(false)
     void startWork.options(target).then(value => { if (version === generation.current) { setOptions(value); setValidated(true) } }, () => { if (version === generation.current) setFailedRead(true) })
   }
-  const allowed = connected && !!options && selected?.available === true
+  const frozen = pending || result?.writeState === 'pending' || result?.writeState === 'unknown'
+  const allowed = (frozen || task.trim() !== '' && task.length <= 16384) && connected && !!options && selected?.available === true
   const submit = (): void => {
     if (!allowed) return
     const version = commandGeneration.current, focused = form.current?.ownerDocument?.activeElement
     focusTicket.current = focused && form.current?.contains?.(focused) ? { version } : undefined
     setPending(true)
-    void startWork.submit({ workspaceId: target.workspaceId, workItemId: target.workItemId, repositoryId: repository, ...(branch === '' ? {} : { branchName: branch }) }).then((answer) => {
+    void startWork.submit({ workspaceId: target.workspaceId, workItemId: target.workItemId, repositoryId: repository, task, ...(branch === '' ? {} : { branchName: branch }) }).then((answer) => {
       if (version !== commandGeneration.current) return
-      if (answer.reason && (['failed', 'conflict'].includes(answer.writeState) || (answer.writeState === 'local_only' && answer.contextStatus === 'failed'))) { setValidated(false); setOptions(undefined) }
+      if (answer.reason?.match(/^(capability|permission|policy) 层拒绝 /) && (['failed', 'conflict'].includes(answer.writeState) || (answer.writeState === 'local_only' && answer.contextStatus === 'failed'))) { setValidated(false); setOptions(undefined) }
       setPending(false); setResult(answer); onStarted()
     })
   }
@@ -72,9 +75,11 @@ export function StartWorkSection({ target, repositories, startWork, connected, o
   return h('section', { className: 'hp-execution', 'aria-label': '开始工作' }, executionStyles(), h('h3', null, '开始工作'),
     !open ? h('button', { className: 'hp-action', type: 'button', onClick: () => setOpen(true) }, '开始工作') : h('form', { ref: form, className: 'hp-form', onSubmit: (event: { preventDefault(): void }) => { event.preventDefault(); submit() } },
       h('p', null, options?.executionMode === 'harness' ? 'Harness 执行' : options ? '人工执行：在创建的工作树继续处理' : failedRead ? '暂时无法读取执行方式，请重新展开表单' : '正在读取执行方式'),
-      h('div', { className: 'hp-field' }, h('label', { htmlFor: `${id}-repository` }, '已绑定仓库'), h('select', { id: `${id}-repository`, ref: field, value: repository, disabled: pending, onChange: (event: { target: { value: string } }) => { setRepository(event.target.value); setResult(undefined) } },
+      h('div', { className: 'hp-field' }, h('label', { htmlFor: `${id}-repository` }, '已绑定仓库'), h('select', { id: `${id}-repository`, ref: field, value: repository, disabled: frozen, onChange: (event: { target: { value: string } }) => { setRepository(event.target.value); setTask(''); setResult(undefined) } },
         h('option', { value: '' }, '请选择仓库'), ...repositories.map((entry) => h('option', { key: entry.id, value: entry.id }, entry.id)))),
-      h('div', { className: 'hp-field' }, h('label', { htmlFor: `${id}-branch` }, '分支名（可留空）'), h('input', { id: `${id}-branch`, value: branch, disabled: pending, onChange: (event: { target: { value: string } }) => { setBranch(event.target.value); setResult(undefined) } })),
+      h('div', { className: 'hp-field' }, h('label', { htmlFor: `${id}-branch` }, '分支名（可留空）'), h('input', { id: `${id}-branch`, value: branch, disabled: frozen, onChange: (event: { target: { value: string } }) => { setBranch(event.target.value); setResult(undefined) } })),
+      h('div', { className: 'hp-field' }, h('label', { htmlFor: `${id}-task` }, '执行任务'), h('textarea', { id: `${id}-task`, value: task, required: true, maxLength: 16384, disabled: frozen, onChange: (event: { target: { value: string } }) => { setTask(event.target.value); setResult(undefined) } })),
+      h('p', null, '只发送明确填写的任务；工作项正文不会自动成为指令。'),
       repositories.find(entry => entry.id === repository)?.access === 'degraded' ? h('p', null, '仓库能力降级，结果需要确认') : null,
       bind ? h('p', null, '此仓库尚无可用路由或写权限。', onBindRepository ? h('button', { type: 'button', onClick: onBindRepository }, '绑定仓库') : '请在连接设置中绑定仓库') : null,
       selected?.reason ? h('p', { role: 'status' }, selected.reason) : null,

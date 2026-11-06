@@ -22,7 +22,7 @@ async function fixture(t, sqlite = false, providers = createFakeProviders()) {
   const core = await composeCore({ workspace, providers, storage })
   const workItemId = (await core.queries.listPlanningItems()).find((row) => row.content.contentKind === 'work_item').entityId
   const scope = { workItemId, repositoryId: 'repo-alpha' }
-  const started = await core.commands.startWork({ ...scope, actor: { kind: 'user' }, idempotencyKey: 'delivery-access' })
+  const started = await core.commands.startWork({ task: 'Synthetic explicit task', ...scope, actor: { kind: 'user' }, idempotencyKey: 'delivery-access' })
   assert.equal(started.confirmed, true)
   await providers.development.createChangeRequest({ repository: refOf(providers.development.gate.bindingId, 'repository', scope.repositoryId), head: started.branchExternalId, base: 'main', title: 'pr-canary', body: '' })
   await core.commands.refreshDeliveryFacts(scope)
@@ -95,7 +95,7 @@ test('repository target and historical context isolation: another target or key 
   dev.state.branches.push({ ...dev.state.branches[0], repository: repo })
   delivery.state.runs.push(...delivery.state.runs.map((run) => ({ ...run, repository: { ...run.repository, externalId: beta.repositoryId }, ref: { ...run.ref, externalId: `beta-${run.ref.externalId}` } })))
   for (const [scope, key] of [[history, 'history'], [beta, 'beta']]) {
-    const started = await h.core.commands.startWork({ ...scope, actor: { kind: 'user' }, idempotencyKey: key, worktreePath: key })
+    const started = await h.core.commands.startWork({ task: 'Synthetic explicit task', ...scope, actor: { kind: 'user' }, idempotencyKey: key, worktreePath: key })
     assert.equal(started.confirmed, true, JSON.stringify(started))
     await h.core.commands.refreshDeliveryFacts(scope)
     assert.ok(nodes(await h.core.queries.getDeliveryProjection(scope), 'pipeline_run').length)
@@ -141,7 +141,7 @@ test('another Development binding cannot unlock a refused repository read', asyn
   const core = await composeCore({ workspace, providers: { ...h.providers, development: [h.providers.development, other] } })
   await registerRepository(h.storage, defaultIdFactory, workspace.id, 'repo-beta', [other.gate.bindingId])
   const beta = { ...h.scope, repositoryId: 'repo-beta' }
-  assert.equal((await core.commands.startWork({ ...beta, actor: { kind: 'user' }, idempotencyKey: 'other-binding', worktreePath: 'beta-binding' })).confirmed, true)
+  assert.equal((await core.commands.startWork({ task: 'Synthetic explicit task', ...beta, actor: { kind: 'user' }, idempotencyKey: 'other-binding', worktreePath: 'beta-binding' })).confirmed, true)
   await core.commands.refreshDeliveryFacts(beta)
   h.providers.development.listBranches = async () => denied(); await core.commands.refreshDeliveryFacts(h.scope)
   await core.commands.refreshDeliveryFacts(beta)
@@ -195,7 +195,7 @@ test('historical delivery facts remain unavailable after creating a fresh Core o
  const h = await fixture(t, true);
  const otherItem = (await h.core.queries.listPlanningItems()).find(row => row.content.contentKind === 'work_item' && row.entityId !== h.scope.workItemId).entityId;
  const history = {...h.scope,workItemId:otherItem};
- assert.equal((await h.core.commands.startWork({...history,actor:{kind:'user'},idempotencyKey:'history-restart',worktreePath:'history-restart'})).confirmed,true);
+ assert.equal((await h.core.commands.startWork({ task: 'Synthetic explicit task',...history,actor:{kind:'user'},idempotencyKey:'history-restart',worktreePath:'history-restart'})).confirmed,true);
  await h.core.commands.refreshDeliveryFacts(history);
  assert.ok(nodes(await h.core.queries.getDeliveryProjection(history),'pipeline_run').length);
  h.providers.delivery.listPipelineRuns = async () => denied();
@@ -313,7 +313,7 @@ for (const sqlite of [false, true]) test(`${sqlite ? 'SQLite roots' : 'Memory'} 
   const owner = storage => composeCore({ workspace, providers: h.providers, storage })
   const other = await owner(workspaceStorage()), original = h.providers.development.getRepository.bind(h.providers.development)
   assert.ok(nodes(await other.queries.getDeliveryProjection(h.scope), 'pipeline_run').length, 'successful operation reads leave no pending marker')
-  const request = { ...h.scope, workItemId: item, actor: { kind: 'user' }, idempotencyKey: 'operation-read-denial' }
+  const request = { task: 'Synthetic explicit task', ...h.scope, workItemId: item, actor: { kind: 'user' }, idempotencyKey: 'operation-read-denial' }
   h.providers.development.getRepository = async () => denied()
   assert.equal((await h.core.commands.startWork(request)).error.code, 'permission_denied')
   const reconstructed = await owner(workspaceStorage()), owners = [h.core, other, reconstructed]
@@ -344,7 +344,7 @@ for (const sqlite of [false, true]) test(`${sqlite ? 'SQLite roots' : 'Memory'} 
 
 for (const sqlite of [false, true]) for (const refusals of [1, 2]) test(`${sqlite ? 'SQLite' : 'Memory'} operation read marker failure and late Delivery success preserve newer denied health${refusals === 2 ? ' after two failed actual refusals' : ''}`, async t => {
   const h = await fixture(t, sqlite), item = (await otherWorkItems(h))[0].entityId, dev = h.providers.development, transaction = h.storage.transaction.bind(h.storage), original = dev.getRepository.bind(dev)
-  const request = { ...h.scope, workItemId: item, actor: { kind: 'user' }, idempotencyKey: 'marker-failure' }
+  const request = { task: 'Synthetic explicit task', ...h.scope, workItemId: item, actor: { kind: 'user' }, idempotencyKey: 'marker-failure' }
   let calls = 0
   dev.getRepository = async (...args) => { calls++; return original(...args) }
   h.storage.transaction = work => transaction(tx => work(new Proxy(tx, { get(object, key) {
@@ -389,7 +389,7 @@ for (const sqlite of [false, true]) for (const confirmed of [false, true]) test(
   const other = await composeCore({ workspace, providers: h.providers, storage: h.storage })
   if (confirmed) assert.equal((await other.commands.refreshDeliveryFacts(h.scope)).applied, true)
   const operation = holdFirst(dev, 'getRepository', unavailable())
-  const starting = other.commands.startWork({ ...h.scope, workItemId: item, actor: { kind: 'user' }, idempotencyKey: 'ordinary-failed-operation' }); await operation.waiting
+  const starting = other.commands.startWork({ task: 'Synthetic explicit task', ...h.scope, workItemId: item, actor: { kind: 'user' }, idempotencyKey: 'ordinary-failed-operation' }); await operation.waiting
   try {
     assert.equal(nodes(await h.core.queries.getDeliveryProjection(h.scope), 'pipeline_run').length, 0, 'old owner count must not cancel the new generation marker')
     if (confirmed) {
@@ -405,7 +405,7 @@ for (const sqlite of [false, true]) for (const confirmed of [false, true]) test(
 for (const sqlite of [false, true]) for (const action of ['operation', 'facts']) test(`${sqlite ? 'SQLite' : 'Memory'} late actual denial versus newer ${action} proof`, async t => {
   const h = await fixture(t, sqlite), dev = h.providers.development, held = holdFirst(dev, 'getRepository', denied())
   const items = await otherWorkItems(h)
-  const request = index => ({ ...h.scope, workItemId: items[index].entityId, actor: { kind: 'user' }, idempotencyKey: `late-denial-${index}` })
+  const request = index => ({ task: 'Synthetic explicit task', ...h.scope, workItemId: items[index].entityId, actor: { kind: 'user' }, idempotencyKey: `late-denial-${index}` })
   const counts = [dev.state.branches.length, dev.state.worktrees.length, h.providers.execution.state.runs.length]
   const older = h.core.commands.startWork(request(0)); await held.waiting
   const other = await composeCore({ workspace, providers: h.providers, storage: h.storage })

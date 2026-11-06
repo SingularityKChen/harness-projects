@@ -77,6 +77,7 @@ export interface StartWorkView {
 }
 
 export interface StartWorkCommandInput extends CommandEnvelope {
+  readonly task: string
   readonly workItemId: string
   readonly repositoryId: string
   readonly branchName?: string
@@ -113,6 +114,7 @@ function toStartWorkView(result: StartWorkResult): StartWorkView {
 
 async function runStartWork(core: CoreApi, input: StartWorkCommandInput): Promise<CommandResult<StartWorkView>> {
   const result = await core.commands.startWork({
+    task: input.task,
     workItemId: input.workItemId,
     repositoryId: input.repositoryId,
     actor: { kind: input.actorRef.kind, ...(input.actorRef.id === undefined ? {} : { id: input.actorRef.id }) },
@@ -278,6 +280,7 @@ export function createControllerCommands(core: CoreApi): ControllerCommands {
       try {
         const value = captureIdentity(input).value
         if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Start Work 请求必须是普通对象')
+        if (Object.keys(value).some(key => !['task', 'actorRef', 'idempotencyKey', 'workItemId', 'repositoryId', 'branchName', 'worktreePath'].includes(key))) throw new TypeError('未知 Start Work 请求字段')
         captured = value as StartWorkCommandInput
         if (captured.actorRef === null || captured.actorRef === undefined) throw new TypeError('actorRef 必须是普通对象')
       } catch (error) {

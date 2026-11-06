@@ -22,7 +22,7 @@ async function setup(kind, fallback = false) {
   }
   const workspace = { id: `intent-${seq++}`, name: 'intent' }, options = { providers, storage, workspace, clock: time.clock }, core = await composeCore(options)
   const workItemId = (await core.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item').entityId
-  const request = { workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' }, idempotencyKey: 'first', worktreePath: '.worktrees/requested' }
+  const request = { task: 'Synthetic explicit task', workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' }, idempotencyKey: 'first', worktreePath: '.worktrees/requested' }
   return { ...options, core, request, time, contextId: contextIdFor(workspace.id, workItemId, 'repo-alpha') }
 }
 const start = (w, key = 'first') => w.core.commands.startWork({ ...w.request, idempotencyKey: key })
@@ -109,10 +109,11 @@ for (const kind of ['Fake', 'SQLite']) {
     assert.deepEqual([result.runExternalId, result.fallback], [run.providerRef.externalId, fallback ? 'manual_fallback' : undefined])
     assert.deepEqual([view.runExternalId, view.fallback], [run.providerRef.externalId, fallback ? 'manual_fallback' : undefined])
     if (status === 'failed') {
-      const results = [await start(w), await start(w, 'new-key')]
+      const results = [await start(w)]
+      assert.equal((await start(w, 'new-key')).error.message, 'existing_execution_task_not_sent')
       if (kind === 'SQLite') { w.storage.close(); w.storage = sqlite(w.storage.location) }
       else w.storage = createFakeStorage(exportFakeStorageState(w.storage))
-      w.core = await composeCore(w); results.push(await start(w, 'restart'))
+      w.core = await composeCore(w); results.push(await start(w)); assert.equal((await start(w, 'restart')).error.message, 'existing_execution_task_not_sent')
       for (const r of results) assert.deepEqual([r.runExternalId, r.fallback, r.confirmed], [run.providerRef.externalId, fallback ? 'manual_fallback' : undefined, true])
     }
     assert.equal(starts, 1, '直接计 startRun 调用，不靠 Fake 幂等隐藏重复启动')

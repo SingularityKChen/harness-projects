@@ -64,7 +64,7 @@ export async function ready(w) {
   await w.storage.putEntity({ id: w.record.id, kind: 'execution_context' })
   await w.storage.putEntity({ id: worktreeEntityId(w.workspace.id, w.scope.repositoryId, w.scope.workItemId), kind: 'worktree' })
   await w.storage.putExecutionContext({ ...w.record, status: 'failed', branchExternalId: undefined, worktreeExternalId: undefined })
-  const start = (key) => w.core.commands.startWork({ ...w.scope, branchName: input.head, actor: { kind: 'user' }, idempotencyKey: key })
+  const start = (key) => w.core.commands.startWork({ task: 'Synthetic explicit task', ...w.scope, branchName: input.head, actor: { kind: 'user' }, idempotencyKey: key })
   const supplied = await start('provision-ready')
   assert.equal(supplied.confirmed, true, JSON.stringify(supplied))
   return start

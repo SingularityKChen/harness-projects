@@ -16,7 +16,7 @@ for (const adapter of ['fake', 'sqlite']) test(`${adapter}: Controller runStatus
   t.after(() => storage.close?.())
   const core = await composeCore({ workspace: { name: 'Execution' }, providers, storage }), controller = createController(core)
   const workItemId = (await core.queries.listPlanningItems()).find((item) => item.content.contentKind === 'work_item').entityId
-  await core.commands.startWork({ workItemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'start' })
+  await core.commands.startWork({ task: 'Synthetic explicit task', workItemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'start' })
   const workspaceId = (await controller.baseline()).workspace.id, id = contextIdFor(workspaceId, workItemId, 'repo-alpha'), runId = runIdFor(id)
   const run = await storage.getExecutionRun(runId), record = await storage.getExecutionContext(id)
   assert.ok(run); assert.ok(record)

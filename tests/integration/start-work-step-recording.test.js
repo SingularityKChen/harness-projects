@@ -26,7 +26,7 @@ import { ExecutionContextStatus, ProviderErrorCode, WriteState, newWorkspaceId }
 import { FaultKind, createFakeProviders, exportFakeStorageState, refOf } from '@harness-projects/provider-fake'
 
 const WORKSPACE = { id: newWorkspaceId(), name: 'recovery' }
-const REQUEST = { repositoryId: 'repo-alpha', actor: { kind: 'agent' } }
+const REQUEST = { task: 'Synthetic explicit task', repositoryId: 'repo-alpha', actor: { kind: 'agent' } }
 const LEASE_MS = 31_000
 
 /** 可控时钟：租约过期由测试显式决定，不靠真实等待。 */
@@ -245,11 +245,11 @@ test('重放省略 branchName 时仍然用已决定的身份，不回落到默�
   localGitLikeBranch(providers, control)
   refuseWorktreeOnce(providers)
 
-  // 记录执行步拿到的 run command：序列已经决定了身份，第三步必须用它，而不是本次请求重新算出来的名字。
+  // 记录执行步的任务与目录：任务原文不拼入分支，目录唯一来自 Git ack。
   const commands = []
   const originalStartRun = providers.execution.startRun.bind(providers.execution)
   providers.execution.startRun = async (input) => {
-    commands.push(input.command)
+    commands.push({ command: input.command, workingDirectory: input.workingDirectory })
     return originalStartRun(input)
   }
 
@@ -270,8 +270,8 @@ test('重放省略 branchName 时仍然用已决定的身份，不回落到默�
     '不得因为省略 branchName 就按默认名建出第二个分支',
   )
   assert.deepEqual(
-    commands, ['harness run work/alpha'],
-    '第三步（启动执行）必须用序列已决定的分支身份；回落到本次请求的默认名会指向一个不存在的分支',
+    commands, [{ command: REQUEST.task, workingDirectory: worktrees[0].path }],
+    '任务保持原文，执行目录来自承载已决定分支的工作树 ack',
   )
 })
 

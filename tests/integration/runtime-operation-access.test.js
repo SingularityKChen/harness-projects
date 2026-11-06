@@ -20,7 +20,7 @@ async function fixture(sqlite = false, t) {
   const core = await composeCore({ workspace: { id: 'runtime-operations', name: 'Operations' }, providers: { ...p, executionFallback: fallback }, storage })
   const items = (await core.queries.listPlanningItems()).filter(row => row.content.contentKind === 'work_item')
   const item = items[0].entityId
-  const request = { workItemId: item, repositoryId: 'repo-alpha', idempotencyKey: 'original-intent', actor: { kind: 'human' } }
+  const request = { task: 'Synthetic explicit task', workItemId: item, repositoryId: 'repo-alpha', idempotencyKey: 'original-intent', actor: { kind: 'human' } }
   return { p, fallback, denied, core, storage, request, otherItem: items[1].entityId, id: contextIdFor('runtime-operations', item, 'repo-alpha') }
 }
 for (const sqlite of [false, true]) {
