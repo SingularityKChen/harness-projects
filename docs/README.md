@@ -25,6 +25,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-06-pr549-pr551-review-followup](exec-plan/active/2026-11-06-pr549-pr551-review-followup.md) | 三项能力 MMP 评审、非阻塞修复与条件收尾 |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed

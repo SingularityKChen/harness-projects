@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [2026-11-06-pr549-pr551-mmp-review](2026-11-06-pr549-pr551-mmp-review.md) | 明确任务交接、原生 Draft 与 Markdown 阅读三个工程闭环 | 首轮无 P0/P1；两项 P2 修复、独立复评及当前版本条件收尾，人工接受另计 |
 | [2026-11-02-approved-pr-integration](2026-11-02-approved-pr-integration.md) | 全部开放PR接管、Storage/权限/浏览器栈与CI依赖升级 | 按明确授权逐实际base复评、当前head门禁和rebase回读；产品/R1独立 |
 | [2026-11-02-pr501-pr504-mmp-review](2026-11-02-pr501-pr504-mmp-review.md) | 当前指南、Core准则、组合浏览器与持续CI | 各自矩阵与当前head门禁；必要上游栈保持独立验收 |
 | [2026-10-30-pr476-pr480-mmp-review](2026-10-30-pr476-pr480-mmp-review.md) | 四项UI反馈、只读范围、连接诊断与详情重排 | 首轮无P0/P1；两P2由本会话修复、独立复评后按逐PR当前门禁与直接条件授权rebase收尾 |
