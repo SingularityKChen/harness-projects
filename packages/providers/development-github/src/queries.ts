@@ -4,7 +4,7 @@
  * 两个变更请求操作在文本末尾拼接同一个片段（GraphQL 要求片段定义与操作在同一文档），所以 list 与 get 解码的是同一组字段。
  */
 const CHANGE_REQUEST_FIELDS = `fragment DevelopmentChangeRequestFields on PullRequest {
-  id number title body state url updatedAt headRefName headRefOid isCrossRepository reviewDecision
+  id number title body state isDraft url updatedAt headRefName headRefOid isCrossRepository reviewDecision
 }`
 
 const DEVELOPMENT_REPOSITORY = `query DevelopmentRepository($owner: String!, $name: String!) {

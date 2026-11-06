@@ -43,7 +43,7 @@ export type FakeCommitRecord = { ref: cap.ExternalObjectRef; sha: string; messag
 export type FakeWorktreeRecord = { repository: cap.ExternalObjectRef; ref: cap.ExternalObjectRef; path: string; branch: string }
 export type FakeChangeRequestRecord = {
   ref: cap.ExternalObjectRef; repository: cap.ExternalObjectRef; number: number
-  title: string; body: string; state: string; head: string; headCommit: string; sourceVersion: string
+  title: string; body: string; state: string; isDraft?: boolean; head: string; headCommit: string; sourceVersion: string
   /** 精确解析出的分支身份；直接 sha 输入与直接构造的记录都可以是 undefined。 */
   headBranch: string | undefined
   /** 来源的原始审核枚举，创建路径默认 unknown；投影时 union 之外的值一律读成 unknown（`toChangeRequest`）。 */
@@ -240,6 +240,9 @@ export class FakeDevelopmentProvider implements cap.DevelopmentProvider {
     if (blocked !== undefined) return blocked
     if (!this.flags.changeRequestCreate) return this.gate.unsupported(cap.CapabilityKey.DevelopmentChangeRequestCreate)
     if (this.knownRepository(input.repository) === undefined) return this.gate.notFound('仓库')
+    let draft: boolean | undefined
+    try { draft = input.draft } catch { return providerFail(ProviderErrorCode.InvalidInput, '草稿选择无法读取') }
+    if (draft !== undefined && typeof draft !== 'boolean') return providerFail(ProviderErrorCode.InvalidInput, '草稿选择必须是布尔值')
     if (this.faultsSwitch.isOn(FaultKind.AmbiguousCreate)) return this.gate.ambiguous('创建变更请求')
     const branch = this.branchOf(input.repository, input.head)
     const head = branch?.headCommit ?? input.head
@@ -247,7 +250,7 @@ export class FakeDevelopmentProvider implements cap.DevelopmentProvider {
     this.state.seq += 1
     const record: FakeChangeRequestRecord = {
       ref: refOf(this.gate.bindingId, EntityKind.ChangeRequest, `pr-${this.state.seq}`), repository: input.repository,
-      number: this.state.seq, title: input.title, body: input.body, state: 'open', head: input.head, headCommit: head, sourceVersion: head,
+      number: this.state.seq, title: input.title, body: input.body, state: 'open', isDraft: draft ?? false, head: input.head, headCommit: head, sourceVersion: head,
       headBranch: branch?.name, reviewState: 'unknown',
     }
     this.state.changeRequests.push(record)
@@ -266,7 +269,7 @@ const isReviewState = (value: string): value is cap.ProviderReviewState => REVIE
 function toChangeRequest(record: FakeChangeRequestRecord): cap.ProviderChangeRequest {
   return {
     ref: record.ref, number: record.number, title: record.title, body: record.body,
-    state: record.state, sourceVersion: record.sourceVersion,
+    state: record.state, ...(record.isDraft === undefined ? {} : { isDraft: record.isDraft }), sourceVersion: record.sourceVersion,
     // 来源出现 union 之外的枚举（例如 dismissed）时投影为 unknown，绝不透传、也不默认 approved。
     headBranch: record.headBranch, reviewState: isReviewState(record.reviewState) ? record.reviewState : 'unknown',
   }

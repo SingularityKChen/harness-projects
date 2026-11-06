@@ -16,7 +16,7 @@ export function platform(scenario = {}, options = {}) {
   const ref = (name) => ({ name, prefix: 'refs/heads/', repository: { id: repositoryId }, target: { __typename: 'Commit', oid: commitOf(name) } })
   const preflight = { repository: { id: repositoryId, nameWithOwner: 'example/project', head: ref(input.head), base: ref(input.base) } }
   const node = (data, index) => ({
-    __typename: 'PullRequest', id: `PR_${index}`, number: index, title: data.title, body: data.body, state: 'OPEN',
+    __typename: 'PullRequest', id: `PR_${index}`, number: index, title: data.title, body: data.body, state: 'OPEN', isDraft: data.draft,
     url: `https://github.com/example/project/pull/${index}`, updatedAt: '2026-10-30T00:00:00Z',
     headRefName: data.headRefName, baseRefName: data.baseRefName, headRefOid: sha,
     isCrossRepository: false, reviewDecision: null, repository: { id: repositoryId }, headRepository: { id: repositoryId },
@@ -41,7 +41,8 @@ export function platform(scenario = {}, options = {}) {
     if (operation === 'DevelopmentCreateChangeRequest') {
       assert.deepEqual(Object.keys(v), ['input'])
       const data = v.input
-      assert.deepEqual(Object.keys(data).sort(), ['baseRefName', 'body', 'headRefName', 'headRepositoryId', 'repositoryId', 'title'])
+      assert.deepEqual(Object.keys(data).sort(), ['baseRefName', 'body', 'draft', 'headRefName', 'headRepositoryId', 'repositoryId', 'title'])
+      assert.equal(typeof data.draft, 'boolean')
       assert.deepEqual([data.repositoryId, data.headRepositoryId], [repositoryId, repositoryId])
       assert.ok(branches.includes(data.headRefName) && branches.includes(data.baseRefName), '必须使用本仓分支')
       assert.notEqual(data.headRefName, data.baseRefName, 'GitHub 拒绝 head==base')

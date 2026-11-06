@@ -119,7 +119,7 @@ export type StartWorkExternalIntent = StartWorkExternalOperation & {
   readonly contextId: ExecutionContextId; readonly ownerGeneration: number; readonly bindingId: ProviderBindingId; readonly state: WriteState
 }
 export type ChangeRequestExternalIntent = {
-  readonly operation: 'createChangeRequest'; readonly input: ProviderCreateChangeRequestInput
+  readonly operation: 'createChangeRequest'; readonly input: ProviderCreateChangeRequestInput & { readonly draft: boolean }
   readonly contextId: ExecutionContextId; readonly ownerGeneration: number; readonly bindingId: ProviderBindingId; readonly state: WriteState
   readonly worktree: string; readonly confirmedRef?: ExternalObjectRef
 }
@@ -147,11 +147,11 @@ export function externalIntentSnapshot(value: ExternalIntent): ExternalIntent {
   const base = { contextId: text(contextId) as ExecutionContextId, ownerGeneration, bindingId: text(bindingId) as ProviderBindingId, state }
   if (operation === 'createChangeRequest') {
     if (Object.keys(value).some((key) => !['operation', 'input', 'contextId', 'ownerGeneration', 'bindingId', 'state', 'worktree', 'confirmedRef'].includes(key))
-      || Object.keys(input).some((key) => !['repository', 'head', 'base', 'title', 'body'].includes(key))) return fail()
-    const { repository, head, base: targetBase, title, body } = input
+      || Object.keys(input).some((key) => !['repository', 'head', 'base', 'title', 'body', 'draft'].includes(key))) return fail()
+    const { repository, head, base: targetBase, title, body, draft } = input
     const { worktree, confirmedRef } = value
-    if (typeof body !== 'string') return fail()
-    return { ...base, operation, worktree: text(worktree), input: { repository: ref(repository, 'repository'), head: text(head), base: text(targetBase), title: text(title), body },
+    if (typeof body !== 'string' || typeof draft !== 'boolean') return fail()
+    return { ...base, operation, worktree: text(worktree), input: { repository: ref(repository, 'repository'), head: text(head), base: text(targetBase), title: text(title), body, draft },
       ...(confirmedRef === undefined ? {} : { confirmedRef: ref(confirmedRef, 'change_request') }) }
   }
   if (operation === 'createBranch') {

@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(new URL('../../packages/ui/package.json', import.meta.url)), React = require('react')
 const scope = { workspaceId: 'ws', workItemId: 'wi', repositoryId: 'repo' }, intent = { ...scope, base: 'main', title: 'Title', body: 'Body' }
 const wire = (state) => ({ writeState: state, saving: state === 'pending', authoritative: ['confirmed', 'reconciled'].includes(state), value: { phase: state, ...(['confirmed', 'reconciled'].includes(state) ? { ref: { bindingId: 'dev', objectKind: 'change_request', externalId: 'PR_1' }, entityId: 'pr-id', lineageStale: false } : {}) } })
-const operation = { kind: 'operation', operationId: 'op-1', state: 'unknown', currentTarget: true, targetStamp: 'target-1', head: 'feature/work', base: 'main', title: '原请求' }
+const operation = { kind: 'operation', operationId: 'op-1', state: 'unknown', currentTarget: true, targetStamp: 'target-1', head: 'feature/work', base: 'main', title: '原请求', draft: true }
 const read = (value = operation) => ({ ...scope, operation: value })
 test('PR creator observes durable operation after lost response and resumes without replaying intent', async () => {
   const calls = []; let release, keys = 0
@@ -119,4 +119,32 @@ test('operation decoder accepts each documented primitive enum without coercion'
     const creator = client.createChangeRequestCreator({ operation: async () => read(view) }, { kind: 'user' })
     assert.deepEqual((await creator.operation(scope)).operation, view)
   }
+})
+
+test('Draft checkbox defaults false, submits explicit choice, freezes pending and resets owner', async () => {
+  const { CreateChangeRequestSection } = await import('../../packages/ui/src/create-change-request-section.ts')
+  let submitted, release
+  const props = { scope, connected: true, creator: { operation: async () => read({ kind: 'none' }), submit: (intent) => { submitted = intent; return new Promise((done) => { release = done }) } }, onConfirmed() {} }
+  const render = componentHarness(CreateChangeRequestSection, props)
+  const checkbox = () => render().props.children.flat().find((node) => node?.type === 'label' && node.props.children?.[1]?.props.type === 'checkbox').props.children[1]
+  render(); await Promise.resolve(); assert.equal(checkbox().props.checked, false)
+  checkbox().props.onChange({ target: { checked: true } })
+  assert.match(JSON.stringify(render()), /创建草稿 PR/)
+  render().props.onSubmit({ preventDefault() {} }); assert.equal(submitted.draft, true); assert.equal(checkbox().props.disabled, true)
+  release({ writeState: 'failed' }); await Promise.resolve()
+  props.scope = { ...scope, workItemId: 'new' }; render(); await Promise.resolve(); assert.equal(checkbox().props.checked, false)
+})
+test('client transmits Draft boolean and rejects malformed durable summary', async () => {
+  const calls = [], creator = client.createChangeRequestCreator({ create: async (...args) => { calls.push(args); return wire('unknown') }, operation: async () => read({ ...operation, draft: 'true' }) }, { kind: 'user' }, () => 'key')
+  await creator.submit({ ...intent, draft: true }); assert.equal(calls[0].at(-1), true)
+  await assert.rejects(() => creator.operation(scope), TypeError)
+})
+
+test('client snapshots Draft once before await and rejects explicit nonboolean without dispatch', async () => {
+  const calls = [], creator = client.createChangeRequestCreator({ create: async (...args) => { calls.push(args); return wire('unknown') } }, { kind: 'user' }, () => 'key')
+  for (const draft of [null, 'true', {}, 0]) await creator.submit({ ...intent, draft })
+  assert.equal(calls.length, 0)
+  let reads = 0, draft = true
+  const pending = creator.submit({ ...intent, get draft() { reads++; return draft } }); draft = false
+  await pending; assert.equal(reads, 1); assert.equal(calls[0].at(-1), true)
 })

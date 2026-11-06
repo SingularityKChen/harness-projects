@@ -64,11 +64,11 @@ function decodeChangeRequestNode(raw: unknown, bindingId: ProviderBindingId): Ch
   const node = obj(raw)
   const [externalId, headRefName] = [id(node.id), id(node.headRefName)]
   const number = Number.isInteger(node.number) && Number(node.number) > 0 ? Number(node.number) : fail()
-  if (typeof node.isCrossRepository !== 'boolean') fail()
+  if (typeof node.isCrossRepository !== 'boolean' || (Object.hasOwn(node, 'isDraft') && typeof node.isDraft !== 'boolean')) fail()
   const item: ProviderChangeRequest = {
     nativeIdentity: { namespace: 'github.com/graphql/PullRequest', id: externalId },
     ref: { bindingId, objectKind: 'change_request', externalId, url: str(node.url) }, number, title: str(node.title), body: str(node.body),
-    state: str(node.state).toLowerCase(), sourceVersion: sha(node.headRefOid),
+    state: str(node.state).toLowerCase(), ...(typeof node.isDraft === 'boolean' ? { isDraft: node.isDraft } : {}), sourceVersion: sha(node.headRefOid),
     // fork 上的同名分支不是本仓库的分支身份：headBranch 只在 head 与 base 同仓库时才有。
     headBranch: node.isCrossRepository ? undefined : headRefName, reviewState: reviewStateOf(node.reviewDecision),
   }
@@ -108,7 +108,7 @@ export function decodeCreatePreflight(data: Obj, owner: string, name: string, he
 export function decodeCreatedChangeRequest(data: Obj, bindingId: ProviderBindingId, repositoryId: string, input: ProviderCreateChangeRequestInput): ProviderChangeRequest {
   const node = obj(obj(data.createPullRequest).pullRequest)
   if (node.__typename !== 'PullRequest' || id(obj(node.repository).id) !== repositoryId || id(obj(node.headRepository).id) !== repositoryId
-    || node.isCrossRepository !== false || node.headRefName !== input.head || node.baseRefName !== input.base
+    || typeof node.isDraft !== 'boolean' || node.isDraft !== input.draft || node.isCrossRepository !== false || node.headRefName !== input.head || node.baseRefName !== input.base
     || node.title !== input.title || node.body !== input.body || !Number.isSafeInteger(node.number)) fail()
   return decodeChangeRequestNode(node, bindingId).item
 }

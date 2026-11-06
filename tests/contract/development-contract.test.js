@@ -334,3 +334,15 @@ test('NODE_TEST_CONTEXT 负控：带该变量会 skip 全部用例且零退出�
   assert.notEqual(clean.code, 0, `经 runAdapter 的坏 adapter 必须非零退出；为零说明 NODE_TEST_CONTEXT 未被删除，判别力已丧失。输出：\n${clean.output}`)
   assert.ok(clean.failures.some((message) => message.includes('不得改动任何对象')), '干净运行必须命中具名副作用断言')
 })
+
+test('fake Draft creation captures boolean once and rejects bad values without objects', async () => {
+  const provider = baseProvider()
+  for (const draft of [null, 'true', {}, 1]) {
+    const before = provider.state.changeRequests.length
+    assert.equal((await provider.createChangeRequest({ ...changeRequestInput, draft })).ok, false)
+    assert.equal(provider.state.changeRequests.length, before)
+  }
+  let reads = 0
+  const result = await provider.createChangeRequest({ ...changeRequestInput, get draft() { reads++; return reads === 1 } })
+  assert.equal(result.ok, true); assert.equal(result.value.isDraft, true); assert.equal(reads, 1)
+})
