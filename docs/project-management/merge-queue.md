@@ -105,6 +105,18 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 ## 4. 当前队列
 
+### PR #549–#551（2026-11-06）
+
+人类本会话具体条件授权及风险矩阵见 [本轮评审](../review/2026-11-06-pr549-pr551-mmp-review.md)。三个独立 main 分支；顺序只是合成操作序列，不建立规划依赖。
+
+| 位置 | PR | 分支 | 交付 | 依赖 | 已知冲突点与解法 |
+|---|---|---|---|---|---|
+| 1 | #549 | `feature/start-work-task-handoff` | #547 明确任务交接 | 无 | 承载批次评审、计划与索引；按当前版本门禁收尾 |
+| 2 | #550 | `feature/draft-pull-request` | #548 原生 Draft | 无硬依赖 | 与前序两份 Host ABI 测试冲突：保留 task 和 draft 参数及全部断言；Completed 索引全保留 |
+| 3 | #551 | `fix/markdown-readability` | Refs #538/#542 阅读修复 | 无硬依赖 | P2 字面量修复独立复评；Completed 索引全保留，人工 Desktop AC 保持开放 |
+
+仓库外完整前序初始预演已验证冲突范围；最终修复版本重测。每条合入后 fetch 真实 main，重新核对下一条 head/base、产品树、CI/PR Fast Gate、threads 与 issue 双向关联；不沿用旧批准。共享历史恢复锚点为 `refs/backup/pr<N>-before-mmp-review-20261106`，以精确 lease 发布，只用预期 head 的 rebase merge。父项、模型和 R1 不随工程合入接受。
+
 ### PR #529–#531（2026-11-04）
 
 本轮评审与人类条件授权见 `docs/review/2026-11-04-pr529-pr531-mmp-review.md`；初始base `f5ae377d98c43ed216f680cb72e5f35d73a2b8e1`。上述三个初始head的六顺序树相同，临时clone线性预演无冲突；当前main移动后仍须逐条重锁，不沿用旧批准。
