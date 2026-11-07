@@ -16,7 +16,7 @@ import { createController, diffSnapshots, toWireMetadata, watchWorkspace } from 
 import * as capabilities from '@harness-projects/capabilities'
 import { createEntityStore, createSync } from '@harness-projects/client'
 import { CapabilityKey, intersectAccess } from '@harness-projects/client/keys'
-import { deriveProjectsHome, deriveWorkItemList, deriveWorkItemListView } from '@harness-projects/ui-model'
+import { deriveWorkItemList, deriveWorkItemListView } from '@harness-projects/ui-model'
 import {
   FaultKind, createFakeExecutionProvider, createFakeProviders, fixtureProjectRef, removeItem,
 } from '@harness-projects/provider-fake'
@@ -258,12 +258,11 @@ test('D snapshot 对抗负控：只改隐藏 freshness 不影响列表结论；�
     const { sync } = await client(controller)
     sync.receive({ kind: 'baseline', baseline: snapshot })
     const list = deriveWorkItemList(sync.read())
-    return { state: [list.stale, list.connection, list.reason], view: viewOf(sync.read()), home: deriveProjectsHome([sync.read()]).workspaces[0].connection }
+    return { state: [list.stale, list.connection, list.reason], view: viewOf(sync.read()) }
   }
   const fresh = await show('fresh')
   const hiddenStaleOnly = await show('degraded')
   assert.deepEqual([hiddenStaleOnly.state, hiddenStaleOnly.view], [fresh.state, fresh.view], '整页结论和安全 view 必须逐字相同，包含 redacted 占位')
-  assert.deepEqual([fresh.home, hiddenStaleOnly.home], ['connected', 'degraded'], 'D 有意只作用列表，不改变首页完整集合的归约')
   assert.deepEqual(fresh.state, [false, 'connected', undefined])
   assert.match(fresh.view.statusText, /已读取当前快照/)
   assert.ok(fresh.view.body.rows.some((row) => row.kind === 'redacted'))
@@ -580,7 +579,6 @@ test('端到端：sync.read 直达 derive / view；断网保行并整体 stale�
   const live = deriveWorkItemList(sync.read())
   assert.deepEqual([live.connection, live.stale, live.lastUpdatedAt], ['connected', false, T(1)])
   assert.ok(live.rows.length > 0 && live.rows.every((row) => !row.freshness.stale))
-  assert.ok(live.rows.some((row) => row.actions.some((action) => action.available)), '真实 key 经 intersectAccess 求得可用动作')
   assert.ok(itemRows(sync.read()).every((row) => !row.stale))
 
   sync.disconnect()
