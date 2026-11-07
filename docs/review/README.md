@@ -24,15 +24,15 @@ gh pr checks <n>          # 哪些检查真的跑过、结果是什么
 
 | 改动面 | 最小证据 |
 |---|---|
-| 包内行为（`packages/*/src`） | `pnpm test`（契约 + 相关单测），必要时先在本地看到失败 |
+| 包内行为（`packages/*/src`） | `pnpm test:file <相关测试文件>`；优先现有判别用例，仅为独有风险补测 |
 | 跨包结构与依赖 | `pnpm run boundaries`（依赖边矩阵） |
 | 门禁与 CI | 在 PR 上确认检查名出现且通过；改检查名要同时改保护配置与 `AGENTS.md` §9.2 |
 | 工程配置（`package.json`、`tsconfig*`、`pnpm-lock.yaml`） | `pnpm install --frozen-lockfile` + `pnpm verify` |
-| 文档 | 文档内命令逐条执行过一次；链接匿名可访问 |
+| 文档 | 检查本次改动的链接和命令；不重跑历史记录 |
 | 发布面（`README`、`LICENSE`、`.gitignore`） | 链接 / 许可证识别 / 忽略规则的回读结果 |
 | 外部状态（GitHub 项目、保护配置、webhook） | 创建后**回读**一次，并说明 revert 不能回退这部分 |
 
-拿不到证据时，如实写"未验证 + 原因"，而不是省略这一栏。
+验收只列本次闭环与独有风险，复用已有结果，不要求新增逐函数清单或重复矩阵。拿不到证据时写明未验证项与原因。
 
 ## 3. 评审者：必查项
 
@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [2026-11-07-pr571-pr579-mmp-review](2026-11-07-pr571-pr579-mmp-review.md) | 五项代码、历史校验、CI 与展示投影精简 | 无 P0/P1；一 P2、一 P3 修复独立复评，逐当前 head 条件 rebase 收尾；产品/R1 另计 |
 | [2026-11-07-pr559-pr565-mmp-review](2026-11-07-pr559-pr565-mmp-review.md) | 持久运行身份、执行设置恢复、来源编号与原生 PR 关联五闭环 | 首轮一 P1、三 P2、一 P3；分派根因修复、独立复评及逐当前 head 条件收尾，安装与 R1 接受另计 |
 | [2026-11-06-pr549-pr551-mmp-review](2026-11-06-pr549-pr551-mmp-review.md) | 明确任务交接、原生 Draft 与 Markdown 阅读三个工程闭环 | 首轮无 P0/P1；两项 P2 修复、独立复评及当前版本条件收尾，人工接受另计 |
 | [2026-11-02-approved-pr-integration](2026-11-02-approved-pr-integration.md) | 全部开放PR接管、Storage/权限/浏览器栈与CI依赖升级 | 按明确授权逐实际base复评、当前head门禁和rebase回读；产品/R1独立 |

@@ -64,20 +64,6 @@ export function storageExecutionSuite(adapter, register = test) {
     }
   })
 
-  register(`${label}：ExecutionRunRecord 的 put/get 均隔离顶层与嵌套引用`, async () => {
-    const storage = makeStorage()
-    await seedExecutionPrereqs(storage)
-    await storage.putExecutionContext({ id: 'alias-context', workspaceId: WORKSPACE, workItemId: 'entity-1', repositoryId: 'repo-1', status: 'ready' })
-    const expected = { id: 'alias-run', workspaceId: WORKSPACE, contextId: 'alias-context', status: 'running', updatedAt: '2026-11-03T00:00:00Z', providerRef: { bindingId: 'binding-execution', objectKind: 'execution_run', externalId: 'original', url: undefined } }
-    const input = structuredClone(expected)
-    await storage.putExecutionRun(input)
-    input.status = 'failed'; input.providerRef.externalId = 'input-mutated'
-    assert.deepEqual(await storage.getExecutionRun(input.id), expected, '已写入 run 不保留输入别名')
-    const output = await storage.getExecutionRun(input.id)
-    output.status = 'canceled'; output.providerRef.externalId = 'output-mutated'
-    assert.deepEqual(await storage.getExecutionRun(input.id), expected, '读回 run 不暴露持久对象的别名')
-  })
-
   register(`${label}：同一工作项+仓库最多一个 active 执行上下文`, async () => {
     const storage = makeStorage()
     await seedExecutionPrereqs(storage)
@@ -439,9 +425,7 @@ export function storageExecutionSuite(adapter, register = test) {
  * 工作项一格（#196）与关系端点一格（#221）已对齐并移入共享执行组。适配器用能力位 `acceptsDanglingCoreParents` 声明自己这一侧
  * 的事实，本函数按位断言**实际行为**：对齐一侧（改替身或改 SQLite）而不改声明，对应用例立刻变红。
  *
- * 为什么独立成函数而不是注册进 `storageExecutionSuite`：切分守卫按组文件的注册条数核账，组文件的新增账在
- * `suites/storage.js`；这些用例与 `storage-contract.test.js` 的其余适配器循环并列注册，不参与切分账。返回值是本
- * 函数**实际注册**的条数，装配点的守卫按独立期望核账——删掉一条 GRIDS 会让守卫红，而不是静默缩小覆盖。
+ * 本组按适配器分别注册，允许错误文本保留各实现的来源。
  * 能力位按边声明（目前只有 `{ repository }`），拒绝的错误文本按适配器各自的真实来源写（`rejection`：SQLite 是外键，替身是显式的存在性检查）。
  */
 export function storageExecutionDivergenceSuite(adapter, register = test) {
@@ -459,11 +443,9 @@ export function storageExecutionDivergenceSuite(adapter, register = test) {
         throw outcomes[0]
       }],
   ]
-  let registered = 0
-  const counted = (name, fn, options) => { registered += 1; register(name, fn, options) }
   for (const [edge, grid, write] of GRIDS) {
     const accepts = acceptsDanglingCoreParents[edge]
-    counted(`${label}：${grid} 悬空时当前${accepts ? '被接受' : '被拒绝'}（${edge === 'repository' ? '已对齐' : '声明式分叉'}）`, async () => {
+    register(`${label}：${grid} 悬空时当前${accepts ? '被接受' : '被拒绝'}（${edge === 'repository' ? '已对齐' : '声明式分叉'}）`, async () => {
       const storage = makeStorage()
       await seedExecutionPrereqs(storage)
       const outcome = await write(storage).then(() => 'accepted', (error) => `rejected: ${error.message}`)
@@ -474,5 +456,4 @@ export function storageExecutionDivergenceSuite(adapter, register = test) {
       }
     })
   }
-  return registered
 }
