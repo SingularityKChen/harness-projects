@@ -7,7 +7,7 @@ import type { PlanningRefreshSource, PlanningRefreshSnapshot } from '@harness-pr
 import type { ExecutionContextReader, StartWork, DeliveryLineageReader, IssueClosingLinksReader, ChangeRequestCreator } from '@harness-projects/client'
 import { createElement, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
-import { deriveWorkItemDetailView, deriveWorkItemListView, workspaceSourceObservation, type WorkItemListReadInput, type WorkspaceRead } from '@harness-projects/ui-model'
+import { deriveDeliveryOverviewTargets, deriveWorkItemDetailView, deriveWorkItemListView, workspaceSourceObservation, type WorkItemListReadInput, type WorkspaceRead } from '@harness-projects/ui-model'
 import { itemPath, parseItemRoute } from './item-route.ts'
 import { LoadingState } from './list-states.ts'
 import { HARNESS_PANEL_TITLE } from './placeholder.ts'
@@ -67,7 +67,7 @@ function screenOf(read: WorkspaceRead | undefined, path: string | undefined, set
   return {
     key: `page:${projectId}`,
     children: [createElement(WorkItemProjectPage, {
-      listView, statusAnnouncement, presentationScopeKey: JSON.stringify([projectId, read.planningSource?.bindingId]),
+      listView, overviewTargets: deriveDeliveryOverviewTargets(input), statusAnnouncement, presentationScopeKey: JSON.stringify([projectId, read.planningSource?.bindingId]),
       detailView: itemId === undefined ? undefined : deriveWorkItemDetailView(input, { projectId, itemId }),
       navigation: { href: (id) => `#${itemPath({ projectId, itemId: id })}`, open: (id) => setPath(itemPath({ projectId, itemId: id })) },
       onCloseDetail: () => setPath(undefined), executionReader, deliveryReader, issueClosingLinksReader, changeRequestCreator, startWork, onBindRepository, connected: read.connection.connected,
