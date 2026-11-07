@@ -1,6 +1,6 @@
 # 给已确认 PR 添加原生负责人 ExecPlan
 
-> 状态：Active；创建：2026-11-07；关联：Closes #567；Refs #557（当前已确认 PR 的负责人选择、添加和读回叶子）。本计划遵循根 `PLANS.md`；仅完成本叶子不会关闭创建前预选的父项。
+> 状态：Completed；创建：2026-11-07；关联：Closes #567；Refs #557（当前已确认 PR 的负责人选择、添加和读回叶子）。本计划遵循根 `PLANS.md`；仅完成本叶子不会关闭创建前预选的父项。
 
 ## Purpose / Big Picture
 
@@ -77,11 +77,11 @@ mutation ack 不作为 Saved 依据。随后完整读取同一 PR 的负责人�
 ## Progress
 
 - [x] (2026-11-07 SGT) 三份独立设计与真实源码比对，修订为事后添加的完整 UI 叶子。
-- [x] (2026-11-07 SGT) Task 1：纵向实现、判别红绿和浏览器组合验证。在检出 `feature/pr-assignee-management`、接合 `origin/main` 后的工作树根运行本计划窄命令并加入 Issue-link/migration 回归，262 tests 全通过；浏览器命令 5 tests、`pnpm verify` 的 3740 tests + 8 MVP0 全通过，均 fail/cancelled/skipped=0；typecheck、boundaries 9 项与 workflow 检查通过。
+- [x] (2026-11-07 SGT) Task 1：历史实施源 `a140f57b` 的纵向实现、判别红绿和浏览器组合验证。在检出 `feature/pr-assignee-management`、接合 `origin/main` 后的工作树根运行本计划窄命令并加入 Issue-link/migration 回归，262 tests 全通过；浏览器命令 5 tests、`pnpm verify` 的 3740 tests + 8 MVP0 全通过，均 fail/cancelled/skipped=0；typecheck、boundaries 9 项与 workflow 检查通过。
 - [x] (2026-11-07 SGT) fixround1：正式 Provider 测试先 9 tests/2 fail RED，修复后受影响 Provider/恢复/API/client 套件 118/118、浏览器 5/5、boundaries 9/9、typecheck 通过，均 fail/cancelled/skipped=0；未重新运行全量 verify，旧全量证据只归属原 head。
 - [x] (2026-11-07 SGT) final fixwave F3：原正式测试使用真实 adapter/Fake Storage，先 18 tests/4 fail RED（当时误称 SQLite；Superseded by 本轮共同出口 SQLite 回证，原 Fake 结果保留）；动态准入及末门修复后，受影响权限/恢复/Provider/API/client/Start Work 套件 194/194，浏览器 5/5、typecheck 和 boundaries 9/9 全通过，fail/cancelled/skipped=0。旧 Saved 保留、query transport 计数不增加、raw deny→regrant 的旧成功被围栏；可选 descriptor 字段不持久化。
 - [x] (2026-11-07 SGT) F3 共同出口：显式 SQLite/生产 adapter 的并发已 Saved 快捷回路与已知 native read403 两项先 RED；原 fixture 消费者/权限/恢复/Provider/API/Start Work 扩展回归256项、最终受影响29项、浏览器5项、边界9项与typecheck通过（fail/cancelled/skipped=0）；所有事务结果汇聚后通过末门，真实 failed 保留为 failed 且修授权后新意图可成功。原四项 F3 也已改为显式 SQLite 重跑，旧 Fake 结果不升级为 SQLite。
-- [ ] Task 2：final fixwave F3 当前权限反馈已局部修订，待独立复审；独立验收、必要修订、发布面/规模/远端回读与 ready；首轮发现 F1/F2，fixround1 已局部修正，待独立复审。
+- [x] (2026-11-07 SGT) Task 2：F1/F2及F3共同出口已独立复审，最终源 `4db6e3ca` / base `7bab4b8c` 零未决P0–P3；7/7归因变异KILLED并逐项恢复。该源码head托管CI/Browser/CodeQL/Fast Gate和全部相关checks、双向567/全线程门通过，Ready回读成立；后续文档head重新核对。
 
 ## Surprises & Discoveries
 
@@ -135,6 +135,8 @@ controller 加 envelope、严格字段白名单；Host OPERATIONS 加同名 unar
 
 原设计阶段交付的是可执行设计（Superseded by Progress 的 Task 1 实施证据；2026-11-07），不是产品完成或测试通过。已形成原生 Provider→Core→Host/client→UI 的合成平台实施证据，SQLite 重开只读恢复保持 create=1/add=1，部分读回不补写、关系/规划快照不变，详见 Progress；独立验收、实际平台 token 能力以及安装人类接受尚未发生；自动化合成证据不得升级为真实平台/发布接受。完成后更新本节、Progress 并按 PLANS 归档；工程 ready 不推进 Planning Status。
 
+2026-11-07 SGT最终工程结果：前段“独立验收尚未发生”Superseded by本段。受验源码 `4db6e3ca` / base `7bab4b8c` 独立最终审查无未决P0–P3。七项变异的baseline→具名业务失败→还原均0→1→0；恢复29/29、carrier/runner38/38、另一Core先query的真实SQLite ABA1/1、新main受影响39/39和typecheck通过。各组重叠不累加；256/29/5/9及旧3740+8保留各自源身份。该源码head当前托管门、双向567关联和全部线程回读通过后已置Ready，未merge。工程评审见 `docs/review/pr-568-mmp-review.md`；文档归档提交后必须重查最终head。原库/匹配artifact、真实平台、安装、人类UAT及R1仍另计；未引入有意延后的实现捷径，无新技术债条目。
+
 ## Bottom Change Note
 
 2026-11-07 SGT：F3 共同出口补齐并纠正原 Fake/SQLite 证据口径；明确拒绝仍 failed，Provider 完整分页真正去重，测试 fixture hook 不进入生产；保持 Task 2 复审门。
@@ -150,3 +152,5 @@ controller 加 envelope、严格字段白名单；Host OPERATIONS 加同名 unar
 2026-11-07 SGT：增加必要 registry、DDL、合成平台 owner 和金样接线，记录原 SQL 假设被源码推翻及其最小修正；保留 Task 2 独立验收门。
 
 2026-11-07 SGT：综合三份独立方案并按真实模块修订；拒绝 backend-only 叶子，冻结只添加/只读恢复、当前 createOperationId 目标、显式外部读取命令与最小 UI carrier 契约。
+
+2026-11-07 SGT：归档最终独立矩阵、七项判别变异和源码head Ready观察；明确新主线已退役独立Merge Gate，最终文档head以现存CI/Fast Gate实际回读为准。
