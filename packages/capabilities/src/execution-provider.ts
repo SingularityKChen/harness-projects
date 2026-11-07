@@ -34,11 +34,17 @@ export interface ProviderStartRunInput {
   readonly context: ExternalObjectRef; readonly command: string; readonly environment: Readonly<Record<string, string>>
 }
 
+/** 运行身份的短事务接纳；不得序列化到任务或 durable intent。 */
+export interface ExecutionRunLifecycle {
+  /** Provider 签发身份后、投递任务前 await；拒绝或超时后不得继续发送任务。 */
+  retainRunIdentity(ref: ExternalObjectRef): Promise<void>
+}
+
 export interface ExecutionProvider {
   /** 静态连接实现定义：由实现作者声明，Host 只注入实例与 id（见 `ProviderDefinition`）。 */
   readonly definition: ProviderDefinition
   describeCapabilities(): Promise<ProviderCapabilitySnapshot>
-  startRun(input: ProviderStartRunInput): Promise<ProviderResult<ProviderExecutionRun>>
+  startRun(input: ProviderStartRunInput, lifecycle?: ExecutionRunLifecycle): Promise<ProviderResult<ProviderExecutionRun>>
   getRun(ref: ExternalObjectRef): Promise<ProviderResult<ProviderExecutionRun>>
   cancelRun?(ref: ExternalObjectRef): Promise<ProviderResult<ProviderExecutionRun>>
 }

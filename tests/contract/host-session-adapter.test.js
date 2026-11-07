@@ -19,12 +19,13 @@ test('raw 嵌套事件白名单、同步 receiver 与 lazy 服务重载', async 
   service = {
     id: 'session-1', create() { calls++; return { sessionId: this.id, secret: 'drop' } },
     prompt() { assert.equal(this.id, 'session-1'); return { accepted: true, secret: 'drop' } },
-    inspect() { return { events: [
+    page() { return { cursor: 4, hasMore: false, records: [
+      { seq: 0, type: 'ignored' },
       { seq: 1, type: 'turn/start', turn: 90, data: { turn: 1 } },
       { seq: 2, type: 'user/message', rpcId: 'wrong', data: { source: { kind: 'user', rpcId: 'request-1' }, content: 'drop' } },
       { seq: 3, type: 'user/message', data: { source: { kind: 'agent', rpcId: 'request-1' } } },
       { seq: 4, type: 'turn/end', data: { turn: 1, reason: { kind: 'error', error: { code: 'MISSING_CREDENTIAL', token: 'drop' } } } },
-    ], secret: 'drop' } },
+    ].map((event) => ({ type: 'event', event })), secret: 'drop' } },
     list() { return { items: [{ sessionId: this.id, running: false, secret: 'drop' }] } },
   }
   assert.deepEqual(await port.create({ cwd: '/work' }), { sessionId: 'session-1' })
@@ -41,6 +42,39 @@ test('raw 嵌套事件白名单、同步 receiver 与 lazy 服务重载', async 
   const forced = createHostSessionPort(() => { calls++; return service }, true)
   await assert.rejects(forced.create({ cwd: '/work' }), /unavailable/)
   assert.equal(calls, 1, 'force 不解析服务，也不发 create/prompt')
+})
+
+// Synthetic 0.2.2-rc.1 ABI structure; no recorded Host execution is claimed.
+const frame = (seq, type = 'other', data = {}) => ({ type: 'event', event: { seq, type, data } })
+test('当前 page ABI：固定 cut 向后分页，投影之前推进 cursor，保留 receiver/signal', async () => {
+  const { createHostSessionPort } = await import('../../apps/harness-plugin/src/host-session-adapter.ts')
+  const requests = [], raw = { marker: true, page(request, received) {
+    assert.equal(this, raw); assert.equal(received, signal); requests.push(request)
+    return requests.length === 1 ? { cursor: 9, records: [frame(7), frame(8, 'turn/end', { turn: 1, reason: { kind: 'completed', secret: 'drop' } }), frame(9)], hasMore: true }
+      : { cursor: 9, records: [frame(0), frame(1, 'turn/start', { turn: 1 }), frame(2, 'user/message', { source: { kind: 'user', rpcId: 'request-1' }, content: 'drop' }), frame(3), frame(4), frame(5), frame(6)], hasMore: false }
+  } }
+  const history = await createHostSessionPort(() => raw).inspect('session-1', signal)
+  assert.deepEqual(requests, [{ address: { kind: 'session', sessionId: 'session-1' }, maxMessages: 50 },
+    { address: { kind: 'session', sessionId: 'session-1' }, maxMessages: 50, throughSeq: 9, beforeSeq: 7 }])
+  assert.deepEqual(history.events, [{ seq: 1, type: 'turn/start', turn: 1 }, { seq: 2, type: 'user/message', rpcId: 'request-1' },
+    { seq: 8, type: 'turn/end', turn: 1, reason: { kind: 'completed' } }])
+})
+for (const fault of ['cursor', 'empty', 'repeat', 'negative', 'duplicate', 'record', 'limit', 'abort']) test(`当前 page ABI 拒绝不完整或畸形读取：${fault}`, async () => {
+  const { createHostSessionPort } = await import('../../apps/harness-plugin/src/host-session-adapter.ts')
+  let calls = 0; const controller = new AbortController()
+  const raw = { page() {
+    calls++
+    if (fault === 'abort') controller.abort()
+    if (fault === 'negative') return { cursor: -2, records: [], hasMore: false }
+    if (fault === 'duplicate') return { cursor: 2, records: [frame(0), frame(1), frame(1, 'turn/start', { turn: 2 }), frame(2)], hasMore: false }
+    if (fault === 'record') return { cursor: 2, records: [{ type: 'event', event: { seq: '1' } }], hasMore: false }
+    if (fault === 'empty' && calls > 1) return { cursor: 9, records: [], hasMore: true }
+    if (fault === 'limit') return { cursor: 1000, records: [frame(1001 - calls)], hasMore: true }
+    return { cursor: fault === 'cursor' && calls > 1 ? 10 : 9,
+      records: calls === 1 || fault === 'repeat' ? [frame(7), frame(8), frame(9)] : [frame(4), frame(5), frame(6)], hasMore: true }
+  } }
+  await assert.rejects(createHostSessionPort(() => raw).inspect('session-1', controller.signal))
+  assert.equal(calls, fault === 'limit' ? 100 : ['cursor', 'empty', 'repeat'].includes(fault) ? 2 : 1)
 })
 
 test('人工 wrapper 能力不读 key；每次解析固定句柄，坏 key 固定拒绝，同 key 重建可读', async () => {

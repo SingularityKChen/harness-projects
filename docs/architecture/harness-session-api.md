@@ -299,3 +299,9 @@ Harness 会话把分支推到哪个远端，本记录未观测（本 PR 不让�
 | 兼容闸门是否比对了探针 peer 的版本范围 | O0.1 只证明「未用 `allow-version` 或 `--accept-risk` 即装入」。安装日志里那行 peer 警告的成因已静态回答（§3.1 O0.1）：profile 的锁文件是 `autoInstallPeers: false`，唯一依赖是探针 tarball，宿主包不在 profile 里，所以是普通缺 peer 警告，不带版本信号；没有用不匹配的 peer 范围对照 | #227 改 peer 范围时，用不匹配的 peer 范围对照安装结果 |
 | stub 收到的请求内容（标题请求与主请求的区分） | stub 只记方法、路径、`keySha8` 与字节数，不记正文；4 个请求与 2 个会话、`held: 2` 一致；字节数两两成对（每个会话一个约 17 万字节、一个约 11 万字节，H4），与「主请求加附带请求」相符，但请求类型未确认 | 真实模型的 R4 观测（TD-066）时一并区分 |
 | 多会话并发、会话执行工具、推送到远端 | 本 PR 不让会话执行工具，也不并发起多个会话 | #140 的集成演练里观测 |
+
+**当前安装版本的读取边界（2026-11-07）**
+
+#554 对安装包内 `@deepseek-ai/dsh-api-session-controller` `0.2.2-rc.1` 的源码核对发现，raw 服务通过 `page({ address: { kind: 'session', sessionId }, maxMessages, throughSeq?, beforeSeq? }, signal)` 返回 `{ cursor, records, hasMore }`；record 包装为 `{ type: 'event', event }`。当前生产适配器只使用此 page ABI；SessionPort.inspect 仍是内部归一端口名。首读选择固定 cursor，续页携带该 throughSeq 并按 raw 最小 seq 向后推进，页数与整个操作均有预算；断页或畸形响应不能证明终态。
+
+本节是当前安装源码事实与合成离线测试依据，未新增 S3 录制，不更改上文 0.2.0-rc.2 观测与原始夹具。真实历史请求的具体 failing Host 方法尚无异常栈证明；本次工程验证不等同 Desktop 安装接受。Core 在 prompt 前以同一 owner 的短事务保留 Provider 身份，之后未知结果只读原 run；旧无 ref 记录不自动从日志回填。

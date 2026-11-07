@@ -12,8 +12,9 @@ import { createSqliteStorage, openDatabase } from '@harness-projects/storage-sql
 const root = mkdtempSync(join(tmpdir(), 'execution-recovery-')), handles = []; let seq = 0
 after(() => { for (const s of handles) try { s.close() } catch {} rmSync(root, { recursive: true, force: true }) })
 const sqlite = (file = join(root, `${seq++}.sqlite`)) => { const s = createSqliteStorage(file); handles.push(s); return s }
-async function setup(kind, fallback = false) {
+async function setup(kind, fallback = false, execution) {
   const providers = createFakeProviders(), storage = kind === 'Fake' ? providers.storage : sqlite()
+  if (execution) providers.execution = execution
   providers.executionFallback = createFakeExecutionProvider()
   const spare = providers.executionFallback, describe = spare.describeCapabilities.bind(spare)
   spare.describeCapabilities = async () => { const s = await describe(); return { ...s, capability: { ...s.capability, [CapabilityKey.ExecutionRunFallback]: 'available' }, permission: { ...s.permission, [CapabilityKey.ExecutionRunFallback]: 'available' } } }
@@ -25,7 +26,7 @@ async function setup(kind, fallback = false) {
   w.contextId = contextIdFor(w.workspace.id, workItemId, 'repo-alpha'); w.runId = runIdFor(w.contextId)
   w.provider = fallback ? spare : providers.execution
   const start = w.provider.startRun.bind(w.provider); w.starts = 0; w.reads = 0
-  w.provider.startRun = (input) => { w.starts++; return start(input) }
+  w.provider.startRun = (input, lifecycle) => { w.starts++; return start(input, lifecycle) }
   const get = w.provider.getRun.bind(w.provider)
   w.provider.getRun = (ref) => { w.reads++; return get(ref) }
   return w
@@ -347,3 +348,164 @@ for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) for
   assert.deepEqual(await w.storage.getExecutionRun(w.runId), run); assert.deepEqual(await w.storage.getExecutionContext(w.contextId), record)
   assert.deepEqual([w.starts, w.reads, gitWrites], [1, 0, 0])
 })
+
+// Synthetic raw Host, real adapter → Harness Provider → Core → SQLite/Fake.
+async function nativeFixture(kind, fault = 'read') {
+  const { createHarnessExecutionProvider } = await import('@harness-projects/provider-execution-harness')
+  const { createHostSessionPort } = await import('../../apps/harness-plugin/src/host-session-adapter.ts')
+  let w
+  const raw = {
+    create: async () => { w.creates++; await w.onCreate?.(); return { sessionId: 'original-session' } },
+    prompt: async () => { w.prompts++; if (w.nativeFault === 'ack') throw Error('lost acknowledgement'); return { accepted: w.nativeFault !== 'reject' } },
+    page: async () => { if (w.nativeFault === 'read') throw Error('lost initial read'); return { cursor: 2, hasMore: false, records: [
+      { type: 'event', event: { seq: 0, type: 'turn/start', data: { turn: 1 } } },
+      { type: 'event', event: { seq: 1, type: 'user/message', data: { source: { kind: 'user', rpcId: w.nativeFault === 'unmatched' ? 'foreign' : w.contextId } } } },
+      { type: 'event', event: { seq: 2, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } } }] } },
+    list: async () => ({ items: [{ sessionId: 'original-session', running: true }] }),
+  }
+  w = await setup(kind, false, createHarnessExecutionProvider({ bindingId: 'native-execution', sessions: createHostSessionPort(() => raw) }))
+  w.request.worktreePath = '/workspace/native-tree'
+  w.raw = raw; w.creates = 0; w.prompts = 0; w.nativeFault = fault; w.fallbackCount = w.providers.executionFallback.state.runs.length
+  return w
+}
+for (const kind of ['Fake', 'SQLite']) {
+  for (const fault of ['read', 'ack', 'unmatched']) test(`${kind}: native ${fault} preserves original identity across reopen without another prompt`, async () => {
+    const w = await nativeFixture(kind, fault), first = await start(w); unknown(first)
+    const ref = (await w.storage.getExecutionRun(w.runId))?.providerRef
+    assert.deepEqual(ref && JSON.parse(ref.externalId), ['original-session', w.contextId])
+    assert.equal(first.runExternalId, ref.externalId)
+    await reopen(w); w.nativeFault = 'healthy'
+    const recovered = await start(w)
+    assert.equal(recovered.writeState, 'saved'); assert.equal((await w.storage.getExecutionRun(w.runId)).status, 'succeeded')
+    assert.deepEqual([w.creates, w.prompts, recovered.runExternalId], [1, 1, ref.externalId])
+  })
+  test(`${kind}: prompt waits for durable checkpoint commit acknowledgement`, async () => {
+    const w = await nativeFixture(kind, 'healthy'), b = barrier(), transaction = w.storage.transaction.bind(w.storage); let held = false
+    w.storage.transaction = async (work) => {
+      const value = await transaction(work)
+      if (!held && (await w.storage.getExecutionRun(w.runId))?.providerRef) { held = true; await b.hold() }
+      return value
+    }
+    const pending = start(w); await Promise.race([b.entered, pending])
+    try { assert.deepEqual([w.creates, w.prompts], [1, 0]); assert.ok((await w.storage.getExecutionRun(w.runId)).providerRef) }
+    finally { b.release() }
+    await pending; assert.equal(w.prompts, 1)
+  })
+  for (const fault of ['storage', 'owner', 'permission']) test(`${kind}: checkpoint ${fault} failure sends zero prompts or fallback`, async () => {
+    const w = await nativeFixture(kind)
+    let hit
+    if (fault === 'storage') hit = inject(w, 'putExecutionRun', (row) => row.providerRef !== undefined)
+    else w.onCreate = async () => {
+      if (fault === 'owner') { const row = await w.storage.getExecutionContext(w.contextId); await w.storage.putExecutionContext({ ...row, provisioningGeneration: row.provisioningGeneration + 1 }) }
+      else { const describe = w.providers.execution.describeCapabilities.bind(w.providers.execution); w.providers.execution.describeCapabilities = async () => { const value = await describe(); return { ...value, permission: { ...value.permission, [CapabilityKey.ExecutionRunStart]: AccessLevel.Unavailable } } } }
+    }
+    const result = await start(w); hit?.()
+    assert.equal(result.confirmed, false); assert.equal(w.prompts, 0)
+    assert.equal((await w.storage.getExecutionRun(w.runId))?.providerRef, undefined)
+    assert.equal(w.providers.executionFallback.state.runs.length, w.fallbackCount)
+  })
+  test(`${kind}: definite prompt rejection preserves identity and never falls back`, async () => {
+    const w = await nativeFixture(kind, 'reject'), result = await start(w)
+    assert.equal(result.writeState, 'failed'); assert.equal((await w.storage.getExecutionRun(w.runId)).status, 'failed')
+    assert.deepEqual(JSON.parse(result.runExternalId), ['original-session', w.contextId])
+    assert.equal(w.providers.executionFallback.state.runs.length, w.fallbackCount)
+  })
+}
+
+for (const kind of ['Fake', 'SQLite']) {
+  for (const change of ['same', 'different', 'binding', 'returned']) test(`${kind}: checkpoint ${change} identity never overwrites the retained run`, async () => {
+    const w = await nativeFixture(kind, 'healthy'), original = w.providers.execution.startRun.bind(w.providers.execution)
+    w.providers.execution.startRun = async (input, lifecycle) => {
+      const result = await original(input, { retainRunIdentity: async (ref) => {
+        await lifecycle.retainRunIdentity(ref)
+        await lifecycle.retainRunIdentity(change === 'different' ? { ...ref, externalId: 'other' } : change === 'binding' ? { ...ref, bindingId: 'other' } : ref)
+      } })
+      return change === 'returned' && result.ok ? { ...result, value: { ...result.value, ref: { ...result.value.ref, externalId: 'other' } } } : result
+    }
+    const result = await start(w), run = await w.storage.getExecutionRun(w.runId)
+    assert.deepEqual(JSON.parse(run.providerRef.externalId), ['original-session', w.contextId])
+    assert.equal(result.runExternalId, run.providerRef.externalId)
+    assert.equal(w.prompts, change === 'same' || change === 'returned' ? 1 : 0)
+    assert.equal(result.writeState, change === 'same' ? 'saved' : 'unknown')
+  })
+  for (const change of ['owner', 'permission']) test(`${kind}: ${change} revoked while checkpoint acknowledgement waits cannot send task`, async () => {
+    const w = await nativeFixture(kind, 'healthy'), b = barrier(), transaction = w.storage.transaction.bind(w.storage); let held = false
+    w.storage.transaction = async work => {
+      const value = await transaction(work)
+      if (!held && (await w.storage.getExecutionRun(w.runId))?.providerRef) { held = true; await b.hold() }
+      return value
+    }
+    const pending = start(w); await b.entered
+    const retained = await w.storage.getExecutionRun(w.runId)
+    if (change === 'owner') { const r = await w.storage.getExecutionContext(w.contextId); await w.storage.putExecutionContext({ ...r, provisioningGeneration: r.provisioningGeneration + 1 }) }
+    else { const describe = w.providers.execution.describeCapabilities.bind(w.providers.execution); w.providers.execution.describeCapabilities = async () => { const value = await describe(); return { ...value, permission: { ...value.permission, [CapabilityKey.ExecutionRunStart]: AccessLevel.Unavailable } } } }
+    b.release(); const result = await pending
+    assert.deepEqual(await w.storage.getExecutionRun(w.runId), retained); assert.equal(w.prompts, 0)
+    assert.equal(result.confirmed, false); assert.equal(result.runExternalId, undefined)
+  })
+}
+
+for (const kind of ['Fake', 'SQLite']) test(`${kind}: callback after start result is closed and cannot persist a late identity`, async () => {
+  const w = await nativeFixture(kind); let checkpoint
+  w.providers.execution.startRun = async (_input, lifecycle) => { checkpoint = lifecycle.retainRunIdentity; return providerFail('ambiguous_result', 'uncertain before identity') }
+  unknown(await start(w))
+  await assert.rejects(checkpoint({ bindingId: 'native-execution', objectKind: 'execution_run', externalId: 'late', url: undefined }))
+  assert.equal((await w.storage.getExecutionRun(w.runId)).providerRef, undefined)
+  assert.deepEqual([w.creates, w.prompts], [0, 0])
+})
+
+for (const kind of ['Fake', 'SQLite']) {
+  for (const recovery of ['refresh', 'replay']) for (const initial of ['failure', 'running']) for (const observed of ['succeeded', 'running']) test(`${kind}: checkpoint late ${initial} preserves newer ${observed} from ${recovery}`, async () => {
+    const w = await nativeFixture(kind, 'healthy'), b = barrier(), page = w.raw.page; let first = true, clock = 0
+    w.clock = () => new Date(Date.UTC(2026, 10, 7) + clock++).toISOString(); w.core = await composeCore(w)
+    w.raw.page = async () => {
+      const value = await page(), old = first; first = false
+      if (old) { await b.hold(); if (initial === 'failure') throw Error('lost initial read') }
+      return old || observed === 'running' ? { ...value, cursor: 1, records: value.records.slice(0, 2) } : value
+    }
+    const original = start(w); await b.entered
+    try {
+      if (recovery === 'refresh') assert.equal((await w.core.commands.refreshExecutionRun(w.request)).ok, true)
+      else { const observer = await composeCore(w); assert.equal((await observer.commands.startWork(w.request)).writeState, 'saved') }
+      const before = [await w.storage.getExecutionRun(w.runId), await receipt(w)]
+      assert.equal(before[0].status, observed)
+      b.release(); const result = await original
+      assert.deepEqual([await w.storage.getExecutionRun(w.runId), await receipt(w)], before, 'late initial settlement cannot replace a newer full run/receipt snapshot')
+      assert.equal(result.runExternalId, before[0].providerRef.externalId)
+      assert.equal(result.writeState, recovery === 'replay' ? 'saved' : 'pending')
+      assert.deepEqual([w.creates, w.prompts], [1, 1])
+    } finally { b.release(); await original }
+  })
+  test(`${kind}: checkpoint final receipt waits for the journaled run snapshot to remain current`, async () => {
+    const w = await nativeFixture(kind, 'healthy'), b = barrier(), page = w.raw.page, transaction = w.storage.transaction.bind(w.storage)
+    let first = true, held = false
+    w.raw.page = async () => { const value = await page(), old = first; first = false; return old ? { ...value, cursor: 1, records: value.records.slice(0, 2) } : value }
+    w.storage.transaction = async work => {
+      const value = await transaction(work)
+      if (!held && (await w.storage.getExecutionRun(w.runId))?.status === 'running' && (await receipt(w))?.state === 'pending') { held = true; await b.hold() }
+      return value
+    }
+    const original = start(w); await b.entered
+    try {
+      assert.equal((await w.core.commands.refreshExecutionRun(w.request)).ok, true)
+      const before = [await w.storage.getExecutionRun(w.runId), await receipt(w)]
+      assert.equal(before[0].status, 'succeeded'); b.release(); await original
+      assert.deepEqual([await w.storage.getExecutionRun(w.runId), await receipt(w)], before, 'receipt cannot settle against a run replaced between journal and receipt transactions')
+      assert.deepEqual([w.creates, w.prompts], [1, 1])
+    } finally { b.release(); await original }
+  })
+  test(`${kind}: checkpoint late initial result preserves a newer receipt even when run is unchanged`, async () => {
+    const w = await nativeFixture(kind, 'healthy'), b = barrier(), page = w.raw.page; let first = true
+    w.raw.page = async () => { const value = await page(); if (first) { first = false; await b.hold() } return value }
+    const original = start(w); await b.entered
+    try {
+      const prior = await receipt(w)
+      await w.storage.putMutationAttempt({ ...prior, state: 'failed', errorCode: 'permission_denied', externalIntent: { ...prior.externalIntent, state: 'failed' } })
+      const before = [await w.storage.getExecutionRun(w.runId), await receipt(w)]
+      b.release(); const result = await original
+      assert.deepEqual([await w.storage.getExecutionRun(w.runId), await receipt(w)], before, 'the run and receipt must be compared together before journal writes')
+      assert.equal(result.writeState, 'failed'); assert.equal(result.error.code, 'permission_denied')
+      assert.deepEqual([w.creates, w.prompts], [1, 1])
+    } finally { b.release(); await original }
+  })
+}

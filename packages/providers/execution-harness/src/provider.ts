@@ -1,6 +1,6 @@
 import {
   AccessLevel, CapabilityKey, providerErr, providerError, providerOk,
-  type ExecutionProvider, type ExternalObjectRef, type ProviderExecutionRun, type ProviderResult, type ProviderStartRunInput,
+  type ExecutionProvider, type ExecutionRunLifecycle, type ExternalObjectRef, type ProviderExecutionRun, type ProviderResult, type ProviderStartRunInput,
 } from '@harness-projects/capabilities'
 import { asBrandedId, ProviderErrorCode, type ProviderBindingId } from '@harness-projects/domain'
 import type { SessionEvent, SessionPort } from './session-port.ts'
@@ -40,8 +40,7 @@ function statusFor(events: readonly SessionEvent[], requestId: string, running: 
   const starts = sorted.filter((e) => e.type === 'turn/start')
   const start = message === undefined ? undefined : starts.filter((e) => e.seq < message.seq).at(-1)
   if (start === undefined) {
-    if (starts.length !== 0 || message !== undefined) return 'unknown'
-    return running === true ? 'running' : running === false ? 'starting' : 'unknown'
+    return 'unknown'
   }
   if (!Number.isInteger(start.turn)) return 'unknown'
   const end = sorted.find((e) => e.type === 'turn/end' && e.turn === start.turn && e.seq > start.seq)
@@ -88,7 +87,7 @@ export function createHarnessExecutionProvider(options: Options): ExecutionProvi
         [CapabilityKey.ExecutionRunCancel]: AccessLevel.Unavailable }
       return { bindingId, capability, permission: capability, observedAt: (options.clock ?? (() => new Date().toISOString()))() }
     },
-    async startRun(input: ProviderStartRunInput): Promise<ProviderResult<ProviderExecutionRun>> {
+    async startRun(input: ProviderStartRunInput, lifecycle?: ExecutionRunLifecycle): Promise<ProviderResult<ProviderExecutionRun>> {
       const ctx = input.context
       if (ctx?.bindingId !== bindingId || ctx?.objectKind !== 'execution_context' || !nonblank(ctx.externalId)
         || typeof input.workingDirectory !== 'string' || !input.workingDirectory.startsWith('/') || input.workingDirectory.includes('\0')
@@ -99,8 +98,10 @@ export function createHarnessExecutionProvider(options: Options): ExecutionProvi
         return providerOk(await budget(timeoutMs, async (signal) => {
           const { sessionId } = await call(signal, () => sessions.create({ cwd: input.workingDirectory }))
           if (!nonblank(sessionId)) throw Error('invalid session identity')
-          phase = 'prompt'
           const requestId = ctx.externalId
+          phase = 'checkpoint'
+          if (lifecycle) await call(signal, () => lifecycle.retainRunIdentity(refFor(sessionId, requestId)))
+          phase = 'prompt'
           const ack = await call(signal, () => sessions.prompt({ sessionId, requestId, mode: 'queue', content: [{ type: 'text', text: input.command }] }, signal))
           if (ack?.accepted === false) throw { code: 'rejected' }
           if (ack?.accepted !== true) throw Error('unconfirmed prompt ack')
@@ -108,7 +109,7 @@ export function createHarnessExecutionProvider(options: Options): ExecutionProvi
           return read([sessionId, requestId], signal)
         }))
       } catch (error) {
-        const code = phase === 'read' || (phase === 'prompt' && !['gateway/bad-request', 'session/not-found', 'rejected'].includes(String(errorCode(error))))
+        const code = phase === 'checkpoint' || phase === 'read' || (phase === 'prompt' && !['gateway/bad-request', 'session/not-found', 'rejected'].includes(String(errorCode(error))))
           ? ProviderErrorCode.AmbiguousResult : mappedCode(error)
         return failure(code, phase)
       }

@@ -544,21 +544,30 @@ async function recordStartFacts(context: RelationStore, request: StartWorkReques
 async function startExecution(
   context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, git: GitOutcome, generation: number, accessEpoch: number,
 ): Promise<StartWorkResult> {
+  let checkpoint: RunSettlementSnapshot | undefined
   const finish = (result: StartWorkResult, status?: ExecutionRunStatus, ref?: ExternalObjectRef, fallback = false) =>
-    localWrite(git, () => recordRun(context, request, contextId, generation, result, status, ref, fallback), ref?.externalId, fallback)
+    localWrite(git, () => recordRun(context, request, contextId, generation, result, status, ref, fallback, checkpoint), ref?.externalId, fallback)
   if (git.worktreeExternalId === undefined) return finish(unknownRun(git, '缺少 Git ack 的工作目录，不能启动执行', undefined))
   const target = resolveWriteTarget(context.registry, CapabilityKey.ExecutionRunStart)
   const provider = target.binding?.execution
   if (provider === undefined || target.binding === undefined) return manualFallback(context, request, contextId, git, generation, accessEpoch, target.error ?? unsupportedCapability(CapabilityKey.ExecutionRunStart))
   const existing = await localWrite(git, () => owned(context, contextId, generation, (tx) => tx.getExecutionRun(runIdFor(contextId))))
   if (existing !== undefined) return finish(existingRun(git, existing), undefined, existing.providerRef, existing.fallback === true)
-  const run = await startExternalRun(context, request, contextId, git, generation, provider, target.binding.ref.bindingId, {
+  const { result: run, retainedRef, settlement } = await startExternalRun(context, request, contextId, git, generation, provider, target.binding.ref.bindingId, {
     workingDirectory: git.worktreeExternalId,
     context: { bindingId: target.binding.ref.bindingId, objectKind: 'execution_context', externalId: contextId, url: undefined },
     command: request.task, environment: {},
   }, false, accessEpoch)
+  checkpoint = settlement.snapshot
   if (!run.ok) {
+    const retained = await localWrite(git, () => owned(context, contextId, generation, tx => tx.getExecutionRun(runIdFor(contextId))))
     const error = toProjectError(run.error)
+    if (retained?.providerRef && retainedRef === undefined) return finish(existingRun(git, retained), undefined, retained.providerRef, retained.fallback === true)
+    if (retainedRef && !isDeepStrictEqual(retained?.providerRef, retainedRef)) throw new OwnerLost(git, retainedRef.externalId)
+    if (retained?.providerRef) return finish(run.error.code === ProviderErrorCode.AmbiguousResult
+      ? unknownRun(git, error.message, retained.providerRef.externalId)
+      : toResult(markFailed(git.report, error), outcomeOf(git, undefined, retained.providerRef.externalId), error),
+      run.error.code === ProviderErrorCode.AmbiguousResult ? ExecutionRunStatus.Unknown : ExecutionRunStatus.Failed, retained.providerRef)
     if (run.error.code === ProviderErrorCode.AmbiguousResult) return finish(unknownRun(git, error.message, undefined), ExecutionRunStatus.Unknown)
     await localWrite(git, () => owned(context, contextId, generation, (tx) => writeReceipt(tx, context, request, 'pending', 'failed', error.code)))
     return manualFallback(context, request, contextId, git, generation, accessEpoch, error)
@@ -582,13 +591,46 @@ async function startExternalRun(context: CoreContext, request: StartWorkRequest,
   const changed = await context.runtimeAccess.operation(binding, key, request.repositoryId, context.policy, 'write', version)
   if (changed) throw new AdmissionInvalid(changed)
   await validate()
+  let open = true, retainedRef: ExternalObjectRef | undefined, admissionFailure: ProjectError | undefined
+  const settlement: { snapshot?: RunSettlementSnapshot } = {}
+  const intent = externalIntentSnapshot({ operation: fallback ? 'startFallbackRun' : 'startRun', input, contextId, ownerGeneration: generation, bindingId, state: 'pending' })
+  const retainRunIdentity = async (ref: ExternalObjectRef): Promise<void> => {
+    if (!open || !validRunRef(ref) || ref.bindingId !== bindingId) throw new Error('Invalid run checkpoint')
+    const safeRef = { bindingId: ref.bindingId, objectKind: ref.objectKind, externalId: ref.externalId, url: ref.url }
+    const allowed = async () => {
+      const error = await context.runtimeAccess.operation(binding, key, request.repositoryId, context.policy, 'write', version)
+      if (error) { admissionFailure = error; throw new AdmissionInvalid(error) }
+      try { await validate() } catch (error) { if (error instanceof AdmissionInvalid) admissionFailure = error.failure; throw error }
+    }
+    await allowed()
+    await owned(context, contextId, generation, async tx => {
+      const attempt = await tx.findMutationAttempt(context.workspaceId, request.idempotencyKey)
+      const record = await tx.getExecutionContext(contextId), prior = await tx.getExecutionRun(runIdFor(contextId))
+      await validate(tx)
+      if (!open || record?.workspaceId !== context.workspaceId || attempt?.state !== 'pending' || requestMismatch(context.workspaceId, request, attempt)
+        || !isDeepStrictEqual(attempt.externalIntent, intent) || (prior !== undefined && (prior.workspaceId !== context.workspaceId || prior.contextId !== contextId
+          || !isDeepStrictEqual(prior.providerRef, safeRef) || (prior.fallback === true) !== fallback))) throw new Error('Run checkpoint ownership changed')
+      const run = prior ?? { id: runIdFor(contextId), workspaceId: context.workspaceId, contextId,
+        status: ExecutionRunStatus.Unknown, updatedAt: context.clock(), providerRef: safeRef, ...(fallback ? { fallback: true } : {}) }
+      if (prior === undefined) await tx.putExecutionRun(run)
+      settlement.snapshot ??= { run, attempt }
+    })
+    retainedRef = safeRef
+    await allowed()
+    await checkOwner(context, contextId, generation)
+    if (!open) throw new Error('Run checkpoint expired')
+  }
   try {
-    const result = await provider.startRun(structuredClone(input))
+    const result = await provider.startRun(structuredClone(input), { retainRunIdentity })
+    if (admissionFailure) throw new AdmissionInvalid(admissionFailure)
+    if (result.ok && retainedRef && (!validRunRef(result.value.ref) || result.value.ref.bindingId !== retainedRef.bindingId
+      || result.value.ref.externalId !== retainedRef.externalId || result.value.ref.url !== retainedRef.url)) return { result: providerErr(providerError(ProviderErrorCode.AmbiguousResult, '运行身份与 checkpoint 不符')), retainedRef, settlement }
     if (result.ok || result.error.code === ProviderErrorCode.PermissionDenied) context.runtimeAccess.observeOperation(bindingId, key, request.repositoryId, !result.ok, version)
     if (!result.ok && result.error.code === ProviderErrorCode.PermissionDenied) throw new AdmissionInvalid(projectError(ProjectErrorCode.PermissionDenied, operationDeniedReason(key)))
-    return result
+    return { result, retainedRef, settlement }
   }
-  catch (error) { if (error instanceof AdmissionInvalid) throw error; return providerErr(providerError(ProviderErrorCode.AmbiguousResult, String(error))) }
+  catch (error) { if (error instanceof AdmissionInvalid) throw error; return { result: providerErr(providerError(ProviderErrorCode.AmbiguousResult, '执行启动未确认')), retainedRef, settlement } }
+  finally { open = false }
 }
 
 async function manualFallback(
@@ -601,7 +643,7 @@ async function manualFallback(
   if (git.worktreeExternalId === undefined) return finish(unknownRun(git, '缺少 Git ack 的工作目录，不能人工接管', undefined))
   const fallback = resolveWriteTarget(context.registry, CapabilityKey.ExecutionRunFallback).binding
   if (fallback?.execution !== undefined) {
-    const run = await startExternalRun(context, request, contextId, git, generation, fallback.execution, fallback.ref.bindingId, {
+    const { result: run } = await startExternalRun(context, request, contextId, git, generation, fallback.execution, fallback.ref.bindingId, {
       workingDirectory: git.worktreeExternalId,
       context: { bindingId: fallback.ref.bindingId, objectKind: 'execution_context', externalId: contextId, url: undefined },
       command: request.task, environment: {},
@@ -620,17 +662,25 @@ async function manualFallback(
   return finish(toResult(git.report, outcomeOf(git, StartWorkFallback.Manual), error), ExecutionRunStatus.Failed)
 }
 
+type RunSettlementSnapshot = { readonly run: ExecutionRunRecord | undefined; readonly attempt: MutationAttemptRecord | undefined }
 async function recordRun(context: CoreContext, request: StartWorkRequest, contextId: ExecutionContextId, generation: number, result: StartWorkResult,
-  status?: ExecutionRunStatus, providerRef?: ExternalObjectRef, fallback = false): Promise<StartWorkResult> {
+  status?: ExecutionRunStatus, providerRef?: ExternalObjectRef, fallback = false, checkpoint?: RunSettlementSnapshot): Promise<StartWorkResult> {
   const pending = await owned(context, contextId, generation, async (tx) => {
-    if (status !== undefined) await tx.putExecutionRun({
+    const prior = await tx.getExecutionRun(runIdFor(contextId))
+    const attempt = await tx.findMutationAttempt(context.workspaceId, request.idempotencyKey)
+    if (checkpoint && (!isDeepStrictEqual(prior, checkpoint.run) || !isDeepStrictEqual(attempt, checkpoint.attempt))) return undefined
+    if (prior?.providerRef !== undefined && providerRef !== undefined && !isDeepStrictEqual(prior.providerRef, providerRef)) throw new Error('Run checkpoint identity changed')
+    const ref = providerRef ?? prior?.providerRef
+    const run = status === undefined ? prior : {
       id: runIdFor(contextId), workspaceId: context.workspaceId, contextId, status, updatedAt: context.clock(),
-      ...(providerRef === undefined ? {} : { providerRef: { bindingId: providerRef.bindingId, objectKind: providerRef.objectKind, externalId: providerRef.externalId, url: providerRef.url } }), ...(fallback ? { fallback } : {}),
-    })
-    return tx.findMutationAttempt(context.workspaceId, request.idempotencyKey)
+      ...(ref === undefined ? {} : { providerRef: { bindingId: ref.bindingId, objectKind: ref.objectKind, externalId: ref.externalId, url: ref.url } }), ...(fallback ? { fallback } : {}),
+    }
+    if (status !== undefined) await tx.putExecutionRun(run!)
+    return { run, attempt }
   })
-  const applied = await owned(context, contextId, generation, async (tx) => {
-    if (!isDeepStrictEqual(await tx.findMutationAttempt(context.workspaceId, request.idempotencyKey), pending)) return false
+  const applied = pending !== undefined && await owned(context, contextId, generation, async (tx) => {
+    if (!isDeepStrictEqual(await tx.findMutationAttempt(context.workspaceId, request.idempotencyKey), pending.attempt)
+      || checkpoint !== undefined && !isDeepStrictEqual(await tx.getExecutionRun(runIdFor(contextId)), pending.run)) return false
     await writeReceipt(tx, context, request, result.writeState, result.writeState, result.error?.code)
     return true
   })
