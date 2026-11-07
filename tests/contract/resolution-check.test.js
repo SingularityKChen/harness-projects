@@ -228,11 +228,10 @@ test('接线：每个跑 node --test 的 pnpm 脚本都先跑守卫，且有单�
   const guard = 'node scripts/resolution-check.mjs && ';
 
   // 这些入口必须存在；其余任何含 `node --test` 的脚本也一并要求前置守卫，新增入口不会漏。
-  const required = ['test', 'test:contract', 'test:mvp0', 'boundaries', 'test:file'];
+  const required = ['test', 'test:contract', 'boundaries', 'test:file'];
   for (const name of required) assert.ok(scripts[name], `package.json 缺少脚本 ${name}`);
 
   const runners = Object.entries(scripts).filter(([, command]) => command.includes('node --test'));
-  assert.ok(runners.length >= required.length, `含 node --test 的脚本只有 ${runners.length} 个`);
   for (const [name, command] of runners) {
     assert.ok(command.startsWith(guard), `脚本 ${name} 没有以「${guard}」开头：${command}`);
   }
@@ -275,7 +274,7 @@ function managedFixture(t, installed = false) {
   }
   const first = fs.readFileSync(path.join(REPO_ROOT, 'tests/contract/domain-enums.test.js'), 'utf8').match(/^import[^\n]+/m)?.[0];
   const guard = first?.includes('resolution-preflight.mjs') ? "import '../fixtures/resolution-preflight.mjs';\n" : '';
-  for (const layer of ['integration', 'e2e', 'mvp0']) {
+  for (const layer of ['contract', 'integration', 'e2e']) {
     fs.mkdirSync(path.join(inner, 'tests', layer), { recursive: true });
     fs.writeFileSync(path.join(inner, 'tests', layer, 'probe.test.js'),
       `${guard}import '${PKG}';\nimport test from 'node:test';\ntest('fixture marker', () => {});\n`);
@@ -286,7 +285,7 @@ function managedFixture(t, installed = false) {
 const NATIVE_ENTRIES = [
   ['file script', ['tests/integration/probe.test.js']],
   ['file --test', ['--test', 'tests/integration/probe.test.js']],
-  ...['integration', 'e2e', 'mvp0'].map((layer) => [layer, ['--test', `tests/${layer}`]]),
+  ...['contract', 'integration', 'e2e'].map((layer) => [layer, ['--test', `tests/${layer}`]]),
   ['layer runner', ['scripts/run-test-layer.mjs', 'tests/integration', 'workspace-local test evidence']],
 ];
 function nativeRun(root, args) {

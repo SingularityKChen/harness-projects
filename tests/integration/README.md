@@ -1,6 +1,6 @@
 # tests/integration
 
-跨包集成测试：可以有临时数据库与临时 Git 仓库，但仍然**不触网**。归入 Merge Gate。
+跨包集成测试：可以有临时数据库与临时 Git 仓库，但仍然**不触网**。由统一 CI 的 Verify 执行，结果纳入 PR Fast Gate。
 
 ## 第一批用例
 

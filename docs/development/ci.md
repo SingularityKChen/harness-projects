@@ -7,7 +7,6 @@
 | workflow | 触发与职责 | 门禁 |
 |---|---|---|
 | CI | pull_request、push main、手动运行；Verify 与 Browser 并行执行，PR Fast Gate 汇总两条 lane | PR Fast Gate 是唯一必需状态 |
-| Merge Gate | pull_request（不声明 base 过滤器）、push main；四条 lane 各跑一层测试并点名它保护的不变量，聚合 job 发布 Merge Gate | advisory；是否加入分支保护由人类伙伴决定 |
 | Issue policy | issue / PR 事件；检查标题、标签和 issue 关联 | advisory |
 | Rule checks | PR 事件；发布面和 PR 体量 | advisory |
 | Board invariants | 每日 schedule；两个 job：读取 Project 工作流启停并与裁决表比较，以及核对 `Engineering` 字段与 PR 真值 | advisory；需要 PROJECTS_TOKEN |
@@ -27,17 +26,17 @@ Board invariants 只从默认分支按日运行，使用 Project token，发现�
 
 Node 版本来自 `.nvmrc`，pnpm 版本来自 `package.json`；lockfile 的精确 Playwright devDependency 与本次安装的 Chromium 对齐。browser job 的十分钟上界包含依赖与系统包安装，下载成本由这条 lane 承担，正常命令不添加 retry、grep 或 skip。真实安装/执行耗时应从当前 head 的 Actions job 回读，不能把本地耗时当作 hosted 成本。
 
-普通 `pnpm test` / `pnpm verify` 保持 Node 契约、集成和既有 E2E 的反馈；浏览器命令通过 `scripts/run-test-layer.mjs` 运行 `tests/browser`，空文件集、零执行/全 skip、摘要解析失败或缺少 binary 均非零。CI 新增的反馈是 Chromium 中生产组合的读取与恢复行为；它不替代安装后的 Harness 人类走查、写入链路验收或 R1 裁决。
+普通 `pnpm test` / `pnpm verify` 通过既有层运行器各执行一次 Node 契约、集成和 E2E，并逐层拒绝空层或全 skip/todo；浏览器命令通过 `scripts/run-test-layer.mjs` 运行 `tests/browser`，空文件集、零执行/全 skip、摘要解析失败或缺少 binary 均非零。CI 新增的反馈是 Chromium 中生产组合的读取与恢复行为；它不替代安装后的 Harness 人类走查、写入链路验收或 R1 裁决。
 
 `PR Fast Gate` 的 `needs` 包含 `verify` 和 `browser`。聚合 job 继续只输出 lane 结论，不 checkout、引用 secret 或执行候选代码；任一 lane 为 failure、cancelled 或 skipped 都不放行。取消整个运行时仍以平台的 cancelled 状态为准。`tests/contract/ci-browser-workflow.test.js` 固定入口顺序、依赖与失败闭合；action pin、凭据、权限和通用超时继续由 W1–W7 检查。
 
 浏览器失败后，pinned `actions/upload-artifact` 仅上传 `test-results/composed-browser` 下生成的 PNG 截图和 ZIP trace，保留七天，不包含隐藏文件。工具准备或 browser launch 失败时可能没有截图，缺少文件不会覆盖原失败；上传失败也不会吞掉测试失败。产物只应包含隔离 fixture 的生成数据，不能加入真实账号、凭据或业务数据。
 
-触发器仍保留 `pull_request: branches: [main]`、push main 和 `workflow_dispatch`。native stack 是否触发必须读取该 head 的真实运行；缺席时由协调者对选定分支手动 dispatch，并校验 run 的 `head_sha`。Merge Gate 仍只有四条执行 lane，保持 advisory。
+触发器为全部 `pull_request`、push main 与 `workflow_dispatch`。取消原 base 过滤，让非 main PR 也由同一 CI 承担验证；仍按目标 head 回读真实运行。
 
 门禁的 hosted 负控在隔离临时 ref 上，仅给 `pnpm test:browser` 步骤添加 `PLAYWRIGHT_BROWSERS_PATH=.superpowers/missing-browser-negative-control`，安装步骤仍使用正常目录。先确认 Verify 绿、实际浏览器用例因缺少 binary 非零、Browser 与 PR Fast Gate 红，再恢复正式 head 并重新取两条 lane 和聚合的绿色证据。最终分支不得留下该 env 或调试提交；本地 16 种 needs 结果测试只能证明仓库的聚合表达式，不能代替平台运行证据。
 
-Board invariants 的 `on` **刻意只有 `schedule`**，由 `tests/contract/check-board-workflows-live.test.js` 钉在 `['schedule']` 上。`workflow_dispatch` 带一个 ref 选择器，而被选中的 ref 同时决定 workflow 定义与 checkout 出来的脚本——这两个 job 都持有长效 PAT，于是手选一个 PR 分支就能拿 token 执行任意代码。`merge-gate.yml` 可以用 `workflow_dispatch`，是因为那条 workflow 不读任何 secret；这条区分不是风格，是提权边界。
+Board invariants 的 `on` **刻意只有 `schedule`**，由 `tests/contract/check-board-workflows-live.test.js` 钉在 `['schedule']` 上。`workflow_dispatch` 带一个 ref 选择器，而被选中的 ref 同时决定 workflow 定义与 checkout 出来的脚本——这两个 job 都持有长效 PAT，于是手选一个 PR 分支就能拿 token 执行任意代码。`ci.yml` 可以用 `workflow_dispatch`，是因为候选代码 lane 不读任何 secret；这条区分不是风格，是提权边界。
 
 ### Board invariants 的第二个 job：`Engineering` 字段漂移
 
@@ -165,27 +164,15 @@ CI workflow 的 action 必须 pin 到 40 位 commit；checkout 必须关闭 pers
 
 三点差异（`<base_sha>...<head_sha>`）本身也是被测试钉住的性质，但要按它的真实范围理解：它保证"以这两个对象为端点时，只算 head 一侧自共同祖先以来的改动"。base 分支前进（fast-forward）时共同祖先仍在分叉点，结论不变；base 被 force-push 到无关历史时共同祖先后退，base 自己的提交会被算进来。`tests/contract/rule-checks.test.js` 有一条真实 git 用例同时钉住这两种情形：base 前进（fast-forward）时只算子分支自己的 5 行；base 被 force-push 到无关历史时，固定对象对给 5 行、移动的 tip 给 1205 行，并断言两者不同。
 
-`CI` workflow 仍保留 `pull_request: branches: [main]`。它造成的是另一件事：非栈、base 非 `main` 的 PR 拿不到 `Verify` / `PR Fast Gate`（栈成员因为运行时 base 是 `main` 反而有）。放开它同时改变运行次数与门禁覆盖面，属于独立决策，尚未执行。
+`CI` 的 PR base 过滤已于 2026-11-07（#573）取消；全部 PR 由同一 Verify / Browser / PR Fast Gate 验证，接替退役 Merge Gate 对非 main PR 的执行覆盖。平台实际准入仍以目标 head 的运行回读为准。
 
-### Merge Gate 的四条 lane，以及与 `CI` 的重复为什么是刻意的
+### 每个候选只执行一次当前层
 
-`.github/workflows/merge-gate.yml` 把四层测试各自放上一条 lane，每条 lane 点名它保护的不变量：
+层执行命名与发现范围以 `tests/README.md` 为准。`package.json` 的 `test` 是 contract、integration、e2e 的唯一执行清单，沿用 `scripts/run-test-layer.mjs` 的工作区解析预检、非空/未全 skip 判定和失败传播。`ci.yml` 的 Verify 调用它，Browser 单独执行，PR Fast Gate 汇总二者。
 
-| job | check 名 | 跑什么 | 保护的不变量 |
-|---|---|---|---|
-| `integration` | Merge Gate · Integration | `node scripts/run-test-layer.mjs tests/integration …` | 迁移可从空库重复执行、失败不留版本记录 |
-| `boundaries` | Merge Gate · Boundaries | `node scripts/run-test-layer.mjs tests/contract/package-boundaries.test.js …` | 依赖方向不反向、不跨层 |
-| `mvp0` | Merge Gate · MVP-0 | `node scripts/run-test-layer.mjs tests/mvp0 …` | 纵向链路每节点有断言，未实现节点必须失败并点名 |
-| `e2e` | Merge Gate · E2E | `node scripts/run-test-layer.mjs tests/e2e …` | 端到端链路与故障降级 |
-| `merge-gate` | Merge Gate | 不 checkout、不读 secrets，只汇总 `needs.*.result` | 任一 lane 未成功即失败 |
+> **Superseded by 本节（2026-11-07，#573）**：旧解释“CI 判定 PR 代码是否可用，Merge Gate 判定不同候选的不变量”不能证明重复执行的价值。PR #571 的两个 workflow 均 checkout 同一个 merge commit；旧 Merge Gate 的 integration、e2e 和 boundary 与 CI 重复，MVP-0 的七节点已完成且由现有行为用例承接。
 
-`pnpm test` 已经跑过 integration、`package-boundaries.test.js` 与 e2e，所以这个 workflow 与 `CI` 有重复。重复的理由不是覆盖率，而是**判定对象不同**：`CI` 判定“这个 head 的代码是否可用”，`Merge Gate` 判定“这条不变量在候选 head 上是否被断言且非空”。因此重复面被刻意压到最小——只取 `package-boundaries.test.js` 一个文件，不复制其余契约测试（见下面“不得把同一组契约测试复制到多个 workflow”）。`tests/mvp0` 是唯一在 `CI` 里完全缺席的层，它在这里第一次进入门禁。
-
-空层判定放在 `scripts/run-test-layer.mjs`，不放在 YAML 里数文件：`node --test` 对“没有用例”退出 0，在 YAML 里 `find | wc -l` 只能判“有文件”，判不了“用例数非零”。脚本先数 `*.test.js` 文件，再解析 `node --test` 的汇总行，判“真正执行的用例数 = `tests` − `skipped` − `todo`”是否 ≥ 1；任何一步判不出来都 fail closed（exit 1 + `::error::`，并把被保护的不变量写进注解）。Node 26 实测：只有 `describe` 没有用例的文件汇总行是 `ℹ tests 0`，只有 `skip` 的文件是 `ℹ tests 1` / `ℹ skipped 1`，所以只看 `tests` 会把“整层被 skip 掉”读成绿的。
-
-`on.pull_request` 刻意不声明 `branches`：理由与 `Rule checks` 相同（见上一节）——本车道不依赖 `base_ref`，只依赖事件本身，声明过滤器只会让基线不是 `main` 的 PR 拿不到结论。`push` 只限 `main`，且 `concurrency.cancel-in-progress` 是 `${{ github.event_name == 'pull_request' }}`：合并到 `main` 的验证记录不得被后续合并取消（W5）。另声明 `workflow_dispatch`：加入分支保护前要在目标 head 上观察到连续两次绿（见下一段），第二次运行需要一个人工入口，不能只靠重跑同一个 job。
-
-`Merge Gate` 目前是 advisory，不是分支保护里的必需检查。是否加入由人类伙伴决定，且加入前要在目标 head 上观察到连续两次绿（`docs/architecture/release-gates.md` §2.2）。本车道**不**改变 `PR Fast Gate` 的唯一必需状态，也不改 `ci.yml`。
+退役 `.github/workflows/merge-gate.yml`、其 YAML 镜像测试与 MVP-0 进度轨道。减少四个测试执行 job、四次依赖安装和一个聚合 job；不发布原 advisory 检查名，也不再维护候选升级为必需检查的流程。R1 对目标 head 连续两次成功、integration/e2e 非空全绿和人类判定的要求保留，证据统一读取 CI，见 `docs/architecture/release-gates.md` §2.2。
 
 ## W1–W7
 
@@ -195,7 +182,7 @@ CI workflow 的 action 必须 pin 到 40 位 commit；checkout 必须关闭 pers
 
 Merge queue / merge_group、integration、E2E 和 weekly regression 只有在仓库出现对应真实测试、耗时基线和稳定入口后才新增。新增 lane 先写 ExecPlan，证明它提供新的系统反馈；不得把同一组契约测试复制到多个 workflow 来制造覆盖率。
 
-integration 与 E2E 的前置条件现已成立：`tests/integration`、`tests/e2e` 各有用例文件，`pnpm verify` 是既有稳定入口，`Merge Gate` 车道按本节顺序（先 ExecPlan）落地。merge queue / merge_group 与 weekly regression 仍然没有对应事实（分支保护只允许 rebase merge，仓库没有 merge queue，也没有实测的慢测试），因此未新增。
+integration 与 E2E 已由 CI 的单次分层执行覆盖，`pnpm verify` 是本地完整入口。merge queue / merge_group 与 weekly regression 仍然没有对应事实（分支保护只允许 rebase merge，仓库没有 merge queue，也没有实测的慢测试），因此未新增。
 
 未来若启用 merge_group，复用 PR Fast Gate 的稳定聚合检查名，确保 required check 在 queue 中有状态上报。慢测和组合矩阵应放到非必需的 main / weekly workflow；不取消 main 的验证记录。self-hosted lane 需要隔离 workspace、临时目录、端口、数据库和子进程，并避免在长期 runner 上执行不可信 fork 代码。
 

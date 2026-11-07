@@ -24,7 +24,7 @@ name: Board invariants
 #
 # 刻意**不**声明 `workflow_dispatch`：它带一个 ref 选择器，而被选中的 ref 同时决定
 # workflow 定义与 checkout 出来的脚本——一个手选的 PR 分支就能拿 `PROJECTS_TOKEN`
-# 执行任意代码。`merge-gate.yml` 可以用它，是因为那条 workflow 不读任何 secret。
+# 执行任意代码。`ci.yml` 可以手动运行，是因为其候选代码 lane 不读任何 secret。
 # `tests/contract/check-board-workflows-live.test.js` 有一条断言把 `on` 钉在
 # `['schedule']` 上，正是为了防止这次修改。
 
