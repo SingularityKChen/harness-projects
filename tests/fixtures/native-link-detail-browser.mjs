@@ -53,6 +53,10 @@ export async function startNativeDetailServer() {
     if (/mutation\s/.test(request.query)) throw new Error('Business write forbidden')
     if (flags.offline && ['PlanningIssueClosingLinks', 'PlanningIssueReferences', 'DevelopmentRepository', 'DevelopmentChangeRequest'].includes(op)) throw new Error('SECRET network error')
     if (flags.deny === op || (op === (flags.denySource ?? 'PlanningIssueClosingLinks') && flags.denyIssue === v.issue)) return new Response(JSON.stringify({ errors: [{ type: 'FORBIDDEN', message: 'SECRET' }] }), { status: 403 })
+    if (op === 'PlanningIssueLinkTarget') {
+      const content = { __typename: 'Issue', id: v.issue, number: 545, repository }
+      return new Response(JSON.stringify({ data: { project: { __typename: 'ProjectV2', id: v.project }, membership: { __typename: 'ProjectV2Item', id: v.membership, type: 'ISSUE', project: { id: v.project }, content }, issue: content } }))
+    }
     if (op === 'PlanningIssueReferences') {
       const result = { data: { project: { __typename: 'ProjectV2', id: v.project }, membership: { __typename: 'ProjectV2Item', id: v.membership, type: 'ISSUE', project: { id: v.project }, content: { __typename: 'Issue', id: v.issue, repository } }, issue: { __typename: 'Issue', id: v.issue, repository, timelineItems: {
         nodes: flags.reference && !v.after ? [{ __typename: 'CrossReferencedEvent', target: { __typename: 'Issue', id: v.issue }, source: { ...rawPr, repository, isDraft: true }, willCloseTarget: false }] : [],

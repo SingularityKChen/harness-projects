@@ -78,7 +78,7 @@ async function finishChangeRequest(controller: Controller, scope: { workItemId: 
 }
 
 /** 工作区身份来自 Host；执行记录只在读取前后均可见的工作项上投影允许字段。 */
-const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness', targetError: CoreApi['queries']['getStartWorkTargetError']): UnaryHandlers<Pick<typeof OPERATIONS, 'getIssueClosingLinks' | 'refreshIssueClosingLinks' | 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts' | 'createChangeRequest' | 'getChangeRequestOperation' | 'resumeChangeRequest'>, Controller> => ({
+const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness', targetError: CoreApi['queries']['getStartWorkTargetError']): UnaryHandlers<Pick<typeof OPERATIONS, 'getIssueClosingLinks' | 'refreshIssueClosingLinks' | 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts' | 'createChangeRequest' | 'getChangeRequestIssueOptions' | 'getChangeRequestOperation' | 'resumeChangeRequest'>, Controller> => ({
   getIssueClosingLinks: async (controller, input) => ({ workspaceId, ...input, observation: await controller.queries.getIssueClosingLinks(input) }),
   refreshIssueClosingLinks: (controller, { actorRef, ...input }) => controller.commands.refreshIssueClosingLinks(input, { actorRef }),
   getStartWorkOptions: async (controller, input) => {
@@ -102,6 +102,7 @@ const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness',
           && Object.values(CapabilityKey).some(key => key === reason[2]) ? `${reason[1]} 层拒绝 ${reason[2]}；其它获准操作仍可用，请恢复授权后重新验证并显式重试`
           : error.message === 'existing_execution_task_not_sent' ? error.message : '开始工作未确认，请按恢复动作处理') }) }
   },
+  getChangeRequestIssueOptions: async (controller, { actorRef: _actorRef, ...scope }) => ({ workspaceId, ...scope, options: await controller.queries.getChangeRequestIssueOptions(scope) }),
   createChangeRequest: async (controller, input) => {
     await assertDeliveryScope(controller, input)
     const result = await controller.commands.createChangeRequest(input)
@@ -366,7 +367,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         while (barrier) await barrier
         if (closed) throw new Error('host 已关闭')
         const assembly = current; const result = await lease(assembly, () => dispatch(assembly.controller, name, input))
-        if (['getIssueClosingLinks', 'refreshIssueClosingLinks'].includes(name) && (closed || assembly !== current || assembly.retired)) throw new Error('host 读取已失效')
+        if (['getIssueClosingLinks', 'refreshIssueClosingLinks', 'getChangeRequestIssueOptions'].includes(name) && (closed || assembly !== current || assembly.retired)) throw new Error('host 读取已失效')
         return result
       },
       watch: (signal) => {

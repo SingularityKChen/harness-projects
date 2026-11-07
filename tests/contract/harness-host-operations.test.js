@@ -183,9 +183,9 @@ test('run refresh exposes only actor and explicit work/repository IDs without re
 
 test('PR create ABI has only explicit user fields and cannot carry provider authority', () => {
   const operation = OPERATIONS.createChangeRequest
-  assert.deepEqual(operation.params.map((param) => param.name), ['actorRef', 'idempotencyKey', 'workItemId', 'repositoryId', 'base', 'title', 'body', 'draft'])
-  assert.equal(operation.params.at(-2).parse(''), '')
-  assert.throws(() => operation.params.at(-2).parse({}), TypeError)
+  assert.deepEqual(operation.params.map((param) => param.name), ['actorRef', 'idempotencyKey', 'workItemId', 'repositoryId', 'base', 'title', 'body', 'draft', 'issueRelation', 'issueTargetStamp'])
+  assert.equal(operation.params.find(p => p.name === 'body').parse(''), '')
+  assert.throws(() => operation.params.find(p => p.name === 'body').parse({}), TypeError)
 })
 
 test('PR operation lookup and resume reject authority and require explicit selector only for resume', () => {
@@ -197,7 +197,7 @@ test('PR operation lookup and resume reject authority and require explicit selec
 })
 
 test('PR draft ABI defaults only omission and preserves explicit booleans', () => {
-  const draft = OPERATIONS.createChangeRequest.params.at(-1)
+  const draft = OPERATIONS.createChangeRequest.params.find(p => p.name === 'draft')
   assert.equal(draft.name, 'draft'); assert.equal(draft.acceptsUndefined, true)
   assert.equal(draft.parse(undefined), false); assert.equal(draft.parse(false), false); assert.equal(draft.parse(true), true)
   for (const value of [null, 'true', 1, {}]) assert.throws(() => draft.parse(value), TypeError)
@@ -207,4 +207,11 @@ test('Start Work task ABI preserves exact Unicode and rejects missing, blank and
   assert.deepEqual(operation.params.map(param => param.name), ['actorRef', 'idempotencyKey', 'workItemId', 'repositoryId', 'task', 'branchName'])
   assert.equal(task.parse('  明确 🧪\n  '), '  明确 🧪\n  ')
   for (const value of [undefined, null, 1, {}, '', ' \n', 'x'.repeat(16385)]) assert.throws(() => task.parse(value), TypeError)
+})
+
+test('PR Issue choice ABI refuses nonprimitive relations and empty target stamps', () => {
+  const relation = OPERATIONS.createChangeRequest.params.find(p => p.name === 'issueRelation'), stamp = OPERATIONS.createChangeRequest.params.find(p => p.name === 'issueTargetStamp')
+  for (const value of ['reference', 'closing', 'none', undefined]) assert.equal(relation.parse(value), value)
+  for (const value of [null, {}, ['reference'], 'implements']) assert.throws(() => relation.parse(value), TypeError)
+  assert.equal(stamp.parse(undefined), undefined); assert.throws(() => stamp.parse(''), TypeError)
 })

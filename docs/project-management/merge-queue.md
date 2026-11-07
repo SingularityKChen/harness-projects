@@ -112,10 +112,10 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 | 位置 | PR / 分支 | 闭环 | 接合门 |
 |---|---|---|---|
 | 1（已合并） | #561 `feature/source-aware-numbers` | Closes #558；Refs #537 | 2026-11-07 rebase merge `b5ddbca68e1e7da6850e7e2abe1be3fe481160ca`；完整树等于当前批准 head，#558 CLOSED |
-| 3 | #559 `fix/execution-start-identity` | Refs #554 | 两 P2 须独立复评；#554 原 installed 失败边界标准保留 OPEN，不能自动关闭 |
-| 4 | #560 `fix/execution-setup-feedback` | Closes #553 | 安装 activation 读回后的重试路由 P2 修复，保持执行意图、不重连 Planning |
+| 3（已合并） | #559 `fix/execution-start-identity` | Refs #554 | 2026-11-07 rebase `1ad2411ef7b7e8ef846c98c72a6e352021a9694c`；两P2已修复复评，Refs#554保持OPEN |
+| 4（已合并） | #560 `fix/execution-setup-feedback` | Closes #553 | 2026-11-07 rebase `45330b54c7c786f81e3453254210440437e6fd3b`；#553 CLOSED，P2独立复评通过 |
 | 2（已合并） | #564 `feature/pull-request-issue-link` | Closes #562 | 2026-11-07 原生 rebase merge `1a621a35d544fca1650d7b380231a76330f569cf`；#562 CLOSED，树等于当前批准 head |
-| 5 | #565 `feature/pull-request-issue-choice` | Closes #563 | 首轮 P1 完整交原 owner；修复独立复评无 P0/P1 后才可推进，基于 #564 的真实新落点 |
+| 5 | #565 `feature/pull-request-issue-choice` | Closes #563 | P1由原owner修复、原评审者独立接受；已接合含前四条的真实main，非docs树与完整已测组合一致，当前head托管/批准门通过后原生rebase合入 |
 
 每层均先备份已发布 head，使用精确 lease，重新核对最终 base/head、产品树、全部 threads、issue 双向关联和当前 CI/批准；#564/#565 使用原生 `merge-async` 并指定 `merge_method=rebase`。当前结果用 `gh pr view <n> -R SingularityKChen/harness-projects --json state,headRefOid,baseRefOid,mergeCommit,closingIssuesReferences` 回读，不能以本表预写未来结果。Planning Status、父项及 R1 不由工程合并接受。
 

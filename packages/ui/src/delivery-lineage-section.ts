@@ -9,7 +9,7 @@ const STATES = { observed: '已观察', passed: '通过', failed: '失败', unkn
 type Refresh = { key: string; reader: DeliveryLineageReader; task?: Promise<boolean> }
 type State = { key: string; reader: DeliveryLineageReader; thresholdMs: number | undefined; read?: DeliveryLineageRead; pending: boolean; failed: boolean }
 /** 每个明确仓库 scope 一个消费者：只有 open/manual 才摄入；时间边界与恢复只纯读 Host。 */
-export function DeliveryLineageSection({ scope, reader, connected, thresholdMs, accessToken, creator, onConnect }: { readonly scope: DeliveryLineageScope; readonly reader: DeliveryLineageReader; readonly connected: boolean; readonly thresholdMs?: number; readonly accessToken?: string | undefined; readonly creator?: ChangeRequestCreator | undefined; readonly onConnect?: (() => void) | undefined }) {
+export function DeliveryLineageSection({ scope, reader, connected, thresholdMs, accessToken, creatorAccessToken, creator, onConnect }: { readonly scope: DeliveryLineageScope; readonly reader: DeliveryLineageReader; readonly connected: boolean; readonly thresholdMs?: number; readonly accessToken?: string | undefined; readonly creatorAccessToken?: string | undefined; readonly creator?: ChangeRequestCreator | undefined; readonly onConnect?: (() => void) | undefined }) {
   const scopeKey = JSON.stringify([scope.workspaceId, scope.workItemId, scope.repositoryId]), key = JSON.stringify([scopeKey, accessToken])
   const [state, setState] = useState<State>({ key, reader, thresholdMs, pending: true, failed: false })
   const refreshing = useRef<Refresh | undefined>(undefined)
@@ -70,6 +70,6 @@ export function DeliveryLineageSection({ scope, reader, connected, thresholdMs, 
             node.label && node.externalId ? h('p', null, '外部标识：', node.externalId) : null,
             h('p', null, node.relationState === 'candidate' ? '候选关系' : node.relationState === 'confirmed' ? '已确认关系' : '已拒绝关系')))
       })))),
-    creator === undefined ? null : h(CreateChangeRequestSection, { key, scope, creator, connected, onConnect, onConfirmed: () => { action.current?.(false) } }),
+    creator === undefined ? null : h(CreateChangeRequestSection, { key, scope, creator, connected, accessToken: creatorAccessToken, onConnect, onConfirmed: () => { action.current?.(false) } }),
     h('button', { className: 'hp-action', type: 'button', disabled: !connected, onClick: () => action.current?.() }, '刷新交付谱系'))
 }

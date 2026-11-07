@@ -209,6 +209,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
 export function unavailableCore(reason: string): CoreApi {
   const error = projectError(ProjectErrorCode.NotSupported, reason)
   const queries: CoreQueries = {
+    getChangeRequestIssueOptions: async () => ({ defaultRelation: 'none', relations: ['none'], reason: '工作区不可用' }),
     getIssueClosingLinks: async (scope) => ({ workItemId: scope.workItemId, scopeToken: 'unavailable', state: 'unsupported', links: [], stale: true }),
     getChangeRequestOperation: async () => ({ kind: 'blocked', reason: 'unavailable' }),
     getDeliveryAccessVersion: () => '0:0:0',

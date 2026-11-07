@@ -118,10 +118,12 @@ export type StartWorkExternalOperation = { readonly operation: 'createBranch'; r
 export type StartWorkExternalIntent = StartWorkExternalOperation & {
   readonly contextId: ExecutionContextId; readonly ownerGeneration: number; readonly bindingId: ProviderBindingId; readonly state: WriteState
 }
+export type ChangeRequestIssueSelection = { readonly relation: 'none' } | { readonly relation: 'reference' | 'closing'; readonly target: import('./planning-provider.ts').ProviderIssueLinkTarget }
 export type ChangeRequestExternalIntent = {
   readonly operation: 'createChangeRequest'; readonly input: ProviderCreateChangeRequestInput & { readonly draft: boolean }
   readonly contextId: ExecutionContextId; readonly ownerGeneration: number; readonly bindingId: ProviderBindingId; readonly state: WriteState
   readonly worktree: string; readonly confirmedRef?: ExternalObjectRef
+  readonly issueSelection: ChangeRequestIssueSelection
 }
 export type ExternalIntent = StartWorkExternalIntent | ChangeRequestExternalIntent
 export function validateExternalIntentCommand(record: MutationAttemptRecord): void {
@@ -146,12 +148,20 @@ export function externalIntentSnapshot(value: ExternalIntent): ExternalIntent {
     || input === null || typeof input !== 'object') return fail()
   const base = { contextId: text(contextId) as ExecutionContextId, ownerGeneration, bindingId: text(bindingId) as ProviderBindingId, state }
   if (operation === 'createChangeRequest') {
-    if (Object.keys(value).some((key) => !['operation', 'input', 'contextId', 'ownerGeneration', 'bindingId', 'state', 'worktree', 'confirmedRef'].includes(key))
+    if (Object.keys(value).some((key) => !['operation', 'input', 'contextId', 'ownerGeneration', 'bindingId', 'state', 'worktree', 'confirmedRef', 'issueSelection'].includes(key))
       || Object.keys(input).some((key) => !['repository', 'head', 'base', 'title', 'body', 'draft'].includes(key))) return fail()
     const { repository, head, base: targetBase, title, body, draft } = input
     const { worktree, confirmedRef } = value
+    const selection = value.issueSelection
+    if (!selection || !['none', 'reference', 'closing'].includes(selection.relation)) return fail()
+    let issueSelection: ChangeRequestIssueSelection = { relation: 'none' }
+    if (selection.relation !== 'none') {
+      const t = selection.target, identity = (v: { namespace: string; id: string }) => ({ namespace: text(v.namespace), id: text(v.id) })
+      if (!Number.isSafeInteger(t.number) || t.number < 1 || !/^[\w.-]+\/[\w.-]+$/.test(t.repository.name)) return fail()
+      issueSelection = { relation: selection.relation, target: { source: { project: ref(t.source.project, 'project'), membership: ref(t.source.membership, 'project_item'), issue: ref(t.source.issue, 'issue') }, nativeIssueIdentity: identity(t.nativeIssueIdentity), number: t.number, repository: { identity: identity(t.repository.identity), name: t.repository.name } } }
+    }
     if (typeof body !== 'string' || typeof draft !== 'boolean') return fail()
-    return { ...base, operation, worktree: text(worktree), input: { repository: ref(repository, 'repository'), head: text(head), base: text(targetBase), title: text(title), body, draft },
+    return { ...base, operation, issueSelection, worktree: text(worktree), input: { repository: ref(repository, 'repository'), head: text(head), base: text(targetBase), title: text(title), body, draft },
       ...(confirmedRef === undefined ? {} : { confirmedRef: ref(confirmedRef, 'change_request') }) }
   }
   if (operation === 'createBranch') {
