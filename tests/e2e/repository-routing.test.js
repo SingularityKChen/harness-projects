@@ -22,7 +22,7 @@ import { createGithubDevelopmentProvider } from '@harness-projects/provider-deve
 import { createLocalGitDevelopmentProvider } from '@harness-projects/provider-development-local-git'
 import { createFakeDevelopmentProvider, createFakeExecutionProvider, createFakePlanningProvider, createFakeStorage, emptyStorageData } from '@harness-projects/provider-fake'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
-import { LineageTarget, accessIndex, lineageEntryPoints, repositoryAccessIndex, startWorkAvailability } from '@harness-projects/ui-model'
+import { accessIndex, repositoryAccessIndex, startWorkAvailability } from '@harness-projects/ui-model'
 
 const dir = mkdtempSync(join(tmpdir(), 'harness-repository-routing-'))
 after(() => rmSync(dir, { recursive: true, force: true }))
@@ -248,13 +248,12 @@ for (const [label, makeStorage] of ADAPTERS) {
     sync.receive({ kind: 'baseline', baseline: await controller.baseline() })
     const read = sync.read()
     assert.deepEqual(read.repositories, base.repositories, 'client 原样收下逐仓库条目')
-    const entryPoint = (index) => lineageEntryPoints(index).find((entry) => entry.target === LineageTarget.ChangeRequest).available
     const availability = (id) => {
       const index = repositoryAccessIndex(read.capabilities, read.repositories.find((repository) => repository.id === id).capabilities)
-      return [startWorkAvailability(index).available, entryPoint(index)]
+      return [startWorkAvailability(index).available, index.get(CapabilityKey.DevelopmentChangeRequestRead)]
     }
-    assert.deepEqual(['r-both', 'r-remote', 'r-local', 'r-twin'].map(availability), [[true, true], [false, true], [true, false], [false, false]], '开始工作 / 变更请求入口')
-    assert.deepEqual([startWorkAvailability(accessIndex(read.capabilities)).available, entryPoint(accessIndex(read.capabilities))], [false, false], '对照：只有工作区级索引时被 key 级 fail closed 盖住')
+    assert.deepEqual(['r-both', 'r-remote', 'r-local', 'r-twin'].map(availability), [[true, 'available'], [false, 'available'], [true, 'unavailable'], [false, 'unavailable']], '开始工作可用性 / 变更请求读取元数据')
+    assert.deepEqual([startWorkAvailability(accessIndex(read.capabilities)).available, accessIndex(read.capabilities).get(CapabilityKey.DevelopmentChangeRequestRead)], [false, 'unavailable'], '对照：只有工作区级索引时被 key 级 fail closed 盖住')
 
     const poll = (change) => {
       const next = structuredClone(base)

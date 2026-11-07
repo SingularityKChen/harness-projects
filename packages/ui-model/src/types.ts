@@ -21,8 +21,6 @@ export interface CapabilitySnapshotEntry {
   readonly reason?: string | undefined
 }
 
-export interface WorkspaceDescriptor { readonly id: string; readonly name: string }
-
 /** 一次"工作区读取"：类型与字段语义由 client 的 `ClientWorkspaceRead` 定义，这里是同一个真源的别名。 */
 export type WorkspaceRead = ClientWorkspaceRead
 
@@ -34,39 +32,15 @@ export const WorkspaceConnectionState = {
 } as const
 export type WorkspaceConnectionState = (typeof WorkspaceConnectionState)[keyof typeof WorkspaceConnectionState]
 
-/** 按内容三态计数；三个键恒存在，缺一类就是 0。 */
-export type ContentKindCounts = Readonly<Record<ContentKind, number>>
-
-export interface WorkspaceItems {
-  readonly total: number
-  /** 展示结论下算陈旧的条目数（与列表行的 `freshness.stale` 同一规则）。 */
-  readonly stale: number
-  readonly byContentKind: ContentKindCounts
-}
-
-export interface WorkspaceHome {
-  readonly workspace: WorkspaceDescriptor; readonly connection: WorkspaceConnectionState
-  readonly revision: number
-  /** `undefined` = 从未读到当前值（与 `WorkspaceRead` 同义）。 */
-  readonly lastUpdatedAt: string | undefined
-  /** 与 `WorkItemList.reason` 同源同值：同一份读取不得给出相反解释。 */
-  readonly reason: string | undefined
-  /** 客户端模型里出现过的来源绑定，去重排序。 */
-  readonly sources: readonly string[]
-  readonly items: WorkspaceItems
-}
-
-export interface ProjectsHome { readonly workspaces: readonly WorkspaceHome[] }
-
 /** 展示层能提供的动作；取值是稳定契约，文案归页面。 */
 export const ActionId = { StartWork: 'start_work' } as const
 export type ActionId = (typeof ActionId)[keyof typeof ActionId]
 
 /**
- * 一个能力组合的结论。`available` 只由 capability key 决定，按用途分两种（与 core 的 `gateCommand`
- * 同一约定）：写动作被 `read_only` 与 `unavailable` 阻断；只读目标只被 `unavailable` 阻断。未声明的
- * key 一律 `unavailable`。`requiredKeys` 必须**精确**等于 core 读该事实时真正经过的门；空列表表示
- * 没有门、恒可用。`reason` 在 `access !== available` 时逐 key 给出**它自己的**级别。
+ * 开始工作能力组合的结论。`available` 只由 capability key 决定，与 core 的 `gateCommand`
+ * 同一约定：写门被 `read_only` 与 `unavailable` 阻断；读门只被 `unavailable` 阻断。未声明的
+ * key 一律 `unavailable`。`requiredKeys` 必须精确等于 core 开始工作实际经过的四门。
+ * `reason` 在 `access !== available` 时逐 key 给出它自己的级别。
  */
 export interface CapabilityDecision {
   readonly available: boolean
@@ -117,8 +91,6 @@ export interface WorkItemRow {
   readonly derived: readonly DerivedFlag[]
   readonly source: SourcePresentation
   readonly freshness: FreshnessPresentation
-  /** 该行**提供**的动作；可用性只来自 capability key。 */
-  readonly actions: readonly ActionAvailability[]
 }
 
 /** 工作项列表：`stale` / `connection` / `reason` 三者同出一处降级决策，`stale` 是可见行与工作区读取状态的整页结论，redacted 自身 freshness 不参与。 */
@@ -131,18 +103,6 @@ export interface WorkItemList {
   readonly lastUpdatedAt: string | undefined
 }
 
-/** 谱系入口的导航目标；取值是稳定契约，文案归页面。 */
-export const LineageTarget = {
-  ExecutionContext: 'execution_context',
-  ChangeRequest: 'change_request',
-  PipelineRun: 'pipeline_run',
-  CheckRun: 'check_run',
-} as const
-export type LineageTarget = (typeof LineageTarget)[keyof typeof LineageTarget]
-
-/** 谱系入口：工程谱系视图的**只读导航目标**（`CapabilityDecision` 的只读用途实例）。 */
-export interface LineageEntryPoint extends CapabilityDecision { readonly target: LineageTarget }
-
 /** 详情里的规划段：规划字段是权威值，派生标记只用于展示。 */
 export interface PlanningSection {
   readonly sourceNumber?: SourceNumber
@@ -154,5 +114,4 @@ export interface PlanningSection {
 export interface WorkItemDetail {
   readonly entityId: EntityId; readonly planning: PlanningSection; readonly source: SourcePresentation
   readonly freshness: FreshnessPresentation
-  readonly actions: readonly ActionAvailability[]
 }

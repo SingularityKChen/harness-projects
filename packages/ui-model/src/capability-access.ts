@@ -7,8 +7,8 @@
 import { CapabilityKey, intersectAccess } from '@harness-projects/client/keys'
 import { AccessLevel } from '@harness-projects/domain/values'
 import {
-  ActionId, LineageTarget,
-  type ActionAvailability, type CapabilityDecision, type CapabilitySnapshotEntry, type LineageEntryPoint,
+  ActionId,
+  type ActionAvailability, type CapabilitySnapshotEntry,
 } from './types.ts'
 
 /** 开始工作的必需 key：建分支、建工作树，以及 core 写前预检经过的仓库读、工作树读两个读门，缺一不可。 */
@@ -18,24 +18,6 @@ const START_WORK_KEYS = [
 ] as const
 /** 读门只按读判定（与 core 的 `gateCommand(..., 'read')` 一致）：`read_only` 对读来说就是可用，只有 `unavailable` 挡住开始工作。 */
 const START_WORK_READ_KEYS: ReadonlySet<string> = new Set([CapabilityKey.DevelopmentRepositoryRead, CapabilityKey.DevelopmentWorktreeRead])
-
-/**
- * 谱系入口的必需 key **必须等于 core 读该事实时真正经过的门**（`packages/core/src/chain-facts.ts`）。
- * `execution_context` 没有门：`readExecutionContext` 是纯本地存储读，core 从不为之设门，所以它不要求
- * 任何 key——挂一个 core 不经过的 key，只会让它在真实工作区永久不可用、在替身里可用。
- */
-const LINEAGE_KEYS: Readonly<Record<LineageTarget, readonly string[]>> = {
-  [LineageTarget.ExecutionContext]: [],
-  [LineageTarget.ChangeRequest]: [CapabilityKey.DevelopmentChangeRequestRead],
-  [LineageTarget.PipelineRun]: [CapabilityKey.DeliveryPipelineRead],
-  [LineageTarget.CheckRun]: [CapabilityKey.DeliveryCheckRead],
-}
-
-/** 入口顺序固定：页面稳定渲染与快照比较依赖它，不是实现细节。 */
-const LINEAGE_ORDER: readonly LineageTarget[] = [
-  LineageTarget.ExecutionContext, LineageTarget.ChangeRequest,
-  LineageTarget.PipelineRun, LineageTarget.CheckRun,
-]
 
 /** 四态求交：逐个折进 capabilities 的 `intersectAccess`（unavailable > read_only > degraded > available），初值为上界 available。 */
 const intersect = (levels: readonly AccessLevel[]): AccessLevel =>
@@ -59,41 +41,20 @@ export function repositoryAccessIndex(
 }
 
 /**
- * 用途：与 core 的 `gateCommand(registry, key, mode)` 同一套约定（`packages/core/src/capabilities.ts`）——
- * 只有**写**命令在 `read_only` 下被拒；**读**目标在 `read_only` 下照常可用。
+ * 开始工作四门求交：两个读门的 `read_only` 照常可读，写门只在 `available` / `degraded` 下可用。
+ * `reason` 逐 key 点名起作用的 key 与它自己的级别，顺序沿用四门声明顺序。
  */
-const CapabilityUse = { Write: 'write', Read: 'read' } as const
-type CapabilityUse = (typeof CapabilityUse)[keyof typeof CapabilityUse]
-
-/**
- * 四态求交后按用途判定可用性（`write` 下 `available` / `degraded` 可用；`read` 下只有 `unavailable`
- * 阻断）。`access !== available` 时 `reason` 逐 key 点名起作用的 key 与**它自己的**级别（合成级别不等于
- * 任何单个 key 的级别），顺序沿用必需 key 的声明顺序，便于机器读取。必需 key 为空时恒可用。
- */
-function decide(
-  requiredKeys: readonly string[], access: ReadonlyMap<string, AccessLevel>, use: CapabilityUse, readKeys: ReadonlySet<string> = new Set(),
-): CapabilityDecision {
+export function startWorkAvailability(access: ReadonlyMap<string, AccessLevel>): ActionAvailability {
+  const requiredKeys = START_WORK_KEYS
   const levelOf = (key: string): AccessLevel => {
     const level = access.get(key) ?? AccessLevel.Unavailable
-    return readKeys.has(key) && level === AccessLevel.ReadOnly ? AccessLevel.Available : level
+    return START_WORK_READ_KEYS.has(key) && level === AccessLevel.ReadOnly ? AccessLevel.Available : level
   }
   const combined = intersect(requiredKeys.map(levelOf))
-  const available = use === CapabilityUse.Read
-    ? combined !== AccessLevel.Unavailable
-    : combined === AccessLevel.Available || combined === AccessLevel.Degraded
-  if (combined === AccessLevel.Available) return { available, access: combined, reason: undefined, requiredKeys }
+  const available = combined === AccessLevel.Available || combined === AccessLevel.Degraded
+  if (combined === AccessLevel.Available) return { id: ActionId.StartWork, available, access: combined, reason: undefined, requiredKeys }
   const blocking = requiredKeys
     .filter((key) => levelOf(key) !== AccessLevel.Available)
     .map((key) => `${key} = ${levelOf(key)}`)
-  return { available, access: combined, requiredKeys, reason: `capability ${blocking.join(', ')}` }
-}
-
-/** 开始工作的动作可用性（写动作）；是否提供这个动作由调用方按内容种类决定。 */
-export function startWorkAvailability(access: ReadonlyMap<string, AccessLevel>): ActionAvailability {
-  return { id: ActionId.StartWork, ...decide(START_WORK_KEYS, access, CapabilityUse.Write, START_WORK_READ_KEYS) }
-}
-
-/** 全部谱系入口（含不可用的）；可用性只来自 capability key，按只读导航判定。 */
-export function lineageEntryPoints(access: ReadonlyMap<string, AccessLevel>): readonly LineageEntryPoint[] {
-  return LINEAGE_ORDER.map((target) => ({ target, ...decide(LINEAGE_KEYS[target], access, CapabilityUse.Read) }))
+  return { id: ActionId.StartWork, available, access: combined, requiredKeys, reason: `capability ${blocking.join(', ')}` }
 }

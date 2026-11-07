@@ -1,18 +1,17 @@
 /**
- * 三组展示结构的派生（issue #128）：项目首页、工作项列表、统一详情。全部是纯函数：不读时钟、不改
+ * 列表与详情的展示结构派生。全部是纯函数：不读时钟、不改
  * 入参、无内部状态。陈旧是如实展示的状态，不是过滤条件——陈旧快照绝不返回空列表。降级规则共用
- * `degradationOf`；列表只归约可见行，首页 / 详情仍取完整集合。
+ * `degradationOf`；列表只归约可见行，详情仍取完整集合。
  */
-import { AccessLevel, ContentKind } from '@harness-projects/domain/values'
+import { ContentKind } from '@harness-projects/domain/values'
 import type { StoredEntity } from '@harness-projects/client'
-import { accessIndex, startWorkAvailability } from './capability-access.ts'
 import { isIsoTimestamp } from './timestamp.ts'
 import {
   WorkspaceConnectionState,
-  type ActionAvailability, type ClientEntity,
-  type FreshnessPresentation, type PlanningSection, type ProjectsHome,
+  type ClientEntity,
+  type FreshnessPresentation, type PlanningSection,
   type SourceIdentity, type SourcePresentation, type WorkItemDetail, type WorkItemList,
-  type WorkItemRow, type WorkspaceHome, type WorkspaceRead,
+  type WorkItemRow, type WorkspaceRead,
 } from './types.ts'
 
 /**
@@ -77,15 +76,6 @@ function freshnessOf(entry: StoredEntity, read: WorkspaceRead, degradation: Degr
   }
 }
 
-/**
- * 动作是否**提供**由内容种类决定：只有工作项提供开始工作——change_request 是工程产物、redacted 没有
- * 可操作的规划条目。它与"是否可用由 capability key 决定"是两条**独立**规则：合成一条会让内容种类变成
- * 可用性来源（#128 验收第 2 条）。
- */
-function actionsFor(entity: ClientEntity, access: ReadonlyMap<string, AccessLevel>): readonly ActionAvailability[] {
-  return entity.content.contentKind === ContentKind.WorkItem ? [startWorkAvailability(access)] : []
-}
-
 /** 遮蔽内容不透出标题、正文与字段事实：即使上游带着缓存值，页面也不会拿到它。 */
 function visibleContent(entity: ClientEntity): { title: string | undefined; body: string | undefined; planningFields: ClientEntity['planningFields']; sourceNumber?: ClientEntity['content']['sourceNumber'] } {
   if (entity.content.contentKind === ContentKind.Redacted) return { title: undefined, body: undefined, planningFields: undefined }
@@ -94,14 +84,14 @@ function visibleContent(entity: ClientEntity): { title: string | undefined; body
 
 function rowOf(
   entry: StoredEntity, read: WorkspaceRead,
-  access: ReadonlyMap<string, AccessLevel>, degradation: Degradation,
+  degradation: Degradation,
 ): WorkItemRow {
   const content = visibleContent(entry.entity)
   return {
     ...(content.sourceNumber === undefined ? {} : { sourceNumber: content.sourceNumber }),
     entityId: entry.entity.entityId, contentKind: entry.entity.content.contentKind, title: content.title,
     planningStatus: entry.entity.planningStatus, planningFields: content.planningFields, derived: entry.entity.derived, source: sourceOf(entry.entity),
-    freshness: freshnessOf(entry, read, degradation), actions: actionsFor(entry.entity, access),
+    freshness: freshnessOf(entry, read, degradation),
   }
 }
 
@@ -121,10 +111,9 @@ function planningSectionOf(entry: StoredEntity): PlanningSection {
 export function deriveWorkItemList(read: WorkspaceRead): WorkItemList {
   assertTimestamp(read.lastUpdatedAt, 'lastUpdatedAt')
   const entries = read.store.list()
-  const access = accessIndex(read.capabilities ?? [])
   const degradation = degradationOf(read, entries.filter((entry) => entry.entity.content.contentKind !== ContentKind.Redacted))
   return {
-    rows: entries.map((entry) => rowOf(entry, read, access, degradation)),
+    rows: entries.map((entry) => rowOf(entry, read, degradation)),
     stale: degradation.level !== WorkspaceConnectionState.Connected,
     connection: degradation.level,
     reason: degradation.reason,
@@ -137,34 +126,10 @@ export function deriveWorkItemDetail(read: WorkspaceRead, entityId: string): Wor
   assertTimestamp(read.lastUpdatedAt, 'lastUpdatedAt')
   const entry = read.store.get(entityId)
   if (entry === undefined) return undefined
-  const access = accessIndex(read.capabilities ?? [])
   return {
     entityId: entry.entity.entityId,
     planning: planningSectionOf(entry),
     source: sourceOf(entry.entity),
     freshness: freshnessOf(entry, read, degradationOf(read, read.store.list())),
-    actions: actionsFor(entry.entity, access),
-  }
-}
-
-/** 项目首页：工作区及其派生的连接状态；未观测到工作区时返回空列表。 */
-export function deriveProjectsHome(reads: readonly WorkspaceRead[]): ProjectsHome {
-  return { workspaces: reads.map((read) => homeOf(read)) }
-}
-
-function homeOf(read: WorkspaceRead): WorkspaceHome {
-  assertTimestamp(read.lastUpdatedAt, 'lastUpdatedAt')
-  const entries = read.store.list()
-  const byContentKind: Record<ContentKind, number> =
-    { [ContentKind.WorkItem]: 0, [ContentKind.ChangeRequest]: 0, [ContentKind.Redacted]: 0 }
-  for (const entry of entries) byContentKind[entry.entity.content.contentKind] += 1
-  const degradation = degradationOf(read, entries)
-  return {
-    workspace: read.workspace, connection: degradation.level, revision: read.store.revision,
-    lastUpdatedAt: read.lastUpdatedAt, reason: degradation.reason,
-    sources: [...new Set(entries.map((entry) => entry.entity.content.bindingId))].sort(),
-    items: {
-      total: entries.length, stale: entries.filter((entry) => isStale(entry, read)).length, byContentKind,
-    },
   }
 }

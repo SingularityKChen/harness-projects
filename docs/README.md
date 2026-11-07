@@ -35,6 +35,7 @@
 | [2026-11-07-e1-record-retirement](exec-plan/completed/2026-11-07-e1-record-retirement.md) | E1 历史散文校验退役（#572） |
 | [2026-11-07-test-execution](exec-plan/completed/2026-11-07-test-execution.md) | 单次分层执行与已完成进度轨道退役（#573） |
 | [2026-11-07-client-push-only](exec-plan/completed/2026-11-07-client-push-only.md) | Client 单一推流帧接受点与旧 pull 生命周期退役（#575） |
+| [2026-11-07-read-model-retirement](exec-plan/completed/2026-11-07-read-model-retirement.md) | 退役无运行时消费者的展示投影（#574） |
 | [2026-11-07-source-work-item-numbers](exec-plan/completed/2026-11-07-source-work-item-numbers.md) | 来源工作项编号展示与搜索（#558） |
 | [2026-11-07-source-pr-native-relations](exec-plan/completed/2026-11-07-source-pr-native-relations.md) | 原生来源 PR 引用与关闭关系观察（#562，Refs #556） |
 | [2026-11-07-execution-start-identity](exec-plan/completed/2026-11-07-execution-start-identity.md) | 发送任务前的持久身份（#554） |
