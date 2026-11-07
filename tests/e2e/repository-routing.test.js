@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { after, test } from 'node:test'
 
 import { CapabilityKey } from '@harness-projects/capabilities'
-import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
+import { createEntityStore, createSync } from '@harness-projects/client'
 import { composeCore, createWorkspaceSetup } from '@harness-projects/core'
 import { createController, toWireMetadata, watchWorkspace } from '@harness-projects/controller'
 import { newExternalIdentityId, newProviderBindingId, newWorkspaceId } from '@harness-projects/domain'
@@ -219,8 +219,8 @@ for (const [label, makeStorage] of ADAPTERS) {
     assert.deepEqual((await core.queries.getWorkspaceMetadata()).repositories, [])
     const controller = createController(core)
     assert.deepEqual(Object.keys(await controller.baseline()).sort(), ['capabilities', 'entities', 'generation', 'planningSource', 'revision', 'source', 'workspace'], '没有 repositories 字段（planningSource 来自替身规划挂载，#383）')
-    const sync = createSync(createTransport(controller), createEntityStore())
-    await sync.connect()
+    const sync = createSync(createEntityStore())
+    sync.receive({ kind: 'baseline', baseline: await controller.baseline() })
     assert.equal(sync.read().repositories, undefined)
     const bare = await composeCore({ workspace: { name: 'Bare' }, providers: { planning: createFakePlanningProvider() } })
     assert.deepEqual((await bare.queries.getWorkspaceMetadata()).repositories, [], '没有 Storage 的 core 也有空数组')
@@ -244,8 +244,8 @@ for (const [label, makeStorage] of ADAPTERS) {
     const twin = base.repositories.find((repository) => repository.id === 'r-twin').capabilities
     assert.ok(START_WORK_KEYS.every((key) => entryOf(twin, key).access === 'unavailable' && entryOf(twin, key).reason.includes('不取第一个注册者')), '歧义逐仓库报告，原因是路由的拒绝文案')
 
-    const sync = createSync(createTransport(controller), createEntityStore())
-    await sync.connect()
+    const sync = createSync(createEntityStore())
+    sync.receive({ kind: 'baseline', baseline: await controller.baseline() })
     const read = sync.read()
     assert.deepEqual(read.repositories, base.repositories, 'client 原样收下逐仓库条目')
     const entryPoint = (index) => lineageEntryPoints(index).find((entry) => entry.target === LineageTarget.ChangeRequest).available

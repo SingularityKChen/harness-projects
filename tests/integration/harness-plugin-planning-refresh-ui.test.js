@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import { createRequire } from 'node:module'
 import { composeCore } from '@harness-projects/core'
 import { createController } from '@harness-projects/controller'
-import { createSync, createTransport, createEntityStore } from '@harness-projects/client'
+import { createSync, createEntityStore } from '@harness-projects/client'
 import { createPlanningRefreshSource, createWorkspaceSetupSource } from '@harness-projects/client'
 import { WorkItemApp } from '@harness-projects/ui'
 import { createFakeProviders, FaultKind } from '@harness-projects/provider-fake'
@@ -17,8 +17,10 @@ test('real controller confirmation reaches list and open drawer; double click sh
   const providers = createFakeProviders()
   let at = T(1), count = 0, read, fault = false
   const core = await composeCore({ workspace: { name: 'refresh' }, providers, clock: () => at })
-  const controller = createController(core), sync = createSync(createTransport(controller), createEntityStore())
-  await sync.connect()
+  const controller = createController(core), sync = createSync(createEntityStore())
+  const baseline = await controller.baseline()
+  sync.receive({ kind: 'baseline', baseline })
+  const watch = controller.watch({ afterRevision: baseline.revision, seed: baseline })
   const listeners = new Set(), publish = () => { read = sync.read(); listeners.forEach((listener) => listener()) }
   const source = { getSnapshot: () => read, subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener) } }
   publish()
@@ -39,7 +41,7 @@ test('real controller confirmation reaches list and open drawer; double click sh
   gate.resolve(); await first
   assert.equal(count, 1)
   assert.equal(refreshSource.getSnapshot().error, undefined, 'real local_only read result is successful')
-  assert.equal((await sync.poll()).kind, 'metadata'); publish()
+  assert.equal((sync.receive(await watch.poll())).kind, 'metadata'); publish()
   const updated = html()
   assert.match(updated.slice(updated.indexOf('<dialog')), /刷新规划/, 'open modal retains an accessible refresh action')
   assert.equal(updated.split(`dateTime="${T(2)}"`).length - 1, 1, 'bare App has one drawer confirmation; persistent source disclosure belongs to StatusPanel')
@@ -51,7 +53,7 @@ test('real controller confirmation reaches list and open drawer; double click sh
   assert.doesNotMatch(html(), /SECRET/)
   assert.equal(read.reconciledAt, saved)
   assert.deepEqual(read.store.list().map((row) => row.entity.content.title), titles)
-  fault = false; at = T(3); await refreshSource.refresh(); await sync.poll(); publish()
+  fault = false; at = T(3); await refreshSource.refresh(); sync.receive(await watch.poll()); publish()
   assert.equal(count, 2)
   assert.equal(sync.revision, revision)
   assert.equal(refreshSource.getSnapshot().error, undefined)
@@ -198,15 +200,17 @@ test('an already started reconcile read cannot publish over a newer mutation', a
 async function refreshView(port) {
   const providers = createFakeProviders(); let at = T(1), read
   const core = await composeCore({ workspace: { name: 'review recovery' }, providers, clock: () => at })
-  const controller = createController(core), sync = createSync(createTransport(controller), createEntityStore())
-  await sync.connect()
+  const controller = createController(core), sync = createSync(createEntityStore())
+  const baseline = await controller.baseline()
+  sync.receive({ kind: 'baseline', baseline })
+  const watch = controller.watch({ afterRevision: baseline.revision, seed: baseline })
   const listeners = new Set(), publish = (next = sync.read()) => { read = next; listeners.forEach((listener) => listener()) }
   const source = { getSnapshot: () => read, subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener) } }
   publish()
   const target = read.store.list().find((row) => row.entity.content.contentKind === 'work_item').entityId
   const refresh = createPlanningRefreshSource({ source, refreshPlanning: () => port(controller) })
   const html = () => renderToStaticMarkup(React.createElement(WorkItemApp, { source, refreshSource: refresh, initialPath: `/projects/${read.workspace.id}/items/${target}` }))
-  return { providers, core, sync, refresh, html, publish, read: () => read, time: (value) => { at = value } }
+  return { providers, core, controller, watch, sync, refresh, html, publish, read: () => read, time: (value) => { at = value } }
 }
 
 for (const recovery of ['metadata', 'reconnect']) {
@@ -223,8 +227,8 @@ for (const recovery of ['metadata', 'reconnect']) {
     assert.equal(h.refresh.getSnapshot().error, error, 'old, renamed, degraded, disconnected or unreadable frames cannot confirm recovery')
   }
   h.publish(old); h.time(T(2)); await h.core.commands.refreshPlanning()
-  if (recovery === 'metadata') { assert.equal((await h.sync.poll()).kind, 'metadata'); h.publish() }
-  else { h.sync.disconnect(); h.publish(); assert.equal(h.refresh.getSnapshot().error, error); await h.sync.reconnect(); h.publish() }
+  if (recovery === 'metadata') { assert.equal((h.sync.receive(await h.watch.poll())).kind, 'metadata'); h.publish() }
+  else { h.sync.disconnect(); h.publish(); assert.equal(h.refresh.getSnapshot().error, error); h.sync.receive({ kind: 'baseline', baseline: await h.controller.baseline() }); h.publish() }
   assert.equal(h.refresh.getSnapshot().error, undefined, 'new same-scope Host confirmation supersedes the old interaction failure')
   const html = h.html(), drawer = html.slice(html.indexOf('<dialog'))
   assert.doesNotMatch(html, /暂时无法刷新规划|当前结果尚未确认，最后已知值不是当前值/)
@@ -237,13 +241,13 @@ for (const recovery of ['metadata', 'reconnect']) {
 test('pending confirmation cannot erase a later failed command or turn the same old fresh read into recovery', async () => {
   const gate = deferred(), h = await refreshView(() => gate.promise)
   const pending = h.refresh.refresh()
-  await Promise.resolve(); h.time(T(2)); await h.core.commands.refreshPlanning(); await h.sync.poll(); h.publish()
+  await Promise.resolve(); h.time(T(2)); await h.core.commands.refreshPlanning(); h.sync.receive(await h.watch.poll()); h.publish()
   assert.deepEqual(h.refresh.getSnapshot(), { pending: true })
   gate.reject(new Error('command failed after metadata')); await pending
   const failed = h.refresh.getSnapshot()
   h.publish()
   assert.equal(h.refresh.getSnapshot(), failed, 'confirmation already observed before failure must not clear it')
-  h.time(T(3)); await h.core.commands.refreshPlanning(); await h.sync.poll(); h.publish()
+  h.time(T(3)); await h.core.commands.refreshPlanning(); h.sync.receive(await h.watch.poll()); h.publish()
   assert.equal(h.refresh.getSnapshot().error, undefined)
   h.refresh.dispose()
 })
@@ -258,7 +262,7 @@ test('committed partial refresh keeps visible rows fresh and table degraded in l
   assert.equal(result?.error.code, 'permission_denied')
   assert.equal(h.refresh.getSnapshot().error, undefined, 'committed partial success is not a failed round')
   assert.equal(h.read().reconciledAt, T(1), 'RPC never manufactures a local confirmation')
-  assert.equal((await h.sync.poll()).kind, 'metadata'); h.publish()
+  assert.equal((h.sync.receive(await h.watch.poll())).kind, 'metadata'); h.publish()
   assert.equal(h.read().reason, 'permission_denied')
   const rows = h.read().store.list()
   const visible = rows.filter((row) => row.entity.content.contentKind !== 'redacted')

@@ -17,7 +17,7 @@ import { ContentKind, RedactionReason, StatusPolicy, newWorkspaceId } from '@har
 import { sourceVersionFromTimestamp } from '@harness-projects/capabilities'
 import { PLANNING_SYNC_SCOPE, composeCore } from '@harness-projects/core'
 import { createController } from '@harness-projects/controller'
-import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
+import { createEntityStore, createSync } from '@harness-projects/client'
 import { FaultKind, createFakeProviders, createFakeStorage, exportFakeStorageState, fixtureProjectRef, removeItem } from '@harness-projects/provider-fake'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
 
@@ -532,17 +532,19 @@ test('客户端时间：冷启动被拒或成功之后被拒，lastUpdatedAt 都
   const cold = await setup(createFakeStorage())
   poison(cold.providers.planning)
   const coldCore = await cold.open()
-  const coldSync = createSync(createTransport(createController(coldCore, { workspaceRevision: cold.revision })), createEntityStore(), { clock: clockOf(T(5)) })
-  await coldSync.connect()
+  const coldController = createController(coldCore, { workspaceRevision: cold.revision })
+  const coldSync = createSync(createEntityStore(), { clock: clockOf(T(5)) })
+  coldSync.receive({ kind: 'baseline', baseline: await coldController.baseline() })
   assert.deepEqual([coldSync.read().store.list().length, coldSync.read().lastUpdatedAt, coldSync.read().reason], [0, undefined, 'unavailable'], '冷启动被拒不得显示成「已读取当前快照，共 0 项」')
 
   const later = await setup(createFakeStorage())
   const laterCore = await later.open()
-  const sync = createSync(createTransport(createController(laterCore, { workspaceRevision: later.revision })), createEntityStore(), { clock: clockOf(T(5), T(6), T(7)) })
-  await sync.connect()
+  const controller = createController(laterCore, { workspaceRevision: later.revision })
+  const sync = createSync(createEntityStore(), { clock: clockOf(T(5), T(6), T(7)) })
+  sync.receive({ kind: 'baseline', baseline: await controller.baseline() })
   poison(later.providers.planning)
   await laterCore.commands.bootstrapWorkspace()
-  await sync.reconnect()
+  sync.receive({ kind: 'baseline', baseline: await controller.baseline() })
   assert.deepEqual([sync.read().lastUpdatedAt, sync.read().reason], [T(5), 'unavailable'], '成功之后的拒绝：重连拿到的是降级基线，时间停在最后一次确认')
 })
 

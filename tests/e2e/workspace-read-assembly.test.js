@@ -14,7 +14,7 @@ import { StatusPolicy, newWorkspaceId } from '@harness-projects/domain'
 import { StatusPolicyMode, composeCore } from '@harness-projects/core'
 import { createController, diffSnapshots, toWireMetadata, watchWorkspace } from '@harness-projects/controller'
 import * as capabilities from '@harness-projects/capabilities'
-import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
+import { createEntityStore, createSync } from '@harness-projects/client'
 import { CapabilityKey, intersectAccess } from '@harness-projects/client/keys'
 import { deriveProjectsHome, deriveWorkItemList, deriveWorkItemListView } from '@harness-projects/ui-model'
 import {
@@ -144,12 +144,14 @@ const T = (n) => `2026-10-03T10:0${n}:00.000Z`
 const clockOf = (...times) => { let calls = 0; return () => times[Math.min(calls++, times.length - 1)] }
 
 async function client(controller, options = {}) {
-  const store = createEntityStore()
-  const transport = options.transport ?? createTransport(controller)
-  return { store, transport, sync: createSync(transport, store, { clock: clockOf(T(1), T(2), T(3)), ...options.sync }) }
+  const store = createEntityStore(), seed = await controller.baseline()
+  const watch = options.watch ?? controller.watch({ afterRevision: seed.revision, seed })
+  return { store, watch, sync: createSync(store, { clock: clockOf(T(1), T(2), T(3)), ...options.sync }) }
 }
-/** 真实 baseline + 脚本化的后续事件：用来喂 sync 一些真实 watch 不会产出的非法载体。 */
-const scripted = (controller) => ({ events: [], closed: 0, fetchBaseline: () => controller.baseline(), poll() { return Promise.resolve(this.events.shift()) }, close() { this.closed += 1 } })
+const receiveBaseline = async (sync, source) => sync.receive({ kind: 'baseline', baseline: await source.baseline() })
+/** 只投递 Controller 已产生的事件，不拥有连接、重试或缺口恢复。 */
+const receiveNext = async (sync, watch) => { const event = await watch.poll(); return event === undefined ? { kind: 'idle' } : sync.receive(event) }
+const scripted = () => ({ events: [], poll() { return Promise.resolve(this.events.shift()) } })
 const shapeOf = (sync) => { const { store, ...rest } = sync.read(); return { ...rest, revision: store.revision, rows: store.list().map((entry) => [entry, entry.entity]) } }
 const stateOf = (sync) => {
   const read = sync.read()
@@ -166,9 +168,9 @@ const stateOf = (sync) => {
 
 test('assembler：六个字段全部来自真实生产者；首个已确认 descriptor 前 read 为 undefined', async () => {
   const { id, controller } = await compose()
-  const { store, sync } = await client(controller)
+  const { store, sync, watch } = await client(controller)
   assert.equal(sync.read(), undefined, '连接前没有已确认的工作区')
-  await sync.connect()
+  await receiveBaseline(sync, controller)
   const read = sync.read()
 
   assert.deepEqual(read.workspace, { id, name: NAME })
@@ -180,19 +182,21 @@ test('assembler：六个字段全部来自真实生产者；首个已确认 desc
 
   const bare = await composeCore({ workspace: { name: NAME }, providers: { planning: createFakeProviders().planning } })
   const cold = await client(createController(bare))
-  await cold.sync.connect()
+  await receiveBaseline(cold.sync, createController(bare))
   assert.equal(cold.sync.read(), undefined, '无 Storage 的 descriptor 未确认，不能凭输入名字伪造')
 })
 
 test('空表：真实空集是确认成功并更新时间；degraded 空表保留原因且没有成功时间', async () => {
   const fresh = createFakeProviders()
   for (const item of [...fresh.planning.state.items]) removeItem(fresh.planning.state, item.ref)
-  const ok = await client((await compose(fresh, { project: fixtureProjectRef(fresh.planning.bindingId) })).controller)
-  await ok.sync.connect()
+  const freshController = (await compose(fresh, { project: fixtureProjectRef(fresh.planning.bindingId) })).controller
+  const ok = await client(freshController)
+  await receiveBaseline(ok.sync, freshController)
   assert.deepEqual([ok.store.list().length, ok.sync.read().lastUpdatedAt, ok.sync.read().reason], [0, T(1), undefined])
 
-  const down = await client((await compose(createFakeProviders({ planning: { faults: { offline: true } } }))).controller)
-  await down.sync.connect()
+  const downController = (await compose(createFakeProviders({ planning: { faults: { offline: true } } }))).controller
+  const down = await client(downController)
+  await receiveBaseline(down.sync, downController)
   const read = down.sync.read()
   assert.deepEqual([down.store.list().length, read.connection.connected], [0, true])
   assert.equal(read.lastUpdatedAt, undefined, '冷启动 degraded 空表没有成功时间')
@@ -229,8 +233,8 @@ test('E partial：redacted source 跟随工作区 degraded；可见 source 仍�
     assert.deepEqual(await controller.queries.getEntity(row.entityId), row, '直接 query 经过同一 core owner')
   }
   for (const row of visible) assert.deepEqual([row.source.freshness, row.source.reason], ['fresh', undefined])
-  const { sync } = await client(controller)
-  await sync.connect()
+  const { sync, watch } = await client(controller)
+  await receiveBaseline(sync, controller)
   assert.deepEqual(hiddenStale(sync.read()), hidden.map(() => true), '经真实 transport / sync 仍保留 E')
   assert.ok(itemRows(sync.read()).every((row) => !row.stale), '部分成功不拖旧已确认的可见行')
   providers.planning.state.items = providers.planning.state.items.filter((row) => row.ref.externalId !== 'm-orphan')
@@ -251,8 +255,8 @@ test('D snapshot 对抗负控：只改隐藏 freshness 不影响列表结论；�
       if (row.content.contentKind === 'redacted') row.source = { ...row.source, freshness: hiddenFreshness, reason: 'HIDDEN-FRESHNESS-CANARY' }
       else if (visibleStale) row.source = { ...row.source, freshness: 'degraded' }
     }
-    const { sync } = await client(controller, { transport: { fetchBaseline: async () => snapshot, close() {} } })
-    await sync.connect()
+    const { sync } = await client(controller)
+    sync.receive({ kind: 'baseline', baseline: snapshot })
     const list = deriveWorkItemList(sync.read())
     return { state: [list.stale, list.connection, list.reason], view: viewOf(sync.read()), home: deriveProjectsHome([sync.read()]).workspaces[0].connection }
   }
@@ -270,8 +274,9 @@ test('D snapshot 对抗负控：只改隐藏 freshness 不影响列表结论；�
 })
 
 test('partial：整表 degraded 带原因并推进时间；已确认行经 view 保持 fresh、整表仍降级；断网后全部 stale', async () => {
-  const { store, sync } = await client((await compose(partialProviders())).controller)
-  await sync.connect()
+  const { controller } = await compose(partialProviders())
+  const { store, sync } = await client(controller)
+  await receiveBaseline(sync, controller)
   assert.ok(sync.read().reason, '整表缺口原因保留，不被 fresh 行洗成正常')
   assert.ok(store.list().length > 0 && store.list().filter((entry) => entry.entity.content.contentKind !== 'redacted').every((entry) => !entry.stale), '本次确认的可见行保持 fresh；隐藏行跟随工作区 degraded')
   assert.equal(sync.read().lastUpdatedAt, T(1), 'partial 帧确有 fresh 行才更新时间')
@@ -283,29 +288,18 @@ test('partial：整表 degraded 带原因并推进时间；已确认行经 view 
   assert.equal(viewOf(sync.read()).statusText, '当前结果尚未确认，最后已知值不是当前值', '断网后回到整表未确认')
 })
 
-test('断网：poll / reconnect 拒绝后 connected=false，行引用、内容与旧时间保留，reason 是安全散文', async () => {
+test('断网：disconnect 后 connected=false，行引用、内容与旧时间保留，reason 是安全散文', async () => {
   const { controller } = await compose()
-  let down = false
-  const flaky = {
-    baseline: () => (down ? Promise.reject(new Error('SECRET-TOKEN stack at /srv')) : controller.baseline()),
-    watch: (options) => (down ? { afterRevision: 0, poll: () => Promise.reject(new Error('SECRET-TOKEN stack at /srv')), close() {} } : controller.watch(options)),
-  }
-  const { store, sync } = await client(controller, { transport: createTransport(flaky) })
-  await sync.connect()
+  const { store, sync } = await client(controller)
+  await receiveBaseline(sync, controller)
   const before = shapeOf(sync)
-
-  down = true
-  await assert.rejects(sync.poll(), /SECRET-TOKEN/, '原异常继续抛给调用者')
+  sync.disconnect()
   const lost = sync.read()
   assert.equal(lost.connection.connected, false)
   assert.ok(lost.reason && !/SECRET|stack|\/srv/.test(lost.reason), 'read.reason 不含原异常内容')
   assert.equal(lost.lastUpdatedAt, T(1), '断网不推进也不清除时间')
   assert.ok(store.list().every((entry, i) => entry === before.rows[i][0] && entry.entity === before.rows[i][1] && entry.stale))
-  await assert.rejects(sync.reconnect(), /SECRET-TOKEN/)
-  assert.deepEqual([sync.read().connection.connected, sync.read().lastUpdatedAt, store.list().length], [false, T(1), before.rows.length])
-
-  down = false
-  assert.equal((await sync.poll()).kind, 'baseline', '断开后 poll 回到基线')
+  await receiveBaseline(sync, controller)
   assert.deepEqual([sync.read().connection.connected, sync.read().reason, sync.read().lastUpdatedAt], [true, undefined, T(2)])
   sync.disconnect()
   assert.deepEqual([sync.read().connection.connected, sync.read().lastUpdatedAt, store.list().every((entry) => entry.stale)], [false, T(2), true])
@@ -314,30 +308,30 @@ test('断网：poll / reconnect 拒绝后 connected=false，行引用、内容�
 const hiddenStale = (read) => deriveWorkItemList(read).rows.filter((row) => row.contentKind === 'redacted').map((row) => row.freshness.stale)
 test('metadata：同 revision 降级 / 恢复同时更新整表与每行 source（含 Fake 唯一的 redacted 条目），时间在恢复或来源确认前进时推进', async () => {
   const { providers, core, controller } = await compose(createFakeProviders(), { clock: clockOf('2026-10-27T01:00:01Z', '2026-10-27T01:00:02Z', '2026-10-27T01:00:03Z') })
-  const { store, sync } = await client(controller)
-  await sync.connect()
+  const { store, sync, watch } = await client(controller)
+  await receiveBaseline(sync, controller)
   const rows = store.list()
 
   providers.planning.faultsSwitch.set(FaultKind.Offline, true)
   await core.commands.bootstrapWorkspace()
-  const down = await sync.poll()
+  const down = await receiveNext(sync, watch)
   assert.deepEqual([down.kind, down.revision], ['metadata', rows[0].revision])
   assert.ok(sync.read().reason, '降级原因来自来源')
   assert.deepEqual(hiddenStale(sync.read()), [true], 'redacted 条目跟随工作区级降级，没有自己的 fresh（决策 E，#178 评论）')
   assert.ok(store.list().every((entry, i) => entry === rows[i] && entry.stale), '行对象不变、就地 stale')
   assert.ok(itemRows(sync.read()).length > 0 && itemRows(sync.read()).every((row) => row.stale), '同 revision 降级经 view 让所有行 stale')
   assert.equal(sync.read().lastUpdatedAt, T(1), '降级 metadata 不推进时间')
-  assert.equal((await sync.poll()).kind, 'idle')
+  assert.equal((await receiveNext(sync, watch)).kind, 'idle')
 
   providers.planning.faultsSwitch.set(FaultKind.Offline, false)
   await core.commands.bootstrapWorkspace()
-  assert.equal((await sync.poll()).kind, 'metadata')
+  assert.equal((await receiveNext(sync, watch)).kind, 'metadata')
   assert.deepEqual(hiddenStale(sync.read()), [false], 'redacted 条目随工作区级同步恢复回到 fresh（决策 E）')
   assert.deepEqual([sync.read().reason, store.list().some((entry) => entry.stale), sync.read().lastUpdatedAt], [undefined, false, T(2)])
   assert.ok(itemRows(sync.read()).every((row) => !row.stale), '来源恢复后行回到 fresh')
 
   await core.commands.bootstrapWorkspace()
-  assert.deepEqual([(await sync.poll()).kind, sync.revision, sync.read().lastUpdatedAt], ['metadata', rows[0].revision, T(3)], '内容不变的成功刷新经来源确认 metadata 推进接收时间')
+  assert.deepEqual([(await receiveNext(sync, watch)).kind, sync.revision, sync.read().lastUpdatedAt], ['metadata', rows[0].revision, T(3)], '内容不变的成功刷新经来源确认 metadata 推进接收时间')
 })
 
 /** 同 revision 的 metadata：整表 fresh 与否、第 i 行 fresh 与否各自指定。 */
@@ -348,13 +342,13 @@ const metaOf = (base, headFresh, rowFresh) => ({
 
 test('metadata：整表 fresh 而一行 degraded 时，只有这一行 stale 且 entity.source 随载体写回，时间不动', async () => {
   const { controller } = await compose()
-  const transport = scripted(controller)
-  const { store, sync } = await client(controller, { transport })
-  await sync.connect()
+  const frames = scripted()
+  const { store, sync, watch } = await client(controller, { watch: frames })
+  await receiveBaseline(sync, controller)
   const base = await controller.baseline()
   assert.ok(store.list().length > 1)
-  transport.events.push({ kind: 'metadata', metadata: metaOf(base, true, (i) => i !== 0) })
-  await sync.poll()
+  frames.events.push({ kind: 'metadata', metadata: metaOf(base, true, (i) => i !== 0) })
+  await receiveNext(sync, watch)
 
   assert.deepEqual(store.list().map((entry) => entry.stale), store.list().map((_, i) => i === 0))
   assert.deepEqual(store.list().map((entry) => entry.entity.source.freshness), store.list().map((_, i) => (i === 0 ? 'degraded' : 'fresh')))
@@ -365,62 +359,58 @@ test('metadata：整表恢复、或仅一行恢复，各自单独推进时间（
   const { controller } = await compose()
   const base = await controller.baseline()
   for (const [label, headFresh, rowFresh] of [['仅整表恢复', true, () => false], ['仅一行恢复', false, (i) => i === 0]]) {
-    const transport = scripted(controller)
-    const { sync } = await client(controller, { transport })
-    await sync.connect()
-    transport.events.push({ kind: 'metadata', metadata: metaOf(base, false, () => false) }, { kind: 'metadata', metadata: metaOf(base, headFresh, rowFresh) })
-    await sync.poll()
+    const frames = scripted()
+    const { sync, watch } = await client(controller, { watch: frames })
+    await receiveBaseline(sync, controller)
+    frames.events.push({ kind: 'metadata', metadata: metaOf(base, false, () => false) }, { kind: 'metadata', metadata: metaOf(base, headFresh, rowFresh) })
+    await receiveNext(sync, watch)
     assert.equal(sync.read().lastUpdatedAt, T(1), `${label}：先降级，时间不动`)
-    await sync.poll()
+    await receiveNext(sync, watch)
     assert.equal(sync.read().lastUpdatedAt, T(2), `${label}：恢复推进时间`)
   }
 })
 
-test('连接生命周期：reconnect 在基线返回前行已 stale；reason 断网优先、degraded 无原因给中性解释；disconnect 关闭传输', async () => {
+test('连接状态：新基线前行已 stale；reason 断网优先、degraded 无原因给中性解释', async () => {
   const { controller } = await compose()
   const base = await controller.baseline()
-  const transport = scripted(controller)
-  const { store, sync } = await client(controller, { transport })
-  await sync.connect()
-  let release
-  transport.fetchBaseline = () => new Promise((resolve) => { release = resolve })
-  const pending = sync.reconnect()
-  assert.ok(store.list().every((entry) => entry.stale), '重连开始即标 stale，基线未到之前没有"当前值"')
-  release(base)
-  await pending
+  const frames = scripted()
+  const { store, sync, watch } = await client(controller, { watch: frames })
+  await receiveBaseline(sync, controller)
+  sync.disconnect()
+  assert.ok(store.list().every((entry) => entry.stale), '新基线未到之前没有"当前值"')
+  sync.receive({ kind: 'baseline', baseline: base })
 
   const degradedHead = (reason) => ({ ...metaOf(base, false, () => true), source: tone(base.source, false, reason) })
-  transport.events.push({ kind: 'metadata', metadata: degradedHead(undefined) }, { kind: 'metadata', metadata: degradedHead('来源说') })
-  await sync.poll()
+  frames.events.push({ kind: 'metadata', metadata: degradedHead(undefined) }, { kind: 'metadata', metadata: degradedHead('来源说') })
+  await receiveNext(sync, watch)
   const neutral = sync.read().reason
   assert.equal(typeof neutral, 'string', '无原因的 degraded 也有解释')
-  await sync.poll()
+  await receiveNext(sync, watch)
   assert.equal(sync.read().reason, '来源说', '连接中显示来源原因')
   sync.disconnect()
   assert.match(sync.read().reason, /断开/, '断网时来源原因让位')
   assert.notEqual(sync.read().reason, neutral)
-  assert.equal(transport.closed, 1, 'disconnect 关闭 transport')
 })
 
 test('时间与头：idle 与纯能力 / 名称 metadata 不推进时间；partial 增量有 fresh 行才推进；头整帧替换', async () => {
   const { controller } = await compose()
-  const transport = scripted(controller)
-  const { store, sync } = await client(controller, { transport, sync: { clock: clockOf(T(1), T(2)) } })
-  await sync.connect()
-  assert.equal((await sync.poll()).kind, 'idle')
+  const frames = scripted()
+  const { store, sync, watch } = await client(controller, { watch: frames, sync: { clock: clockOf(T(1), T(2)) } })
+  await receiveBaseline(sync, controller)
+  assert.equal((await receiveNext(sync, watch)).kind, 'idle')
   const base = await controller.baseline()
   const next = toWireMetadata({ ...base, workspace: { ...base.workspace, name: 'renamed' }, capabilities: base.capabilities.map((entry) => ({ ...entry, access: 'read_only' })) })
-  transport.events.push({ kind: 'metadata', metadata: next })
-  assert.equal((await sync.poll()).kind, 'metadata')
+  frames.events.push({ kind: 'metadata', metadata: next })
+  assert.equal((await receiveNext(sync, watch)).kind, 'metadata')
   assert.deepEqual([sync.read().workspace.name, sync.read().capabilities[0].access, sync.read().lastUpdatedAt], ['renamed', 'read_only', T(1)])
 
   const revision = base.revision + 1
-  transport.events.push({ kind: 'delta', delta: { generation: base.generation, previousRevision: base.revision, revision, upserts: [base.entities[0]], removed: [], workspace: base.workspace, capabilities: base.capabilities, source: { ...tone(base.source, false, '部分缺口'), revision } } })
-  assert.equal((await sync.poll()).kind, 'delta')
+  frames.events.push({ kind: 'delta', delta: { generation: base.generation, previousRevision: base.revision, revision, upserts: [base.entities[0]], removed: [], workspace: base.workspace, capabilities: base.capabilities, source: { ...tone(base.source, false, '部分缺口'), revision } } })
+  assert.equal((await receiveNext(sync, watch)).kind, 'delta')
   assert.deepEqual([sync.read().lastUpdatedAt, sync.read().reason, store.isCurrent(base.entities[0].entityId)], [T(2), '部分缺口', true], '整表 degraded 但确有 fresh 行：推进时间、保留原因')
 
-  transport.events.push({ kind: 'metadata', metadata: { ...toWireMetadata({ ...base, revision, source: { ...base.source, revision } }), workspace: undefined } })
-  assert.equal((await sync.poll()).kind, 'metadata')
+  frames.events.push({ kind: 'metadata', metadata: { ...toWireMetadata({ ...base, revision, source: { ...base.source, revision } }), workspace: undefined } })
+  assert.equal((await receiveNext(sync, watch)).kind, 'metadata')
   assert.equal(sync.read(), undefined, '头随接受的帧整体替换：宿主不再确认 descriptor 时不沿用旧值')
 })
 
@@ -450,12 +440,12 @@ test('接受点：clock 非法、store 拒绝的载体都不推进头 / 能力 /
     ['额外业务字段', { kind: 'metadata', metadata: { ...valid, entities: rowsWith({ source: degraded, content: { title: 'x' } }) } }],
   ]
   for (const [label, event, clock] of cases) {
-    const transport = scripted(controller)
-    const { sync } = await client(controller, { transport, sync: { clock: clock ?? clockOf(T(1), T(2)) } })
-    await sync.connect()
+    const frames = scripted()
+    const { sync, watch } = await client(controller, { watch: frames, sync: { clock: clock ?? clockOf(T(1), T(2)) } })
+    await receiveBaseline(sync, controller)
     const before = shapeOf(sync)
-    transport.events.push(event)
-    await assert.rejects(sync.poll(), label)
+    frames.events.push(event)
+    await assert.rejects(receiveNext(sync, watch), label)
     const after = sync.read()
     assert.deepEqual([after.workspace, after.capabilities, after.lastUpdatedAt, after.store.revision], [before.workspace, before.capabilities, before.lastUpdatedAt, before.revision], `${label}：头 / 能力 / 时间 / store 修订不变`)
     assert.ok(after.store.list().every((entry, i) => entry === before.rows[i][0] && entry.entity === before.rows[i][1]), `${label}：行内容与来源未被半更新`)
@@ -466,9 +456,9 @@ test('接受点：倒退 / 不前进 delta 与重复、未知、坏 access capab
   const { controller } = await compose()
   const base = await controller.baseline()
   const row = base.entities[0]
-  const transport = scripted(controller)
-  const { sync } = await client(controller, { transport })
-  await sync.connect()
+  const frames = scripted()
+  const { sync, watch } = await client(controller, { watch: frames })
+  await receiveBaseline(sync, controller)
 
   const events = [
     ['倒退 revision', { kind: 'delta', delta: { ...base, previousRevision: base.revision, revision: base.revision - 1, source: { ...base.source, revision: base.revision - 1 }, upserts: [{ ...row, source: { ...row.source, revision: base.revision - 1 }, content: { ...row.content, title: 'rollback' } }], removed: [] } }],
@@ -480,8 +470,8 @@ test('接受点：倒退 / 不前进 delta 与重复、未知、坏 access capab
 
   for (const [label, event] of events) {
     const before = stateOf(sync)
-    transport.events.push(event)
-    await assert.rejects(sync.poll(), label)
+    frames.events.push(event)
+    await assert.rejects(receiveNext(sync, watch), label)
     assert.deepEqual(stateOf(sync), before, `${label}：rows/header/current/stale/time 必须保持深相等`)
   }
 })
@@ -495,12 +485,12 @@ test('接受点：畸形 event 在读取嵌套字段前拒绝且快照保持深�
   ]
 
   for (const [label, event] of cases) {
-    const transport = scripted(controller)
-    const { sync } = await client(controller, { transport })
-    await sync.connect()
+    const frames = scripted()
+    const { sync, watch } = await client(controller, { watch: frames })
+    await receiveBaseline(sync, controller)
     const before = stateOf(sync)
-    transport.events.push(event)
-    await assert.rejects(sync.poll())
+    frames.events.push(event)
+    await assert.rejects(receiveNext(sync, watch))
     assert.deepEqual(stateOf(sync), before, `${label}：拒绝不得改变 rows/header/current/stale/time`)
   }
 })
@@ -508,74 +498,73 @@ test('接受点：畸形 event 在读取嵌套字段前拒绝且快照保持深�
 test('接受点：低 revision baseline 只有新 generation evidence 才能 reset', async () => {
   const { controller } = await compose()
   const first = await controller.baseline()
-  const transport = scripted(controller)
+  const frames = scripted()
   let nextBaseline = { ...first, generation: 'host-z' }
-  transport.fetchBaseline = () => Promise.resolve(nextBaseline)
-  const { sync } = await client(controller, { transport })
-  await sync.connect()
+  const { sync, watch } = await client(controller, { watch: frames })
+  sync.receive({ kind: 'baseline', baseline: nextBaseline })
 
   const higher = { ...first, revision: first.revision + 1, source: { ...first.source, revision: first.revision + 1 }, generation: 'host-z' }
-  transport.events.push({ kind: 'delta', delta: { ...higher, previousRevision: first.revision, revision: higher.revision, upserts: [], removed: [] } })
-  await sync.poll()
+  frames.events.push({ kind: 'delta', delta: { ...higher, previousRevision: first.revision, revision: higher.revision, upserts: [], removed: [] } })
+  await receiveNext(sync, watch)
 
   nextBaseline = { ...first, revision: Math.max(0, first.revision - 1), source: { ...first.source, revision: Math.max(0, first.revision - 1) }, generation: 'host-z' }
   sync.disconnect()
   const rejectedBefore = stateOf(sync)
-  await assert.rejects(sync.reconnect(), /generation|revision/i)
+  assert.throws(() => sync.receive({ kind: 'baseline', baseline: nextBaseline }), /generation|revision/i)
   assert.deepEqual(stateOf(sync), rejectedBefore, '重连预先标 stale；拒绝帧不得再改变快照')
 
   nextBaseline = { ...nextBaseline, generation: 'host-a' }
-  await sync.reconnect()
+  sync.receive({ kind: 'baseline', baseline: nextBaseline })
   assert.equal(sync.revision, nextBaseline.revision, '新 generation 的低 revision baseline 可按 #218 合同 reset')
 })
 
 test('接受点：generation 建立后，缺 generation 的 delta / metadata 被拒绝且快照不变', async () => {
   const { controller } = await compose()
   const base = await controller.baseline()
-  const transport = scripted(controller)
-  transport.fetchBaseline = () => Promise.resolve({ ...base, generation: 'host-z' })
-  const { sync } = await client(controller, { transport })
-  await sync.connect()
+  const frames = scripted()
+  const { sync, watch } = await client(controller, { watch: frames })
+  sync.receive({ kind: 'baseline', baseline: { ...base, generation: 'host-z' } })
   const before = stateOf(sync)
   const next = base.revision + 1
-  transport.events.push({ kind: 'delta', delta: { ...base, generation: undefined, previousRevision: base.revision, revision: next, source: { ...base.source, revision: next }, upserts: [], removed: [] } })
-  await assert.rejects(sync.poll(), /generation/i)
+  frames.events.push({ kind: 'delta', delta: { ...base, generation: undefined, previousRevision: base.revision, revision: next, source: { ...base.source, revision: next }, upserts: [], removed: [] } })
+  await assert.rejects(receiveNext(sync, watch), /generation/i)
   assert.deepEqual(stateOf(sync), before)
 
-  transport.events.push({ kind: 'metadata', metadata: { ...base, generation: undefined, revision: base.revision, entities: base.entities.map(({ entityId, source }) => ({ entityId, source })) } })
-  await assert.rejects(sync.poll(), /generation/i)
+  frames.events.push({ kind: 'metadata', metadata: { ...base, generation: undefined, revision: base.revision, entities: base.entities.map(({ entityId, source }) => ({ entityId, source })) } })
+  await assert.rejects(receiveNext(sync, watch), /generation/i)
   assert.deepEqual(stateOf(sync), before)
 })
 
 test('接受点：前游标超前的合法 delta 走 gap recovery，倒退或不前进仍原子拒绝', async () => {
   const { controller } = await compose()
   const base = await controller.baseline()
-  const transport = scripted(controller)
+  const frames = scripted()
   let recovery = base
-  transport.fetchBaseline = () => Promise.resolve(recovery)
   const observed = []
-  const { sync } = await client(controller, { transport, sync: { onGap: (gap, store) => observed.push([gap.requestedAfter, gap.currentRevision, store.isCurrent(base.entities[0].entityId)]) } })
-  await sync.connect()
+  const { sync, watch } = await client(controller, { watch: frames, sync: { onGap: (gap, store) => observed.push([gap.requestedAfter, gap.currentRevision, store.isCurrent(base.entities[0].entityId)]) } })
+  await receiveBaseline(sync, controller)
   const next = base.revision + 1
   const beforeMalformed = stateOf(sync)
-  transport.events.push({ kind: 'delta', delta: { ...base, previousRevision: next, revision: next + 1, source: { ...base.source, revision: next + 1 }, upserts: [base.entities[0], base.entities[0]], removed: [] } })
-  await assert.rejects(sync.poll(), /重复实体|delta/i)
+  frames.events.push({ kind: 'delta', delta: { ...base, previousRevision: next, revision: next + 1, source: { ...base.source, revision: next + 1 }, upserts: [base.entities[0], base.entities[0]], removed: [] } })
+  await assert.rejects(receiveNext(sync, watch), /重复实体|delta/i)
   assert.deepEqual(stateOf(sync), beforeMalformed)
   assert.deepEqual(observed, [])
-  transport.events.push({ kind: 'delta', delta: { ...base, previousRevision: next, revision: next + 1, source: { ...base.source, revision: next + 1 }, upserts: [], removed: null } })
-  await assert.rejects(sync.poll(), /删除表|delta/i)
+  frames.events.push({ kind: 'delta', delta: { ...base, previousRevision: next, revision: next + 1, source: { ...base.source, revision: next + 1 }, upserts: [], removed: null } })
+  await assert.rejects(receiveNext(sync, watch), /删除表|delta/i)
   assert.deepEqual(stateOf(sync), beforeMalformed)
   assert.deepEqual(observed, [])
 
   recovery = { ...base, revision: next + 1, source: { ...base.source, revision: next + 1 }, entities: base.entities.map((entity) => ({ ...entity, source: { ...entity.source, revision: next + 1 } })) }
-  transport.events.push({ kind: 'delta', delta: { ...base, previousRevision: next, revision: next + 1, source: { ...base.source, revision: next + 1 }, upserts: [], removed: [] } })
-  assert.equal((await sync.poll()).kind, 'gap')
+  frames.events.push({ kind: 'delta', delta: { ...base, previousRevision: next, revision: next + 1, source: { ...base.source, revision: next + 1 }, upserts: [], removed: [] } })
+  assert.equal((await receiveNext(sync, watch)).kind, 'gap')
   assert.deepEqual(observed, [[base.revision, next + 1, false]])
+  assert.equal(sync.revision, base.revision)
+  sync.receive({ kind: 'baseline', baseline: recovery })
   assert.equal(sync.revision, next + 1)
 
   const before = stateOf(sync)
-  transport.events.push({ kind: 'delta', delta: { ...base, previousRevision: sync.revision - 1, revision: sync.revision - 2, source: { ...base.source, revision: sync.revision - 2 }, upserts: [], removed: [] } })
-  await assert.rejects(sync.poll(), /严格前进/i)
+  frames.events.push({ kind: 'delta', delta: { ...base, previousRevision: sync.revision - 1, revision: sync.revision - 2, source: { ...base.source, revision: sync.revision - 2 }, upserts: [], removed: [] } })
+  await assert.rejects(receiveNext(sync, watch), /严格前进/i)
   assert.deepEqual(stateOf(sync), before)
 })
 
@@ -586,8 +575,8 @@ test('单真源：ui-model 所取的 client/keys 叶子与 capabilities 是同�
 
 test('端到端：sync.read 直达 derive / view；断网保行并整体 stale，恢复后回到当前', async () => {
   const { controller } = await compose()
-  const { sync } = await client(controller)
-  await sync.connect()
+  const { sync, watch } = await client(controller)
+  await receiveBaseline(sync, controller)
   const live = deriveWorkItemList(sync.read())
   assert.deepEqual([live.connection, live.stale, live.lastUpdatedAt], ['connected', false, T(1)])
   assert.ok(live.rows.length > 0 && live.rows.every((row) => !row.freshness.stale))
@@ -599,15 +588,15 @@ test('端到端：sync.read 直达 derive / view；断网保行并整体 stale�
   assert.deepEqual([lost.connection, lost.rows.length, lost.lastUpdatedAt], ['disconnected', live.rows.length, T(1)])
   assert.ok(lost.rows.every((row) => row.freshness.stale) && itemRows(sync.read()).every((row) => row.stale))
 
-  await sync.poll()
-  assert.ok(itemRows(sync.read()).every((row) => !row.stale), '重新拉基线后回到当前值')
+  await receiveBaseline(sync, controller)
+  assert.ok(itemRows(sync.read()).every((row) => !row.stale), '新基线回到当前值')
 })
 
 
 test('字段映射来源闭集：baseline 接受 derived/user，拒绝未知 origin 而不污染旧读取', async () => {
   const { controller } = await compose()
   const snapshot = await controller.baseline()
-  const sync = createSync(createTransport(controller), createEntityStore())
+  const sync = createSync(createEntityStore())
   for (const mappingOrigin of ['derived', 'user']) {
     sync.receive({ kind: 'baseline', baseline: { ...snapshot, planningSource: { ...snapshot.planningSource, mappingOrigin } } })
     assert.equal(sync.read().planningSource.mappingOrigin, mappingOrigin)
@@ -622,12 +611,13 @@ test('字段映射来源闭集：baseline 接受 derived/user，拒绝未知 ori
 test('same revision confirmation advances client receive time; malformed source time never partially applies', async () => {
   let hostAt = '2026-10-27T01:00:01.000Z', receives = 0
   const { core, controller } = await compose(createFakeProviders(), { clock: () => hostAt })
-  const sync = createSync(createTransport(controller), createEntityStore(), { clock: () => { receives++; return T(Math.min(receives, 9)) } })
-  await sync.connect()
+  const sync = createSync(createEntityStore(), { clock: () => { receives++; return T(Math.min(receives, 9)) } })
+  const snapshot = await controller.baseline(), watch = controller.watch({ afterRevision: snapshot.revision, seed: snapshot })
+  sync.receive({ kind: 'baseline', baseline: snapshot })
   const before = sync.read(), revision = sync.revision
   hostAt = '2026-10-27T01:00:02.000Z'
   await core.commands.refreshPlanning()
-  assert.equal((await sync.poll()).kind, 'metadata')
+  assert.equal((await receiveNext(sync, watch)).kind, 'metadata')
   assert.equal(sync.revision, revision)
   assert.equal(sync.read().reconciledAt, hostAt)
   assert.notEqual(sync.read().lastUpdatedAt, before.lastUpdatedAt)
@@ -652,7 +642,7 @@ test('same revision confirmation advances client receive time; malformed source 
 test('source scope replacement clears inherited confirmation; fresh metadata advances only its own source time', async () => {
   const { controller } = await compose(), base = await controller.baseline()
   let calls = 0
-  const sync = createSync(createTransport(controller), createEntityStore(), { clock: () => { calls++; return T(Math.min(calls, 9)) } })
+  const sync = createSync(createEntityStore(), { clock: () => { calls++; return T(Math.min(calls, 9)) } })
   sync.receive({ kind: 'baseline', baseline: base })
   const frame = toWireMetadata(base), { reconciledAt: _oldTime, ...unconfirmed } = frame.source
   sync.receive({ kind: 'metadata', metadata: { ...frame, source: unconfirmed, planningSource: { ...frame.planningSource, bindingId: 'replacement' } } })
@@ -660,7 +650,7 @@ test('source scope replacement clears inherited confirmation; fresh metadata adv
   assert.equal(sync.read().lastUpdatedAt, undefined)
   assert.equal(calls, 1)
   for (const reconciledAt of [undefined, '2024-02-29T23:59:59+08:00']) {
-    const received = createSync(createTransport(controller), createEntityStore())
+    const received = createSync(createEntityStore())
     received.receive({ kind: 'baseline', baseline: { ...base, source: { ...base.source, reconciledAt } } })
     assert.equal(received.read().reconciledAt, reconciledAt)
   }
@@ -668,8 +658,8 @@ test('source scope replacement clears inherited confirmation; fresh metadata adv
 
 test('native access version crosses baseline, metadata and delta without advancing Planning confirmation', async () => {
   const { controller } = await compose(), baseline = await controller.baseline()
-  const sync = createSync({ fetchBaseline: async () => baseline, poll: async () => undefined, close() {} }, createEntityStore())
-  await sync.connect(); const at = sync.read().lastUpdatedAt
+  const sync = createSync(createEntityStore())
+  sync.receive({ kind: 'baseline', baseline }); const at = sync.read().lastUpdatedAt
   const metadata = toWireMetadata({ ...baseline, nativeAccessVersion: 'opaque-native-1' })
   for (const bad of [null, 1, {}, '', ' ']) {
     assert.throws(() => sync.receive({ kind: 'metadata', metadata: { ...metadata, nativeAccessVersion: bad } }), TypeError)

@@ -1,28 +1,26 @@
 /**
- * 客户端同步（issue #79 / #178）：基线修订 N → 按 N 订阅 → 按序应用 delta / metadata；发现缺口或重连时重拉基线。
+ * 客户端帧接受（issue #79 / #178）：按序接受宿主 baseline / delta / metadata，流与重连由 follower / supervisor 拥有。
  *
- * 缺口先被如实标记：store 整体置 stale，并通过 onGap 暴露这个窗口，然后才重拉基线恢复当前值。重连
- * 与缺口走同一条路径，所以重连后的投影必然与一个全新客户端的基线投影一致。
+ * 缺口先被如实标记：store 整体置 stale，并通过 onGap 暴露这个窗口；消费者重开宿主流，下一代 baseline 恢复当前值。
  *
  * `accept` 是**唯一**接受点：先校验帧头、读并校验时钟，再改 store，全部成功后才一次发布头 / 能力 /
- * 时间 / 连接状态——被拒绝的帧不会留下半个新状态。传输失败与被拒绝的帧一样走 `lose`：保留最后已知的
+ * 时间 / 连接状态——被拒绝的帧不会留下半个新状态。消费者在载体失败时调用 `disconnect`：保留最后已知的
  * 内容、头与时间，只把连接标成断开、行标成 stale。
  */
 import { WireFreshness } from '@harness-projects/controller/values'
 import type { SourceMetadata, WireEntity, WireEvent, WireGap, WireSnapshot, WireWorkspaceHeader } from '@harness-projects/controller'
 import { assertDeltaFrame, type EntityStore } from './store.ts'
-import type { Transport } from './transport.ts'
 import { assertHeader, readClock, type ClientWorkspaceRead } from './workspace-read.ts'
 
 export interface SyncReport {
-  readonly kind: 'baseline' | 'delta' | 'metadata' | 'gap' | 'idle'
+  readonly kind: 'baseline' | 'delta' | 'metadata' | 'gap'
   readonly revision: number
-  /** gap 的原因；重拉基线后仍然保留，方便调用方解释这次跳变。 */
+  /** gap 的原因，方便调用方解释这次跳变。 */
   readonly reason: string | undefined
 }
 
 export interface SyncOptions {
-  /** 缺口已检测、store 已整体标 stale、但还没重拉基线时调用；用于观测"旧值不是当前值"的窗口。 */
+  /** 缺口已检测、store 已整体标 stale、消费者还没重开宿主流时调用；用于观测"旧值不是当前值"的窗口。 */
   readonly onGap?: (gap: WireGap, store: EntityStore) => void
   /** 接受时间的来源（ISO 8601）；默认系统时钟，测试注入固定值。 */
   readonly clock?: () => string
@@ -31,13 +29,10 @@ export interface SyncOptions {
 export interface WorkspaceSync {
   readonly revision: number
   readonly connected: boolean
-  connect(): Promise<SyncReport>
-  reconnect(): Promise<SyncReport>
-  poll(): Promise<SyncReport>
-  /** 关闭传输并标记断开；保留最后已知的内容、头与时间。 */
+  /** 标记断开；保留最后已知的内容、头与时间。 */
   disconnect(): void
   /**
-   * 推模式（#276）：接受宿主流的一帧。baseline / delta / metadata 走与 poll 相同的接受点，拒绝时抛错且状态不变；
+   * 接受宿主流的一帧（#276）。baseline / delta / metadata 走唯一接受点，拒绝时抛错且状态不变；
    * gap（含越过本地修订的 delta）只整体标 stale、调 onGap 并回报 `kind: 'gap'`，由流的消费者重开下一代。
    */
   receive(frame: unknown): SyncReport
@@ -74,20 +69,13 @@ function assertEventShape(event: unknown): asserts event is WireEvent {
   }
 }
 
-class FrameRejectedError extends TypeError {}
-
-export function createSync(transport: Transport, store: EntityStore, options: SyncOptions = {}): WorkspaceSync {
+export function createSync(store: EntityStore, options: SyncOptions = {}): WorkspaceSync {
   const clock = options.clock ?? ((): string => new Date().toISOString())
   let connected = false
   /** 最近一次被接受帧的整表头：整体替换，不跨帧拼字段（宿主不再确认 descriptor 时 read 回到 undefined）。 */
   let head: WireWorkspaceHeader | undefined
   let lastUpdatedAt: string | undefined
   let generation: string | undefined
-  let operation = 0
-  let polling: Promise<SyncReport> | undefined
-  const invalidate = (): number => { polling = undefined; return ++operation }
-  const idle = (): SyncReport => ({ kind: 'idle', revision: store.revision, reason: undefined })
-
   const validateFrame = (frame: WireWorkspaceHeader, allowGenerationReset = false): string => {
     assertHeader(frame)
     if (generation !== undefined && frame.generation !== generation && !allowGenerationReset) {
@@ -109,7 +97,7 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
       generation = frameGeneration
       connected = true
     } catch (error) {
-      throw new FrameRejectedError(error instanceof Error ? error.message : '帧拒绝')
+      throw new TypeError(error instanceof Error ? error.message : '帧拒绝')
     }
   }
 
@@ -118,49 +106,25 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
     store.markAllStale()
   }
 
-  const guarded = async (ticket: number, run: () => Promise<SyncReport>): Promise<SyncReport> => {
-    try {
-      const report = await run()
-      return ticket === operation ? report : idle()
-    } catch (error) {
-      if (ticket !== operation) return idle()
-      if (error instanceof FrameRejectedError) throw error
-      lose()
-      throw error
-    }
-  }
-
   const acceptBaseline = (snapshot: WireSnapshot): SyncReport => {
     let nextGeneration: string
     try {
       nextGeneration = validateFrame(snapshot, true)
     } catch (error) {
-      throw new FrameRejectedError(error instanceof Error ? error.message : 'generation 不合契约')
+      throw new TypeError(error instanceof Error ? error.message : 'generation 不合契约')
     }
     if (store.revision > snapshot.revision && nextGeneration === generation) {
-      throw new FrameRejectedError(`baseline revision ${snapshot.revision} 低于本地 ${store.revision}，没有新的 generation evidence`)
+      throw new TypeError(`baseline revision ${snapshot.revision} 低于本地 ${store.revision}，没有新的 generation evidence`)
     }
     accept(snapshot, () => store.applyBaseline(snapshot), confirms(snapshot.source, snapshot.entities), true)
     return { kind: 'baseline', revision: snapshot.revision, reason: undefined }
   }
 
-  const baseline = async (ticket: number): Promise<SyncReport> => {
-    const snapshot = await transport.fetchBaseline()
-    return ticket === operation ? acceptBaseline(snapshot) : idle()
-  }
-
-  /** 缺口已检测：整表 stale 并调 onGap；拉模式的 poll 随后重拉基线，推模式由流的消费者重开下一代。 */
+  /** 缺口只标 stale 并回报，流的消费者负责重开下一代。 */
   const markGap = (gap: WireGap): SyncReport => {
     store.markAllStale()
     options.onGap?.(gap, store)
     return { kind: 'gap', revision: store.revision, reason: gap.reason }
-  }
-
-  const reconnect = (): Promise<SyncReport> => {
-    const ticket = invalidate()
-    connected = false
-    store.markAllStale()
-    return guarded(ticket, () => baseline(ticket))
   }
 
   const applyEvent = (event: unknown): SyncReport => {
@@ -168,7 +132,7 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
     try {
       assertEventShape(event)
     } catch (error) {
-      throw new FrameRejectedError(error instanceof Error ? error.message : 'event 不合契约')
+      throw new TypeError(error instanceof Error ? error.message : 'event 不合契约')
     }
     if (event.kind === 'gap') return markGap(event.gap)
     if (event.kind === 'metadata') {
@@ -185,14 +149,14 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
     const { delta } = event
     if (!Number.isInteger(delta.previousRevision) || !Number.isInteger(delta.revision)
       || delta.revision <= delta.previousRevision || delta.previousRevision < store.revision) {
-      throw new FrameRejectedError(`delta 必须从本地修订 ${store.revision} 严格前进`)
+      throw new TypeError(`delta 必须从本地修订 ${store.revision} 严格前进`)
     }
     if (delta.previousRevision > store.revision) {
       try {
         validateFrame(delta)
         assertDeltaFrame(delta)
       } catch (error) {
-        throw new FrameRejectedError(error instanceof Error ? error.message : '帧拒绝')
+        throw new TypeError(error instanceof Error ? error.message : '帧拒绝')
       }
       return markGap({
         requestedAfter: store.revision,
@@ -207,33 +171,10 @@ export function createSync(transport: Transport, store: EntityStore, options: Sy
   const sync: WorkspaceSync = {
     get revision(): number { return store.revision },
     get connected(): boolean { return connected },
-    connect: reconnect,
-    reconnect,
-    poll(): Promise<SyncReport> {
-      if (polling !== undefined) return polling
-      const ticket = ++operation
-      const pending = guarded(ticket, async () => {
-        if (!connected) return baseline(ticket)
-        const event = await transport.poll(store.revision)
-        if (ticket !== operation || event === undefined) return idle()
-        const report = applyEvent(event)
-        if (ticket !== operation) return idle()
-        if (report.kind !== 'gap') return report
-        const recovered = await baseline(ticket)
-        return ticket === operation ? { ...report, revision: recovered.revision } : idle()
-      }).finally(() => { if (polling === pending) polling = undefined })
-      polling = pending
-      return pending
-    },
     receive(event: unknown): SyncReport {
-      const report = applyEvent(event)
-      invalidate()
-      transport.close()
-      return report
+      return applyEvent(event)
     },
     disconnect(): void {
-      invalidate()
-      transport.close()
       lose()
     },
     read(): ClientWorkspaceRead | undefined {

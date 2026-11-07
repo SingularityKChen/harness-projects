@@ -1,4 +1,4 @@
-/** 读取保值集成（issue #130）：真实 composeCore→controller→transport→createSync/read()，固定时钟与受控 transport。 */
+/** 读取保值集成（issue #130）：真实 composeCore→controller→receive/read()，固定时钟与明确帧。 */
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
@@ -7,13 +7,13 @@ import { test } from 'node:test'
 import { StatusPolicy, newWorkspaceId } from '@harness-projects/domain'
 import { composeCore } from '@harness-projects/core'
 import { createController, toWireMetadata } from '@harness-projects/controller'
-import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
+import { createEntityStore, createSync } from '@harness-projects/client'
 import { deriveWorkItemDetailView, deriveWorkItemListView } from '@harness-projects/ui-model'
 import { createFakeProviders, fixtureProjectRef } from '@harness-projects/provider-fake'
 
 const metadata = { planningSourceName: '规划源', sourceNames: {} }
 const T = (n) => `2026-10-03T10:0${n}:00.000Z`
-const client = (transport) => createSync(transport, createEntityStore(), { clock: clockOf(T(1), T(2), T(3)) })
+const client = () => createSync(createEntityStore(), { clock: clockOf(T(1), T(2), T(3)) })
 const clockOf = (...times) => { let calls = 0; return () => times[Math.min(calls++, times.length - 1)] }
 
 async function compose(providers) {
@@ -23,12 +23,6 @@ async function compose(providers) {
   })
   return { id, controller: createController(core) }
 }
-const scripted = (controller) => ({
-  events: [],
-  fetchBaseline: () => controller.baseline(),
-  poll() { return Promise.resolve(this.events.shift()) },
-  close() {},
-})
 const phaseOf = (read, extra = {}) => ({ read, metadata, phase: 'received', refreshing: false, ...extra })
 const targetOf = (read, projectId) => {
   const body = deriveWorkItemListView(phaseOf(read)).body
@@ -49,8 +43,8 @@ const metaOf = (base, headFresh, rowFresh) => ({
 
 test('sync-loss-preserves-visible-detail：断线前后 title/body/status/identity/时间 deepEqual，stale 由 false 转 true', async () => {
   const { id, controller } = await compose(createFakeProviders())
-  const sync = client(createTransport(controller))
-  await sync.connect()
+  const sync = client()
+  sync.receive({ kind: 'baseline', baseline: await controller.baseline() })
   const target = targetOf(sync.read(), id)
   const before = contentOf(sync.read(), target)
   assert.ok(before.title && before.body && before.identity, '前置：可见行必须带内容与来源身份')
@@ -64,15 +58,13 @@ test('sync-loss-preserves-visible-detail：断线前后 title/body/status/identi
 
 test('sync-source-degraded-retains-content：Provider 降级 metadata 帧后连接保持正常、所选行转 stale，内容与时间保留', async () => {
   const { id, controller } = await compose(createFakeProviders())
-  const transport = scripted(controller)
-  const sync = client(transport)
-  await sync.connect()
+  const sync = client()
+  sync.receive({ kind: 'baseline', baseline: await controller.baseline() })
   const base = await controller.baseline()
   const target = targetOf(sync.read(), id)
   const before = contentOf(sync.read(), target)
 
-  transport.events.push({ kind: 'metadata', metadata: metaOf(base, false, () => false) })
-  assert.equal((await sync.poll()).kind, 'metadata')
+  sync.receive({ kind: 'metadata', metadata: metaOf(base, false, () => false) })
   const read = sync.read()
   assert.deepEqual([read.connection.connected, read.lastUpdatedAt], [true, T(1)], '降级不推进时间，连接仍是正常')
   assert.ok(read.reason, '来源降级必有解释')
@@ -83,19 +75,16 @@ test('sync-source-degraded-retains-content：Provider 降级 metadata 帧后连�
 
 test('sync-recovery-reprojects：恢复帧与增量重新投影实际内容，不沿用缓存', async () => {
   const { id, controller } = await compose(createFakeProviders())
-  const transport = scripted(controller)
-  const sync = client(transport)
-  await sync.connect()
+  const sync = client()
+  sync.receive({ kind: 'baseline', baseline: await controller.baseline() })
   const base = await controller.baseline()
   const target = targetOf(sync.read(), id)
   const original = contentOf(sync.read(), target)
 
-  transport.events.push({ kind: 'metadata', metadata: metaOf(base, false, () => false) })
-  await sync.poll()
+  sync.receive({ kind: 'metadata', metadata: metaOf(base, false, () => false) })
   assert.equal(contentOf(sync.read(), target).stale, true, '先降级：不能冒充当前值')
 
-  transport.events.push({ kind: 'metadata', metadata: metaOf(base, true, () => true) })
-  assert.equal((await sync.poll()).kind, 'metadata')
+  sync.receive({ kind: 'metadata', metadata: metaOf(base, true, () => true) })
   const recovered = contentOf(sync.read(), target)
   assert.deepEqual([recovered.stale, recovered.lastUpdatedAt], [false, T(2)], '恢复推进确认时间并回到当前值')
   assert.deepEqual([recovered.title, recovered.body], [original.title, original.body], '恢复帧本身不改内容')
@@ -103,8 +92,7 @@ test('sync-recovery-reprojects：恢复帧与增量重新投影实际内容，�
   const entity = base.entities.find((candidate) => candidate.entityId === target.itemId)
   const revision = base.revision + 1
   const source = { ...base.source, revision }
-  transport.events.push({ kind: 'delta', delta: { generation: base.generation, previousRevision: base.revision, revision, source, upserts: [{ ...entity, content: { ...entity.content, title: '恢复后的新标题' }, source }], removed: [], workspace: base.workspace, capabilities: base.capabilities } })
-  assert.equal((await sync.poll()).kind, 'delta')
+  sync.receive({ kind: 'delta', delta: { generation: base.generation, previousRevision: base.revision, revision, source, upserts: [{ ...entity, content: { ...entity.content, title: '恢复后的新标题' }, source }], removed: [], workspace: base.workspace, capabilities: base.capabilities } })
   const reprojected = contentOf(sync.read(), target)
   assert.deepEqual([reprojected.title, reprojected.lastUpdatedAt], ['恢复后的新标题', T(3)], '新帧必须重新投影，而不是沿用缓存')
 })

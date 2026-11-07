@@ -28,7 +28,7 @@ test('strict native reader reads exact scope and uses opaque refresh receipt wit
   }
 })
 test('workspace sync exposes the accepted Host generation even when source metadata is unchanged', () => {
-  const sync = client.createSync({ close() {} }, client.createEntityStore(), { clock: () => at })
+  const sync = client.createSync(client.createEntityStore(), { clock: () => at })
   const baseline = { generation: 'host-1', revision: 1, workspace: { id: 'ws', name: 'workspace' }, capabilities: [], entities: [], source: { revision: 1, freshness: 'fresh', authority: 'host' } }
   sync.receive({ kind: 'baseline', baseline }); assert.equal(sync.read().generation, 'host-1')
   sync.receive({ kind: 'baseline', baseline: { ...baseline, generation: 'host-2' } }); assert.equal(sync.read().generation, 'host-2')

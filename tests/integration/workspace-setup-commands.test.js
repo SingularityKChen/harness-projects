@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
+import { createEntityStore, createSync } from '@harness-projects/client'
 import { createController, createSetupCommands, toWireMetadata, watchWorkspace } from '@harness-projects/controller'
 import { composeCore, createWorkspaceSetup } from '@harness-projects/core'
 import { createFakeStorage, emptyStorageData, exportFakeStorageState } from '@harness-projects/provider-fake'
@@ -496,8 +496,8 @@ for (const kind of ['memory', 'sqlite']) {
     const { core } = await compose(store.storage, { fetch: (...args) => (online ? replay.fetch(...args) : Promise.reject(new TypeError('offline'))) }, CANARY)
     const controller = createController(core)
     const connected = async () => {
-      const sync = createSync(createTransport(controller), createEntityStore())
-      await sync.connect()
+      const sync = createSync(createEntityStore())
+      sync.receive({ kind: 'baseline', baseline: await controller.baseline() })
       return sync
     }
     const input = (sync, metadata) => ({ read: sync.read(), metadata, phase: 'received', refreshing: false })

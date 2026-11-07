@@ -6,7 +6,6 @@
  */
 import { createEntityStore } from './store.ts'
 import { createSync, type SyncOptions, type SyncReport } from './sync.ts'
-import type { Transport } from './transport.ts'
 import type { ClientWorkspaceRead } from './workspace-read.ts'
 
 /** 宿主 RemoteStream 的最小结构面（0.2.0-rc.2），不 import 宿主包；generation 是物理代号，只用于诊断。 */
@@ -24,12 +23,8 @@ export interface WorkspaceFollower {
   close(): Promise<void>
 }
 
-/** 推模式从不拉取（gap 只标记，由消费者重开下一代）；这个 transport 只为复用 createSync 的接受点。 */
-const refuse = (): Promise<never> => Promise.reject(new Error('推模式会话不拉取'))
-const PUSH_ONLY: Transport = { fetchBaseline: refuse, poll: refuse, close: () => undefined }
-
 export function followWorkspace(connect: (carrierFailed: () => void) => GenerationStream, options: FollowOptions = {}): WorkspaceFollower {
-  const sync = createSync(PUSH_ONLY, createEntityStore(), options)
+  const sync = createSync(createEntityStore(), options)
   let closed = false
   const stream = connect(() => sync.disconnect())
   const consume = async (): Promise<void> => {
