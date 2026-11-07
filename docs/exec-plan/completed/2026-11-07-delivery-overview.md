@@ -1,6 +1,6 @@
 # 跨工作项交付总览 ExecPlan
 
-> 状态：Active；创建：2026-11-07；关联：Closes #281。本计划遵循根 `PLANS.md`。目标是只读工程交付视图，不作部署或发布就绪判断。
+> 状态：Completed（工程验收与 Ready）；创建：2026-11-07；关联：Closes #281。本计划遵循根 `PLANS.md`。目标是只读工程交付视图，不作部署或发布就绪判断。
 
 ## Purpose / Big Picture
 
@@ -30,7 +30,7 @@ summary 只展示 change_request/pipeline_run/check_run slots，复用原 strip 
 
 ## Global Constraints
 
-唯一文件集：`packages/ui-model/src/delivery-overview.ts`（新，安全 targets）、`packages/ui-model/src/index.ts`；`packages/ui/src/delivery-lineage-section.ts`（summary与显式刷新trigger，保留唯一loader）、`packages/ui/src/delivery-overview.ts`（新，仓库/分页/并发队列）、`packages/ui/src/work-item-project.ts`、`packages/ui/src/work-item-app.ts`、`packages/ui/src/work-item-list.ts`（稳定 context/toolbar，仅允许展示正文/标题/region 标签替换）；`tests/contract/delivery-overview-model.test.js`（新）、`tests/contract/ui-delivery-overview.test.js`（新）、`tests/contract/ui-delivery-lineage-section.test.js`、`tests/contract/ui-work-item-detail.test.js`（既有 hook/子组件定位夹具适配，保留焦点断言）、`tests/fixtures/execution-drawer-browser.mjs`、`tests/browser/delivery-overview.test.js`（新）；本计划与整合者串行维护的 `docs/README.md`。summary 时间呈现复用既有 `packages/ui/src/observed-time.ts`（仅依赖，不修改该源）；不扩大 ui-model 年龄规则、不修改现有 PR 创建功能；组件内部直接 import，无须为内部 UI 添加公共出口。
+唯一文件集：`packages/ui-model/src/delivery-overview.ts`（新，安全 targets）、`packages/ui-model/src/index.ts`；`packages/ui/src/delivery-lineage-section.ts`（summary与显式刷新trigger，保留唯一loader）、`packages/ui/src/delivery-overview.ts`（新，仓库/分页/并发队列）、`packages/ui/src/work-item-project.ts`、`packages/ui/src/work-item-app.ts`、`packages/ui/src/work-item-list.ts`（稳定 context/toolbar，仅允许展示正文/标题/region 标签替换）；`tests/contract/delivery-overview-model.test.js`（新）、`tests/contract/ui-delivery-overview.test.js`（新）、`tests/contract/ui-delivery-lineage-section.test.js`、`tests/contract/ui-work-item-detail.test.js`（既有 hook/子组件定位夹具适配，保留焦点断言）、`tests/fixtures/execution-drawer-browser.mjs`、`tests/browser/delivery-overview.test.js`（新）；本计划、`docs/review/pr-569-mmp-review.md` 与整合者串行维护的 `docs/README.md`。summary 时间呈现复用既有 `packages/ui/src/observed-time.ts`（仅依赖，不修改该源）；不扩大 ui-model 年龄规则、不修改现有 PR 创建功能；组件内部直接 import，无须为内部 UI 添加公共出口。
 
 预算 additions+deletions：safe model及测试100、section复用及回归160、overview200、装配60、浏览器/fixture/其余测试190，目标710，硬门 <800 code/test/config；文档目标220，硬门 <1300。一个 owner 修改本 UI 单元；和负责人 PR 的 create section 改动分开，唯一共同组合处由整合者串行处理。Node>=22、pnpm10.28.2，不增依赖、不改 Provider/Storage/Host wire，不碰 #552 审计文档、不改 Planning Status/blocking。
 
@@ -82,7 +82,7 @@ summary 只展示 change_request/pipeline_run/check_run slots，复用原 strip 
 - [x] (2026-11-07 SGT) 三份独立方案与基线源码核对，收敛为共享 section summary、明确仓库和20项范围。
 - [x] (2026-11-07 SGT) Task 1：模型与组件、共享 summary loader、20项/单仓库/3并发、红绿与生产组合浏览器实施；最终基线同步和复验记录见本节后续条目。
 - [x] (2026-11-07 SGT) CI 布局修复本地验证：两项原失败矩阵 RED→GREEN，完整 `pnpm test:browser` 60通过、相关合同75通过、typecheck退出0、boundaries9通过；原断言阈值不变。
-- [ ] Task 2：CI 布局修复待独立 scoped 复审；修复前独立评审的 Approved 仅覆盖旧 head，当前发布面/规模与最终远端回读门未完成。
+- [x] (2026-11-07 15:57 SGT) Task 2：布局独立复审及最终源树4/4归因变异通过；整理后源码/测试/配置树独立核同，当前代码head `a4a8f835` 的托管相关checks、双向issue关联及全线程回读通过，PR #569 已Ready。归档文档后的head按本计划命令重新回读，不沿用旧结果。
 
 ## Surprises & Discoveries
 
@@ -114,7 +114,11 @@ summary 只展示 change_request/pipeline_run/check_run slots，复用原 strip 
 
 ## Outcomes & Retrospective
 
-已实现总览并完成本地合同/生产组合验证；托管 CI 揭示未纳入初次窄验证的共享布局回归，已据 DOM 测量修复并完成完整浏览器层60项。CI 修复仍待独立 scoped 复审与新 head 托管验证；安装接受尚未完成。自动化只证明合成组合，不代表 R1/发布或人类接受。全部验收完成后更新本节、Progress，按 PLANS 归档并更新 docs 索引。
+已实现总览并完成本地合同/生产组合验证；托管 CI 揭示未纳入初次窄验证的共享布局回归，已据 DOM 测量修复并完成完整浏览器层60项。CI 修复仍待独立 scoped 复审与新 head 托管验证；安装接受尚未完成。自动化只证明合成组合，不代表 R1/发布或人类接受。全部验收完成后更新本节、Progress，按 PLANS 归档并更新 docs 索引。 **Superseded by 本节下段工程收尾（2026-11-07）。**
+
+2026-11-07 15:57 SGT：总览、时间呈现和共享布局修复已通过独立验收/复审；最终源树四项变异归因KILLED。完整浏览器层60项、相关合同75项、类型及边界9项通过；历史代码head `a4a8f835` 在该时点的托管Verify/Browser/CodeQL、当时仍存在的advisory Merge Gate及PR Fast Gate均通过。新基线 `329227dd` 已退役Merge Gate；新head以仍存在的CI Verify/Browser、PR Fast Gate及相关checks实际读回为准，不要求产生退役check，Closes #281及反向closedBy回读成立、线程无未决项，PR已Ready。计划按工程闭环归档，工作树保留；实际安装、人类接受与R1仍单列。未引入有意实现债务；后续新head以明确命令回读为准。
+
+2026-11-07 SGT：重放至base `329227dd`，受验head `aa38346e`。本PR功能patch不变；主线client/runner/CI改变后独立重跑85项窄组合、完整browser60和typecheck全绿，workflow7文件无发现。旧15:57 Ready只属历史head，最终发布head另行回读；当前工程归档不改变安装/人类/R1边界。
 
 ## Bottom Change Note
 
@@ -127,3 +131,9 @@ summary 只展示 change_request/pipeline_run/check_run slots，复用原 strip 
 2026-11-07 SGT：按独立评审 P3/F1，仅 summary 确认时间复用既有 ObservedTime 本地化并明确时区，精确 ISO 留在 dateTime；detail/loader/年龄事实不变，追加语义时间接线与320px/200%像素验证，Task 2 待修订范围独立复审。
 
 2026-11-07 SGT：以托管 CI 两项旧布局 RED 与 DOM 前后测量订正独立模式条结构；保留既有统一 toolbar/context/滚动 owner，补完整浏览器层与75相关合同证据，Task 2 明确为CI修复待独立复审。
+
+2026-11-07 15:57 SGT：根据当前代码head远端门禁与Ready回读归档工程计划，加入PR自身评审记录；保留CI反例与独立修复证据，不升级为安装或发布接受。
+
+2026-11-07 SGT：同步新基线验证和退役门禁名称，旧观察保留历史身份。
+
+2026-11-07 SGT：主线7bab4b8c退役未用UI投影后，独立核对总览未消费被删字段；在检出feature/delivery-overview、受验head e7417ca3重跑typecheck及 `pnpm test:file tests/contract/delivery-overview-model.test.js tests/contract/ui-work-item-detail.test.js` 12/12通过，功能patch与已受验源保持一致。此条仅补新base本地验证，最终远端状态另行读回。
