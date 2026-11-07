@@ -8,6 +8,7 @@ import {
   type DevelopmentProvider, type ExternalObjectRef, type ProviderChangeRequest, type ProviderCreateChangeRequestInput, type ProviderDefinition, type ProviderObservation, type ProviderPage, type ProviderResult,
 } from '@harness-projects/capabilities'
 import { ProviderErrorCode, type ProviderBindingId } from '@harness-projects/domain'
+import { assigneeMethods } from './assignees.ts'
 import { classifyResponse, failure, requestIdOf } from './classify.ts'
 import {
   SHA, decodeCreatePreflight, decodeCreatedChangeRequest, decodeBranches, decodeChangeRequest, decodeChangeRequests, decodeCommit, decodeRepository, isRecord, type ChangeRequestRow, type DecodedPage, type Obj,
@@ -171,8 +172,10 @@ export function createGithubDevelopmentProvider({ bindingId, repository, transpo
     }
   }
 
+  const assignees = assigneeMethods(bindingId, repository, call)
   let nativePermission: AccessLevel = AccessLevel.Degraded, nativeDenialEpoch = 0
   const provider: DevelopmentProvider = {
+    listAssignableUsers: assignees.listAssignableUsers, getChangeRequestAssignees: assignees.getChangeRequestAssignees, addChangeRequestAssignees: assignees.addChangeRequestAssignees,
     async getChangeRequestByNativeIdentity(input) {
       let requestedId: string
       try {
@@ -207,8 +210,8 @@ export function createGithubDevelopmentProvider({ bindingId, repository, transpo
       observedAt ??= new Date(now()).toISOString()
       const keys = [CapabilityKey.DevelopmentRepositoryRead, CapabilityKey.DevelopmentChangeRequestRead]
       const level = (access: AccessLevel) => Object.fromEntries(keys.map((key) => [key, access]))
-      return { bindingId, capability: { ...level(AccessLevel.Available), [CapabilityKey.DevelopmentChangeRequestNativeIdentityRead]: AccessLevel.Available, [CapabilityKey.DevelopmentChangeRequestCreate]: AccessLevel.Available },
-        permission: { ...level(permission), [CapabilityKey.DevelopmentChangeRequestNativeIdentityRead]: nativePermission, [CapabilityKey.DevelopmentChangeRequestCreate]: createPermission }, observedAt }
+      return { bindingId, capability: { ...Object.fromEntries(Object.keys(assignees.levels).map(key => [key, AccessLevel.Available])), ...level(AccessLevel.Available), [CapabilityKey.DevelopmentChangeRequestNativeIdentityRead]: AccessLevel.Available, [CapabilityKey.DevelopmentChangeRequestCreate]: AccessLevel.Available },
+        permissionVersion: { ...assignees.epochs }, permission: { ...assignees.levels, ...level(permission), [CapabilityKey.DevelopmentChangeRequestNativeIdentityRead]: nativePermission, [CapabilityKey.DevelopmentChangeRequestCreate]: createPermission }, observedAt }
     },
     getRepository,
     createChangeRequest,

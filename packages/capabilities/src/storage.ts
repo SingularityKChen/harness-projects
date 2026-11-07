@@ -125,12 +125,17 @@ export type ChangeRequestExternalIntent = {
   readonly worktree: string; readonly confirmedRef?: ExternalObjectRef
   readonly issueSelection: ChangeRequestIssueSelection
 }
-export type ExternalIntent = StartWorkExternalIntent | ChangeRequestExternalIntent
+export type ChangeRequestAssigneeIntent = Pick<ChangeRequestExternalIntent, 'contextId' | 'ownerGeneration' | 'bindingId' | 'state' | 'worktree'> & {
+  readonly operation: 'addChangeRequestAssignees'; readonly sequence: number; readonly createOperationId: string; readonly createReceipt: string; readonly targetStamp: string
+  readonly input: { readonly repository: ExternalObjectRef; readonly changeRequest: ExternalObjectRef; readonly assigneeIds: readonly string[] }; readonly confirmedIds: readonly string[]
+}
+export type ExternalIntent = StartWorkExternalIntent | ChangeRequestExternalIntent | ChangeRequestAssigneeIntent
 export function validateExternalIntentCommand(record: MutationAttemptRecord): void {
-  if (record.externalIntent?.operation === 'createChangeRequest' && (!record.requestFingerprint || record.externalIntent.bindingId !== record.bindingId)) throw new TypeError('invalid PR attempt identity')
-  if (record.externalIntent !== undefined && record.commandName !== (record.externalIntent.operation === 'createChangeRequest' ? 'createChangeRequest' : 'startWork')) throw new TypeError('external intent command mismatch')
+  if (record.externalIntent !== undefined && ['createChangeRequest', 'addChangeRequestAssignees'].includes(record.externalIntent.operation) && (!record.requestFingerprint || record.externalIntent.bindingId !== record.bindingId)) throw new TypeError('invalid PR attempt identity')
+  if (record.externalIntent !== undefined && record.commandName !== (['createChangeRequest', 'addChangeRequestAssignees'].includes(record.externalIntent.operation) ? record.externalIntent.operation : 'startWork')) throw new TypeError('external intent command mismatch')
 }
 /** 持久输入白名单：字段只读一次，不接收任意 environment、不保存访问 URL；两个 Storage 共用同一复制与校验。 */
+export function externalIntentSnapshot(value: ChangeRequestAssigneeIntent): ChangeRequestAssigneeIntent
 export function externalIntentSnapshot(value: StartWorkExternalIntent): StartWorkExternalIntent
 export function externalIntentSnapshot(value: ExternalIntent): ExternalIntent
 export function externalIntentSnapshot(value: ExternalIntent): ExternalIntent {
@@ -147,6 +152,14 @@ export function externalIntentSnapshot(value: ExternalIntent): ExternalIntent {
   if (!Number.isSafeInteger(ownerGeneration) || ownerGeneration < 1 || !['pending', 'saved', 'unknown', 'conflict', 'failed'].includes(state)
     || input === null || typeof input !== 'object') return fail()
   const base = { contextId: text(contextId) as ExecutionContextId, ownerGeneration, bindingId: text(bindingId) as ProviderBindingId, state }
+  if (operation === 'addChangeRequestAssignees') {
+    if (Reflect.ownKeys(value).some(key => typeof key !== 'string' || !['operation', 'input', 'contextId', 'ownerGeneration', 'bindingId', 'state', 'worktree', 'createOperationId', 'createReceipt', 'targetStamp', 'confirmedIds', 'sequence'].includes(key))
+      || Object.keys(input).some(key => !['repository', 'changeRequest', 'assigneeIds'].includes(key))) return fail()
+    const ids = (v: readonly string[]) => Array.isArray(v) && v.every(id => typeof id === 'string' && id !== '') && new Set(v).size === v.length ? [...v].sort() : fail()
+    if (!Number.isSafeInteger(value.sequence) || value.sequence < 1) return fail()
+    return { ...base, operation, sequence: value.sequence, worktree: text(value.worktree), createOperationId: text(value.createOperationId), createReceipt: text(value.createReceipt), targetStamp: text(value.targetStamp), confirmedIds: ids(value.confirmedIds),
+      input: { repository: ref(input.repository, 'repository'), changeRequest: ref(input.changeRequest, 'change_request'), assigneeIds: ids(input.assigneeIds) } }
+  }
   if (operation === 'createChangeRequest') {
     if (Object.keys(value).some((key) => !['operation', 'input', 'contextId', 'ownerGeneration', 'bindingId', 'state', 'worktree', 'confirmedRef', 'issueSelection'].includes(key))
       || Object.keys(input).some((key) => !['repository', 'head', 'base', 'title', 'body', 'draft'].includes(key))) return fail()

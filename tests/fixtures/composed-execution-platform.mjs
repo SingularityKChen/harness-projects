@@ -44,8 +44,15 @@ export async function createComposedExecutionPlatform() {
     for (const [method, count] of [['createBranch', 'branches'], ['createWorktree', 'worktrees']]) {
       const run = local[method].bind(local); local[method] = input => { counts[count]++; return run(input) }
     }
+    const assignment = { ids: [], adds: 0, drop: false, offline: false }, users = [{ id: 'U_browser', login: 'browser-assignee' }]
     const github = createGithubDevelopmentProvider({ bindingId: repository.bindingId, repository: { externalId: REPOSITORY, owner: 'example', name: 'project' }, permissionMode: 'lazy', transport: async request => {
       if (flags.dropAck && f.objects.length && request.operationName !== 'DevelopmentCreateChangeRequest') throw Error('creation reconciliation temporarily unavailable')
+      if (request.operationName.startsWith('DevelopmentAssign') || request.operationName === 'DevelopmentAddAssignees') {
+        const page = nodes => ({ nodes, pageInfo: { hasNextPage: false, endCursor: null } })
+        if (assignment.offline && assignment.drop) throw Error('assignment acknowledgement lost')
+        if (request.operationName === 'DevelopmentAddAssignees') { assignment.adds++; assignment.ids.push(...request.variables.input.assigneeIds); if (assignment.drop) { assignment.offline = true; throw Error('assignment acknowledgement lost') } }
+        return { status: 200, headers: {}, body: { data: { repository: { id: 'R_synthetic', nameWithOwner: 'example/project', assignableUsers: page(users) }, node: { id: f.objects[0]?.id, repository: { id: 'R_synthetic' }, assignees: page(users.filter(u => assignment.ids.includes(u.id))) }, addAssigneesToAssignable: { assignable: { id: f.objects[0]?.id } } } } }
+      }
       const result = await f.transport(request)
       if (flags.dropAck && request.operationName === 'DevelopmentCreateChangeRequest') throw Error('created remotely; acknowledgement lost')
       return result
@@ -77,7 +84,7 @@ export async function createComposedExecutionPlatform() {
       providers.delivery.state.checks = [{ ref: ref('check_run', 'target-check'), repository: repo, commit: sha, name: 'target-check', status: 'completed', conclusion }]
     }
     delivery('failed'); await rebuild()
-    const world = { flags, delivery, get prCreates() { return f.mutations().length }, get peer() { return peer }, effects: () => ({ ...counts, prs: f.objects.length }),
+    const world = { flags, assignment, delivery, get prCreates() { return f.mutations().length }, get peer() { return peer }, effects: () => ({ ...counts, prs: f.objects.length }),
       async gitFacts() { const worktrees = (await git(['worktree', 'list', '--porcelain'])).split('\n').filter(line => line.startsWith('worktree ')).map(line => line.slice(9)); assert.equal(worktrees.length, 2); const worktree = worktrees.find(p => p !== repositoryPath); return { path: await realpath(worktree), branch: await git(['branch', '--show-current'], worktree), worktrees: worktrees.length } },
     }
     return { dataPath, workspaceId, itemId, get storage() { return storage }, get host() { return host }, get installed() { return installed }, rebuild, platform: world,

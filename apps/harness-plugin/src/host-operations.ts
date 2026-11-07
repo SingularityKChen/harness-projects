@@ -87,6 +87,8 @@ function repositoryReferences(value: unknown) {
   })
 }
 
+const assigneeScope = [param('workItemId', 'WorkItemId', v => nonEmptyString(v, 'workItemId')), param('repositoryId', 'RepositoryId', v => nonEmptyString(v, 'repositoryId'))] as const
+const confirmedPr = [...assigneeScope, param('createOperationId', 'OperationId', v => nonEmptyString(v, 'createOperationId'))] as const
 /** `watch` 追加在末尾：descriptor 的 `invocations[0]` 仍是 `baseline`。 */
 export const OPERATIONS = defineOperations({
   baseline: { mode: 'unary', params: [] },
@@ -132,6 +134,10 @@ export const OPERATIONS = defineOperations({
     param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId')),
     param('operationId', 'OperationId', (value) => nonEmptyString(value, 'operationId')),
   ] },
+  listChangeRequestAssigneeOptions: { mode: 'unary', params: [ENVELOPE[0], ...assigneeScope, { ...param('cursor', 'Cursor', v => v === undefined ? undefined : nonEmptyString(v, 'cursor')), acceptsUndefined: true }, param('limit', 'PageLimit', v => { if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 100) throw TypeError('limit'); return v as number })] },
+  getChangeRequestAssigneeOperation: { mode: 'unary', params: [ENVELOPE[0], ...confirmedPr, { ...param('operationId', 'OperationId', v => v === undefined ? undefined : nonEmptyString(v, 'operationId')), acceptsUndefined: true }] },
+  addChangeRequestAssignees: { mode: 'unary', params: [...ENVELOPE, ...confirmedPr, param('assigneeIds', 'AssigneeIds', v => { if (!Array.isArray(v) || v.length > 10 || v.some(id => typeof id !== 'string' || id.trim() === '')) throw TypeError('assigneeIds'); return [...v] as string[] })] },
+  resumeChangeRequestAssignees: { mode: 'unary', params: [ENVELOPE[0], ...confirmedPr, param('operationId', 'OperationId', v => nonEmptyString(v, 'operationId'))] },
   createWorkspace: { mode: 'unary', params: [...ENVELOPE, param('name', 'WorkspaceName', (value) => nonEmptyString(value, 'name'))] },
   connectAccount: { mode: 'unary', params: ENVELOPE },
   bindPlanningSource: { mode: 'unary', params: [...ENVELOPE, param('accountId', 'AccountId', (value) => nonEmptyString(value, 'accountId')), param('projectNodeId', 'ProjectNodeId', (value) => nonEmptyString(value, 'projectNodeId'))] },
@@ -162,6 +168,9 @@ export type UnaryHandlers<O extends Operations, A> = {
 /** 按声明校验并规整 Host 输入记录；label 是操作名。 */
 export function parseInput(operation: Operation, input: unknown): JsonRecord {
   const record = exactRecord(input, operation.params.map((p) => p.name), operation.name)
+  if (['listChangeRequestAssigneeOptions', 'getChangeRequestAssigneeOperation', 'addChangeRequestAssignees', 'resumeChangeRequestAssignees'].includes(operation.name)) {
+    const inspect = (value: unknown): void => { if (value && typeof value === 'object') for (const key of Reflect.ownKeys(value)) { const field = Object.getOwnPropertyDescriptor(value, key)!; if (typeof key !== 'string' || field.get || field.set) throw TypeError('负责人输入不能含存取器或符号字段'); inspect(field.value) } }; inspect(record)
+  }
   return Object.fromEntries(operation.params.map((p) => [p.name, p.parse(record[p.name])]))
 }
 

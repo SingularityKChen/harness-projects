@@ -94,7 +94,12 @@ export interface ProviderListChangeRequestsInput {
   readonly headBranch?: string
 }
 
+export interface ProviderAssignee { readonly id: string; readonly login: string }
+export interface ProviderAssigneeTarget { readonly repository: ExternalObjectRef; readonly changeRequest: ExternalObjectRef }
 export interface DevelopmentProvider {
+  listAssignableUsers?(input: { readonly repository: ExternalObjectRef; readonly cursor: string | undefined; readonly limit: number }): Promise<ProviderResult<ProviderPage<ProviderAssignee>>>
+  getChangeRequestAssignees?(input: ProviderAssigneeTarget): Promise<ProviderResult<{ readonly changeRequest: ExternalObjectRef; readonly users: readonly ProviderAssignee[] }>>
+  addChangeRequestAssignees?(input: ProviderAssigneeTarget & { readonly assigneeIds: readonly string[] }): Promise<ProviderResult<void>>
   /** 静态连接实现定义：由实现作者声明，Host 只注入实例与 id（见 `ProviderDefinition`）。 */
   readonly definition: ProviderDefinition
   describeCapabilities(): Promise<ProviderCapabilitySnapshot>

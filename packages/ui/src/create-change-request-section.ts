@@ -1,4 +1,5 @@
 import { createElement as h, useEffect, useRef, useState } from 'react'
+import { ChangeRequestAssigneesSection } from './change-request-assignees-section.ts'
 import type { ChangeRequestIssueOptions, IssueRelation, ChangeRequestCreation, ChangeRequestCreator, ChangeRequestOperationRead, DeliveryLineageScope } from '@harness-projects/client'
 /** 恢复只观察原操作；确认后由谱系 section 纯读现有快照。 */
 export function CreateChangeRequestSection({ scope, creator, connected, accessToken, onConfirmed, onConnect }: {
@@ -71,7 +72,8 @@ export function CreateChangeRequestSection({ scope, creator, connected, accessTo
   const repair = value?.recovery === 'fix_permission' && onConnect !== undefined ? h('button', { type: 'button', onClick: onConnect }, '打开连接设置') : null
   if (!connected || operation?.kind !== 'none') return h('section', { 'aria-label': '创建变更请求' }, h('h4', null, '创建变更请求'), status,
     operation?.kind === 'operation' ? h('p', null, `已保存原请求（${operation.draft ? '草稿 PR' : '普通 PR'}）：${operation.title}；${operation.head} → ${operation.base}；${operation.issueRelation === 'none' ? '不关联 Issue' : `${operation.issueTarget === undefined ? '原关联目标不可见，请重新验证来源' : `${operation.issueRelation === 'closing' ? 'Closes' : 'Refs'} ${operation.issueTarget.repositoryName}#${operation.issueTarget.number}`}`}`) : null, repair,
-    h('button', { type: 'button', className: 'hp-action', disabled: !connected || busy || (operation?.kind === 'operation' && (view?.access !== access || !operation.currentTarget)), onClick: () => { if (operation?.kind === 'operation') void run(true); else void lookup() } }, operation?.kind === 'operation' ? '读回原操作' : '重新读取'))
+    h('button', { type: 'button', className: 'hp-action', disabled: !connected || busy || (operation?.kind === 'operation' && (view?.access !== access || !operation.currentTarget)), onClick: () => { if (operation?.kind === 'operation') void run(true); else void lookup() } }, operation?.kind === 'operation' ? '读回原操作' : '重新读取'),
+    ...(connected && view?.access === access && operation?.kind === 'operation' && operation.currentTarget && operation.state === 'saved' && creator.assignees ? [h(ChangeRequestAssigneesSection, { key: JSON.stringify([key, accessToken]), scope: { ...scope, createOperationId: operation.operationId }, port: creator.assignees, connected })] : []))
   return h('form', { onSubmit: (event: { preventDefault(): void }) => { event.preventDefault(); void run(false) }, 'aria-label': '创建变更请求' },
     h('h4', null, '创建变更请求'),
     ...(['base', 'title', 'body'] as const).map((name) => h('label', { key: name }, { base: '目标分支', title: '标题', body: '正文' }[name],

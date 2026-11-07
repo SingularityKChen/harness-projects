@@ -24,6 +24,7 @@ export async function world(t, label = 'Fake', options = {}) {
         const fn = Reflect.get(target, method, target)
         return typeof fn !== 'function' ? fn : async (...args) => {
           const result = await fn.apply(target, args)
+          if (w.afterRead) await w.afterRead(method, result)
           if (method === w.fault) throw new Error('local settlement canary')
           return result
         }

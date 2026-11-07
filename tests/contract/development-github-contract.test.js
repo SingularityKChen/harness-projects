@@ -243,7 +243,7 @@ const MESSAGES = { permission_denied: 'GitHub 拒绝了当前凭据的访问', n
 const readAll = async (provider) => [await provider.getRepository(repositoryRef), await provider.listBranches({ repository: repositoryRef, cursor: undefined, limit: 10 }),
   await provider.getCommit(commitRef(GAMMA_HEAD)), await provider.getChangeRequest(PR_REF), await provider.listChangeRequests({ repository: repositoryRef, cursor: undefined, limit: 10 })]
 const accessOf = async (provider) => Object.fromEntries(effectiveCapabilities(await provider.describeCapabilities()).map(({ key, access }) => [key, access]))
-const bothAre = (level, create = 'degraded') => ({ 'development.change_request.native_identity.read': create === 'available' ? 'available' : 'degraded', [READ_KEYS[0]]: level, [READ_KEYS[1]]: level, 'development.change_request.create': create })
+const bothAre = (level, create = 'degraded') => ({ ...Object.fromEntries(['development.assignee.list', 'development.change_request.assignee.read', 'development.change_request.assignee.add'].map(key => [key, create])), 'development.change_request.native_identity.read': create === 'available' ? 'available' : 'degraded', [READ_KEYS[0]]: level, [READ_KEYS[1]]: level, 'development.change_request.create': create })
 
 test('permission-loss-degrades（录制 + 合成）：失去读权限时快照降级、五个读方法结构化失败、恢复后回到可用', async () => {
   const invisible = replayProvider({ externalId: LOCAL_REPOSITORY_KEY, owner: OWNER, name: ABSENT_NAME })
