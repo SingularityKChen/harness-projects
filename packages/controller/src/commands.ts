@@ -12,7 +12,7 @@ import { ProjectErrorCode, projectError } from '@harness-projects/capabilities'
 import type { ExternalObjectRef, ProjectError } from '@harness-projects/capabilities'
 import type { ConnectorAccountId, EntityId, NormalizedStatus, ProviderBindingId, WorkspaceId } from '@harness-projects/domain'
 import {
-  WritePhase, type CreateChangeRequestRequest, type CreateChangeRequestResult, type ResumeChangeRequestRequest, type ExecutionContextQuery, type RefreshExecutionRunResult,
+  type AssigneeOptions, type AssigneeAdd, type AssigneeResume, type AssigneeResult, WritePhase, type CreateChangeRequestRequest, type CreateChangeRequestResult, type ResumeChangeRequestRequest, type ExecutionContextQuery, type RefreshExecutionRunResult,
   type BindPlanningSourceRequest, type BindRepositoryRequest, type BootstrapResult, type ConnectAccountRequest, type CoreApi, type CreateWorkspaceRequest, type DeliveryRefreshResult,
   type IssueClosingLinksScope, type IssueClosingLinksObservation, type DeliveryScope, type DeliveryWriteAttempt, type RecordedEdge, type RelationRef, type RepositoryBinding, type SetupOutcome, type StartWorkResult, type StatusDecision,
   type WorkspaceSetup, type SetPlanningMappingRequest, type ExecutionBindingPair, type InstallExecutionRequest,
@@ -139,6 +139,9 @@ export type CreateChangeRequestInput = Omit<CreateChangeRequestRequest, 'actor'>
 export type ResumeChangeRequestInput = Omit<ResumeChangeRequestRequest, 'observer'> & { readonly actorRef: ActorRef }
 
 export interface ControllerCommands {
+  listChangeRequestAssigneeOptions(input: Omit<AssigneeOptions, 'observer'> & { actorRef: ActorRef }): ReturnType<CoreApi['commands']['listChangeRequestAssigneeOptions']>
+  addChangeRequestAssignees(input: Omit<AssigneeAdd, 'actor'> & CommandEnvelope): Promise<CommandResult<AssigneeResult>>
+  resumeChangeRequestAssignees(input: Omit<AssigneeResume, 'observer'> & { actorRef: ActorRef }): Promise<CommandResult<AssigneeResult>>
   resumeChangeRequest(input: ResumeChangeRequestInput): Promise<CommandResult<CreateChangeRequestResult>>
   createChangeRequest(input: CreateChangeRequestInput): Promise<CommandResult<CreateChangeRequestResult>>
   validateStartWork(workItemId: string): ReturnType<CoreApi['commands']['validateStartWork']>
@@ -167,6 +170,9 @@ type ReplayEntry = { readonly fingerprint: string; readonly result: CommandResul
 type InFlightEntry = { readonly fingerprint: string; readonly promise: Promise<CommandResult<unknown>> }
 
 /** 同一次遍历同时规范身份并捕获普通值；每个调用方属性只读一次，副本不保留其嵌套引用。 */
+function assertAssigneeInput(input: object, keys: readonly string[]) {
+  if (!input || Object.getPrototypeOf(input) !== Object.prototype || Reflect.ownKeys(input).some(key => typeof key !== 'string' || !keys.includes(key) || Object.getOwnPropertyDescriptor(input, key)?.get || Object.getOwnPropertyDescriptor(input, key)?.set)) throw new TypeError('负责人请求含未知字段或存取器')
+}
 function captureIdentity(value: unknown, seen = new Set<object>()): { readonly identity: string; readonly value: unknown } {
   const leaf = (identity: string) => ({ identity, value })
   if (value === undefined) return leaf('u')
@@ -260,6 +266,18 @@ export function createControllerCommands(core: CoreApi): ControllerCommands {
       return resultOf(result.ok ? CommandWriteState.LocalOnly : CommandWriteState.Failed, result, result.error)
     },
 
+    listChangeRequestAssigneeOptions: async (input) => {
+      assertAssigneeInput(input, ['actorRef', 'workItemId', 'repositoryId', 'cursor', 'limit']); const { actorRef, ...request } = input
+      return core.commands.listChangeRequestAssigneeOptions({ ...request, observer: actorRef })
+    },
+    addChangeRequestAssignees: async (input) => {
+      assertAssigneeInput(input, ['actorRef', 'idempotencyKey', 'workItemId', 'repositoryId', 'createOperationId', 'assigneeIds']); const { actorRef, ...request } = input
+      const result = await core.commands.addChangeRequestAssignees({ ...request, actor: actorRef }); return resultOf(result.phase, result, result.error)
+    },
+    resumeChangeRequestAssignees: async (input) => {
+      assertAssigneeInput(input, ['actorRef', 'workItemId', 'repositoryId', 'createOperationId', 'operationId']); const { actorRef, ...request } = input
+      const result = await core.commands.resumeChangeRequestAssignees({ ...request, observer: actorRef }); return resultOf(result.phase, result, result.error)
+    },
     resumeChangeRequest: async (input) => {
       if (input === null || typeof input !== 'object' || Object.values(Object.getOwnPropertyDescriptors(input)).some((field) => field.get !== undefined || field.set !== undefined)) return resultOf<CreateChangeRequestResult>(CommandWriteState.Failed, undefined, projectError(ProjectErrorCode.InvalidInput, 'PR 恢复请求不能含存取器'))
       const { actorRef, ...request } = input

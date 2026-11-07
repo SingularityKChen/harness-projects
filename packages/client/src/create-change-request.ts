@@ -1,3 +1,4 @@
+import type { ChangeRequestAssignees } from './change-request-assignees.ts'
 import type { ActorRef, CommandWriteState } from '@harness-projects/controller'
 import type { DeliveryLineageScope } from './delivery-lineage-reader.ts'
 export type IssueRelation = 'reference' | 'closing' | 'none'
@@ -9,6 +10,7 @@ export interface ChangeRequestOperationRead extends DeliveryLineageScope { reado
 export interface ChangeRequestCreation { readonly writeState: CommandWriteState; readonly operationId?: string; readonly targetStamp?: string; readonly lineageStale?: boolean; readonly recovery?: string; readonly relationState?: 'none' | 'pending' | 'confirmed' | 'denied' | 'unknown' }
 export interface ChangeRequestCreator {
   options(scope: DeliveryLineageScope, base: string): Promise<ChangeRequestIssueOptions>
+  readonly assignees?: ChangeRequestAssignees
   operation(scope: DeliveryLineageScope, operationId?: string): Promise<ChangeRequestOperationRead>
   submit(intent: ChangeRequestIntent): Promise<ChangeRequestCreation>
   resume(scope: DeliveryLineageScope, operationId: string): Promise<ChangeRequestCreation>

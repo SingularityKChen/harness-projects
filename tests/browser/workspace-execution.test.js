@@ -185,3 +185,20 @@ describe('production composed browser execution', { timeout: 120000 }, () => {
     })
   })
 })
+
+test('confirmed PR can select add and reconcile assignees through production carrier', { timeout: 60000 }, async t => {
+  await scene(t, async ({ h, page }) => {
+    await start(page); await visible(page, '开始工作已确认'); await createPr(page); await visible(page, 'PR 已确认')
+    const picker = page.getByRole('checkbox', { name: 'browser-assignee', exact: true })
+    await tabTo(page, picker, 'assignee'); await page.keyboard.press('Space'); assert.equal(await picker.isChecked(), true)
+    h.platform.assignment.drop = true
+    const add = page.getByRole('button', { name: '添加负责人', exact: true }); await tabTo(page, add, 'add assignee'); await page.keyboard.press('Enter')
+    await visible(page, '负责人分配尚未确认'); assert.equal(h.platform.assignment.adds, 1)
+    const original = rows(h, 'mutation_attempt').find(r => r.command_name === 'addChangeRequestAssignees'); assert.equal(original.state, 'unknown')
+    assert.doesNotMatch(original.external_intent_json, /browser-assignee/)
+    await page.evaluate(() => window.fixture.unmount()); await h.rebuild(); h.platform.assignment.drop = false
+    await page.reload(); await page.getByRole('link', { name: TITLE, exact: true }).click()
+    await page.getByRole('button', { name: '核对原 PR 分配', exact: true }).click(); await visible(page, '负责人最后确认')
+    assert.equal(rows(h, 'mutation_attempt').find(r => r.id === original.id).state, 'saved'); assert.equal(h.platform.assignment.adds, 1); assert.equal(h.platform.prCreates, 1)
+  })
+})

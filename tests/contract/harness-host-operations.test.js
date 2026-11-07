@@ -3,7 +3,7 @@ import '../fixtures/resolution-preflight.mjs';
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { OPERATIONS, defineOperations, dispatchOf, nonEmptyString, param } from '../../apps/harness-plugin/src/host-operations.ts'
+import { OPERATIONS, defineOperations, dispatchOf, nonEmptyString, param, parseInput } from '../../apps/harness-plugin/src/host-operations.ts'
 import { CLIENT_REMOTE, HOST_REMOTE, defineRemote, installHostRemote } from '../../apps/harness-plugin/src/remote.ts'
 
 // 把函数值（codec 的 create / encode）换成 typeof：金样只钉住形状、键存在性与 wire 名，不依赖函数身份。
@@ -214,4 +214,20 @@ test('PR Issue choice ABI refuses nonprimitive relations and empty target stamps
   for (const value of ['reference', 'closing', 'none', undefined]) assert.equal(relation.parse(value), value)
   for (const value of [null, {}, ['reference'], 'implements']) assert.throws(() => relation.parse(value), TypeError)
   assert.equal(stamp.parse(undefined), undefined); assert.throws(() => stamp.parse(''), TypeError)
+})
+
+test('assignee ABI separates repository directory from exact confirmed operation and rejects implicit authority', () => {
+  assert.deepEqual(OPERATIONS.listChangeRequestAssigneeOptions.params.map(p => p.name), ['actorRef', 'workItemId', 'repositoryId', 'cursor', 'limit'])
+  assert.deepEqual(OPERATIONS.addChangeRequestAssignees.params.map(p => p.name), ['actorRef', 'idempotencyKey', 'workItemId', 'repositoryId', 'createOperationId', 'assigneeIds'])
+  for (const value of [null, [''], Array(11).fill('U')]) assert.throws(() => OPERATIONS.addChangeRequestAssignees.params.at(-1).parse(value))
+  assert.throws(() => OPERATIONS.resumeChangeRequestAssignees.params.at(-1).parse(undefined))
+})
+
+
+test('assignee Host inputs reject accessors before reading a caller value', () => {
+  let reads = 0
+  const base = { actorRef: { kind: 'user' }, workItemId: 'wi', repositoryId: 'repo', createOperationId: 'create', idempotencyKey: 'key', assigneeIds: [] }
+  const input = { ...base, get assigneeIds() { reads++; return ['U'] } }
+  assert.throws(() => parseInput(OPERATIONS.addChangeRequestAssignees, input)); assert.equal(reads, 0)
+  assert.throws(() => parseInput(OPERATIONS.addChangeRequestAssignees, { ...base, actorRef: { get kind() { reads++; return 'user' } } })); assert.equal(reads, 0)
 })

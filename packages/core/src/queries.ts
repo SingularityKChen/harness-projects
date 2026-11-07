@@ -13,6 +13,7 @@ import {
 } from '@harness-projects/capabilities'
 import { IdentityRole, type EntityId, type ProjectError, type ProviderBindingId, type WorkspaceId } from '@harness-projects/domain'
 import { getIssueClosingLinks, issueClosingLinksAccessVersion, type IssueClosingLinksScope, type IssueClosingLinksObservation } from './issue-closing-links.ts'
+import { getChangeRequestAssigneeOperation, type AssigneeQuery, type AssigneeOperation } from './change-request-assignees.ts'
 import { getChangeRequestOperation, type PrOperationQuery, type PrOperationView } from './create-change-request.ts'
 import { startTargetError } from './start-work.ts'
 import { committedFence, redactPlanning } from './runtime-access.ts'
@@ -55,6 +56,7 @@ export interface RepositoryMetadata {
 export interface CoreQueries {
   getIssueClosingLinks(scope: IssueClosingLinksScope): Promise<IssueClosingLinksObservation>
   getChangeRequestIssueOptions(scope: ChangeRequestIssueScope): Promise<ChangeRequestIssueOptions>
+  getChangeRequestAssigneeOperation(query: AssigneeQuery): Promise<AssigneeOperation>
   getChangeRequestOperation(query: PrOperationQuery): Promise<PrOperationView>
   /** Start Work 的只读目标预检：复用 Core 准入守卫，不依赖展示身份，不发外部调用或落控制事实。 */
   getDeliveryAccessVersion(): string
@@ -77,6 +79,7 @@ export function createQueries(context: CoreContext): CoreQueries {
   return {
     getIssueClosingLinks: (scope) => getIssueClosingLinks(context, scope),
     getChangeRequestIssueOptions: (scope) => getChangeRequestIssueOptions(context, scope),
+    getChangeRequestAssigneeOperation: query => getChangeRequestAssigneeOperation(context, query),
     getChangeRequestOperation: (query) => getChangeRequestOperation(context, query),
     getDeliveryAccessVersion: () => `${context.runtimeAccess.epoch}:${context.runtimeAccess.deliveryEpoch}:${committedFence(context.storage)}`,
     getStartWorkTargetError: (workItemId) => startTargetError(context, workItemId),

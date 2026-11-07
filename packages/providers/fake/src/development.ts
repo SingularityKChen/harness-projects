@@ -15,10 +15,10 @@ import { FakeGate, providerFail } from './gate.ts'
 import { byExternalId, itemKey, paginate, refOf } from './state.ts'
 
 export type FakeDevelopmentCapabilities = {
-  branchCreate: boolean; worktreeCreate: boolean; worktreeRead: boolean; worktreeRemove: boolean; changeRequestCreate: boolean
+  assigneeList: boolean; assigneeRead: boolean; assigneeAdd: boolean; branchCreate: boolean; worktreeCreate: boolean; worktreeRead: boolean; worktreeRemove: boolean; changeRequestCreate: boolean
 }
 const ALL_CAPABILITIES: FakeDevelopmentCapabilities = {
-  branchCreate: true, worktreeCreate: true, worktreeRead: true, worktreeRemove: true, changeRequestCreate: true,
+  assigneeList: true, assigneeRead: true, assigneeAdd: true, branchCreate: true, worktreeCreate: true, worktreeRead: true, worktreeRemove: true, changeRequestCreate: true,
 }
 
 /** 未启用的能力不出现在快照里：调用方据此提前得到 unavailable，而不是等一次失败才知道。 */
@@ -33,6 +33,7 @@ function declaredCapabilities(flags: FakeDevelopmentCapabilities): Partial<Recor
   // 移除是破坏性能力，单独声明：能创建不等于能移除（AGENTS.md §7 破坏性删除默认不做）。
   if (flags.worktreeRemove) map[cap.CapabilityKey.DevelopmentWorktreeRemove] = cap.AccessLevel.Available
   if (flags.changeRequestCreate) map[cap.CapabilityKey.DevelopmentChangeRequestCreate] = cap.AccessLevel.Available
+  for (const [flag, key] of [['assigneeList', cap.CapabilityKey.DevelopmentAssigneeList], ['assigneeRead', cap.CapabilityKey.DevelopmentChangeRequestAssigneeRead], ['assigneeAdd', cap.CapabilityKey.DevelopmentChangeRequestAssigneeAdd]] as const) if (flags[flag]) map[key] = cap.AccessLevel.Available
   // review.read 在 port 里没有对应方法：键不声明，方法不提供（与 Planning 的 content.write 同一处理）。
   return map
 }
@@ -84,6 +85,30 @@ export class FakeDevelopmentProvider implements cap.DevelopmentProvider {
     this.gate = new FakeGate(this.faultsSwitch, bindingId, options.observedAt ?? '2026-09-20T00:00:00Z')
   }
 
+  readonly assignableUsers = [{ id: 'fake-user', login: 'fixture-user' }]
+  readonly assignees = new Map<string, string[]>()
+  async listAssignableUsers(input: Parameters<NonNullable<cap.DevelopmentProvider['listAssignableUsers']>>[0]): Promise<cap.ProviderResult<cap.ProviderPage<cap.ProviderAssignee>>> {
+    if (!this.flags.assigneeList) return this.gate.unsupported<cap.ProviderPage<cap.ProviderAssignee>>(cap.CapabilityKey.DevelopmentAssigneeList)
+    const blocked = this.gate.blocked<cap.ProviderPage<cap.ProviderAssignee>>(); if (blocked) return blocked
+    if (!this.knownRepository(input.repository)) return this.gate.notFound<cap.ProviderPage<cap.ProviderAssignee>>('仓库')
+    const scope = JSON.stringify([this.gate.bindingId, input.repository.externalId, input.limit]); let cursor: string | undefined
+    try { if (input.cursor !== undefined) { const [stamp, offset] = JSON.parse(input.cursor); if (stamp !== scope || typeof offset !== 'string') throw Error('cursor'); cursor = offset } } catch { return providerFail(ProviderErrorCode.InvalidInput, '候选游标作用域不一致') }
+    const page = paginate(this.assignableUsers, { ...input, cursor })
+    return cap.providerOk({ ...page, nextCursor: page.nextCursor === undefined ? undefined : JSON.stringify([scope, page.nextCursor]) })
+  }
+  async getChangeRequestAssignees(input: cap.ProviderAssigneeTarget): Promise<cap.ProviderResult<{ changeRequest: cap.ExternalObjectRef; users: readonly cap.ProviderAssignee[] }>> {
+    if (!this.flags.assigneeRead) return this.gate.unsupported(cap.CapabilityKey.DevelopmentChangeRequestAssigneeRead)
+    const blocked = this.gate.blocked<{ changeRequest: cap.ExternalObjectRef; users: readonly cap.ProviderAssignee[] }>(); if (blocked) return blocked
+    if (!this.knownRepository(input.repository) || !this.state.changeRequests.some(pr => itemKey(pr.repository) === itemKey(input.repository) && itemKey(pr.ref) === itemKey(input.changeRequest))) return this.gate.notFound('变更请求')
+    return cap.providerOk({ changeRequest: input.changeRequest, users: (this.assignees.get(itemKey(input.changeRequest)) ?? []).map(id => this.assignableUsers.find(u => u.id === id)!).filter(Boolean) })
+  }
+  async addChangeRequestAssignees(input: cap.ProviderAssigneeTarget & { assigneeIds: readonly string[] }): Promise<cap.ProviderResult<void>> {
+    if (!this.flags.assigneeAdd) return this.gate.unsupported(cap.CapabilityKey.DevelopmentChangeRequestAssigneeAdd)
+    const blocked = this.gate.blocked<void>(); if (blocked) return blocked
+    if (!this.knownRepository(input.repository) || !this.state.changeRequests.some(pr => itemKey(pr.repository) === itemKey(input.repository) && itemKey(pr.ref) === itemKey(input.changeRequest))) return this.gate.notFound('变更请求')
+    if (!Array.isArray(input.assigneeIds) || input.assigneeIds.length > 10 || input.assigneeIds.some(id => !this.assignableUsers.some(u => u.id === id))) return providerFail(ProviderErrorCode.InvalidInput, '负责人不可指派')
+    this.assignees.set(itemKey(input.changeRequest), [...new Set([...(this.assignees.get(itemKey(input.changeRequest)) ?? []), ...input.assigneeIds])]); return cap.providerOk(undefined)
+  }
   describeCapabilities(): Promise<cap.ProviderCapabilitySnapshot> {
     return Promise.resolve(this.gate.snapshot(declaredCapabilities(this.flags)))
   }

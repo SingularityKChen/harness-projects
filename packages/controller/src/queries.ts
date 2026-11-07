@@ -5,11 +5,12 @@
  * 调用方拿不到 provider 的实例、ref 形状或平台字段。
  */
 import type {
-  ChangeRequestIssueOptions, ChangeRequestIssueScope, IssueClosingLinksScope, IssueClosingLinksObservation, CoreApi, PrOperationQuery, PrOperationView, DeliveryLineageHop, DeliveryProjection, DeliveryScope, ExecutionContextQuery, ExecutionContextView,
+  AssigneeQuery, AssigneeOperation, ChangeRequestIssueOptions, ChangeRequestIssueScope, IssueClosingLinksScope, IssueClosingLinksObservation, CoreApi, PrOperationQuery, PrOperationView, DeliveryLineageHop, DeliveryProjection, DeliveryScope, ExecutionContextQuery, ExecutionContextView,
 } from '@harness-projects/core'
 import { toWireEntity, toWireSnapshot, type WireAuthority, type WireEntity, type WireSnapshot } from './wire.ts'
 
 export interface ControllerQueries {
+  getChangeRequestAssigneeOperation(query: AssigneeQuery): Promise<AssigneeOperation>
   getIssueClosingLinks(scope: IssueClosingLinksScope): Promise<IssueClosingLinksObservation>
   getChangeRequestIssueOptions(scope: ChangeRequestIssueScope): Promise<ChangeRequestIssueOptions>
   getChangeRequestOperation(query: PrOperationQuery): Promise<PrOperationView>
@@ -44,6 +45,7 @@ export function createControllerQueries(
       return view === undefined ? undefined : toWireEntity(view, authority)
     },
     getChangeRequestIssueOptions: (scope) => core.queries.getChangeRequestIssueOptions(scope),
+    getChangeRequestAssigneeOperation: query => core.queries.getChangeRequestAssigneeOperation(query),
     getChangeRequestOperation: (query) => core.queries.getChangeRequestOperation(query),
     getExecutionContext: (query) => core.queries.getExecutionContext(query),
     getDeliveryLineage: (scope) => core.queries.getDeliveryLineage(scope),
