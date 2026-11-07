@@ -154,3 +154,6 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 记录按 `PLANS.md` §3 的 ExecPlan 章节写——评审本身也是一次有批次、有验收、有决策的工作。
 
 2026-11-02：PR #486/#487/#488 的独立矩阵分别见 `pr-486-mmp-review.md`、`pr-487-mmp-review.md`、`pr-488-mmp-review.md`。#486/#488 为原生栈，#487 独立；按当前 main 先收尾该栈，再接合 #487，产品树须保持已验证组合。用户仅在无 P0/P1 且修复独立复评通过时授权这三条 rebase merge；不变更规划 Status 或原生依赖。
+
+- [PR #552 安装态验收文档交付评审](pr-552-mmp-review.md)：原验收证据身份、固定测试核销、修复PR归属与R1保留边界。
+- [PR #552 当前main独立复审](2026-11-07-pr552-mmp-rereview.md)：P0–P3矩阵、两项P2修复与计划归档，保留安装和发布接受边界。
