@@ -5,12 +5,13 @@
  * 调用方拿不到 provider 的实例、ref 形状或平台字段。
  */
 import type {
-  IssueClosingLinksScope, IssueClosingLinksObservation, CoreApi, PrOperationQuery, PrOperationView, DeliveryLineageHop, DeliveryProjection, DeliveryScope, ExecutionContextQuery, ExecutionContextView,
+  ChangeRequestIssueOptions, ChangeRequestIssueScope, IssueClosingLinksScope, IssueClosingLinksObservation, CoreApi, PrOperationQuery, PrOperationView, DeliveryLineageHop, DeliveryProjection, DeliveryScope, ExecutionContextQuery, ExecutionContextView,
 } from '@harness-projects/core'
 import { toWireEntity, toWireSnapshot, type WireAuthority, type WireEntity, type WireSnapshot } from './wire.ts'
 
 export interface ControllerQueries {
   getIssueClosingLinks(scope: IssueClosingLinksScope): Promise<IssueClosingLinksObservation>
+  getChangeRequestIssueOptions(scope: ChangeRequestIssueScope): Promise<ChangeRequestIssueOptions>
   getChangeRequestOperation(query: PrOperationQuery): Promise<PrOperationView>
   /** 当前修订上的完整投影；修订号是客户端增量订阅的起点。 */
   getDeliveryAccessVersion(): string
@@ -42,6 +43,7 @@ export function createControllerQueries(
       const view = views.find((item) => item.entityId === entityId)
       return view === undefined ? undefined : toWireEntity(view, authority)
     },
+    getChangeRequestIssueOptions: (scope) => core.queries.getChangeRequestIssueOptions(scope),
     getChangeRequestOperation: (query) => core.queries.getChangeRequestOperation(query),
     getExecutionContext: (query) => core.queries.getExecutionContext(query),
     getDeliveryLineage: (scope) => core.queries.getDeliveryLineage(scope),

@@ -1,3 +1,4 @@
+import { getChangeRequestIssueOptions, type ChangeRequestIssueOptions, type ChangeRequestIssueScope } from './change-request-issue-link.ts'
 /**
  */
 import {
@@ -53,6 +54,7 @@ export interface RepositoryMetadata {
 
 export interface CoreQueries {
   getIssueClosingLinks(scope: IssueClosingLinksScope): Promise<IssueClosingLinksObservation>
+  getChangeRequestIssueOptions(scope: ChangeRequestIssueScope): Promise<ChangeRequestIssueOptions>
   getChangeRequestOperation(query: PrOperationQuery): Promise<PrOperationView>
   /** Start Work 的只读目标预检：复用 Core 准入守卫，不依赖展示身份，不发外部调用或落控制事实。 */
   getDeliveryAccessVersion(): string
@@ -74,6 +76,7 @@ export interface CoreQueries {
 export function createQueries(context: CoreContext): CoreQueries {
   return {
     getIssueClosingLinks: (scope) => getIssueClosingLinks(context, scope),
+    getChangeRequestIssueOptions: (scope) => getChangeRequestIssueOptions(context, scope),
     getChangeRequestOperation: (query) => getChangeRequestOperation(context, query),
     getDeliveryAccessVersion: () => `${context.runtimeAccess.epoch}:${context.runtimeAccess.deliveryEpoch}:${committedFence(context.storage)}`,
     getStartWorkTargetError: (workItemId) => startTargetError(context, workItemId),

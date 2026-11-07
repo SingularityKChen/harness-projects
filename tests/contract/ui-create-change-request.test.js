@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(new URL('../../packages/ui/package.json', import.meta.url)), React = require('react')
 const scope = { workspaceId: 'ws', workItemId: 'wi', repositoryId: 'repo' }, intent = { ...scope, base: 'main', title: 'Title', body: 'Body' }
 const wire = (state) => ({ writeState: state, saving: state === 'pending', authoritative: ['confirmed', 'reconciled'].includes(state), value: { phase: state, ...(['confirmed', 'reconciled'].includes(state) ? { ref: { bindingId: 'dev', objectKind: 'change_request', externalId: 'PR_1' }, entityId: 'pr-id', lineageStale: false } : {}) } })
-const operation = { kind: 'operation', operationId: 'op-1', state: 'unknown', currentTarget: true, targetStamp: 'target-1', head: 'feature/work', base: 'main', title: '原请求', draft: true }
+const operation = { kind: 'operation', operationId: 'op-1', state: 'unknown', currentTarget: true, targetStamp: 'target-1', head: 'feature/work', base: 'main', title: '原请求', draft: true, issueRelation: 'none' }
 const read = (value = operation) => ({ ...scope, operation: value })
 test('PR creator observes durable operation after lost response and resumes without replaying intent', async () => {
   const calls = []; let release, keys = 0
@@ -28,6 +28,7 @@ test('PR creator observes durable operation after lost response and resumes with
   }
 })
 function componentHarness(Component, props) {
+  props.creator.options ??= async () => ({ defaultRelation: 'none', relations: ['none'] })
   const cells = []; let cursor = 0, effects = []
   const slot = (make) => cells[cursor++] ?? (cells[cursor - 1] = make())
   const shared = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED
@@ -59,7 +60,7 @@ test('detail unknown without operation id queries durable slot and never resubmi
   let query = 0, creates = 0
   const props = { scope, connected: true, creator: { operation: async () => read(++query === 1 ? { kind: 'none' } : operation), submit: async () => { creates++; return { writeState: 'unknown' } } }, onConfirmed() {} }
   const render = componentHarness(CreateChangeRequestSection, props)
-  render(); await Promise.resolve(); const form = render(); assert.equal(form.type, 'form')
+  render(); await Promise.resolve(); render(); await Promise.resolve(); const form = render(); assert.equal(form.type, 'form')
   form.props.onSubmit({ preventDefault() {} }); await Promise.resolve(); await Promise.resolve()
   assert.equal(creates, 1); assert.equal(query, 2); assert.match(JSON.stringify(render()), /原请求/)
 })
@@ -127,16 +128,16 @@ test('Draft checkbox defaults false, submits explicit choice, freezes pending an
   const props = { scope, connected: true, creator: { operation: async () => read({ kind: 'none' }), submit: (intent) => { submitted = intent; return new Promise((done) => { release = done }) } }, onConfirmed() {} }
   const render = componentHarness(CreateChangeRequestSection, props)
   const checkbox = () => render().props.children.flat().find((node) => node?.type === 'label' && node.props.children?.[1]?.props.type === 'checkbox').props.children[1]
-  render(); await Promise.resolve(); assert.equal(checkbox().props.checked, false)
+  render(); await Promise.resolve(); render(); await Promise.resolve(); assert.equal(checkbox().props.checked, false)
   checkbox().props.onChange({ target: { checked: true } })
   assert.match(JSON.stringify(render()), /创建草稿 PR/)
   render().props.onSubmit({ preventDefault() {} }); assert.equal(submitted.draft, true); assert.equal(checkbox().props.disabled, true)
   release({ writeState: 'failed' }); await Promise.resolve()
-  props.scope = { ...scope, workItemId: 'new' }; render(); await Promise.resolve(); assert.equal(checkbox().props.checked, false)
+  props.scope = { ...scope, workItemId: 'new' }; render(); await Promise.resolve(); render(); await Promise.resolve(); assert.equal(checkbox().props.checked, false)
 })
 test('client transmits Draft boolean and rejects malformed durable summary', async () => {
   const calls = [], creator = client.createChangeRequestCreator({ create: async (...args) => { calls.push(args); return wire('unknown') }, operation: async () => read({ ...operation, draft: 'true' }) }, { kind: 'user' }, () => 'key')
-  await creator.submit({ ...intent, draft: true }); assert.equal(calls[0].at(-1), true)
+  await creator.submit({ ...intent, draft: true }); assert.equal(calls[0].at(-3), true)
   await assert.rejects(() => creator.operation(scope), TypeError)
 })
 
@@ -146,5 +147,49 @@ test('client snapshots Draft once before await and rejects explicit nonboolean w
   assert.equal(calls.length, 0)
   let reads = 0, draft = true
   const pending = creator.submit({ ...intent, get draft() { reads++; return draft } }); draft = false
-  await pending; assert.equal(reads, 1); assert.equal(calls[0].at(-1), true)
+  await pending; assert.equal(reads, 1); assert.equal(calls[0].at(-3), true)
+})
+test('eligible Issue preview defaults to reference, allows clearing and rejects stale options after scope changes', async () => {
+  const { CreateChangeRequestSection } = await import('../../packages/ui/src/create-change-request-section.ts')
+  let submitted, release
+  const props = { scope, connected: true, creator: { operation: async () => read({ kind: 'none' }), options: () => new Promise(done => { release = done }), submit: async value => { submitted = value; return { writeState: 'failed' } } }, onConfirmed() {} }
+  const render = componentHarness(CreateChangeRequestSection, props)
+  render(); await Promise.resolve(); render()
+  release({ defaultRelation: 'reference', relations: ['reference', 'none'], target: { repositoryName: 'example/project', number: 545 }, reason: '默认分支才可关闭' }); await Promise.resolve()
+  const form = render(), select = form.props.children.flat().find(n => n?.type === 'label' && n.props.children[1]?.type === 'select').props.children[1]
+  assert.equal(select.props.value, 'reference'); assert.match(JSON.stringify(form), /Refs example\/project#545/)
+  select.props.onChange({ target: { value: 'none' } }); render().props.onSubmit({ preventDefault() {} }); await Promise.resolve()
+  assert.equal(submitted.issueRelation, 'none')
+  render().props.children.flat().find(n => n?.type === 'label' && n.props.children[1]?.props.name === 'base').props.children[1].props.onChange({ target: { value: 'release' } }); render()
+  const stale = release; props.scope = { ...scope, workItemId: 'other' }; render()
+  stale({ defaultRelation: 'reference', relations: ['reference', 'none'], target: { repositoryName: 'hidden/old', number: 777 } }); await Promise.resolve()
+  assert.doesNotMatch(JSON.stringify(render()), /example\/project#545|hidden\/old|777/)
+})
+for (const late of ['options', 'operation', 'resume', 'acknowledged']) test(`access metadata fences late ${late} without remount, probing or replay`, async () => {
+  const { CreateChangeRequestSection } = await import('../../packages/ui/src/create-change-request-section.ts')
+  const linked = { ...operation, state: 'saved', issueRelation: 'reference', issueTarget: { repositoryName: 'example/project', number: 545 } }
+  const hidden = { ...linked }; delete hidden.issueTarget
+  let release, revoked = false, reads = 0, probes = 0, writes = 0, confirmations = 0
+  const props = { scope, accessToken: 'allowed', connected: true, creator: {
+    operation: () => late === 'operation' && reads++ === 0 ? new Promise(done => { release = done }) : Promise.resolve(read(late === 'options' ? { kind: 'none' } : revoked ? hidden : linked)),
+    options: () => { probes++; return new Promise(done => { release = done }) },
+    resume: () => { writes++; return new Promise(done => { release = done }) }, submit: async () => { writes++; return { writeState: 'unknown' } },
+  }, onConfirmed() { confirmations++ } }
+  const render = componentHarness(CreateChangeRequestSection, props)
+  render(); await Promise.resolve(); render(); await Promise.resolve()
+  if (['resume', 'acknowledged'].includes(late)) { assert.match(JSON.stringify(render()), /example\/project#545/); render().props.children.at(-1).props.onClick() }
+  if (late === 'acknowledged') {
+    release({ writeState: 'reconciled', operationId: 'op-1', targetStamp: 'target-1', relationState: 'confirmed' }); await Promise.resolve(); render(); await Promise.resolve()
+    assert.match(JSON.stringify(render()), /PR 已确认.*Issue 关联已由来源确认/)
+  }
+  const pendingProbes = probes; revoked = true; props.accessToken = 'denied'; render()
+  assert.doesNotMatch(JSON.stringify(render()), /example\/project#545/)
+  if (late === 'resume') render().props.children.at(-1).props.onClick()
+  if (late !== 'acknowledged') release(late === 'options' ? { defaultRelation: 'reference', relations: ['reference', 'none'], target: linked.issueTarget } : late === 'operation' ? read(linked) : { writeState: 'reconciled', operationId: 'op-1', targetStamp: 'target-1', relationState: 'confirmed' })
+  await Promise.resolve(); render(); await Promise.resolve()
+  assert.doesNotMatch(JSON.stringify(render()), /example\/project#545|Issue 关联已由来源确认/); assert.equal(confirmations, late === 'acknowledged' ? 1 : 0)
+  if (late === 'acknowledged') assert.match(JSON.stringify(render()), /PR 已确认/)
+  for (const token of ['metadata-2', 'metadata-3']) { props.accessToken = token; render(); await Promise.resolve(); render() }
+  assert.equal(probes, pendingProbes, 'metadata may query the operation but must not probe Issue targets')
+  assert.equal(writes, ['resume', 'acknowledged'].includes(late) ? 1 : 0, 'access changes preserve the pending write dedupe slot')
 })

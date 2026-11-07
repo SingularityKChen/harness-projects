@@ -1,5 +1,5 @@
 /** 本代 Host 的只读来源观察；不摄入业务关系或执行谱系，不以 native ack 恢复 delivery health。 */
-import { AccessLevel, CapabilityKey as K, effectiveCapabilities, type CapabilityKey, type ExternalObjectRef, type ProviderCapabilitySnapshot, type NativeIssueRelationKind, type ProviderIssueClosingLink, type ProviderResult } from '@harness-projects/capabilities'
+import { AccessLevel, CapabilityKey as K, effectiveCapabilities, type CapabilityKey, type ExternalObjectRef, type ProviderCapabilitySnapshot, type NativeIssueRelationKind, type ProviderIssueClosingLink, type ProviderIssueClosingLinksInput, type ProviderResult } from '@harness-projects/capabilities'
 import { type EntityId } from '@harness-projects/domain'
 import type { CoreContext } from './context.ts'
 import { selectDevelopment } from './development-route.ts'
@@ -21,10 +21,10 @@ export type IssueClosingLinksObservation = {
 
 type State = IssueClosingLinksObservation['state']
 class Refusal extends Error { readonly state: State; constructor(state: State) { super(state); this.state = state } }
-const owners = new WeakMap<CoreContext, { generation: string; serial: number; epoch: number; authority: Set<string>; missing: Set<string>; requests: Map<string, number>; cache: Map<string, { stamp: string; epoch: number; value: IssueClosingLinksObservation }> }>()
+const owners = new WeakMap<CoreContext, { generation: string; serial: number; epoch: number; authority: Set<string>; sourceVersions: Map<string, number>; missing: Set<string>; requests: Map<string, number>; cache: Map<string, { stamp: string; epoch: number; value: IssueClosingLinksObservation }> }>()
 function owner(context: CoreContext) {
   let value = owners.get(context)
-  if (!value) { value = { generation: crypto.randomUUID(), serial: 0, epoch: 0, authority: new Set(), missing: new Set(), requests: new Map(), cache: new Map() }; owners.set(context, value) }
+  if (!value) { value = { generation: crypto.randomUUID(), serial: 0, epoch: 0, authority: new Set(), sourceVersions: new Map(), missing: new Set(), requests: new Map(), cache: new Map() }; owners.set(context, value) }
   return value
 }
 /** 仅本代已观察的 native 准入变化；不泄漏 binding/ref，不借业务 revision 或旧 delivery health。 */
@@ -34,15 +34,30 @@ export function issueClosingLinksAccessVersion(context: CoreContext): string | u
 }
 function observeAuthority(context: CoreContext, bindingId: string, key: CapabilityKey, denied: boolean, proofEpoch?: number) {
   const state = owner(context), address = JSON.stringify([bindingId, key])
-  if (denied && !state.authority.has(address)) { state.authority.add(address); state.epoch++ }
+  if (denied && !state.authority.has(address)) { state.authority.add(address); state.epoch++; if (key === K.PlanningItemRead) state.sourceVersions.set(address, state.epoch) }
   // Pending dispatch 不是权限证明；只有本 epoch 已完成身份校验的 actual ack 能解除拒读 cohort。
   if (!denied && proofEpoch === state.epoch) state.authority.delete(address)
 }
-function observeResource(context: CoreContext, resource: string, missing: boolean, proofEpoch?: number) {
+function observeResource(context: CoreContext, resource: string, missing: boolean, proofEpoch?: number, proofSourceVersion?: number) {
   const state = owner(context)
-  if (missing && !state.missing.has(resource)) { state.missing.add(resource); state.epoch++ }
-  if (!missing && proofEpoch === state.epoch) state.missing.delete(resource)
+  if (missing) {
+    if (!state.missing.has(resource)) { state.missing.add(resource); state.epoch++ }
+    // 每次 actual resource 拒绝都换相关 receipt 代；重复拒绝可保持 native 全局 epoch 稳定。
+    state.sourceVersions.set(resource, (state.sourceVersions.get(resource) ?? 0) + 1)
+  }
+  if (!missing && proofEpoch === state.epoch && (proofSourceVersion === undefined || proofSourceVersion === (state.sourceVersions.get(resource) ?? 0))) state.missing.delete(resource)
   while (state.missing.size > 100) state.missing.delete(state.missing.values().next().value!)
+}
+/** PR 选择复用本观察器的拒读 cohort；目标回证只能恢复同一 source resource，不能解除 native port 的 authority 拒读。 */
+export function issueSourceReadAccess(context: CoreContext, input: Pick<ProviderIssueClosingLinksInput, 'project' | 'membership' | 'issue'>, snapshot?: ProviderCapabilitySnapshot) {
+  if (snapshot) allowed(snapshot, input.issue.bindingId, [K.PlanningItemRead], context)
+  const state = owner(context), resource = JSON.stringify([refKey(input.project), refKey(input.membership), refKey(input.issue)])
+  const authority = JSON.stringify([input.issue.bindingId, K.PlanningItemRead])
+  return { version: `${state.generation}:${state.sourceVersions.get(authority) ?? 0}:${state.sourceVersions.get(resource) ?? 0}`, denied: state.authority.has(authority), missing: state.missing.has(resource) }
+}
+export function observeIssueTargetRead(context: CoreContext, input: Pick<ProviderIssueClosingLinksInput, 'project' | 'membership' | 'issue'>, denied: boolean, version?: string) {
+  const state = owner(context), resource = JSON.stringify([refKey(input.project), refKey(input.membership), refKey(input.issue)])
+  observeResource(context, resource, denied, version === issueSourceReadAccess(context, input).version ? state.epoch : undefined)
 }
 
 const refKey = (r: ExternalObjectRef | undefined) => JSON.stringify([r?.bindingId, r?.objectKind, r?.externalId])
@@ -76,9 +91,10 @@ async function scope(context: CoreContext, input: IssueClosingLinksScope) {
       repositories.push({ id: record.id, route, version: context.runtimeAccess.deliveryVersion(record.id) })
     }
     if (fence !== committedFence(context.storage) || epoch !== `${context.runtimeAccess.epoch}:${context.runtimeAccess.deliveryEpoch}`) continue
+    const sourceVersion = owner(context).sourceVersions.get(JSON.stringify([refKey(project), refKey(membership), refKey(issue)])) ?? 0
     const stamp = JSON.stringify([context.workspaceId, refKey(project), refKey(issue), refKey(membership), member, context.policy, access.masked,
-      repositories.map(r => [r.id, r.version, r.route.ok ? [refKey(r.route.repository), r.route.binding.capabilities] : false]), context.runtimeAccess.epoch])
-    return { stamp, fence, epoch: owner(context).epoch, binding, planning: binding.planning, project, issue, membership, repositories }
+      repositories.map(r => [r.id, r.version, r.route.ok ? [refKey(r.route.repository), r.route.binding.capabilities] : false]), context.runtimeAccess.epoch, sourceVersion])
+    return { stamp, fence, sourceVersion, epoch: owner(context).epoch, binding, planning: binding.planning, project, issue, membership, repositories }
   }
 }
 /** 已知但未恢复的来源拒读不能签发新事实；epoch 稳定不等于准入已恢复。 */
@@ -226,7 +242,7 @@ export async function refreshIssueClosingLinks(context: CoreContext, input: Issu
     // 共享读门只有双流均回证才恢复；closing 成功不能清掉 reference 的拒读或缺失。
     if (complete) {
       for (const key of [K.PlanningItemRead, K.PlanningIssueClosingLinksRead]) observeAuthority(context, source.binding.ref.bindingId, key, false, authorityEpoch)
-      observeResource(context, sourceResource, false, authorityEpoch)
+      observeResource(context, sourceResource, false, authorityEpoch, source.sourceVersion)
     }
     const old = state.cache.get(input.workItemId)
     const offline = Object.values(covered).every(c => c.state === 'unavailable')

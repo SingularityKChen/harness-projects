@@ -23,7 +23,7 @@ for (const dropAck of [true, false]) test(`local discovery recovers an immutable
   const before = await snapshot(w), view = await query(w)
   assert.equal(before[1][0].state, dropAck ? 'unknown' : 'saved')
   assert.equal(view.kind, 'operation'); assert.equal(view.currentTarget, true); assert.equal(view.state, dropAck ? 'unknown' : 'saved')
-  assert.deepEqual(Object.keys(view).sort(), ['kind', 'operationId', 'state', 'currentTarget', 'targetStamp', 'head', 'base', 'title', 'draft'].sort())
+  assert.deepEqual(Object.keys(view).sort(), ['kind', 'operationId', 'state', 'currentTarget', 'targetStamp', 'head', 'base', 'title', 'draft', 'issueRelation'].sort())
   assert.deepEqual(await snapshot(w), before)
   const result = await resume(w, view.operationId), original = before[1][0], saved = (await w.storage.listMutationAttempts(w.workspace.id))[0]
   assert.equal(result.writeState, 'reconciled'); assert.equal(result.value.operationId, view.operationId); assert.equal(result.value.targetStamp, view.targetStamp)

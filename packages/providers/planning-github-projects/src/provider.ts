@@ -11,6 +11,7 @@ import { MembershipContentKind, ProviderErrorCode, type ProviderBindingId } from
 import { classifyResponse, failure } from './classify.ts'
 import { decodeFieldDefinitions, decodeItemsPage, decodeProject, projectNode, type ItemRow, type Obj } from './decode.ts'
 import { issueClosingLinks } from './issue-closing-links.ts'
+import { issueLinkTarget } from './issue-link-target.ts'
 import { PLANNING_QUERIES } from './queries.ts'
 import type { GraphqlRequest, GraphqlTransport } from './transport.ts'
 
@@ -94,6 +95,7 @@ export function createGithubProjectsPlanningProvider({ bindingId, projectNodeId,
 
   const closing = issueClosingLinks(bindingId, projectNodeId, transport, now)
   const provider: PlanningProvider = {
+    getIssueLinkTarget: issueLinkTarget(bindingId, projectNodeId, transport, now),
     listIssueClosingLinks: closing.read,
     definition: GITHUB_PROJECTS_PROVIDER_DEFINITION,
     async describeCapabilities() {

@@ -65,7 +65,7 @@ export async function apply(ctx: ClientContext): Promise<void> {
       getStartWorkOptions: (...args) => unwrap(remote.getStartWorkOptions(...args)),
       startWork: (...args) => unwrap(remote.startWork(...args)),
     }, reader, { kind: 'user' })
-    const changeRequestCreator = createChangeRequestCreator({ create: (...args) => unwrap(remote.createChangeRequest(...args)), operation: (...args) => unwrap(remote.getChangeRequestOperation(...args)), resume: (...args) => unwrap(remote.resumeChangeRequest(...args)) }, { kind: 'user' })
+    const changeRequestCreator = createChangeRequestCreator({ options: (...args) => unwrap(remote.getChangeRequestIssueOptions(...args)), create: (...args) => unwrap(remote.createChangeRequest(...args)), operation: (...args) => unwrap(remote.getChangeRequestOperation(...args)), resume: (...args) => unwrap(remote.resumeChangeRequest(...args)) }, { kind: 'user' })
     const deliveryReader = createDeliveryLineageReader({
       read: ({ workItemId, repositoryId }) => unwrap(remote.getDeliveryProjection(workItemId, repositoryId)),
       refresh: ({ workItemId, repositoryId }) => unwrap(remote.refreshDeliveryFacts({ kind: 'user' }, workItemId, repositoryId)),

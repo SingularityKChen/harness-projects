@@ -112,10 +112,16 @@ export interface ProviderIssueClosingLinksPage extends ProviderPage<ProviderIssu
   readonly source: { readonly project: ExternalObjectRef; readonly membership: ExternalObjectRef; readonly issue: ExternalObjectRef; readonly repository: ProviderSourceRepositoryIdentity }
 }
 
+export type ProviderIssueLinkTargetInput = Pick<ProviderIssueClosingLinksInput, 'project' | 'membership' | 'issue'>
+export interface ProviderIssueLinkTarget {
+  readonly source: ProviderIssueLinkTargetInput; readonly nativeIssueIdentity: ProviderNativeIdentity; readonly number: number
+  readonly repository: { readonly identity: ProviderSourceRepositoryIdentity; readonly name: string }
+}
 export interface PlanningProvider {
   /** 静态连接实现定义：由实现作者声明，Host 只注入实例与 id（见 `ProviderDefinition`）。 */
   readonly definition: ProviderDefinition
   describeCapabilities(): Promise<ProviderCapabilitySnapshot>
+  getIssueLinkTarget?(input: ProviderIssueLinkTargetInput): Promise<ProviderResult<ProviderIssueLinkTarget>>
   listIssueClosingLinks?(input: ProviderIssueClosingLinksInput): Promise<ProviderResult<ProviderIssueClosingLinksPage>>
   getProject(ref: ExternalObjectRef): Promise<ProviderResult<ProviderProject>>
   listPlanningItems(input: ProviderListPlanningItemsInput): Promise<ProviderResult<ProviderPage<ProviderPlanningItem>>>

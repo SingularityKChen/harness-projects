@@ -16,6 +16,7 @@ export type WorkItemDetailContent = {
   readonly issueClosingLinksTarget?: IssueClosingLinksTarget
   readonly executionTarget?: ExecutionTarget
   readonly deliveryAccessTokens?: Readonly<Record<string, string>>
+  readonly changeRequestAccessToken?: string
   readonly startWorkRepositories?: readonly StartWorkRepository[]
   readonly kind: 'content'
   readonly numberLabel?: string
@@ -68,7 +69,7 @@ export function deriveWorkItemDetailView(input: WorkItemListReadInput, target: W
         sourceToken: JSON.stringify([input.read.generation, primary]),
         accessToken: JSON.stringify([input.read.generation, input.read.nativeAccessVersion, primary, input.read.planningSource, input.read.capabilities, input.read.repositories]) } } : {}),
       ...(detail.planning.contentKind === ContentKind.WorkItem ? {
-        ...(input.read.repositories?.length ? { startWorkRepositories: input.read.repositories.map((repository) => {
+        ...(input.read.repositories?.length ? { changeRequestAccessToken: JSON.stringify([input.read.generation, input.read.nativeAccessVersion, primary, input.read.planningSource, input.read.capabilities]), startWorkRepositories: input.read.repositories.map((repository) => {
           // Development 四门必须来自选中仓库的路由；缺少元数据时不能借工作区里另一个连接放行。
           const { available, access } = startWorkAvailability(repositoryAccessIndex([], repository.capabilities ?? []))
           return { id: repository.id, available, access, ...(!available ? { reason: repository.capabilities?.find(entry => entry.reason)?.reason } : {}) }
