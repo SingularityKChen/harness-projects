@@ -57,7 +57,7 @@ async function scene(t, run, keyboard = false) {
     await run({ h, page })
     assert.deepEqual(outside, []); assert.deepEqual(errors, [])
   } catch (error) {
-    const dir = 'test-results/composed-browser/' + t.name.replace(/[^a-z0-9-]/gi, '-')
+    const dir = '.superpowers/sdd/2026-11-07-pr-assignee-creation/browser/' + t.name.replace(/[^a-z0-9-]/gi, '-')
     await mkdir(dir, { recursive: true }); await page?.screenshot({ path: dir + '/failure.png', fullPage: true }).catch(() => {})
     await context?.tracing.stop({ path: dir + '/trace.zip' }).catch(() => {}); throw error
   } finally { await close() }
@@ -83,14 +83,15 @@ async function start(page, keyboard = false) {
   if (keyboard) await page.keyboard.press('Enter'); else await submit.click()
   await (await acknowledgement).finished()
 }
-async function createPr(page, draft = false) {
+async function createPr(page, draft = false, keyboard = false) {
   await page.getByLabel('目标分支', { exact: true }).fill('main')
   await page.getByLabel('标题', { exact: true }).fill('Browser native PR')
   await page.getByLabel('正文', { exact: true }).fill('  原请求 λ\n\n正文  ')
   const checkbox = page.getByRole('checkbox', { name: '创建为草稿', exact: true })
   assert.equal(await checkbox.isChecked(), false)
   if (draft) await checkbox.check()
-  await page.getByRole('button', { name: draft ? '创建草稿 PR' : '创建 PR', exact: true }).click()
+  const submit = page.getByRole('button', { name: draft ? '创建草稿 PR' : '创建 PR', exact: true })
+  if (keyboard) { await tabTo(page, submit, 'PR creation submit'); await page.keyboard.press('Enter') } else await submit.click()
 }
 describe('production composed browser execution', { timeout: 120000 }, () => {
   test('Start Work dispatch creates one actual Git worktree and run; replay preserves source and keyboard focus', { timeout: 60000 }, async t => {
@@ -202,3 +203,92 @@ test('confirmed PR can select add and reconcile assignees through production car
     assert.equal(rows(h, 'mutation_attempt').find(r => r.id === original.id).state, 'saved'); assert.equal(h.platform.assignment.adds, 1); assert.equal(h.platform.prCreates, 1)
   })
 })
+
+test('preselection and reload use actual picker and production carrier without second create', { timeout: 60000 }, async t => scene(t, async ({ h, page }) => {
+  await page.getByRole('button', { name: '重新读取负责人候选', exact: true }).waitFor()
+  await start(page, true); await visible(page, '开始工作已确认')
+  const candidate = page.getByRole('checkbox', { name: 'browser-assignee', exact: true })
+  await tabTo(page, candidate, 'creation native assignee'); await page.keyboard.press('Space'); assert.equal(await candidate.isChecked(), true)
+  h.platform.assignment.drop = true; await createPr(page, true, true); await visible(page, 'PR 已确认')
+  await visible(page, '创建时负责人尚未确认'); assert.equal(h.platform.assignment.adds, 1)
+  const original = rows(h, 'mutation_attempt').find(r => r.command_name === 'createChangeRequest'), frozen = JSON.parse(original.external_intent_json)
+  assert.deepEqual(frozen.requestedAssigneeIds, ['U_browser']); assert.equal(frozen.input.draft, true)
+  await page.evaluate(() => window.fixture.unmount()); await h.rebuild(); h.platform.assignment.drop = false; h.platform.assignment.offline = false
+  await page.reload(); await visible(page, TITLE); await page.getByRole('link', { name: TITLE, exact: true }).click()
+  const recover = page.getByRole('button', { name: '核对创建时负责人', exact: true }); await tabTo(page, recover, 'creation assignment recovery'); await page.keyboard.press('Enter'); await visible(page, '创建时负责人已确认')
+  assert.equal(h.platform.assignment.adds, 1); assert.equal(h.platform.prCreates, 1)
+  assert.equal(rows(h, 'mutation_attempt').find(r => r.id === original.id).external_intent_json, original.external_intent_json)
+}, true))
+
+for (const relation of ['reference', 'closing', 'none']) test(`preselected Draft preserves native browser Issue choice ${relation}`, { timeout: 60000 }, async t => scene(t, async ({ h, page }) => {
+  h.platform.flags.issueTarget = true
+  await start(page); await visible(page, '开始工作已确认')
+  await page.getByLabel('目标分支', { exact: true }).fill('main'); await page.getByLabel('标题', { exact: true }).fill('Browser Issue choice')
+  const select = page.locator('select[name="issueRelation"]')
+  await page.getByText('Refs example/project#545', { exact: true }).waitFor()
+  await tabTo(page, select, 'source Issue relation'); await select.selectOption(relation)
+  assert.equal(await select.inputValue(), relation)
+  await page.getByRole('checkbox', { name: 'browser-assignee', exact: true }).check(); await page.getByLabel('创建为草稿', { exact: true }).check()
+  await page.getByRole('button', { name: '创建草稿 PR', exact: true }).click(); await page.getByRole('status').filter({ hasText: /^PR 已确认/ }).first().waitFor(); await visible(page, '创建时负责人已确认')
+  const intent = JSON.parse(rows(h, 'mutation_attempt').find(r => r.command_name === 'createChangeRequest').external_intent_json)
+  assert.equal(intent.issueSelection.relation, relation); assert.deepEqual(intent.requestedAssigneeIds, ['U_browser']); assert.equal(intent.input.draft, true)
+  assert.equal(h.platform.prCreates, 1); assert.equal(h.platform.assignment.adds, 1)
+}))
+test('native candidate denial masks late browser response while keeping same-item Draft fields', { timeout: 60000 }, async t => scene(t, async ({ h, page }) => {
+  await start(page); await visible(page, '开始工作已确认')
+  await page.getByLabel('目标分支', { exact: true }).fill('main'); await page.getByLabel('标题', { exact: true }).fill('Preserved draft'); await page.getByLabel('正文', { exact: true }).fill('Preserved body')
+  await page.getByLabel('创建为草稿', { exact: true }).check()
+  const github = h.platform.github, list = github.listAssignableUsers.bind(github), scope = { repository: { bindingId: 'binding-github-create', objectKind: 'repository', externalId: REPOSITORY }, limit: 50 }
+  const baseline = await h.host.controller.baseline(); h.platform.assignment.denied = 'DevelopmentAssignableUsers'
+  assert.equal((await list(scope)).ok, false)
+  h.platform.flags.issueDenied = true; await h.installed.service.getChangeRequestIssueOptions({ kind: 'user' }, h.itemId, REPOSITORY, 'main')
+  await page.getByRole('button', { name: '重新读取负责人候选', exact: true }).waitFor()
+  assert.equal(await page.getByLabel('标题', { exact: true }).inputValue(), 'Preserved draft')
+  let release, entered; const held = new Promise(done => { entered = done }), gate = new Promise(done => { release = done })
+  let heldOnce = false
+  github.listAssignableUsers = async input => { const result = await list(input); if (!heldOnce && result.ok) { heldOnce = true; entered(); await gate } return result }
+  t.signal.addEventListener('abort', () => release(), { once: true })
+  const originalRequest = page.waitForRequest(request => request.url().endsWith('/remote') && request.postDataJSON()?.name === 'listChangeRequestAssigneeOptions')
+  h.platform.assignment.denied = ''; await list(scope)
+  h.platform.flags.issueTarget = true; h.platform.flags.issueDenied = false; await h.installed.service.getChangeRequestIssueOptions({ kind: 'user' }, h.itemId, REPOSITORY, 'main')
+  await page.getByRole('button', { name: '重新读取负责人候选', exact: true }).click()
+  const heldRequest = await originalRequest
+  await Promise.race([held, new Promise((_, reject) => { const timer = setTimeout(() => reject(Error('new authorized picker read did not enter')), 7000); timer.unref() })])
+  h.platform.assignment.denied = 'DevelopmentAssignableUsers'; assert.equal((await list(scope)).ok, false)
+  h.platform.flags.issueDenied = true; await h.installed.service.getChangeRequestIssueOptions({ kind: 'user' }, h.itemId, REPOSITORY, 'main')
+  await page.getByRole('button', { name: '重新读取负责人候选', exact: true }).waitFor()
+  const originalResponse = page.waitForResponse(response => response.request() === heldRequest)
+  release(); assert.equal(await (await originalResponse).finished(), null)
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)))
+  await page.getByRole('checkbox', { name: 'browser-assignee', exact: true }).waitFor({ state: 'detached' })
+  assert.equal(await page.getByLabel('目标分支', { exact: true }).inputValue(), 'main'); assert.equal(await page.getByLabel('标题', { exact: true }).inputValue(), 'Preserved draft')
+  assert.equal(await page.locator('textarea[name="body"]').inputValue(), 'Preserved body'); assert.equal(await page.getByLabel('创建为草稿', { exact: true }).isChecked(), true)
+  assert.notDeepEqual((await h.host.controller.baseline()).nativeAccessVersion, baseline.nativeAccessVersion)
+  await page.evaluate(() => window.fixture.command('disconnect', true)); await visible(page, '连接已断开')
+  assert.equal(await page.getByRole('button', { name: '创建草稿 PR', exact: true }).count(), 0)
+  assert.equal(h.platform.prCreates, 0); assert.equal(h.platform.assignment.adds, 0)
+}))
+
+test('access change preserves pending browser consumer and PR confirmation after assignment refusal', { timeout: 60000 }, async t => scene(t, async ({ h, page }) => {
+  await start(page); await visible(page, '开始工作已确认')
+  await page.getByRole('checkbox', { name: 'browser-assignee', exact: true }).check()
+  const create = h.platform.github.createChangeRequest.bind(h.platform.github)
+  let entered, release; const held = new Promise(done => { entered = done }), gate = new Promise(done => { release = done })
+  h.platform.github.createChangeRequest = async input => { const result = await create(input); entered(); await gate; return result }
+  t.signal.addEventListener('abort', () => release(), { once: true })
+  await createPr(page, true); await held; assert.equal(h.platform.prCreates, 1)
+  h.platform.flags.issueDenied = true; h.platform.assignment.denied = 'DevelopmentAddAssignees'
+  await h.installed.service.getChangeRequestIssueOptions({ kind: 'user' }, h.itemId, REPOSITORY, 'main')
+  await page.getByText('已保存原请求（草稿 PR）：Browser native PR；feature/topic → main；不关联 Issue', { exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '核对创建时负责人', exact: true }).isDisabled(), true)
+  assert.equal(await page.getByRole('button', { name: '创建草稿 PR', exact: true }).count(), 0)
+  const response = page.waitForResponse(r => r.url().endsWith('/remote') && r.request().postDataJSON()?.name === 'createChangeRequest')
+  release(); await (await response).finished()
+  await page.getByText('PR 已确认，创建时负责人添加失败；可在负责人区显式重新添加', { exact: true }).waitFor()
+  const resume = page.getByRole('button', { name: '读回原操作', exact: true }); await tabTo(page, resume, 'original creation recovery'); await page.keyboard.press('Enter')
+  await visible(page, 'PR 已确认')
+  const attempts = rows(h, 'mutation_attempt'), original = attempts.find(r => r.command_name === 'createChangeRequest')
+  assert.equal(original.state, 'saved'); assert.deepEqual(JSON.parse(original.external_intent_json).requestedAssigneeIds, ['U_browser'])
+  assert.equal(attempts.find(r => r.command_name === 'addChangeRequestAssignees').state, 'failed')
+  assert.equal(h.platform.prCreates, 1); assert.equal(h.requests.filter(r => r.name === 'createChangeRequest').length, 1)
+}))
