@@ -76,7 +76,8 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   }, [stage])
   const submit = (): void => { if (setup?.workspace === null) void setupSource.create(name); else void setupSource.connect(project ?? setup?.planning.projectNodeId ?? '') }
   const recovery = (): void => {
-    if (snapshot.failure === 'read') void setupSource.refresh()
+    if (snapshot.failure === 'install' && snapshot.error?.code === 'result_unknown') void setupSource.recoverExecution()
+    else if (snapshot.failure === 'read') void setupSource.refresh()
     else if (view.recovery?.action === 'refresh') void setupSource.refresh(setup?.planning.state === 'degraded')
     else if (snapshot.failure === 'install') void setupSource.installExecution()
     else if (snapshot.failure === 'create') void setupSource.create(name)
@@ -108,7 +109,7 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
       h('div', { key: 'context' }, h('p', null, `当前工作区：${setup.workspace!.name}`), recoveryOutlet),
       h('div', { key: 'planning' }, ...planning),
       setup.planning.bindingId && setup.planning.projectNodeId && mappingSource ? h(PlanningMappingForm, { key: 'mapping', source: mappingSource }) : h('p', { key: 'mapping' }, !setup.planning.bindingId || !setup.planning.projectNodeId ? '先完成规划连接，确认项目后再设置字段映射。' : '当前宿主未提供字段映射。请检查宿主的规划设置能力。'),
-      h('section', { key: 'execution', className: 'hp-form', 'aria-label': '执行' }, setup.executionInstalled ? h('p', { role: 'status' }, 'Harness 执行绑定已启用；会话与模型状态由执行时确认。') : h('div', null, h('p', null, '尚无已确认的执行绑定。'), !view.error ? button('启用 Harness 执行', () => { void setupSource.installExecution() }, true) : null)),
+      h('section', { key: 'execution', className: 'hp-form', 'aria-label': '执行' }, setup.executionInstalled && !setup.activationError ? h('p', { role: 'status' }, 'Harness 执行绑定已启用；会话与模型状态由执行时确认。') : h('div', null, h('p', null, '尚无已确认的执行绑定。'), !view.error ? button('启用 Harness 执行', () => { void setupSource.installExecution() }, true) : null)),
       repositoryBindingSource ? h(RepositoryBindingForm, { key: 'repository', source: repositoryBindingSource }) : h('p', { key: 'repository' }, '当前宿主未提供仓库绑定。请检查宿主的研发设置能力。')
     ] }))
   }

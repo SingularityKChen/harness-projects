@@ -158,7 +158,7 @@ for (const scenario of ['corrected-conflict', 'removed-pair', 'read-recovered-pa
   t.after(() => source.dispose())
   await source.installExecution()
   if (scenario === 'read-recovered-pair') {
-    assert.equal(source.getSnapshot().failure, 'read')
+    assert.equal(source.getSnapshot().failure, 'install')
     await source.refresh()
     assert.equal(source.getSnapshot().error, undefined)
   }

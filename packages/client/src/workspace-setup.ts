@@ -25,6 +25,7 @@ export interface WorkspaceSetupSource {
   subscribe(listener: () => void): () => void
   getSnapshot(): WorkspaceSetupSnapshot
   installExecution(): Promise<void>
+  recoverExecution(): Promise<void>
   create(name: string): Promise<void>
   connect(projectNodeId: string): Promise<void>
   refresh(reconcile?: boolean): Promise<void>
@@ -75,11 +76,14 @@ function command(value: unknown, valueKey?: string): { id?: string; error?: Proj
 }
 type Stage = 'create' | 'account' | 'bind'
 type Intent = { payload: string; key: string; attempts: Partial<Record<Stage, number>> }
-export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { readonly actorRef: ActorRef; readonly key?: () => string }): WorkspaceSetupSource {
+export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { readonly actorRef: ActorRef; readonly key?: () => string; readonly interactionTimeoutMs?: number }): WorkspaceSetupSource {
   let snapshot: WorkspaceSetupSnapshot = Object.freeze({ pending: false }), disposed = false, revision = 0
   let createIntent: Intent | undefined, connectIntent: Intent | undefined
   let executionIntent: { key: string; acknowledged: boolean } | undefined
   let executionAttempt = 0
+  let executionPending: Promise<void> | undefined
+  const timeoutMs = options.interactionTimeoutMs ?? 30_000
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) throw new RangeError('设置等待预算无效')
   let mutationPending: Promise<void> | undefined, readPending: Promise<void> | undefined, reconcilePending: Promise<void> | undefined
   const listeners = new Set<() => void>(), key = options.key ?? (() => globalThis.crypto.randomUUID())
   const finishExecutionIntent = (intent: NonNullable<typeof executionIntent>): void => {
@@ -88,29 +92,47 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
   }
   const publish = (next: WorkspaceSetupSnapshot): void => { if (!disposed) { snapshot = Object.freeze(next); listeners.forEach((listener) => listener()) } }
   const read = async (): Promise<WorkspaceSetupDTO> => parseWorkspaceSetup(await port.getWorkspaceSetup())
-  const run = (kind: 'read' | 'reconcile' | 'create' | 'connect' | 'install', action: () => Promise<ProjectError | undefined>, detail?: () => ConnectionFailure | undefined): Promise<void> => {
+  const run = (kind: 'read' | 'reconcile' | 'create' | 'connect' | 'install', action: () => Promise<ProjectError | undefined>, detail?: () => ConnectionFailure | undefined, recover = false): Promise<void> => {
     if (disposed) return Promise.resolve()
-    const current = ++revision
+    const current = ++revision, workspaceId = snapshot.setup?.workspace?.id
+    let active = true
     publish({ ...(snapshot.setup ? { setup: snapshot.setup } : {}), pending: true })
-    return (async () => {
+    const task = (async () => {
       let failure = kind
       try {
         const error = await action()
-        if (disposed || current !== revision) return
-        failure = 'read'
+        if (!active || disposed || current !== revision) return
+        // failure 决定 UI 的恢复路由；执行读失败必须继续有界纯读，不能降为普通 refresh。
+        if (kind !== 'install') failure = 'read'
         const confirmation = executionIntent?.acknowledged ? executionIntent : undefined
         const setup = await read()
-        if (current === revision) {
-          if (setup.workspace === null && setup.error) publish({ ...(snapshot.setup ? { setup: snapshot.setup } : {}), pending: false, error: setup.error, failure: 'read' })
+        if (active && !disposed && current === revision) {
+          if (kind === 'install' && workspaceId !== undefined && setup.workspace?.id !== workspaceId) throw new TypeError('设置工作区已变化')
+          if (setup.workspace === null && setup.error) publish({ ...(snapshot.setup ? { setup: snapshot.setup } : {}), pending: false, error: kind === 'install' ? safeError('result_unknown') : setup.error, failure })
           else {
-            // 只用已 ack 意图之后开始且仍属当前版本的读数结算；普通 refresh 也能完成读回恢复。
-            if (!error && confirmation && setup.executionInstalled && !setup.activationError && !setup.error) finishExecutionIntent(confirmation)
+            // 当前 Host 装配读可独立确认配置；普通 refresh 仅结算已 ack 意图。规划读取错误与执行配置正交。
+            if (!error && (confirmation || recover) && setup.executionInstalled && !setup.activationError && executionIntent) finishExecutionIntent(executionIntent)
             const connectionFailure = kind === 'connect' && error ? detail?.() : undefined
-            publish({ setup, pending: false, ...(error ? { error, failure: kind } : {}), ...(connectionFailure ? { connectionFailure } : {}) })
+            const unresolved = error ?? (kind === 'install' ? setup.activationError ?? (!setup.executionInstalled ? safeError('result_unknown') : undefined) : undefined)
+            publish({ setup, pending: false, ...(unresolved ? { error: unresolved, failure: kind } : {}), ...(connectionFailure ? { connectionFailure } : {}) })
           }
         }
-      } catch { if (current === revision) publish({ ...(snapshot.setup ? { setup: snapshot.setup } : {}), pending: false, error: safeError(), failure }) }
+      } catch { if (active && !disposed && current === revision) publish({ ...(snapshot.setup ? { setup: snapshot.setup } : {}), pending: false, error: safeError(failure === 'install' ? 'result_unknown' : 'unavailable'), failure }) }
     })()
+    if (kind !== 'install') return task
+    if (!recover) {
+      executionPending = task
+      void task.then(() => { if (executionPending === task) executionPending = undefined })
+    }
+    // 超时只结束交互；原命令仍占有安装槽，晚值不得发布或释放重复写保护。
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        active = false
+        if (!disposed && current === revision) publish({ ...(snapshot.setup ? { setup: snapshot.setup } : {}), pending: false, error: safeError('result_unknown'), failure: 'install' })
+        resolve()
+      }, timeoutMs)
+      void task.then(() => { clearTimeout(timer); resolve() })
+    })
   }
   const submit = (kind: 'create' | 'connect', raw: string): Promise<void> => {
     if (disposed) return Promise.resolve()
@@ -146,9 +168,14 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
   const installExecution = (): Promise<void> => {
     if (disposed) return Promise.resolve()
     if (mutationPending) return mutationPending
+    if (executionPending) return Promise.resolve()
     const active = executionIntent ??= { key: `${key()}:execution${executionAttempt ? `:attempt-${executionAttempt + 1}` : ''}`, acknowledged: false }
     readPending = undefined
-    const promise = run('install', async () => {
+    let settle!: (task: Promise<void>) => void
+    const promise = new Promise<void>((resolve) => { settle = resolve })
+    mutationPending = promise
+    void promise.then(() => { if (mutationPending === promise) mutationPending = undefined })
+    settle(run('install', async () => {
       const value = await port.installExecutionBindings(options.actorRef, active.key), dto = record(value, ['writeState', 'saving', 'authoritative', 'value', 'error', 'activationError'])
       const checked = command(value)
       if (checked.definitive) finishExecutionIntent(active)
@@ -160,9 +187,7 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
       if (checked.error) return checked.error
       if (dto.writeState !== 'local_only') return safeError(dto.writeState === 'unknown' || dto.writeState === 'pending' ? 'result_unknown' : 'unavailable')
       return undefined
-    })
-    mutationPending = promise
-    void promise.then(() => { if (mutationPending === promise) mutationPending = undefined })
+    }))
     return promise
   }
   const refresh = (reconcile = false): Promise<void> => {
@@ -189,6 +214,6 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
   }
   return { subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } }, getSnapshot: () => snapshot,
     create: (name) => submit('create', name), connect: (project) => submit('connect', project),
-    refresh, installExecution,
+    refresh, installExecution, recoverExecution: () => run('install', async () => undefined, undefined, true),
     dispose: () => { disposed = true; revision += 1; const { connectionFailure: _detail, ...rest } = snapshot; snapshot = Object.freeze(rest); listeners.clear() } }
 }
