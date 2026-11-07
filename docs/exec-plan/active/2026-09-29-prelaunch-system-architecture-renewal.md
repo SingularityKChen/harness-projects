@@ -43,6 +43,7 @@ Batch 0 先交付最后那一半：只读仓库的人能在 `docs/product/vertic
 - `packages/providers/{planning-github-projects,development-github,delivery-github-actions,execution-harness,planning-local}/src/index.ts` 与 `apps/*/src/index.ts` 都是 8 行占位；真实实现只有 `development-local-git` 与 `execution-human`。经 `composeCore` 装配真实 provider 的只有 `tests/integration/human-execution-provider.test.js`；`tests/integration/local-git-core-provisioning.test.js` 的多数用例走 `createContext` + `provisionGit`（core 内部函数）。`main@699d715` 起另有 `local-git-start-work-resume.test.js`、`local-git-branch-probe.test.js`，它们与 `local-git-core-provisioning.test.js` 的 `startWork` 用例一起，在真实 Git 上调用 core 导出的 `startWork` 函数（`commands.startWork` 直接委托的那个），上下文是手工 `createContext`、没有 Planning 绑定，不经 `composeCore` 与 `commands`：按 0.2 仍是旁证，但覆盖的是完整供应序列，不只是 `provisionGit`。没有任何测试把 core 组合在 SQLite Storage 上。
 - 故障注入：`FaultKind.OutOfOrder` 从未被测试使用；`duplicateEvent` 只在 `tests/contract/suites/planning.js`（provider 契约层）；`permissionDenied` 经 core 只出现在执行域（`human-execution-provider.test.js`）。
 - 会读 active 计划的契约测试：`tests/contract/e1-evidence-consistency.test.js` 按内容发现携带 Gate E1 沙箱 id 字面量的计划；`tests/contract/board-status-semantics.test.js` 扫描旧的 Status 读法；`tests/integration/execution-relation-write-schema.test.js:16-29` 把 `release-gates.md R1` 与"R1 第 10 项"当出处 token。
+  **Superseded by [E1 历史记录校验退役计划](../completed/2026-11-07-e1-record-retirement.md)（2026-11-07）**：本条关于 E1 解析器的说明为历史状态；它不再扫描当前计划，其余检查保持原范围。
 
 ## Design / Spec
 
@@ -142,6 +143,7 @@ SQLite 目标是发布前单一空库建表基线。允许不支持旧开发库�
 - 行为变更先写在 base 上失败、在 head 上通过的判别性用例；变异实验先证明变异已应用。文档正文中文，路径、标识符、命令英文；`docs/` 自包含，不写本机绝对路径，不引用内部系统。
 - `main` 不直接推送；每批在 `.worktrees/<task-slug>/` 隔离，分支前缀只用 `feature/`、`fix/`、`docs/`、`chore/`、`test/`、`project-management/`。开工前重新锁 base/head、开放 PR、相关 issue 与工作树状态。
 - 本计划不写 Gate E1 沙箱 id 字面量（`tests/contract/e1-evidence-consistency.test.js` 会把携带者当作 E1 证据计划），不写关闭关键字加 issue 编号的字面组合；关闭关系只写在 PR 正文尾注并用 `closingIssuesReferences` 回读。
+  **Superseded by [E1 历史记录校验退役计划](../completed/2026-11-07-e1-record-retirement.md)（2026-11-07）**：因 E1 解析器纳入核对范围而施加的限制已随解析器退役；关闭关系与公开面纪律仍按原规则执行。
 - 凡关闭 `vertical-path.md` §2.1 或 `release-gates.md` §2.1.1 所引 issue 的 PR，必须在同一 PR 里更新对应行与观察基线。
 
 ### 批次 → issue（唯一映射）
@@ -282,7 +284,7 @@ SQLite 目标是发布前单一空库建表基线。允许不支持旧开发库�
 | B0-8 | #217 验收第 4 条 | `node --test tests/mvp0` 为 `ℹ tests 7`、`ℹ fail 0`；`node --test tests/contract/content-placement.test.js` exit 0；`git diff --check origin/main...HEAD` exit 0 |
 | B0-9 | 规模与"只改文档" | 下方 B0-9 代码块：非 `.md` 改动为空；docs ≤ 1300、code 0；`node scripts/rule-checks.mjs size origin/main` exit 0 |
 | B0-10 | 发布面与关闭关键字 | 下方 B0-10 代码块：本机路径无命中；关闭关键字无命中（提交正文不写关闭关键字，关闭 #217 只在 PR 正文尾注）；`node scripts/rule-checks.mjs disclosure origin/main` exit 0 并完成人工五类目 |
-| B0-11 | 读 active 计划的契约测试 | `node --test tests/contract/plan-facts-consistency.test.js tests/contract/e1-evidence-consistency.test.js tests/contract/board-status-semantics.test.js tests/contract/content-placement.test.js` exit 0；`node --test tests/contract` 在工作树里只允许 S-1 记录的那条环境失败 |
+| B0-11 | 读 active 计划的契约测试 | `node --test tests/contract/plan-facts-consistency.test.js tests/contract/board-status-semantics.test.js tests/contract/content-placement.test.js` exit 0；`node --test tests/contract` 在工作树里只允许 S-1 记录的那条环境失败 |
 
 ```bash
 # B0-9
@@ -453,6 +455,7 @@ cd "$SCRATCH/export" && node --input-type=module -e "console.log(import.meta.res
 - **S-8 mvp0 节点 3 标题过强**：M1 下 chain-bootstrap 的提升用例变红而 `tests/mvp0` 仍 7/7（TD-001）。
 - **S-9 另一份 active 计划复述了 MVP-0 判定**：`docs/exec-plan/completed/2026-09-18-delivery-planning-and-board.md` 的里程碑表写 MVP-0 以 `node --test tests/mvp0` 全绿判定；它由该计划的所有者维护，本批不改，并入 H1 一起裁决。
 - **S-10 会读 active 计划的契约测试**：`e1-evidence-consistency`、`board-status-semantics`、`plan-facts-consistency`（只管 09-23/24 计划）按内容或文件名扫描计划；写计划时要避开 E1 沙箱 id 字面量与 Status 旧读法。
+  **Superseded by [E1 历史记录校验退役计划](../completed/2026-11-07-e1-record-retirement.md)（2026-11-07）**：E1 项仅保留为当时发现；持续历史文档校验已退役。
 - **旧迁移"版本号一致"不代表表形一致**。`packages/storage/sqlite/src/migrate.ts` 只按版本清单跳过已应用版本；四版压为一版后，旧 [1] 会被误判为已完成，新基线必须带世代标记。
 - **源码扫描也可能制造假证据**。`tests/contract/content-placement.test.js` 只检查两张表与反引号 token，不是通用链接检查；`board-status-semantics.test.js` 部分断言锁句式；`storage-contract.test.js` 有大段源码行多重集。
 - **本机 `pnpm verify` 的环境阻塞发生在测试前**：非 TTY 下拒绝清理 `node_modules`，退出 `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`；直接的 TypeScript 与 Node 测试可跑通。
@@ -466,6 +469,8 @@ cd "$SCRATCH/export" && node --input-type=module -e "console.log(import.meta.res
 - **S-18 按故障开关搜索会漏掉手工注入的同类失败**（B0.6 验收发现）。替身的 `FaultKind.Offline` 在 `gate.ts` 与 `planning.ts` 里就是返回 `ProviderErrorCode.Unavailable`；`tests/integration/start-work-retry-identity.test.js` 与 `start-work-step-recording.test.js` 不用故障开关，而是手工替换 `createWorktree` / `listBranches` 让它返回同一个错误码，并且都经 `composeCore` + `commands.startWork`。只 `grep FaultKind` 得出的"13.3 经入口的用例：无"因此偏强（原文已订正）。以后核对"某故障没有经入口的用例"时，要同时按故障开关与 `ProviderErrorCode.*` 搜索。
 
 ## Decision Log
+
+2026-11-07 / 人类伙伴经协调者授权：按 issue #572 退役已完成 E1 实验的专用历史文档解析器，并从 B0-11 当前执行命令移除该路径；原始证据与 freeze 裁决保留。持续实验节、id 台账、字段计数、时间、Superseded 与索引校验是明确接受的独有损失，不宣称被现存行为测试等价替代。
 
 2026-09-30 / 执行者：#203 的修复由后合并的 #240 同步更新 `release-gates.md` 第 8 行和历史探针取代标注，满足本计划的同 PR 更新纪律；原 Batch 0 的部分 5 / 反例 5 是历史快照，**Superseded by** 新表当前部分 6 / 反例 4。其余用户链路反例没有因载体修复消失。
 
@@ -563,3 +568,5 @@ B0.5 在最终提交上的验收结果：B0-1 为 13 个编号行加 1 个附行
 
 - 2026-09-30：#240 合入前按同 PR 纪律刷新 #203 的端口反例与 R1 汇总，保留历史快照和探针，记录仍缺的 core 乱序注入。
 - 2026-10-28 10:09 SGT：#218 收口实际剩余异步/代际反例及本地 metadata 一致读，更新第4行局部证据，保留产品验收边界。
+
+2026-11-07：仅订正 E1 专用历史校验的生命周期、当前命令与决定，原架构任务和验收范围保持原责任归属。

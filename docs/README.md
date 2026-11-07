@@ -32,6 +32,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-11-07-code-simplification](exec-plan/completed/2026-11-07-code-simplification.md) | 单一诊断实现、冗余测试与验收负担精简（#570） |
+| [2026-11-07-e1-record-retirement](exec-plan/completed/2026-11-07-e1-record-retirement.md) | E1 历史散文校验退役（#572） |
 | [2026-11-07-source-work-item-numbers](exec-plan/completed/2026-11-07-source-work-item-numbers.md) | 来源工作项编号展示与搜索（#558） |
 | [2026-11-07-source-pr-native-relations](exec-plan/completed/2026-11-07-source-pr-native-relations.md) | 原生来源 PR 引用与关闭关系观察（#562，Refs #556） |
 | [2026-11-07-execution-start-identity](exec-plan/completed/2026-11-07-execution-start-identity.md) | 发送任务前的持久身份（#554） |
