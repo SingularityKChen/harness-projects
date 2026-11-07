@@ -9,7 +9,8 @@ import { createHostComposition } from '../../apps/harness-plugin/src/host-compos
 import { installHostRemote } from '../../apps/harness-plugin/src/remote.ts'
 import { PROVIDER_CATALOG } from '../../apps/harness-plugin/src/host-providers.ts'
 import { registerRepository } from '../../packages/core/src/development-route.ts'
-import { createEntityStore, createSync } from '@harness-projects/client'
+import { createEntityStore, createSync, createIssueClosingLinksReader } from '@harness-projects/client'
+import { deriveIssueClosingLinksView } from '@harness-projects/ui-model'
 import { SqliteStorage } from '@harness-projects/storage-sqlite'
 import { WORKSPACE, seed, seedWorkspace, seedPlanning, seedRepositoryMount, developmentFixture, githubFetch, REPOSITORY_MOUNTS, dump } from './fixtures/host-seed.js'
 const actor = { kind: 'user' }, turn = () => new Promise(r => setImmediate(r))
@@ -29,6 +30,10 @@ async function open(t) {
     if (flags.intercept) { const response = await flags.intercept(request); if (response) return response }
     if (flags.offline) throw new Error('SECRET raw network detail')
     if (flags.deny === op) return new Response(JSON.stringify({ errors: [{ type: 'FORBIDDEN', message: 'SECRET' }] }), { status: 403 })
+    if (op === 'PlanningIssueReferences') {
+      if (flags.hold?.operation === op) { const hold = flags.hold; flags.hold = undefined; hold.entered.resolve(); await hold.release.promise }
+      return new Response(JSON.stringify({ data: { project: { __typename: 'ProjectV2', id: v.project }, membership: { __typename: 'ProjectV2Item', id: v.membership, type: 'ISSUE', project: { id: v.project }, content: { __typename: 'Issue', id: v.issue, repository } }, issue: { __typename: 'Issue', id: v.issue, repository, timelineItems: { nodes: flags.reference ? [{ __typename: 'CrossReferencedEvent', source: { ...rawPr, repository, isDraft: true }, target: { __typename: 'Issue', id: v.issue }, willCloseTarget: false }] : [], pageInfo: { hasNextPage: false, endCursor: null } } } } }), { status: 200 })
+    }
     if (op === 'PlanningIssueClosingLinks') {
       const payload = { data: { project: { __typename: 'ProjectV2', id: v.project }, membership: { __typename: 'ProjectV2Item', id: v.membership, type: 'ISSUE', project: { id: v.project }, content: { __typename: 'Issue', id: v.issue, repository } },
         issue: { __typename: 'Issue', id: v.issue, repository, closedByPullRequestsReferences: { nodes: v.after || flags.empty ? [] : [{ ...rawPr, repository, title: 'source only', isDraft: true }], pageInfo: { hasNextPage: flags.pages && !v.after, endCursor: flags.pages && !v.after ? 'page2' : null } } } } }
@@ -53,7 +58,7 @@ test('production remote observes source pages and actual PR decoder without cont
   h.flags.pages = true
   const value = (await h.service.refreshIssueClosingLinks(actor, h.id)).value
   assert.equal(value.state, 'complete'); assert.equal(value.links[0].title, h.rawPr.title); assert.equal(value.links[0].repositoryName, h.repository.nameWithOwner); assert.equal(value.links[0].isDraft, true); assert.equal(value.stale, false)
-  assert.deepEqual(h.requests.map(r => r.operationName).filter(op => op !== 'PlanningProject'), ['PlanningIssueClosingLinks', 'DevelopmentRepository', 'DevelopmentChangeRequest', 'PlanningIssueClosingLinks'])
+  assert.deepEqual(h.requests.map(r => r.operationName).filter(op => op !== 'PlanningProject'), ['PlanningIssueClosingLinks', 'DevelopmentRepository', 'DevelopmentChangeRequest', 'PlanningIssueClosingLinks', 'PlanningIssueReferences'])
   assert.deepEqual(h.requests.filter(r => r.operationName === 'PlanningIssueClosingLinks').map(r => r.variables.after), [null, 'page2'])
   h.requests.length = 0; assert.deepEqual((await h.service.getIssueClosingLinks(h.id)).observation, value); assert.deepEqual(h.requests, [])
   assert.deepEqual(dump(h.dataPath), before); assert.deepEqual(h.fallback.misses, [])
@@ -61,7 +66,7 @@ test('production remote observes source pages and actual PR decoder without cont
   await assert.rejects(() => h.host.call('getIssueClosingLinks', { workItemId: h.id, issue: 'forged' }), TypeError)
 })
 test('source, repository and native PR actual denials hide last known and recover by actual reads', async t => {
-  for (const operation of ['PlanningIssueClosingLinks', 'DevelopmentRepository', 'DevelopmentChangeRequest']) {
+  for (const operation of ['PlanningIssueClosingLinks', 'PlanningIssueReferences', 'DevelopmentRepository', 'DevelopmentChangeRequest']) {
     const h = await open(t); assert.equal((await h.service.refreshIssueClosingLinks(actor, h.id)).value.state, 'complete')
     h.flags.offline = true; const stale = (await h.service.refreshIssueClosingLinks(actor, h.id)).value; assert.equal(stale.stale, true); assert.equal(stale.links.length, 1); h.flags.offline = false
     const hold = { entered: gate(), release: gate() }; h.flags.hold = hold
@@ -82,7 +87,7 @@ test('stopping Host during native read rejects the late result', async t => {
   h.host.stop(); hold.release.resolve(); await assert.rejects(() => pending); await turn()
 })
 
-for (const operation of ['PlanningIssueClosingLinks', 'DevelopmentChangeRequest']) test('native authority denial fences other Issue receipts, pending reads and client metadata: ' + operation, async t => {
+for (const operation of ['PlanningIssueClosingLinks', 'PlanningIssueReferences', 'DevelopmentChangeRequest']) test('native authority denial fences other Issue receipts, pending reads and client metadata: ' + operation, async t => {
   const h = await open(t); assert.ok(h.ids.length > 1)
   assert.equal((await h.service.refreshIssueClosingLinks(actor, h.id)).value.state, 'complete')
   const base = await h.service.baseline(), watch = h.host.controller.watch({ afterRevision: base.revision, seed: base })
@@ -112,7 +117,7 @@ for (const operation of ['PlanningIssueClosingLinks', 'DevelopmentChangeRequest'
   assert.deepEqual((await h.service.getIssueClosingLinks(h.id)).observation.links, [])
 })
 
-for (const [operation, outcome] of ['PlanningIssueClosingLinks', 'DevelopmentChangeRequest'].flatMap(op => ['offline', 'success'].map(result => [op, result]))) test('a newer pre-denial probe never suppresses an older actual denial: ' + operation + '/' + outcome, async t => {
+for (const [operation, outcome] of ['PlanningIssueClosingLinks', 'PlanningIssueReferences', 'DevelopmentChangeRequest'].flatMap(op => ['offline', 'success'].map(result => [op, result]))) test('a newer pre-denial probe never suppresses an older actual denial: ' + operation + '/' + outcome, async t => {
   const h = await open(t); assert.ok(h.ids.length >= 3)
   assert.equal((await h.service.refreshIssueClosingLinks(actor, h.ids[0])).value.state, 'complete')
   const olderEntered = gate(), olderRelease = gate(), newerEntered = gate(), newerRelease = gate(); let calls = 0
@@ -138,7 +143,7 @@ for (const [operation, outcome] of ['PlanningIssueClosingLinks', 'DevelopmentCha
   assert.equal((await h.service.baseline()).nativeAccessVersion, version, 'actual recovery never rolls version backward')
 })
 
-for (const operation of ['PlanningIssueClosingLinks', 'DevelopmentRepository', 'DevelopmentChangeRequest']) {
+for (const operation of ['PlanningIssueClosingLinks', 'PlanningIssueReferences', 'DevelopmentRepository', 'DevelopmentChangeRequest']) {
   for (const outcome of ['forbidden', 'missing', 'offline', 'success']) test('late actual visibility evidence survives the Host deadline: ' + operation + '/' + outcome, async t => {
     const h = await open(t), entered = gate(), release = gate()
     await h.service.refreshIssueClosingLinks(actor, h.ids[0])
@@ -189,3 +194,45 @@ for (const operation of ['PlanningIssueClosingLinks', 'DevelopmentRepository', '
     assert.deepEqual(dump(h.dataPath), before)
   })
 }
+
+test('production Host and strict client expose refs-only native PR outside Project', async t => {
+  const h = await open(t); h.flags.empty = true; h.flags.reference = true
+  const scope = { workspaceId: WORKSPACE, workItemId: h.id }
+  const reader = createIssueClosingLinksReader({ read: () => h.service.getIssueClosingLinks(h.id), refresh: () => h.service.refreshIssueClosingLinks(actor, h.id) })
+  const receipt = await reader.refresh(scope), value = (await reader.read(scope, receipt)).observation
+  assert.equal(value.state, 'complete'); assert.equal(value.links.length, 1)
+  assert.deepEqual(value.links[0].relations, ['native_reference']); assert.equal(value.links[0].referenceWillCloseTarget, false)
+  assert.equal(deriveIssueClosingLinksView(value).links[0].relation, '仅引用')
+})
+
+test('refs-only PR target denial hides native metadata and actual refresh recovers', async t => {
+  for (const operation of ['DevelopmentRepository', 'DevelopmentChangeRequest']) {
+    const h = await open(t); h.flags.empty = true; h.flags.reference = true
+    assert.equal((await h.service.refreshIssueClosingLinks(actor, h.id)).value.links[0].relations[0], 'native_reference')
+    h.flags.deny = operation
+    const denied = (await h.service.refreshIssueClosingLinks(actor, h.id)).value
+    assert.equal(denied.state, 'denied'); assert.deepEqual(denied.links, []); assert.doesNotMatch(JSON.stringify(denied), /repositoryName|pull\//)
+    h.flags.deny = undefined; assert.equal((await h.service.refreshIssueClosingLinks(actor, h.id)).value.state, 'complete')
+  }
+})
+
+for (const failed of ['PlanningIssueClosingLinks', 'PlanningIssueReferences']) for (const failure of ['forbidden', 'missing']) test('known source cohort masks partial recovery and stable repeated negative: ' + failed + '/' + failure, async t => {
+  const h = await open(t), scope = { workspaceId: WORKSPACE, workItemId: h.id }; h.flags.empty = failed === 'PlanningIssueClosingLinks'; h.flags.reference = failed === 'PlanningIssueClosingLinks'
+  const reject = request => request.operationName === failed ? new Response(JSON.stringify({ errors: [{ type: failure === 'missing' ? 'NOT_FOUND' : 'FORBIDDEN' }] }), { status: failure === 'missing' ? 200 : 403 }) : undefined
+  const reader = createIssueClosingLinksReader({ read: () => h.service.getIssueClosingLinks(h.id), refresh: () => h.service.refreshIssueClosingLinks(actor, h.id) })
+  h.flags.intercept = reject
+  const denied = (await h.service.refreshIssueClosingLinks(actor, h.id)).value; assert.deepEqual(denied.links, [])
+  const version = (await h.service.baseline()).nativeAccessVersion
+  h.flags.intercept = request => { if (request.operationName === failed) throw new Error('offline fixture') }
+  const receipt = await reader.refresh(scope), partial = (await reader.read(scope, receipt)).observation
+  assert.deepEqual(partial.links, [], 'unrestored negative cohort cannot issue partial metadata')
+  h.flags.intercept = reject
+  assert.deepEqual((await h.service.refreshIssueClosingLinks(actor, h.ids[1])).value.links, [])
+  const repeatedVersion = (await h.service.baseline()).nativeAccessVersion
+  if (failure === 'forbidden') assert.equal(repeatedVersion, version)
+  await h.service.refreshIssueClosingLinks(actor, h.ids[1]); assert.equal((await h.service.baseline()).nativeAccessVersion, repeatedVersion)
+  assert.deepEqual((await reader.read(scope)).observation.links, [], 'same cohort denial cannot leave an A receipt visible')
+  h.flags.intercept = undefined
+  const recovered = (await h.service.refreshIssueClosingLinks(actor, h.id)).value; assert.equal(recovered.state, 'complete'); assert.equal(recovered.links.length, 1)
+  assert.equal((await h.service.baseline()).nativeAccessVersion, repeatedVersion)
+})

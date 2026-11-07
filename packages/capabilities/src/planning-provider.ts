@@ -96,7 +96,9 @@ export interface ProviderMovePlanningItemInput {
 }
 
 /** 当前 primary Issue 的来源关系页；空页也必须回证 source，不意味着工作区确认了 implements。 */
+export type NativeIssueRelationKind = 'native_reference' | 'native_closing'
 export interface ProviderIssueClosingLinksInput {
+  readonly relationKind: NativeIssueRelationKind
   readonly project: ExternalObjectRef; readonly membership: ExternalObjectRef; readonly issue: ExternalObjectRef
   readonly cursor: string | undefined; readonly limit: number
 }
@@ -104,7 +106,7 @@ export interface ProviderIssueClosingLink {
   readonly nativeIdentity: ProviderNativeIdentity
   readonly repository: { readonly identity: ProviderSourceRepositoryIdentity; readonly name: string }
   readonly number: number; readonly title: string; readonly url: string; readonly state: 'open' | 'closed' | 'merged'; readonly isDraft: boolean
-  readonly provenance: 'source_observed'; readonly relation: 'native_closing'
+  readonly provenance: 'source_observed'; readonly relation: NativeIssueRelationKind; readonly referenceWillCloseTarget?: boolean
 }
 export interface ProviderIssueClosingLinksPage extends ProviderPage<ProviderIssueClosingLink> {
   readonly source: { readonly project: ExternalObjectRef; readonly membership: ExternalObjectRef; readonly issue: ExternalObjectRef; readonly repository: ProviderSourceRepositoryIdentity }

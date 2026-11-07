@@ -97,3 +97,25 @@ export const PLANNING_ISSUE_CLOSING_LINKS = `query PlanningIssueClosingLinks($pr
     }
   }
 }`
+
+export const PLANNING_ISSUE_REFERENCES = `query PlanningIssueReferences($project: ID!, $membership: ID!, $issue: ID!, $first: Int!, $after: String) {
+  project: node(id: $project) { __typename ... on ProjectV2 { id } }
+  membership: node(id: $membership) {
+    __typename ... on ProjectV2Item {
+      id type project { id }
+      content { __typename ... on Issue { id repository { id nameWithOwner } } }
+    }
+  }
+  issue: node(id: $issue) {
+    __typename ... on Issue {
+      id repository { id nameWithOwner }
+      timelineItems(first: $first, after: $after, itemTypes: [CROSS_REFERENCED_EVENT]) {
+        pageInfo { hasNextPage endCursor }
+        nodes { __typename ... on CrossReferencedEvent {
+          willCloseTarget target { __typename ... on Issue { id } }
+          source { __typename ... on PullRequest { id number title url state isDraft repository { id nameWithOwner } } }
+        } }
+      }
+    }
+  }
+}`

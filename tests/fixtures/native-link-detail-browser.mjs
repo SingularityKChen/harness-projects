@@ -51,11 +51,19 @@ export async function startNativeDetailServer() {
   const transport = async (url, init) => {
     const request = JSON.parse(init.body), { operationName: op, variables: v } = request; requests.push(request)
     if (/mutation\s/.test(request.query)) throw new Error('Business write forbidden')
-    if (flags.offline && ['PlanningIssueClosingLinks', 'DevelopmentRepository', 'DevelopmentChangeRequest'].includes(op)) throw new Error('SECRET network error')
-    if (flags.deny === op || (op === 'PlanningIssueClosingLinks' && flags.denyIssue === v.issue)) return new Response(JSON.stringify({ errors: [{ type: 'FORBIDDEN', message: 'SECRET' }] }), { status: 403 })
+    if (flags.offline && ['PlanningIssueClosingLinks', 'PlanningIssueReferences', 'DevelopmentRepository', 'DevelopmentChangeRequest'].includes(op)) throw new Error('SECRET network error')
+    if (flags.deny === op || (op === (flags.denySource ?? 'PlanningIssueClosingLinks') && flags.denyIssue === v.issue)) return new Response(JSON.stringify({ errors: [{ type: 'FORBIDDEN', message: 'SECRET' }] }), { status: 403 })
+    if (op === 'PlanningIssueReferences') {
+      const result = { data: { project: { __typename: 'ProjectV2', id: v.project }, membership: { __typename: 'ProjectV2Item', id: v.membership, type: 'ISSUE', project: { id: v.project }, content: { __typename: 'Issue', id: v.issue, repository } }, issue: { __typename: 'Issue', id: v.issue, repository, timelineItems: {
+        nodes: flags.reference && !v.after ? [{ __typename: 'CrossReferencedEvent', target: { __typename: 'Issue', id: v.issue }, source: { ...rawPr, repository, isDraft: true }, willCloseTarget: false }] : [],
+        pageInfo: { hasNextPage: !!flags.referencePages && !v.after, endCursor: flags.referencePages && !v.after ? 'reference-second' : null },
+      } } } }
+      if (flags.hold && flags.holdOperation === op) { flags.hold = false; await new Promise(resolve => held.push(resolve)) }
+      return new Response(JSON.stringify(result))
+    }
     if (op === 'PlanningIssueClosingLinks') {
       const result = { data: { project: { __typename: 'ProjectV2', id: v.project }, membership: { __typename: 'ProjectV2Item', id: v.membership, type: 'ISSUE', project: { id: v.project }, content: { __typename: 'Issue', id: v.issue, repository } }, issue: { __typename: 'Issue', id: v.issue, repository, closedByPullRequestsReferences: { nodes: v.after || flags.empty ? [] : [{ ...rawPr, repository, isDraft: true }], pageInfo: { hasNextPage: !!flags.partial || (!!flags.pages && !v.after), endCursor: flags.partial ? (v.after ? null : 'second') : flags.pages && !v.after ? 'second' : null } } } } }
-      if (flags.hold) { flags.hold = false; await new Promise(resolve => held.push(resolve)) }
+      if (flags.hold && (!flags.holdOperation || flags.holdOperation === op)) { flags.hold = false; await new Promise(resolve => held.push(resolve)) }
       return new Response(JSON.stringify(result))
     }
     return fallback.fetch(url, init)

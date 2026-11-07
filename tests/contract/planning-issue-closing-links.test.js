@@ -5,7 +5,7 @@ import { CapabilityKey } from '@harness-projects/capabilities'
 import { createGithubProjectsPlanningProvider } from '@harness-projects/provider-planning-github-projects'
 
 const ref = (objectKind, externalId) => ({ bindingId: 'planning', objectKind, externalId, url: undefined })
-const input = { project: ref('project', 'P_current'), membership: ref('project_item', 'M_current'), issue: ref('issue', 'I_115'), cursor: undefined, limit: 10 }
+const input = { project: ref('project', 'P_current'), membership: ref('project_item', 'M_current'), issue: ref('issue', 'I_115'), cursor: undefined, limit: 10, relationKind: 'native_closing' }
 const repository = { id: 'R_current', nameWithOwner: 'example/project' }
 const pr = { __typename: 'PullRequest', id: 'PR_159', number: 159, title: '<b>literal</b>', url: 'https://github.com/example/project/pull/159', state: 'MERGED', isDraft: false, repository }
 const body = (nodes = [pr], pageInfo = { hasNextPage: false, endCursor: null }) => structuredClone({ data: {

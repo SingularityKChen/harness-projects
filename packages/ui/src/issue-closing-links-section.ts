@@ -40,8 +40,9 @@ export function IssueClosingLinksSection({ target, reader, connected }: { readon
     current?.failed && view ? h('p', null, '刷新未完成，以下为宿主仍允许读取的记录') : null,
     view?.stale ? h('p', null, '最后已知值，当前来源结果尚未确认') : null,
     view?.observedAt ? h('p', null, '观察时间：', h('time', { dateTime: view.observedAt }, view.observedAt)) : null,
+    ...(view?.coverage ?? []).map(c => h('p', { key: c.label }, c.label, '：', c.state, ' · ', c.observedAt)),
     h('ul', null, ...(view?.links ?? []).map((link, index) => h('li', { key: index },
       h('p', null, link.repository, ' · #', link.number, ' · ', link.href ? h('a', { href: link.href, target: '_blank', rel: 'noopener noreferrer' }, link.title) : link.title),
-      h('p', null, link.draft ? '草稿 · ' : '', link.state, ' · 来源记录的关闭关联')))),
+      h('p', null, link.draft ? '草稿 · ' : '', link.state, ' · ', link.relation)))),
     h('button', { className: 'hp-action', type: 'button', disabled: !connected, onClick: () => action.current?.() }, '刷新来源关联'))
 }

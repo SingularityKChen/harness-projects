@@ -19,17 +19,24 @@ function timestamp(v: unknown): boolean {
   return day >= 1 && day <= ([31, year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 0)
 }
 function observation(input: unknown, scope: IssueClosingLinksScope): IssueClosingLinksObservation {
-  const v = record(input, ['workItemId', 'scopeToken', 'state', 'links', 'stale', 'observedAt'])
+  const v = record(input, ['workItemId', 'scopeToken', 'state', 'links', 'stale', 'observedAt', 'coverage'])
   if (typeof v.state !== 'string' || v.workItemId !== scope.workItemId || !nonempty(v.scopeToken) || !Array.isArray(v.links) || typeof v.stale !== 'boolean') throw new TypeError(INVALID)
   if (['unread', 'denied', 'unsupported', 'unavailable'].includes(String(v.state))) {
-    if (v.links.length || v.stale !== true || Object.hasOwn(v, 'observedAt')) throw new TypeError(INVALID)
+    if (v.links.length || v.stale !== true || (Object.hasOwn(v, 'observedAt') || Object.hasOwn(v, 'coverage'))) throw new TypeError(INVALID)
   } else {
     if (!['complete', 'partial'].includes(String(v.state)) || !timestamp(v.observedAt)) throw new TypeError(INVALID)
+    const coverage = record(v.coverage, ['native_reference', 'native_closing'])
+    for (const kind of ['native_reference', 'native_closing']) {
+      const c = record(coverage[kind], ['state', 'stale', 'observedAt'])
+      if (!['complete', 'partial', 'unavailable'].includes(String(c.state)) || typeof c.state !== 'string' || typeof c.stale !== 'boolean' || c.stale !== (c.state !== 'complete') || !timestamp(c.observedAt)) throw new TypeError(INVALID)
+    }
+    const complete = Object.values(coverage).every(c => (c as { state: string }).state === 'complete')
+    if ((v.state === 'complete') !== complete || v.state === 'partial' && !v.stale) throw new TypeError(INVALID)
     const identities = new Set<string>()
     for (const entry of v.links) {
-      const link = record(entry, ['repositoryId', 'repositoryName', 'bindingId', 'externalId', 'number', 'title', 'url', 'state', 'isDraft', 'provenance', 'relation'])
-      const key = JSON.stringify([link.repositoryId, link.bindingId, link.externalId])
-      if (identities.has(key) || ['repositoryId', 'repositoryName', 'bindingId', 'externalId'].some(k => !nonempty(link[k])) || typeof link.title !== 'string' || typeof link.url !== 'string' || !Number.isSafeInteger(link.number) || Number(link.number) <= 0 || typeof link.state !== 'string' || !['open', 'closed', 'merged'].includes(link.state) || typeof link.isDraft !== 'boolean' || link.provenance !== 'source_observed' || link.relation !== 'native_closing') throw new TypeError(INVALID)
+      const link = record(entry, ['repositoryId', 'repositoryName', 'bindingId', 'externalId', 'number', 'title', 'url', 'state', 'isDraft', 'provenance', 'relations', 'referenceWillCloseTarget'])
+      const key = JSON.stringify([link.repositoryId, link.bindingId, link.externalId]), relations = link.relations
+      if (identities.has(key) || ['repositoryId', 'repositoryName', 'bindingId', 'externalId'].some(k => !nonempty(link[k])) || typeof link.title !== 'string' || typeof link.url !== 'string' || !Number.isSafeInteger(link.number) || Number(link.number) <= 0 || typeof link.state !== 'string' || !['open', 'closed', 'merged'].includes(link.state) || typeof link.isDraft !== 'boolean' || link.provenance !== 'source_observed' || !Array.isArray(relations) || relations.length < 1 || relations.length > 2 || relations.some((r, i) => !['native_reference', 'native_closing'].includes(r) || i > 0 && (r !== 'native_closing' || relations[0] !== 'native_reference')) || (relations.includes('native_reference') ? typeof link.referenceWillCloseTarget !== 'boolean' : Object.hasOwn(link, 'referenceWillCloseTarget'))) throw new TypeError(INVALID)
       identities.add(key)
     }
   }
