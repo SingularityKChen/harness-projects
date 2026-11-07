@@ -1,5 +1,6 @@
 import { createElement as h, useEffect, useRef, useState } from 'react'
 import type { ChangeRequestCreator, DeliveryLineageRead, DeliveryLineageReader, DeliveryLineageScope } from '@harness-projects/client'
+import { ObservedTime } from './observed-time.ts'
 import { CreateChangeRequestSection } from './create-change-request-section.ts'
 import { deriveDeliveryLineageStrip, deliverySetFreshness } from '@harness-projects/ui-model'
 import { executionBadge, executionSource, executionStyles } from './execution-presentation.ts'
@@ -7,10 +8,12 @@ const LABELS = { execution_context: '执行上下文', worktree: '工作树（�
 const GAPS = { not_started: '尚未开始工作', not_observed: '尚未观察到', not_refreshed: '尚未刷新', unconfirmed: '尚未确认', permission_denied: '读取被拒绝', unknown: '原因未知' }
 const STATES = { observed: '已观察', passed: '通过', failed: '失败', unknown: '未知', stale: '陈旧（最后已知）' }
 type Refresh = { key: string; reader: DeliveryLineageReader; task?: Promise<boolean> }
-type State = { key: string; reader: DeliveryLineageReader; thresholdMs: number | undefined; read?: DeliveryLineageRead; pending: boolean; failed: boolean }
+type State = { key: string; reader: DeliveryLineageReader; thresholdMs: number | undefined; intent?: string; read?: DeliveryLineageRead; pending: boolean; failed: boolean }
 /** 每个明确仓库 scope 一个消费者：只有 open/manual 才摄入；时间边界与恢复只纯读 Host。 */
-export function DeliveryLineageSection({ scope, reader, connected, thresholdMs, accessToken, creatorAccessToken, creator, onConnect }: { readonly scope: DeliveryLineageScope; readonly reader: DeliveryLineageReader; readonly connected: boolean; readonly thresholdMs?: number; readonly accessToken?: string | undefined; readonly creatorAccessToken?: string | undefined; readonly creator?: ChangeRequestCreator | undefined; readonly onConnect?: (() => void) | undefined }) {
+export function DeliveryLineageSection({ scope, reader, connected, thresholdMs, accessToken, creatorAccessToken, creator, onConnect, presentation = 'detail', refreshToken, onSettled }: { readonly presentation?: 'detail' | 'summary'; readonly refreshToken?: number; readonly onSettled?: ((failed: boolean) => void) | undefined; readonly scope: DeliveryLineageScope; readonly reader: DeliveryLineageReader; readonly connected: boolean; readonly thresholdMs?: number; readonly accessToken?: string | undefined; readonly creatorAccessToken?: string | undefined; readonly creator?: ChangeRequestCreator | undefined; readonly onConnect?: (() => void) | undefined }) {
   const scopeKey = JSON.stringify([scope.workspaceId, scope.workItemId, scope.repositoryId]), key = JSON.stringify([scopeKey, accessToken])
+  const summary = presentation === 'summary', intent = JSON.stringify([scopeKey, refreshToken])
+  const settled = useRef(onSettled); settled.current = onSettled
   const [state, setState] = useState<State>({ key, reader, thresholdMs, pending: true, failed: false })
   const refreshing = useRef<Refresh | undefined>(undefined)
   const opened = useRef<string | undefined>(undefined), action = useRef<((refresh?: boolean) => void) | undefined>(undefined)
@@ -19,7 +22,7 @@ export function DeliveryLineageSection({ scope, reader, connected, thresholdMs, 
     refreshing.current = source
     let active = true, generation = 0, timer: ReturnType<typeof setTimeout> | undefined
     const cancel = () => { if (timer !== undefined) clearTimeout(timer); timer = undefined }
-    const mark = () => { cancel(); generation++; if (active) setState((old) => ({ ...(old.key === key && old.reader === reader ? old : { key, reader }), thresholdMs, pending: true, failed: false })) }
+    const mark = () => { cancel(); generation++; if (active) setState((old) => ({ ...(old.key === key && old.reader === reader ? old : { key, reader }), thresholdMs, intent, pending: true, failed: false })) }
     const load = async (refresh: boolean) => {
       if (!active) return
       mark(); const request = generation
@@ -40,36 +43,37 @@ export function DeliveryLineageSection({ scope, reader, connected, thresholdMs, 
         const read = await reader.read(scope)
         if (!active || request !== generation) return
         const strip = deriveDeliveryLineageStrip(read.projection, read.now, thresholdMs === undefined ? {} : { thresholdMs })
-        setState({ key, reader, thresholdMs, read, pending: false, failed })
+        setState({ key, reader, thresholdMs, intent, read, pending: false, failed })
+        settled.current?.(failed || read.projection.error !== undefined || read.projection.degraded)
         // 新对象只安装边界；不把接受结果作为下一次读取的依赖。
         if (strip.nextFlipAt !== undefined) timer = setTimeout(() => { void load(false) }, Math.max(0, strip.nextFlipAt - Date.parse(read.now)))
-      } catch { if (active && request === generation) setState((old) => ({ ...(old.key === key && old.reader === reader ? old : { key, reader }), thresholdMs, pending: false, failed: true })) }
+      } catch { if (active && request === generation) { setState((old) => ({ ...(old.key === key && old.reader === reader ? old : { key, reader }), thresholdMs, intent, pending: false, failed: true })); settled.current?.(true) } }
     }
     const doc = (globalThis as { document?: { visibilityState?: string; addEventListener?: (name: string, listener: () => void) => void; removeEventListener?: (name: string, listener: () => void) => void } }).document
     const win = (globalThis as { window?: { addEventListener?: (name: string, listener: () => void) => void; removeEventListener?: (name: string, listener: () => void) => void } }).window
     const resume = () => { if (doc?.visibilityState === 'hidden') mark(); else void load(false) }
     action.current = (refresh = true) => { void load(refresh) }
-    const first = opened.current !== scopeKey; opened.current = scopeKey
+    const first = opened.current !== intent; opened.current = intent
     void load(first)
     doc?.addEventListener?.('visibilitychange', resume); win?.addEventListener?.('pageshow', resume)
     return () => { active = false; generation++; cancel(); action.current = undefined; doc?.removeEventListener?.('visibilitychange', resume); win?.removeEventListener?.('pageshow', resume) }
-  }, [key, connected, reader, thresholdMs])
-  const current = state.key === key && state.reader === reader ? state : undefined, blocked = !connected || current?.pending !== false || current.failed || current.thresholdMs !== thresholdMs || current.read?.projection.error !== undefined
+  }, [key, connected, reader, thresholdMs, intent])
+  const current = state.key === key && state.reader === reader ? state : undefined, blocked = !connected || current?.intent !== intent || current?.pending !== false || current.failed || current.thresholdMs !== thresholdMs || current.read?.projection.error !== undefined
   const strip = current?.read === undefined ? undefined : deriveDeliveryLineageStrip(current.read.projection, current.read.now, thresholdMs === undefined ? {} : { thresholdMs })
-  return h('section', { className: 'hp-execution', 'aria-label': '交付谱系' }, executionStyles(), h('h3', null, `交付谱系 · ${scope.repositoryId}`),
-    blocked ? h('p', { role: 'status' }, !connected ? '连接中断，最后已知；正在核对新鲜度' : current?.failed ? '暂时无法确认谱系，最后已知' : '正在核对新鲜度') : null,
+  return h('section', { className: summary ? 'hp-execution hp-delivery-summary' : 'hp-execution', 'aria-label': '交付谱系' }, executionStyles(), summary ? null : h('h3', null, `交付谱系 · ${scope.repositoryId}`),
+    blocked ? h('p', { role: summary ? undefined : 'status' }, !connected ? '连接中断，最后已知；正在核对新鲜度' : current?.failed ? '暂时无法确认谱系，最后已知' : '正在核对新鲜度') : null,
     current?.read?.projection.degraded || current?.read?.projection.error ? h('p', null, '谱系不完整，保留最后已知事实') : null,
-    strip === undefined ? h('p', null, '尚无已读谱系') : h('ol', null, ...strip.slots.map((slot) => h('li', { key: slot.position, 'data-position': slot.position }, h('h4', null, LABELS[slot.position]),
+    strip === undefined ? h('p', null, '尚无已读谱系') : h('ol', null, ...strip.slots.filter(slot => !summary || ['change_request', 'pipeline_run', 'check_run'].includes(slot.position)).map((slot) => h('li', { key: slot.position, 'data-position': slot.position }, h('h4', null, LABELS[slot.position]),
       slot.kind === 'gap' ? h('p', { 'data-reason': slot.reason }, `缺口：${GAPS[slot.reason]}${slot.reason === 'permission_denied' ? ' · ' + current?.read?.projection.gaps.find((gap) => gap.entityKind === slot.position)?.key + ' · ' + current?.read?.projection.gaps.find((gap) => gap.entityKind === slot.position)?.layer + '；其它获准集合仍可读取，请恢复授权后刷新交付谱系' : ''}`) : slot.nodes.map((node, index) => {
-        const state = blocked && node.state === 'passed' ? 'unknown' : node.state
+        const state = (blocked || summary && (!node.available || node.relationState !== 'confirmed')) && node.state === 'passed' ? 'unknown' : node.state
         const freshness = current?.read?.projection.freshness.find((entry) => entry.kind === slot.position)
         const confirmedAt = current?.read && deliverySetFreshness(freshness, current.read.now, thresholdMs) !== 'unconfirmed' ? freshness?.confirmedAt : undefined
-        return h('div', { key: index }, h('p', { 'data-state': state }, executionBadge(state, STATES[state]), node.available ? '' : ' · 逐跳不可用', ['pipeline_run', 'check_run'].includes(slot.position) ? '（所属提交的最后已知 CI）' : ''),
-          confirmedAt === undefined ? null : h('p', { className: 'hp-execution-meta' }, '最后确认：', confirmedAt),
+        return h('div', { key: index }, h('p', { 'data-state': state }, executionBadge(state, summary && state === 'passed' ? '已观察 CI 通过' : STATES[state]), node.available ? '' : ' · 逐跳不可用', ['pipeline_run', 'check_run'].includes(slot.position) ? '（所属提交的最后已知 CI）' : ''),
+          confirmedAt === undefined ? null : h('p', { className: 'hp-execution-meta' }, '最后确认：', summary ? h(ObservedTime, { at: confirmedAt }) : confirmedAt),
           executionSource('谱系来源', h('p', null, node.label ?? node.externalId ?? '身份未知'),
             node.label && node.externalId ? h('p', null, '外部标识：', node.externalId) : null,
             h('p', null, node.relationState === 'candidate' ? '候选关系' : node.relationState === 'confirmed' ? '已确认关系' : '已拒绝关系')))
       })))),
-    creator === undefined ? null : h(CreateChangeRequestSection, { key, scope, creator, connected, accessToken: creatorAccessToken, onConnect, onConfirmed: () => { action.current?.(false) } }),
-    h('button', { className: 'hp-action', type: 'button', disabled: !connected, onClick: () => action.current?.() }, '刷新交付谱系'))
+    summary || creator === undefined ? null : h(CreateChangeRequestSection, { key, scope, creator, connected, accessToken: creatorAccessToken, onConnect, onConfirmed: () => { action.current?.(false) } }),
+    summary ? null : h('button', { className: 'hp-action', type: 'button', disabled: !connected, onClick: () => action.current?.() }, '刷新交付谱系'))
 }

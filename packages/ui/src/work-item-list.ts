@@ -2,6 +2,7 @@
  * 只读工作项列表页面（issue #129）：消费 ui-model 已经算好的安全 view，不读 store / 时钟 / capability，也不推导读取
  * 过程。页面是一处标题、一处稳定的 role=status 区和一个 table；没有行按钮或连接入口；只在传入 navigation 时，安全 item 行的标题是打开详情的链接（ADR-0010），redacted 行没有。
  * `headingTabIndex` 只在组合页传入（-1）：让关闭详情后的回焦能落到列表标题，独立列表页不改变既有输出。
+ * 组合页可替换只读 body 与标题/region 标签；context/toolbar 持续挂载，替换时不显示列表专属控件或计数。
  * 本文件用 `createElement` 而不是 JSX（tsconfig 不启用 jsx）。
  */
 import { Fragment, createElement, useState } from 'react'
@@ -67,7 +68,7 @@ function bodyOf({ body, planningSourceName }: WorkItemListView, query: QueryCont
     body.rows.length === 0 ? createElement(EmptyState, { confirmed: !notConfirmed }) : createElement(ItemTable, { rows: query.result.rows, navigation, query, sizes }))
 }
 
-export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnnouncement, presentationScopeKey, actions }: { actions?: ReactNode; presentationScopeKey?: string | undefined; view: WorkItemListView; navigation?: ItemNavigation | undefined; headingTabIndex?: number | undefined; statusAnnouncement?: string | undefined }): ReactElement {
+export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnnouncement, presentationScopeKey, actions, content, heading = '工作项', label = '工作项列表' }: { content?: ReactNode; heading?: string; label?: string; actions?: ReactNode; presentationScopeKey?: string | undefined; view: WorkItemListView; navigation?: ItemNavigation | undefined; headingTabIndex?: number | undefined; statusAnnouncement?: string | undefined }): ReactElement {
   const sizes=useColumnWidths(presentationScopeKey)
   const { body } = view
   const [local, setLocal] = useState({ scopeKey:presentationScopeKey, conditions:defaultLocalTableConditions(), adjusted:false })
@@ -77,16 +78,17 @@ export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnno
   else if (computed.conditionsAdjusted) setLocal({ scopeKey:presentationScopeKey, conditions:computed.conditions, adjusted:true })
   const query: QueryControls = { result:{...computed,conditionsAdjusted:computed.conditionsAdjusted || (sameScope && local.adjusted)},
     onChange:conditions => setLocal({scopeKey:presentationScopeKey,conditions,adjusted:false}) }
+  const showingList = content === undefined
   const busy = body.kind === 'loading' || (body.kind === 'content' && body.refreshing)
-  return createElement('section', { 'aria-label': '工作项列表', className: 'hp-work-items' },
+  return createElement('section', { 'aria-label': label, className: 'hp-work-items' },
     createElement('style', null, LIST_STYLES),
-    createElement('div', { className: 'hp-list-context', role: 'region', 'aria-label': '工作项上下文', tabIndex: 0 },
-    createElement('header', { className: 'hp-list-toolbar' }, createElement('h2', { tabIndex: headingTabIndex }, '工作项'), actions),
-    body.kind === 'content' && body.rows.length > 0 ? createElement('div',{className:'hp-column-tools'},createElement('button',{type:'button',onClick:sizes.reset},'重置列宽'),createElement('span',null,'拖动列边界，或聚焦边界后用方向键调整。')):null,
-    view.readOnly ? createElement('p', null, '只读：规划来源仅允许读取，此处展示规划内容。') : null,
-    view.degraded ? createElement('p', null, '读取能力降级：显示的是保守的最后已知值。') : null,
-    createElement('div', { role: 'status', 'aria-live': statusAnnouncement === undefined ? 'polite' : 'off', 'aria-atomic': 'true' }, view.statusText),
-    statusAnnouncement === undefined ? null : createElement('span', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true', style: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' } }, statusAnnouncement),
-    body.kind === 'content' ? createElement(TableControls, query) : null),
-    createElement('div', { 'aria-busy': busy, className: 'hp-list-body' }, bodyOf(view, query, sizes, navigation)))
+    createElement('div', { className: 'hp-list-context', role: 'region', 'aria-label': `${heading}上下文`, tabIndex: 0 },
+    createElement('header', { className: 'hp-list-toolbar' }, createElement('h2', { tabIndex: headingTabIndex }, heading), actions),
+    showingList && body.kind === 'content' && body.rows.length > 0 ? createElement('div',{className:'hp-column-tools'},createElement('button',{type:'button',onClick:sizes.reset},'重置列宽'),createElement('span',null,'拖动列边界，或聚焦边界后用方向键调整。')):null,
+    showingList && view.readOnly ? createElement('p', null, '只读：规划来源仅允许读取，此处展示规划内容。') : null,
+    showingList && view.degraded ? createElement('p', null, '读取能力降级：显示的是保守的最后已知值。') : null,
+    !showingList ? null : createElement('div', { role: 'status', 'aria-live': statusAnnouncement === undefined ? 'polite' : 'off', 'aria-atomic': 'true' }, view.statusText),
+    !showingList || statusAnnouncement === undefined ? null : createElement('span', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true', style: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' } }, statusAnnouncement),
+    showingList && body.kind === 'content' ? createElement(TableControls, query) : null),
+    createElement('div', { 'aria-busy': showingList ? busy : undefined, className: 'hp-list-body' }, showingList ? bodyOf(view, query, sizes, navigation) : content))
 }
