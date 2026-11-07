@@ -121,7 +121,7 @@ test('execution unknown uses one shared task-independent recovery and reads befo
   assert.equal(find(tree, 'div').filter(node => node.props.role === 'alert').length, 1)
   assert.equal(find(tree, 'button').filter(node => node.props.children === '启用 Harness 执行').length, 0)
   assert.match(renderToStaticMarkup(tree), /尚无已确认的执行绑定/)
-  find(tree, 'button').find(node => node.props.children === '重新读取').props.onClick()
+  find(tree, 'button').find(node => node.props.children === '重新读取设置').props.onClick()
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(installs, 1, '未知执行结果的读取恢复不能重发install')
   f.source.dispose()

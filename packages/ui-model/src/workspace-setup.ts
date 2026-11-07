@@ -9,6 +9,6 @@ export function workspaceSetupView(snapshot: WorkspaceSetupSnapshot, providerLab
   const messages = { credential_rejected: `${providerLabel} 拒绝了当前凭据，请在宿主检查或更新凭据。`, permission_missing: `${providerLabel} 明确报告所需权限不足，请在宿主补充授权。`, target_unavailable: `项目不存在或当前授权不可见，请在 ${providerLabel} 核对项目标识与访问范围。` }
   const cause = snapshot.connectionFailure?.cause
   const error = original ? { ...original, message: cause ? messages[cause] : original.code === 'permission_denied' ? '当前访问被拒绝，请在宿主检查访问授权。' : original.message } : undefined
-  return { error, recovery: error ? recovery[error.recovery] : undefined,
+  return { error, recovery: error ? snapshot.failure === 'install' && error.code === 'result_unknown' ? { label: '重新读取设置', action: 'refresh' as const } : recovery[error.recovery] : undefined,
     notice: setup?.activationError ? '配置已记录，激活失败' : setup?.planning.state === 'configured' ? '配置已记录，正在读取项目' : setup?.planning.state === 'degraded' ? '项目读取不完整' : undefined }
 }

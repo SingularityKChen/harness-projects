@@ -321,7 +321,10 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         const stored = await storage!.getWorkspace(options.workspaceId)
         workspace = stored === undefined ? null : { id: stored.id, name: stored.name }
         const executions = (await storage!.listProviderBindings(options.workspaceId)).filter((mount) => mount.domain === 'execution')
-        if (executions.length === 2 && executions.some((mount) => mount.isDefault) && executions.some((mount) => !mount.isDefault) && executions.every((mount) => mount.enabled && mount.implementationKey === (mount.isDefault ? 'execution.harness' : 'execution.human'))) activation = { ...activation, executionInstalled: true }
+        const active = await fingerprint() === activeFingerprint
+        if (!activationError && active && assembly.executionMode === 'harness' && !assembly.disabled.some((mount) => mount.domain === 'execution')
+          && executions.length === 2 && executions.some((mount) => mount.isDefault) && executions.some((mount) => !mount.isDefault)
+          && executions.every((mount) => mount.enabled && mount.implementationKey === (mount.isDefault ? 'execution.harness' : 'execution.human'))) activation = { ...activation, executionInstalled: true }
         if (workspace === null) return { workspace, planning: { state: 'unbound' }, ...activation }
         const mount = (await storage!.listProviderBindings(options.workspaceId)).find((mount) => mount.enabled && mount.domain === 'planning')
         if (mount === undefined) return { workspace, planning: { state: 'unbound' }, ...activation }
@@ -331,7 +334,6 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         if (typeof target === 'string' && target !== '') projectNodeId = target
         const mapping = await storage!.getWorkspacePlanningMapping(options.workspaceId)
         const mappingOrigin = mapping?.bindingId === bindingId && mapping.projectExternalId === projectNodeId ? mapping.origin : undefined
-        const active = await fingerprint() === activeFingerprint
         const snapshot = active ? await assembly.controller.baseline() : undefined
         const state = !active ? 'configured' : projectNodeId !== undefined && snapshot?.source.freshness === 'fresh' ? 'confirmed' : 'degraded'
         return { workspace, planning: { state, bindingId, ...(projectNodeId === undefined ? {} : { projectNodeId }) }, ...activation,

@@ -108,6 +108,84 @@ function mount(props) {
     try { return ui.WorkspaceSetupGate(props) } finally { internals.ReactCurrentDispatcher.current = before } },
     flush() { const batch = effects; effects = []; batch.forEach((effect) => effect()) } }
 }
+
+test('unknown execution exposes an enabled pure read control while the actual install ack is held', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let release, installs = 0, installed = false
+  const f = fixture({ getWorkspaceSetup: async () => ({ ...setup('confirmed'), ...(installed ? { executionInstalled: true } : {}) }),
+    installExecutionBindings: async () => { installs++; installed = true; await new Promise((done) => { release = done }); return result({ bindingIds: ['h', 'm'] }) } })
+  await f.source.refresh()
+  const app = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
+  find(app.render(), 'button').find((node) => node.props.children === '连接设置').props.onClick()
+  const pending = f.source.installExecution(); t.mock.timers.tick(30_000); await pending
+  const control = find(app.render(), 'button').find((node) => node.props.children === '重新读取设置')
+  assert.ok(control, 'unknown must expose labeled recovery without navigation'); assert.equal(control.props.disabled, false)
+  control.props.onClick(); await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(f.source.getSnapshot().error, undefined); assert.equal(installs, 1)
+  assert.match(renderToStaticMarkup(app.render()), /Harness 执行绑定已启用/)
+  const confirmed = f.source.getSnapshot(); f.source.dispose(); release(); await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(f.source.getSnapshot(), confirmed)
+})
+
+test('synchronous pending subscriber joins the reserved install interaction', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const releases = []; let calls = 0, nested
+  const f = fixture({ installExecutionBindings: () => { calls++; return new Promise((done) => releases.push(() => done(result({ bindingIds: ['h', 'm'] })))) } })
+  await f.source.refresh()
+  t.after(() => { f.source.dispose(); releases.forEach((done) => done()) })
+  f.source.subscribe(() => { if (f.source.getSnapshot().pending && nested === undefined) { nested = null; nested = f.source.installExecution() } })
+  const first = f.source.installExecution()
+  assert.equal(calls, 1, 'pending notification must not admit another install')
+  assert.equal(nested, first)
+  releases.forEach((done) => done()); await first
+})
+
+for (const response of ['rejected', 'null-error']) test(`${response} execution recovery keeps the next UI read bounded and preserves the original install`, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const degraded = { ...setup('degraded'), error: error('permission_denied', 'fix_permission') }, keys = []
+  let reads = 0, releaseAck, releaseRead
+  const f = fixture({ getWorkspaceSetup: async () => {
+    reads++
+    if (reads === 2) { if (response === 'null-error') return { ...empty, error: error() }; throw new Error('RAW-CANARY') }
+    if (reads === 3) return new Promise((done) => { releaseRead = done })
+    return { ...degraded, ...(reads >= 4 ? { executionInstalled: true } : {}) }
+  }, installExecutionBindings: async (_actor, key) => {
+    keys.push(key); await new Promise((done) => { releaseAck = done }); return result({ bindingIds: ['h', 'm'] })
+  } })
+  t.after(() => { f.source.dispose(); releaseAck?.(); releaseRead?.(degraded) })
+  const turn = () => new Promise((resolve) => setImmediate(resolve))
+  await f.source.refresh()
+  const app = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
+  const recover = () => find(app.render(), 'button').find((node) => ['重新读取设置', '重新读取', '重试'].includes(node.props.children)).props.onClick()
+  const install = f.source.installExecution(); t.mock.timers.tick(30_000); await install
+  recover(); await turn()
+  recover(); await turn(); t.mock.timers.tick(30_000); await turn()
+  assert.equal(f.source.getSnapshot().pending, false, 'a transient read rejection must not downgrade the next recovery to unbounded refresh')
+  assert.equal(f.source.getSnapshot().error.code, 'result_unknown')
+  assert.ok(find(app.render(), 'button').some((node) => node.props.children === '重新读取设置' && !node.props.disabled))
+  await f.source.installExecution(); assert.deepEqual(keys, ['intent-1:execution'])
+  recover(); await turn()
+  const confirmed = f.source.getSnapshot()
+  assert.equal(confirmed.setup.executionInstalled, true); assert.equal(confirmed.error, undefined)
+  assert.equal(confirmed.setup.planning.state, 'degraded'); assert.equal(confirmed.setup.error.code, 'permission_denied')
+  releaseAck(); releaseRead(degraded); await turn()
+  assert.equal(f.source.getSnapshot(), confirmed, 'late ack/read cannot erase the current readback or planning error')
+  assert.deepEqual(keys, ['intent-1:execution']); assert.doesNotMatch(JSON.stringify(confirmed), /RAW-CANARY/)
+})
+
+for (const state of ['changed-scope', 'disposed', 'rejected']) test(`execution recovery fences ${state} responses`, async () => {
+  let resolve, reject, held = false
+  const f = fixture({ getWorkspaceSetup: () => held ? new Promise((yes, no) => { resolve = yes; reject = no }) : Promise.resolve(setup('confirmed')) })
+  await f.source.refresh(); held = true
+  const pending = f.source.recoverExecution(); await Promise.resolve(); const before = f.source.getSnapshot()
+  if (state === 'disposed') f.source.dispose()
+  if (state === 'rejected') reject(new Error('RAW-CANARY'))
+  else resolve({ ...setup('confirmed'), workspace: { id: state === 'changed-scope' ? 'other' : 'ws-1', name: 'Other' }, executionInstalled: true })
+  await pending
+  if (state === 'disposed') assert.deepEqual(f.source.getSnapshot(), before)
+  else { assert.equal(f.source.getSnapshot().setup.workspace.id, 'ws-1'); assert.notEqual(f.source.getSnapshot().setup.executionInstalled, true); assert.ok(f.source.getSnapshot().error); assert.doesNotMatch(JSON.stringify(f.source.getSnapshot()), /RAW-CANARY/) }
+  f.source.dispose()
+})
 test('form retains editable drafts through failure, disables pending, and refocuses only replaced stage', async () => {
   let reject, focused = 0
   const f = fixture({ createWorkspace: () => new Promise((_, no) => { reject = no }) })
@@ -314,4 +392,22 @@ test('confirmed list keeps heading and settings action inside shared workspace p
   const out = html(f.source, { workspace: { id: 'ws-1', name: 'Fixture' }, store, connection: { connected: true }, capabilities: [] })
   const opening = out.match(/<section[^>]*data-workspace-setup[^>]*>/)?.[0] ?? ''
   assert.match(opening, /class="[^"]*hp-workspace/); assert.match(out, /class="hp-action"[^>]*>连接设置<\/button>/)
+})
+
+test('execution activation readback keeps the actual Retry on the original install intent', async () => {
+  const keys = []; let activation = false, installed = false, planningWrites = 0
+  const f = fixture({ getWorkspaceSetup: async () => ({ ...setup('confirmed'), ...(activation ? { activationError: error() } : {}), ...(installed ? { executionInstalled: true } : {}) }),
+    installExecutionBindings: async (_actor, key) => { keys.push(key); if (keys.length === 1) { activation = true; throw Error('lost install ack') } activation = false; installed = true; return result({ bindingIds: ['h', 'm'] }) },
+    connectAccount: async () => { planningWrites++; return result({ accountId: 'a' }) },
+    bindPlanningSource: async () => { planningWrites++; return result({ bindingId: 'p' }) },
+  })
+  try {
+    await f.source.refresh(); await f.source.installExecution(); await f.source.recoverExecution()
+    const app = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
+    const retry = find(app.render(), 'button').find(node => node.props.children === '重试')
+    assert.ok(retry); retry.props.onClick(); await new Promise(resolve => setImmediate(resolve))
+    assert.equal(planningWrites, 0, 'execution activation retry cannot reconnect Planning')
+    assert.deepEqual(keys, ['intent-1:execution', 'intent-1:execution'])
+    assert.equal(f.source.getSnapshot().setup.executionInstalled, true); assert.equal(f.source.getSnapshot().error, undefined)
+  } finally { f.source.dispose() }
 })
