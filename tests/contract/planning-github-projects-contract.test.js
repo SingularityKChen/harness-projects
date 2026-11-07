@@ -83,7 +83,7 @@ test('条目映射：内容身份、成员关系与两套时间戳逐字段归�
   assert.deepEqual(listed.value.items.find((item) => item.ref.externalId === ALPHA), {
     ref: { bindingId, objectKind: 'issue', externalId: ALPHA, url: alpha.content.url }, project,
     membership: { externalId: alpha.id, createdAt: alpha.createdAt, updatedAt: alpha.updatedAt },
-    content: { kind: 'work_item', workItem: { externalId: ALPHA, title: alpha.content.title, body: alpha.content.body } },
+    content: { kind: 'work_item', workItem: { externalId: ALPHA, title: alpha.content.title, body: alpha.content.body, sourceNumber: { sourceName: 'GitHub', scopeIdentity: { namespace: 'github.com/graphql/Repository', id: 'R_kgDOUjWAlw' }, scopeName: 'SingularityKChen/e1-sandbox', number: 1 } } },
     fields: { statusKey: undefined, priority: undefined, assigneeRefs: [], iterationId: undefined, startDate: undefined, targetDate: undefined, customFields: {}, nativeValues: { [STATUS_FIELD]: TODO } },
     sourceVersion: sourceVersionFromTimestamp(alpha.updatedAt), sourceUpdatedAt: alpha.updatedAt,
   })

@@ -21,8 +21,8 @@ const PLANNING_ITEMS = `query PlanningItems($project: ID!, $first: Int!, $after:
           id type createdAt updatedAt
           content {
             __typename
-            ... on Issue { id number title body url updatedAt }
-            ... on PullRequest { id number title body url updatedAt }
+            ... on Issue { id number title body url updatedAt repository { id nameWithOwner } }
+            ... on PullRequest { id number title body url updatedAt repository { id nameWithOwner } }
             ... on DraftIssue { id title body updatedAt }
           }
           fieldValues(first: 100) {

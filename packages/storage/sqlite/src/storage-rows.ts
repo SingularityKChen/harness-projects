@@ -1,4 +1,5 @@
 /** SQLite 行 → 端口记录的映射：列名是 snake_case，端口字段是 camelCase，本模块是两者之间唯一的翻译层（换列名只改这里，改一处）。 */
+import { sourceNumberSnapshot } from '@harness-projects/domain'
 import { externalIntentSnapshot, validateExternalIntentCommand } from '@harness-projects/capabilities'
 import type { BindingConfigurationRecord, CapabilityDomain, ConnectorAccountRecord, DeliveryFactsRecord, ExecutionContextRecord, ExecutionRunRecord, ExternalObjectRef, FieldValueRecord, MembershipRecord, MutationAttemptRecord, PlanningSyncRoundRecord, ProviderBindingRecord, ReconcileCursorRecord, RepositoryRecord, SecretHandle, SyncCursorRecord, SyncState, WorkspaceRecord } from '@harness-projects/capabilities'
 import type { ConnectorAccountId, EntityId, ExecutionContextId, ExecutionContextStatus, ExecutionRunId, ExecutionRunStatus, ExternalIdentity, ExternalIdentityId, IdentityRole, MembershipContentKind,
@@ -109,17 +110,19 @@ export const rowToMutationAttempt = (row: Row): MutationAttemptRecord => {
 }
 
 /** 内容三态 → 列值，列顺序与 INSERT 的列清单一致；redacted 没有标题（表级 CHECK 保证）。 */
-export function contentColumns(content: PlanningContent): readonly [string, string | null, string | null, number | null, string | null] {
-  if (content.contentKind === 'redacted') return [content.contentKind, null, null, null, content.reason]
-  if (content.contentKind === 'change_request') return [content.contentKind, content.title, content.body, content.number, null]
-  return [content.contentKind, content.title, content.body, null, null]
+export function contentColumns(content: PlanningContent): readonly [string, string | null, string | null, number | null, string | null, string | null] {
+  if (content.contentKind === 'redacted') return [content.contentKind, null, null, null, null, content.reason]
+  const source = content.sourceNumber === undefined ? null : JSON.stringify(sourceNumberSnapshot(content.sourceNumber))
+  if (content.contentKind === 'change_request') return [content.contentKind, content.title, content.body, content.number, source, null]
+  return [content.contentKind, content.title, content.body, null, source, null]
 }
 
 function rowToContent(row: Row): PlanningContent {
   const kind = text(row, 'content_kind')
   if (kind === 'redacted') return { contentKind: 'redacted', reason: text(row, 'redaction_reason') as RedactionReason }
-  if (kind === 'change_request') return { contentKind: 'change_request', number: row['content_number'] as number, title: text(row, 'content_title'), body: text(row, 'content_body') }
-  return { contentKind: 'work_item', title: text(row, 'content_title'), body: text(row, 'content_body') }
+  const sourceNumber = row.source_number_json == null ? {} : { sourceNumber: sourceNumberSnapshot(JSON.parse(text(row, 'source_number_json'))) }
+  if (kind === 'change_request') return { contentKind: 'change_request', ...sourceNumber, number: row['content_number'] as number, title: text(row, 'content_title'), body: text(row, 'content_body') }
+  return { contentKind: 'work_item', ...sourceNumber, title: text(row, 'content_title'), body: text(row, 'content_body') }
 }
 
 const FIELD_COLUMNS = { statusName: 'field_status_name', iterationTitle: 'field_iteration_title', targetDate: 'field_target_date' } as const

@@ -34,6 +34,19 @@ function dateOnly(value: string): boolean {
   return year > 0 && month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1]!
 }
 
+/** 输入已 trim：末尾数字、scope 与分隔边界互斥扫描，每个字符至多被常数次访问。 */
+function isQualifiedNumberToken(value: string): boolean {
+  const hash = value.lastIndexOf('#')
+  if (hash < 2 || hash === value.length - 1) return false
+  for (let index = hash + 1; index < value.length; index++) {
+    const digit = value.charCodeAt(index)
+    if (digit < 48 || digit > 57) return false
+  }
+  let scopeStart = hash
+  while (scopeStart > 0 && value[scopeStart - 1]!.trim() !== '') scopeStart--
+  return scopeStart > 1 && scopeStart < hash
+}
+
 /** 撤权后的 facet 与条件在同一次纯计算中归一，不依赖 effect 清理旧文字。 */
 export function queryVisibleWorkItems(rows: readonly VisibleListRow[], input: Partial<LocalTableConditions> = {}): LocalTableResult {
   const items = rows.filter((row): row is Extract<VisibleListRow, { kind:'item' }> => row.kind === 'item')
@@ -50,7 +63,11 @@ export function queryVisibleWorkItems(rows: readonly VisibleListRow[], input: Pa
     visibleColumns:COLUMNS.filter(column => column === 'title' || selected.includes(column)),
   }
   const needle = folded(conditions.search.trim())
-  const matches = items.filter(row => (!needle || folded(row.title).includes(needle))
+  // # 前缀显式按原生号精确查找；普通数字继续保留既有标题包含语义。
+  const numberQuery = /^#?([0-9]+)$/.exec(needle)
+  const qualifiedNumberQuery = isQualifiedNumberToken(needle)
+  const matches = items.filter(row => (!needle || (numberQuery ? row.sourceNumber === Number(numberQuery[1]) || (!needle.startsWith('#') && folded(row.title).includes(needle))
+    : qualifiedNumberQuery ? row.sourceNumber !== undefined && folded(row.numberLabel ?? '') === needle : folded(row.title).includes(needle)))
     && (planningStatus === null || row.planningStatus === planningStatus) && (iteration === null || row.iteration === iteration))
   if (sort) matches.sort((left, right) => {
     const a = left[sort.column], b = right[sort.column]

@@ -4,7 +4,7 @@
  * 读能力全套 + 可选写能力 + 内容三态判别联合。可选能力用 `?` 声明：provider 不实现时，调用方必须
  * 读 capability key 而不是按 provider 名字分支（ExecPlan D2）。
  */
-import { ContentKind, type NativePlanningFieldValue, type RedactionReason } from '@harness-projects/domain'
+import { ContentKind, type NativePlanningFieldValue, type RedactionReason, type SourceNumber } from '@harness-projects/domain'
 import type { ProviderCapabilitySnapshot } from './capability-keys.ts'
 import type { ExternalObjectRef, ProviderNativeIdentity, ProviderObservation, ProviderReconcileScope } from './observation.ts'
 import type { ProviderPage, ProviderResult } from './result.ts'
@@ -12,8 +12,8 @@ import type { ProviderSourceRepositoryIdentity } from './development-provider.ts
 import type { ProviderDefinition } from './registry.ts'
 
 export interface ProviderProject { readonly ref: ExternalObjectRef; readonly title: string; readonly sourceUpdatedAt: string | undefined }
-export interface ProviderWorkItemContent { readonly externalId: string; readonly title: string; readonly body: string }
-export interface ProviderChangeRequestContent { readonly externalId: string; readonly number: number; readonly title: string; readonly body: string }
+export interface ProviderWorkItemContent { readonly sourceNumber?: SourceNumber; readonly externalId: string; readonly title: string; readonly body: string }
+export interface ProviderChangeRequestContent { readonly sourceNumber?: SourceNumber; readonly externalId: string; readonly number: number; readonly title: string; readonly body: string }
 
 /** 规划内容三态：redacted 是一等状态，调用方必须显示占位，不得回退到缓存或推断出的内容。 */
 export type ProviderPlanningContent =

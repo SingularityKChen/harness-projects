@@ -87,9 +87,9 @@ function actionsFor(entity: ClientEntity, access: ReadonlyMap<string, AccessLeve
 }
 
 /** 遮蔽内容不透出标题、正文与字段事实：即使上游带着缓存值，页面也不会拿到它。 */
-function visibleContent(entity: ClientEntity): { title: string | undefined; body: string | undefined; planningFields: ClientEntity['planningFields'] } {
+function visibleContent(entity: ClientEntity): { title: string | undefined; body: string | undefined; planningFields: ClientEntity['planningFields']; sourceNumber?: ClientEntity['content']['sourceNumber'] } {
   if (entity.content.contentKind === ContentKind.Redacted) return { title: undefined, body: undefined, planningFields: undefined }
-  return { title: entity.content.title, body: entity.content.body, planningFields: entity.planningFields }
+  return { title: entity.content.title, body: entity.content.body, planningFields: entity.planningFields, ...(entity.content.sourceNumber === undefined ? {} : { sourceNumber: entity.content.sourceNumber }) }
 }
 
 function rowOf(
@@ -98,6 +98,7 @@ function rowOf(
 ): WorkItemRow {
   const content = visibleContent(entry.entity)
   return {
+    ...(content.sourceNumber === undefined ? {} : { sourceNumber: content.sourceNumber }),
     entityId: entry.entity.entityId, contentKind: entry.entity.content.contentKind, title: content.title,
     planningStatus: entry.entity.planningStatus, planningFields: content.planningFields, derived: entry.entity.derived, source: sourceOf(entry.entity),
     freshness: freshnessOf(entry, read, degradation), actions: actionsFor(entry.entity, access),
@@ -107,6 +108,7 @@ function rowOf(
 function planningSectionOf(entry: StoredEntity): PlanningSection {
   const content = visibleContent(entry.entity)
   return {
+    ...(content.sourceNumber === undefined ? {} : { sourceNumber: content.sourceNumber }),
     entityId: entry.entity.entityId, contentKind: entry.entity.content.contentKind, title: content.title,
     body: content.body, status: entry.entity.planningStatus, derived: entry.entity.derived,
   }

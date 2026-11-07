@@ -12,7 +12,7 @@ const render=result=>renderToStaticMarkup(createElement(controls.TableControls,{
 test('受控工具栏显示当前条件、可读计数、原生筛选与必显标题；无匹配不冒充源为空',()=>{
   const html=render(queryVisibleWorkItems(rows,{search:'missing',planningStatus:'进行中',sort:{column:'title',direction:'desc'}}))
   assert.match(html,/当前已加载可读条目：显示 0 项，共 1 项/)
-  assert.match(html,/当前条件：标题包含“missing”；规划状态：进行中；迭代：全部；排序：工作项降序/)
+  assert.match(html,/当前条件：匹配“missing”；规划状态：进行中；迭代：全部；排序：工作项降序/)
   assert.match(html,/<input[^>]+type="search"[^>]+value="missing"/)
   assert.match(html,/<select aria-label="规划状态筛选"/)
   assert.match(html,/<option value="value:进行中" selected="">进行中<\/option>/)

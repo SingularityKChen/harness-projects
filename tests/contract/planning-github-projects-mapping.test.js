@@ -40,7 +40,7 @@ const dateValue = (date) => ({ __typename: 'ProjectV2ItemFieldDateValue', field:
 const iterationValue = (patch = {}) => ({ __typename: 'ProjectV2ItemFieldIterationValue', field: { id: 'field-iter', name: 'I' }, iterationId: 'i-1', title: 'Sprint', startDate: '2026-09-21', duration: 7, ...patch })
 const row = (n, type, content = {}, patch = {}) => ({
   id: `item-${n}`, type, createdAt: '2026-09-21T07:00:00Z', updatedAt: '2026-09-21T07:11:54Z',
-  content: content === null ? null : { ...CONTENT[type], id: `content-${n}`, title: `title ${n}`, body: `body ${n}`, updatedAt: '2026-09-21T07:10:00Z', ...content },
+  content: content === null ? null : { ...CONTENT[type], ...(type === 'ISSUE' || type === 'PULL_REQUEST' ? { repository: { id: 'repo-1', nameWithOwner: 'example/repo' } } : {}), id: `content-${n}`, title: `title ${n}`, body: `body ${n}`, updatedAt: '2026-09-21T07:10:00Z', ...content },
   fieldValues: fieldValues(), ...patch,
 })
 const page = (nodes, hasNextPage = false, endCursor = null) => ok({ data: { node: { __typename: 'ProjectV2', items: { pageInfo: { hasNextPage, endCursor }, nodes } } } })

@@ -3,13 +3,39 @@ import { ContentKind, type EntityKind, type NormalizedStatus } from './enums.ts'
 import type { EntityId, WorkspaceId } from './ids.ts'
 import type { PlanningFieldsSnapshot } from './planning-fields.ts'
 
+/** 原生展示号：不参与实体身份或关系键；来源与仓库必须来自同一可见对象。 */
+export interface SourceNumber {
+  readonly sourceName: string
+  readonly scopeIdentity: { readonly namespace: string; readonly id: string }
+  readonly scopeName: string
+  readonly number: number
+}
+
+/** 信任边界白名单重建；异常不复述输入，避免坏载体进入错误回执。 */
+export function sourceNumberSnapshot(value: unknown): SourceNumber {
+  const record = (v: unknown, keys: readonly string[]): Record<string, unknown> => {
+    if (typeof v !== 'object' || v === null || Array.isArray(v) || Object.keys(v).some(k => !keys.includes(k))) throw new TypeError('原生编号不合契约')
+    return v as Record<string, unknown>
+  }
+  const text = (v: unknown): string => {
+    if (typeof v !== 'string' || v.trim() === '' || /[\r\n\t]/.test(v)) throw new TypeError('原生编号不合契约')
+    return v
+  }
+  const v = record(value, ['sourceName','scopeIdentity','scopeName','number'])
+  const scope = record(v.scopeIdentity, ['namespace','id'])
+  if (!Number.isSafeInteger(v.number) || Number(v.number) <= 0) throw new TypeError('原生编号不合契约')
+  return { sourceName:text(v.sourceName), scopeIdentity:{namespace:text(scope.namespace),id:text(scope.id)}, scopeName:text(v.scopeName), number:Number(v.number) }
+}
+
 export interface WorkItemContent {
+  readonly sourceNumber?: SourceNumber
   readonly contentKind: typeof ContentKind.WorkItem
   readonly title: string
   readonly body: string
 }
 
 export interface ChangeRequestContent {
+  readonly sourceNumber?: SourceNumber
   readonly contentKind: typeof ContentKind.ChangeRequest
   readonly number: number
   readonly title: string

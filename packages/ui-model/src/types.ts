@@ -3,7 +3,7 @@
  * 平台名不参与任何分支。工作区身份、能力与时间都由客户端同步会话生产（`sync.read()`），展示层不读时钟，
  * 因此同一输入必然得到同一输出（不变量 7）。跨层约定的理由写在各自字段上，不外包给已归档的计划。
  */
-import type { AccessLevel, ContentKind, DerivedFlag, EntityId, NormalizedStatus, PlanningFieldsSnapshot } from '@harness-projects/domain'
+import type { AccessLevel, ContentKind, DerivedFlag, EntityId, NormalizedStatus, PlanningFieldsSnapshot, SourceNumber } from '@harness-projects/domain'
 import type { ClientWorkspaceRead, StoredEntity } from '@harness-projects/client'
 
 /** 客户端模型里一个条目的字段面；类型经 client 的 `StoredEntity` 取得，不新增依赖边。 */
@@ -104,6 +104,7 @@ export interface FreshnessPresentation {
 
 /** 列表行：以规划条目（`entityId`）为键。 */
 export interface WorkItemRow {
+  readonly sourceNumber?: SourceNumber
   readonly entityId: EntityId
   /** 内容种类：work_item / change_request / redacted。 */
   readonly contentKind: ContentKind
@@ -144,6 +145,7 @@ export interface LineageEntryPoint extends CapabilityDecision { readonly target:
 
 /** 详情里的规划段：规划字段是权威值，派生标记只用于展示。 */
 export interface PlanningSection {
+  readonly sourceNumber?: SourceNumber
   readonly entityId: EntityId; readonly contentKind: ContentKind; readonly title: string | undefined
   readonly body: string | undefined; readonly status: NormalizedStatus; readonly derived: readonly DerivedFlag[]
 }

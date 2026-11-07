@@ -7,7 +7,7 @@
 import { ContentKind } from '@harness-projects/domain'
 import type {
   AccessLevel, DerivedFlag, EntityId, EntityKind, ExternalIdentityKind, NormalizedStatus, PlanningFieldsSnapshot,
-  ProviderBindingId, WorkspaceId,
+  ProviderBindingId, WorkspaceId, SourceNumber,
 } from '@harness-projects/domain'
 import type { CapabilityKey, EffectiveCapability } from '@harness-projects/capabilities'
 import { StatusPolicyMode } from '@harness-projects/core'
@@ -39,6 +39,7 @@ export interface SourceMetadata {
 
 /** 内容引用的 wire 形状：三态判别式 + 内部外部身份，不含 provider 的原生对象。redacted 不带 externalKind / externalId（H12）。 */
 export interface WireContentRef {
+  readonly sourceNumber?: SourceNumber
   readonly contentKind: ContentKind
   readonly title: string | undefined
   readonly body: string | undefined
@@ -135,6 +136,7 @@ export function toWireEntity(view: PlanningItemView, authority: WireAuthority): 
     kind: view.kind,
     planningStatus: view.planningStatus,
     content: {
+      ...(shown && view.content.sourceNumber !== undefined ? { sourceNumber: view.content.sourceNumber } : {}),
       contentKind: view.content.contentKind,
       title: view.content.title,
       body: view.content.body,
