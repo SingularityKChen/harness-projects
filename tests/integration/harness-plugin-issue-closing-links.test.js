@@ -91,8 +91,8 @@ for (const operation of ['PlanningIssueClosingLinks', 'PlanningIssueReferences',
   const h = await open(t); assert.ok(h.ids.length > 1)
   assert.equal((await h.service.refreshIssueClosingLinks(actor, h.id)).value.state, 'complete')
   const base = await h.service.baseline(), watch = h.host.controller.watch({ afterRevision: base.revision, seed: base })
-  const sync = createSync({ fetchBaseline: () => h.service.baseline(), poll: () => watch.poll(), close() {} }, createEntityStore())
-  await sync.connect(); const before = sync.read().nativeAccessVersion
+  const sync = createSync(createEntityStore())
+  sync.receive({ kind: 'baseline', baseline: base }); const before = sync.read().nativeAccessVersion
   const hold = { operation, entered: gate(), release: gate() }; h.flags.hold = hold
   const old = h.service.refreshIssueClosingLinks(actor, h.id); await hold.entered.promise
   h.flags.deny = operation; assert.equal((await h.service.refreshIssueClosingLinks(actor, h.ids[1])).value.state, 'denied')

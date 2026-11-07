@@ -1,4 +1,4 @@
-import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
+import { createEntityStore, createSync } from '@harness-projects/client'
 
 const sourceMetadata = (revision, freshness = 'fresh') => ({ revision, freshness, authority: 'provider' })
 const entity = (revision, title) => ({
@@ -23,28 +23,15 @@ const header = (revision) => ({ generation: 'host-a',
 })
 let baselineRevision = 1
 const baseline = () => ({ ...header(baselineRevision), revision: baselineRevision, entities: [entity(baselineRevision, baselineRevision === 1 ? 'before' : 'recovered')] })
-let nextEvent
-const source = {
-  baseline,
-  watch: () => ({
-    async poll() {
-      const event = nextEvent
-      nextEvent = undefined
-      return event
-    },
-    close() {},
-  }),
-}
-
 export async function drive() {
   const store = createEntityStore()
   let gapCurrent
-  const sync = createSync(createTransport(source), store, {
+  const sync = createSync(store, {
     clock: () => '2026-10-12T00:00:00.000Z',
     onGap: (_gap, current) => { gapCurrent = current.isCurrent('entity-browser') },
   })
-  const first = await sync.connect()
-  nextEvent = {
+  const first = sync.receive({ kind: 'baseline', baseline: baseline() })
+  const delta = {
     kind: 'delta',
     delta: {
       ...header(2),
@@ -54,14 +41,13 @@ export async function drive() {
       removed: [],
     },
   }
-  const second = await sync.poll()
+  const second = sync.receive(delta)
   baselineRevision = 3
-  nextEvent = { kind: 'gap', gap: { requestedAfter: 2, currentRevision: 3, reason: 'fixture gap' } }
-  const third = await sync.poll()
+  const third = sync.receive({ kind: 'gap', gap: { requestedAfter: 2, currentRevision: 3, reason: 'fixture gap' } })
   sync.disconnect()
   const disconnectedCurrent = store.isCurrent('entity-browser')
   const disconnectedConnected = sync.connected
-  const fourth = await sync.reconnect()
+  const fourth = sync.receive({ kind: 'baseline', baseline: baseline() })
   const read = sync.read()
   return {
     first: first.kind,

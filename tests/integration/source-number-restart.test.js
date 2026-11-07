@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { bootstrapWorkspace, createContext, createQueries, defaultIdFactory, promoteEntityIdentity } from '@harness-projects/core'
 import { createController, toWireEntity } from '@harness-projects/controller'
-import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
+import { createEntityStore, createSync } from '@harness-projects/client'
 import { createGithubProjectsPlanningProvider } from '@harness-projects/provider-planning-github-projects'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
 import { deriveWorkItemListView, deriveWorkItemDetailView, queryVisibleWorkItems } from '@harness-projects/ui-model'
@@ -52,8 +52,8 @@ test('production provider → SQLite reopen → controller/client → default li
     await assert.rejects(storage.getPlanningProjection('numbers',issue.entityId),TypeError)
     storage.db.prepare('UPDATE workspace_projection SET source_number_json = ? WHERE entity_id = ?').run(JSON.stringify(nativeNumber()),issue.entityId)
     const core = {queries:createQueries(context),commands:{}}
-    const controller = createController(core), store = createEntityStore(), sync = createSync(createTransport(controller),store)
-    await sync.connect()
+    const controller = createController(core), store = createEntityStore(), sync = createSync(store)
+    sync.receive({ kind: 'baseline', baseline: await controller.baseline() })
     const view = deriveWorkItemListView(input(sync.read()))
     const one = view.body.rows.find(r => r.key === issue.entityId)
     assert.equal(one.numberLabel,'GitHub example/one#449')
@@ -65,7 +65,7 @@ test('production provider → SQLite reopen → controller/client → default li
     const oldId = issue.entityId
     state.nodes[0] = {...state.nodes[0],type:'REDACTED',content:null}
     assert.equal((await bootstrapWorkspace(context)).ok,true)
-    await sync.reconnect()
+    sync.receive({ kind: 'baseline', baseline: await controller.baseline() })
     const hidden = store.get(oldId).entity
     assert.equal(hidden.content.sourceNumber,undefined)
     assert.deepEqual(hidden.content,redactedContent)
@@ -86,7 +86,7 @@ test('production provider → SQLite reopen → controller/client → default li
     assert.deepEqual(promotedViews.find(v=>v.entityId===draft.entityId).content.sourceNumber,nativeNumber('example/promoted',450))
     state.denied=true
     assert.equal((await bootstrapWorkspace(context)).ok,false)
-    await sync.reconnect()
+    sync.receive({ kind: 'baseline', baseline: await controller.baseline() })
     assert.deepEqual(store.list().map(entry=>entry.entityId).sort(),promotedViews.map(view=>view.entityId).sort(),'redaction retains opaque routing identities')
     for (const entry of store.list()) assert.deepEqual(entry.entity.content,redactedContent)
     assert.doesNotMatch(JSON.stringify(store.list()),sourceMetadata)

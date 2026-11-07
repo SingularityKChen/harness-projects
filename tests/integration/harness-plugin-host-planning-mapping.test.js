@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { createSqliteStorage, openDatabase, SqliteStorage } from '@harness-projects/storage-sqlite'
-import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
+import { createEntityStore, createSync } from '@harness-projects/client'
 import { deriveWorkItemListView, deriveWorkItemDetailView } from '@harness-projects/ui-model'
 import { createHostComposition } from '../../apps/harness-plugin/src/host-composition.ts'
 import { catalogOf, hostStoragePolicy, PROVIDER_CATALOG } from '../../apps/harness-plugin/src/host-providers.ts'
@@ -25,7 +25,7 @@ async function sandbox(t) {
 }
 const open = (dataPath, catalog, extra = {}) => createHostComposition({ dataPath, workspaceId: WORKSPACE, catalog, resolveCredential: async () => 'test-credential', planningTimers: timers, ...extra })
 async function view(host) {
-  const sync = createSync(createTransport(host.controller), createEntityStore()); await sync.connect()
+  const sync = createSync(createEntityStore()); sync.receive({ kind: 'baseline', baseline: await host.controller.baseline() })
   return deriveWorkItemListView({ read: sync.read(), metadata: { sourceNames: {} }, phase: 'received', refreshing: false })
 }
 async function fake(t, definitions, saved, prepare) {
@@ -168,7 +168,7 @@ test('same Host watch updates list and open drawer once; failed read retains con
     provider.listPlanningItems = (...args) => { itemReads++; return fail ? { ok: false, error: { code: 'unavailable', message: 'offline' } } : list(...args) }
   })
   let host = await open(env.dataPath, env.catalog)
-  const sync = createSync(createTransport(host.controller), createEntityStore()), abort = new AbortController()
+  const sync = createSync(createEntityStore()), abort = new AbortController()
   let stream = host.watch(abort.signal)[Symbol.asyncIterator](); t.after(() => { abort.abort(); return stream.return() })
   const first = (await stream.next()).value, controller = host.controller
   sync.receive(first); const itemId = sync.read().store.list().find((item) => item.entity.content.contentKind === 'work_item').entityId
@@ -226,7 +226,7 @@ test('new mapping requires this Core generation commit proof after read/cursor o
       provider.listPlanningItems = (...args) => { itemReads++; return armed ? { ok: false, error: { code: 'unavailable' } } : list(...args) }
     })
     const host = await open(env.dataPath, env.catalog, { watchIntervalMs: 5 }); t.after(() => host.dispose())
-    const sync = createSync(createTransport(host.controller), createEntityStore()), abort = new AbortController(), stream = host.watch(abort.signal)[Symbol.asyncIterator]()
+    const sync = createSync(createEntityStore()), abort = new AbortController(), stream = host.watch(abort.signal)[Symbol.asyncIterator]()
     t.after(() => { abort.abort(); return stream.return() }); sync.receive((await stream.next()).value)
     assert.ok((await host.call('baseline', {})).entities.some((entity) => entity.planningStatus === 'todo'))
     for (const method of ['putSyncCursor', ...(stage === 'begin' ? ['putPlanningSyncRound'] : [])]) {
