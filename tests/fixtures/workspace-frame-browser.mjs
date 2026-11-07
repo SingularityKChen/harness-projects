@@ -19,10 +19,12 @@ import { wire, redacted, T } from './tests/fixtures/work-item-wire.mjs'
 
 export function scene(scenario = 'content', detail = false) {
   const store = createEntityStore()
-  const long = scenario === 'long'
+  const long = scenario === 'long', numbers = scenario === 'numbers'
+  const number = (scopeName) => ({ sourceNumber: { sourceName:'GitHub',scopeIdentity:{namespace:'github.com/graphql/Repository',id:'opaque-'+scopeName},scopeName,number:449 } })
   const entities = scenario === 'empty' ? [] : [
-    wire('ent-aa', { content: { title: long ? '长标题无空格Title'.repeat(24) : '可见工作项', body: long ? '长正文WithoutSpaces'.repeat(200) : '正文-ent-aa' },
+    wire('ent-aa', { content: { ...(numbers ? number('example/one') : {}), title: long ? '长标题无空格Title'.repeat(24) : '可见工作项', body: long ? '长正文WithoutSpaces'.repeat(200) : '正文-ent-aa' },
       planningFields: { iterationTitle: long ? 'IterationWithoutSpaces'.repeat(10) : 'E1 Sprint 1', targetDate: '2026-09-24' }, derived: ['ci_failing', 'execution_failed'] }),
+    ...(numbers ? [wire('ent-cc',{content:{title:'另一仓库工作项',...number('example/two')}}),wire('ent-dd',{content:{title:'Draft工作项 Discuss GitHub example/one#449 GitHub missing/repo#449',externalKind:'draft'}})] : []),
     redacted('ent-bb', {}, { planningFields: { statusName: 'CANARY-STATUS', iterationTitle: 'CANARY-ITERATION', targetDate: '2099-12-31' } }),
   ]
   store.applyBaseline({ revision: 0, entities, source: { revision: 0, freshness: 'fresh', authority: 'provider' } })

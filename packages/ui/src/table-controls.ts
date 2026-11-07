@@ -29,7 +29,7 @@ export function TableControls({ result, onChange }: TableControlsProps): ReactEl
   const sortDescription = conditions.sort ? `${SORT_LABELS[conditions.sort.column]}${conditions.sort.direction === 'asc' ? '升序' : '降序'}` : '默认输入顺序'
   return createElement('div', { className:'hp-table-controls', role:'group', 'aria-label':'当前已加载可读条目的局部查询' },
     createElement('style', null, STYLES),
-    createElement('label', null, '搜索标题', createElement('input', { type:'search', 'aria-label':'搜索标题', value:conditions.search,
+    createElement('label', null, '搜索标题或编号', createElement('input', { type:'search', 'aria-label':'搜索标题或编号', placeholder:'搜索标题或编号', value:conditions.search,
       onChange:(event: { target: { value: string } }) => update({ search:event.target.value }) })),
     facet('planningStatus','规划状态'), facet('iteration','迭代'),
     createElement('label', null, '排序', createElement('select', { 'aria-label':'排序',value:conditions.sort ? `${conditions.sort.column}:${conditions.sort.direction}` : '',
@@ -44,7 +44,7 @@ export function TableControls({ result, onChange }: TableControlsProps): ReactEl
           onChange:(event: { target: { checked: boolean } }) => update({ visibleColumns:event.target.checked ? [...conditions.visibleColumns,column.id] : conditions.visibleColumns.filter(id => id !== column.id) }) }),
         column.label + (column.optional ? '' : '（必显）'))))),
     createElement('button', { type:'button',onClick:() => onChange(defaultLocalTableConditions()) }, '清除条件并恢复默认显示列'),
-    createElement('p', { className:'hp-query-summary' }, `当前条件：${conditions.search.trim() ? `标题包含“${conditions.search}”` : '标题不限'}；规划状态：${conditions.planningStatus === null ? '全部' : labelOf(conditions.planningStatus)}；迭代：${conditions.iteration === null ? '全部' : labelOf(conditions.iteration)}；排序：${sortDescription}`),
+    createElement('p', { className:'hp-query-summary' }, `当前条件：${conditions.search.trim() ? `匹配“${conditions.search}”` : '标题与编号不限'}；规划状态：${conditions.planningStatus === null ? '全部' : labelOf(conditions.planningStatus)}；迭代：${conditions.iteration === null ? '全部' : labelOf(conditions.iteration)}；排序：${sortDescription}`),
     createElement('p', { className:'hp-query-summary',role:'status','aria-live':'polite','aria-atomic':true },
       `当前已加载可读条目：显示 ${result.matchedReadableCount} 项，共 ${result.loadedReadableCount} 项。`,
       result.conditionsAdjusted ? '部分筛选条件已不可用，已清除。' : ''),

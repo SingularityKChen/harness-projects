@@ -7,6 +7,7 @@
  */
 import { WireFreshness } from '@harness-projects/controller/values'
 import type { WireDelta, WireEntity, WireSnapshot, WireWorkspaceMetadata } from '@harness-projects/controller'
+import { sourceNumberSnapshot } from '@harness-projects/domain/values'
 import { isSource } from './workspace-read.ts'
 
 export interface StoredEntity {
@@ -56,6 +57,14 @@ function assertFrame(frame: Pick<WireSnapshot, 'revision' | 'source'>, rows: rea
 /** Delta 的纯 shape 校验供 sync 在 gap 分流前复用，避免 malformed delta 伪装成缺口恢复。 */
 export function assertDeltaFrame(delta: WireDelta): void {
   assertFrame(delta, delta.upserts, 'delta', delta.removed)
+  assertSourceNumbers(delta.upserts)
+}
+
+function assertSourceNumbers(rows: readonly WireEntity[]): void {
+  for (const { content } of rows) if (content.sourceNumber !== undefined) {
+    if (content.contentKind === 'redacted') throw new TypeError('遮蔽内容不能携带原生编号')
+    sourceNumberSnapshot(content.sourceNumber)
+  }
 }
 
 const METADATA_KEYS = ['nativeAccessVersion', 'generation', 'revision', 'workspace', 'capabilities', 'repositories', 'planningSource', 'source', 'entities']
@@ -71,6 +80,7 @@ export function createEntityStore(): EntityStore {
     },
     applyBaseline(snapshot: WireSnapshot): void {
       assertFrame(snapshot, snapshot.entities, 'baseline')
+      assertSourceNumbers(snapshot.entities)
       const seen = new Set<string>(snapshot.entities.map((entity) => entity.entityId))
       for (const entity of snapshot.entities) upsertInto(entries, entity, snapshot.revision)
       for (const entityId of [...entries.keys()]) {

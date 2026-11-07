@@ -6,7 +6,7 @@ import {
   ContentKind, derivedFlagsFor, planningTitle,
   type DerivedFlag, type EngineeringFact, type EntityId, type EntityKind, type ExternalIdentity,
   type ExternalIdentityKind, type NormalizedStatus, type PlanningContent, type PlanningFieldsSnapshot, type ProviderBindingId,
-  type WorkspaceProjection,
+  type WorkspaceProjection, type SourceNumber,
 } from '@harness-projects/domain'
 import type { DeliveryLineageHop } from './delivery.ts'
 import { entityKindFor } from './identity.ts'
@@ -20,6 +20,7 @@ export interface ExternalIdentityRef {
 
 /** 内容引用：三态判别式 + 可展示标题；redacted 的 title 必须为 undefined。 */
 export interface ContentReference {
+  readonly sourceNumber?: SourceNumber
   readonly contentKind: ContentKind
   readonly title: string | undefined
   readonly body: string | undefined
@@ -67,6 +68,7 @@ export function identityRef(identity: ExternalIdentity): ExternalIdentityRef {
 
 export function contentReference(content: PlanningContent, identity: ExternalIdentityRef): ContentReference {
   return {
+    ...(content.contentKind === ContentKind.Redacted || content.sourceNumber === undefined ? {} : { sourceNumber: content.sourceNumber }),
     contentKind: content.contentKind,
     title: planningTitle(content),
     body: content.contentKind === ContentKind.Redacted ? undefined : content.body,

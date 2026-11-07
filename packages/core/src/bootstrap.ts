@@ -10,7 +10,7 @@ import {
   type ProviderProject, type ResolvedBinding, type ProviderPlanningContent, type ProviderPlanningItem, type ProviderResult, type StorageTransaction,
 } from '@harness-projects/capabilities'
 import {
-  ContentKind, EntityKind, ProviderErrorCode,
+  ContentKind, EntityKind, ProviderErrorCode, sourceNumberSnapshot,
   type EntityId, type PlanningContent, type ProjectError, type ProviderBindingId,
   type WorkspaceId, type WorkspacePlanningFieldMapping, type WorkspaceProjection,
 } from '@harness-projects/domain'
@@ -184,6 +184,16 @@ function validatePlanningItems(
   project: ExternalObjectRef, items: readonly ProviderPlanningItem[],
 ): ProviderResult<ValidatedPlanningRead> {
   for (const item of items) {
+    const c = item.content
+    if (c.kind !== ContentKind.Redacted) {
+      const visible = c.kind === ContentKind.WorkItem ? c.workItem : c.changeRequest
+      try {
+        if (visible.sourceNumber !== undefined) {
+          const number = sourceNumberSnapshot(visible.sourceNumber)
+          if (c.kind === ContentKind.ChangeRequest && number.number !== c.changeRequest.number) throw new TypeError()
+        }
+      } catch { return providerErr(providerError(ProviderErrorCode.InvalidInput, '原生编号不合契约')) }
+    }
     if (!validNativeIdentity(item.nativeIdentity) || (item.nativeIdentity !== undefined
       && (item.ref.objectKind !== 'change_request' || item.content.kind !== ContentKind.ChangeRequest))) {
       return providerErr(providerError(ProviderErrorCode.InvalidInput, '原生 PR 身份声明不合法'))
@@ -335,11 +345,11 @@ function toProjection(
 /** provider 内容三态 → 领域三态；redacted 是一等状态，不回退到缓存或推断值。 */
 function toContent(content: ProviderPlanningContent): PlanningContent {
   if (content.kind === ContentKind.WorkItem) {
-    return { contentKind: ContentKind.WorkItem, title: content.workItem.title, body: content.workItem.body }
+    return { contentKind: ContentKind.WorkItem, title: content.workItem.title, body: content.workItem.body, ...(content.workItem.sourceNumber === undefined ? {} : { sourceNumber: sourceNumberSnapshot(content.workItem.sourceNumber) }) }
   }
   if (content.kind === ContentKind.ChangeRequest) {
     const cr = content.changeRequest
-    return { contentKind: ContentKind.ChangeRequest, number: cr.number, title: cr.title, body: cr.body }
+    return { contentKind: ContentKind.ChangeRequest, number: cr.number, title: cr.title, body: cr.body, ...(cr.sourceNumber === undefined ? {} : { sourceNumber: sourceNumberSnapshot(cr.sourceNumber) }) }
   }
   return { contentKind: ContentKind.Redacted, reason: content.reason }
 }

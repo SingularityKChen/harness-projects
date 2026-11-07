@@ -56,12 +56,12 @@ const CONSTRAINED_COLUMNS = [
   {
     table: 'workspace_projection', column: 'planning_status', values: Object.values(NormalizedStatus),
     prepare: (value) => `INSERT INTO entity VALUES ('entity-status-${value}', 'work_item')`,
-    insert: (value) => `INSERT INTO workspace_projection VALUES ('ws-1', 'entity-status-${value}', '${value}', 'work_item', NULL, '正文', NULL, NULL, NULL, NULL, NULL, 1)`,
+    insert: (value) => `INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1', 'entity-status-${value}', '${value}', 'work_item', NULL, '正文', NULL, NULL, NULL, NULL, NULL, 1)`,
   },
   {
     table: 'workspace_projection', column: 'content_kind', values: Object.values(ContentKind),
     prepare: (value) => `INSERT INTO entity VALUES ('entity-kind-${value}', 'work_item')`,
-    insert: (value) => `INSERT INTO workspace_projection VALUES ('ws-1', 'entity-kind-${value}', 'todo', '${value}', NULL, '正文', NULL, NULL, NULL, NULL, NULL, 1)`,
+    insert: (value) => `INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1', 'entity-kind-${value}', 'todo', '${value}', NULL, '正文', NULL, NULL, NULL, NULL, NULL, 1)`,
   },
 ]
 

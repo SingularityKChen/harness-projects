@@ -40,6 +40,7 @@ const FOCUSABLE = 'a[href],button,input,select,textarea,[tabindex]:not([tabindex
 function contentPanel(body: Extract<WorkItemDetailView['body'], { kind: 'content' }>): ReactElement {
   const at = body.lastUpdatedAt === undefined ? '读取时间未知' : createElement('time', { dateTime: body.lastUpdatedAt }, body.lastUpdatedAt)
   return createElement('div', null,
+    ...(body.numberLabel === undefined ? [] : [createElement('p', null, body.numberLabel)]),
     createElement('p', null, '规划状态：', body.planningStatus),
     createElement('p', null, '迭代：', body.iteration),
     createElement('p', null, '目标日期：', body.targetDate),

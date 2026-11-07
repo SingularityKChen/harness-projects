@@ -6,6 +6,7 @@
 import { CapabilityKey } from '@harness-projects/client/keys'
 import { AccessLevel, ContentKind, DerivedFlag, NormalizedStatus } from '@harness-projects/domain/values'
 import { accessIndex } from './capability-access.ts'
+import { formatSourceNumber } from './source-number.ts'
 import { deriveWorkItemList } from './derive.ts'
 import type { WorkItemRow, WorkspaceRead } from './types.ts'
 
@@ -41,6 +42,7 @@ export type WorkItemListReadInput = {
 export type VisibleListRow =
   | { readonly kind: 'redacted'; readonly key: string }
   | {
+      readonly sourceNumber?: number; readonly numberLabel?: string
       readonly kind: 'item'; readonly key: string; readonly title: string; readonly identity: string
       readonly planningStatus: string; readonly engineering: string; readonly source: string
       readonly authority: string; readonly stale: boolean
@@ -102,6 +104,7 @@ function rowView(row: WorkItemRow, nameOf: (bindingId: string) => string | undef
   if (row.contentKind === ContentKind.Redacted) return { kind: 'redacted', key: row.entityId }
   const primary = row.source.primary
   return {
+    ...(row.sourceNumber === undefined ? (primary?.externalKind === 'draft' ? { numberLabel: '暂无原生编号' } : {}) : { sourceNumber: row.sourceNumber.number, numberLabel: formatSourceNumber(row.sourceNumber) }),
     kind: 'item', key: row.entityId, title: row.title || '标题未提供',
     identity: (primary && pick(IDENTITY, primary.externalKind)) ?? '身份未知',
     planningStatus: statusText(row),

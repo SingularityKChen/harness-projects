@@ -40,7 +40,8 @@ function ItemRow({ row, navigation, columns }: { row: VisibleListRow; navigation
   const title = row.kind === 'redacted' ? '内容不可见' : row.title
   return createElement('tr', null,
     createElement('th', { scope: 'row', className: 'hp-list-wrap' },
-      row.kind === 'item' && navigation !== undefined ? createElement(TitleLink, { itemId: row.key, title, navigation }) : row.kind === 'item' ? createElement('details', null, createElement('summary', { className: 'hp-list-title-text' }, title)) : title),
+      row.kind === 'item' && navigation !== undefined ? createElement(TitleLink, { itemId: row.key, title, navigation }) : row.kind === 'item' ? createElement('details', null, createElement('summary', { className: 'hp-list-title-text' }, title)) : title,
+      row.kind === 'item' && row.numberLabel !== undefined ? createElement('span', { style: { display: 'block', fontSize: '0.85em', fontWeight: 'normal' } }, row.numberLabel) : null),
     ...columns.slice(1).map(column => createElement('td', { key:column.id, className:column.id === 'iteration' || column.id === 'source' ? 'hp-list-wrap' : undefined }, values?.[column.id] ?? '—')))
 }
 

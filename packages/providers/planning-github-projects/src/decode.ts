@@ -8,6 +8,7 @@ import {
   type ExternalObjectRef, type ProviderIteration, type ProviderPlanningContent, type ProviderPlanningFieldDefinition,
   type ProviderPlanningItem, type ProviderProject,
 } from '@harness-projects/capabilities'
+import { sourceNumberSnapshot } from '@harness-projects/domain'
 import type { NativePlanningFieldValue } from '@harness-projects/domain'
 
 export type Obj = Readonly<Record<string, unknown>>
@@ -64,10 +65,11 @@ function decodeRow(raw: unknown, project: ExternalObjectRef): ItemRow {
   const source = obj(node.content)
   if (source.__typename !== typename) fail()
   const [externalId, title, body, isDraft] = [id(source.id), str(source.title), str(source.body), objectKind === 'draft']
-  const number = isDraft ? null : Number.isInteger(source.number) && Number(source.number) > 0 ? Number(source.number) : fail()
+  const number = isDraft ? null : Number.isSafeInteger(source.number) && Number(source.number) > 0 ? Number(source.number) : fail()
+  const sourceNumber = isDraft ? {} : { sourceNumber: sourceNumberSnapshot({ sourceName: 'GitHub', scopeIdentity: { namespace: 'github.com/graphql/Repository', id: obj(source.repository).id }, scopeName: obj(source.repository).nameWithOwner, number }) }
   const content: ProviderPlanningContent = objectKind === 'change_request' && number !== null
-    ? { kind: 'change_request', changeRequest: { externalId, number, title, body } }
-    : { kind: 'work_item', workItem: { externalId, title, body } }
+    ? { kind: 'change_request', changeRequest: { externalId, number, title, body, ...sourceNumber } }
+    : { kind: 'work_item', workItem: { externalId, title, body, ...sourceNumber } }
   const ref = { bindingId, objectKind, externalId, url: isDraft ? undefined : str(source.url) }
   const fields = emptyFields(decodeFieldValues(obj(node.fieldValues)))
   return { item: { ...common, fields, ref, content, ...(objectKind === 'change_request'

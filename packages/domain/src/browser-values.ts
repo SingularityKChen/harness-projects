@@ -3,6 +3,7 @@
  * 根出口经 ids.ts 依赖 node:crypto，浏览器 bundle 因此不能从根出口取运行时值。
  */
 export { AccessLevel, ContentKind, ExecutionContextStatus, ExecutionRunStatus, NormalizedStatus } from './enums.ts'
+export { sourceNumberSnapshot } from './entities.ts'
 export { DerivedFlag } from './status.ts'
 
 export { planningFieldMappingSnapshot } from './planning-fields.ts'

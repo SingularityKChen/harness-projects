@@ -101,6 +101,7 @@ export function assert002Shape(db: WorkspaceDatabase): void {
   if (isConnectorAccountShapeMissing(db)) throw new Error(CONNECTOR_ACCOUNT_SCHEMA_MESSAGE)
   const projection = (db.prepare("SELECT name FROM pragma_table_info('workspace_projection')").all() as { name: string }[]).map((row) => row.name.toLowerCase())
   if (projection.length > 0 && ['field_status_name', 'field_iteration_title', 'field_target_date'].some((name) => !projection.includes(name))) throw new Error(PLANNING_FIELD_SCHEMA_MESSAGE)
+  if (projection.length > 0 && !projection.includes('source_number_json')) throw new Error('Planning source number schema is outdated: rebuild explicitly')
   const mapping = (db.prepare("SELECT name FROM pragma_table_info('workspace_planning_mapping')").all() as { name: string }[]).map((row) => row.name.toLowerCase())
   if (projection.length > 0 && ['workspace_id', 'binding_id', 'domain', 'project_external_id', 'origin', 'mapping_json'].some((column) => !mapping.includes(column))) throw new Error('Planning mapping schema is outdated: rebuild explicitly')
 }

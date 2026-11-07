@@ -15,7 +15,7 @@ test('production Provider→SQLite→Host→App safe query changes local rows an
     const before=await control(server,'inspect')
     assert.match(await page.locator('.hp-work-items').innerText(),/共 124 项/)
     assert.equal(await page.getByRole('columnheader').count(),5)
-    await page.getByRole('searchbox',{name:'搜索标题'}).fill('query 00')
+    await page.getByRole('searchbox',{name:'搜索标题或编号'}).fill('query 00')
     assert.deepEqual((await titles(page)).filter(x=>x.startsWith('Query')).sort(),Array.from({length:10},(_,i)=>'Query 00'+i));assert.equal((await titles(page)).length,11)
     await page.getByRole('button',{name:'按工作项排序',exact:true}).click();await page.getByRole('button',{name:'按工作项排序',exact:true}).click()
     assert.equal((await titles(page))[0],'Query 009');assert.equal(await page.locator('[aria-sort="descending"]').count(),1)
@@ -36,7 +36,7 @@ test('production Provider→SQLite→Host→App safe query changes local rows an
 })
 test('App safe projection synchronously clears revoked facets, retains valid refresh state and resets identity scopes',async t=>{
   await withBrowser(t,startTableGeometryServer,async page=>{
-    const search=page.getByRole('searchbox',{name:'搜索标题'});await search.waitFor()
+    const search=page.getByRole('searchbox',{name:'搜索标题或编号'});await search.waitFor()
     const initial=await page.locator('.hp-work-items').innerHTML();await page.evaluate(()=>window.queryFixture.hidden());assert.equal(await page.locator('.hp-work-items').innerHTML(),initial,'raw hidden mutations do not affect any DOM')
     const iteration=page.getByRole('combobox',{name:'迭代筛选'}),value=(await iteration.locator('option').allTextContents()).find(x=>x.startsWith('Iteration'))
     await iteration.selectOption({label:value})

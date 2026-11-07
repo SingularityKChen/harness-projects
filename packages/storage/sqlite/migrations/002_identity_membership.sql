@@ -129,6 +129,7 @@ CREATE TABLE workspace_projection (
   content_title TEXT,
   content_body TEXT,
   content_number INTEGER,
+  source_number_json TEXT,
   redaction_reason TEXT,
   -- #133 列表展示的字段事实（映射的状态字段上的原生选项名、迭代 title、date-only 目标日期）；可空 = 没有该值。规范状态只在 planning_status。
   field_status_name TEXT,
@@ -138,7 +139,7 @@ CREATE TABLE workspace_projection (
   -- 不变量 6 / Gate E1 行为 2 的 storage 侧强制点：同一工作区里同一实体只有一行投影。
   PRIMARY KEY (workspace_id, entity_id),
   -- ADR-0005 的内容三态：redacted 内容没有标题，调用方必须显示占位，不得回退到缓存标题。
-  CHECK (content_kind <> 'redacted' OR content_title IS NULL)
+  CHECK (content_kind <> 'redacted' OR (content_title IS NULL AND source_number_json IS NULL))
 );
 
 -- workspace_planning_mapping：issue #277，独立的本地配置，挂载删除时随其配置一起移除。
