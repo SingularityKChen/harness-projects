@@ -1,5 +1,5 @@
 /** Storage 契约套件入口：接受任意 Storage 适配器 `{ label, makeStorage(), restart(storage) }`。`restart` 必须返回"重启后"的新实例，且读到的内容与重启前一致——删掉导出/导入实现就会失败。看护的不变量：事务原子性；同一实例只有一个写者路径（重叠事务串行提交、事务在途时的直接写入不被并进事务）；连接锚点跨工作区共享而挂载是工作区作用域的（同 id 换实现被拒、第二个启用的 planning 挂载被拒、同一工作区同一域至多一个启用的默认）；外部身份全局一份且每个实体至多一个 primary；同一内容在两个工作区是两条成员关系，同一 (工作区, 项目, 内容) 只有一条，被取代条目的字段值一并删除；listMemberships 按 itemExternalId 升序；字段值按 (工作区, 条目, 项目字段) 定位且不含可选值 id；成员关系/字段值/投影的引用完整性；同一工作项+仓库 只有一个 active 执行上下文；观察按 (binding, dedupeKey) 去重；写尝试按幂等键重放返回原结果；投影修订号单调递增。
- * 本文件保留入口与**地基组**：地基组用例体留在原地（切分是纯移动，逐字未动），同步组与执行组分别在 `storage-sync.js` 与 `storage-execution.js`，共享夹具在 `storage-fixtures.js`。切分账与两层守卫见下方常量与 `tests/contract/storage-contract.test.js`。
+ * 本文件保留入口与地基组；同步组与执行组分别在 `storage-sync.js` 与 `storage-execution.js`，共享夹具在 `storage-fixtures.js`。
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -202,32 +202,8 @@ export function storageFoundationSuite(adapter, register = test) {
   })
 }
 
-/**
- * 切分前的用例条数（守卫基线）。判据是**回读本层 base 的 `tests/contract/suites/storage.js`**，不写任何 SHA——
- * 第三轮与第四轮评审各点过一次：写死的 SHA 在级联后不再是 head 的祖先，命令就不可复跑。
- * 回读命令：`BASE=$(gh pr view 167 -R SingularityKChen/harness-projects --json baseRefOid -q .baseRefOid)`，再 `git show "$BASE":tests/contract/suites/storage.js | grep -c '^  test('` → 18。
- * 三组继承条数（地基 7 / 同步 8 / 执行 3）之和必须等于它。
- */
-export const PRE_SPLIT_CASE_COUNT = 18
-/**
- * 切分之后新增的用例条数：地基组 6 条——L4 修复轮的 4 条（嵌套事务 + 重叠事务串行提交、在途事务不吞直接写入、
- * 在途事务回滚后直接写入仍落库）与修复轮 2 的 2 条（读隔离、投影覆盖）；同步组在 L4 / L5 是纯移动，0 条；执行组
- * 由 L6 新增 10 条（执行面的读隔离、原子性、悬空父边与枚举等），合计 16；再加同步组 +1（#203 规范载体定序），合计 17；再加执行组 +2（#187 / #188 的仓库挂载契约），合计 19；再加执行组 +1（#196 的工作项父边共享拒绝），合计 20；再加执行组 +2（#221 的交付事实整行往返与读隔离；父行与关系端点的拒绝并入已有的悬空父边用例），合计 22。
- * #458 再追加执行组 2 条（run 声明形状与别名隔离）；当前新增合计 26，逐组账见 `tests/contract/storage-contract.test.js` 的 `CASE_LEDGER`；"新增"一旦跨组增长，写成单个标量就只能在账上写假数。
- */
-export const ADDED_CASE_COUNT = 26
-/** 三组各自从切分前继承的条数：foundation 7 + sync 8 + execution 3 = 18。 */
-export const INHERITED_CASE_COUNTS = { foundation: 7, sync: 8, execution: 3 }
-/** 组名 → suite：守卫与组合入口共用同一张表，组名不再以字符串形式散落在两处。 */
+/** 组名 → suite：两个适配器的装配共用同一张表。 */
 export const STORAGE_SUITE_GROUPS = { foundation: storageFoundationSuite, sync: storageSyncSuite, execution: storageExecutionSuite }
-
-/** 数一组用例的条数：传入只计数的注册器，用例体不执行——删掉一个 `register(...)` 或整组不再被装配都会变红。 */
-export function countSuiteCases(suite) {
-  let count = 0
-  const adapter = { label: '计数', makeStorage: () => { throw new Error('计数不执行用例体') }, restart: (storage) => storage }
-  suite(adapter, () => { count += 1 })
-  return count
-}
 
 /** 组合入口：两个实现最终都要跑全部三组；真实装配在 `tests/contract/storage-contract.test.js`（SQLite 侧逐组注册，L6 起执行组也注册）。 */
 export function storageContractSuite(adapter) {

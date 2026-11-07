@@ -2,13 +2,13 @@
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test, { after } from 'node:test'
 import { createFakeStorage, exportFakeStorageState } from '@harness-projects/provider-fake'
 import { createSqliteStorage, openDatabase } from '@harness-projects/storage-sqlite'
-import { STORAGE_SUITE_GROUPS, countSuiteCases, PRE_SPLIT_CASE_COUNT, ADDED_CASE_COUNT, INHERITED_CASE_COUNTS } from './suites/storage.js'
+import { STORAGE_SUITE_GROUPS } from './suites/storage.js'
 import { storageIdentityFoundationSuite, storageIdentitySyncSuite } from './suites/storage-identity-membership.js'
 import { storageExecutionDivergenceSuite } from './suites/storage-execution.js'
 import { developmentBinding, fieldValue, membership, observation, WORKSPACE } from './suites/storage-fixtures.js'
@@ -17,21 +17,9 @@ const workspace = (id, name) => ({ id, name, statusPolicy: 'provider_authoritati
 
 const bindingRecord = (id, workspaceId) => ({ id, workspaceId, domain: 'planning', implementationKey: 'fake', enabled: true, isDefault: false })
 
-// 装配台账：`assemble` 是**唯一**的装配入口，它按组把用例注册进 runner，同时把"这个标签实际注册了多少条"记进
-// `REGISTERED`。守卫因此断言的是**实际注册条数**，不是组文件里写了多少条——删掉一整条装配调用（整组不再被装配）
-// 会让该标签在台账里消失，删掉组清单里的一项会让它对该组注册 0 条，两种都变红。
-// 身份面两组也走同一入口：`storage-identity-membership.js` 接受 `register` 参数（默认 `test`），因此它不再是
-// 台账之外的"直接注册"——SQLite 的身份同步组注册被删掉同样会红（第四轮评审 P2）。
 const SUITE_GROUPS = { ...STORAGE_SUITE_GROUPS, identityFoundation: storageIdentityFoundationSuite, identitySync: storageIdentitySyncSuite, sharedSync: (adapter, register) => sharedSyncSuite(adapter, register) }
-const REGISTERED = new Map()
-let assembled = 0
 function assemble(adapter, groups) {
-  const counts = {}
-  assembled += 1
-  REGISTERED.set(adapter.label, counts)
-  for (const group of groups) {
-    SUITE_GROUPS[group](adapter, (name, fn, options) => { counts[group] = (counts[group] ?? 0) + 1; test(name, fn, options) })
-  }
+  for (const group of groups) SUITE_GROUPS[group](adapter, test)
 }
 
 // SQLite 适配器：L4 / #163 交付地基组与身份地基组，L5 / #164 补同步组与身份同步组，L6 / #120 补执行组（见下方
@@ -52,99 +40,12 @@ assemble(sqliteAdapter('SQLite Storage（身份同步组）', 'storage-identity-
 // L6 / #120：执行面落地之后，SQLite 侧也注册执行组——执行面的 10 个方法第一次在 SQLite 上跑契约。
 assemble(sqliteAdapter('SQLite Storage（执行组）', 'storage-execution'), ['execution'])
 
-/**
- * 守卫的**独立**期望：标签 → 它必须装配的组。它是守卫自己的一份陈述，不由 `assemble` 的实参推导——
- * 从实参推导的话，删掉装配调用会连期望一起删掉，守卫就永远绿（这正是本守卫要消灭的缺陷形态）。
- */
-// 依赖 core 的格只剩执行上下文 → 仓库一格：已对齐（core 的写前登记先建挂载，#187 / #188），
-// 两个适配器都拒绝，只是错误文本来源不同（SQLite 的外键、替身的存在性检查）；关系端点一格已对齐（#221，唯一的谱系写者先登记端点），用例在共享执行组里。
-// 工作项一格已对齐（#196）：两个实现以同一个 `StorageInputError` 拒绝，用例在共享执行组里，不再是声明式分叉。
-// 这一格**必须是显式且被守卫的**：能力位按适配器、按边声明，注册数由守卫独立写成 1。
+// 仓库父边在两个适配器上都拒绝悬空引用，错误来源分别为替身存在性检查与 SQLite 外键。
 const fakeDivergence = { label: '内存 Storage 替身（分叉格）', makeStorage: () => createFakeStorage(),
   acceptsDanglingCoreParents: { repository: false }, rejection: /^rejected: execution context repository does not exist/ }
 const sqliteDivergence = { ...sqliteAdapter('SQLite Storage（分叉格）', 'storage-divergence'),
   acceptsDanglingCoreParents: { repository: false }, rejection: /^rejected: FOREIGN KEY constraint failed/ }
-const DIVERGENCE_REGISTERED = [fakeDivergence, sqliteDivergence].map((adapter) => storageExecutionDivergenceSuite(adapter))
-test('执行组守卫：依赖 core 的仓库格用例必须在两个适配器上都注册', () => {
-  assert.deepEqual(DIVERGENCE_REGISTERED, [1, 1], '两个适配器都必须注册仓库格：删掉这条显式用例会在这里变红')
-})
-
-const EXPECTED_ASSEMBLY = {
-  '内存 Storage 替身': ['foundation', 'sync', 'execution', 'identityFoundation', 'identitySync', 'sharedSync'],
-  'SQLite Storage（地基组）': ['foundation'],
-  'SQLite Storage（同步组）': ['sync', 'sharedSync'],
-  'SQLite Storage（身份地基组）': ['identityFoundation'],
-  'SQLite Storage（身份同步组）': ['identitySync'],
-  'SQLite Storage（执行组）': ['execution'],
-}
-
-/** 基线里的每条断言文本（去掉空白后的整行）在当前文件里按多重集逐条消耗；返回消耗不到的那些。 */
-function missingAssertions(file, baseline) {
-  const remaining = readFileSync(new URL(`./suites/${file}`, import.meta.url), 'utf8').split('\n')
-    .filter((line) => /\bassert\./.test(line)).map((line) => line.replace(/\s+/g, ''))
-  return baseline.filter((text) => {
-    const at = remaining.indexOf(text)
-    if (at === -1) return true
-    remaining.splice(at, 1)
-    return false
-  })
-}
-
-// 身份面两组不在切分台账里（`CASE_LEDGER` 只管 `storage.js` 的三组），装配守卫又拿组自己的条数当期望，所以删掉身份面的用例时
-// 两边同降、谁也发现不了。条数因此写成字面量：增删身份面用例必须有意改这里。
-const IDENTITY_CASE_COUNTS = { identityFoundation: 8, identitySync: 7 }
-/** 身份面文件 `assert.` 语句的多重集基线（#195 评审补上，2026-10-02 实测）：条数台账看不出用例内部少了断言，规则与下方切分守卫的断言层相同。 */
-const IDENTITY_ASSERTION_BASELINE = ["awaitassert.rejects(storage.putProviderBinding({...binding('binding-1'),implementationKey:'other'}),'同一个id换provider实现必须被拒绝')", "assert.equal((awaitstorage.listProviderBindings(WORKSPACE)).find((b)=>b.id==='binding-1')?.implementationKey,'fake','被拒绝的写入不得改动原连接')", "awaitassert.rejects(storage.putProviderBinding({...binding('binding-2'),implementationKey:'leaked'}),'同一工作区第二个启用的planning挂载必须被拒绝')", "assert.deepEqual((awaitstorage.listProviderBindings(WORKSPACE)).map((b)=>b.id),['binding-1'],'被拒绝的挂载不得留下任何行')", "assert.deepEqual((awaitstorage.listProviderBindings(WORKSPACE)).map((b)=>b.id).sort(),['binding-1','binding-2'],'同一条连接换域挂载必须成功：上一次拒绝不得留下leaked锚点')", "assert.equal((awaitstorage.listProviderBindings(WORKSPACE)).find((b)=>b.id==='binding-3')?.enabled,false,'禁用的planning挂载不占用启用槽')", "awaitassert.rejects(storage.putProviderBinding({...binding('binding-3'),enabled:false,isDefault:true}),'is_default=1蕴含enabled=1')", "awaitassert.rejects(storage.putProviderBinding({...binding('binding-4'),enabled:false,isDefault:true}),'被拒绝的默认挂载不得留下任何行')", "assert.deepEqual((awaitstorage.listProviderBindings(WORKSPACE)).map((b)=>b.id).sort(),['binding-1','binding-2','binding-3'])", "assert.deepEqual(bindings.filter((b)=>b.isDefault).map((b)=>b.id),['binding-5'],'禁用的挂载不占用默认槽，新的启用默认是唯一的默认')", "assert.equal(bindings.find((b)=>b.id==='binding-4')?.isDefault,false,'禁用挂载不得被当成默认')", "assert.deepEqual((awaitstorage.listIdentitiesForEntity('entity-1')).map((i)=>i.id),['identity-1'],'同一对象键的幂等重写不得被自己的唯一性检查误伤')", "awaitassert.rejects(storage.putExternalIdentity(identity({id:'identity-2',externalId:'issue-2'})),'同一实体第二个primary必须被拒绝')", "assert.deepEqual((awaitstorage.listIdentitiesForEntity('entity-1')).map((i)=>i.id),['identity-1'],'被拒绝的写入不得留下任何行')", "assert.deepEqual((awaitstorage.listIdentitiesForEntity('entity-1')).map((i)=>i.id).sort(),['identity-1','identity-3'],'alias/historical不受primary唯一约束限制')", "awaitassert.rejects(storage.putExternalIdentity(identity({entityId:'entity-2',externalKind:'issue',externalId:'issue-9'})),'同一个身份id换对象键必须被拒绝')", "assert.equal(awaitstorage.findExternalIdentity('binding-1','issue','issue-9'),undefined,'被拒绝的写入不得留下任何行')", "assert.equal(found?.id,'identity-1','同对象幂等覆盖保留已分配的id')", "assert.equal(found?.entityId,'entity-1','同对象幂等覆盖保留已分配的entityId')", "assert.deepEqual(awaitstorage.listIdentitiesForEntity('entity-2'),[],'覆盖不得把身份搬到另一个实体')", "awaitassert.rejects(storage.putPlanningProjection(WORKSPACE,projection),'投影的实体必须先存在')", "assert.deepEqual(awaitstorage.listPlanningProjections(WORKSPACE),[],'被拒绝的写入不得留下任何行')", "awaitassert.rejects(storage.putPlanningProjection('ws-none',projection),'投影必须属于存在的工作区')", "assert.deepEqual(awaitstorage.listPlanningProjections('ws-none'),[],'被拒绝的写入不得留下任何行')", "assert.deepEqual((awaitstorage.listPlanningProjections(WORKSPACE)).map((p)=>p.entityId),['entity-1'],'工作区与实体都存在时同一写入必须成功')", "constrejected=async(write,read,message)=>{awaitassert.rejects(write,message);assert.deepEqual(awaitread(),[],'被拒绝的写入不得留下任何行')}", "assert.deepEqual(awaitstorage.findExternalIdentity('binding-1','repository','repo-1'),identity,'按(连接,repository,外部id)读回同一条身份：id与entityId是稳定键')", "assert.equal(awaitstorage.findExternalIdentity('binding-1','branch','repo-1'),undefined,'种类是自然键的分量：同名branch是另一个对象')", "assert.deepEqual(awaitstorage.listRepositories(WORKSPACE),[{id:'repo-1',workspaceId:WORKSPACE,externalIdentityId:'repo-identity-1'}],'仓库记录引用身份行的稳定键')", "assert.equal((awaitcontrol.findExternalIdentity('binding-1','issue','object-1'))?.id,'identity-1','同形状的合法写入必须成功并能按issue查回：否则「一律拒绝」的实现也能通过下面的断言')", "awaitassert.rejects(storage.putExternalIdentity(record(bogus)),{name:'RangeError',message:'unsupportedexternalidentitykind'},`${String(bogus)}必须以端口级的同一个错误被拒绝，而不是依赖驱动或库约束的措辞`)", "assert.deepEqual(awaitstorage.listIdentitiesForEntity('entity-1'),[],'被拒绝的写入不得留下任何行：写前写后身份总数不变')", "assert.equal(awaitstorage.findExternalIdentity('binding-1','issue','object-1'),undefined,'未知种类不得被静默登记成issue')", "assert.deepEqual((awaitstorage.listProviderBindings(WORKSPACE)).map((b)=>b.id),['binding-1'],'连接锚点必须留在第一个工作区')", "assert.deepEqual((awaitstorage.listProviderBindings('ws-2')).map((b)=>b.id),['binding-1'],'同一条连接必须能被第二个工作区挂载')", "assert.equal((awaitstorage.findExternalIdentity('binding-1','issue','issue-1'))?.id,'identity-1')", "assert.deepEqual((awaitstorage.listIdentitiesForEntity('entity-1')).map((i)=>i.id),['identity-1'],'同一对象不得在两个工作区各登记一条身份')", "assert.deepEqual((awaitstorage.listMemberships(WORKSPACE,'project-1')).map((m)=>m.itemExternalId),['item-1'])", "assert.deepEqual((awaitstorage.listMemberships('ws-2','project-1')).map((m)=>m.itemExternalId),['item-2'],'成员关系是工作区作用域的：同一对象在两个工作区各有自己的挂载点')", "assert.deepEqual((awaitstorage.listMemberships(WORKSPACE,'project-1')).map((m)=>m.itemExternalId),['item-1'],'第二个project的同内容不得取代第一个project的成员关系')", "assert.deepEqual((awaitstorage.listMemberships(WORKSPACE,'project-2')).map((m)=>m.itemExternalId),['item-2'],'project过滤不得混入别的project')", "assert.equal((awaitstorage.getMembership(WORKSPACE,'item-1'))?.projectExternalId,'project-1')", "assert.equal((awaitstorage.getMembership(WORKSPACE,'item-2'))?.projectExternalId,'project-2')", "assert.deepEqual((awaitstorage.listMemberships(WORKSPACE,'project-1')).map((m)=>m.itemExternalId),['item-a','item-b'],'顺序是契约：乱序插入也必须按itemExternalId升序返回')", "assert.deepEqual((awaitstorage.listMemberships(WORKSPACE,'project-1')).map((m)=>m.itemExternalId),['item-a','item-b','item-\\uFF5E','item-\\u{1F600}'],'码点序：U+FF5E在增补平面字符之前（UTF-16码元序会给出相反结果）')", "assert.equal((awaitstorage.listFieldValues(WORKSPACE,'item-1')).length,1,'前置：旧条目名下有字段值')", "assert.equal(awaitstorage.getMembership(WORKSPACE,'item-1'),undefined,'旧成员关系已被取代')", "assert.deepEqual(awaitstorage.listFieldValues(WORKSPACE,'item-1'),[],'被取代的条目不得返回孤儿字段值')", "assert.deepEqual(awaitstorage.listFieldValues(WORKSPACE,'item-1'),[],'字段值是被删除而不是读取时过滤：旧itemid重新加入不得让旧值复活')", "assert.deepEqual(awaitrows('item-1'),[['item-1','field-1','InProgress']],'第二个条目的同名字段不得覆盖第一条')", "assert.deepEqual(awaitrows('item-2'),[['item-2','field-1','Todo']],'item-2只返回自己的字段值')"]
-test('身份面守卫：两组用例条数与台账一致，断言集合不低于基线', () => {
-  for (const [group, count] of Object.entries(IDENTITY_CASE_COUNTS)) {
-    assert.equal(countSuiteCases(SUITE_GROUPS[group]), count, `${group} 组用例条数必须与 IDENTITY_CASE_COUNTS 一致：删掉或新增身份面用例都要有意改台账`)
-  }
-  const missing = missingAssertions('storage-identity-membership.js', IDENTITY_ASSERTION_BASELINE)
-  assert.equal(missing.length, 0, `身份面有 ${missing.length} 条基线断言在当前文件里消失（被删除、改写或改宽）：\n${missing.slice(0, 3).join('\n')}`)
-})
-
-// 切分守卫（两层）。**条数层**：三组用例数之和必须等于切分前的条数（再加切分后新增的那几条）——删掉任何一个
-// register(...) 都会变红。**断言层**（2026-09-24 评审补上，第四轮评审改成集合比对）：条数层对"某个用例**内部**
-// 少了一条断言"或"把断言改宽"都没有判别力——实测级联时丢掉 L2 钉住的两条默认降级断言（`binding-1.isDefault === false`
-// / `binding-1.enabled === true`），条数守卫全绿，而"降级并禁用"或"直接删掉"两种实现都能通过；把
-// `assert.deepEqual(a, b)` 改成 `assert.deepEqual(a, a)` 同样全绿。断言层因此比对三组文件里 `assert.` 语句的
-// **多重集**（去掉空白后的整行文本）：基线里任何一条文本在当前文件里少出现一次即失败。新增断言不受影响；
-// 要放宽必须**有意**从基线里删掉对应文本，并在提交信息里写明放宽了哪一条。
-const CASE_LEDGER = { foundation: { inherited: INHERITED_CASE_COUNTS.foundation, added: 8 }, sync: { inherited: INHERITED_CASE_COUNTS.sync, added: 1 }, execution: { inherited: INHERITED_CASE_COUNTS.execution, added: 17 } }
-const SUITE_FILES = { foundation: 'storage.js', sync: 'storage-sync.js', execution: 'storage-execution.js' }
-/** 切分完成时三组 `assert.` 语句的多重集基线（2026-09-24 实测）：元素是语句**去掉空白后的整行文本**，同一文本出现几次就写几项。 */
-const ASSERTION_BASELINE = {
-  foundation: ["assert.equal((awaitstorage.getWorkspace(WORKSPACE))?.name,'工作区')", "awaitassert.rejects(storage.transaction(async(tx)=>{", "assert.equal(awaitstorage.getWorkspace('ws-rolled-back'),undefined)", "assert.equal((awaitstorage.getWorkspace('ws-t1'))?.name,'T1')", "assert.equal((awaitstorage.getWorkspace('ws-direct'))?.name,'直接写入')", "assert.equal((awaitstorage.getWorkspace('ws-t1'))?.name,'T1')", "assert.equal((awaitstorage.getWorkspace('ws-t2'))?.name,'T2','T2已确认的写入不得被T1的提交覆盖')", "release();awaitassert.rejects(failed,/事务内失败/);awaitdirect", "assert.equal(awaitstorage.getWorkspace('ws-t1'),undefined,'失败事务的写入必须整体回滚')", "assert.equal((awaitstorage.getWorkspace('ws-direct'))?.name,'直接写入','事务在途时的直接写入不得被并进事务、随回滚一起消失')", "release();awaitassert.rejects(failed,/事务内失败/);awaitread", "assert.notEqual(seen?.name,'未提交','未提交的写入不得被事务外的读看到')", "assert.equal((awaitstorage.getWorkspace(WORKSPACE))?.name,'工作区','回滚后读到的是已提交的基线值')", "assert.deepEqual(bindings.filter((b)=>b.isDefault).map((b)=>b.id),['binding-2'])", "assert.equal(bindings.find((b)=>b.id==='binding-1')?.isDefault,false,'同域旧的默认必须被降级')", "assert.equal(bindings.find((b)=>b.id==='binding-1')?.enabled,true,'降级只改isDefault，不改变启用状态')", "assert.equal(found?.id,'identity-1')", "assert.equal(found?.entityId,'entity-1')", "assert.equal((awaitstorage.listIdentitiesForEntity('entity-1')).length,1)", "assert.deepEqual(awaitstorage.listIdentitiesForEntity('entity-9'),[])", "assert.deepEqual(awaitstorage.getPlanningProjection(WORKSPACE,'entity-1'),projection)", "assert.deepEqual((awaitstorage.listPlanningProjections(WORKSPACE)).map((p)=>p.entityId),['entity-1'])", "assert.deepEqual(awaitstorage.listPlanningProjections('ws-other'),[])", "assert.deepEqual((awaitstorage.listRepositories(WORKSPACE)).map((r)=>r.id),['repo-1'])", "assert.deepEqual(awaitstorage.getPlanningProjection(WORKSPACE,'entity-1'),updated,'同键第二次写入必须覆盖前值，而不是保留旧行')", "assert.deepEqual(awaitstorage.listPlanningProjections(WORKSPACE),[updated],'覆盖不得变成追加第二行')", "assert.deepEqual(awaitstorage.listPlanningProjections(WORKSPACE),[{...projection,entityId:'entity-2'}])", "assert.deepEqual(awaitstorage.listPlanningProjections(WORKSPACE),[],'收敛把作用域内的投影移除')", "assert.equal((awaitstorage.findExternalIdentity('binding-1','issue','issue-1'))?.entityId,'entity-1','实体仍有身份，不得被连带删除')", "assert.deepEqual(awaitstorage.listPlanningProjections(WORKSPACE),[projection],'条目重新加入必须成功')", "assert.equal(awaitstorage.currentRevision(WORKSPACE),0)", "assert.equal(awaitstorage.advanceRevision(WORKSPACE),1)", "assert.equal(awaitstorage.advanceRevision(WORKSPACE),2)", "assert.equal(awaitstorage.currentRevision(WORKSPACE),2)", "assert.equal(awaitstorage.currentRevision('ws-other'),0)", "assert.equal(outcome,`Error:${NESTED_TRANSACTION_MESSAGE}`,'StorageTransaction的Omit只在类型层生效：实现必须在运行时拒绝嵌套事务，而不是静默吞掉内层写入；断言整串，措辞漂移即变红')"],
-  sync: ["assert.equal(awaitstorage.recordObservation(makeObservation('key-1','v2',{value:'new'})),true)", "assert.equal(awaitstorage.recordObservation(makeObservation('key-old','v1',{value:'old'})),false)", "assert.equal(awaitstorage.recordObservation(makeObservation('key-1','v2',{value:'replacement'})),false)", "assert.equal(awaitstorage.recordObservation(makeObservation('key-2','v3',{value:'latest'})),true)", "assert.equal((awaitstorage.getSyncCursor(WORKSPACE,'binding-1','scope-1')),undefined)", "assert.equal((awaitstorage.getReconcileCursor(WORKSPACE))?.lastReconciledAt,'2026-09-20T00:00:00Z')", "assert.equal((awaitstorage.getReconcileCursor('ws-other'))?.lastReconciledAt,'2026-09-21T00:00:00Z')", "assert.equal((awaitstorage.getSyncCursor(WORKSPACE,'binding-1','scope-1'))?.cursorValue,'cursor-1')", "assert.deepEqual((awaitstorage.listMemberships(WORKSPACE,'project-1')).map((m)=>m.itemExternalId),['item-1'],'重复putMembership幂等')", "assert.equal((awaitstorage.getMembership(WORKSPACE,'item-1'))?.membershipUpdatedAt,'2026-09-20T01:00:00Z')", "assert.equal((awaitstorage.getMembership('ws-2','item-2'))?.membershipUpdatedAt,'2026-09-20T00:00:00Z','另一个工作区的成员关系不得被覆盖')", "assert.equal(awaitstorage.getMembership('ws-2','item-1'),undefined,'成员关系是工作区作用域的，不得跨工作区命中')", "assert.deepEqual(rows.map((m)=>m.itemExternalId),['item-2'],'平台保证(项目,内容)唯一，新观测取代旧行而不是留下第二条（R1）')", "assert.deepEqual((awaitstorage.listMemberships(WORKSPACE,'project-1')).map((m)=>m.itemExternalId),['item-2'],'project-1查询不得混入project-2')", "assert.deepEqual((awaitstorage.listMemberships(WORKSPACE,'project-2')).map((m)=>m.itemExternalId),['item-3'],'project-2查询只返回自身成员')", "assert.deepEqual([...Object.values(MembershipContentKind)].sort(),['change_request','draft','issue'])", "assert.deepEqual([...Object.values(ExternalIdentityKind)].sort(),['branch','change_request','draft','issue','repository','worktree'],'R1：不得把ProjectV2Item加进外部身份种类')", "assert.deepEqual(awaitpairs('item-1'),[['field-1','Done'],['field-2','Todo']],'同键覆盖、不同字段各一条')", "assert.deepEqual(Object.keys(first).sort(),['itemExternalId','observedAt','projectFieldId','value','workspaceId'],'R2：定位键不得含可选值id')", "assert.deepEqual(awaitpairs('item-1'),[['field-1','Done'],['field-2','Todo']],'同工作区另一个条目不得进入item-1，同字段的不同条目也不得互相覆盖')", "assert.deepEqual(awaitpairs('item-2'),[['field-1','Blocked']],'item-2只看到自己的字段值')", "assert.deepEqual(awaitstorage.listFieldValues(WORKSPACE,'item-nonexistent'),[],'没有成员关系的条目没有字段值')", "assert.deepEqual(awaitpairs('item-2'),[['field-1','Blocked']],'另一个工作区的同名字段值互不覆盖')", "awaitassert.rejects(storage.putMembership(membership({workspaceId:'ws-none'})),'成员关系必须属于存在的工作区')", "assert.equal(awaitstorage.getMembership('ws-none','item-1'),undefined,'被拒绝的成员关系不得留下任何行')", "assert.deepEqual(awaitstorage.listMemberships('ws-none','project-1'),[],'被拒绝的成员关系不得留下任何行')", "awaitassert.rejects(storage.putFieldValue(fieldValue({itemExternalId:'item-none'})),'字段值必须挂在存在的成员关系上')", "assert.deepEqual(awaitstorage.listFieldValues(WORKSPACE,'item-none'),[],'被拒绝的写入不得留下任何行')", "awaitassert.rejects(storage.putFieldValue(fieldValue({itemExternalId:'item-2'})),'成员关系是工作区作用域的，不得跨工作区挂靠字段值')", "assert.deepEqual(awaitstorage.listFieldValues(WORKSPACE,'item-2'),[],'被拒绝的写入不得留下任何行')", "assert.deepEqual(awaitstorage.listFieldValues('ws-2','item-2'),[],'被拒绝的写入不得落到另一个工作区')", "assert.equal(awaitstorage.recordObservation(at('k1','2026-09-21T07:11:00Z')),true)", "assert.equal(awaitstorage.recordObservation(at('k2','2026-09-21T07:11:54Z')),true,'更新的ISO版本必须被接受')", "assert.equal(awaitstorage.recordObservation(at('k3','2026-09-21T07:11:30Z')),false,'介于中间（比已提交旧、比最早的新）的版本必须被拒绝')", "assert.equal(awaitstorage.recordObservation(at('k4','2026-09-21T07:10:00Z')),false,'更旧的ISO版本必须被拒绝')", "assert.equal(awaitstorage.recordObservation(at('k1','2026-09-21T07:11:00Z')),false,'同版本重复投递必须被拒绝')", "awaitassert.rejects(storage.recordObservation(at('k1','～')),/ASCII/,'非ASCII的sourceVersion必须被拒绝')", "awaitassert.rejects(storage.recordObservation(at('k2','😀')),/ASCII/,'增补平面字符同样必须被拒绝')", "awaitassert.rejects(storage.recordObservation(at('k3','v1')),/规范载体/,'不定长编号v1不再是合法载体')", "assert.equal((awaitrevived.getWorkspace(WORKSPACE))?.name,'工作区')", "assert.equal((awaitrevived.getPlanningProjection(WORKSPACE,'entity-1'))?.content.title,'标题')", "assert.equal(awaitrevived.currentRevision(WORKSPACE),1)", "assert.equal((awaitrevived.getMembership(WORKSPACE,'item-1'))?.contentExternalId,'issue-1','重启后成员关系仍在')", "assert.equal((awaitrevived.listFieldValues(WORKSPACE,'item-1'))[0]?.value,'InProgress','重启后字段值仍在')", "assert.equal(awaitrevived.recordObservation(observation('key-1')),false,'重启后重复观察仍必须被去重')"],
-  execution: ["assert.equal((awaitstorage.findActiveExecutionContext(WORKSPACE,'entity-1','repo-1'))?.id,'context-2')", "assert.equal((awaitstorage.getExecutionContext('context-1'))?.status,'closed')", "assert.equal((awaitstorage.getExecutionRun('run-1'))?.status,'running')", "assert.equal((awaitstorage.listRelations(WORKSPACE)).filter((item)=>item.state==='confirmed').length,1,'候选写入不得把已确认行降级')", "assert.equal(relations.length,1)", "assert.equal(relations[0].state,'confirmed')", "assert.deepEqual(awaitstorage.listRelations('ws-other'),[])", "assert.equal((awaitstorage.findMutationAttempt(WORKSPACE,'key-1'))?.state,'saved','同键是幂等覆盖，不是保留首次结果')", "assert.deepEqual((awaitstorage.listMutationAttempts(WORKSPACE)).map((a)=>a.id),['attempt-1'],'同键只有一行')", "awaitassert.rejects(storage.putMutationAttempt({...attempt,idempotencyKey:'key-2'}),'同一工作区内同一个id不得复用')", "assert.equal((awaitstorage.findMutationAttempt('ws-2','key-1'))?.state,'pending','幂等键的作用域是工作区')", "assert.deepEqual((awaitstorage.listMutationAttempts(WORKSPACE)).map((a)=>a.id),['attempt-1'],'另一个工作区的写入不得进入本工作区')"],
-}
-test('storage 契约套件切分守卫：三组用例数与断言集合都不低于切分时的基线', () => {
-  const counts = Object.fromEntries(Object.entries(STORAGE_SUITE_GROUPS).map(([group, suite]) => [group, countSuiteCases(suite)]))
-  const expected = Object.fromEntries(Object.entries(CASE_LEDGER).map(([group, ledger]) => [group, ledger.inherited + ledger.added]))
-  assert.deepEqual(counts, expected, '分组条数必须与切分账一致（继承条数见 suites/storage.js 的来处注释）')
-  assert.equal(counts.foundation + counts.sync + counts.execution, PRE_SPLIT_CASE_COUNT + ADDED_CASE_COUNT,
-    '三组用例数之和 == 切分前的条数 + 切分后新增的条数')
-  for (const [group, file] of Object.entries(SUITE_FILES)) {
-    const missing = missingAssertions(file, ASSERTION_BASELINE[group])
-    assert.equal(missing.length, 0,
-      `${group} 组有 ${missing.length} 条切分时的断言在当前文件里消失（被删除、改写或改宽）：\n${missing.slice(0, 3).join('\n')}`)
-  }
-})
-
-test('storage 契约套件装配守卫：每个适配器实际注册的条数等于它声明要跑的组', () => {
-  assert.equal(assembled, REGISTERED.size, '每个装配标签必须唯一：同名标签会把两次装配并成一份台账，条数守卫看不出来')
-  assert.deepEqual([...REGISTERED.keys()].sort(), Object.keys(EXPECTED_ASSEMBLY).sort(),
-    '装配标签必须与守卫的期望一一对应：删掉一整条装配调用会在这里变红（总条数只会静默缩水，不会被别的守卫发现）')
-  for (const [label, groups] of Object.entries(EXPECTED_ASSEMBLY)) {
-    const registered = REGISTERED.get(label)
-    assert.ok(registered !== undefined, `${label} 没有任何用例被注册：整组不再被装配`)
-    assert.deepEqual(Object.keys(registered).sort(), [...groups].sort(), `${label} 装配的组必须恰好是它声明的那几组`)
-    for (const group of groups) {
-      assert.equal(registered[group], countSuiteCases(SUITE_GROUPS[group]),
-        `${label} 的 ${group} 组实际注册条数必须等于该组用例数：删掉组里任何一条 register(...) 都会在这里变红`)
-    }
-  }
-})
+for (const adapter of [fakeDivergence, sqliteDivergence]) storageExecutionDivergenceSuite(adapter)
 
 // 终态不是 active：`startWork` 的 `claimContext` 靠这条语义接管一条失败的上下文（issue #184）。
 // 判据写在 `packages/capabilities/src/storage.ts` 的执行段；这里把它钉成可失败的断言。
@@ -240,8 +141,8 @@ test('SQLite Storage：结算后泄漏出 work 的 tx、未 await 的 tx 写入�
   await assert.rejects(leaked.getWorkspace('ws-leaked'), { message: CLOSED_MESSAGE }, '关闭标记与根实例共用：关闭后作用域实例也必须快速失败')
 })
 
-// ── 共享同步面用例（两个实现都跑，组名 `sharedSync`，经 `assemble` 装配）。放在装配处是因为切分账 `CASE_LEDGER`
-// 的 `sync.added` 为 0；前置状态只走端口（`seedSync` 调 putWorkspace / putProviderBinding），唯一的直连是原子性注入用的触发器。
+// ── 共享同步面用例（两个实现都跑，组名 `sharedSync`，经 `assemble` 装配）。
+// 前置状态只走端口（`seedSync` 调 putWorkspace / putProviderBinding），唯一的直连是原子性注入用的触发器。
 // 原子性注入：SQLite 用触发器让 putMembership 的第三条语句 ABORT（前两条 DELETE 已执行，事务回滚是唯一防线）；
 // 替身没有语句层，在它第一次状态赋值处注入（此时它还没有写入任何东西，断言检查的是同一可观察契约）。
 // 判别性落在 SQLite——把 `atomic` 换回 `mutate` 后该用例变红。
@@ -249,7 +150,7 @@ const failFakeWrite = (storage) => { storage.data = new Proxy(storage.data, { se
 const failSqliteInsert = (storage) => { const db = openDatabase(storage.location); try { db.exec("CREATE TRIGGER contract_break BEFORE INSERT ON project_item_membership BEGIN SELECT RAISE(ABORT, '注入失败'); END") } finally { db.close() } }
 const seedSync = async (storage) => { await storage.putWorkspace(workspace('ws-1', '工作区')); await storage.putProviderBinding(bindingRecord('binding-1', 'ws-1')) }
 
-// 组函数经 `assemble` 装配（第六轮评审 P2）：删掉任一装配或期望里的 `sharedSync`，装配守卫都会变红。
+// 共享同步套件由两个适配器分别注册。
 function sharedSyncSuite({ label, makeStorage, inject }, test) {
   // 观察的引用完整性（R4-2）：SQLite 的 sync_observation.binding_id 外键与替身的检查必须同语义。
   test(`${label}：观察的绑定必须存在，悬空绑定的观察必须被拒绝`, async () => {

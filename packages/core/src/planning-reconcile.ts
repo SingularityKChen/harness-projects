@@ -1,5 +1,6 @@
 import type { BootstrapResult } from './bootstrap.ts'
 import type { CoreApi, CoreDiagnostics } from './context.ts'
+import { reportSyncRoundFailure } from './diagnostics.ts'
 
 export interface PlanningReconcilerTimers {
   setInterval(callback: () => void, intervalMs: number): unknown
@@ -61,18 +62,9 @@ export function createPlanningReconciler(
     inFlight = task
     return task
   }
-  const reportScheduledFailure = (error: unknown): void => {
-    try {
-      const pending: unknown = options.diagnostics?.syncRoundFailed?.(error)
-      // 与 Core 的 `reportSyncRoundFailure` 同法：用 Promise 构造器吸收任何 thenable 的拒绝与读取 `then` 的同步抛出。
-      if (pending !== undefined) new Promise((resolve) => { resolve(pending) }).catch(() => undefined)
-    } catch {
-      // 诊断出口自己的失败不改变调度：下一个 tick 照常读取。
-    }
-  }
   const tick = (generation: number): void => {
     if (disposed || handle === undefined || generation !== timerGeneration) return
-    void triggerNow().catch(reportScheduledFailure)
+    void triggerNow().catch((error) => reportSyncRoundFailure(options, error))
   }
 
   return {

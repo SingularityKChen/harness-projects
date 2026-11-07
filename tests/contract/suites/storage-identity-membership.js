@@ -1,8 +1,6 @@
 /**
- * 身份与成员关系面：L2（#27）的判别性断言（每条配过一次注入实验）。本文件按端口面独立成文、L4 及以上原样继承；
- * 两个适配器（内存替身与 SQLite）现在都注册两组（地基组在 L4、同步组在 L5）。两个 suite 接受 `register` 参数
- * （默认 `test`），因此可以走 `storage-contract.test.js` 的 `assemble` 装配台账——直接注册会绕过"实际注册条数"
- * 守卫，删掉某一组装配时套件静默少跑（第四轮评审 P2 的缺陷形态）。
+ * 身份与成员关系面：绑定、身份、投影与规划成员的共享端口契约。
+ * 内存替身与 SQLite 均由 `storage-contract.test.js` 注册地基与同步两组。
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'

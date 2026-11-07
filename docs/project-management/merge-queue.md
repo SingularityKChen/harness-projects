@@ -755,3 +755,7 @@ gh issue reopen 4 -c "被 #108 的关闭引用自动关闭；revise 清单（R1�
 每层只以当前 head 的独立批准、真实 CI、全部线程和 issue 关联进入下一门；原生栈 `merge-async` 明确指定 `merge_method=rebase`。用户未授权规划 Status 或依赖变更，实际安装件 UAT/R1 不由本批合并推导。
 
 2026-10-30 本批回读：#464已rebase合并为`52b0900906b001129464e765e8849ed84ad068c5`，#436 CLOSED；后层仍按各自当前head门，不继承旧批准。
+
+## 2026-11-07 · PR #571、#576–#579 精简批次
+
+直接条件授权、矩阵和组合证据见[本轮记录](../review/2026-11-07-pr571-pr579-mmp-review.md)。五条独立 main 分支依次 #571/#570 → #576/#572 → #577/#573 → #578/#575 → #579/#574，顺序仅用于真实 main 更新与组合验证，不创建规划依赖。每条最终 push 后重锁 head/base、PR Fast Gate、全部 threads、issue 关联与批准，再以精确 head 执行 rebase merge；下一条 fetch 后保留全部索引。原 head 保存在 `refs/backup/pr<N>-before-mmp-review-20261107`。Planning Status、父项、安装 UAT 和 R1 均不因合并自动接受。
