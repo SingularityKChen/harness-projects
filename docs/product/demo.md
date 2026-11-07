@@ -6,7 +6,9 @@
 
 安装指南记录了 2026 年 10 月 26 日在官方 Harness `0.2.0-rc.2` Web profile 中从构建产物安装、打开 Projects 入口并卸载的过程。该次操作没有配置模型密钥，也没有发送 prompt。另一次 2026 年 10 月 27 日的接线验证使用临时 SQLite 数据库、真实本地 Git 仓库和会话录制响应；没有运行真实模型，也没有重新完成 Harness 内的完整走查。2026 年 11 月 2 日合入 main 的详情 PR 创建与恢复实现已由源码和对应交付记录核对；这不是已安装产品验收，也没有新增真实 GitHub PR 创建或人工走查证据。
 
-完整 sandbox 走查尚未记录，见 [issue #143](https://github.com/SingularityKChen/harness-projects/issues/143)。[#236](https://github.com/SingularityKChen/harness-projects/issues/236) 仍开放；由非作者只依本指南在干净 profile 完成的独立安装尚未执行。已有安装记录和本次指南修订都不满足该项验收。Desktop 安装、真实模型会话和完整用户路径的端到端验收也未验证。下表中的目标观察是人工走查时要核对的内容，不表示每步已经通过。测试、录制会话和 Web 安装不能替代人工走查或 R1 发布裁决。
+2026年11月4日至6日，人类在Desktop `0.2.1-rc.5` 上完成了首屏、列表/详情、设置往返、光暗/窄面板、键盘及提交前表单等部分检查；12个安装文件与产品源码 `f0883948f78a9bf0a28290e21c7b1c3842b54cf5` 的交付包一致。11月6日，独立接收者仅按安装指南在固定Web `0.2.0-rc.2` 干净profile中完成摘要、安装、Documents/native workspace隔离和空入口检查，并明确接受四项结果。该Web安装不替代Desktop或模型执行。精确身份、人类接受来源、旧证据复用裁决和逐步缺口统一记录在[已安装Core验收](installed-core-acceptance.md)。
+
+2026年11月7日，人类已接受源码 `64b58137` / Desktop `0.2.2-rc.1` 的本轮Demo走查、界面及最后离线/恢复检查，#143/#449/#427/#124/#72已关闭并Done。一次原生模型任务完成，实际Draft PR #555及同源CI已核对；插件run身份恢复缺陷仍由 #554跟进。精确构建、逐步结果、明确复用的Web人工备用/尺寸/截图证据及限制见[安装态验收记录](installed-core-acceptance.md)。#236独立干净Web安装已接受，其指南交付由 #552完成；这些接受均不代替R1发布裁决，也不自动覆盖后续构建。下表保留可重复的走查步骤，目标观察本身不是通过证据。
 
 ## 准备
 
@@ -14,7 +16,9 @@
 
 Harness 执行需要显式启用。界面显示“Harness 执行绑定已启用”只确认配置已写入，不代表会话服务、模型凭据或人工备用密钥可用。安装指南说明了稳定的人工 issuer key，以及如何测试强制会话启动失败。不要在本记录中填写凭据、会话 URL 或仓库访问令牌。
 
-演示版读取规划状态，规划字段请直接在 GitHub 修改；它不提供规划写入或通用 Board/Kanban 视图。开始工作必须由用户显式操作，打开工作项不会自动启动执行。工作项详情中已有专用的 **创建 PR** 操作：从当前执行上下文填写目标分支、标题和正文后显式提交。GitHub 或 Harness session 中创建 PR 仍是第 9 步允许的替代路径。只读规划边界、Board/Kanban 范围和 PR 创建父项分别由 [#71](https://github.com/SingularityKChen/harness-projects/issues/71)、[#145](https://github.com/SingularityKChen/harness-projects/issues/145) 和 [#235](https://github.com/SingularityKChen/harness-projects/issues/235) 跟踪；#235 仍开放不代表详情入口缺失。
+演示版读取规划状态，规划字段请直接在 GitHub 修改；它不提供规划写入或通用 Board/Kanban 视图。开始工作必须由用户显式操作，打开工作项不会自动启动执行。工作项详情中已有专用的 **创建 PR** 操作：从当前执行上下文填写目标分支、标题和正文后显式提交。GitHub 或 Harness session 中创建 PR 仍是第 9 步允许的替代路径。只读规划边界、Board/Kanban 范围和 PR 创建父项分别由 [#71](https://github.com/SingularityKChen/harness-projects/issues/71)、[#145](https://github.com/SingularityKChen/harness-projects/issues/145) 和 [#235](https://github.com/SingularityKChen/harness-projects/issues/235) 跟踪；#235已按原创建/对账条件验收关闭，权限/未知结果仍按第9步处理。
+
+当前已验候选 `64b58137` 已有显式任务输入与Draft选择。人类提交的 #545精确任务到达原session并完成，随后在产品内创建 #555 Draft；不把工程测试替代该安装态记录。原 `f0883948` 候选仅发送分支启动标记、没有Draft输入，是历史限制：#547/#548已由 #549/#550交付；#546保留原父单的证据核销。任何新任务仍须核对授权范围，unknown结果先读回原操作，不能重复启动。
 
 ## 走查步骤
 
@@ -30,7 +34,7 @@ Harness 执行需要显式启用。界面显示“Harness 执行绑定已启用�
 | 6 | 点击 **开始工作** 打开表单，选择已绑定到此工作区的仓库；填写本次 **执行任务**（保留任务原文；工作项正文不会自动成为指令），可选填写分支名，然后点击 **提交开始工作**。 | 工作只在提交后开始；所选仓库对该工作区可用。表单显示“正在提交”，随后显示确认、失败、冲突或结果未知等状态。 | 是否出现开始工作入口、所选仓库、可选分支、提交按钮结果及拒绝/不可用提示。结果为 `pending` 或 `unknown` 且 **读回并恢复** 按钮可用时，保持原仓库、分支和任务，用该按钮按原 intent 读取现有执行上下文并观察返回状态。若按钮因连接或所选仓库写路由/权限不可用而禁用，记录当前可见的已确认上下文与状态提示；通过工作区 **连接设置** 恢复或重新核对同一仓库的访问后，重新打开此工作项、选择原仓库、分支并填写原任务，再继续恢复。不要点击禁用按钮、改选目标或修改任务绕过原 intent。只有无运行、无未决外部效果且原任务/连接不变的已过期认领可以安全续跑；已有运行会明确显示本次任务未发送。已交付的 #204/#421 修复分别补齐 pending intent 记录与接管/丢失回执下的执行唯一性，但不把未知状态说成成功。 |
 | 7 | 提交开始工作后，等待本地 Git 操作完成。 | 分支和真实工作树对应所选工作项；不会覆盖已有的脏工作树。 | 分支/工作树是否创建成功、错误信息，以及原有仓库内容是否保留。 |
 | 8 | 查看已配置的执行方式。 | 显示 Harness session 或诚实的人工备用状态；若会话明确无法启动，执行上下文和工作树仍保留。 | 会话状态、备用状态及上下文/工作树是否保留。若 session 已接纳 prompt 但结果未知，使用现有恢复路径先读回；不能仅凭 UI 状态推断模型已经执行。 |
-| 9 | 在当前作用域没有原 PR 请求时，打开工作项详情中的 **创建 PR** 表单，填写目标分支、标题和正文；需要 Draft 时勾选 **创建为草稿**（默认不勾选），再显式提交；也可在 GitHub 或 Harness session 中创建 sandbox PR，再回到插件。 | 新请求前会读取当前作用域的原操作；只有确认不存在原操作时才显示可提交表单。若读回发现待决或已保存的原操作，显示原请求的草稿/普通类型摘要和 **读回原操作**；页面重载后无需重新输入正文，恢复不会再次提交创建请求。作用域失效或读取权限不可用时阻止新创建。PR 确认与谱系刷新状态分别显示；首次未知结果须读回唯一原 PR 且草稿事实相符，不能修改选择另起创建。 | 记录创建入口、分支、表单结果、原请求摘要和恢复结果。原操作读取失败时可用 **重新读取** 重试；权限不足时使用界面提供的 **打开连接设置**；作用域失效时先检查连接和执行上下文，不要创建新请求绕过保护。GitHub/session 的替代路径仍可用，其结果需按实际情况对账。 |
+| 9 | 在当前作用域没有原 PR 请求时，打开工作项详情中的 **创建 PR** 表单，填写目标分支、标题和正文；对符合条件的来源Issue，关系默认是“引用”，也可选“无关系”；“合并时关闭”仅在仓库已验证默认分支时可选。需要 Draft 时勾选 **创建为草稿**（默认不勾选），再显式提交；也可在 GitHub 或 Harness session 中创建 sandbox PR，再回到插件。该来源关系选择由 #565 交付到当前源码，尚未在本轮新安装包中验收；父项 #556 仍开放。 | 新请求前会读取当前作用域的原操作；只有确认不存在原操作时才显示可提交表单。若读回发现待决或已保存的原操作，显示原请求的草稿/普通类型摘要和 **读回原操作**；页面重载后无需重新输入正文，恢复不会再次提交创建请求。作用域失效或读取权限不可用时阻止新创建。PR 确认与谱系刷新状态分别显示；首次未知结果须读回唯一原 PR 且草稿事实相符，不能修改选择另起创建。 | 记录创建入口、所选来源Issue关系、分支、表单结果、原请求摘要和恢复结果。原操作读取失败时可用 **重新读取** 重试；权限不足时使用界面提供的 **打开连接设置**；作用域失效时先检查连接和执行上下文，不要创建新请求绕过保护。GitHub/session 的替代路径仍可用，其结果需按实际情况对账。 |
 | 10 | 在详情抽屉查看 PR 的 Actions run 和 checks。 | 显示实际运行和检查状态；未知、不可用、陈旧或失败不能显示成通过。 | 实际观察到的 checks，以及数据是否陈旧、缺失、不可用或未知。 |
 | 11 | 在详情抽屉查看谱系。 | 可见链路连接工作项、执行上下文、分支、PR 和可读取的 CI 事实；缺失关系明确显示为缺口。 | 逐一记录存在的关联，以及缺失或不确定的关联；缺口不等于成功。 |
 | 12 | 回到 GitHub 重新打开规划条目并比较规划字段。 | GitHub 仍是规划事实源；开始工作、CI 和 PR 活动没有改写规划状态。 | 记录变更前后值和任何意外写入；规划值发生变化属于阻塞人工走查的问题。 |
@@ -50,24 +54,36 @@ Harness 执行需要显式启用。界面显示“Harness 执行绑定已启用�
 
 每项都记录宿主和插件版本、实际状态、证据位置，以及失败属于平台、权限还是环境。强制失败开关只影响后续新的 Start Work；它不会模拟 session 接纳 prompt 后回执丢失的情况。结果未知不代表可转人工备用。
 
+## 2026-11-07 源码推进与安装边界
+
+当前源码基线为main `50abd7d779f6ec332401234479e3c10cc8b96251`。#561来源限定编号/搜索、#564原生引用与关闭关联观察、#565创建PR时选择来源Issue关系、#559新执行身份持久化和 #560设置反馈/原位恢复均已合并；这是源码交付，尚无本轮对应新包安装或真实模型重跑。旧安装态证据继续绑定 `64b58137` / `04af317e`，不能自动转移到该main。
+
+#235已按原条件验收关闭/Done；#553已随 #560工程交付关闭，从开放owner清单移除，保留旧候选的真实pending观察。#545按原条件允许的诚实失败分类核销固定测试：一次真实任务、唯一产物、Draft #555与人类检查成立，原run仍unknown，由开放 #554跟进。#554/#304/#459/#73不随修复合并或测试单关闭自动获准；#555继续Draft/unmerged，禁止重复启动原测试。
+
 ## 已知限制
 
-以下 issue 状态和 milestone 于 2026 年 11 月 2 日回读。#223 和 #283 属于 M2.1；列出它们是因为会影响演示数据完整性或恢复，不因其阶段归属从清单移除。本页记录实际 issue 归属，不修改 milestone；发布裁决前应重新读取状态。表中的步骤编号表示受影响路径；跨多步或启动期限制以“启动/全程”标明。
+以下状态与milestone按2026年11月7日的人类授权补齐并回读。M4.1承接恢复与生命周期问题，M5承接完整界面能力；这是milestone归属，未承诺具体iteration或日期。#223/#283从M2.1归入M4.1后仍保留原MMP-Core要求，所有开放正确性问题仍由 #459/#73判断实际发布风险。#236原“每项已知问题须链接M4.1或以后开放Issue”的条件保留；归属与清单已同步，指南仍须完成 #552的评审和合并。
 
-截至该日，[#204](https://github.com/SingularityKChen/harness-projects/issues/204)（pending intent 记录）由 [#467](https://github.com/SingularityKChen/harness-projects/pull/467) 关闭，[#421](https://github.com/SingularityKChen/harness-projects/issues/421)（接管与丢失回执下的 Start Work 执行唯一性）由 [#492](https://github.com/SingularityKChen/harness-projects/pull/492) 关闭；这些机制不消除所有 Provider/session 的未知结果，也不把待确认结果变成成功。PR 创建方面，[#437](https://github.com/SingularityKChen/harness-projects/issues/437) 与 [#494](https://github.com/SingularityKChen/harness-projects/issues/494) 分别由 [#491](https://github.com/SingularityKChen/harness-projects/pull/491) 与 [#495](https://github.com/SingularityKChen/harness-projects/pull/495) 关闭，详情创建入口及持久原操作读取/恢复已在当前源码中接线。[#235](https://github.com/SingularityKChen/harness-projects/issues/235) 仍开放；issue 当前 milestone 为 M4.1，其正文的当前发布处置仍写 TargetRelease: MMP-Core。父项保持开放，不等于详情入口未实现，也不表示本指南已完成其余父项验收。
+已交付的 #204/#421及 #437/#494分别保留在各自关闭Issue和验收记录中；已知限制只列当前尚需跟进的行为。步骤编号表示受影响路径，跨多步或启动期限制以“启动/全程”标明。
 
-| 限制 | 受影响步骤 | 用户影响与当前建议 | 开放 owner |
+| 已知限制 | 步骤 | 当前处置 | 开放owner及milestone |
 |---|---|---|---|
-| Draft 转为 Issue 后的身份提升尚不完整。后续同步可能创建新的工作项，使原执行上下文与转换后的 Issue 脱离。如果需要原上下文继续关联，请勿转换演示用 Draft。 | 3–5 | 记录 Draft、Issue ID 以及是否出现第二个工作项。这是已知的数据谱系限制，不表示支持规划写入。 | [#283，M2.1](https://github.com/SingularityKChen/harness-projects/issues/283) |
-| Provider 离线和权限撤销后的跨域降级行为尚不完整。已建立连接后 Provider 离线，与建立连接时的失败分类是两个问题。 | 2–8 | 保留最后确认值，并记录受影响的 Provider、能力和恢复提示。不要把凭据无效、缺少权限或项目不可见视为同一种情况。 | [#144，M4.1](https://github.com/SingularityKChen/harness-projects/issues/144)；[#278，M4.1](https://github.com/SingularityKChen/harness-projects/issues/278) |
-| 不同预发布数据库代际之间没有自动迁移兼容承诺。当前 storage admission 会在业务写入前拒绝不兼容代际或 schema，并返回 `back_up_and_rebuild`；不会静默删除旧库。 | 启动、全程及重启观察 | 数据库位于各 profile 的插件数据目录，不是 Harness native workspace 的 Documents 目录。所支持的 Web profile 使用 `$DSH_HOME/profiles/web/harness-projects/workspace.sqlite`；自定义 profile 的实际位置以[安装指南](demo-install.md#当前数据根与旧库保留)中的宿主权威目录为准。停止所有使用实际数据根的 Harness 进程。将该 profile 的整个 `harness-projects` 目录复制到尚不存在的备份目标；对比源与备份的文件清单及每个文件的 SHA-256，确认一致后仍保留原目录。旧版共享数据目录也保持不动。重建时由操作者在新 profile / 新数据位置决定如何开始；不要删除或覆盖原库，不要把不兼容数据库复制进新位置、修改代际标记或执行修复 SQL。重建不会自动恢复旧执行上下文；仓库、分支和工作树须一并保留。回滚须使用匹配旧 artifact 的原库副本。 | [#223，M2.1](https://github.com/SingularityKChen/harness-projects/issues/223) |
-| PR 创建父项仍开放；不能据此判断详情入口是否已实现，也不能将子项关闭视为父项所有验收完成。 | 9–11 | 可在详情中使用 **创建 PR** 和 **读回原操作**；读回失败、权限不足或作用域失效时分别按第 9 步处理并记录结果。GitHub/Harness session 创建仍是允许的替代路径。 | [#235，M4.1](https://github.com/SingularityKChen/harness-projects/issues/235)；正文当前发布处置为 MMP-Core |
+| Draft转Issue后可能新建WorkItem，旧执行关联脱离。 | 3、6 | 演示中不要在已执行条目上转换；必须转换时先保留来源身份及执行证据。 | [#283，M4.1](https://github.com/SingularityKChen/harness-projects/issues/283) |
+| Provider离线/拒绝后的完整跨域降级，以及连接时的失败分类仍有未收口范围。 | 2–8 | 保留最后确认值和实际错误。此次人类离线批次通过不代表所有Provider/拒绝路径均完成。 | [#144，M4.1](https://github.com/SingularityKChen/harness-projects/issues/144)；[#278，M4.1](https://github.com/SingularityKChen/harness-projects/issues/278) |
+| 当前单基线及旧库拒绝父项仍未完整验收；不支持跨实验代际自动升级。 | 启动/全程 | 数据库位于profile的插件数据目录，不是native workspace的Documents目录。停止使用该数据根的全部Harness进程，按[安装指南](demo-install.md#当前数据根与旧库保留)备份整个 `harness-projects` 数据目录，核对文件清单和每个文件的SHA-256后保留原目录。由操作者在新profile/新数据位置重建；不得删除或覆盖原库、修改代际标记或执行修复SQL。旧上下文不会自动恢复，仓库/分支/工作树一并保留；回滚使用匹配旧artifact的原库副本。 | [#223，M4.1](https://github.com/SingularityKChen/harness-projects/issues/223) |
+| 已验旧候选的编号展示/搜索仍有限制；完整多来源编号由父项跟进。 | 4–5 | #561已交付来源限定编号与搜索，尚无本轮新包安装接受；旧包可用标题关键词，标题不作为跨来源唯一身份。 | [#537，M5](https://github.com/SingularityKChen/harness-projects/issues/537) |
+| 来源语义引用如 `#328` 尚未自动链接。 | 5 | 使用完整显式链接；链接解析、标题/状态增强及代码预览卡片分开验收。 | [#539，M5](https://github.com/SingularityKChen/harness-projects/issues/539) |
+| 原生parent/children和blocking/blocked-by尚无只读展示。 | 5 | 到来源平台核对；缺少展示不代表没有依赖。 | [#543，M5](https://github.com/SingularityKChen/harness-projects/issues/543) |
+| 来源Issue→PR观察没有持久的最后完整快照。 | 5、9–11及离线 | 在线/本轮离线可读不证明Host重启后离线能重建关联；持久化由独立owner交付。引用与关闭关系须保留各自类型、完整性和观察时间。 | [#544，M4.1](https://github.com/SingularityKChen/harness-projects/issues/544) |
+| 原生任务已完成，但旧记录丢失run身份并保持unknown。 | 6–11 | #559已合并新启动身份持久化；不自动回填旧记录。保留原请求，按受支持路径读回；不能从文件产出推定恢复成功或重发模型。 | [#554，M4.1](https://github.com/SingularityKChen/harness-projects/issues/554) |
+| 创建PR的来源Issue关系选择尚未完成人类安装验收；父项 #556 仍开放。 | 9–11 | #565已将默认“仅引用”、可选“合并关闭”的选择交付到当前源码；未在本轮新安装包中验收。#555的Refs不关闭Issue，不能把全部Refs改为Closes。 | [#556，M4.1](https://github.com/SingularityKChen/harness-projects/issues/556) |
+| 创建PR不能选择负责人。 | 9 | GitHub作者由认证账号确定；负责人可留空，与Issue关联无关。 | [#557，M5](https://github.com/SingularityKChen/harness-projects/issues/557) |
 
-[#420](https://github.com/SingularityKChen/harness-projects/issues/420) 的持久 owner 围栏已随 #455 交付并关闭，旧调用不能覆盖接管后的本地结算；#421 现已关闭，详见上面的状态记录。关闭这些工程问题不替代重新连接时对陈旧状态的人工核对。
-
-[#218](https://github.com/SingularityKChen/harness-projects/issues/218) 已关闭，因此不列为开放缺陷；该修复不能代替人工核对重新连接时的陈旧状态。规划写入和通用 Board/Kanban 不在演示版范围内，分别由 #71 和 #145 跟踪。
+任务列表额外圆点与正文HTML注释在 `64b58137` 已由人类确认消失；最终main `04af317e`包的12个安装文件与SHA-256 `32e0dd1b…`一致，新增parser影响范围也由人类三项补验通过，#538/#542均已completed关闭/Done，不再列为开放缺陷。完整摘要与版本边界见[安装态记录](installed-core-acceptance.md#2026-11-07-最终markdown安装补验与r1分项)。原候选任务输入缺口的父单[#546，M4.1](https://github.com/SingularityKChen/harness-projects/issues/546)已补录 #547/#549和本轮真实任务证据，不再把旧候选限制写成当前缺失。#218已关闭，不列为开放缺陷。规划写入和通用Board/Kanban仍按 #71/#145的独立范围处理。
 
 ## 走查记录
+
+本节保留空白模板，实际已接受/未执行项以[本轮验收记录](installed-core-acceptance.md)为准，不能从模板中的“未执行”反推已接受项失效。
 
 将下表复制到人工走查报告中。操作者执行前，各项保持 `未执行`。每个失败分别记录两类判断：原因是平台、权限还是环境；严重度/处置是基本缺陷（阻塞 Demo）、非基本缺陷（登记到 M4.1）还是环境问题。一个失败可以同时记录原因和严重度，不要用原因替代严重度。填写对应的跟踪 issue；尚无 issue 时标记待人类决定，不要自行移动 milestone。将走查发现和对 M5 backlog 的影响记录到 [#143](https://github.com/SingularityKChen/harness-projects/issues/143)，在拆分 M5 工作前由人类处理。只链接脱敏后的证据；不要包含 Token、凭据值、会话 URL 或本机绝对路径。
 
@@ -111,4 +127,4 @@ Harness 执行需要显式启用。界面显示“Harness 执行绑定已启用�
 | 规划字段未改变 | 未执行 | 未执行 | 未执行 | 未执行 | 未执行 |
 | 无未确认 Saved / 凭据仍为引用 / 用户仓库得到保留 | 未执行 | 未执行 | 未执行 | 未执行 | 未执行 |
 
-独立干净 profile 安装和完整人工走查是两条不同记录。填写模板需要操作者提供实际结果；本模板和历史 Web 安装记录都不算完成其中任何一项。
+独立干净 profile 安装和完整人工走查是两条不同记录。填写模板需要操作者提供实际结果；本模板本身不算完成记录；本轮两项的实际接受见安装态验收记录，历史Web工程安装不能替代人类独立安装。

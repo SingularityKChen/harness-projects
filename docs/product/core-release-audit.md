@@ -4,13 +4,94 @@
 > 审计检出：`docs/core-release-evidence`，初始 head `a0c84c22a1c310c056f92c2f4baecc3d9e931e2b`；其相对产品基线只增加计划。
 > 工程子项 #533，Draft PR #536；Refs #459、#73、#413。执行依据：[ExecPlan](../exec-plan/completed/2026-11-04-core-release-evidence.md)。
 
-本页保留`f0883948`的历史证据快照；后续Host支持集拒绝见本页“后续准入修复增量（2026-11-04）”。
+本页保留`f0883948`历史快照；当前候选与人类分项裁决见“2026-11-07当前安装候选核对增量”，后续Host支持集拒绝另保留原增量。
 
 本页补充[首发范围](core-release-scope.md)已有规范，记录当前实现的可达性、反例与证据缺口，不另立发布标准。六组本地相关测试共 **1022 个通过、0 失败、0 跳过**，仍复现了持久非默认策略自动刷新覆盖状态；测试通过不能替代 #459 或 R1 的人类判断。
 
 当前最需要保留的反例是 #273：合法当前库的 `host_authoritative`、`manual_only` 被生产 Host 接纳，自动刷新将本地 `done` 覆盖为 Provider 的 `todo`。这是原快照的 P1 候选，需人类归级与有界 remediation；本页没有接受、豁免或修复它。**Superseded by 后续准入修复增量（2026-11-04）**：#541已阻断Core Host接纳不支持policy的这条路径，通用Core语义仍由#273拥有。#202 的内部切源残留、#309 的特殊配置键损失、#341 的根变更恢复死路也仍可复现，适用条件分别列明。
 
 以下“通过”只指表内具名实验的局部结果。实际 GitHub 写入、真实模型、当前 artifact 安装、人类 UAT、staffing/review/UAT availability 均未由本次审计执行。#451/#532 的并行未合并增量不属于上述源码基线；不能合并若干 Ready PR 的描述冒充已安装 RC。
+
+## 2026-11-07 当前安装候选核对增量
+
+本节覆盖实际安装main `04af317ec3bda5084ab1e44ea5e3559fd4622079`，不是重写上方 `f0883948` 历史实验。安装包SHA-256为 `32e0dd1bb5574fb7828278c2817d68aa01f269624b14c85ccb33534e32387b58`、302917 bytes，12个已安装文件逐字节匹配。相对已完整走查的 `64b58137`，`apps`/`packages`产品源码只改变 `packages/ui/src/safe-markdown.ts`；归档只改变client bundle，Host bundle、manifest/peers、七份迁移、patch和LICENSE未变。原Demo/离线/PR/CI接受仍记在原source，当前候选的Markdown影响范围已由人类三项补验通过，不虚称重新执行了完整Demo或模型。
+
+规范对齐PR #502、历史边界证据PR #536、policy拒绝PR #541、真实回滚演练PR #535及创建PR来源关系选择PR #565均已合并到源码。它们分别证明自己的子闭环，不能把当前 #459自动关闭；#565源码交付不代表新安装接受，父项 #556仍开放。本轮更新和人类记录由文档PR #552交付，当前改动还须评审/合并。
+
+### 当前入口和有判别力检查
+
+动态重算仍为23入口（22 unary、1 stream），与下方历史声明清单同名；增加的显式task和Draft参数由当前严格parser处理。当前源码中未知操作/额外字段、第二Planning源、写规划状态、取消及任意catalog注册等边界仍按各自guard拒绝，不能仅凭无按钮判定不可达。当前的支持集仍限定provider-authoritative Host和通过schema/generation准入的数据库；合法但含旧源残留的状态不能仅因schema合法而当作语义安全。
+
+在当前源码根运行以下8文件，324通过、0失败/取消/跳过：
+
+```sh
+pnpm test:file tests/contract/harness-host-operations.test.js tests/contract/harness-host-remote-adapter.test.js tests/integration/harness-plugin-policy-admission.test.js tests/integration/storage-baseline-admission.test.js tests/integration/harness-plugin-runtime-access.test.js tests/integration/planning-membership-reconcile.test.js tests/integration/pull-request-identity-convergence.test.js tests/e2e/status-policy.test.js
+```
+
+owner/唯一执行/外部intent/恢复/注册/Storage的独立7文件为591通过、0失败/取消/跳过，完整命令见[控制计划](../exec-plan/completed/2026-11-04-installed-delivery-acceptance.md) Batch 5。另有最终包的62项Markdown/安装件检查；这些组各有原始日志，均为各自限定范围，不合称完整全仓verify。
+
+### 当前风险处置与未决项
+
+本轮核对原九项和新验收发现，保留其实际触发边界。归属、Post-Core及已登记均不是风险接受；未取得人类例外，不自行设置例外到期日或消除原修复义务。未完成全量开放正确性条目的逐项归级，#459该条件仍保留。
+
+| owner | 当前证据与边界 | 本轮处置 |
+|---|---|---|
+| #191 | Core主路径的写前intent、PR原操作和resume有当前限定测试；一般Planning写的重启reconcile未全量核销，Host不暴露Planning写wire | 保留一般语义和对抗审读义务，不由PR链路成功替代 |
+| #202 | 当前P202双适配器均total=10、旧源可见5，断言exit1；公开切源被拒绝，合法预存混源的准入/过滤仍未证明安全 | 保留remediation与支持状态边界缺口，禁止称已不可达 |
+| #215 | 运行事实已由 #458完成的部分不重复报未修；cancel Host wire不暴露，通用Core cancel的actor/key、ack/reconcile等原条件仍开放 | 保留Post-Core原范围，内部可调用与对外暴露分开 |
+| #273 | 当前10项Host policy admission通过，非默认持久policy在Provider构造前拒绝；不改原policy、不中途覆盖 | 原Host可达反例已由 #541收敛，通用Core policy×incoming仍待人类决策 |
+| #309 | 当前P309仍丢声明的特殊own key，exit1；productionSpecialKeys为空、wire不能注入schema | 保留parser修复，不夸大为默认catalog已被污染 |
+| #313 | 实际预构建包与Host读取有版本证据；Node26上的源码检查不证明所有声明的最低source runtime已实跑 | 保留source-runtime声明/验证缺口，不虚构artifact加载失败 |
+| #336 | 当前五探针各report1、0 unhandled；共享helper与持续mutant的原AC仍未交付 | 维护项保留，没有据此宣称默认Host当前失控 |
+| #340 | 正式Host新绑定先canonical化，既有路径负控仍在；默认Provider的精确symlink布局原修复未核销 | 保留有条件的错误拒绝/可用性修复，不当作已发生越界写 |
+| #341 | 原P341缺新必填task，在当前源码先invalid_input；补显式task后非空正控成立、换root返回conflict且未新建worktree | 不移植旧Ready/unknown断言，也不据conflict关闭原Failed/reset/恢复设计AC；保留owner |
+| #190/#223/#283 | 单主身份、物理单基线和生产Draft提升仍是原MMP-Core义务；#223/#283移到M4.1不改变义务。辅助提升函数测试不能替代生产reconcile | 保留Core验收，不以旧库拒绝或纯函数绿代替父项完成 |
+| #304/#554 | 591项证明旧owner隔离及最多一次外部run；真实原session完成而产品provider ref丢失，已有session身份可能在adapter异常出口丢弃 | #554实质触及父 #304“句柄不丢失、可恢复”；父项保持开放；该安装快照时 #559未合并，后续源码状态见下方推进记录，修复未计入该旧安装包 |
+| #553 | 旧安装观察：设置已持久但页面pending，安全重进可读回；未观察虚假Saved或新模型启动 | 后续已由 #560交付并关闭；未宣称该新修复已安装接受 |
+| #537/#539/#543 | 编号、语义引用和只读关系仍由各自owner跟进 | 原范围保留，不将普通引用等同关闭关系 |
+| #544 | 来源Issue→PR观察快照的持久化与重启恢复仍由独立owner跟进 | 在线观察和本轮离线读取不替代持久化验收 |
+| #556/#565 | #564已交付原生引用/关闭关系观察，#565已交付创建时关系选择源码；#556父项和指定artifact的人类接受仍开放 | #544仅负责完整快照持久化及重启/离线恢复；不将源码交付视为安装接受 |
+| #557 | PR负责人选择由独立owner跟进 | 与来源Issue关系选择分开验收 |
+
+### 十二条R1与十项不变量的当前映射
+
+本表是证据/缺口映射，只有条件12使用本轮明确人类裁决；不代判整体R1。
+
+| R1 | 当前证据 | 剩余owner/门 |
+|---|---|---|
+| 1 E1 | 2026-10-15人类freeze保留 | #190/#223/#283物理/身份义务仍独立 |
+| 2 迁移 | 当前324组含空库重复、错误回滚、严格当前/旧库准入 | 目标CI完整层证据和 #223原条件不混淆 |
+| 3 十不变量 | 下表及当前限定套件 | 生产Draft提升、混源语义及无ref恢复缺口仍保留 |
+| 4 Fast Gate两次稳定 | 同产品SHA的CI成功记录已回读 | 仍未取得同一目标head连续两次合格运行；文档PR或Issue policy不能代替 |
+| 5 Merge Gate两次稳定 | 同产品SHA一条Merge Gate成功 | 同目标head连续两次和integration/e2e非空证据待完整回读 |
+| 6 无P0/P1 | 当前风险矩阵包含生产恢复及原Core义务 | 尚无全量归级/人类零计数确认，不写通过 |
+| 7 事实所有权 | 运行unknown未被改为Saved；当前Host非默认policy拒绝、runtime晚到撤权测试 | 一般写与支持持久状态的边界仍由 #459审读 |
+| 8 LLM不控状态 | 当前Host闭集/显式命令，task传递不改变规划权威 | 沿用契约和代码审读，不能由零新模型调用推导全路径无风险 |
+| 9 离线/撤权 | 原Desktop离线批次接受；当前runtime访问测试；#450/#451/#457保留生产组合浏览器身份 | 原生账号未实际撤权，适用范围不得扩写 |
+| 10 Start Work恢复 | 原Web强制失败备用、Desktop重启及591项幂等/隔离 | #554没有原会话身份的恢复仍未完成；#304开放 |
+| 11 UAT | #143/#124/#72/#449/#427已接受并关闭；当前Markdown影响范围补验完成 | 原日期/source与受影响重验分开，#236/#552文档交付尚待合并 |
+| 12 回滚/备份 | 人类明确接受2026-11-04 Web演练，并批准在 #73记条件12满足、关闭 #369/Done | 只裁决该条件；保留原Web/Host/两包/只读回滚边界 |
+
+| 不变量 | 当前证据与未决边界 |
+|---|---|
+| 1 单Planning源 | 当前挂载/Host拒绝测试；P202旧源投影语义仍开放 |
+| 2 成员与身份分离 | 当前membership与PR identity套件；#190物理约束不被替代 |
+| 3 PR-backed不重复 | 当前identity套件；原安装列表与 #555唯一性人验保留日期 |
+| 4 Draft提升身份 | 辅助函数/历史mutant不代表生产同步，#283仍开放 |
+| 5 规划工程正交 | 当前三策略测试；Host只接纳Provider策略，#273通用语义独立 |
+| 6 未确认不Saved | 当前外部intent/恢复、真实unknown原样保留；不因此称恢复完成 |
+| 7 重复幂等 | 已有同步/ledger套件绑定原source；当前未另跑全平台事件实验 |
+| 8 乱序拒绝旧值 | 已有双适配器观察定序；不扩写为所有Provider时间语义 |
+| 9 缺能力拒绝 | 当前strict operations/runtime/policy测试；逐命令作用域保留 |
+| 10 重启恢复 | 已有ref的SQLite恢复与真实上下文重开；#554无ref路径仍未知且不可读回 |
+
+人类已确认“本人可继续验收，评审/修复容量待确认”。这是真实部分可用性，不是完整staffing承诺；未确定Reviewer、修复容量和具体时段。11月8日目标仍受上述缺口约束，不自动形成发布批准。#369接受不关闭 #459/#304/#73；后续修复候选必须重新锁定source、安装件及受影响验证。
+
+## 2026-11-07 后续源码合并记录
+
+本轮文档同步到main `45330b54c7c786f81e3453254210440437e6fd3b`：#559新执行身份持久化已合并，#560设置反馈/原位恢复已合并并关闭 #553；#561编号搜索与 #564来源引用/关闭观察也已交付。以上不能重标上方 `04af317e`安装件、324/591/62项局部结果和原R1映射；它们仍绑定各自原源码。
+
+#235已满足原创建/对账三项而关闭/Done，#545固定一次测试按允许的诚实失败路径核销。原 #545无ref run仍unknown，#554的原实际Host失败边界和安装恢复接受未完成，#304继续开放。#141另缺真实Local Git＋文件SQLite四场景组合测试；本次未新增该组合，也未修改既有阻塞边。该四项源码交付需要对应新包及受影响接受，不能用合并或全层CI代替；#459/#73的风险、稳定性与容量裁决继续保留。
 
 ## 复跑入口与证据层级
 
@@ -273,7 +354,9 @@ JS
 
 本次Ready/confirmed:false/result_unknown、worktree集合不变，最后断言exit1。该探针显式换Core注入root，不是固定profile常规UI动作；不证明当前安装件自动搬迁了数据。路径守卫拒绝越界是正确安全结果，但恢复死路仍由#341拥有。
 
-## 下一门与记录维护
+## 历史下一门与记录维护（2026-11-04）
+
+本节状态为原观察快照，Superseded by 本页2026-11-07当前安装候选增量；旧实验的source身份仍保留。
 
 #73、#449、#143、#124、#72、#451、#369当前均OPEN，#450 CLOSED；状态来自上述日期的只读回读，不据此替人类判定。#124的既有Web产物记录只绑定它自己的source/hash；#72仍缺同一真实WorkItem的native PR+workflow/check在安装Host中展示；#449已留用户界面反馈但没有本候选完整接受记录。#236独立非作者安装、真实模型/Desktop适用范围也不由本页补齐。
 

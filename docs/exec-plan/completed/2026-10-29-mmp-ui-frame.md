@@ -46,7 +46,7 @@
 唯一产品写集：`packages/ui/src/workspace-presentation.ts`、`work-item-app.ts`、`work-item-list.ts`、`list-states.ts`。
 测试写集：`tests/contract/ui-work-item-app.test.js`、`ui-work-item-list.test.js`、`ui-work-item-list-browser.test.js`；如需新增可服务的屏幕 fixture，仅新增 `tests/fixtures/workspace-frame-browser.mjs`，计入上述预算。
 文档写集：本计划迁入 `docs/exec-plan/completed/2026-10-29-mmp-ui-frame.md`；另含 `docs/product/ui-workspace-frame.md`、`docs/review/pr-461-mmp-review.md`；`docs/README.md` 仅整合 owner 串行维护。
-不改 project/detail/form、ui-model/client/Host、生产 build、依赖/lockfile、数据库或 Provider；不修改看板 Status 或 native dependency。
+不改 project/detail/form、ui-model/client/Host、生产 build、依赖/lockfile、数据库或 Provider；不修改看板 Status 或 native dependency。Superseded by `Decision Log` 的 2026-11-04 人类验收收口裁决：仅 #446 的 `Status=Done` 获本次人类批准，native dependency 仍不修改。
 不引兼容适配、旧实验数据库迁移或双轨实现；保持当前受支持 Host ABI、包依赖方向和安全事实边界。
 
 ## Plan of Work
@@ -89,6 +89,8 @@ Batch F2 锁定交付证据。在同一分支根运行 `pnpm typecheck`、`pnpm 
 - [x] (2026-10-29 +08) F1：目标 RED 已记录于 `.superpowers/frame-red.log`；共享框架、实际入口消费者、列表样式收敛和 fixture 已实现，focused GREEN 35 tests、typecheck、boundaries 通过；真实浏览器负控与截图待整合 owner 执行。
 - [x] (2026-10-29 +08) F2：clean同工具链报告、base差异、独立复评、实际浏览器与官方Host呈现检查通过；最终远端当前head回读按PR门禁执行后才ready。
 
+- [x] (2026-11-04 17:46 SGT) 人类完成当前安装候选的首屏视觉、明暗/窄面板、状态披露、键盘、表格与详情检查，并明确裁决已登记问题独立跟踪、可关闭项记录后关闭；据此接受 #446 并批准登记验收后关闭 Issue、将 Project #10 的该项 `Status` 置为 `Done`。
+
 ## Surprises & Discoveries
 
 现有名为 browser 的列表/详情契约主要执行 bundle、VM、SSR 和 HTTP；文件名不能充作真实 DOM/viewport 证据。
@@ -105,7 +107,14 @@ Batch F2 锁定交付证据。在同一分支根运行 `pnpm typecheck`、`pnpm 
 2026-10-29 / 独立评审修正：移除共享样式中按 DOM 层级命中的动作间距；项目页动作布局归组合组件 owner，共享模块仅维护已约定的变量、类与通用规则。
 2026-10-29 / 实施：共享私有样式固定于 `packages/ui/src/workspace-presentation.ts`，列表仅保留专有规则；返回动作消费 `.hp-action hp-action-primary`，未新增公共包出口。
 
-2026-10-30 / 本轮主评审：用户授权本轮无 P0/P1 时自行修复、独立复评并以 rebase 合并 #461–#463。#446 修正首项尚缺具体屏幕/遗漏参数的人类确认，因此本 PR 改为 `Refs #446`，保留 issue OPEN 和该验收未勾选；冻结设计基线和 agent 浏览器检查不替代人类确认。#449 完整安装 UAT 仍是另一道门。
+2026-10-30 / 本轮主评审：用户授权本轮无 P0/P1 时自行修复、独立复评并以 rebase 合并 #461–#463。#446 修正首项尚缺具体屏幕/遗漏参数的人类确认，因此本 PR 改为 `Refs #446`，保留 issue OPEN 和该验收未勾选；冻结设计基线和 agent 浏览器检查不替代人类确认。#449 完整安装 UAT 仍是另一道门。 Superseded by 本节 2026-11-04 人类验收收口裁决（仅 #446 的具体首屏人验；#449 独立门保留）。
+
+
+2026-11-04 / 人类验收收口裁决：在主控明确询问“#446 当前首屏视觉与布局整体通过，改进项独立跟进，还是先修复后通过”之后，人类答复“登记的问题单独跟踪。可以关闭的 Issue 登记后可以关闭”。结合已逐项确认的首屏/主题/窄面板、状态披露、键盘、详情、设置和表格观察，判定 #446 的具体屏幕人类确认完成；批准 agent 在记录此裁决后关闭 **Issue #446**，并代写 **Project #10 中 #446 的 `Status=Done`**。批准仅覆盖此目标，不据此关闭 #124/#72/#143/#236/#427/#449 或修改原生阻塞关系。
+
+Rationale：本次人类明确接受现有首屏并将新发现保留为独立工作项：#537 编号/搜索、#538 任务列表标记、#539 引用扩展、#542 注释隐藏、#543 原生关系展示、#544 关联快照持久化。它们继续开放，不宣称已修复，也不把 #446 接受外推为最终 Core/R1 风险接受。
+
+验收候选为源码 `f0883948f78a9bf0a28290e21c7b1c3842b54cf5`、安装包 SHA-256 `29787f35ab8efbfd9233e5018757687a932bee8cbf0e39c46d82402fcea96cdf`、Desktop Host `0.2.1-rc.5`，此前 12 个安装文件已与该包逐字节核对。人类接受既有 Web 缩放证据，Desktop 无缩放入口，本次不记为 Desktop 200% 实测。详细人验记录见 #446/#449 的 2026-11-04 评论；易失远端状态以 `gh issue view 446 -R SingularityKChen/harness-projects --json state,body` 和 `gh project item-list 10 --owner SingularityKChen --format json` 回读，期望 `CLOSED` 且该项 `Status=Done`。
 
 ## Idempotence and Recovery
 
@@ -129,6 +138,8 @@ Batch F2 锁定交付证据。在同一分支根运行 `pnpm typecheck`、`pnpm 
 最终同工具链clean base/head报告、完整inputs/externals/React及pack身份在 `.superpowers/ui-frame-bundle/report.json` 重算，数值不以“没有加依赖”推断。远端CI与ready必须读取当前head的真实检查；本计划归档不代表已merge或人类接受R1。
 #449人类完整UAT、#457运行时权限P0、父UI和R1均保持独立，不由本PR关闭。没有新增技术债；当前布局局部横滚、原生控件和Host继承的取舍已纳入产品文档。
 
+2026-11-04：#446 所保留的具体首屏人类确认已取得，原 2026-10-30 保留结论由 Decision Log 同日裁决替代。当前变更仅登记验收与授权，不修改产品代码或重复声明新的工程测试通过；#449 完整安装态、#124 离线、#72 真正 PR/CI 谱系及 #143 Demo 仍按原要求分别验收。
+
 ## Bottom Change Note
 
 2026-10-29：独立综合两份方案与现有源码，固定三个呈现闭环、私有 CSS 交接、真实浏览器/Host 证据边界及严格预算。
@@ -140,3 +151,5 @@ Batch F2 锁定交付证据。在同一分支根运行 `pnpm typecheck`、`pnpm 
 2026-10-29：整合独立审查、实际浏览器负控和官方Host呈现证据，归档实现闭环；远端当前head门禁继续由PR回读控制。
 
 2026-10-30：按本轮 P2 审查保留 #446 人类具体屏幕确认门，修正先前反馈的证据归属；加入当前 head 的独立全矩阵记录与条件合并授权。
+
+2026-11-04：依据本次人类验收与点名收口上下文，补记 #446 接受、Issue 关闭及 Project Status 代写批准；保留既有证据版本、独立改进项与剩余父项门禁，修正原处被替代的保留结论。

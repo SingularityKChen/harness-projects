@@ -40,6 +40,7 @@
 | [2026-11-06-start-work-task-handoff](exec-plan/completed/2026-11-06-start-work-task-handoff.md) | 明确任务交接、原请求安全恢复与同一回执原子拒绝（#547） |
 | [2026-11-06-draft-pull-request](exec-plan/completed/2026-11-06-draft-pull-request.md) | 原生 Draft 创建、严格首次确认与已确认身份恢复（#548） |
 | [2026-11-06-markdown-readability](exec-plan/completed/2026-11-06-markdown-readability.md) | 任务列表单一标记、空首段行盒与正文注释隐藏（#538/#542） |
+| [2026-11-04-installed-delivery-acceptance](exec-plan/completed/2026-11-04-installed-delivery-acceptance.md) | 已安装候选指南、逐项人类验收与一次有界交付链路（#236/#449/#427/#143，Refs #545/#72） |
 | [2026-11-04-pr534-pr541-review-delivery](exec-plan/completed/2026-11-04-pr534-pr541-review-delivery.md) | 四项 MMP 风险矩阵、独立复评与条件授权交付 |
 | [2026-11-04-core-release-evidence](exec-plan/completed/2026-11-04-core-release-evidence.md) | 当前 Core 操作、准入、风险与发布证据审计（#533） |
 | [2026-11-04-backup-rollback-rehearsal](exec-plan/completed/2026-11-04-backup-rollback-rehearsal.md) | 停机备份、匹配产物回滚与同 profile 恢复工程演练（#532） |
@@ -234,6 +235,7 @@
 | [ui-workspace-status.md](product/ui-workspace-status.md) | 工作区摘要的作用域、来源确认、滚动与公告责任 |
 | [board-semantics.md](product/board-semantics.md) | `Status` 与 `Engineering` 字段分别属于规划轴还是工程轴、谁写、不变量 3 在看板上如何被满足、全部内置工作流该开该关、`Size` 为什么是信号而不是控制 |
 | [demo.md](product/demo.md) | Harness Projects 预发布 Demo 的用户路径、验收边界、已知限制与人工走查记录 |
+| [installed-core-acceptance.md](product/installed-core-acceptance.md) | 已安装候选身份、逐项人类接受、历史证据复用及 #236/#449/#427/#143 剩余验收 |
 | [ui-forms.md](product/ui-forms.md) | 连接表单的布局、状态与可访问交互约定 |
 | [core-release-scope.md](product/core-release-scope.md) | Core首发与后续工作台范围、R1和不变量的当前候选证据责任 |
 | [vertical-path.md](product/vertical-path.md) | 纵向链路的步骤枚举、MVP-0 / MVP-1 / 首发范围各自的判定方式、MVP-0 的非目标 |

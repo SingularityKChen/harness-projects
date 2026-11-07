@@ -124,6 +124,10 @@ npx --yes --package @deepseek-ai/dsh@0.2.0-rc.2 dsh web --patch "$HP_DEMO_SCRATC
 
 ## 验收记录边界
 
+2026-11-06，人类独立接收者只按本指南在固定 `0.2.0-rc.2` Web 干净profile完成四项安装检查：收到tarball摘要一致、安装成功、生效Documents及native workspace隔离正确、Harness Projects空工作区创建入口正常且指南足以完成。候选产品源码为 `f0883948f78a9bf0a28290e21c7b1c3842b54cf5`，插件 `0.1.0-demo.1`，SHA-256为 `29787f35ab8efbfd9233e5018757687a932bee8cbf0e39c46d82402fcea96cdf`。操作者明确回复“确认无问题。继续”，[#236安装子项](https://github.com/SingularityKChen/harness-projects/issues/236#issuecomment-6680184758)已接受。协调者仅交付原包和逐字指南副本，没有代替人类执行此次安装，也未新增人类终端日志采集。
+
+该结果与10月26日工程安装记录分别保留。它不覆盖配置模型、真实GitHub执行、Desktop干净安装、卸载或完整Demo。现有Desktop的部分人类观察和剩余门禁见[已安装Core验收](installed-core-acceptance.md)，不扩大本指南固定Web支持范围。
+
 本版已于 2026-10-26 21:48 +08 使用官方 `0.2.0-rc.2` Web profile完成 artifact-only 目录的实际安装、Projects 创建入口打开、卸载及重启核对。测试产物 SHA-256 为 `450afc5c90c82504fe71dfd8bca82d5b4cdfa8f6d92c09e9ee9ff223e8fad6a3`；12 个安装文件与 tgz 逐字节相同。卸载后依赖、配置层、侧栏/主面板与插件 remote 撤回，21 个独立仓库夹具文件摘要不变，Project 数据库保留。未配置模型 key，未发 prompt；Web 实证不覆盖 Desktop 或完整 demo 走查。
 
 源码候选、具体判定、独立评审与回读命令见 [安装件 ExecPlan](../exec-plan/completed/2026-10-26-plugin-demo-artifact.md)。重新打包后应重新核对摘要；版本号不能替代本次字节身份。原始访问日志和截图仅留隔离运行目录。
