@@ -124,6 +124,7 @@ export type ChangeRequestExternalIntent = {
   readonly contextId: ExecutionContextId; readonly ownerGeneration: number; readonly bindingId: ProviderBindingId; readonly state: WriteState
   readonly worktree: string; readonly confirmedRef?: ExternalObjectRef
   readonly issueSelection: ChangeRequestIssueSelection
+  readonly requestedAssigneeIds?: readonly string[]
 }
 export type ChangeRequestAssigneeIntent = Pick<ChangeRequestExternalIntent, 'contextId' | 'ownerGeneration' | 'bindingId' | 'state' | 'worktree'> & {
   readonly operation: 'addChangeRequestAssignees'; readonly sequence: number; readonly createOperationId: string; readonly createReceipt: string; readonly targetStamp: string
@@ -161,7 +162,7 @@ export function externalIntentSnapshot(value: ExternalIntent): ExternalIntent {
       input: { repository: ref(input.repository, 'repository'), changeRequest: ref(input.changeRequest, 'change_request'), assigneeIds: ids(input.assigneeIds) } }
   }
   if (operation === 'createChangeRequest') {
-    if (Object.keys(value).some((key) => !['operation', 'input', 'contextId', 'ownerGeneration', 'bindingId', 'state', 'worktree', 'confirmedRef', 'issueSelection'].includes(key))
+    if (Object.keys(value).some((key) => !['operation', 'input', 'contextId', 'ownerGeneration', 'bindingId', 'state', 'worktree', 'confirmedRef', 'issueSelection', 'requestedAssigneeIds'].includes(key))
       || Object.keys(input).some((key) => !['repository', 'head', 'base', 'title', 'body', 'draft'].includes(key))) return fail()
     const { repository, head, base: targetBase, title, body, draft } = input
     const { worktree, confirmedRef } = value
@@ -174,7 +175,10 @@ export function externalIntentSnapshot(value: ExternalIntent): ExternalIntent {
       issueSelection = { relation: selection.relation, target: { source: { project: ref(t.source.project, 'project'), membership: ref(t.source.membership, 'project_item'), issue: ref(t.source.issue, 'issue') }, nativeIssueIdentity: identity(t.nativeIssueIdentity), number: t.number, repository: { identity: identity(t.repository.identity), name: t.repository.name } } }
     }
     if (typeof body !== 'string' || typeof draft !== 'boolean') return fail()
+    const requested = value.requestedAssigneeIds
+    if (requested !== undefined && (!Array.isArray(requested) || requested.length < 1 || requested.length > 10 || requested.some(id => typeof id !== 'string' || !id.trim()) || new Set(requested).size !== requested.length || JSON.stringify([...requested].sort()) !== JSON.stringify(requested))) return fail()
     return { ...base, operation, issueSelection, worktree: text(worktree), input: { repository: ref(repository, 'repository'), head: text(head), base: text(targetBase), title: text(title), body, draft },
+      ...(requested === undefined ? {} : { requestedAssigneeIds: [...requested] }),
       ...(confirmedRef === undefined ? {} : { confirmedRef: ref(confirmedRef, 'change_request') }) }
   }
   if (operation === 'createBranch') {

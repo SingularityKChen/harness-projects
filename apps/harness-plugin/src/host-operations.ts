@@ -123,6 +123,7 @@ export const OPERATIONS = defineOperations({
     { ...param('draft', 'PullRequestDraft', value => { if (value === undefined) return false; if (typeof value !== 'boolean') throw new TypeError('draft 必须是布尔值'); return value }), acceptsUndefined: true },
     { ...param('issueRelation', 'IssueRelation', value => { if (value !== undefined && !['reference', 'closing', 'none'].includes(value as string)) throw new TypeError('Issue 选择无效'); return value as 'reference' | 'closing' | 'none' | undefined }), acceptsUndefined: true },
     { ...param('issueTargetStamp', 'IssueTargetStamp', value => value === undefined ? undefined : nonEmptyString(value, 'issueTargetStamp')), acceptsUndefined: true },
+    { ...param('assigneeIds', 'AssigneeIds', value => { if (value === undefined) return undefined; if (!Array.isArray(value) || value.length > 10 || value.some(id => typeof id !== 'string' || !id.trim())) throw new TypeError('负责人 IDs 无效'); return [...value] as readonly string[] }), acceptsUndefined: true },
   ] },
   getChangeRequestOperation: { mode: 'unary', params: [ENVELOPE[0],
     param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId')),

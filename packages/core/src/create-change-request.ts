@@ -11,16 +11,18 @@ import { EdgeProvenance, recordEdges } from './relations.ts'
 import { startTargetError } from './start-work.ts'
 import { gateBinding } from './capabilities.ts'
 import { selectChangeRequestIssue, verifyChangeRequestIssue, confirmChangeRequestIssue, getChangeRequestIssueOptions, assertChangeRequestIssueSource, visibleChangeRequestIssue, issueTargetStamp, issueClause, type IssueRelation } from './change-request-issue-link.ts'
+import { continueCreationAssignees, creationAssigneeSummary, preflightCreationAssignees, type CreationAssignment } from './change-request-assignees.ts'
 import { refreshDeliveryFacts } from './delivery-facts.ts'
 
 export interface PrScope { readonly workItemId: string; readonly repositoryId: string }
 export interface PrOperationQuery extends PrScope { readonly operationId?: string }
 export type PrOperationView = { readonly kind: 'none' } | { readonly kind: 'blocked'; readonly reason: 'unavailable' | 'ambiguous' | 'invalid_operation' }
-  | { readonly kind: 'operation'; readonly operationId: string; readonly state: MutationAttemptRecord['state']; readonly currentTarget: boolean; readonly targetStamp: string; readonly head: string; readonly base: string; readonly title: string; readonly draft: boolean; readonly issueRelation: IssueRelation; readonly issueTarget?: { readonly repositoryName: string; readonly number: number } }
+  | { readonly kind: 'operation'; readonly operationId: string; readonly state: MutationAttemptRecord['state']; readonly currentTarget: boolean; readonly targetStamp: string; readonly head: string; readonly base: string; readonly title: string; readonly draft: boolean; readonly issueRelation: IssueRelation; readonly issueTarget?: { readonly repositoryName: string; readonly number: number }; readonly requestedAssigneeIds?: readonly string[]; readonly assignment?: CreationAssignment }
 type Actor = { readonly kind: string; readonly id?: string }
-export interface CreateChangeRequestRequest extends PrScope { readonly base: string; readonly title: string; readonly body: string; readonly draft?: boolean; readonly issueRelation?: IssueRelation | undefined; readonly issueTargetStamp?: string | undefined; readonly actor: Actor; readonly idempotencyKey: string }
+export interface CreateChangeRequestRequest extends PrScope { readonly base: string; readonly title: string; readonly body: string; readonly draft?: boolean; readonly issueRelation?: IssueRelation | undefined; readonly issueTargetStamp?: string | undefined; readonly assigneeIds?: readonly string[] | undefined; readonly actor: Actor; readonly idempotencyKey: string }
 export interface ResumeChangeRequestRequest extends PrScope { readonly operationId: string; readonly observer: Actor }
 export interface CreateChangeRequestResult {
+  readonly assignment?: CreationAssignment
   readonly phase: 'confirmed' | 'reconciled' | 'unknown' | 'conflict' | 'failed'
   readonly ref?: ProviderChangeRequest['ref']; readonly entityId?: EntityId; readonly error?: ProjectError; readonly lineageStale?: boolean
   readonly operationId?: string; readonly targetStamp?: string; readonly relationState?: 'none' | 'pending' | 'confirmed' | 'denied' | 'unknown'
@@ -48,7 +50,7 @@ function actorSnapshot(actor: Actor): Actor {
 }
 function canonical(workspace: string, actor: Actor, intent: ChangeRequestExternalIntent, body: string): string {
   return JSON.stringify({ command: 'createChangeRequest', version: 1, workspace, actor, repository: intent.input.repository, binding: intent.bindingId,
-    contextId: intent.contextId, generation: intent.ownerGeneration, head: intent.input.head, worktree: intent.worktree, base: intent.input.base, title: intent.input.title, body, draft: intent.input.draft, issueSelection: intent.issueSelection })
+    contextId: intent.contextId, generation: intent.ownerGeneration, head: intent.input.head, worktree: intent.worktree, base: intent.input.base, title: intent.input.title, body, draft: intent.input.draft, issueSelection: intent.issueSelection, ...(intent.requestedAssigneeIds === undefined ? {} : { requestedAssigneeIds: intent.requestedAssigneeIds }) })
 }
 async function readRoute(context: CoreContext, storage: StorageTransaction, scope: PrScope, bindingId?: string, capability: CapabilityKey = CapabilityKey.DevelopmentChangeRequestCreate, readKeys: readonly CapabilityKey[] = [CapabilityKey.DevelopmentRepositoryRead, CapabilityKey.DevelopmentChangeRequestRead]): Promise<Route> {
   const repo = (await storage.listRepositories(context.workspaceId)).find((repo) => repo.id === scope.repositoryId)
@@ -94,8 +96,16 @@ export async function getChangeRequestOperation(context: CoreContext, query: PrO
     return await context.storage.transaction(async tx => {
       const resolved = await resolveOperation(context, query, tx)
       if (resolved.kind !== 'resolved') return resolved
-      const { attempt, intent, currentTarget, targetStamp } = resolved.operation
-      return { kind: 'operation', operationId: attempt.id, state: attempt.state, currentTarget, targetStamp, head: intent.input.head, base: intent.input.base, title: intent.input.title, draft: intent.input.draft, issueRelation: intent.issueSelection.relation, ...(intent.issueSelection.relation === 'none' || !await visibleChangeRequestIssue(context, query, intent.issueSelection, tx) ? {} : { issueTarget: { repositoryName: intent.issueSelection.target.repository.name, number: intent.issueSelection.target.number } }) }
+      const { attempt, intent, targetStamp } = resolved.operation
+      let currentTarget = resolved.operation.currentTarget
+      let summary = currentTarget ? await creationAssigneeSummary(context, query, attempt, intent, tx) : intent.requestedAssigneeIds ? { assignment: { state: 'unknown' as const } } : {}
+      if (intent.requestedAssigneeIds) {
+        const final = await resolveOperation(context, { ...query, operationId: attempt.id }, tx)
+        if (final.kind !== 'resolved' || receipt(final.operation) !== receipt(resolved.operation)) return { kind: 'blocked', reason: 'invalid_operation' }
+        currentTarget = final.operation.currentTarget
+        if (!currentTarget) summary = { assignment: { state: 'unknown' } }
+      }
+      return { ...summary, kind: 'operation', operationId: attempt.id, state: attempt.state, currentTarget, targetStamp, head: intent.input.head, base: intent.input.base, title: intent.input.title, draft: intent.input.draft, issueRelation: intent.issueSelection.relation, ...(intent.issueSelection.relation === 'none' || !await visibleChangeRequestIssue(context, query, intent.issueSelection, tx) ? {} : { issueTarget: { repositoryName: intent.issueSelection.target.repository.name, number: intent.issueSelection.target.number } }) }
     })
   } catch { return { kind: 'blocked', reason: 'unavailable' } }
 }
@@ -131,6 +141,7 @@ const receipt = (operation: Operation) => JSON.stringify([operation.attempt.id, 
 async function finish(context: CoreContext, scope: PrScope, expected: Operation, phase: 'confirmed' | 'reconciled', refresh: boolean): Promise<CreateChangeRequestResult> {
   if (refresh) try { await refreshDeliveryFacts(context, scope) } catch { /* 保留 Saved；最后快照如实报告陈旧。 */ }
   const relationState = expected.intent.confirmedRef === undefined ? 'pending' : await confirmChangeRequestIssue(context, scope.workItemId, scope.repositoryId, expected.intent.issueSelection, expected.intent.confirmedRef)
+  const assignment = expected.attempt.state === 'saved' ? await continueCreationAssignees(context, scope, expected.attempt.id) : undefined
   try {
     return await context.storage.transaction(async (tx) => {
       const operation = required(await resolveOperation(context, { ...scope, operationId: expected.attempt.id }, tx)), { attempt, intent } = operation
@@ -140,7 +151,10 @@ async function finish(context: CoreContext, scope: PrScope, expected: Operation,
       const set = (await tx.getDeliveryFacts(context.workspaceId, intent.contextId))?.sets.find((set) => set.kind === 'change_request')
       const lineageStale = set?.stale !== false || set.confirmedAt === undefined || set.anchorId !== worktreeEntityId(context.workspaceId, scope.repositoryId, scope.workItemId)
         || !set.nodes.some((node) => node.entityId === identity.entityId && node.externalId === ref.externalId)
-      return { ...outcome(receipt(operation) === receipt(expected) ? phase : 'reconciled', undefined, operation), ref, entityId: identity.entityId, lineageStale, relationState }
+      const summary = await creationAssigneeSummary(context, scope, attempt, intent, tx)
+      const final = required(await resolveOperation(context, { ...scope, operationId: expected.attempt.id }, tx))
+      if (receipt(final) !== receipt(expected)) throw invalid()
+      return { ...outcome(phase, undefined, final), ref, entityId: identity.entityId, lineageStale, relationState, assignment: assignment && ['conflict', 'unknown'].includes(assignment.state) ? assignment : summary.assignment ?? assignment ?? { state: 'none' } }
     })
   } catch { return outcome('conflict', projectError(ProjectErrorCode.Conflict, '当前 PR 目标或读取授权已变化'), expected) }
 }
@@ -191,12 +205,24 @@ export async function resumeChangeRequest(context: CoreContext, input: ResumeCha
 }
 /** 准入是唯一可达写端口的位置；已存请求统一走只读 observer。 */
 export async function createChangeRequest(context: CoreContext, input: CreateChangeRequestRequest): Promise<CreateChangeRequestResult> {
-  let request: CreateChangeRequestRequest, operation: Operation | undefined, dispatch = false
+  let request: CreateChangeRequestRequest, operation: Operation | undefined, dispatch = false, assignmentFailure: CreationAssignment | undefined
+  const preflight = async (route: Route, tx: StorageTransaction = context.storage) => {
+    try { await preflightCreationAssignees(context, request, route, tx) }
+    catch (error) {
+      const reason = (error as ProjectError).code
+      assignmentFailure = { state: 'failed', ...(['not_supported', 'permission_denied'].includes(reason) ? { reason: reason as 'not_supported' | 'permission_denied' } : {}) }
+      throw error
+    }
+  }
   try {
-    plain(input, ['workItemId', 'repositoryId', 'base', 'title', 'body', 'draft', 'issueRelation', 'issueTargetStamp', 'actor', 'idempotencyKey'])
-    const { workItemId, repositoryId, base, title, body, draft, issueRelation, issueTargetStamp: expectedIssueTarget, idempotencyKey } = input, actor = actorSnapshot(input.actor)
+    plain(input, ['workItemId', 'repositoryId', 'base', 'title', 'body', 'draft', 'issueRelation', 'issueTargetStamp', 'assigneeIds', 'actor', 'idempotencyKey'])
+    const { workItemId, repositoryId, base, title, body, draft, issueRelation, assigneeIds: suppliedIds, issueTargetStamp: expectedIssueTarget, idempotencyKey } = input, actor = actorSnapshot(input.actor)
     if (![workItemId, repositoryId, base, title, idempotencyKey].every(text) || typeof body !== 'string' || (draft !== undefined && typeof draft !== 'boolean') || body.includes(PREFIX) || (issueRelation !== undefined && !['reference', 'closing', 'none'].includes(issueRelation)) || (expectedIssueTarget !== undefined && !text(expectedIssueTarget))) throw invalid()
-    request = { workItemId, repositoryId, base, title, body, draft: draft ?? false, ...(issueRelation === undefined ? {} : { issueRelation }), idempotencyKey, actor }
+    if (suppliedIds !== undefined && !Array.isArray(suppliedIds)) throw invalid()
+    const capturedIds = [...(suppliedIds ?? [])]
+    if (capturedIds.length > 10 || !capturedIds.every(text)) throw invalid()
+    const assigneeIds = [...new Set(capturedIds)].sort()
+    request = { assigneeIds, workItemId, repositoryId, base, title, body, draft: draft ?? false, ...(issueRelation === undefined ? {} : { issueRelation }), idempotencyKey, actor }
     const previous = await context.storage.findMutationAttempt(context.workspaceId, idempotencyKey)
       ?? (await context.storage.listMutationAttempts(context.workspaceId)).find(row => row.commandName === 'createChangeRequest' && row.externalIntent?.contextId === contextIdFor(context.workspaceId, workItemId, repositoryId) && ['pending', 'unknown'].includes(row.state))
     const savedSelection = previous?.externalIntent?.operation === 'createChangeRequest' ? previous.externalIntent.issueSelection : undefined
@@ -208,10 +234,11 @@ export async function createChangeRequest(context: CoreContext, input: CreateCha
     const id = await context.storage.transaction(async (tx) => {
       const route = await readRoute(context, tx, request), contextId = contextIdFor(context.workspaceId, workItemId, repositoryId), record = await tx.getExecutionContext(contextId)
       if (record?.workspaceId !== context.workspaceId || record.workItemId !== workItemId || record.repositoryId !== repositoryId || !record.provisioningGeneration || !record.branchExternalId || !record.worktreeExternalId) throw invalid()
-      const intent: ChangeRequestExternalIntent = { operation: 'createChangeRequest', issueSelection, contextId, ownerGeneration: record.provisioningGeneration, bindingId: route.binding.ref.bindingId, state: 'pending', worktree: record.worktreeExternalId, input: { repository: route.repository, head: record.branchExternalId, base, title, body, draft: draft ?? false } }
+      const intent: ChangeRequestExternalIntent = { operation: 'createChangeRequest', issueSelection, ...(assigneeIds.length ? { requestedAssigneeIds: assigneeIds } : {}), contextId, ownerGeneration: record.provisioningGeneration, bindingId: route.binding.ref.bindingId, state: 'pending', worktree: record.worktreeExternalId, input: { repository: route.repository, head: record.branchExternalId, base, title, body, draft: draft ?? false } }
       const fingerprint = canonical(context.workspaceId, actor, intent, body), existing = await tx.findMutationAttempt(context.workspaceId, idempotencyKey)
         ?? (await tx.listMutationAttempts(context.workspaceId)).find((row) => row.commandName === 'createChangeRequest' && row.externalIntent?.contextId === contextId && row.externalIntent.operation === 'createChangeRequest' && row.externalIntent.input.head === intent.input.head && ['pending', 'unknown'].includes(row.state))
       if (existing !== undefined) { if (existing.commandName !== 'createChangeRequest' || existing.requestFingerprint !== fingerprint) throw projectError(ProjectErrorCode.Conflict, 'PR 幂等键或未决槽位已绑定另一个请求'); return existing.id }
+      if (assigneeIds.length) await preflight(route, tx)
       const gate = gateBinding(route.binding, CapabilityKey.DevelopmentChangeRequestCreate, 'write')
       if (!gate.allowed) throw gate.error
       const id = `pr-${hash(idempotencyKey)}`
@@ -228,14 +255,18 @@ export async function createChangeRequest(context: CoreContext, input: CreateCha
     operation = required(resolved)
   } catch (error) {
     const code = (error as ProjectError).code
-    return outcome(code === ProjectErrorCode.Conflict ? 'conflict' : 'failed', Object.values(ProjectErrorCode).includes(code) ? error as ProjectError : invalid(), operation)
+    return { ...outcome(code === ProjectErrorCode.Conflict ? 'conflict' : 'failed', Object.values(ProjectErrorCode).includes(code) ? error as ProjectError : invalid(), operation), ...(assignmentFailure ? { assignment: assignmentFailure } : {}) }
   }
   if (!dispatch || operation.attempt.state === 'saved') return resumeChangeRequest(context, { workItemId: request.workItemId, repositoryId: request.repositoryId, operationId: operation.attempt.id, observer: request.actor })
   let found: ProviderChangeRequest | undefined, failure: ProjectError | undefined
   try {
+    if (operation.intent.requestedAssigneeIds?.length) await preflight(operation.route)
     await verifyChangeRequestIssue(context, request, operation.intent.issueSelection)
     operation = required(await resolveOperation(context, { workItemId: request.workItemId, repositoryId: request.repositoryId, operationId: operation.attempt.id }))
-  } catch (error) { return settle(context, { workItemId: request.workItemId, repositoryId: request.repositoryId }, operation, undefined, projectError(ProjectErrorCode.InvalidInput, '创建前 Issue 目标或授权已变化'), false) }
+  } catch (error) {
+    const failure = assignmentFailure ? projectError((error as ProjectError).code, '创建前负责人准入已变化') : projectError(ProjectErrorCode.InvalidInput, '创建前 Issue 目标或授权已变化')
+    return { ...await settle(context, { workItemId: request.workItemId, repositoryId: request.repositoryId }, operation, undefined, failure, false), ...(assignmentFailure ? { assignment: assignmentFailure } : {}) }
+  }
   try {
     const created = await operation.route.provider.createChangeRequest?.(operation.intent.input)
     if (created?.ok && provesCreation(created.value, operation.intent)) found = created.value

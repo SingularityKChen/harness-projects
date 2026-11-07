@@ -25,6 +25,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-07-pr-assignee-creation](exec-plan/active/2026-11-07-pr-assignee-creation.md) | 创建 PR 预选原生负责人与原意图恢复（#557） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
