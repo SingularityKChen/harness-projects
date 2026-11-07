@@ -75,10 +75,13 @@ for (const scenario of ['completed', 'error', 'missing', 'forced', 'unknown', 'e
   }
   const recording = replay(exchanges), raw = {
     async create(input) { calls.push(['create', input]); assert.equal(input.cwd, await realpath(input.cwd)); return recording.create({ cwd: '<scratch>/work' }) },
-    async prompt(input, signal) { calls.push(['prompt', input]); assert.equal(input.requestId, id); assert.equal(signal.aborted, false); if (scenario === 'unknown') throw new Error('ack lost'); return recording.prompt(input) },
-    async inspect(sessionId) {
-      calls.push(['inspect', sessionId]); const value = await recording.inspect(sessionId)
-      return { events: value.events.map(({ seq, type, turn, rpcId, reason }) => ({ seq, type, data: { ...(turn === undefined ? {} : { turn }), ...(rpcId ? { source: { kind: 'user', rpcId } } : {}), ...(reason ? { reason } : {}) } })) }
+    async prompt(input, signal) { calls.push(['prompt', input]); assert.equal(input.requestId, id); assert.equal(signal.aborted, false); const ack = await recording.prompt(input); if (scenario === 'unknown') throw new Error('ack lost'); return ack },
+    // Synthetic current-ABI envelope around historical normalized events; not a new Host recording.
+    async page({ address }) {
+      calls.push(['page', address.sessionId]); const value = await recording.inspect(address.sessionId)
+      const bySeq = new Map(value.events.map(({ seq, type, turn, rpcId, reason }) => [seq, { seq, type, data: { ...(turn === undefined ? {} : { turn }), ...(rpcId ? { source: { kind: 'user', rpcId } } : {}), ...(reason ? { reason } : {}) } }]))
+      const cursor = Math.max(...bySeq.keys())
+      return { cursor, hasMore: false, records: Array.from({ length: cursor + 1 }, (_, seq) => ({ type: 'event', event: bySeq.get(seq) ?? { seq, type: 'unprojected', data: {} } })) }
     },
     list(input) { calls.push(['list']); return recording.list(input) },
   }
@@ -115,12 +118,13 @@ for (const scenario of ['completed', 'error', 'missing', 'forced', 'unknown', 'e
   if (manual) assert.deepEqual(calls, [], '明确 unavailable 和 force 必须零 create/prompt')
   else assert.equal(calls.filter(([name]) => name === 'create').length, 1)
   const repeated = await remote.service.startWork(actor, 'start', 'wi-1', 'repo-alpha', task, undefined)
-  assert.deepEqual({ ...repeated, value: { ...repeated.value, branchHeadCommit: undefined } }, { ...started, value: { ...started.value, branchHeadCommit: undefined } })
+  if (scenario === 'unknown') { assert.equal(repeated.writeState, 'reconciled'); assert.equal(repeated.value.runExternalId, started.value.runExternalId) }
+  else assert.deepEqual({ ...repeated, value: { ...repeated.value, branchHeadCommit: undefined } }, { ...started, value: { ...started.value, branchHeadCommit: undefined } })
   assert.equal(secrets.length, manual ? 1 : 0, 'unknown/replay 不启动人工执行者')
   assert.equal(calls.filter(([name]) => name === 'create').length, manual ? 0 : 1)
   const storage = createSqliteStorage(dataPath, hostStoragePolicy(PROVIDER_CATALOG)), run = await storage.getExecutionRun(runIdFor(id)); storage.close()
-  assert.equal(run.status, view.runStatus)
-  if (!manual && scenario !== 'unknown') { assert.deepEqual(JSON.parse(run.providerRef.externalId)[1], id); recording.assertConsumed() }
+  assert.equal(run.status, scenario === 'unknown' ? 'failed' : view.runStatus)
+  if (!manual) { assert.deepEqual(JSON.parse(run.providerRef.externalId)[1], id); recording.assertConsumed() }
   if (manual) {
     host.stop(); await remote.dispose(); await host.dispose()
     host = await createHostComposition(options); remote = await installHostRemote({ invocation: { peer: { id: 'fixture-peer' } }, provide: () => () => {}, typert: { register: () => () => {} } }, host)

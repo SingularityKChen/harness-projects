@@ -96,7 +96,7 @@ test('Harness：状态只属于 rpcId 的 turn，终态优先；运行中与崩�
     { seq: 6, type: 'turn/end', turn: 2, reason: { kind: 'completed' } }]
   for (const [history, running, want] of [[events('completed'), true, 'succeeded'], [events('error'), false, 'failed'],
     [events('aborted'), true, 'canceled'], [events('blocked'), true, 'unknown'], [events(), true, 'running'],
-    [events(), false, 'unknown'], [[], false, 'starting'], [[...events(), ...later], false, 'unknown'],
+    [events(), false, 'unknown'], [[], false, 'unknown'], [[...events(), ...later], false, 'unknown'],
     [[...events('error'), ...later], true, 'failed'], [later, false, 'unknown']]) {
     const read = await provider(port({ history, running })).getRun(runRef)
     assert.equal(read.ok, true)
@@ -210,8 +210,22 @@ test('Harness：原型键和所有未知结束原因都返回唯一字符串 unk
   }
 })
 
-test('Harness：已接纳但 history 尚空时，running=true 优先于 starting', async () => {
+test('Harness：没有匹配 request 时不能借 session.running 猜状态', async () => {
   const p = provider(port({ history: [], running: true }))
-  assert.equal((await p.startRun(input)).value.status, 'running')
-  assert.equal((await p.getRun(runRef)).value.status, 'running')
+  assert.equal((await p.startRun(input)).value.status, 'unknown')
+  assert.equal((await p.getRun(runRef)).value.status, 'unknown')
+})
+
+test('Harness：checkpoint 拒绝或迟到时禁止 prompt；同 ref callback 不含任务内容', async () => {
+  for (const late of [false, true]) {
+    let prompts = 0, finish
+    const p = provider(port({ prompt: async () => { prompts++; return { accepted: true } } }), { timeoutMs: 10 })
+    const result = await p.startRun(input, { retainRunIdentity: async (ref) => {
+      assert.deepEqual(ref, runRef)
+      if (late) await new Promise((resolve) => { finish = resolve })
+      else throw Error('checkpoint failure')
+    } })
+    assert.equal(result.error.code, 'ambiguous_result'); assert.equal(prompts, 0)
+    finish?.(); await new Promise((resolve) => setImmediate(resolve)); assert.equal(prompts, 0)
+  }
 })

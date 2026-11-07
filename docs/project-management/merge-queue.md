@@ -105,6 +105,20 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 ## 4. 当前队列
 
+### PR #559–#561、#564–#565（2026-11-07）
+
+本会话直接条件授权与风险矩阵见 [本轮记录](../review/2026-11-07-pr559-pr565-mmp-review.md)。#561 优先的完整线性预演与原操作序列产品/测试树相同；只有索引并列插入冲突，全部保留。操作顺序不新增规划依赖。
+
+| 位置 | PR / 分支 | 闭环 | 接合门 |
+|---|---|---|---|
+| 1（已合并） | #561 `feature/source-aware-numbers` | Closes #558；Refs #537 | 2026-11-07 rebase merge `b5ddbca68e1e7da6850e7e2abe1be3fe481160ca`；完整树等于当前批准 head，#558 CLOSED |
+| 3 | #559 `fix/execution-start-identity` | Refs #554 | 两 P2 须独立复评；#554 原 installed 失败边界标准保留 OPEN，不能自动关闭 |
+| 4 | #560 `fix/execution-setup-feedback` | Closes #553 | 安装 activation 读回后的重试路由 P2 修复，保持执行意图、不重连 Planning |
+| 2（已合并） | #564 `feature/pull-request-issue-link` | Closes #562 | 2026-11-07 原生 rebase merge `1a621a35d544fca1650d7b380231a76330f569cf`；#562 CLOSED，树等于当前批准 head |
+| 5 | #565 `feature/pull-request-issue-choice` | Closes #563 | 首轮 P1 完整交原 owner；修复独立复评无 P0/P1 后才可推进，基于 #564 的真实新落点 |
+
+每层均先备份已发布 head，使用精确 lease，重新核对最终 base/head、产品树、全部 threads、issue 双向关联和当前 CI/批准；#564/#565 使用原生 `merge-async` 并指定 `merge_method=rebase`。当前结果用 `gh pr view <n> -R SingularityKChen/harness-projects --json state,headRefOid,baseRefOid,mergeCommit,closingIssuesReferences` 回读，不能以本表预写未来结果。Planning Status、父项及 R1 不由工程合并接受。
+
 ### PR #549–#551（2026-11-06）
 
 人类本会话具体条件授权及风险矩阵见 [本轮评审](../review/2026-11-06-pr549-pr551-mmp-review.md)。三个独立 main 分支；顺序只是合成操作序列，不建立规划依赖。
