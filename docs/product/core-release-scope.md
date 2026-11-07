@@ -66,7 +66,7 @@ rg -n '^  [A-Za-z][A-Za-z0-9]*: \{ mode:' apps/harness-plugin/src/host-operation
 | 2 | 空库迁移成功、可重复，失败不留版本记录 | CI | 当前目标 head 上的非空迁移用例、重复执行和失败路径证据待核对；`tests/integration/` |
 | 3 | release-gates §2.1 十项不变量逐条有自动化断言且无凭据/网络通过 | CI + 人类评审 | 沿用 §2.1.1 的历史观察，不代表当前候选复跑；十项责任见下表 |
 | 4 | 目标 head 的 PR Fast Gate 连续两次通过并由人类回读 | CI + 人类回读 | 当前 head/checks 未在本子项判定；按 `docs/development/ci.md` 回读 |
-| 5 | Merge Gate 的 integration 与 e2e 各有非空用例且目标 head 连续两次通过 | CI + 人类回读 | 当前 head/checks 未在本子项判定；按 `docs/development/ci.md` 回读 |
+| 5 | 统一 CI 的 integration 与 e2e 各有非空用例，且目标 head 的 CI（含 PR Fast Gate）连续两次通过 | CI + 人类回读 | 当前 head/checks 未在本子项判定；按 `docs/development/ci.md` 回读 |
 | 6 | P0/P1 正确性缺陷为零且风险矩阵无未决项 | 人类伙伴 | #459 仍须逐项分类当前开放 findings；Post-Core 标签与 known issues 不接受风险 |
 | 7 | 不存在本地缓存静默覆盖外部权威的已知路径 | 人类评审 | 当前候选写路径与 unknown/conflict 证据待核对；见 `tests/README.md` §2 第 2 类 |
 | 8 | 不存在 LLM 参与状态控制的已知路径 | 人类评审 | 当前代码路径审查待完成；依据 `AGENTS.md` §1.1 第 5 条及对应契约测试 |

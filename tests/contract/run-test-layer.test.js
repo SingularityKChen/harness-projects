@@ -1,7 +1,7 @@
 // 层运行器 `scripts/run-test-layer.mjs` 的可执行表述（ExecPlan `2026-09-21-merge-gate-layers` D2）。
 //
 // 这里用临时目录验证空层、零用例层、全 skip / 全 todo 层与失败层都会被拒绝，
-// 并检查 Merge Gate 的四个真实层至少各有一个 `*.test.js` 文件。
+// 当前目录的非空检查由实际层入口执行。
 //
 // 关于"摘要行解析不到"这条 fail-closed 分支：Node 26 的 runner 一旦启动成功，
 // 即使用例文件语法错误、被 SIGKILL 或 `process.abort()`，也会打印 `ℹ tests <n>`
@@ -24,14 +24,6 @@ import { countTestFiles, parseSummary } from '../../scripts/run-test-layer.mjs';
 const SCRIPT = fileURLToPath(new URL('../../scripts/run-test-layer.mjs', import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
-// 真实层：与 `.github/workflows/merge-gate.yml` 的四条 lane 一一对应；lane 接线
-// 由 `merge-gate-workflow.test.js` 钉住，这里只检查各层没有变空。
-const REAL_LAYERS = [
-  'tests/integration',
-  'tests/contract/package-boundaries.test.js',
-  'tests/mvp0',
-  'tests/e2e',
-];
 
 function withLayer(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run-test-layer-'));
@@ -167,7 +159,7 @@ test('断言失败的层：退出码非零，且失败输出里同时有 node --
 });
 
 test('缺少 <layer> 或 <invariant> 时 exit 1：参数不全不能被当成通过', () => {
-  for (const args of [[SCRIPT], [SCRIPT, 'tests/mvp0']]) {
+  for (const args of [[SCRIPT], [SCRIPT, 'tests/integration']]) {
     const result = spawnSync(process.execPath, args, { cwd: REPO_ROOT, encoding: 'utf8' });
     assert.equal(result.status, 1, `期望 exit 1，实际 ${result.status}；args=${JSON.stringify(args)}`);
   }
@@ -257,13 +249,3 @@ test('countTestFiles 只认 *.test.js：这是刻意的窄口径，不是与 nod
     fixture.cleanup();
   }
 });
-
-// ---------------------------------------------------------------------------
-// 真实层：Merge Gate 的四条 lane 各自至少有一个用例文件
-// ---------------------------------------------------------------------------
-
-for (const layer of REAL_LAYERS) {
-  test(`真实层 ${layer} 非空`, () => {
-    assert.ok(countTestFiles(path.join(REPO_ROOT, layer)) > 0, `${layer} 必须至少有一个 *.test.js 文件`);
-  });
-}

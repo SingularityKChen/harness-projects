@@ -1,7 +1,7 @@
 # 发布门禁 R1
 
 > 本文件是发布门禁 R1 的仓库内权威表述：逐条列出条件、判定证据与判定者。
-> 它回答"这个版本能不能发"，不回答"每次改动要跑哪些检查"——后者是 `AGENTS.md` §9 的执行门禁（`PR Fast Gate` / `Merge Gate`）。两者生命周期不同：R1 修订只改本文件，执行门禁修订只改 `AGENTS.md` §9 与 CI。
+> 它回答"这个版本能不能发"，不回答"每次改动要跑哪些检查"——后者是 `AGENTS.md` §9 的执行门禁（`PR Fast Gate`）。两者生命周期不同：R1 修订只改本文件，执行门禁修订只改 `AGENTS.md` §9 与 CI。
 > 依据 `AGENTS.md` §3（文档与事实源）：本文件自包含，不引用任何不随仓库分发的外部输入。
 
 MMP-Core 与后续工作台的范围映射见 [core-release-scope.md](../product/core-release-scope.md)。范围分期不豁免本文件任一 R1 条件、十项不变量或原判定者；`Post-Core`、known issues、测试存在、历史快照和子项关闭都不能替代当前候选证据或人类裁决。无法判定仍按 §1 等同于不满足。范围页的证据矩阵是核对入口，不是另一份 R1 通过表。
@@ -33,7 +33,7 @@ R1 本身不得由 LLM 判定（`AGENTS.md` §1.1 第 5 条）；agent 只能提
 | 2 | 从空库出发的迁移可通过且可重复 | `node --test tests/integration` 中**至少有一条迁移用例且全绿**（空层的 exit 0 不是证据，判定方式同 §2.2）；二次执行不改动任何东西，失败的迁移不留版本记录 | CI |
 | 3 | §2.1 枚举的 10 条不变量每条都有自动化测试 | 按 §2.1 逐条核对：每条都有自动化用例，且在无凭据、无网络下通过 | CI + 人类评审 |
 | 4 | `PR Fast Gate` 稳定 | 目标 head 上最近连续两次运行均为绿；回读命令与"稳定"的定义见 §2.2，不采信本地推断 | CI + 人类回读 |
-| 5 | `Merge Gate` 稳定 | 目标 head 上 `tests/integration` 与 `tests/e2e` **各自至少有一条用例且全绿**（空层的 exit 0 不是证据）；且连续两次运行均为绿；回读命令见 §2.2 | CI + 人类回读 |
+| 5 | 分层行为执行稳定 | 目标 head 上 `tests/integration` 与 `tests/e2e` **各自至少有一条用例且全绿**（空层的 exit 0 不是证据）；且连续两次运行均为绿；回读命令见 §2.2 | CI + 人类回读 |
 | 6 | 没有未关闭的 P0 / P1 正确性缺陷 | 开放 issue 中 P0 / P1 计数为零；`docs/review/mvp-review.md` 的风险矩阵无未决项 | 人类伙伴 |
 | 7 | 不存在"本地缓存静默覆盖外部权威"的已知路径 | 事实所有权用例（`tests/README.md` §2 第 2 类）与写路径 unknown / conflict 用例；代码中本地缓存不回写外部字段 | 人类评审（对抗验证提供证据） |
 | 8 | 不存在 LLM 参与控制状态的已知路径 | `AGENTS.md` §1.1 第 5 条对应的契约测试与代码审查：状态与关系写入路径不经过 LLM | 人类评审 |
@@ -55,7 +55,7 @@ R1 本身不得由 LLM 判定（`AGENTS.md` §1.1 第 5 条）；agent 只能提
 每条的判定方式统一为两步，两步都能在本仓库内完成，不依赖任何外部文档：
 
 1. 在 `tests/` 下找到一条自动化用例，它**断言**该不变量（用例名应点名该不变量，见 `tests/README.md` §3「写法要求」）；
-2. 该用例在无凭据、无网络环境下通过（在 `node --test tests/contract`、`node --test tests/e2e`、`node --test tests/mvp0` 对应层的输出中可见）。
+2. 该用例在无凭据、无网络环境下通过（在 `node --test tests/contract`、`node --test tests/integration`、`node --test tests/e2e` 对应层的输出中可见）。
 
 表中的"定位关键词"只是把搜索范围缩小的提示：`git grep -n "<关键词>" -- 'tests/**/*.test.js'` 命中**不等于**该不变量已被断言——必须打开用例确认它断言的是该行为（例如 `tests/contract/board-workflow.test.js` 的"同一输入重复调用结果相同"与下表第 7 条无关）。
 
@@ -144,43 +144,25 @@ node --test tests/contract/capabilities-observation.test.js tests/contract/stora
 
 本行的 #203 旧反例已收口：旧版公开端口写入 v9 后，当前版本预检拒绝且原文件不变；显式备份修复后规范新观察返回 true。预检后才出现旧写入时，已提交的早先迁移保持，005 回滚并通过错误的 phase / appliedVersions 报告真实状态。其余九行观察仍取 `main@699d715`（#239 的 `main@1cdfb23` 仅改文档，运行时代码相同）；本次只更新第 8 行及汇总，不替人类裁决 R1。
 
-### 2.2 第 4、5 条的"稳定"与空层假绿
+### 2.2 第 4、5 条的稳定与非空判定
 
-第 4、5 条原先只写"稳定"，既没有时间窗也没有 head 归属，读的人无从判定；第 5 条原先写"`tests/integration` 与 `tests/e2e` 为绿"，而这两个目录为空时 `node --test` 仍然退出 0（Node 26 实测：摘要行 `ℹ tests 0`，exit code 0），因此它是一条会假绿的门禁表述。两处都在下面收成可复跑的形式。
-
-**"稳定"的定义**（第 4、5 条共用）：
-
-- **head 归属**：判定对象是**目标 head**，即回读命令返回的 `headRefOid`，不是本地 `git rev-parse HEAD`，也不是分支名——分支在被推入新提交后仍然叫同一个名字。
-- **时间窗**：在该 `headRefOid` 上**最近连续两次运行**都为绿，且第二次运行之前该 head 没有被推入新提交。只有一次运行不算稳定；最近一次为红即不满足。
-- **回读命令**（第 4 条）：
+两条要求保留：目标 head 上最近连续两次 CI 运行都成功，第二次前 head 未变化；integration 与 e2e 各自非空且全绿。R1 的接受仍由人类伙伴判定。只读回该 head 的 CI，避免把其他 workflow 的两次绿色当作本门禁证据：
 
 ```bash
 n=<PR 编号>
-head=$(gh pr view "$n" --json headRefOid --jq .headRefOid)
-gh run list --commit "$head" --limit 2 --json headSha,conclusion,createdAt
-# 判定：返回 2 条、两条的 headSha 都等于 "$head"、两条的 conclusion 都是 "success"
+head=$(gh pr view "$n" -R SingularityKChen/harness-projects --json headRefOid --jq .headRefOid)
+gh run list -R SingularityKChen/harness-projects --workflow CI --commit "$head" --limit 2 --json headSha,conclusion,createdAt
+# 必须返回两条同 head 的 success；不足两条不满足稳定要求
 ```
 
-- **回读命令**（第 5 条）：先用上面的命令确认 head 归属与稳定，再在同一 head 上核对两层各自非空且全绿：
+每次 CI 的 Verify 通过 `pnpm test` 执行现有层运行器；integration/e2e 各层的 `tests − skipped − todo` 至少为1，且退出码为0。本地回读同样用既有实现，不复制摘要解析算法：
 
 ```bash
-# 1) 用例文件计数：每层至少一个
-find tests/integration tests/e2e -name '*.test.js' | wc -l    # 期望 ≥ 1
-
-# 2) 每层分别运行：退出码为 0，且摘要行 tests ≥ 1、fail = 0
-rc=0
-for layer in tests/integration tests/e2e; do
-  out=$(node --test "$layer" 2>&1) || { echo "$layer: FAIL 非零退出"; rc=1; continue; }
-  n=$(printf '%s\n' "$out" | sed -n 's/^ℹ tests \([0-9][0-9]*\)$/\1/p')
-  if [ "${n:-0}" -ge 1 ]; then printf '%s: OK tests=%s\n' "$layer" "$n"
-  else echo "$layer: FAIL 用例数为 0（空层假绿）"; rc=1; fi
-done
-exit $rc
+node scripts/run-test-layer.mjs tests/integration "持久化与跨层集成"
+node scripts/run-test-layer.mjs tests/e2e "端到端链路与故障恢复"
 ```
 
-空层的 `node --test` 输出是 `ℹ tests 0` 且退出 0；上面第 2 步把"用例数为 0"判为失败，因此"目录存在但没有用例"不再能通过第 5 条。同一组检查也适用于第 2 条：`tests/integration` 里没有用例时，"迁移可通过且可重复"无从判定，空层的 exit 0 同样不是证据。
-
-这段手工脚本现在有机械等价物：`Merge Gate · Integration` 与 `Merge Gate · E2E` 两条 lane 通过 `scripts/run-test-layer.mjs` 做同一组判定，并且更严——它要求"真正执行的用例数 = `tests` − `skipped` − `todo`" ≥ 1，因此整层被 `skip` 或 `todo` 消音时同样失败。有 CI 结论时优先读这两条 check；上面的命令是在没有 CI 结论（例如本地复核某个 head）时的手工复现。
+> **Superseded by 本节（2026-11-07，#573）**：独立 Merge Gate 的检查名与手工摘要解析脚本已退役；相同判定由单次 CI 与共享层运行器承担。以下带日期段落保留为历史观察，不能替代目标 head 的实际 CI 读回。
 
 **当前结论（2026-09-26 随 #175 更新，观察时刻快照；以命令回读为准）**：两个层都有用例文件——`find tests/integration tests/e2e -name '*.test.js' | wc -l` 为 16（`tests/integration` 8 个、`tests/e2e` 8 个），逐层运行时 `tests/integration` 为 `ℹ tests 69` / `ℹ fail 0`、`tests/e2e` 为 `ℹ tests 39` / `ℹ fail 0`，两者退出码都是 0，所以 §2.2 第 5 条的两条命令现在都通过。`Merge Gate` 现在是一个 lane：`.github/workflows/merge-gate.yml` 有四条执行 lane（`Merge Gate · Integration` / `Merge Gate · Boundaries` / `Merge Gate · MVP-0` / `Merge Gate · E2E`）与一个聚合 job `Merge Gate`，空层与零用例层由 `scripts/run-test-layer.mjs` 判失败；`docs/development/ci.md` 记录了它与 `CI` 的重复为什么是刻意的。因此第 5 条的"两层非空且全绿"部分**满足**，但"目标 head 上连续两次运行均为绿"必须在目标 head 上用上面的回读命令确认——本文件所在 head 的 CI 结论只能从该 head 的运行记录读，本地推断与"上一次跑过"都不算证据。第 4 条同样只有在存在 open PR 时才能回读。
 

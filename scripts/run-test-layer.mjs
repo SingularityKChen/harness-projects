@@ -28,46 +28,23 @@ const ANSI_PATTERN = /\u001B\[[0-9;]*[A-Za-z]/g;
 /** 捕获 node --test 输出的上限；层输出远小于它，但 spawnSync 默认的 1 MiB 会截断大层。 */
 const MAX_BUFFER = 8 * 1024 * 1024;
 
-/**
- * 该层有多少个 `*.test.js` 用例文件。层可以是目录，也可以是单个用例文件。
- *
- * `node_modules` 必须排除：`node --test <dir>` 自己会跳过它，而 `readdirSync`
- * 的递归不会。今天 `tests/` 下没有 `node_modules`，所以两边一致；一旦某一层
- * 长出 fixture 依赖，计数就会把依赖包里的用例算进这一层——方向是"多算"，
- * 会让空层判定假绿。
- *
- * 计数只覆盖 `*.test.js` 一种命名，**不是** `node --test` 的完整发现规则：
- * Node 还会执行 `*-test.js`、`*_test.js`、`test-*.js` 以及 `test/` 目录下的
- * `*.js`，这些文件在这里一律不计入。方向是刻意的、也是安全的：只含这类命名的
- * 层会被报成"空层"并 exit 1（假红，不是假绿），不会把"这一层没有证据"读成通过。
- * 代价是命名一旦偏离 `*.test.js`，报错会指向"空层"而不是"命名不匹配"——要支持
- * 那些命名，得先在这里放宽匹配，或改用 `node --test` 的摘要行来区分两种情形。
- */
-export function countTestFiles(layer) {
-  let stats;
+/** 计数与执行共用仓库约定的 *.test.js 清单，排除依赖目录；不可读即空。 */
+function testFiles(layer) {
   try {
-    stats = fs.statSync(layer);
+    const stats = fs.statSync(layer);
+    if (stats.isFile()) return layer.endsWith('.test.js') ? [layer] : [];
+    if (!stats.isDirectory()) return [];
+    return fs.readdirSync(layer, { recursive: true })
+      .filter((entry) => entry.endsWith('.test.js') && !entry.split(path.sep).includes('node_modules'))
+      .map((entry) => path.join(layer, entry))
+      .filter((file) => { try { return fs.statSync(file).isFile(); } catch { return false; } });
   } catch {
-    return 0;
+    return [];
   }
-  if (stats.isFile()) return layer.endsWith('.test.js') ? 1 : 0;
-  if (!stats.isDirectory()) return 0;
+}
 
-  let entries;
-  try {
-    entries = fs.readdirSync(layer, { recursive: true });
-  } catch {
-    return 0;
-  }
-  return entries.filter((entry) => {
-    if (!entry.endsWith('.test.js')) return false;
-    if (entry.split(path.sep).includes('node_modules')) return false;
-    try {
-      return fs.statSync(path.join(layer, entry)).isFile();
-    } catch {
-      return false;
-    }
-  }).length;
+export function countTestFiles(layer) {
+  return testFiles(layer).length;
 }
 
 /** 摘要行里的某个计数；同名行出现多次时取最后一条（`node --test` 的汇总在末尾）。 */
@@ -95,8 +72,8 @@ function fail(layer, invariant, reason, exitCode = 1) {
   process.exitCode = exitCode;
 }
 
-function runLayer(layer) {
-  const result = spawnSync(process.execPath, ['--test', layer], {
+function runLayer(files) {
+  const result = spawnSync(process.execPath, ['--test', '--test-reporter=spec', '--test-timeout=120000', ...files], {
     encoding: 'utf8',
     maxBuffer: MAX_BUFFER,
   });
@@ -121,13 +98,13 @@ function main() {
   // 不变量先打一遍：即使后面的测试输出很长，CI 日志开头也能看到被保护的是什么。
   console.log(`run-test-layer: ${layer} —— 该层保护的不变量：${invariant}`);
 
-  const files = countTestFiles(layer);
-  if (files === 0) {
+  const files = testFiles(layer);
+  if (files.length === 0) {
     fail(layer, invariant, '没有任何 *.test.js 用例文件，空层不算通过');
     return;
   }
 
-  const result = runLayer(layer);
+  const result = runLayer(files);
   const summary = parseSummary(`${result.stdout ?? ''}${result.stderr ?? ''}`);
   if (summary === null) {
     fail(layer, invariant, '无法从 node --test 输出解析摘要行 "ℹ tests <n>"，按 fail closed 处理');

@@ -1,6 +1,6 @@
 # tests/e2e
 
-端到端测试：验证用户链路与故障降级。默认全部使用 Fake Provider，CI 中不需要任何外部凭据；真实平台的验证属于 Gate E1 spike，不放进普通 CI。归入 Merge Gate。
+端到端测试：验证用户链路与故障降级。默认全部使用 Fake Provider，CI 中不需要任何外部凭据；真实平台的验证属于 Gate E1 spike，不放进普通 CI。由统一 CI 的 Verify 执行，结果纳入 PR Fast Gate。
 
 ## 两条主线
 

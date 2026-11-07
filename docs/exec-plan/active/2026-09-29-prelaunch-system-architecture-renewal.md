@@ -253,6 +253,8 @@ SQLite 目标是发布前单一空库建表基线。允许不支持旧开发库�
 
 行为批次合入后，把当前 owner、连接/绑定路由、同步/写入/查询数据流、SQLite 新基线、Client 重连契约和失败恢复自包含地写入 `docs/architecture/`、必要 ADR 与 `docs/product/`；用仓库内文字重述"能力意图 → 首发范围 → 延后理由/退出条件"；过期结论原地标 `Superseded by`。系统验收把矩阵与 R1 映射逐行复核，运行 `node_modules/.bin/tsc --noEmit`、`node --test tests/contract tests/integration tests/e2e`、`node --test tests/mvp0`、`node scripts/workflow-check.mjs`、`pnpm run boundaries`，并用 P1–P5 与重连竞态反例核对。真实 GitHub sandbox、浏览器 E2E 与 UAT 只在相应 Host、UI、Provider 可用后执行；缺项留为 R1 不满足，由人类裁决。全部验收后把本计划移到 `docs/exec-plan/completed/` 并更新索引。
 
+> **Superseded by `docs/exec-plan/completed/2026-11-07-test-execution.md`（2026-11-07，#573）**：本批未来验收中的七节点进度轨道已退役，执行入口改为 `pnpm test` 的 contract/integration/e2e 三层；真实行为与 R1 人类裁决保持。原命令仅保留为历史计划。
+
 ## Validation and Acceptance
 
 | # | 完成条件 | 判定证据 |
