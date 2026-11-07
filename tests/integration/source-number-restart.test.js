@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { bootstrapWorkspace, createContext, createQueries, promoteEntityIdentity } from '@harness-projects/core'
+import { bootstrapWorkspace, createContext, createQueries, defaultIdFactory, promoteEntityIdentity } from '@harness-projects/core'
 import { createController, toWireEntity } from '@harness-projects/controller'
 import { createEntityStore, createSync, createTransport } from '@harness-projects/client'
 import { createGithubProjectsPlanningProvider } from '@harness-projects/provider-planning-github-projects'
@@ -28,16 +28,22 @@ function fixture() {
   return {state,planning}
 }
 const input = read => ({phase:'received',refreshing:false,metadata:{sourceNames:{}},read})
+const redactedContent = { contentKind:'redacted', title:undefined, body:undefined, bindingId, externalKind:undefined, externalId:undefined }
+// Match source metadata, never bare digits that may occur inside opaque routing identities.
+const sourceMetadata = /example\/(?:one|two|promoted)|sourceNumber|numberLabel|searchTerms|searchHint|"number":(?:449|450)(?:[,}])/
 
 test('production provider → SQLite reopen → controller/client → default list/detail keeps qualified numbers; redaction clears them', async () => {
   const dir = mkdtempSync(join(tmpdir(),'source-numbers-')), path = join(dir,'workspace.sqlite')
   const {planning,state} = fixture(), workspace = {id:'numbers',name:'Numbers',project:{bindingId,objectKind:'project',externalId:projectId,url:undefined}}
+  let sequence = 0
+  const ids = { ...defaultIdFactory, entityId: () => `00000449-0450-4449-8450-${String(++sequence).padStart(12,'0')}` }
   let storage = createSqliteStorage(path)
   try {
-    let context = await createContext({workspace,providers:{planning},storage})
+    let context = await createContext({workspace,providers:{planning},storage,ids})
     assert.equal((await bootstrapWorkspace(context)).ok,true)
     const before = await createQueries(context).listPlanningItems()
     const issue = before.find(v => v.content.identity.externalId === 'issue-one')
+    assert.match(issue.entityId,/449.*450/,'opaque internal identities may contain native-number digits')
     assert.deepEqual(issue.content.sourceNumber,nativeNumber())
     storage.close(); storage = createSqliteStorage(path)
     context = {...context,storage}
@@ -62,7 +68,8 @@ test('production provider → SQLite reopen → controller/client → default li
     await sync.reconnect()
     const hidden = store.get(oldId).entity
     assert.equal(hidden.content.sourceNumber,undefined)
-    assert.doesNotMatch(JSON.stringify(hidden),/example\/one|449/)
+    assert.deepEqual(hidden.content,redactedContent)
+    assert.doesNotMatch(JSON.stringify(hidden),sourceMetadata)
     const after = deriveWorkItemListView(input(sync.read()))
     assert.deepEqual(after.body.rows.find(r=>r.key===oldId),{kind:'redacted',key:oldId})
     assert.equal(queryVisibleWorkItems(after.body.rows,{search:'#449'}).matchedReadableCount,2)
@@ -80,8 +87,13 @@ test('production provider → SQLite reopen → controller/client → default li
     state.denied=true
     assert.equal((await bootstrapWorkspace(context)).ok,false)
     await sync.reconnect()
-    assert.doesNotMatch(JSON.stringify(store.list()),/example\/|sourceNumber|449|450/)
-    assert.doesNotMatch(JSON.stringify(deriveWorkItemListView(input(sync.read()))),/example\/|sourceNumber|449|450/)
+    assert.deepEqual(store.list().map(entry=>entry.entityId).sort(),promotedViews.map(view=>view.entityId).sort(),'redaction retains opaque routing identities')
+    for (const entry of store.list()) assert.deepEqual(entry.entity.content,redactedContent)
+    assert.doesNotMatch(JSON.stringify(store.list()),sourceMetadata)
+    const denied = deriveWorkItemListView(input(sync.read()))
+    assert.equal(denied.body.kind,'unavailable')
+    assert.equal(queryVisibleWorkItems(denied.body.rows ?? [],{search:'#449'}).matchedReadableCount,0)
+    assert.doesNotMatch(JSON.stringify(denied),sourceMetadata)
   } finally { storage.close(); rmSync(dir,{recursive:true,force:true}) }
 })
 

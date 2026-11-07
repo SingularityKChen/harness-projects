@@ -8,7 +8,7 @@ const ui = await import('../../packages/ui/src/issue-closing-links-section.ts').
 import { wire, T } from '../fixtures/work-item-wire.mjs'
 const require = createRequire(new URL('../../packages/ui/package.json', import.meta.url)), React = require('react'), { renderToStaticMarkup } = require('react-dom/server')
 const scope = { workspaceId: 'ws', workItemId: 'wi' }, target = { ...scope, sourceToken: 'source-1', accessToken: 'access-1' }
-const observation = (over = {}) => ({ workItemId: 'wi', scopeToken: 'host:1', state: 'complete', stale: false, observedAt: T, links: [{ repositoryId: 'OPAQUE-REPO', bindingId: 'OPAQUE-BIND', externalId: 'OPAQUE-ID', repositoryName: 'actual/repo', number: 159, title: 'SAFE-TITLE', url: 'https://example.test/pull/159', state: 'merged', isDraft: false, provenance: 'source_observed', relation: 'native_closing' }], ...over })
+const observation = (over = {}) => ({ workItemId: 'wi', scopeToken: 'host:1', state: 'complete', coverage: { native_reference: { state: 'complete', stale: false, observedAt: T }, native_closing: { state: 'complete', stale: false, observedAt: T } }, stale: false, observedAt: T, links: [{ repositoryId: 'OPAQUE-REPO', bindingId: 'OPAQUE-BIND', externalId: 'OPAQUE-ID', repositoryName: 'actual/repo', number: 159, title: 'SAFE-TITLE', url: 'https://example.test/pull/159', state: 'merged', isDraft: false, provenance: 'source_observed', relations: ['native_closing'] }], ...over })
 const settle = async () => { for (let i = 0; i < 25; i++) await Promise.resolve() }
 function harness(props) {
   const cells = []; let cursor = 0, pending = [], writes = 0
@@ -45,7 +45,7 @@ test('consumer refresh/query once, masks before effects, rejects late scope and 
   const pending = [], calls = []; let hold = false, value = observation()
   const reader = { refresh: async () => { calls.push('refresh'); return value.scopeToken }, read: async s => { calls.push('read'); return hold ? new Promise(resolve => pending.push(resolve)) : { ...s, observation: value } } }
   const h = harness({ target, reader, connected: true }); h.text(); h.flush(); await settle()
-  assert.deepEqual(calls, ['refresh', 'read']); assert.match(h.text(), /SAFE-TITLE|来源记录的关闭关联|已合并/); assert.doesNotMatch(h.text(), /OPAQUE|已确认关系|implements/)
+  assert.deepEqual(calls, ['refresh', 'read']); assert.match(h.text(), /SAFE-TITLE|合并时关闭|已合并/); assert.doesNotMatch(h.text(), /OPAQUE|已确认关系|implements/)
   h.text(); h.flush(); await settle(); assert.equal(calls.length, 2)
   hold = true; h.props.target = { ...target, accessToken: 'revoked' }; assert.doesNotMatch(h.text(), /SAFE-TITLE/); h.flush(); await settle()
   h.props.target = { ...target, workItemId: 'other' }; h.text(); h.flush(); await settle(); pending.shift()({ ...scope, observation: value }); await settle(); assert.doesNotMatch(h.text(), /SAFE-TITLE/)
@@ -81,4 +81,11 @@ test('same source authority version changes mask synchronously and query without
   pending[1]({ ...scope, observation: denied }); await settle(); pending[0]({ ...scope, observation: observation() }); await settle(); assert.doesNotMatch(h.text(), /SAFE-TITLE/)
   h.text(); h.flush(); await settle(); assert.equal(calls.length, 5)
   hold = false; h.render().props.children.at(-1).props.onClick(); await settle(); assert.match(h.text(), /SAFE-TITLE/); assert.deepEqual(calls.slice(-2), ['refresh', 'read']); h.close()
+})
+
+test('relation badges distinguish refs-only, historical will-close and two current sources', () => {
+  for (const [relations, hint, expected] of [[['native_reference'], false, /仅引用/], [['native_reference'], true, /关闭关系尚未确认/], [['native_reference', 'native_closing'], true, /原生引用.*合并时关闭/]]) {
+    const value = observation(); value.links[0].relations = relations; value.links[0].referenceWillCloseTarget = hint
+    assert.match(model.deriveIssueClosingLinksView(value).links[0].relation, expected)
+  }
 })

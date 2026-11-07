@@ -15,7 +15,7 @@ export async function fixture() {
   }
   describe(planning, [K.PlanningIssueClosingLinksRead]); describe(dev, [K.DevelopmentChangeRequestNativeIdentityRead])
   let page = (input) => providerOk({ source: { project: input.project, membership: input.membership, issue: input.issue, repository: repo('alpha') }, items: [link()], nextCursor: undefined })
-  planning.listIssueClosingLinks = async input => { calls.push('source'); return flags.denied ? providerErr(providerError('permission_denied', 'SECRET')) : flags.offline ? providerErr(providerError('unavailable', 'SECRET')) : page(input) }
+  planning.listIssueClosingLinks = async input => { calls.push('source'); return flags.denied ? providerErr(providerError('permission_denied', 'SECRET')) : flags.offline ? providerErr(providerError('unavailable', 'SECRET')) : input.relationKind === 'native_reference' && !flags.references ? providerOk({ source: { ...input, repository: repo('alpha') }, items: [] }) : page(input) }
   dev.getRepository = async ref => { calls.push('repo'); return providerOk({ ref, name: ref.externalId, sourceRepositoryIdentity: repo(ref.externalId === 'repo-beta' ? 'beta' : 'alpha') }) }
   dev.getChangeRequestByNativeIdentity = async ({ repository, identity }) => { calls.push('native'); return providerOk({ ref: { ...refOf(dev.gate.bindingId, 'change_request', 'resolved-' + identity.id), url: 'https://example.invalid/pull/1' }, nativeIdentity: identity, number: 1, title: 'actual ' + identity.id, body: '', state: 'open', sourceVersion: 'sha', headBranch: undefined, reviewState: 'unknown' }) }
   const core = await composeCore({ workspace: { name: 'Native observation' }, providers: p, clock: () => '2026-11-03T00:00:00.000Z' })
@@ -149,4 +149,46 @@ test('canonical repositories with the same short name retain qualified source la
   ] }))
   const value = await h.refresh(); assert.equal(value.state, 'complete')
   assert.deepEqual(value.links.map(link => link.repositoryName), ['owner-a/project', 'owner-b/project'])
+})
+
+test('two native streams union relations and retain honest independent coverage', async () => {
+  for (const mode of ['reference', 'both', 'closing-failed', 'reference-failed', 'true-reference']) {
+    const h = await fixture(); h.flags.references = true
+    h.page(input => {
+      const kind = input.relationKind
+      if (mode === 'closing-failed' && kind === 'native_closing' || mode === 'reference-failed' && kind === 'native_reference') return providerErr(providerError('unavailable', 'SECRET'))
+      const items = kind === 'native_closing' && ['reference', 'true-reference'].includes(mode) ? [] : [{ ...h.link(), relation: kind, ...(kind === 'native_reference' ? { referenceWillCloseTarget: mode === 'true-reference' } : {}) }]
+      return providerOk({ source: { ...input, repository: repo('alpha') }, items })
+    })
+    const v = await h.refresh(); assert.equal(v.links.length, 1)
+    assert.deepEqual(v.links[0].relations, mode === 'both' ? ['native_reference', 'native_closing'] : mode === 'reference-failed' ? ['native_closing'] : ['native_reference'])
+    assert.equal(v.state, mode.endsWith('failed') ? 'partial' : 'complete')
+    assert.equal(v.coverage.native_reference.state, mode === 'reference-failed' ? 'unavailable' : 'complete')
+    assert.equal(v.coverage.native_closing.state, mode === 'closing-failed' ? 'unavailable' : 'complete')
+    if (mode === 'true-reference') assert.equal(v.links[0].referenceWillCloseTarget, true)
+  }
+})
+
+test('native streams own their cursors and repeated reference events preserve conservative hint', async () => {
+  const h = await fixture(), cursors = []; h.flags.references = true
+  h.page(input => {
+    const kind = input.relationKind; cursors.push([kind, input.cursor])
+    const nextCursor = input.cursor ? undefined : kind === 'native_reference' ? 'reference2' : 'closing2'
+    const items = kind === 'native_reference' ? [{ ...h.link(), relation: kind, referenceWillCloseTarget: !!input.cursor }] : [h.link()]
+    return providerOk({ source: { ...input, repository: repo('alpha') }, items, nextCursor })
+  })
+  const value = await h.refresh(); assert.equal(value.state, 'complete'); assert.equal(value.links.length, 1)
+  assert.deepEqual(value.links[0].relations, ['native_reference', 'native_closing']); assert.equal(value.links[0].referenceWillCloseTarget, true)
+  assert.deepEqual(cursors, [['native_closing', undefined], ['native_closing', 'closing2'], ['native_reference', undefined], ['native_reference', 'reference2']])
+  for (const c of Object.values(value.coverage)) assert.deepEqual(c, { state: 'complete', stale: false, observedAt: '2026-11-03T00:00:00.000Z' })
+})
+
+test('final visibility check deadline cannot advertise complete relation coverage', async t => {
+  const h = await fixture(), describe = h.p.planning.describeCapabilities; let final = false, checks = 0
+  t.mock.timers.enable({ apis: ['Date'] }); t.after(() => t.mock.timers.reset())
+  h.page(input => { if (input.relationKind === 'native_reference') final = true; return providerOk({ source: { ...input, repository: repo('alpha') }, items: [] }) })
+  h.flags.references = true
+  h.p.planning.describeCapabilities = async () => { if (final && ++checks === 2) t.mock.timers.tick(10001); return describe() }
+  const value = await h.refresh(); assert.equal(value.state, 'partial')
+  assert.equal(Object.values(value.coverage).every(c => c.state === 'complete'), false)
 })
