@@ -29,9 +29,10 @@ export async function createComposedExecutionPlatform() {
     await writeFile(path.join(repositoryPath, 'README.md'), 'Browser Git fixture\n')
     await git(['add', 'README.md'])
     await git(['-c', 'user.name=Browser Fixture', '-c', 'user.email=browser@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-m', 'fixture'])
-    const flags = { execution: 'normal', dropAck: false }, counts = { branches: 0, worktrees: 0, primary: 0, manual: 0 }
+    const flags = { execution: 'normal', dropAck: false, issueTarget: false, issueDenied: false }, counts = { branches: 0, worktrees: 0, primary: 0, manual: 0 }
     const f = platform(), providers = createFakeProviders({ planning: { bindingId: 'planning-browser' }, delivery: { bindingId: 'delivery-browser' }, execution: { bindingId: 'execution-browser' } })
     providers.execution.state.runs = []; providers.execution.state.seq = 0
+    providers.planning.getIssueLinkTarget = async source => flags.issueDenied ? providerErr(providerError('permission_denied', 'synthetic source denied')) : flags.issueTarget ? { ok: true, value: { source, nativeIssueIdentity: { namespace: 'fixture/Issue', id: source.issue.externalId }, number: 545, repository: { identity: { namespace: 'github.com/graphql/Repository', id: 'R_synthetic' }, name: 'example/project' } } } : providerErr(providerError('not_supported', 'synthetic issue target disabled'))
     const startPrimary = providers.execution.startRun.bind(providers.execution)
     providers.execution.startRun = async input => {
       counts.primary++
@@ -44,8 +45,9 @@ export async function createComposedExecutionPlatform() {
     for (const [method, count] of [['createBranch', 'branches'], ['createWorktree', 'worktrees']]) {
       const run = local[method].bind(local); local[method] = input => { counts[count]++; return run(input) }
     }
-    const assignment = { ids: [], adds: 0, drop: false, offline: false, failure: '', more: false }, users = [{ id: 'U_browser', login: 'browser-assignee' }]
+    const assignment = { ids: [], adds: 0, drop: false, offline: false, denied: '', failure: '', more: false }, users = [{ id: 'U_browser', login: 'browser-assignee' }]
     const github = createGithubDevelopmentProvider({ bindingId: repository.bindingId, repository: { externalId: REPOSITORY, owner: 'example', name: 'project' }, permissionMode: 'lazy', transport: async request => {
+      if (request.operationName === assignment.denied) return { status: 403, headers: {}, body: {} }
       if (flags.dropAck && f.objects.length && request.operationName !== 'DevelopmentCreateChangeRequest') throw Error('creation reconciliation temporarily unavailable')
       if (request.operationName.startsWith('DevelopmentAssign') || request.operationName === 'DevelopmentAddAssignees') {
         const page = nodes => ({ nodes, pageInfo: { hasNextPage: assignment.more || assignment.failure === 'unavailable', endCursor: assignment.failure === 'unavailable' ? null : assignment.more ? 'next-directory-page' : null } })
@@ -87,7 +89,7 @@ export async function createComposedExecutionPlatform() {
       providers.delivery.state.checks = [{ ref: ref('check_run', 'target-check'), repository: repo, commit: sha, name: 'target-check', status: 'completed', conclusion }]
     }
     delivery('failed'); await rebuild()
-    const world = { flags, assignment, delivery, get prCreates() { return f.mutations().length }, get peer() { return peer }, effects: () => ({ ...counts, prs: f.objects.length }),
+    const world = { flags, assignment, github, delivery, get prCreates() { return f.mutations().length }, get peer() { return peer }, effects: () => ({ ...counts, prs: f.objects.length }),
       async gitFacts() { const worktrees = (await git(['worktree', 'list', '--porcelain'])).split('\n').filter(line => line.startsWith('worktree ')).map(line => line.slice(9)); assert.equal(worktrees.length, 2); const worktree = worktrees.find(p => p !== repositoryPath); return { path: await realpath(worktree), branch: await git(['branch', '--show-current'], worktree), worktrees: worktrees.length } },
     }
     return { dataPath, workspaceId, itemId, get storage() { return storage }, get host() { return host }, get installed() { return installed }, rebuild, platform: world,

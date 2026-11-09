@@ -183,7 +183,7 @@ test('run refresh exposes only actor and explicit work/repository IDs without re
 
 test('PR create ABI has only explicit user fields and cannot carry provider authority', () => {
   const operation = OPERATIONS.createChangeRequest
-  assert.deepEqual(operation.params.map((param) => param.name), ['actorRef', 'idempotencyKey', 'workItemId', 'repositoryId', 'base', 'title', 'body', 'draft', 'issueRelation', 'issueTargetStamp'])
+  assert.deepEqual(operation.params.map((param) => param.name), ['actorRef', 'idempotencyKey', 'workItemId', 'repositoryId', 'base', 'title', 'body', 'draft', 'issueRelation', 'issueTargetStamp', 'assigneeIds'])
   assert.equal(operation.params.find(p => p.name === 'body').parse(''), '')
   assert.throws(() => operation.params.find(p => p.name === 'body').parse({}), TypeError)
 })
@@ -230,4 +230,11 @@ test('assignee Host inputs reject accessors before reading a caller value', () =
   const input = { ...base, get assigneeIds() { reads++; return ['U'] } }
   assert.throws(() => parseInput(OPERATIONS.addChangeRequestAssignees, input)); assert.equal(reads, 0)
   assert.throws(() => parseInput(OPERATIONS.addChangeRequestAssignees, { ...base, actorRef: { get kind() { reads++; return 'user' } } })); assert.equal(reads, 0)
+})
+
+test('creation assignee ABI appends native IDs and rejects malformed input', () => {
+  const ids = OPERATIONS.createChangeRequest.params.at(-1)
+  assert.equal(ids.name, 'assigneeIds'); assert.equal(ids.acceptsUndefined, true); assert.equal(ids.parse(undefined), undefined)
+  assert.deepEqual(ids.parse(['U_2', 'U_1']), ['U_2', 'U_1'])
+  for (const value of [null, 'U', [' '], [1], Array(11).fill('U')]) assert.throws(() => ids.parse(value), TypeError)
 })

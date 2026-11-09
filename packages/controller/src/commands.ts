@@ -286,7 +286,7 @@ export function createControllerCommands(core: CoreApi): ControllerCommands {
     },
     createChangeRequest: async (input) => {
       if (input === null || typeof input !== 'object' || Object.values(Object.getOwnPropertyDescriptors(input)).some((field) => field.get !== undefined || field.set !== undefined)) return resultOf<CreateChangeRequestResult>(CommandWriteState.Failed, undefined, projectError(ProjectErrorCode.InvalidInput, 'PR 请求不能含存取器'))
-      if (Object.keys(input).some((key) => !['actorRef', 'idempotencyKey', 'workItemId', 'repositoryId', 'base', 'title', 'body', 'draft', 'issueRelation', 'issueTargetStamp'].includes(key))) return resultOf<CreateChangeRequestResult>(CommandWriteState.Failed, undefined, projectError(ProjectErrorCode.InvalidInput, '未知 PR 请求字段'))
+      if (Object.keys(input).some((key) => !['actorRef', 'idempotencyKey', 'workItemId', 'repositoryId', 'base', 'title', 'body', 'draft', 'issueRelation', 'issueTargetStamp', 'assigneeIds'].includes(key))) return resultOf<CreateChangeRequestResult>(CommandWriteState.Failed, undefined, projectError(ProjectErrorCode.InvalidInput, '未知 PR 请求字段'))
       const { actorRef, draft, ...request } = input
       if (draft !== undefined && typeof draft !== 'boolean') return resultOf<CreateChangeRequestResult>(CommandWriteState.Failed, undefined, projectError(ProjectErrorCode.InvalidInput, 'draft 必须是布尔值'))
       const result = await core.commands.createChangeRequest({ ...request, draft: draft ?? false, actor: actorRef })

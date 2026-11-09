@@ -193,10 +193,14 @@ for (const relation of ['reference', 'closing', 'none']) test(`native target dec
     return { status: 200, headers: {}, body: { data: { project: { __typename: 'ProjectV2', id: v.project }, membership: { __typename: 'ProjectV2Item', id: v.membership, type: 'ISSUE', project: { id: v.project }, content: issue }, issue } } }
   } })
   planning.getIssueLinkTarget = native.getIssueLinkTarget
+  let assigned = [], adds = 0
+  w.f.provider.listAssignableUsers = async () => ({ ok: true, value: { items: [{ id: 'U_native', login: 'native' }] } })
+  w.f.provider.getChangeRequestAssignees = async input => ({ ok: true, value: { changeRequest: input.changeRequest, users: assigned.map(id => ({ id, login: 'native' })) } })
+  w.f.provider.addChangeRequestAssignees = async input => { adds++; assigned = [...input.assigneeIds]; return { ok: true } }
   const h = await install(w, 'native-choice-peer'); t.after(h.close)
   const creator = createChangeRequestCreator({ options: (...a) => h.service.getChangeRequestIssueOptions(...a), create: (...a) => h.service.createChangeRequest(...a), operation: (...a) => h.service.getChangeRequestOperation(...a), resume: (...a) => h.service.resumeChangeRequest(...a) }, { kind: 'user' }, () => 'native-choice')
   let done, result; const completed = new Promise(resolve => { done = resolve })
-  const scope = { workspaceId: w.workspace.id, ...w.scope }, props = { scope, accessToken: JSON.stringify((await h.service.baseline()).nativeAccessVersion), connected: true, creator: { ...creator, submit: async input => { result = await creator.submit(input); done(); return result } }, onConfirmed() {} }
+  const scope = { workspaceId: w.workspace.id, ...w.scope }, props = { scope, accessToken: JSON.stringify((await h.service.baseline()).nativeAccessVersion), connected: true, creator: { ...creator, submit: async input => { result = await creator.submit({ ...input, assigneeIds: ['U_native'] }); done(); return result } }, onConfirmed() {} }
   const render = renderOperation(props)
   render(); await new Promise(resolve => setImmediate(resolve)); render(); await new Promise(resolve => setImmediate(resolve))
   for (const label of render().props.children.flat().filter(n => n?.type === 'label')) { const field = label.props.children[1]; if (field.type === 'input' && field.props.name !== 'draft' || field.type === 'textarea') field.props.onChange({ target: { value: field.props.name === 'base' ? 'main' : field.props.name === 'body' ? 'User text\nRefs #999' : 'Native choice' } }) }
@@ -204,6 +208,7 @@ for (const relation of ['reference', 'closing', 'none']) test(`native target dec
   const form = render(); assert.match(JSON.stringify(form), /example\/project#545/)
   form.props.children.flat().find(n => n?.type === 'label' && n.props.children[1]?.type === 'select').props.children[1].props.onChange({ target: { value: relation } })
   render().props.onSubmit({ preventDefault() {} }); await completed
+  assert.equal(result.assignment.state, 'confirmed'); assert.equal(adds, 1)
   assert.equal(result.writeState, 'confirmed'); assert.equal(result.relationState, relation === 'none' ? 'none' : 'unknown'); assert.equal(w.f.mutations().length, 1)
   assert.match(w.f.objects[0].body, /^User text\nRefs #999\n/)
   relation === 'none' ? assert.doesNotMatch(w.f.objects[0].body, /project#545/) : assert.match(w.f.objects[0].body, new RegExp(`\\n${relation === 'closing' ? 'Closes' : 'Refs'} example/project#545\\n`))
@@ -231,4 +236,15 @@ for (const during of [false, true]) test(`Host options and create reject current
   assert.equal((await creator.options(scope, 'main')).target, undefined)
   assert.equal((await creator.submit({ ...scope, base: 'main', title: 'Denied Issue', body: '', issueRelation: 'reference' })).writeState, 'failed')
   assert.equal(w.f.mutations().length, 0)
+})
+
+test('Host final assignment denial masks people while preserving confirmed PR and Issue result', async t => {
+  const { createComposedExecutionPlatform } = await import('../fixtures/composed-execution-platform.mjs'), w = await createComposedExecutionPlatform(); t.after(w.close)
+  const service = w.installed.service, actor = { kind: 'user' }, repo = 'local-repository'
+  await service.startWork(actor, 'start-assignee', w.itemId, repo, 'Synthetic explicit task', 'feature/topic')
+  const query = w.host.controller.queries.getChangeRequestOperation
+  w.host.controller.queries.getChangeRequestOperation = async scope => { const result = await query(scope); return result.kind === 'operation' ? { ...result, requestedAssigneeIds: undefined, assignment: { state: 'unknown' } } : result }
+  const result = await service.createChangeRequest(actor, 'host-preselect', w.itemId, repo, 'main', 'Assigned PR', '', true, 'none', undefined, ['U_browser'])
+  assert.equal(result.writeState, 'confirmed'); assert.equal(result.value.ref.externalId, 'PR_1'); assert.equal(result.value.relationState, 'none'); assert.equal(result.value.assignment.state, 'unknown')
+  assert.equal(w.platform.assignment.adds, 1)
 })

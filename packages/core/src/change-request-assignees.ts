@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { CapabilityKey, externalIntentSnapshot, projectError, type ChangeRequestAssigneeIntent, type MutationAttemptRecord, type StorageTransaction, type ProjectError } from '@harness-projects/capabilities'
+import { CapabilityKey, externalIntentSnapshot, projectError, type ChangeRequestAssigneeIntent, type ChangeRequestExternalIntent, type MutationAttemptRecord, type StorageTransaction, type ProjectError } from '@harness-projects/capabilities'
 import type { CoreContext } from './context.ts'
 import { resolveAssigneeRepositoryTarget, resolveConfirmedChangeRequestTarget, type PrScope } from './create-change-request.ts'
 type Actor = { readonly kind: string; readonly id?: string }
@@ -11,6 +11,7 @@ export interface AssigneeResume extends AssigneeScope { readonly observer: Actor
 export interface AssigneeOptions extends PrScope { readonly observer: Actor; readonly cursor?: string | undefined; readonly limit: number }
 export type AssigneeOperation = { readonly kind: 'none' | 'blocked' } | { readonly kind: 'operation'; readonly operationId: string; readonly targetStamp: string; readonly state: MutationAttemptRecord['state']; readonly requestedIds: readonly string[]; readonly confirmedIds: readonly string[] }
 export interface AssigneeResult { readonly phase: 'confirmed' | 'reconciled' | 'unknown' | 'failed' | 'conflict'; readonly operationId?: string; readonly error?: ProjectError }
+export interface CreationAssignment { readonly state: 'none' | 'pending' | 'confirmed' | 'unknown' | 'failed' | 'conflict'; readonly operationId?: string; readonly reason?: 'not_supported' | 'permission_denied' }
 const hash = (s: string) => createHash('sha256').update(s).digest('hex')
 const fail = () => projectError('conflict', '负责人目标、授权或持久操作已变化')
 const text = (v: unknown): v is string => typeof v === 'string' && v.trim() !== ''
@@ -23,6 +24,72 @@ const receipt = (r: MutationAttemptRecord) => JSON.stringify([r.id, r.workspaceI
 const fingerprint = (workspace: string, intent: ChangeRequestAssigneeIntent, who: Actor) => { const { sequence: _sequence, ...request } = externalIntentSnapshot({ ...intent, state: 'pending', confirmedIds: [] }); return JSON.stringify([workspace, who, request]) }
 async function gate(context: CoreContext, target: Pick<Awaited<ReturnType<typeof resolveConfirmedChangeRequestTarget>>, 'route'>, key: CapabilityKey, mode: 'read' | 'write' = 'read', version = context.runtimeAccess.operationVersion(target.route.binding.ref.bindingId, key, target.route.repository.externalId)) {
   const error = await context.runtimeAccess.operation(target.route.binding, key, target.route.repository.externalId, context.policy, mode, version); if (error) throw error; return version
+}
+const creationKey = (id: string, ids: readonly string[]) => `pr-assignees:${id}:${hash(JSON.stringify(ids))}`
+function matchesCreationRequest(context: CoreContext, attempt: MutationAttemptRecord, resolved: Awaited<ReturnType<typeof resolve>>, ids: readonly string[]) {
+  return resolved.row && resolved.intent && resolved.row.idempotencyKey === creationKey(attempt.id, ids)
+    && JSON.stringify(resolved.intent.input.assigneeIds) === JSON.stringify(ids)
+    && resolved.row.requestFingerprint === fingerprint(context.workspaceId, resolved.intent, actor(JSON.parse(attempt.requestFingerprint!).actor))
+}
+export async function preflightCreationAssignees(context: CoreContext, scope: PrScope, route: Awaited<ReturnType<typeof resolveAssigneeRepositoryTarget>>['route'], tx: StorageTransaction = context.storage) {
+  const directory = await resolveAssigneeRepositoryTarget(context, scope, tx)
+  if (directory.route.binding.ref.bindingId !== route.binding.ref.bindingId) throw fail()
+  for (const [key, method, mode] of [
+    [CapabilityKey.DevelopmentAssigneeList, 'listAssignableUsers', 'read'],
+    [CapabilityKey.DevelopmentChangeRequestAssigneeRead, 'getChangeRequestAssignees', 'read'],
+    [CapabilityKey.DevelopmentChangeRequestAssigneeAdd, 'addChangeRequestAssignees', 'write'],
+  ] as const) {
+    if (!route.provider[method]) throw projectError('not_supported', '当前连接不支持创建时负责人')
+    await gate(context, { route }, key, mode)
+  }
+}
+/** 创建摘要只看原稳定键；人工后续 sequence 不替换创建意图。 */
+export async function creationAssigneeSummary(context: CoreContext, scope: PrScope, attempt: MutationAttemptRecord, intent: ChangeRequestExternalIntent, tx: StorageTransaction = context.storage, version?: number): Promise<{ assignment?: CreationAssignment; requestedAssigneeIds?: readonly string[] }> {
+  const ids = intent.requestedAssigneeIds
+  if (!ids?.length) return {}
+  let terminal: CreationAssignment | undefined
+  try {
+    const row = await tx.findMutationAttempt(context.workspaceId, creationKey(attempt.id, ids))
+    const target = await resolveAssigneeRepositoryTarget(context, scope, tx)
+    if (target.route.binding.ref.bindingId !== intent.bindingId) throw fail()
+    if (row) {
+      const resolved = await resolve(context, { ...scope, createOperationId: attempt.id, operationId: row.id }, tx, false)
+      if (!matchesCreationRequest(context, attempt, resolved, ids)) throw fail()
+      terminal = {
+        state: row.state === 'saved' ? 'confirmed' : row.state, operationId: row.id,
+        ...(['not_supported', 'permission_denied'].includes(row.errorCode ?? '') ? { reason: row.errorCode as 'not_supported' | 'permission_denied' } : {}),
+      }
+    }
+    await gate(context, target, CapabilityKey.DevelopmentChangeRequestAssigneeRead, 'read', version)
+    return { requestedAssigneeIds: [...ids], assignment: terminal ?? { state: 'pending' } }
+  } catch { return { assignment: terminal?.state === 'failed' ? terminal : { state: 'unknown' } } }
+}
+export async function continueCreationAssignees(context: CoreContext, scope: PrScope, createOperationId: string): Promise<CreationAssignment> {
+  try {
+    const target = await resolveConfirmedChangeRequestTarget(context, { ...scope, createOperationId })
+    const ids = target.intent.requestedAssigneeIds
+    if (!ids?.length) return { state: 'none' }
+    const version = context.runtimeAccess.operationVersion(target.intent.bindingId, CapabilityKey.DevelopmentChangeRequestAssigneeRead, scope.repositoryId)
+    let result: AssigneeResult | undefined
+    const idempotencyKey = creationKey(createOperationId, ids)
+    const original = await context.storage.findMutationAttempt(context.workspaceId, idempotencyKey)
+    if (original) {
+      const exact = await context.storage.transaction(tx => resolve(context, { ...scope, createOperationId, operationId: original.id }, tx, false))
+      if (!matchesCreationRequest(context, target.attempt, exact, ids)) throw fail()
+      if (['pending', 'unknown'].includes(original.state)) {
+        result = await resumeChangeRequestAssignees(context, {
+          ...scope, createOperationId, operationId: original.id, observer: actor(JSON.parse(target.attempt.requestFingerprint!).actor),
+        })
+      }
+    } else {
+      result = await addChangeRequestAssignees(context, {
+        ...scope, createOperationId, actor: actor(JSON.parse(target.attempt.requestFingerprint!).actor), assigneeIds: ids, idempotencyKey,
+      })
+    }
+    const summary = (await creationAssigneeSummary(context, scope, target.attempt, target.intent, context.storage, version)).assignment ?? { state: 'unknown' as const }
+    // 新一轮可读摘要不能把此前公共出口拒绝过的响应重新变成成功。
+    return result?.phase === 'conflict' ? { state: 'conflict' } : summary
+  } catch { return { state: 'unknown' } }
 }
 async function resolve(context: CoreContext, query: AssigneeQuery, tx: StorageTransaction, authorize = true) {
   capture(query, [...keys, 'operationId']); query = { ...query }; if (![query.workItemId, query.repositoryId, query.createOperationId].every(text) || (query.operationId !== undefined && !text(query.operationId))) throw fail()
