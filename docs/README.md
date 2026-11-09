@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-09-draft-promotion](exec-plan/completed/2026-11-09-draft-promotion.md) | Draft 转 Issue 保留工作项与执行谱系，含已知身份遮罩恢复（#283） |
 | [2026-11-09-pr568-pr581-review-followup](exec-plan/completed/2026-11-09-pr568-pr581-review-followup.md) | 三项 MMP 交付独立评审、P2 修复复评与条件 rebase 整合 |
 | [2026-11-07-pr-assignee-creation](exec-plan/completed/2026-11-07-pr-assignee-creation.md) | 创建 PR 预选原生负责人与原意图恢复（#557） |
 | [2026-11-07-pr-assignee-management](exec-plan/completed/2026-11-07-pr-assignee-management.md) | 已确认 PR 的原生负责人添加与只读恢复（#567，Refs #557） |

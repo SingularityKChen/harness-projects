@@ -10,7 +10,7 @@ import {
   type ProviderProject, type ResolvedBinding, type ProviderPlanningContent, type ProviderPlanningItem, type ProviderResult, type StorageTransaction,
 } from '@harness-projects/capabilities'
 import {
-  ContentKind, EntityKind, ProviderErrorCode, sourceNumberSnapshot,
+  ContentKind, EntityKind, IdentityRole, MembershipContentKind, ProviderErrorCode, sourceNumberSnapshot,
   type EntityId, type PlanningContent, type ProjectError, type ProviderBindingId,
   type WorkspaceId, type WorkspacePlanningFieldMapping, type WorkspaceProjection,
 } from '@harness-projects/domain'
@@ -18,7 +18,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { gateCommand } from './capabilities.ts'
 import type { CoreContext } from './context.ts'
 import { reportSyncRoundFailure } from './diagnostics.ts'
-import { changeRequestEntityId, ensureEntity, entityKindFor, IdentityConflictError, planningContentKind, validNativeIdentity } from './identity.ts'
+import { changeRequestEntityId, ensureEntity, entityKindFor, IdentityConflictError, planningContentKind, promoteEntityIdentity, validNativeIdentity } from './identity.ts'
 import { planningFieldsOf } from './planning-fields.ts'
 import { collectBindings } from './registry.ts'
 import { redactPlanning, PLANNING_DENIED } from './runtime-access.ts'
@@ -98,7 +98,7 @@ async function syncRound(
   if (!project.ok) return providerErr(project.error)
   const items = await readAllItems(planning, project.value.ref)
   if (!items.ok) return providerErr(items.error)
-  const validated = validatePlanningItems(project.value.ref, items.value)
+  const validated = validatePlanningItems(bindingId, project.value.ref, items.value)
   if (!validated.ok) return validated
   let verified: ResolvedBinding | undefined
   if (context.runtimeAccess.denied || round.latestStartedRound > (round.latestCommittedRound ?? 0) + 1 || (await context.runtimeAccess.planning(context.storage)).masked) {
@@ -181,8 +181,9 @@ async function readAllItems(
  * 再进入任何 membership/projection 写入路径。
  */
 function validatePlanningItems(
-  project: ExternalObjectRef, items: readonly ProviderPlanningItem[],
+  bindingId: ProviderBindingId, project: ExternalObjectRef, items: readonly ProviderPlanningItem[],
 ): ProviderResult<ValidatedPlanningRead> {
+  if (project.bindingId !== bindingId) return providerErr(providerError(ProviderErrorCode.InvalidInput, '规划项目不属于当前 Planning 绑定'))
   for (const item of items) {
     const c = item.content
     if (c.kind !== ContentKind.Redacted) {
@@ -198,7 +199,7 @@ function validatePlanningItems(
       && (item.ref.objectKind !== 'change_request' || item.content.kind !== ContentKind.ChangeRequest))) {
       return providerErr(providerError(ProviderErrorCode.InvalidInput, '原生 PR 身份声明不合法'))
     }
-    if (item.project.bindingId !== project.bindingId
+    if (item.ref.bindingId !== bindingId || item.project.bindingId !== project.bindingId
       || item.project.objectKind !== project.objectKind
       || item.project.externalId !== project.externalId) {
       return providerErr(providerError(ProviderErrorCode.InvalidInput, '规划条目所属项目与本轮确认项目不一致，本次读取不完整'))
@@ -313,7 +314,7 @@ async function upsertItems(
 }
 
 /**
- * 条目的本地锚点。有内容身份：先记下成员关系 → 内容的映射，再解析（必要时新建）实体。没有内容身份（REDACTED / content 为 null）：
+ * 条目的本地锚点。有内容身份：用旧 membership 识别 Draft→Issue，再解析实体、登记本轮 membership。没有内容身份（project_item）：
  * 只读地按成员关系找回上次可见时登记的实体，投影内容仍取本次读到的 redacted，不回退缓存；找不到返回 undefined。
  */
 async function anchorOf(
@@ -326,13 +327,28 @@ async function anchorOf(
     const identity = known && await tx.findExternalIdentity(item.ref.bindingId, known.contentKind, known.contentExternalId)
     return identity && { entityId: identity.entityId, kind: entityKindFor(item.content.kind, identity.externalKind) }
   }
+  const known = await tx.getMembership(workspaceId, item.membership.externalId)
+  let promotedId: EntityId | undefined
+  if (known?.projectExternalId === item.project.externalId && known.contentKind === MembershipContentKind.Draft
+    && contentKind === MembershipContentKind.Issue && (item.content.kind === ContentKind.WorkItem || item.content.kind === ContentKind.Redacted)) {
+    const draft = await tx.findExternalIdentity(item.project.bindingId, MembershipContentKind.Draft, known.contentExternalId)
+    if (draft?.role === IdentityRole.Primary) {
+      const primaries = (await tx.listIdentitiesForEntity(draft.entityId)).filter(identity => identity.role === IdentityRole.Primary)
+      if (primaries.length === 1 && primaries[0]?.id === draft.id) {
+        const promotion = await promoteEntityIdentity(tx, draft.entityId, item.ref.externalId)
+        if (!promotion.ok) throw new IdentityConflictError('Draft 提升目标身份已被占用')
+        promotedId = promotion.entityId
+      }
+    }
+  }
+  const external = { bindingId: item.ref.bindingId, externalKind: contentKind, externalId: item.ref.externalId }
+  const kind = entityKindFor(item.content.kind, contentKind)
+  const entityId = promotedId ?? await ensureEntity(tx, external, kind, context.ids, kind === EntityKind.ChangeRequest ? changeRequestEntityId(item.ref, item.nativeIdentity) : undefined, item.nativeIdentity !== undefined)
   await tx.putMembership({
     workspaceId, projectExternalId: item.project.externalId, itemExternalId: item.membership.externalId, contentKind,
     contentExternalId: item.ref.externalId, membershipCreatedAt: item.membership.createdAt, membershipUpdatedAt: item.membership.updatedAt,
   })
-  const external = { bindingId: item.ref.bindingId, externalKind: contentKind, externalId: item.ref.externalId }
-  const kind = entityKindFor(item.content.kind, contentKind)
-  return { entityId: await ensureEntity(tx, external, kind, context.ids, kind === EntityKind.ChangeRequest ? changeRequestEntityId(item.ref, item.nativeIdentity) : undefined, item.nativeIdentity !== undefined), kind }
+  return { entityId, kind }
 }
 
 function toProjection(

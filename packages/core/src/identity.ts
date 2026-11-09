@@ -105,8 +105,15 @@ export async function promoteEntityIdentity(
   issueExternalId: string,
 ): Promise<PromotionOutcome> {
   const identities = await tx.listIdentitiesForEntity(entityId)
+  const draft = identities.find(identity => identity.role === IdentityRole.Primary && identity.externalKind === ExternalIdentityKind.Draft)
+  if (draft !== undefined) {
+    const occupant = await tx.findExternalIdentity(draft.bindingId, ExternalIdentityKind.Issue, issueExternalId)
+    if (occupant !== undefined && occupant.entityId !== entityId) return { ok: false, entityId, reason: 'external_identity_occupied' }
+  }
   const result = promoteDraftToIssue({ entityId, identities, issueExternalId })
   if (!result.ok) return { ok: false, entityId, reason: result.conflict.reason }
-  for (const identity of result.identities) await tx.putExternalIdentity(identity)
+  // Storage 不承诺身份列表顺序；先释放旧 primary，才能将既有 alias 或新身份升为 primary。
+  for (const identity of result.identities.filter(identity => identity.role !== IdentityRole.Primary)) await tx.putExternalIdentity(identity)
+  for (const identity of result.identities.filter(identity => identity.role === IdentityRole.Primary)) await tx.putExternalIdentity(identity)
   return { ok: true, entityId: result.entityId, reason: undefined }
 }
