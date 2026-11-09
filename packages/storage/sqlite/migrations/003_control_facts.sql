@@ -161,7 +161,7 @@ CREATE TABLE mutation_attempt (
   command_name TEXT NOT NULL,
   request_fingerprint TEXT CHECK (command_name NOT IN ('startWork', 'createChangeRequest') OR (request_fingerprint IS NOT NULL AND length(request_fingerprint) > 0)),
   -- Start Work 在每个实际 Provider 写前提交精确输入；未知步骤跨 key/lease 保守阻挡，非自动恢复日志。
-  external_intent_json TEXT CHECK (external_intent_json IS NULL OR (json_valid(external_intent_json) AND json_type(external_intent_json) = 'object' AND ((command_name = 'startWork' AND json_extract(external_intent_json, '$.operation') IN ('createBranch', 'createWorktree', 'startRun', 'startFallbackRun')) OR (command_name = 'createChangeRequest' AND json_extract(external_intent_json, '$.operation') = 'createChangeRequest')))),
+  external_intent_json TEXT CHECK (external_intent_json IS NULL OR (json_valid(external_intent_json) AND json_type(external_intent_json) = 'object' AND ((command_name = 'startWork' AND json_extract(external_intent_json, '$.operation') IN ('createBranch', 'createWorktree', 'startRun', 'startFallbackRun')) OR (command_name IN ('createChangeRequest', 'addChangeRequestAssignees') AND json_extract(external_intent_json, '$.operation') = command_name AND (command_name != 'addChangeRequestAssignees' OR (json_type(external_intent_json, '$.sequence') IS 'integer' AND json_extract(external_intent_json, '$.sequence') BETWEEN 1 AND 9007199254740991)))))),
   -- R8：幂等键由调用方选择；"加入既有内容"这一步取 content_id，"创建内容"这一步的键形状仍未证明（L1 记录 §3 第 6 条）。
   state TEXT NOT NULL CHECK (state IN ('pending','saved','unknown','conflict','failed')),
   expected_source_version TEXT,

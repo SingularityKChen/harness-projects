@@ -185,3 +185,119 @@ describe('production composed browser execution', { timeout: 120000 }, () => {
     })
   })
 })
+
+test('confirmed PR can select add and reconcile assignees through production carrier', { timeout: 60000 }, async t => {
+  await scene(t, async ({ h, page }) => {
+    await start(page); await visible(page, '开始工作已确认'); await createPr(page); await visible(page, 'PR 已确认')
+    const picker = page.getByRole('checkbox', { name: 'browser-assignee', exact: true })
+    await tabTo(page, picker, 'assignee'); await page.keyboard.press('Space'); assert.equal(await picker.isChecked(), true)
+    h.platform.assignment.drop = true
+    const add = page.getByRole('button', { name: '添加负责人', exact: true }); await tabTo(page, add, 'add assignee'); await page.keyboard.press('Enter')
+    await visible(page, '负责人分配尚未确认'); assert.equal(h.platform.assignment.adds, 1)
+    const original = rows(h, 'mutation_attempt').find(r => r.command_name === 'addChangeRequestAssignees'); assert.equal(original.state, 'unknown')
+    assert.doesNotMatch(original.external_intent_json, /browser-assignee/)
+    await page.evaluate(() => window.fixture.unmount()); await h.rebuild(); h.platform.assignment.drop = false
+    await page.reload(); await page.getByRole('link', { name: TITLE, exact: true }).click()
+    await page.getByRole('button', { name: '核对原 PR 分配', exact: true }).click(); await visible(page, '负责人最后确认')
+    assert.equal(rows(h, 'mutation_attempt').find(r => r.id === original.id).state, 'saved'); assert.equal(h.platform.assignment.adds, 1); assert.equal(h.platform.prCreates, 1)
+  })
+})
+
+
+for (const [failure, message] of [
+  ['not_supported', '当前连接不支持负责人候选'],
+  ['permission_denied', '负责人候选读取被拒绝，请检查连接权限后重试'],
+  ['unavailable', '负责人候选读取不完整或暂时不可用，请重试'],
+]) test(`candidate ${failure} feedback crosses production carrier and clears selection`, { timeout: 60000 }, async t => {
+  await scene(t, async ({ h, page }) => {
+    await start(page); h.platform.assignment.more = true; await createPr(page); await visible(page, 'PR 已确认')
+    const picker = page.getByRole('checkbox', { name: 'browser-assignee', exact: true })
+    await picker.check(); h.platform.assignment.failure = failure
+    const failedPage = page.waitForResponse(response => response.url().endsWith('/remote') && response.request().postDataJSON()?.name === 'listChangeRequestAssigneeOptions')
+    await page.getByRole('button', { name: '加载更多负责人', exact: true }).click(); await (await failedPage).finished()
+    const retry = page.getByRole('button', { name: '重新读取负责人候选', exact: true }); await visible(page, message)
+    assert.match(await page.locator('body').innerText(), new RegExp(message), 'candidate failure must name the matching recovery action')
+    assert.equal(await picker.count(), 0); assert.equal(await page.getByRole('button', { name: '添加负责人', exact: true }).isDisabled(), true)
+    assert.doesNotMatch(await page.locator('body').innerText(), /candidate-private-canary/)
+    const reads = h.requests.filter(request => request.name === 'listChangeRequestAssigneeOptions').length
+    const refreshed = page.waitForResponse(response => response.url().endsWith('/remote') && response.request().postDataJSON()?.name === 'getDeliveryProjection')
+    await page.getByRole('button', { name: '刷新交付谱系', exact: true }).click(); await (await refreshed).finished(); await visible(page, message)
+    assert.equal(h.requests.filter(request => request.name === 'listChangeRequestAssigneeOptions').length, reads, 'delivery observation must not remount and auto-read the denied picker')
+    const retried = page.waitForResponse(response => response.url().endsWith('/remote') && response.request().postDataJSON()?.name === 'listChangeRequestAssigneeOptions')
+    await retry.click(); const response = await retried; await response.finished(); const result = await response.json()
+    if (result.ok === false) {
+      assert.equal(failure, 'permission_denied'); assert.deepEqual(result, { ok: false, error: 'Host unavailable' })
+      await visible(page, '本次读取尚未确认，请重新读取'); assert.match(await page.locator('body').innerText(), /最后已知失败：/)
+    } else assert.equal(result.value.error, failure)
+    await visible(page, message)
+    if (failure !== 'permission_denied') {
+      h.platform.assignment.failure = ''; h.platform.assignment.more = false
+      await retry.click(); await picker.waitFor(); assert.equal(await picker.isChecked(), false)
+    }
+    assert.equal(h.platform.assignment.adds, 0); assert.equal(h.platform.prCreates, 1)
+  })
+})
+
+for (const late of [false, true]) test(`cross-caller directory denial masks selection and fences late success=${late}`, { timeout: 60000 }, async t => {
+  await scene(t, async ({ h, page }) => {
+    await start(page); await createPr(page); await visible(page, 'PR 已确认')
+    const picker = page.getByRole('checkbox', { name: 'browser-assignee', exact: true })
+    if (!late) {
+      await picker.check(); await page.getByRole('button', { name: '添加负责人', exact: true }).click(); await visible(page, '负责人最后确认')
+    }
+    h.platform.assignment.more = true; await page.reload(); await page.getByRole('link', { name: TITLE, exact: true }).click(); await picker.check()
+    let release, accepted = false, held = false, staged
+    const captured = new Promise(resolve => { staged = resolve })
+    await page.route('**/remote', async route => {
+      const request = route.request().postDataJSON()
+      if (late && !held && request.name === 'listChangeRequestAssigneeOptions' && request.input.cursor) {
+        held = true; const response = await route.fetch(); assert.equal((await response.json()).value.items[0].id, 'U_browser'); await new Promise(resolve => { release = resolve; staged() }); return route.fulfill({ response })
+      }
+      return route.continue()
+    })
+    const oldReply = late ? page.waitForResponse(response => response.url().endsWith('/remote') && response.request().postDataJSON()?.input?.cursor) : undefined
+    if (late) { h.platform.assignment.more = false; await page.getByRole('button', { name: '加载更多负责人', exact: true }).click(); await captured }
+    const reads = h.requests.filter(request => request.name === 'listChangeRequestAssigneeOptions').length
+    const metadata = page.waitForEvent('console', { predicate: message => { if (!message.text().includes('[harness-projects] watch metadata')) return false; accepted = true; return true } })
+    const projection = page.waitForResponse(response => accepted && response.url().endsWith('/remote') && response.request().postDataJSON()?.name === 'getDeliveryProjection')
+    try {
+      h.platform.assignment.failure = 'permission_denied'
+      const denied = await page.evaluate(workItemId => window.fixture.remote.listChangeRequestAssigneeOptions({ kind: 'user' }, workItemId, 'local-repository', undefined, 50), h.itemId)
+      assert.equal(denied.value.error, 'permission_denied'); await metadata; await (await projection).finished()
+      assert.equal(await picker.count(), 0); assert.equal(await page.getByRole('button', { name: '添加负责人', exact: true }).isDisabled(), true)
+      assert.doesNotMatch(await page.locator('body').innerText(), /负责人最后确认/)
+      if (late) { release(); await (await oldReply).finished(); await page.evaluate(() => new Promise(requestAnimationFrame)); assert.equal(await picker.count(), 0) }
+      assert.equal(h.requests.filter(request => request.name === 'listChangeRequestAssigneeOptions').length, reads + 1, 'access invalidation must wait for manual retry')
+      assert.equal(h.platform.assignment.adds, late ? 0 : 1); assert.equal(h.platform.prCreates, 1)
+    } finally { release?.() }
+  })
+})
+
+test('manual candidate retry keeps safe history distinct from a fenced unknown result', { timeout: 60000 }, async t => scene(t, async ({ h, page }) => {
+  await start(page); h.platform.assignment.more = true; await createPr(page); await visible(page, 'PR 已确认')
+  const picker = page.getByRole('checkbox', { name: 'browser-assignee', exact: true }); await picker.check()
+  let accepted = false
+  const metadata = page.waitForEvent('console', { predicate: message => { if (!message.text().includes('[harness-projects] watch metadata')) return false; accepted = true; return true } })
+  const projection = page.waitForResponse(response => accepted && response.url().endsWith('/remote') && response.request().postDataJSON()?.name === 'getDeliveryProjection')
+  h.platform.assignment.failure = 'permission_denied'; await page.getByRole('button', { name: '加载更多负责人', exact: true }).click(); await metadata; await (await projection).finished()
+  const denial = '负责人候选读取被拒绝，请检查连接权限后重试'; await visible(page, denial)
+  const list = h.host.controller.commands.listChangeRequestAssigneeOptions.bind(h.host.controller.commands), errors = []
+  h.host.controller.commands.listChangeRequestAssigneeOptions = async input => { try { return await list(input) } catch (error) { errors.push(error.code); throw error } }
+  await page.evaluate(() => window.fixture.command('hold', { domain: 'watch', method: 'metadata', enabled: true }))
+  try {
+    const reply = page.waitForResponse(response => response.url().endsWith('/remote') && response.request().postDataJSON()?.name === 'listChangeRequestAssigneeOptions')
+    await page.getByRole('button', { name: '重新读取负责人候选', exact: true }).click(); const response = await reply; await response.finished()
+    assert.deepEqual(await response.json(), { ok: false, error: 'Host unavailable' }); assert.deepEqual(errors, ['stale_revision'])
+    await page.evaluate(() => new Promise(requestAnimationFrame))
+    assert.match(await page.locator('body').innerText(), /最后已知失败：/); await visible(page, denial); await visible(page, '本次读取尚未确认，请重新读取')
+    let changed = false
+    const next = page.waitForEvent('console', { predicate: message => { if (!message.text().includes('[harness-projects] watch metadata')) return false; changed = true; return true } })
+    const reread = page.waitForResponse(response => changed && response.url().endsWith('/remote') && response.request().postDataJSON()?.name === 'getDeliveryProjection')
+    await page.evaluate(() => window.fixture.command('release')); await next; await (await reread).finished()
+    await visible(page, denial); await visible(page, '本次读取尚未确认，请重新读取'); assert.equal(await picker.count(), 0)
+    assert.equal(await page.getByRole('button', { name: '添加负责人', exact: true }).isDisabled(), true); assert.equal(h.platform.assignment.adds, 0)
+    const classified = page.waitForResponse(response => response.url().endsWith('/remote') && response.request().postDataJSON()?.name === 'listChangeRequestAssigneeOptions')
+    await page.getByRole('button', { name: '重新读取负责人候选', exact: true }).click(); assert.equal((await (await classified).json()).value.error, 'permission_denied'); await visible(page, denial)
+    assert.doesNotMatch(await page.locator('body').innerText(), /最后已知失败：|本次读取尚未确认/)
+  } finally { await page.evaluate(() => window.fixture.command('release')).catch(() => {}) }
+}))

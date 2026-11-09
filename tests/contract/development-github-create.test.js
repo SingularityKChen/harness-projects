@@ -29,7 +29,7 @@ developmentContractSuite({
 test('创建精确原生 ack、marker 与独立写权限；read 和 viewerPermission 不证明 write', async () => {
   const f = platform()
   assert.equal(typeof f.provider.createChangeRequest, 'function', '生产 provider 必须实现创建')
-  assert.deepEqual(Object.values((await f.provider.describeCapabilities()).capability), ['available', 'available', 'available', 'available'])
+  assert.deepEqual(Object.values((await f.provider.describeCapabilities()).capability), Array(7).fill('available'))
   await f.provider.getRepository(repository)
   assert.deepEqual([(await state(f.provider))[READ], (await state(f.provider))[CREATE]], ['available', 'degraded'])
   const result = await f.provider.createChangeRequest(input)

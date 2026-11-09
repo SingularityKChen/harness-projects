@@ -50,14 +50,14 @@ function canonical(workspace: string, actor: Actor, intent: ChangeRequestExterna
   return JSON.stringify({ command: 'createChangeRequest', version: 1, workspace, actor, repository: intent.input.repository, binding: intent.bindingId,
     contextId: intent.contextId, generation: intent.ownerGeneration, head: intent.input.head, worktree: intent.worktree, base: intent.input.base, title: intent.input.title, body, draft: intent.input.draft, issueSelection: intent.issueSelection })
 }
-async function readRoute(context: CoreContext, storage: StorageTransaction, scope: PrScope, bindingId?: string): Promise<Route> {
+async function readRoute(context: CoreContext, storage: StorageTransaction, scope: PrScope, bindingId?: string, capability: CapabilityKey = CapabilityKey.DevelopmentChangeRequestCreate, readKeys: readonly CapabilityKey[] = [CapabilityKey.DevelopmentRepositoryRead, CapabilityKey.DevelopmentChangeRequestRead]): Promise<Route> {
   const repo = (await storage.listRepositories(context.workspaceId)).find((repo) => repo.id === scope.repositoryId)
   if (repo === undefined || await startTargetError({ ...context, storage }, scope.workItemId) !== undefined) throw invalid()
-  const selected = bindingId === undefined ? await selectDevelopment({ ...context, storage }, scope.repositoryId, CapabilityKey.DevelopmentChangeRequestCreate) : undefined
+  const selected = bindingId === undefined ? await selectDevelopment({ ...context, storage }, scope.repositoryId, capability) : undefined
   const binding = bindingId === undefined ? selected?.ok ? selected.binding : undefined : context.registry.bindings.find((binding) => binding.ref.bindingId === bindingId && binding.ref.workspaceId === context.workspaceId && binding.ref.domain === 'development' && binding.enabled)
   if (binding?.development === undefined || !(await storage.listProviderBindings(context.workspaceId)).some((row) => row.id === binding.ref.bindingId && row.enabled)
     || (await repositoryReferences(storage, repo, [binding.ref.bindingId])).length !== 1) throw invalid()
-  for (const key of [CapabilityKey.DevelopmentRepositoryRead, CapabilityKey.DevelopmentChangeRequestRead]) {
+  for (const key of readKeys) {
     const gate = gateBinding(binding, key, 'read')
     if (!gate.allowed) throw gate.error
   }
@@ -242,4 +242,16 @@ export async function createChangeRequest(context: CoreContext, input: CreateCha
     else if (created?.ok === false && ['permission_denied', 'invalid_input', 'not_supported'].includes(created.error.code)) failure = projectError(created.error.code, created.error.message)
   } catch { /* 单次 mutation 结果未知。 */ }
   return settle(context, { workItemId: request.workItemId, repositoryId: request.repositoryId }, operation, found, failure, true)
+}
+
+/** 内部复用创建操作验证；调用方仍必须独立判定负责人能力。 */
+export async function resolveConfirmedChangeRequestTarget(context: CoreContext, scope: PrScope & { createOperationId: string }, storage: StorageTransaction = context.storage) {
+  const operation = required(await resolveOperation(context, { workItemId: scope.workItemId, repositoryId: scope.repositoryId, operationId: scope.createOperationId }, storage))
+  if (operation.attempt.state !== 'saved' || operation.intent.confirmedRef === undefined) throw invalid()
+  return { ...operation, createReceipt: receipt(operation) }
+}
+export async function resolveAssigneeRepositoryTarget(context: CoreContext, scope: PrScope, storage: StorageTransaction = context.storage) {
+  const route = await readRoute(context, storage, scope, undefined, CapabilityKey.DevelopmentAssigneeList, []), record = await storage.getExecutionContext(contextIdFor(context.workspaceId, scope.workItemId, scope.repositoryId))
+  if (record?.workspaceId !== context.workspaceId || !record.provisioningGeneration || !record.worktreeExternalId) throw invalid()
+  return { route, targetStamp: hash(JSON.stringify([context.workspaceId, scope, record, route.binding.ref.bindingId])) }
 }
