@@ -111,8 +111,8 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 | 位置 | PR / issue | 接合与门 |
 |---|---|---|
-| 1 | #568 / #567 | 候选失败反馈 P2 修复与独立复评；用户已明确改为代码1000行硬上限，当前完整修复980须最终复核；原生 stack merge-async 指定 merge_method=rebase |
-| 2 | #581 / #557 | 继承 #568 当前修复，保留原创建 IDs/actor/稳定键与草稿；同栈当前版本门 |
+| 1（已合并） | #568 / #567 | 候选失败反馈 P2 修复与独立复评；用户明确代码1000硬上限，最终980；689fb170 PR CI和当前批准/线程/issue通过，原生rebase合并8b6cd5d1，#567 CLOSED |
+| 2（已合并） | #581 / #557 | b0561f3f继承当前#568并通过PR CI及当前批准/线程/issue，原生rebase合并c2e2f738，#557 CLOSED |
 | 3 | #569 / #281 | 前两项真实 main 之后变基；两块谱系文本联合，保留 summary 写区隐藏、scopeKey 与两刷新参数；性能 P2 修复独立复评 |
 
 各已发布初始头保存在 refs/backup/pr<N>-before-mmp-review-20261109。最终 push 后重读实际 base/head、全部 checks/threads、双向 issue 和当前批准；变更产品 blob 即回到验证门。每次合并后读取实际 main，再处理后续。安装、人工 UAT、R1 与 Planning Status 独立。

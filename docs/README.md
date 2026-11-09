@@ -25,13 +25,13 @@
 
 | 计划 | 用途 |
 |---|---|
-| [2026-11-09-pr568-pr581-review-followup](exec-plan/active/2026-11-09-pr568-pr581-review-followup.md) | 三项 MMP 交付独立评审、P2 修复复评与条件 rebase 整合 |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-09-pr568-pr581-review-followup](exec-plan/completed/2026-11-09-pr568-pr581-review-followup.md) | 三项 MMP 交付独立评审、P2 修复复评与条件 rebase 整合 |
 | [2026-11-07-pr-assignee-creation](exec-plan/completed/2026-11-07-pr-assignee-creation.md) | 创建 PR 预选原生负责人与原意图恢复（#557） |
 | [2026-11-07-pr-assignee-management](exec-plan/completed/2026-11-07-pr-assignee-management.md) | 已确认 PR 的原生负责人添加与只读恢复（#567，Refs #557） |
 | [2026-11-07-code-simplification](exec-plan/completed/2026-11-07-code-simplification.md) | 单一诊断实现、冗余测试与验收负担精简（#570） |
@@ -39,6 +39,7 @@
 | [2026-11-07-test-execution](exec-plan/completed/2026-11-07-test-execution.md) | 单次分层执行与已完成进度轨道退役（#573） |
 | [2026-11-07-client-push-only](exec-plan/completed/2026-11-07-client-push-only.md) | Client 单一推流帧接受点与旧 pull 生命周期退役（#575） |
 | [2026-11-07-read-model-retirement](exec-plan/completed/2026-11-07-read-model-retirement.md) | 退役无运行时消费者的展示投影（#574） |
+| [2026-11-07-delivery-overview](exec-plan/completed/2026-11-07-delivery-overview.md) | 跨工作项 PR/CI 工程交付总览（#281） |
 | [2026-11-07-source-work-item-numbers](exec-plan/completed/2026-11-07-source-work-item-numbers.md) | 来源工作项编号展示与搜索（#558） |
 | [2026-11-07-source-pr-native-relations](exec-plan/completed/2026-11-07-source-pr-native-relations.md) | 原生来源 PR 引用与关闭关系观察（#562，Refs #556） |
 | [2026-11-07-execution-start-identity](exec-plan/completed/2026-11-07-execution-start-identity.md) | 发送任务前的持久身份（#554） |
