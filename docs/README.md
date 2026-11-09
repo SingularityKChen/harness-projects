@@ -32,6 +32,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-07-pr-assignee-creation](exec-plan/completed/2026-11-07-pr-assignee-creation.md) | 创建 PR 预选原生负责人与原意图恢复（#557） |
 | [2026-11-07-pr-assignee-management](exec-plan/completed/2026-11-07-pr-assignee-management.md) | 已确认 PR 的原生负责人添加与只读恢复（#567，Refs #557） |
 | [2026-11-07-code-simplification](exec-plan/completed/2026-11-07-code-simplification.md) | 单一诊断实现、冗余测试与验收负担精简（#570） |
 | [2026-11-07-e1-record-retirement](exec-plan/completed/2026-11-07-e1-record-retirement.md) | E1 历史散文校验退役（#572） |
