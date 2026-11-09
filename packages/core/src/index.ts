@@ -36,3 +36,4 @@ export * from './create-change-request.ts'
 export * from './issue-closing-links.ts'
 
 export * from './change-request-issue-link.ts'
+export type { AssigneeRepositoryScope, AssigneeScope, AssigneeQuery, AssigneeOperation, AssigneeAdd, AssigneeResume, AssigneeOptions, AssigneeResult } from './change-request-assignees.ts'

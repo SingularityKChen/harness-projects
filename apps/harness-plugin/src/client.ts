@@ -4,7 +4,7 @@
  * 先在根 Context 上挂载 Remote，再在 `ctx.inject` 子 Context 中同时读取
  * `remote.harnessProjects` 与 `slots`；根 Context 不直接读取 namespace（M17）。
  */
-import { createPlanningMappingSource, createPlanningRefreshSource, createExecutionContextReader, createWorkspaceSetupSource, createRepositoryBindingSource, createStartWork, createDeliveryLineageReader, createIssueClosingLinksReader, createChangeRequestCreator } from '@harness-projects/client'
+import { createPlanningMappingSource, createPlanningRefreshSource, createExecutionContextReader, createWorkspaceSetupSource, createRepositoryBindingSource, createStartWork, createDeliveryLineageReader, createIssueClosingLinksReader, createChangeRequestCreator, createChangeRequestAssignees } from '@harness-projects/client'
 import { HARNESS_PANEL_TITLE, PlaceholderIcon, bindWorkspaceStatusApp } from '@harness-projects/ui'
 import type { ClientContext, RemoteResult } from './host-surface.ts'
 import { CLIENT_REMOTE } from './remote.ts'
@@ -65,7 +65,13 @@ export async function apply(ctx: ClientContext): Promise<void> {
       getStartWorkOptions: (...args) => unwrap(remote.getStartWorkOptions(...args)),
       startWork: (...args) => unwrap(remote.startWork(...args)),
     }, reader, { kind: 'user' })
-    const changeRequestCreator = createChangeRequestCreator({ options: (...args) => unwrap(remote.getChangeRequestIssueOptions(...args)), create: (...args) => unwrap(remote.createChangeRequest(...args)), operation: (...args) => unwrap(remote.getChangeRequestOperation(...args)), resume: (...args) => unwrap(remote.resumeChangeRequest(...args)) }, { kind: 'user' })
+    const assignees = createChangeRequestAssignees({
+      options: (s, cursor) => unwrap(remote.listChangeRequestAssigneeOptions({ kind: 'user' }, s.workItemId, s.repositoryId, cursor, 50)),
+      operation: (s, id) => unwrap(remote.getChangeRequestAssigneeOperation({ kind: 'user' }, s.workItemId, s.repositoryId, s.createOperationId, id)),
+      add: (s, ids, key) => unwrap(remote.addChangeRequestAssignees({ kind: 'user' }, key, s.workItemId, s.repositoryId, s.createOperationId, [...ids])),
+      resume: (s, id) => unwrap(remote.resumeChangeRequestAssignees({ kind: 'user' }, s.workItemId, s.repositoryId, s.createOperationId, id)),
+    })
+    const changeRequestCreator = { assignees, ...createChangeRequestCreator({ options: (...args) => unwrap(remote.getChangeRequestIssueOptions(...args)), create: (...args) => unwrap(remote.createChangeRequest(...args)), operation: (...args) => unwrap(remote.getChangeRequestOperation(...args)), resume: (...args) => unwrap(remote.resumeChangeRequest(...args)) }, { kind: 'user' }) }
     const deliveryReader = createDeliveryLineageReader({
       read: ({ workItemId, repositoryId }) => unwrap(remote.getDeliveryProjection(workItemId, repositoryId)),
       refresh: ({ workItemId, repositoryId }) => unwrap(remote.refreshDeliveryFacts({ kind: 'user' }, workItemId, repositoryId)),

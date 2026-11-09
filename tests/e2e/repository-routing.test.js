@@ -35,7 +35,7 @@ const ADAPTERS = [['替身 Storage', () => createFakeStorage(emptyStorageData(),
 
 /** Local Git 只声明仓库读、建分支、建工作树与读工作树；GitHub Development 声明仓库读、变更请求读与创建。替身的其余开关按此关掉。 */
 const FLAGS = {
-  'local-git': { worktreeRemove: false, changeRequestCreate: false },
+  'local-git': { assigneeList: false, assigneeRead: false, assigneeAdd: false, worktreeRemove: false, changeRequestCreate: false },
   github: { branchCreate: false, worktreeCreate: false, worktreeRead: false, worktreeRemove: false },
 }
 const withoutChangeRequestRead = (levels) => Object.fromEntries(Object.entries(levels).filter(([key]) => key !== CapabilityKey.DevelopmentChangeRequestRead))

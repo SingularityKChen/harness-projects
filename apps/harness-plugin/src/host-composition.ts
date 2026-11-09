@@ -78,7 +78,18 @@ async function finishChangeRequest(controller: Controller, scope: { workItemId: 
 }
 
 /** 工作区身份来自 Host；执行记录只在读取前后均可见的工作项上投影允许字段。 */
-const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness', targetError: CoreApi['queries']['getStartWorkTargetError']): UnaryHandlers<Pick<typeof OPERATIONS, 'getIssueClosingLinks' | 'refreshIssueClosingLinks' | 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts' | 'createChangeRequest' | 'getChangeRequestIssueOptions' | 'getChangeRequestOperation' | 'resumeChangeRequest'>, Controller> => ({
+const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness', targetError: CoreApi['queries']['getStartWorkTargetError']): UnaryHandlers<Pick<typeof OPERATIONS, 'listChangeRequestAssigneeOptions' | 'getChangeRequestAssigneeOperation' | 'addChangeRequestAssignees' | 'resumeChangeRequestAssignees' | 'getIssueClosingLinks' | 'refreshIssueClosingLinks' | 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts' | 'createChangeRequest' | 'getChangeRequestIssueOptions' | 'getChangeRequestOperation' | 'resumeChangeRequest'>, Controller> => ({
+  listChangeRequestAssigneeOptions: async (controller, input) => {
+    try { return { workspaceId, ...await controller.commands.listChangeRequestAssigneeOptions(input) } }
+    catch (error) {
+      const code = (error as ProjectError | undefined)?.code
+      if (!['not_supported', 'permission_denied', 'unavailable'].includes(code ?? '')) throw error
+      return { workspaceId, workItemId: input.workItemId, repositoryId: input.repositoryId, error: code }
+    }
+  },
+  getChangeRequestAssigneeOperation: async (controller, { actorRef: _actor, ...scope }) => ({ workspaceId, ...scope, operation: await controller.queries.getChangeRequestAssigneeOperation(scope) }),
+  addChangeRequestAssignees: async (controller, input) => ({ workspaceId, workItemId: input.workItemId, repositoryId: input.repositoryId, createOperationId: input.createOperationId, result: await controller.commands.addChangeRequestAssignees(input) }),
+  resumeChangeRequestAssignees: async (controller, input) => ({ workspaceId, workItemId: input.workItemId, repositoryId: input.repositoryId, createOperationId: input.createOperationId, result: await controller.commands.resumeChangeRequestAssignees(input) }),
   getIssueClosingLinks: async (controller, input) => ({ workspaceId, ...input, observation: await controller.queries.getIssueClosingLinks(input) }),
   refreshIssueClosingLinks: (controller, { actorRef, ...input }) => controller.commands.refreshIssueClosingLinks(input, { actorRef }),
   getStartWorkOptions: async (controller, input) => {

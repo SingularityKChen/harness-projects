@@ -70,6 +70,6 @@ export function DeliveryLineageSection({ scope, reader, connected, thresholdMs, 
             node.label && node.externalId ? h('p', null, '外部标识：', node.externalId) : null,
             h('p', null, node.relationState === 'candidate' ? '候选关系' : node.relationState === 'confirmed' ? '已确认关系' : '已拒绝关系')))
       })))),
-    creator === undefined ? null : h(CreateChangeRequestSection, { key, scope, creator, connected, accessToken: creatorAccessToken, onConnect, onConfirmed: () => { action.current?.(false) } }),
+    creator === undefined ? null : h(CreateChangeRequestSection, { key: scopeKey, scope, creator, connected, accessToken: creatorAccessToken, assigneeAccessToken: accessToken, onConnect, onConfirmed: () => { action.current?.(false) } }),
     h('button', { className: 'hp-action', type: 'button', disabled: !connected, onClick: () => action.current?.() }, '刷新交付谱系'))
 }

@@ -28,6 +28,7 @@ export function createRuntimeAccess(base: ProviderRegistry, storage: Storage, wo
   const delivery = new Map<string, DeliveryHealth>(), owned = new Map<string, number>()
   // 未 ack 的实际拒读只保留因果起点与单调观察号；只有较新的完整事实确认可清遮罩，不生成持久版本。
   const readDenials = new Map<string, { observation: number; cause?: number }>()
+  const permissionVersions = new Map<string, number>()
   const operations = new Map<string, { version: number; reason?: string; layer?: string }>()
   const scopeKey = (ticket: Pick<DeliveryReadTicket, 'key' | 'target'>) => JSON.stringify(['delivery.read', ticket.key, ticket.target])
   const load = async (ticket: DeliveryReadTicket, source: StorageTransaction): Promise<DeliveryHealth> => {
@@ -60,9 +61,18 @@ export function createRuntimeAccess(base: ProviderRegistry, storage: Storage, wo
       if (!provider) return projectError(ProjectErrorCode.NotSupported, `capability 层拒绝 ${key}`)
       let snapshot
       try { snapshot = await provider.describeCapabilities() } catch { return projectError(ProjectErrorCode.Unavailable, `${key} 暂时无法验证；其它获准操作仍可用，请重新验证`)}
-      const current = operations.get(address({ bindingId: binding.ref.bindingId, key, target }))
+      const versions = snapshot.permissionVersion
+      if (versions !== undefined && (versions === null || typeof versions !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(versions)) || Reflect.ownKeys(versions).some(key => {
+        const field = Object.getOwnPropertyDescriptor(versions, key)!
+        return typeof key !== 'string' || !Object.values(CapabilityKey).includes(key as CapabilityKey) || field.get || field.set || !Number.isSafeInteger(field.value) || field.value < 0
+      }))) return projectError(ProjectErrorCode.Unavailable, '权限代际形状无效')
+      const location = address({ bindingId: binding.ref.bindingId, key, target }), version = versions?.[key] ?? 0, prior = permissionVersions.get(location)
+      if (prior !== undefined && version < prior) return projectError(ProjectErrorCode.Conflict, '权限描述身份或代际变化')
+      const current = operations.get(location)
       if ((current?.version ?? 0) !== captured) return projectError(ProjectErrorCode.StaleRevision, current?.reason ?? `${key} 准入版本变化，请重新验证`)
       if (snapshot.bindingId !== binding.ref.bindingId) return projectError(ProjectErrorCode.Conflict, `${key} 连接身份变化，请重新验证`)
+      permissionVersions.set(location, version)
+      if (prior !== undefined && version !== prior) { this.observeOperation(binding.ref.bindingId, key, target, true); return projectError(ProjectErrorCode.StaleRevision, `${key} 准入版本变化，请重新验证`) }
       const access = effectiveCapabilities(snapshot, policy).find(entry => entry.key === key)?.access ?? AccessLevel.Unavailable
       if (access === AccessLevel.Unavailable || (mode === 'write' && access === AccessLevel.ReadOnly)) {
         const layer = snapshot.capability[key] === undefined || snapshot.capability[key] === AccessLevel.Unavailable || (mode === 'write' && snapshot.capability[key] === AccessLevel.ReadOnly) ? 'capability'

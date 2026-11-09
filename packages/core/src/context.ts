@@ -19,6 +19,7 @@ import { cancelExecutionRun, refreshExecutionRun, type RefreshExecutionRunResult
 import { createQueries, type CoreQueries } from './queries.ts'
 import { collectBindings, type CoreProviderTable } from './registry.ts'
 import { confirmRelation, type RecordedEdge, type RelationRef } from './relations.ts'
+import { listChangeRequestAssigneeOptions, addChangeRequestAssignees, resumeChangeRequestAssignees, type AssigneeOptions, type AssigneeAdd, type AssigneeResume, type AssigneeResult } from './change-request-assignees.ts'
 import { createChangeRequest, resumeChangeRequest, type ResumeChangeRequestRequest, type CreateChangeRequestRequest, type CreateChangeRequestResult } from './create-change-request.ts'
 import { startWork, validateStartWork } from './start-work.ts'
 import { createRuntimeAccess, type RuntimeAccess } from './runtime-access.ts'
@@ -97,6 +98,9 @@ export interface CoreContext {
 }
 
 export interface CoreCommands {
+  listChangeRequestAssigneeOptions(input: AssigneeOptions): ReturnType<typeof listChangeRequestAssigneeOptions>
+  addChangeRequestAssignees(input: AssigneeAdd): Promise<AssigneeResult>
+  resumeChangeRequestAssignees(input: AssigneeResume): Promise<AssigneeResult>
   refreshIssueClosingLinks(scope: IssueClosingLinksScope): Promise<IssueClosingLinksObservation>
   validateStartWork(workItemId: string): ReturnType<typeof validateStartWork>
   /** 既有引导命令：每次调用独立一轮，不进 `refreshPlanning` 的单飞槽；与刷新并发时由 #305 的轮次栅栏裁决，后开始的一轮胜出。 */
@@ -192,6 +196,9 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
       bootstrapWorkspace: () => bootstrapWorkspace(context),
       refreshPlanning,
       refreshIssueClosingLinks: (scope: IssueClosingLinksScope) => refreshIssueClosingLinks(context, scope),
+      listChangeRequestAssigneeOptions: input => listChangeRequestAssigneeOptions(context, input),
+      addChangeRequestAssignees: input => addChangeRequestAssignees(context, input),
+      resumeChangeRequestAssignees: input => resumeChangeRequestAssignees(context, input),
       resumeChangeRequest: (request: ResumeChangeRequestRequest) => resumeChangeRequest(context, request),
       createChangeRequest: (request: CreateChangeRequestRequest) => createChangeRequest(context, request),
       startWork: (request: StartWorkRequest) => startWork(context, request),
@@ -211,6 +218,7 @@ export function unavailableCore(reason: string): CoreApi {
   const queries: CoreQueries = {
     getChangeRequestIssueOptions: async () => ({ defaultRelation: 'none', relations: ['none'], reason: '工作区不可用' }),
     getIssueClosingLinks: async (scope) => ({ workItemId: scope.workItemId, scopeToken: 'unavailable', state: 'unsupported', links: [], stale: true }),
+    getChangeRequestAssigneeOperation: async () => ({ kind: 'blocked' }),
     getChangeRequestOperation: async () => ({ kind: 'blocked', reason: 'unavailable' }),
     getDeliveryAccessVersion: () => '0:0:0',
     getStartWorkTargetError: async () => error,
@@ -234,6 +242,9 @@ export function unavailableCore(reason: string): CoreApi {
     refreshPlanning: async () => ({
       ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0, revision: 0, degraded: true, error,
     }),
+    listChangeRequestAssigneeOptions: async () => { throw error },
+    addChangeRequestAssignees: async () => ({ phase: 'failed', error }),
+    resumeChangeRequestAssignees: async () => ({ phase: 'failed', error }),
     resumeChangeRequest: async () => ({ phase: 'failed', error }),
     createChangeRequest: async () => ({ phase: 'failed', error }),
     startWork: async () => startWorkUnavailable(error),

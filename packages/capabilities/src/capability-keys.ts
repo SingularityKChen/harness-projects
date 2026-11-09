@@ -42,6 +42,9 @@ export const CapabilityKey = {
   DevelopmentChangeRequestNativeIdentityRead: 'development.change_request.native_identity.read',
   DevelopmentChangeRequestRead: 'development.change_request.read',
   DevelopmentChangeRequestCreate: 'development.change_request.create',
+  DevelopmentAssigneeList: 'development.assignee.list',
+  DevelopmentChangeRequestAssigneeRead: 'development.change_request.assignee.read',
+  DevelopmentChangeRequestAssigneeAdd: 'development.change_request.assignee.add',
   DevelopmentReviewRead: 'development.review.read',
   DeliveryPipelineRead: 'delivery.pipeline.read',
   DeliveryCheckRead: 'delivery.check.read',
@@ -83,6 +86,8 @@ export interface ProviderCapabilitySnapshot {
   readonly bindingId: ProviderBindingId
   readonly capability: Readonly<Partial<Record<CapabilityKey, AccessLevel>>>
   readonly permission: Readonly<Partial<Record<CapabilityKey, AccessLevel>>>
+  /** Provider 本实例已观察的权限拒绝代际；可选、按 key 单调，仅作内存因果围栏。 */
+  readonly permissionVersion?: Readonly<Partial<Record<CapabilityKey, number>>>
   readonly observedAt: string
 }
 

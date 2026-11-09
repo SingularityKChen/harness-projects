@@ -22,3 +22,5 @@ export * from './planning-refresh.ts'
 
 export * from './create-change-request.ts'
 export * from './issue-closing-links-reader.ts'
+
+export * from './change-request-assignees.ts'
