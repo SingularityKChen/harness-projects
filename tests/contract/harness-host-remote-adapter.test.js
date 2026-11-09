@@ -80,24 +80,25 @@ test('host adapter validates through the strict parser before reaching Core and 
   await assert.rejects(() => installed.service.baseline(), /已卸载/)
 })
 
-test('host adapter drains an in-flight call before the provider service disposer completes', async () => {
+test('host adapter withdraws immediately and keeps disposal pending until the active call drains', async () => {
   let release
   const pending = new Promise((resolve) => { release = resolve })
   const composition = { call: async () => pending }
-  const { ctx, events } = recordingContext()
+  const { ctx, events, services } = recordingContext()
   const installed = await installHostRemote(ctx, composition)
   const call = installed.service.baseline()
   let disposed = false
   const dispose = installed.dispose().then(() => { disposed = true })
   await Promise.resolve()
-  assert.deepEqual([disposed, events], [false, []])
+  assert.deepEqual([disposed, events, services.size], [false, ['remote-dispose', 'provide-dispose-start', 'provide-dispose-end'], 0])
+  await assert.rejects(installed.service.baseline(), /已卸载/)
   release({ ok: true })
   await call
   await dispose
   assert.deepEqual([disposed, events], [true, ['remote-dispose', 'provide-dispose-start', 'provide-dispose-end']])
 })
 
-test('host adapter strictly JSON-encodes every watch frame, aborts and drains an open watch before withdrawing the service', async () => {
+test('host adapter strictly JSON-encodes watch frames, withdraws the service and aborts / drains the open watch', async () => {
   let aborted
   const composition = {
     call: async () => undefined,

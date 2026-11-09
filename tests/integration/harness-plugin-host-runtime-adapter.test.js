@@ -58,15 +58,15 @@ test('Host entry loads without the credentials service, resolves it per provider
     assert.deepEqual([command.writeState, (await service.baseline()).entities.length > 0, received()[0]], ['local_only', true, 'bearer credential-canary-1'])
 
     canary = 'credential-canary-2' // 在途调用按操作解析，拿到的是新值
-    // 卸载先排空在途调用再关闭 SQLite：provider 挂起期间不得 close。
+    // 卸载截断 Host 等待并排空 Core；raw provider 的晚结果不能延长资源所有权。
     let release
     hold = new Promise((resolve) => { release = resolve })
     const started = new Promise((resolve) => { entered = resolve })
     const inFlight = service.bootstrapWorkspace({ kind: 'agent', id: 'host-entry' }, 'host-entry-2')
     await started // stop closes admission; prove this read already reached the transport
     const unload = (async () => { for (const dispose of effects.reverse()) await dispose() })()
-    await new Promise((resolve) => setImmediate(resolve))
-    assert.equal(close.mock.callCount(), 0, '在途调用结束前不得关闭 SQLite')
+    await unload
+    assert.equal(close.mock.callCount(), 1, '截断在途等待后即可关闭 SQLite')
     release()
     await Promise.all([inFlight, unload])
     assert.deepEqual([close.mock.callCount(), services.has('harnessProjects')], [1, false])
@@ -88,7 +88,9 @@ test('Host entry closes storage and publishes nothing when composition or remote
       const before = close.mock.callCount()
       const injected = fault()
       try { await assert.rejects(() => applyHost(ctx), reason) } finally { injected?.mock.restore() }
-      assert.deepEqual([close.mock.callCount() - before, services.size, effects.length], [1, 0, 0])
+      assert.deepEqual([close.mock.callCount() - before, services.size, effects.length], [1, 0, 1], '启动前已登记根清理 owner')
+      for (const dispose of effects) await dispose()
+      assert.equal(close.mock.callCount() - before, 1, '失败后根清理仍幂等')
     }, register === undefined ? {} : { register })
   }
 })

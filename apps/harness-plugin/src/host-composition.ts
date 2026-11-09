@@ -10,7 +10,7 @@ import type { ExecutionContextDTO, WorkspaceSetupDTO } from '@harness-projects/c
 import { StatusPolicy, ProjectErrorCode, projectError, type ProjectError, type ConnectorAccountId, type WorkspaceId, type WorkspacePlanningFieldMapping } from '@harness-projects/domain'
 import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
 import { createHostPlanningMapping } from './host-planning-mapping.ts'
-import { createPlanningLifetime } from './host-planning-lifetime.ts'
+import { createPlanningLifetime, drainUntil } from './host-planning-lifetime.ts'
 import { dispatchOf, OPERATIONS, type UnaryHandlers, type UnaryName } from './host-operations.ts'
 import { preflightRepositoryBinding } from './host-repository-binding.ts'
 import { preflightPlanningConnection, githubViewer, HOST_SECRET_HANDLES, hostStoragePolicy, restoreProviders, type DisabledBinding, type ProviderCatalog } from './host-providers.ts'
@@ -29,6 +29,7 @@ class HostPolicyAdmissionError extends Error {
 }
 
 export interface HostCompositionOptions {
+  readonly owner?: { readonly signal: AbortSignal; stop(error?: unknown): number }
   readonly dataPath: string
   readonly workspaceId: WorkspaceId
   readonly catalog: ProviderCatalog
@@ -59,7 +60,9 @@ export interface HostComposition {
   /** 同步撤销读准入；Host 在 remote drain 前调用。 */
   stop(): void
   /** 等已登记任务完成后关闭 Storage；重复调用共享同一 Promise。 */
-  dispose(): Promise<void>
+  dispose(deadline?: number): Promise<void>
+  /** Host 内部生命周期诊断：只写现有日志的安全允许名单，不进入 remote wire。 */
+  diagnoseShutdown(event: 'shutdownDeadlineExceeded' | 'shutdownFailed', error?: unknown): void
 }
 
 /** 读取前后检查可见性与当前绑定仓库，避免读取期间撤权仍返回历史节点。 */
@@ -183,9 +186,12 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   const intervalMs = options.planningIntervalMs ?? 60_000
   if (!Number.isFinite(intervalMs) || intervalMs < 60_000 || intervalMs > 2_147_483_647) throw new RangeError('Planning refresh interval is invalid')
   const dataDir = path.dirname(options.dataPath)
+  options.owner?.signal.throwIfAborted()
   await mkdir(dataDir, { recursive: true })
   const worktreesDir = path.join(await realpath(dataDir), 'worktrees')
+  options.owner?.signal.throwIfAborted()
   const log = createDiagnosticLog(path.join(dataDir, 'diagnostics.log'))
+  const diagnoseShutdown: HostComposition['diagnoseShutdown'] = (event, error) => log.write(event, error === undefined ? {} : describeError(error))
   /** Controller 的任何拒绝上 wire 前都经这里：原因先进诊断日志，调用方只看到固定文案。`closed` 与输入校验留在它之外（固定中文文案，不含运行期原文）。 */
   const guarded = async <T>(run: () => Promise<T>): Promise<T> => {
     try { return await run() } catch (error) {
@@ -194,22 +200,35 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     }
   }
   let storage: SqliteStorage | undefined
+  let io: ReturnType<typeof createPlanningLifetime> | undefined
+  const resolveCredential = (handle: string) => io!.wait(() => options.resolveCredential(handle), Infinity)
+  const fetch = (url: string, init: RequestInit) => io!.wait(async () => {
+    const signal = AbortSignal.any([io!.signal, ...(init.signal ? [init.signal] : [])])
+    const response = await (options.fetch ?? globalThis.fetch)(url, { ...init, signal })
+    io!.assertActive()
+    return new Proxy(response, { get(target, key) {
+      const value: unknown = Reflect.get(target, key, target)
+      return key === 'json' ? () => io!.wait(() => target.json(), Infinity) : typeof value === 'function' ? value.bind(target) : value
+    } })
+  }, Infinity)
   let closed = false
   type Assembly = { mapping?: ReturnType<typeof createHostPlanningMapping>; controller: Controller; targetError: CoreApi['queries']['getStartWorkTargetError']; disabled: readonly DisabledBinding[]; lifetime: ReturnType<typeof createPlanningLifetime>; reconciler?: PlanningReconciler; leases: Set<Promise<unknown>>; retired?: boolean; cache: Map<string, object>; executionMode: 'manual' | 'harness' }
+  const assemblies = new Set<Assembly>()
   let developmentCache = new Map<string, object>()
   let current: Assembly
   let barrier: Promise<void> | undefined, epoch = 0, tail: Promise<unknown> = Promise.resolve(), activeFingerprint = ''
   let activationError: ProjectError | undefined
   const watches = new AbortController()
   let disposal: Promise<void> | undefined
+  let stopDeadline: number | undefined
   const pending = new Set<Promise<unknown>>()
   const track = <T>(task: Promise<T>): Promise<T> => {
     pending.add(task)
     void task.then(() => pending.delete(task), () => pending.delete(task))
     return task
   }
-  const retire = (assembly: Assembly): void => { if (assembly.retired) return; assembly.retired = true; assembly.lifetime.stop(); assembly.reconciler?.dispose() }
-  const stop = (): void => { closed = true; watches.abort(); if (current) retire(current) }
+  const retire = (assembly: Assembly): void => { if (assembly.retired) return; assembly.retired = true; assemblies.delete(assembly); assembly.lifetime.stop(); assembly.reconciler?.dispose() }
+  const stop = (): void => { stopDeadline ??= options.owner?.stop() ?? Date.now() + 1000; closed = true; watches.abort(); io?.stop(); for (const assembly of assemblies) retire(assembly) }
   const lease = <T>(assembly: Assembly, work: () => Promise<T>): Promise<T> => {
     const task = Promise.resolve().then(work); assembly.leases.add(task)
     void task.finally(() => assembly.leases.delete(task)).catch(() => undefined)
@@ -231,21 +250,25 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     return { ...snapshot, source: { ...snapshot.source, ...stale }, entities: snapshot.entities.map((entity) => ({ ...entity, source: { ...entity.source, ...stale } })) }
   }) }
 
-  const dispose = (): Promise<void> => disposal ??= (async () => {
+  const dispose = (deadline = stopDeadline ?? options.owner?.stop() ?? Date.now() + 1000): Promise<void> => disposal ??= (async () => {
     stop()
-    await Promise.allSettled([...pending])
+    if (!await drainUntil([...pending], deadline)) diagnoseShutdown('shutdownDeadlineExceeded')
     storage?.close()
+    options.owner?.signal.removeEventListener('abort', abortStartup)
   })()
+  const abortStartup = () => { void dispose().catch((error) => diagnoseShutdown('shutdownFailed', error)) }
+  options.owner?.signal.addEventListener('abort', abortStartup, { once: true })
   const diagnostics = { syncRoundFailed: (error: unknown) => log.write('syncRoundFailed', describeError(error)) }
   try {
+    options.owner?.signal.throwIfAborted()
     storage = createSqliteStorage(options.dataPath, hostStoragePolicy(options.catalog), options.migrationsDir === undefined ? {} : { migrationsDir: options.migrationsDir })
     const setup = createSetupCommands(createWorkspaceSetup(storage))
     const connection = createConnectionCommands(setup, {
       resolveAccount: async () => {
-        const viewer = await githubViewer(options.fetch ?? globalThis.fetch, () => options.resolveCredential(HOST_SECRET_HANDLES[0]))
+        const viewer = await githubViewer(fetch, () => resolveCredential(HOST_SECRET_HANDLES[0]))
         return viewer.ok ? { ok: true, value: { platformFamily: 'github', platformOrigin: 'https://github.com', identityKind: 'account', externalId: viewer.value.nodeId, displayName: viewer.value.login, secretHandle: HOST_SECRET_HANDLES[0] } } : viewer
       },
-      verifyProject: (input) => preflightPlanningConnection(storage!, input.accountId, input.configuration.projectNodeId, options.fetch ?? globalThis.fetch, options.resolveCredential),
+      verifyProject: (input) => preflightPlanningConnection(storage!, input.accountId, input.configuration.projectNodeId, fetch, resolveCredential),
     })
     const fingerprint = async () => JSON.stringify([await storage!.getWorkspacePlanningMapping(options.workspaceId), await storage!.getWorkspace(options.workspaceId), await Promise.all((await storage!.listProviderBindings(options.workspaceId)).map(async (mount) => {
       const accountId = await storage!.getProviderBindingAccount(mount.id)
@@ -255,25 +278,35 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     const assemble = async (): Promise<Assembly> => {
       const workspace = await storage!.getWorkspace(options.workspaceId)
       if (workspace !== undefined && workspace.statusPolicy !== StatusPolicy.ProviderAuthoritative) throw new HostPolicyAdmissionError()
+      if (closed) throw new Error('host 已关闭')
+      io ??= createPlanningLifetime(options.planningReadTimeoutMs)
       const lifetime = createPlanningLifetime(options.planningReadTimeoutMs)
       const assembly: Assembly = { controller: undefined!, targetError: undefined!, disabled: [], lifetime, leases: new Set(), cache: new Map(developmentCache), executionMode: 'manual' }
+      assemblies.add(assembly)
       try {
         const { table, disabled } = workspace === undefined ? { table: {}, disabled: [] } : await restoreProviders(storage!, workspace.id, options.catalog, {
           // 解析失败（例如宿主凭据服务缺席）只留允许名单字段；provider 随后把它归类为结构化 unavailable，不带原文。
           sessionController: () => { lifetime.assertActive(); return options.sessionController?.() },
+          lifetime,
           forceSessionStartFailure: options.forceSessionStartFailure,
           resolveCredential: async (handle) => {
             lifetime.assertActive()
-            try { const value = await options.resolveCredential(handle); lifetime.assertActive(); return value }
+            try { const value = await io!.wait(() => options.resolveCredential(handle), Infinity); lifetime.assertActive(); return value }
             catch (error) { log.write('credentialFailed', describeError(error)); throw error }
           },
-          development: { cache: assembly.cache, resolveCredential: async (handle) => { if (closed) throw new Error('host 已关闭'); return options.resolveCredential(handle) }, fetch: (url, init) => { if (closed) throw new Error('host 已关闭'); return (options.fetch ?? globalThis.fetch)(url, init) } },
-          worktreesDir, fetch: (url, init) => { lifetime.assertActive(); return (options.fetch ?? globalThis.fetch)(url, init) },
+          development: { cache: assembly.cache, resolveCredential, fetch },
+          worktreesDir, fetch,
         })
         for (const item of disabled) log.write('bindingDisabled', { bindingId: item.bindingId, domain: item.domain, implementationKey: item.implementationKey, code: item.error.code })
-        const providers = { ...table, ...(table.planning === undefined ? {} : { planning: lifetime.wrap(table.planning) }), storage: storage! }
+        const providers = { ...table,
+          ...(table.planning === undefined ? {} : { planning: lifetime.wrap(table.planning, track, 'planning') }),
+          ...(table.development === undefined ? {} : { development: [table.development].flat().map((port) => lifetime.wrap(port, track)) }),
+          ...(table.delivery === undefined ? {} : { delivery: lifetime.wrap(table.delivery, track) }),
+          ...(table.execution === undefined ? {} : { execution: lifetime.wrap(table.execution, track) }),
+          ...(table.executionFallback === undefined ? {} : { executionFallback: lifetime.wrap(table.executionFallback, track) }), storage: storage! }
         assembly.mapping = createHostPlanningMapping(storage!, options.workspaceId, providers.planning)
         const mapping = workspace === undefined ? {} : await loadPlanningMapping(storage!, workspace.id, providers.planning, (event) => log.write(event, {}))
+        lifetime.assertActive()
         // 空数据根：不向 Core 传 storage，不写任何行；工作区的创建属于挂载写者（#127、#131）。
         const core: CoreApi = workspace === undefined ? unavailableCore('工作区尚未创建') : await composeCore({
           workspace: { id: workspace.id, name: workspace.name, statusPolicy: workspace.statusPolicy, ...mapping },
@@ -291,7 +324,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         return assembly
       } catch (error) { retire(assembly); throw error }
     }
-    current = await assemble(); developmentCache = current.cache; activeFingerprint = await fingerprint(); current.reconciler?.start()
+    current = await assemble(); io!.assertActive(); developmentCache = current.cache; activeFingerprint = await fingerprint(); io!.assertActive(); current.reconciler?.start()
     const configure = <T>(run: () => Promise<CommandResult<T>>, activate = true, confirmPlanning = false): Promise<CommandResult<T> & { activationError?: ProjectError }> => {
       const task = tail.then(async () => {
         if (closed) throw new Error('host 已关闭')
@@ -371,7 +404,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       bindPlanningSource: (_controller, { projectNodeId, accountId, ...input }) => configure(() => connection.bindPlanningSource({ ...input, accountId: accountId as ConnectorAccountId, workspaceId: options.workspaceId, implementationKey: 'planning.github-projects', configuration: { projectNodeId } })),
       installExecutionBindings: (_controller, input) => configure(() => setup.installExecutionBindings({ ...input, workspaceId: options.workspaceId })),
       bindRepository: async (_controller, input) => {
-        const checked = await preflightRepositoryBinding({ ...input, references: input.references.map((ref) => ({ ...ref, accountId: ref.accountId as ConnectorAccountId | undefined })), workspaceId: options.workspaceId }, storage!, options.catalog, { worktreesDir, fetch: options.fetch ?? globalThis.fetch, resolveCredential: options.resolveCredential })
+        const checked = await io!.wait(() => preflightRepositoryBinding({ ...input, references: input.references.map((ref) => ({ ...ref, accountId: ref.accountId as ConnectorAccountId | undefined })), workspaceId: options.workspaceId }, storage!, options.catalog, { worktreesDir, fetch, resolveCredential }), Infinity)
         return 'writeState' in checked ? checked : configure(() => setup.bindRepository(checked))
       },
     }, guarded)
@@ -391,9 +424,9 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         const frames = streamWorkspace(source, { signal: AbortSignal.any([signal, watches.signal]), intervalMs: options.watchIntervalMs ?? 1000 })
         return { [Symbol.asyncIterator]: () => ({ next: () => guarded(() => frames.next()), return: () => frames.return() }) }
       },
-      stop, dispose,
+      stop, dispose, diagnoseShutdown,
     }
-  } catch (error) { await dispose(); throw error }
+  } catch (error) { await dispose(options.owner?.stop(error)); throw error }
 }
 
 type MappingInput = { readonly project?: ExternalObjectRef; readonly planningFieldMapping?: WorkspacePlanningFieldMapping; readonly planningMappingOrigin?: 'derived' | 'user' }

@@ -77,7 +77,9 @@ async function drain(read) {
 
 test('C1 已存研发与 Actions 挂载在启动时组合并经宿主出口读通；凭据只在单次请求的 authorization 头里', async (t) => {
   const stray = t.mock.method(globalThis, 'fetch', async () => { throw new Error('测试不得触网') })
-  const timeouts = t.mock.method(AbortSignal, 'timeout') // 原实现照常生效，只记录参数与返回的 signal
+  const deadlines = []
+  const timeouts = t.mock.method(AbortSignal, 'timeout', () => { const controller = new AbortController(); deadlines.push(controller); return controller.signal })
+  const combined = t.mock.method(AbortSignal, 'any')
   const { dataDir, dataPath } = await dataRoot()
   await seed(dataPath, PROVIDER_CATALOG, async (storage) => {
     await seedWorkspace(storage)
@@ -90,6 +92,9 @@ test('C1 已存研发与 Actions 挂载在启动时组合并经宿主出口读�
   const resolved = []
   const env = { fetch: github.fetch, resolveCredential: async (handle) => { resolved.push(handle); return CANARY } }
   const { disabled, wire } = await compose(dataPath, env)
+  const hostRequests = github.requests.length
+  assert.ok(hostRequests > 0 && github.requests.every(({ signal }) => signal.aborted), '组合卸载实际中止全部 Host 请求信号')
+  assert.ok(deadlines.every(({ signal }) => !signal.aborted), 'Host 中止不依赖请求 deadline 已到')
   assert.deepEqual(disabled, [], '两个挂载都被组合，没有挂载被禁用')
   assert.deepEqual(entriesOf(wire, DEVELOPMENT_KEYS), accessAll(DEVELOPMENT_KEYS, 'degraded'), 'lazy 研发两 key 初始 degraded，尚无真实权限确认')
   assert.deepEqual(entriesOf(wire, DELIVERY_KEYS), accessAll(DELIVERY_KEYS, 'degraded'), '交付两 key 是 Host 传入的 degraded：有句柄但未验证')
@@ -127,11 +132,14 @@ test('C1 已存研发与 Actions 挂载在启动时组合并经宿主出口读�
     const { authorization, ...others } = headers
     assert.equal(authorization, `bearer ${CANARY}`, '凭据只以宿主 bearer 出现在 authorization 头')
     assert.equal(JSON.stringify([href, others]).includes(CANARY), false, 'URL 与其它请求头不含凭据值')
-    const timeoutMs = timeouts.mock.calls.find((call) => call.result === signal)?.arguments[0]
-    assert.deepEqual([origin, others['user-agent'], redirect, timeoutMs], ['https://api.github.com', 'harness-projects', 'error', 30_000], `${method} ${pathname}：只发往 api.github.com，不跟随重定向，signal 恰是 AbortSignal.timeout(30_000)`)
+    const sources = combined.mock.calls.find((call) => call.result === signal)?.arguments[0] ?? [signal]
+    const timeoutMs = timeouts.mock.calls.find((call) => sources.includes(call.result))?.arguments[0]
+    assert.deepEqual([origin, others['user-agent'], redirect, timeoutMs], ['https://api.github.com', 'harness-projects', 'error', 30_000], `${method} ${pathname}：只发往 api.github.com，不跟随重定向，保留原请求的 30s 信号`)
     if (pathname === '/graphql') assert.deepEqual([method, others['content-type']], ['POST', 'application/json'], 'GraphQL 只用 POST')
     else assert.deepEqual([method, others.accept, others['x-github-api-version']], ['GET', 'application/vnd.github+json', '2022-11-28'], 'REST 只用 GET 且带 provider 的静态头')
   }
+  for (const deadline of deadlines) deadline.abort()
+  assert.ok(github.requests.every(({ signal }) => signal.aborted), '原请求 deadline 仍传播到组合后的底层 signal')
 })
 
 test('C2 权限只按账号事实推导：研发要 github.com 账号带句柄，Actions 无可用凭据时组合但显式 unavailable', async (t) => {

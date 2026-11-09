@@ -3,6 +3,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHostComposition } from './host-composition.ts'
 import { PROVIDER_CATALOG } from './host-providers.ts'
+import { createPlanningLifetime, drainUntil } from './host-planning-lifetime.ts'
+import { observeRootDisposal, type RootDisposalContext } from './host-surface.ts'
 import { installHostRemote, type HostRemoteContext } from './remote.ts'
 import { profileDataPath, traceHostService } from './host-authority.ts'
 
@@ -31,29 +33,43 @@ function credentialResolverOf(ctx: { get?: (name: string) => unknown }): (refere
 }
 
 /** Host composition root: all stateful resources are created before the typed remote is registered. */
-export async function apply(ctx: HostRemoteContext & { effect(callback: () => (() => void) | Promise<() => void>, label?: string): unknown; get?: (name: string) => unknown }): Promise<void> {
-  const composition = await createHostComposition({
-    dataPath: await profileDataPath(ctx),
-    workspaceId: WORKSPACE_ID,
-    catalog: PROVIDER_CATALOG,
-    sessionController: () => ctx.get?.('sessionController'),
-    forceSessionStartFailure: process.env.HARNESS_PROJECTS_FORCE_SESSION_START_FAILURE === '1',
-    resolveCredential: credentialResolverOf(ctx),
-    migrationsDir: migrationsDir(),
-  })
+export async function apply(ctx: HostRemoteContext & RootDisposalContext & { effect(callback: () => (() => void) | Promise<() => void>, label?: string): unknown; get?: (name: string) => unknown }): Promise<void> {
+  const lifetime = createPlanningLifetime(), acquisitions: Promise<unknown>[] = []
+  let composition: Awaited<ReturnType<typeof createHostComposition>> | undefined
   let remote: Awaited<ReturnType<typeof installHostRemote>> | undefined
+  let deadline: number | undefined, failure: unknown, disposal: Promise<void> | undefined
+  const stop = (error?: unknown): number => {
+    if (deadline === undefined) { deadline = Date.now() + 1000; failure = error; lifetime.stop(error); composition?.stop() }
+    return deadline
+  }
+  const owner = { signal: lifetime.signal, stop }
+  const dispose = () => disposal ??= (async () => {
+    const end = stop(), withdrawing = remote?.dispose(end)
+    await drainUntil(acquisitions, end)
+    try { await withdrawing; await remote?.dispose(end) } finally { await composition?.dispose(end) }
+  })()
+  // 获取资源前建立根 owner；迟到 acquisition 自行释放，绝不向已停止根发布端点。
+  ctx.effect(() => dispose, 'harness-projects: host composition')
+  observeRootDisposal(ctx, dispose)
   try {
-    remote = await installHostRemote(ctx, composition, undefined, traceHostService)
-    const installedRemote = remote
-    // I7：先撤回 remote 并等在途调用排空，再关闭 SQLite；两者不得交换。
-    ctx.effect(() => async () => {
-      composition.stop()
-      try { await installedRemote.dispose() } finally { await composition.dispose() }
-    }, 'harness-projects: host composition')
+    const dataPath = await lifetime.wait(() => profileDataPath(ctx), Infinity)
+    const opening = createHostComposition({
+      owner, dataPath, workspaceId: WORKSPACE_ID, catalog: PROVIDER_CATALOG,
+      sessionController: () => ctx.get?.('sessionController'),
+      forceSessionStartFailure: process.env.HARNESS_PROJECTS_FORCE_SESSION_START_FAILURE === '1',
+      resolveCredential: credentialResolverOf(ctx), migrationsDir: migrationsDir(),
+    }).then(async (value) => { composition = value; if (lifetime.signal.aborted) await value.dispose(stop()); return value })
+    acquisitions.push(opening)
+    composition = await lifetime.wait(() => opening, Infinity)
+    const installing = installHostRemote(ctx, composition, undefined, traceHostService, owner, composition.diagnoseShutdown)
+      .then(async (value) => { remote = value; if (lifetime.signal.aborted) await value.dispose(stop()); return value })
+    acquisitions.push(installing)
+    await lifetime.wait(() => installing, Infinity)
+    lifetime.assertActive()
     console.info('[harness-projects] host ready')
   } catch (error) {
-    composition.stop()
-    try { await remote?.dispose() } finally { await composition.dispose() }
-    throw error
+    if (!lifetime.signal.aborted) stop(error)
+    await dispose()
+    if (failure !== undefined) throw failure
   }
 }

@@ -7,6 +7,7 @@
  */
 
 import { inputOfArguments, OPERATIONS, plainRecord, type Operation, type Operations, type StreamName, type UnaryName } from './host-operations.ts'
+import { drainUntil } from './host-planning-lifetime.ts'
 
 export const REMOTE_PACKAGE = '@harness-projects/app-harness-plugin' as const
 export const REMOTE_NAMESPACE = 'harnessProjects' as const
@@ -147,7 +148,7 @@ export const CLIENT_REMOTE: ClientRemoteContribution = REMOTE.client
 export interface InstalledHostRemote {
   /** 方法由声明派生，类型上只能是记录；唯一的消费者是测试。 */
   readonly service: Readonly<Record<string, unknown>>
-  dispose(): Promise<void>
+  dispose(deadline?: number): Promise<void>
 }
 
 /** Install the live Cordis service and its strict Typert contribution. `remote` 缺省为生产的 `OPERATIONS`；测试可注入带夹具操作的声明。 */
@@ -156,6 +157,8 @@ export async function installHostRemote(
   composition: HostCompositionCall,
   remote: { readonly operations: Operations; readonly host: HostRemoteContribution } = REMOTE,
   decorate: (service: Record<string, unknown>) => void = () => {},
+  owner?: { readonly signal: AbortSignal; stop(error?: unknown): number },
+  diagnostic?: (event: 'shutdownDeadlineExceeded' | 'shutdownFailed', error?: unknown) => void,
 ): Promise<InstalledHostRemote> {
   let unregisterRemote: (() => void) | (() => Promise<void>)
   let provideDispose: (() => void | Promise<void>) | undefined
@@ -165,6 +168,7 @@ export async function installHostRemote(
   const lifetime = new AbortController() // 卸载时先中止所有打开的流，再等它们的 finally 把在途计数归零
   let drainResolve: (() => void) | undefined
   const drained = new Promise<void>((resolve) => { drainResolve = resolve })
+  const report = (event: 'shutdownDeadlineExceeded' | 'shutdownFailed', error?: unknown): void => { try { diagnostic?.(event, error) } catch { /* 诊断不得中断其它清理 */ } }
   const beginCall = (): void => {
     if (disposed) throw new Error('host remote 已卸载')
     activeCalls += 1
@@ -196,22 +200,26 @@ export async function installHostRemote(
   }
   service.typertRemote = Object.freeze({ service, serviceKey: REMOTE_SERVICE, namespace: REMOTE_NAMESPACE })
 
-  try {
-    decorate(service)
-    provideDispose = ctx.provide(REMOTE_SERVICE, service) ?? undefined
-    unregisterRemote = ctx.typert.register(remote.host)
-  } catch (error) {
-    await provideDispose?.()
-    throw error
-  }
-
-  return {
-    service,
-    dispose: () => disposal ??= (async () => {
+  const dispose = (deadline = owner?.stop() ?? Date.now() + 1000) => disposal ??= (async () => {
       disposed = true
       lifetime.abort()
-      if (activeCalls > 0) await drained
-      try { await unregisterRemote?.() } finally { await provideDispose?.() }
-    })(),
+      // 先同步撤准入；两个 disposer 同时开始，共用剩余预算，单个抛错也不阻断另一清理。
+      const cleanup = [unregisterRemote, provideDispose].map((dispose) => {
+        let task: Promise<unknown>
+        try { task = Promise.resolve(dispose?.()) } catch (error) { task = Promise.reject(error) }
+        return task.catch((error) => report('shutdownFailed', error))
+      })
+      if (!await drainUntil([...cleanup, ...(activeCalls > 0 ? [drained] : [])], deadline)) report('shutdownDeadlineExceeded')
+    })()
+  try {
+    owner?.signal.throwIfAborted()
+    decorate(service)
+    provideDispose = ctx.provide(REMOTE_SERVICE, service) ?? undefined
+    owner?.signal.throwIfAborted()
+    unregisterRemote = ctx.typert.register(remote.host)
+  } catch (error) {
+    await dispose(owner?.stop(error))
+    throw error
   }
+  return { service, dispose }
 }

@@ -100,7 +100,7 @@ test('production plugin binds an unwrapped delivery reader and App carries it to
   const remote = new Proxy({}, { get: (_, name) => async (...args) => ({ ok: true, value: await h.installed.service[name](...args) }) })
   const stream = { restart() {}, dispose: async () => abort.abort(), async *[Symbol.asyncIterator]() { for await (const value of h.host.watch(abort.signal)) yield { generation: 1, value: json(value), accept() {} } } }
   const child = { remote: { harnessProjects: remote, $stream: () => stream }, effect: (run) => disposers.push(run()), slots: { inject: (_, run) => run(), register: (slot, component) => { if (slot.name === 'main') Panel = component } } }
-  await apply({ remote: { $mount: async () => {} }, inject: (_, run) => run(child) })
+  await apply({ effect: child.effect, remote: { $mount: async () => async () => {} }, inject: (_, run) => run(child) })
   const panel = Panel(), reader = panel.props.deliveryReader, creator = panel.props.changeRequestCreator, scope = { workspaceId: h.workspaceId, workItemId: h.itemId, repositoryId: 'repo-alpha' }
   assert.equal(typeof creator.submit, 'function'); assert.equal(typeof reader.read, 'function'); assert.equal(typeof reader.refresh, 'function')
   assert.equal((await reader.read(scope)).projection.hops.length, 2)

@@ -16,7 +16,7 @@ async function open(t, state = 'configured') {
   const child = { effect: run => { cleanups.push(run()) }, slots: { inject: (_name, run) => run(), register: (slot, component) => { if (slot.name === 'main') Panel = component } }, remote: {
     harnessProjects: remote, $stream: options => { lost = options.carrierFailed; return { restart() {}, dispose: async () => { stopped = true; receive?.({ done: true }) }, [Symbol.asyncIterator]: () => ({ next: () => stopped ? Promise.resolve({ done: true }) : queue.length ? Promise.resolve({ done: false, value: queue.shift() }) : new Promise(resolve => { receive = resolve }) }) } },
   } }
-  await apply({ remote: { $mount: async () => {} }, inject: (_names, run) => run(child) }); await turn()
+  await apply({ effect: child.effect, remote: { $mount: async () => async () => {} }, inject: (_names, run) => run(child) }); await turn()
   t.after(async () => { for (const stop of cleanups) await stop() })
   const render = () => renderToStaticMarkup(React.createElement(Panel))
   const frame = async (bindingId = 'binding', observation = {}) => {

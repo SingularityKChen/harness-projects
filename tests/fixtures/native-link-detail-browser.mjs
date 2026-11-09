@@ -36,7 +36,7 @@ export async function mount(root) {
       }};streams.add(stream);return stream
     }
   }}
-  await apply({ remote:{$mount:async()=>{}},inject:(_,run)=>run(child) })
+  await apply({ effect:child.effect,remote:{$mount:async()=>async()=>{}},inject:(_,run)=>run(child) })
   return { frames:()=>frames.slice(), unmount:async()=>{root.unmount();await Promise.all(disposers.reverse().map(run=>run()));await Promise.all([...streams].map(s=>s.dispose()))} }
 }`
 export async function startNativeDetailServer() {
