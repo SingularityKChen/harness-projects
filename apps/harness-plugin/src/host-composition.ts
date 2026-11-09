@@ -74,7 +74,12 @@ async function finishChangeRequest(controller: Controller, scope: { workItemId: 
   if (result.authoritative && (operation?.kind !== 'operation' || operation.state !== 'saved' || !operation.currentTarget || operation.targetStamp !== result.value?.targetStamp)) {
     return { writeState: 'conflict', saving: false, authoritative: false, error: projectError(ProjectErrorCode.Conflict, 'PR 当前目标已变化，请读取原操作') }
   }
-  return { ...result, ...(result.error === undefined ? {} : { error: projectError(result.error.code, 'PR 未确认，请按恢复动作处理') }) }
+  const assignment = operation?.kind === 'operation' ? operation.assignment : undefined
+  return {
+    ...result,
+    ...(result.authoritative && assignment && assignment.state !== 'confirmed' ? { value: { ...result.value!, assignment } } : {}),
+    ...(result.error === undefined ? {} : { error: projectError(result.error.code, 'PR 未确认，请按恢复动作处理') }),
+  }
 }
 
 /** 工作区身份来自 Host；执行记录只在读取前后均可见的工作项上投影允许字段。 */

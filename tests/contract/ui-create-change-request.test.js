@@ -137,7 +137,7 @@ test('Draft checkbox defaults false, submits explicit choice, freezes pending an
 })
 test('client transmits Draft boolean and rejects malformed durable summary', async () => {
   const calls = [], creator = client.createChangeRequestCreator({ create: async (...args) => { calls.push(args); return wire('unknown') }, operation: async () => read({ ...operation, draft: 'true' }) }, { kind: 'user' }, () => 'key')
-  await creator.submit({ ...intent, draft: true }); assert.equal(calls[0].at(-3), true)
+  await creator.submit({ ...intent, draft: true }); assert.equal(calls[0][7], true)
   await assert.rejects(() => creator.operation(scope), TypeError)
 })
 
@@ -147,7 +147,7 @@ test('client snapshots Draft once before await and rejects explicit nonboolean w
   assert.equal(calls.length, 0)
   let reads = 0, draft = true
   const pending = creator.submit({ ...intent, get draft() { reads++; return draft } }); draft = false
-  await pending; assert.equal(reads, 1); assert.equal(calls[0].at(-3), true)
+  await pending; assert.equal(reads, 1); assert.equal(calls[0][7], true)
 })
 test('eligible Issue preview defaults to reference, allows clearing and rejects stale options after scope changes', async () => {
   const { CreateChangeRequestSection } = await import('../../packages/ui/src/create-change-request-section.ts')
@@ -192,4 +192,74 @@ for (const late of ['options', 'operation', 'resume', 'acknowledged']) test(`acc
   for (const token of ['metadata-2', 'metadata-3']) { props.accessToken = token; render(); await Promise.resolve(); render() }
   assert.equal(probes, pendingProbes, 'metadata may query the operation but must not probe Issue targets')
   assert.equal(writes, ['resume', 'acknowledged'].includes(late) ? 1 : 0, 'access changes preserve the pending write dedupe slot')
+})
+
+test('client freezes preselection and strictly decodes independent assignment states', async () => {
+  const calls = [], ids = ['U_2', 'U_1'], creator = client.createChangeRequestCreator({ create: async (...args) => { calls.push(args); return { ...wire('reconciled'), value: { ...wire('reconciled').value, operationId: 'op-1', targetStamp: 'target-1', assignment: { state: 'failed', reason: 'permission_denied' } } } } }, { kind: 'user' }, () => 'key')
+  const pending = creator.submit({ ...intent, draft: true, issueRelation: 'closing', issueTargetStamp: 'issue', assigneeIds: ids }); ids[0] = 'changed'
+  assert.deepEqual((await pending).assignment, { state: 'failed', reason: 'permission_denied' }); assert.deepEqual(calls[0].slice(7), [true, 'closing', 'issue', ['U_1', 'U_2']])
+  for (const assignment of [{ state: 'saved' }, { state: 'confirmed', login: 'private' }, { state: 'failed', reason: 'secret' }]) {
+    const bad = client.createChangeRequestCreator({ operation: async () => read({ ...operation, assignment }) }, { kind: 'user' })
+    await assert.rejects(() => bad.operation(scope), TypeError)
+  }
+})
+test('creator access change masks candidates while preserving draft and current write ownership', async () => {
+  const { CreateChangeRequestSection } = await import('../../packages/ui/src/create-change-request-section.ts'), { ChangeRequestAssigneePicker } = await import('../../packages/ui/src/change-request-assignees-section.ts')
+  let submitted, release, writes = 0
+  const props = { scope, accessToken: 'one', connected: true, creator: { assignees: {}, operation: async () => read({ kind: 'none' }), submit: input => { writes++; submitted = input; return new Promise(done => { release = done }) } }, onConfirmed() {} }
+  const render = componentHarness(CreateChangeRequestSection, props), flush = async () => { render(); await Promise.resolve(); render(); await Promise.resolve() }
+  await flush()
+  const picker = () => render().props.children.flat().find(n => n?.type === ChangeRequestAssigneePicker)
+  assert.ok(picker()); picker().props.onChange(['U_sensitive'])
+  for (const label of render().props.children.flat().filter(n => n?.type === 'label')) { const field = label.props.children[1]; if (['base', 'title', 'body'].includes(field.props.name)) field.props.onChange({ target: { value: field.props.name === 'base' ? 'main' : '保留草稿' } }); if (field.props.name === 'draft') field.props.onChange({ target: { checked: true } }) }
+  const key = picker().key; props.accessToken = 'two'; await flush()
+  assert.notEqual(picker().key, key); assert.deepEqual(picker().props.value, []); assert.match(JSON.stringify(render()), /保留草稿/)
+  render().props.children.flat().find(n => n?.type === 'button' && n.props.children === '重新验证来源 Issue').props.onClick(); await flush()
+  picker().props.onChange(['U_current']); render().props.onSubmit({ preventDefault() {} }); assert.deepEqual(submitted.assigneeIds, ['U_current']); assert.equal(submitted.draft, true)
+  const pendingKey = picker().key; props.refreshToken = 1; await flush(); assert.notEqual(picker().key, pendingKey); assert.match(JSON.stringify(render()), /保留草稿/)
+  props.accessToken = 'three'; await flush(); render().props.onSubmit({ preventDefault() {} }); assert.equal(writes, 1)
+  release({ writeState: 'unknown' }); await Promise.resolve(); props.connected = false; render(); assert.doesNotMatch(JSON.stringify(render()), /U_sensitive|U_current/)
+})
+
+test('preflight assignee refusal explains clearing selection without claiming a PR exists', async () => {
+  const { CreateChangeRequestSection } = await import('../../packages/ui/src/create-change-request-section.ts')
+  const props = { scope, connected: true, creator: { operation: async () => read({ kind: 'none' }), submit: async () => ({ writeState: 'failed', assignment: { state: 'failed', reason: 'not_supported' } }) }, onConfirmed() {} }
+  const render = componentHarness(CreateChangeRequestSection, props)
+  render(); await Promise.resolve(); render(); await Promise.resolve(); render().props.onSubmit({ preventDefault() {} }); await Promise.resolve()
+  assert.match(JSON.stringify(render()), /负责人.*清空/); assert.doesNotMatch(JSON.stringify(render()), /PR 已确认/)
+})
+test('client optional ABI shares omitted and empty intent while selected IDs append parameter eleven', async () => {
+  const calls = [], creator = client.createChangeRequestCreator({ create: async (...args) => { calls.push(args); return wire('unknown') } }, { kind: 'user' }, () => 'optional-ids')
+  const omitted = creator.submit(intent), empty = creator.submit({ ...intent, assigneeIds: [] })
+  assert.equal(omitted, empty); await omitted
+  assert.equal(calls.length, 1); assert.equal(calls[0].length, 10)
+  await creator.submit({ ...intent, assigneeIds: ['U_2', 'U_1'] }); assert.equal(calls[1].length, 11); assert.deepEqual(calls[1][10], ['U_1', 'U_2'])
+  for (const assigneeIds of [null, 'U', [' '], Array(11).fill('U')]) assert.equal((await creator.submit({ ...intent, assigneeIds })).writeState, 'failed')
+  assert.equal(calls.length, 2)
+})
+for (const next of ['unknown', 'blocked', 'waiting', 'mismatch']) test(`fresh assignment observation supersedes earlier confirmed response: ${next}`, async () => {
+  const { CreateChangeRequestSection } = await import('../../packages/ui/src/create-change-request-section.ts')
+  let lookup
+  const original = { ...operation, state: 'saved', assignment: { state: 'unknown' } }
+  const props = { scope, connected: true, creator: { operation: () => new Promise(done => { lookup = done }), resume: async () => ({ writeState: 'reconciled', operationId: 'op-1', targetStamp: 'target-1', assignment: { state: 'confirmed' } }) }, onConfirmed() {} }
+  const render = componentHarness(CreateChangeRequestSection, props)
+  render(); lookup(read(original)); await Promise.resolve()
+  render().props.children.flat().find(n => n?.type === 'button').props.onClick(); await Promise.resolve()
+  assert.doesNotMatch(JSON.stringify(render()), /创建时负责人已确认/, 'waiting for fresh Host read cannot resurrect response confirmation')
+  if (next !== 'waiting') {
+    lookup(read(next === 'blocked' ? { kind: 'blocked', reason: 'unavailable' } : next === 'mismatch' ? { ...original, operationId: 'foreign', assignment: { state: 'confirmed' } } : original)); await Promise.resolve()
+    assert.doesNotMatch(JSON.stringify(render()), /创建时负责人已确认/)
+    if (next === 'unknown') assert.match(JSON.stringify(render()), /PR 已确认.*创建时负责人尚未确认/)
+  }
+})
+
+for (const source of ['operation', 'result']) test(`repo access change preserves proven no assignment intent from ${source}`, async () => {
+  const { CreateChangeRequestSection } = await import('../../packages/ui/src/create-change-request-section.ts')
+  let reads = 0
+  const props = { scope, connected: true, accessToken: 'creator', assigneeAccessToken: 'before', creator: { operation: async () => { reads++; return read({ ...operation, state: 'saved', ...(source === 'operation' ? { assignment: { state: 'none' } } : {}) }) }, resume: async () => ({ writeState: 'reconciled', operationId: 'op-1', targetStamp: 'target-1', assignment: { state: 'none' } }) }, onConfirmed() {} }
+  const render = componentHarness(CreateChangeRequestSection, props)
+  render(); await Promise.resolve()
+  if (source === 'result') { render().props.children.flat().find(child => child?.type === 'button').props.onClick(); await Promise.resolve(); await Promise.resolve() }
+  assert.doesNotMatch(JSON.stringify(render()), /创建时负责人|原负责人意图/); const before = reads
+  props.assigneeAccessToken = 'after'; assert.doesNotMatch(JSON.stringify(render()), /创建时负责人|原负责人意图/); assert.equal(reads, before)
 })

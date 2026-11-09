@@ -3,11 +3,12 @@ import type { ActorRef, CommandWriteState } from '@harness-projects/controller'
 import type { DeliveryLineageScope } from './delivery-lineage-reader.ts'
 export type IssueRelation = 'reference' | 'closing' | 'none'
 export interface ChangeRequestIssueOptions { readonly targetStamp?: string; readonly target?: { readonly repositoryName: string; readonly number: number }; readonly defaultRelation: IssueRelation; readonly relations: readonly IssueRelation[]; readonly reason?: string }
-export interface ChangeRequestIntent extends DeliveryLineageScope { readonly base: string; readonly title: string; readonly body: string; readonly draft?: boolean; readonly issueRelation?: IssueRelation; readonly issueTargetStamp?: string | undefined }
+export interface CreationAssignment { readonly state: 'none' | 'pending' | 'confirmed' | 'unknown' | 'failed' | 'conflict'; readonly operationId?: string; readonly reason?: 'not_supported' | 'permission_denied' }
+export interface ChangeRequestIntent extends DeliveryLineageScope { readonly base: string; readonly title: string; readonly body: string; readonly draft?: boolean; readonly issueRelation?: IssueRelation; readonly issueTargetStamp?: string | undefined; readonly assigneeIds?: readonly string[] | undefined }
 export type ChangeRequestOperation = { readonly kind: 'none' } | { readonly kind: 'blocked'; readonly reason: 'unavailable' | 'ambiguous' | 'invalid_operation' }
-  | { readonly kind: 'operation'; readonly operationId: string; readonly state: string; readonly currentTarget: boolean; readonly targetStamp: string; readonly head: string; readonly base: string; readonly title: string; readonly draft: boolean; readonly issueRelation: IssueRelation; readonly issueTarget?: { readonly repositoryName: string; readonly number: number } }
+  | { readonly kind: 'operation'; readonly operationId: string; readonly state: string; readonly currentTarget: boolean; readonly targetStamp: string; readonly head: string; readonly base: string; readonly title: string; readonly draft: boolean; readonly issueRelation: IssueRelation; readonly issueTarget?: { readonly repositoryName: string; readonly number: number }; readonly requestedAssigneeIds?: readonly string[]; readonly assignment?: CreationAssignment }
 export interface ChangeRequestOperationRead extends DeliveryLineageScope { readonly operation: ChangeRequestOperation }
-export interface ChangeRequestCreation { readonly writeState: CommandWriteState; readonly operationId?: string; readonly targetStamp?: string; readonly lineageStale?: boolean; readonly recovery?: string; readonly relationState?: 'none' | 'pending' | 'confirmed' | 'denied' | 'unknown' }
+export interface ChangeRequestCreation { readonly assignment?: CreationAssignment; readonly writeState: CommandWriteState; readonly operationId?: string; readonly targetStamp?: string; readonly lineageStale?: boolean; readonly recovery?: string; readonly relationState?: 'none' | 'pending' | 'confirmed' | 'denied' | 'unknown' }
 export interface ChangeRequestCreator {
   options(scope: DeliveryLineageScope, base: string): Promise<ChangeRequestIssueOptions>
   readonly assignees?: ChangeRequestAssignees
@@ -17,7 +18,7 @@ export interface ChangeRequestCreator {
 }
 interface Port {
   options(actor: ActorRef, workItemId: string, repositoryId: string, base: string): Promise<unknown>
-  create(actor: ActorRef, key: string, workItemId: string, repositoryId: string, base: string, title: string, body: string, draft: boolean, issueRelation?: IssueRelation, issueTargetStamp?: string): Promise<unknown>
+  create(actor: ActorRef, key: string, workItemId: string, repositoryId: string, base: string, title: string, body: string, draft: boolean, issueRelation?: IssueRelation, issueTargetStamp?: string, assigneeIds?: readonly string[]): Promise<unknown>
   operation(actor: ActorRef, workItemId: string, repositoryId: string, operationId?: string): Promise<unknown>
   resume(actor: ActorRef, workItemId: string, repositoryId: string, operationId: string): Promise<unknown>
 }
@@ -26,6 +27,18 @@ function record(value: unknown, keys: readonly string[]): Record<string, unknown
   return value as Record<string, unknown>
 }
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0
+function ids(value: unknown): string[] {
+  if (!Array.isArray(value)) throw new TypeError('负责人 IDs 无效')
+  const captured = [...value]
+  if (captured.length > 10 || captured.some(id => typeof id !== 'string' || !id.trim())) throw new TypeError('负责人 IDs 无效')
+  return [...new Set(captured)].sort()
+}
+function assignment(value: unknown): CreationAssignment | undefined {
+  if (value === undefined) return undefined
+  const v = record(value, ['state', 'operationId', 'reason'])
+  if (typeof v.state !== 'string' || !['none', 'pending', 'confirmed', 'unknown', 'failed', 'conflict'].includes(v.state) || (v.operationId !== undefined && !text(v.operationId)) || (v.reason !== undefined && !['not_supported', 'permission_denied'].includes(v.reason as string))) throw new TypeError('创建时负责人状态无效')
+  return { ...v } as unknown as CreationAssignment
+}
 /** 仅保留传输中的单飞任务；恢复身份与原输入由 Host 持有。 */
 export function createChangeRequestCreator(port: Port, actor: ActorRef, makeKey: () => string = () => globalThis.crypto.randomUUID()): ChangeRequestCreator {
   const flights = new Map<string, Promise<ChangeRequestCreation>>()
@@ -36,13 +49,13 @@ export function createChangeRequestCreator(port: Port, actor: ActorRef, makeKey:
       try {
         const dto = record(await run(), ['writeState', 'saving', 'authoritative', 'value', 'error']), state = dto.writeState as CommandWriteState
         if (!['confirmed', 'reconciled', 'pending', 'unknown', 'failed', 'conflict'].includes(state) || dto.saving !== (state === 'pending') || dto.authoritative !== ['confirmed', 'reconciled'].includes(state)) throw new TypeError('PR 状态不合契约')
-        const value = dto.value === undefined ? undefined : record(dto.value, ['phase', 'ref', 'entityId', 'error', 'lineageStale', 'operationId', 'targetStamp', 'relationState'])
+        const value = dto.value === undefined ? undefined : record(dto.value, ['phase', 'ref', 'entityId', 'error', 'lineageStale', 'operationId', 'targetStamp', 'relationState', 'assignment'])
         if (value !== undefined && ((value.lineageStale !== undefined && typeof value.lineageStale !== 'boolean') || (value.operationId !== undefined && (!text(value.operationId) || !text(value.targetStamp))))) throw new TypeError('PR 结果不合契约')
         if (value?.relationState !== undefined && (typeof value.relationState !== 'string' || !['none', 'pending', 'confirmed', 'denied', 'unknown'].includes(value.relationState))) throw new TypeError('Issue 关联状态无效')
         const ref = value?.ref as Record<string, unknown> | undefined
         if (dto.authoritative && (value?.phase !== state || !text(value.operationId) || !text(value.targetStamp) || !text(value.entityId) || ref?.objectKind !== 'change_request' || !text(ref.bindingId) || !text(ref.externalId))) throw new TypeError('PR 缺少确认身份')
         const error = dto.error as Record<string, unknown> | undefined
-        return { writeState: state, ...(text(value?.operationId) ? { operationId: value.operationId, targetStamp: value!.targetStamp as string } : {}), lineageStale: value?.lineageStale === true, ...(value?.relationState === undefined ? {} : { relationState: value.relationState as NonNullable<ChangeRequestCreation['relationState']> }), ...(typeof error?.recovery === 'string' ? { recovery: error.recovery } : {}) }
+        return { writeState: state, ...(value?.assignment === undefined ? {} : { assignment: assignment(value.assignment)! }), ...(text(value?.operationId) ? { operationId: value.operationId, targetStamp: value!.targetStamp as string } : {}), lineageStale: value?.lineageStale === true, ...(value?.relationState === undefined ? {} : { relationState: value.relationState as NonNullable<ChangeRequestCreation['relationState']> }), ...(typeof error?.recovery === 'string' ? { recovery: error.recovery } : {}) }
       } catch { return { writeState: 'unknown' } }
       finally { flights.delete(identity) }
     })
@@ -62,9 +75,11 @@ export function createChangeRequestCreator(port: Port, actor: ActorRef, makeKey:
     async operation(scope, operationId) {
       const dto = record(await port.operation(actor, scope.workItemId, scope.repositoryId, operationId), ['workspaceId', 'workItemId', 'repositoryId', 'operation'])
       for (const key of ['workspaceId', 'workItemId', 'repositoryId'] as const) if (!text(dto[key]) || dto[key] !== scope[key]) throw new TypeError('PR 作用域不合契约')
-      const value = record(dto.operation, ['kind', 'reason', 'operationId', 'state', 'currentTarget', 'targetStamp', 'head', 'base', 'title', 'draft', 'issueRelation', 'issueTarget'])
-      record(value, value.kind === 'none' ? ['kind'] : value.kind === 'blocked' ? ['kind', 'reason'] : ['kind', 'operationId', 'state', 'currentTarget', 'targetStamp', 'head', 'base', 'title', 'draft', 'issueRelation', 'issueTarget'])
+      const value = record(dto.operation, ['kind', 'reason', 'operationId', 'state', 'currentTarget', 'targetStamp', 'head', 'base', 'title', 'draft', 'issueRelation', 'issueTarget', 'requestedAssigneeIds', 'assignment'])
+      record(value, value.kind === 'none' ? ['kind'] : value.kind === 'blocked' ? ['kind', 'reason'] : ['kind', 'operationId', 'state', 'currentTarget', 'targetStamp', 'head', 'base', 'title', 'draft', 'issueRelation', 'issueTarget', 'requestedAssigneeIds', 'assignment'])
       if (value.kind === 'operation') {
+        assignment(value.assignment)
+        if (value.requestedAssigneeIds !== undefined && (ids(value.requestedAssigneeIds).length === 0 || JSON.stringify(ids(value.requestedAssigneeIds)) !== JSON.stringify(value.requestedAssigneeIds))) throw new TypeError('原负责人 IDs 无效')
         if (['operationId', 'targetStamp', 'head', 'base', 'title'].some((key) => !text(value[key])) || typeof value.draft !== 'boolean' || (typeof value.issueRelation !== 'string' || !['reference', 'closing', 'none'].includes(value.issueRelation)) || typeof value.currentTarget !== 'boolean' || (typeof value.state !== 'string' || !['pending', 'unknown', 'saved', 'failed', 'conflict'].includes(value.state)) || (operationId !== undefined && value.operationId !== operationId)) throw new TypeError('PR 操作不合契约')
         if (value.issueRelation !== 'none' && value.issueTarget !== undefined) { const target = record(value.issueTarget, ['repositoryName', 'number']); if (!text(target.repositoryName) || !Number.isSafeInteger(target.number) || Number(target.number) < 1) throw new TypeError('原 Issue 目标无效') } else if (value.issueRelation === 'none' && value.issueTarget !== undefined) throw new TypeError('无关联不能含目标')
       } else if (value.kind !== 'none' && !(value.kind === 'blocked' && typeof value.reason === 'string' && ['unavailable', 'ambiguous', 'invalid_operation'].includes(value.reason))) throw new TypeError('PR 操作不合契约')
@@ -72,10 +87,11 @@ export function createChangeRequestCreator(port: Port, actor: ActorRef, makeKey:
     },
     submit(intent) {
       try {
-        const { workspaceId, workItemId, repositoryId, base, title, body, draft, issueRelation, issueTargetStamp } = intent
+        const { workspaceId, workItemId, repositoryId, base, title, body, draft, issueRelation, issueTargetStamp, assigneeIds: inputIds } = intent
         if ((draft !== undefined && typeof draft !== 'boolean') || (issueRelation !== undefined && !['reference', 'closing', 'none'].includes(issueRelation))) return Promise.resolve({ writeState: 'failed' })
-        const captured = { workspaceId, workItemId, repositoryId, base, title, body, draft: draft ?? false, issueRelation, issueTargetStamp }
-        return send(JSON.stringify(['create', captured]), () => port.create(actor, makeKey(), workItemId, repositoryId, base, title, body, captured.draft, captured.issueRelation, captured.issueTargetStamp))
+        const assigneeIds = ids(inputIds === undefined ? [] : inputIds)
+        const captured = { workspaceId, workItemId, repositoryId, base, title, body, draft: draft ?? false, issueRelation, issueTargetStamp, assigneeIds }
+        return send(JSON.stringify(['create', captured]), () => port.create(actor, makeKey(), workItemId, repositoryId, base, title, body, captured.draft, captured.issueRelation, captured.issueTargetStamp, ...(assigneeIds.length ? [assigneeIds] as const : [])))
       } catch { return Promise.resolve({ writeState: 'failed' }) }
     },
     resume(scope, operationId) { return send(JSON.stringify(['resume', scope, operationId]), () => port.resume(actor, scope.workItemId, scope.repositoryId, operationId)) },
