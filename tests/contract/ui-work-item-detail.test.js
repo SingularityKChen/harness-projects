@@ -15,7 +15,7 @@ import { deriveWorkItemDetailView, deriveWorkItemListView } from '@harness-proje
 import { CANARIES, T, redacted, wire } from '../fixtures/work-item-wire.mjs'
 
 const uiRequire = createRequire(new URL('../../packages/ui/package.json', import.meta.url))
-const { createElement } = uiRequire('react')
+const { createElement, Children } = uiRequire('react')
 const { renderToStaticMarkup } = uiRequire('react-dom/server')
 
 const TARGET = { projectId: 'ws-1', itemId: 'ent-aa' }
@@ -191,7 +191,7 @@ test('事件回调机械判据：Escape 只有 cancel 单次关闭；Tab 接受 
     assert.deepEqual([tabPrevented, focused], [2, ['first', 'last']], 'Tab 焦点循环：无 filter 的 NodeList 形状也必须被接受并在 dialog 内循环')
     const opened = []
     const page = ui.WorkItemProjectPage({ listView: views([wire('ent-aa')]).listView, detailView: undefined, navigation: { href: (id) => id, open: (id) => opened.push(id) }, onCloseDetail: () => undefined })
-    page.props.children[0].props.children.props.navigation.open('ent-aa')
+    Children.toArray(page.props.children[0].props.children).find(node => node.type === ui.WorkItemListPage).props.navigation.open('ent-aa')
     assert.deepEqual([opened, refs.at(-3).current], [['ent-aa'], first], '组合页 open 通道：记下 opener，并把同一 id 原样转交外层 open')
   } finally {
     globalThis.document = previousDocument
@@ -269,7 +269,7 @@ test('detail-close-focus：原入口仍在列表时回焦，否则落可聚焦�
   const previous = internals.ReactCurrentDispatcher.current, doc = globalThis.document
   const refs = [], focused = [], effects = []
   let cursor = 0
-  internals.ReactCurrentDispatcher.current = { useRef: (v) => { const i = cursor++; return refs[i] ?? (refs[i] = { current: v }) }, useEffect: (fn) => effects.push(fn) }
+  internals.ReactCurrentDispatcher.current = { useState: value => [value, () => undefined], useRef: (v) => { const i = cursor++; return refs[i] ?? (refs[i] = { current: v }) }, useEffect: (fn) => effects.push(fn) }
   try {
     const { listView, detailView } = views([wire('ent-aa')])
     const opener = { isConnected: true, focus: () => focused.push('opener') }
@@ -280,7 +280,7 @@ test('detail-close-focus：原入口仍在列表时回焦，否则落可聚焦�
     initial.props.children.find((node) => node?.props?.className === 'hp-project-list').ref.current = list
     runEffects()
     globalThis.document = { activeElement: opener }
-    const open = () => render(undefined).props.children.find((node) => node?.props?.className === 'hp-project-list').props.children.props.navigation.open('ent-aa')
+    const open = () => Children.toArray(render(undefined).props.children.find((node) => node?.props?.className === 'hp-project-list').props.children).find(node => node.type === ui.WorkItemListPage).props.navigation.open('ent-aa')
     open(); render(detailView); runEffects(); render(undefined); runEffects()
     opener.isConnected = false
     open(); render(detailView); runEffects(); render(undefined); runEffects()

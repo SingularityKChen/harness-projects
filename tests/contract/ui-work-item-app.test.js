@@ -111,6 +111,19 @@ test('列表与链接：缺省是当前工作区列表；列表点击与链接�
   assert.ok(renderToStaticMarkup(app.render()).includes('<a href="#/projects/ws-2/items/ent-aa">'), '关闭详情之后工作区切换：显示新工作区的列表，不落到 unresolved')
 })
 
+test('ordinary item list and detail routes do not eagerly derive delivery overview targets', () => {
+  const read = readOf(), original = read.store
+  original.applyBaseline({ revision: 1, entities: Array.from({ length: 128 }, (_, i) => wire('item-' + i)), source: { revision: 1, freshness: 'fresh', authority: 'provider' } })
+  let scans = 0
+  read.store = { ...original, list: () => { scans++; return original.list() } }
+  const source = sourceOf(read)
+  assert.match(html({ source }), /标题-item-0/)
+  assert.equal(scans, 1, 'ordinary list needs only its existing list projection')
+  scans = 0
+  assert.match(html({ source, initialPath: '/projects/ws-1/items/item-0' }), /<dialog/)
+  assert.equal(scans, 3, 'detail route retains its existing list/detail guards without a per-row overview pass')
+})
+
 test('断开说明只在 connected 为 false 时出现；无快照时是带 tabindex 标题的 loading，没有行', () => {
   assert.ok(html({ source: sourceOf(readOf({ connected: false })) }).includes(NOTICE), '断开：最后已知值 + 重连说明')
   assert.ok(!html({ source: sourceOf(readOf()) }).includes('与宿主的连接已中断'), '在线：没有说明')

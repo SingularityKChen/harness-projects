@@ -173,3 +173,55 @@ test('PR confirmation reloads existing lineage with a pure read and no duplicate
   assert.deepEqual(f.calls, ['refresh', 'read', 'read'])
   f.h.close()
 })
+
+test('summary hides actions and live regions; unconfirmed unavailable CI cannot pass', async (t) => {
+  const f = fixture(t); f.h.props.presentation = 'summary'; f.h.props.refreshToken = 0
+  f.h.props.creator = {submit:async()=>({writeState:'confirmed'})}
+  let settled = []; f.h.props.onSettled = failed => settled.push(failed)
+  await f.open(); let html = text(f.h)
+  assert.equal((html.match(/data-position=/g)??[]).length,3)
+  assert.doesNotMatch(html,/role="status"|刷新交付谱系|创建 PR|data-state="passed"/)
+  assert.match(html,/候选关系/); assert.deepEqual(settled,[false])
+  const p = projection(); p.hops.forEach(hop => {hop.relationState='confirmed'}); f.p=p
+  f.h.props.refreshToken++; text(f.h); f.h.flush(); await settle()
+  assert.deepEqual(f.calls,['refresh','read','refresh','read']); assert.match(text(f.h),/已观察 CI 通过/)
+  f.h.props.onSettled = failed => settled.push(failed); text(f.h); f.h.flush(); await settle()
+  assert.equal(f.calls.length,4,'callback identity must not cause reads')
+  p.hops.forEach(hop => {hop.unavailable=true}); f.resume(); await settle()
+  assert.doesNotMatch(text(f.h),/data-state="passed"/); f.h.close()
+})
+test('summary ages at exact threshold from confirmedAt and ignores attemptedAt', async (t) => {
+  const f=fixture(t); f.h.props.presentation='summary'; f.h.props.thresholdMs=undefined
+  const p=projection(); p.hops.forEach(hop=>{hop.relationState='confirmed'}); p.freshness.forEach(entry=>{entry.attemptedAt=at(299999)})
+  f.p=p; f.now=299999; await f.open(); assert.match(text(f.h),/data-state="passed"/)
+  f.now=300000; f.fire(); await settle()
+  const html=text(f.h); assert.equal((html.match(/data-state="passed"/g)??[]).length,1); assert.match(html,/陈旧/)
+  assert.equal(f.calls.filter(call=>call==='refresh').length,1); f.h.close()
+})
+
+test('revocation and late old repository results never restore canary identities', async t => {
+  const f=fixture(t); f.h.props.presentation='summary'; f.h.props.refreshToken=0
+  const p=projection(); p.hops[0].label='OLD-CANARY'; f.p=p; await f.open(); assert.match(text(f.h),/OLD-CANARY/)
+  f.hold=true; f.resume(); await settle()
+  f.h.props.accessToken='revoked'; assert.doesNotMatch(text(f.h),/OLD-CANARY/); f.h.flush(); await settle()
+  f.h.props.scope={...scope,repositoryId:'other'}; assert.doesNotMatch(text(f.h),/OLD-CANARY/); f.h.flush(); await settle()
+  f.pending[0].resolve({...scope,projection:p,now:at(0)}); f.pending[1].reject(Error('LATE-SECRET')); await settle()
+  assert.doesNotMatch(text(f.h),/OLD-CANARY|LATE-SECRET|data-state="passed"/)
+  const empty=projection(); empty.hops=[]; empty.gaps=[{entityKind:'change_request',reason:'not_observed'},{entityKind:'check_run',reason:'not_observed'}]
+  f.pending[2].resolve({...f.h.props.scope,projection:empty,now:at(0)}); await settle()
+  assert.match(text(f.h),/缺口：尚未观察到/);assert.doesNotMatch(text(f.h),/data-state="passed"/);f.h.close()
+})
+test('missing PR and empty checks render gaps not passed', async t => {
+  const f=fixture(t);f.h.props.presentation='summary';const p=projection();p.hops=[];p.gaps=[{entityKind:'change_request',reason:'not_observed'},{entityKind:'check_run',reason:'not_observed'}];f.p=p
+  await f.open();const html=text(f.h);assert.equal((html.match(/缺口：/g)??[]).length,3);assert.doesNotMatch(html,/data-state="passed"|已观察 CI 通过/);f.h.close()
+})
+
+test('summary confirmation preserves exact instant in semantic time without displaying raw ISO', async t => {
+  const f=fixture(t);f.h.props.presentation='summary';await f.open()
+  const html=text(f.h),times=html.match(/<time datetime="[^"]+">[^<]+<\/time>/gi)??[]
+  assert.equal(times.length,2);assert.match(times[0],/datetime="2026-10-26T00:00:00.000Z"/i)
+  assert.match(times[1],/datetime="2026-10-26T00:00:00.100Z"/i)
+  assert.ok(times.every(time=>!/>[^<]*2026-10-26T/.test(time)),'machine precision belongs in datetime, not the visible confirmation')
+  f.h.props.presentation='detail';assert.match(text(f.h),/最后确认：2026-10-26T00:00:00.000Z/)
+  assert.deepEqual(f.calls,['refresh','read'],'presentation cannot alter ingestion or freshness');f.h.close()
+})
