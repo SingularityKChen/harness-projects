@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:http'
 import { composeCore, contextIdFor, runIdFor } from '@harness-projects/core'
-import { createFakeProviders, FAKE_PROVIDER_DEFINITION } from '@harness-projects/provider-fake'
+import { createFakeProviders, FAKE_PROVIDER_DEFINITION, refOf } from '@harness-projects/provider-fake'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
 import { createHostComposition } from '../../apps/harness-plugin/src/host-composition.ts'
 import { catalogOf, hostStoragePolicy } from '../../apps/harness-plugin/src/host-providers.ts'
@@ -19,8 +19,8 @@ import { AccessLevel, providerErr, providerError } from '@harness-projects/capab
 export async function createExecutionFixture({ seed } = {}) {
   if (seed === 'execution') return createComposedExecutionPlatform()
   const root = await mkdtemp(path.join(tmpdir(), 'execution-drawer-')), dataPath = path.join(root, 'workspace.sqlite')
-  const make = (options) => { const p = createFakeProviders(options); if (seed === 'query') for (let i=0;i<120;i++) p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Query '+String(i).padStart(3,'0'), 'Safe query body'); if (seed === 'read') p.planning.addItem(p.planning.state.projects[0].ref, 'draft', '规划项 draft-1', 'draft-1 正文占位'); return p }
-  const mounted = [], byDomain = {}, providers = make(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: { projectNodeId: { kind: 'string', required: false, pattern: '.+', maxLength: 100 } }, create: async ({ binding }) => { const provider = make({ [binding.domain]: { bindingId: binding.id } })[binding.domain]; byDomain[binding.domain] = provider; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
+  const make = (options) => { const p = createFakeProviders(options); if (seed === 'query') for (let i=0;i<120;i++) p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Query '+String(i).padStart(3,'0'), 'Safe query body'); if (seed === 'overview') p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Overview gap', 'Gap fixture'); if (seed === 'read') p.planning.addItem(p.planning.state.projects[0].ref, 'draft', '规划项 draft-1', 'draft-1 正文占位'); return p }
+  const mounted = [], byDomain = {}, providers = make(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: { projectNodeId: { kind: 'string', required: false, pattern: '.+', maxLength: 100 } }, create: async ({ binding }) => { const provider = seed === 'overview' ? providers[binding.domain] : make({ [binding.domain]: { bindingId: binding.id } })[binding.domain]; byDomain[binding.domain] = provider; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
   const workspaceId = '00000000-0000-4000-8000-000000000282'
   const storage = createSqliteStorage(dataPath, hostStoragePolicy(catalog))
   let host, installed
@@ -34,7 +34,22 @@ export async function createExecutionFixture({ seed } = {}) {
     const core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture' }, providers, storage })
     await storage.putBindingConfiguration({ ref: { workspaceId, bindingId: providers.planning.bindingId, domain: 'planning' }, configuration: { projectNodeId: providers.planning.state.projects[0].ref.externalId } })
     itemId = (await core.queries.listPlanningItems()).find((item) => item.content.title === '规划项 issue-1').entityId
-    if (seed !== 'query') { await core.commands.startWork({ task: 'Synthetic explicit task', workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
+    if (seed === 'overview') {
+      providers.delivery.state.runs = []; providers.delivery.state.checks = []
+      const work = (await core.queries.listPlanningItems()).filter(item => ['规划项 issue-1','规划项 issue-2','规划项 issue-4'].includes(item.content.title))
+      for (const [index, item] of work.entries()) {
+        const sha = 'overview-sha-' + index, dev = providers.development, ci = providers.delivery, repository = refOf(ci.gate.bindingId, 'repository', 'repo-alpha')
+        dev.state.branches[0].headCommit = sha; dev.state.commits.push({ ref: refOf(dev.gate.bindingId, 'commit', sha), sha, message: 'Overview fixture', changeRequest: undefined })
+        const started = await core.commands.startWork({ task: 'Synthetic overview setup', workItemId: item.entityId, repositoryId: 'repo-alpha', actor: {kind:'human'}, idempotencyKey: 'overview-' + index })
+        await dev.createChangeRequest({ repository: dev.state.repositories[0].ref, head: started.branchExternalId, base: 'main', title: 'Overview PR ' + index, body: 'Synthetic provider fixture' })
+        const conclusion = item.content.title.endsWith('1') ? 'success' : item.content.title.endsWith('2') ? 'failure' : undefined
+        ci.state.runs.push({ ref: refOf(ci.gate.bindingId, 'pipeline_run', 'ci-overview-' + index), repository, commit: sha, branch: started.branchExternalId, status: 'completed', conclusion })
+        ci.state.checks.push({ ref: refOf(ci.gate.bindingId, 'check_run', 'check-overview-' + index), repository, commit: sha, name: 'Overview CI', status: 'completed', conclusion })
+      }
+      // 合成夹具预先确认关系；Provider 观察默认只生成 candidate，不能借 CI 成功冒充关系确认。
+      for (const item of work) await core.commands.refreshDeliveryFacts({ workItemId: item.entityId, repositoryId: 'repo-alpha' })
+      for (const relation of await storage.listRelations(workspaceId)) await core.commands.confirmRelation(relation)
+    } else if (seed !== 'query') { await core.commands.startWork({ task: 'Synthetic explicit task', workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
     const id = contextIdFor(workspaceId, itemId, 'repo-alpha'); runId = runIdFor(id)
     await storage.putExecutionRun({ ...(await storage.getExecutionRun(runId)), fallback: true }) }
   }
