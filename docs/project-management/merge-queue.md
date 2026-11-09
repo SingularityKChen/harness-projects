@@ -105,6 +105,18 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 ## 4. 当前队列
 
+### PR #583 → #584 → #585（2026-11-09）
+
+直接条件授权与完整矩阵见[本批记录](../review/2026-11-09-pr583-pr585-mmp-review.md)。三个独立 main PR，不建立原生 stack 或 Planning 依赖。初始完整前序已在仓库外 clone 预演；每条合入后以真实 main 重核。
+
+| 位置 | PR / issue | 接合与当前版本门 |
+|---|---|---|
+| 1（已合并） | #583 / #283 | P2/P3 修复独立复评；当前批准/门禁通过，rebase `1c28c7fc`，#283 CLOSED，合入树相同 |
+| 2（已合并） | #584 / #422 | P2诊断修复及独立复评；实际新main完整3775项和当前批准/门禁通过，rebase `e3e37adc`，#422 CLOSED，合入树相同 |
+| 3 | #585 / #435 | 实际前两项main接合，两个Host冲突联合、索引自动联合；三个永久探针，verify3799/Chromium77及独立52项/六变异通过；最终当前head门后rebase |
+
+原 head 保存在 `refs/backup/pr<N>-before-mmp-review-20261109`；最终 push 用精确 lease，回读当前 head/base、全部 checks/threads、双向 issue 与 Bot 批准，以 expected head SHA rebase merge。UAT、ADR Accepted、Planning Status 与 R1 不随合并接受。
+
 ### PR #568 → #581 与 #569（2026-11-09）
 
 直接条件授权与风险矩阵见[本轮记录](../review/2026-11-09-pr568-pr581-mmp-review.md)。仅 #568 → #581 是原生 stack #582；#569 独立，工程顺序不创建 Planning 依赖。

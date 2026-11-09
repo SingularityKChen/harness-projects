@@ -12,8 +12,8 @@ import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
 import { createHostPlanningMapping } from './host-planning-mapping.ts'
 import { createPlanningLifetime, drainUntil } from './host-planning-lifetime.ts'
 import { dispatchOf, OPERATIONS, type UnaryHandlers, type UnaryName } from './host-operations.ts'
-import { preflightRepositoryBinding } from './host-repository-binding.ts'
-import { preflightPlanningConnection, githubViewer, HOST_SECRET_HANDLES, hostStoragePolicy, restoreProviders, type DisabledBinding, type ProviderCatalog } from './host-providers.ts'
+import { preflightRepositoryBinding, repositoryHead } from './host-repository-binding.ts'
+import { preflightPlanningConnection, ciAccountStamp, type CiReadObservation, githubViewer, HOST_SECRET_HANDLES, hostStoragePolicy, restoreProviders, type DisabledBinding, type ProviderCatalog } from './host-providers.ts'
 
 /** Controller 失败上 wire 的唯一文案：原因只写进宿主诊断日志。 */
 const OPERATION_FAILED = 'harness-projects：操作失败，原因已写入宿主诊断日志'
@@ -217,7 +217,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   let developmentCache = new Map<string, object>()
   let current: Assembly
   let barrier: Promise<void> | undefined, epoch = 0, tail: Promise<unknown> = Promise.resolve(), activeFingerprint = ''
-  let activationError: ProjectError | undefined
+  let activationError: ProjectError | undefined, repositoryValidation = 0
   const watches = new AbortController()
   let disposal: Promise<void> | undefined
   let stopDeadline: number | undefined
@@ -275,7 +275,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       const configuration = options.catalog.has(mount.implementationKey) ? await storage!.getBindingConfiguration({ workspaceId: options.workspaceId, bindingId: mount.id, domain: mount.domain }) : undefined
       return [[mount.id, mount.domain, mount.implementationKey, mount.enabled], configuration, accountId === undefined ? undefined : await storage!.getConnectorAccount(accountId)]
     }))])
-    const assemble = async (): Promise<Assembly> => {
+    const assemble = async (ci?: { observation: CiReadObservation; bindingId: import('@harness-projects/domain').ProviderBindingId }): Promise<Assembly> => {
       const workspace = await storage!.getWorkspace(options.workspaceId)
       if (workspace !== undefined && workspace.statusPolicy !== StatusPolicy.ProviderAuthoritative) throw new HostPolicyAdmissionError()
       if (closed) throw new Error('host 已关闭')
@@ -286,6 +286,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       try {
         const { table, disabled } = workspace === undefined ? { table: {}, disabled: [] } : await restoreProviders(storage!, workspace.id, options.catalog, {
           // 解析失败（例如宿主凭据服务缺席）只留允许名单字段；provider 随后把它归类为结构化 unavailable，不带原文。
+          ...(ci ? { ci } : {}),
           sessionController: () => { lifetime.assertActive(); return options.sessionController?.() },
           lifetime,
           forceSessionStartFailure: options.forceSessionStartFailure,
@@ -325,7 +326,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       } catch (error) { retire(assembly); throw error }
     }
     current = await assemble(); io!.assertActive(); developmentCache = current.cache; activeFingerprint = await fingerprint(); io!.assertActive(); current.reconciler?.start()
-    const configure = <T>(run: () => Promise<CommandResult<T>>, activate = true, confirmPlanning = false): Promise<CommandResult<T> & { activationError?: ProjectError }> => {
+    const configure = <T>(run: () => Promise<CommandResult<T>>, activate = true, confirmPlanning = false, ci?: { observation: CiReadObservation; current(): Promise<boolean>; isCurrent(): boolean; bindingId: import('@harness-projects/domain').ProviderBindingId | undefined }): Promise<CommandResult<T> & { activationError?: ProjectError }> => {
       const task = tail.then(async () => {
         if (closed) throw new Error('host 已关闭')
         let release!: () => void; barrier = new Promise<void>((resolve) => { release = resolve }); epoch++
@@ -337,12 +338,13 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
           if (result.writeState === 'local_only' && activate) {
             try {
               const desired = await fingerprint()
-              if (desired !== activeFingerprint) {
+              if (desired !== activeFingerprint || ci) {
                 old.reconciler?.stop()
-                const candidate = await assemble()
-                if (closed) { retire(candidate); throw new Error('host 已关闭') }
+                if (ci && !await ci.current()) throw new Error('仓库验证已失效')
+                const candidate = await assemble(ci?.bindingId ? { observation: ci.observation, bindingId: ci.bindingId } : undefined)
+                if (closed || (ci && (!await ci.current() || await fingerprint() !== desired))) { retire(candidate); throw new Error('仓库验证已失效') }
                 let activatedFingerprint: string
-                try { activatedFingerprint = await fingerprint(); candidate.reconciler?.start() } catch (error) { retire(candidate); throw error }
+                try { activatedFingerprint = await fingerprint(); if (ci && !ci.isCurrent()) throw new Error('仓库验证已失效'); candidate.reconciler?.start() } catch (error) { retire(candidate); throw error }
                 current = candidate; developmentCache = candidate.cache; activeFingerprint = activatedFingerprint; retire(old)
               }
               activationError = undefined
@@ -404,8 +406,20 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       bindPlanningSource: (_controller, { projectNodeId, accountId, ...input }) => configure(() => connection.bindPlanningSource({ ...input, accountId: accountId as ConnectorAccountId, workspaceId: options.workspaceId, implementationKey: 'planning.github-projects', configuration: { projectNodeId } })),
       installExecutionBindings: (_controller, input) => configure(() => setup.installExecutionBindings({ ...input, workspaceId: options.workspaceId })),
       bindRepository: async (_controller, input) => {
-        const checked = await io!.wait(() => preflightRepositoryBinding({ ...input, references: input.references.map((ref) => ({ ...ref, accountId: ref.accountId as ConnectorAccountId | undefined })), workspaceId: options.workspaceId }, storage!, options.catalog, { worktreesDir, fetch, resolveCredential }), Infinity)
-        return 'writeState' in checked ? checked : configure(() => setup.bindRepository(checked))
+        const sequence = ++repositoryValidation, before = await fingerprint()
+        const checked = await io!.wait(() => preflightRepositoryBinding({ ...input, references: input.references.map((ref) => ({ ...ref, accountId: ref.accountId as ConnectorAccountId | undefined })), workspaceId: options.workspaceId }, storage!, options.catalog, { sequence, worktreesDir, fetch, resolveCredential }), Infinity)
+        if ('writeState' in checked) return checked
+        const accountId = checked.input.references.find(ref => ref.implementationKey === 'github-actions')!.accountId!
+        const ci = { observation: checked.ci, bindingId: undefined as import('@harness-projects/domain').ProviderBindingId | undefined,
+          isCurrent: () => !closed && checked.ci.sequence === repositoryValidation,
+          current: async () => ci.isCurrent() && ciAccountStamp(await storage!.getConnectorAccount(accountId)) === checked.ci.accountStamp
+            && await repositoryHead(checked.input.references.find(ref => ref.implementationKey === 'development.local-git')!.configuration!.repositoryPath as string) === checked.ci.commit && ci.isCurrent() }
+        return configure(async () => {
+          if (!await ci.current() || await fingerprint() !== before) return { writeState: 'failed' as const, saving: false, authoritative: false, value: undefined, error: projectError(ProjectErrorCode.Conflict, '仓库验证已失效，请重新验证') }
+          const result = await setup.bindRepository(checked.input)
+          ci.bindingId = result.value?.bindingIds[checked.input.references.findIndex(ref => ref.implementationKey === 'github-actions')]
+          return result
+        }, true, false, ci)
       },
     }, guarded)
     return {
