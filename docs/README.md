@@ -25,12 +25,14 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-09-pr568-pr581-review-followup](exec-plan/active/2026-11-09-pr568-pr581-review-followup.md) | 三项 MMP 交付独立评审、P2 修复复评与条件 rebase 整合 |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-07-pr-assignee-management](exec-plan/completed/2026-11-07-pr-assignee-management.md) | 已确认 PR 的原生负责人添加与只读恢复（#567，Refs #557） |
 | [2026-11-07-code-simplification](exec-plan/completed/2026-11-07-code-simplification.md) | 单一诊断实现、冗余测试与验收负担精简（#570） |
 | [2026-11-07-e1-record-retirement](exec-plan/completed/2026-11-07-e1-record-retirement.md) | E1 历史散文校验退役（#572） |
 | [2026-11-07-test-execution](exec-plan/completed/2026-11-07-test-execution.md) | 单次分层执行与已完成进度轨道退役（#573） |

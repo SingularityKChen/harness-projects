@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [2026-11-09-pr568-pr581-mmp-review](2026-11-09-pr568-pr581-mmp-review.md) | 已确认/创建时负责人意图与跨项交付总览 | 首轮两项 P2、隔离复评补充一项 P2；无已证明 P0/P1，修复及当前版本整合门分别记录 |
 | [2026-11-07-pr571-pr579-mmp-review](2026-11-07-pr571-pr579-mmp-review.md) | 五项代码、历史校验、CI 与展示投影精简 | 无 P0/P1；一 P2、一 P3 修复独立复评，逐当前 head 条件 rebase 收尾；产品/R1 另计 |
 | [2026-11-07-pr559-pr565-mmp-review](2026-11-07-pr559-pr565-mmp-review.md) | 持久运行身份、执行设置恢复、来源编号与原生 PR 关联五闭环 | 首轮一 P1、三 P2、一 P3；分派根因修复、独立复评及逐当前 head 条件收尾，安装与 R1 接受另计 |
 | [2026-11-06-pr549-pr551-mmp-review](2026-11-06-pr549-pr551-mmp-review.md) | 明确任务交接、原生 Draft 与 Markdown 阅读三个工程闭环 | 首轮无 P0/P1；两项 P2 修复、独立复评及当前版本条件收尾，人工接受另计 |
