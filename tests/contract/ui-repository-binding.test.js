@@ -179,3 +179,29 @@ test('repository task distinguishes an idle binding from a confirmed connection'
   await f.source.bind(selection)
   assert.match(html(), /仓库已连接/); assert.doesNotMatch(html(), /尚未绑定仓库/)
 })
+
+test('CI display uses only one matching repository and one valid independent capability per axis', async () => {
+  const capability = (key, access) => ({ key, access }), actions = 'delivery.pipeline.read', checks = 'delivery.check.read'
+  for (const [extra, expected] of [
+    [[], { actions: 'degraded', checks: 'degraded' }],
+    [[capability(actions, 'available'), capability(checks, 'unavailable')], { actions: 'available', checks: 'unavailable' }],
+    [[capability(actions, 'read_only'), capability(checks, 'bogus')], { actions: 'degraded', checks: 'degraded' }],
+    [[capability(actions, 'available'), capability(actions, 'available'), capability(checks, 'available')], { actions: 'degraded', checks: 'available' }],
+  ]) {
+    const f = fixture({ baseline: async () => ({ repositories: [{ ...readyRepository(), capabilities: [...readyRepository().capabilities, ...extra] }, { id: 'github.com/other/repo', capabilities: [capability(actions, 'available'), capability(checks, 'available')] }] }) })
+    await f.source.bind(selection); assert.deepEqual(f.source.getSnapshot().ciReadAccess, expected)
+    const html = renderToStaticMarkup(React.createElement(ui.RepositoryBindingForm, { source: f.source }))
+    assert.ok(html.includes(`Actions 读取：${expected.actions === 'available' ? '已验证可用' : '尚未验证或暂时无法确认'}`))
+  }
+  const duplicate = fixture({ baseline: async () => ({ repositories: [readyRepository(), readyRepository()] }) }); await duplicate.source.bind(selection)
+  assert.deepEqual(duplicate.source.getSnapshot().ciReadAccess, { actions: 'degraded', checks: 'degraded' })
+})
+test('cancelled source cannot publish late CI baseline and same selection may revalidate', async () => {
+  let finish
+  const f = fixture({ baseline: () => new Promise(resolve => { finish = resolve }) })
+  const pending = f.source.bind(selection); await new Promise(resolve => setImmediate(resolve)); f.source.reset()
+  finish({ repositories: [{ ...readyRepository(), capabilities: [...readyRepository().capabilities, { key: 'delivery.pipeline.read', access: 'available' }] }] }); await pending
+  assert.equal(f.source.getSnapshot().state, 'idle'); assert.equal(f.source.getSnapshot().ciReadAccess, undefined)
+  const next = f.source.bind(selection); await new Promise(resolve => setImmediate(resolve)); finish({ repositories: [readyRepository()] }); await next
+  assert.equal(f.source.getSnapshot().state, 'active'); assert.deepEqual(f.source.getSnapshot().ciReadAccess, { actions: 'degraded', checks: 'degraded' })
+})

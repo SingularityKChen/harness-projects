@@ -3,13 +3,17 @@ import { execFile } from 'node:child_process'
 import { realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import type { DevelopmentProvider, Storage } from './host-providers.ts'
+import { AccessLevel, type DeliveryProvider, type ProviderResult, type ProviderPage, type DevelopmentProvider, type Storage } from './host-providers.ts'
 import type { BindRepositoryInput, CommandResult } from './host-composition.ts'
 import { ProjectErrorCode, projectError, type ConnectorAccountId, type ProviderBindingId } from '@harness-projects/domain'
-import { BindingRefused, type ProviderBuildInput, type ProviderCatalog } from './host-providers.ts'
+import { BindingRefused, ciAccountStamp, type CiReadObservation, type ProviderBuildInput, type ProviderCatalog } from './host-providers.ts'
 const execute = promisify(execFile)
 const invalid = () => new BindingRefused(ProjectErrorCode.InvalidInput, '仓库选择不一致或本地检出不可读')
-export async function preflightRepositoryBinding(input: BindRepositoryInput, storage: Storage, catalog: ProviderCatalog, env: Pick<ProviderBuildInput, 'worktreesDir' | 'fetch'> & { resolveCredential(handle: string): Promise<string | undefined> }): Promise<BindRepositoryInput | CommandResult<never>> {
+export const repositoryHead = async (repositoryPath: string): Promise<string | undefined> => {
+  const head = await execute('git', ['-C', repositoryPath, 'rev-parse', '--verify', 'HEAD'], { timeout: 30_000, maxBuffer: 65536 }).then(result => result.stdout.trim(), () => undefined)
+  return head && /^[0-9a-f]{40}$/.test(head) ? head : undefined
+}
+export async function preflightRepositoryBinding(input: BindRepositoryInput, storage: Storage, catalog: ProviderCatalog, env: Pick<ProviderBuildInput, 'worktreesDir' | 'fetch'> & { sequence: number; resolveCredential(handle: string): Promise<string | undefined> }): Promise<{ input: BindRepositoryInput; ci: CiReadObservation } | CommandResult<never>> {
   try {
     const refs = input.references, local = refs.find((r) => r.implementationKey === 'development.local-git'), github = refs.find((r) => r.implementationKey === 'development.github'), actions = refs.find((r) => r.implementationKey === 'github-actions')
     if (refs.length !== 3 || !local || !github || !actions || local.domain !== 'development' || github.domain !== 'development' || actions.domain !== 'delivery' || local.accountId !== undefined) throw invalid()
@@ -37,7 +41,26 @@ export async function preflightRepositoryBinding(input: BindRepositoryInput, sto
       const result = await provider.getRepository({ bindingId: id, objectKind: 'repository', externalId: input.repositoryId, url: undefined })
       if (!result.ok) throw new BindingRefused(result.error.rawClass === 'http_404' ? ProjectErrorCode.NotFound : Object.values(ProjectErrorCode).includes(result.error.code as ProjectErrorCode) ? result.error.code as ProjectErrorCode : ProjectErrorCode.Unavailable, '仓库暂时不可读，请按恢复提示检查')
     }
-    return normalized
+    const commit = await repositoryHead(repositoryPath)
+    let actionsAccess: AccessLevel = AccessLevel.Degraded, checksAccess: AccessLevel = AccessLevel.Degraded
+    if (commit) {
+      try {
+        const entry = catalog.get('github-actions')
+        if (entry) {
+          const id = 'repository-ci-probe' as ProviderBindingId
+          const provider = await entry.create({ binding: { id, workspaceId: input.workspaceId, domain: 'delivery', implementationKey: 'github-actions', enabled: true, isDefault: false }, configuration: actions.configuration ?? {}, account,
+            credential: () => env.resolveCredential(account.secretHandle!), ...env }) as DeliveryProvider
+          const scope = { repository: { bindingId: id, objectKind: 'repository', externalId: input.repositoryId, url: undefined }, commit, limit: 1, cursor: undefined }
+          const observe = async (read: () => Promise<ProviderResult<ProviderPage<unknown>>>): Promise<AccessLevel> => {
+            try { const result = await read(); return result.ok ? result.value.items.length > 0 ? AccessLevel.Available : AccessLevel.Degraded
+              : result.error.code === 'permission_denied' ? AccessLevel.Unavailable : AccessLevel.Degraded } catch { return AccessLevel.Degraded }
+          }
+          const observed = await Promise.all([observe(() => provider.listPipelineRuns(scope)), observe(() => provider.listChecks(scope))])
+          actionsAccess = observed[0]!; checksAccess = observed[1]!
+        }
+      } catch { /* 独立 CI 观察失败不拒绝无关仓库配置；不回显响应原文。 */ }
+    }
+    return { input: normalized, ci: { workspaceId: input.workspaceId, repositoryId: input.repositoryId, owner, name, accountStamp: ciAccountStamp(account), commit, sequence: env.sequence, observedAt: new Date().toISOString(), actions: actionsAccess, checks: checksAccess } }
   } catch (error) {
     return { writeState: 'failed', saving: false, authoritative: false, value: undefined, error: projectError(error instanceof BindingRefused ? error.code : ProjectErrorCode.Unavailable, '无法绑定仓库，请检查路径、仓库名称或宿主授权') }
   }

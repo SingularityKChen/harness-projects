@@ -15,11 +15,20 @@ const request = (repositoryPath, extra = {}) => ({ actorRef, idempotencyKey: 'bi
   { domain: 'development', implementationKey: 'development.local-git', configuration: { repositoryExternalId: repositoryId, repositoryPath } },
   ...['development.github', 'github-actions'].map((implementationKey) => ({ domain: implementationKey === 'github-actions' ? 'delivery' : 'development', implementationKey, accountId: ACCOUNT, configuration: { repositoryExternalId: repositoryId, repositoryOwner: selected.repositoryOwner.toLowerCase(), repositoryName: selected.repositoryName.toLowerCase() } })),
 ], ...extra })
+const repositoryFetch = (github) => (url, init) => {
+  if (init.body === undefined) {
+    const route = new URL(url).pathname
+    assert.ok(['/actions/runs', '/check-suites', '/check-runs'].some(suffix => route.endsWith(suffix)))
+    return Promise.resolve(new Response(JSON.stringify({ total_count: 0, [route.endsWith('/actions/runs') ? 'workflow_runs' : route.endsWith('/check-suites') ? 'check_suites' : 'check_runs']: [] }), { status: 200 }))
+  }
+  const body = JSON.parse(init.body); body.variables.owner = selected.repositoryOwner
+  return github.fetch(url, { ...init, body: JSON.stringify(body) })
+}
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'binding-')), repo = path.join(root, 'repo'), dataPath = path.join(root, 'data', 'workspace.sqlite')
   await mkdir(repo); git(repo, 'init', '-q', '-b', 'main'); git(repo, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture')
   await seed(dataPath, PROVIDER_CATALOG, async (storage) => { await seedWorkspace(storage); await storage.putConnectorAccount(account()) })
-  const github = githubFetch(), host = await createHostComposition({ dataPath, workspaceId: WORKSPACE, catalog: PROVIDER_CATALOG, resolveCredential: async () => 'fixture-secret', fetch: (url, init) => { const body = JSON.parse(init.body); body.variables.owner = selected.repositoryOwner; return github.fetch(url, { ...init, body: JSON.stringify(body) }) } })
+  const github = githubFetch(), host = await createHostComposition({ dataPath, workspaceId: WORKSPACE, catalog: PROVIDER_CATALOG, resolveCredential: async () => 'fixture-secret', fetch: repositoryFetch(github) })
   return { root, repo, dataPath, host, github }
 }
 const identity = (file) => { const rows = dump(file); return Object.fromEntries(Object.entries(rows).filter(([key]) => !key.includes('revision'))) }
@@ -65,7 +74,7 @@ test('double binding uses one repository and exactly three same-key identities w
   try {
     const before = await repoState(f.repo), input = request(f.repo)
     const results = await Promise.all([f.host.call('bindRepository', input), f.host.call('bindRepository', input)])
-    assert.deepEqual(results.map((r) => r.writeState), ['local_only', 'local_only'])
+    assert.deepEqual(results.map((r) => r.writeState), ['failed', 'local_only']); assert.equal(results[0].error.code, 'conflict', 'newer explicit validation invalidates older evidence')
     const rows = dump(f.dataPath), repos = JSON.parse(rows.repository), bindings = JSON.parse(rows.provider_binding), configs = JSON.parse(rows.workspace_binding)
     assert.equal(repos.length, 1); assert.equal(bindings.length, 3); assert.equal(configs.length, 3)
     assert.ok(configs.every((row) => JSON.parse(row.configuration_json).repositoryExternalId === repositoryId))
@@ -96,28 +105,28 @@ test('Local catalog preflight issues only read argv while real Git state remains
   const f = await fixture(); await f.host.dispose()
   const catalog = new Map(PROVIDER_CATALOG), entry = catalog.get('development.local-git'), calls = []
   catalog.set('development.local-git', { ...entry, create: async (input) => { const port = await entry.create(input), run = port.runGit; port.runGit = (args) => { calls.push(args); return run(args) }; return port } })
-  const host = await createHostComposition({ dataPath: f.dataPath, workspaceId: WORKSPACE, catalog, resolveCredential: async () => 'fixture-secret', fetch: (url, init) => { const body = JSON.parse(init.body); body.variables.owner = selected.repositoryOwner; return f.github.fetch(url, { ...init, body: JSON.stringify(body) }) } })
+  const host = await createHostComposition({ dataPath: f.dataPath, workspaceId: WORKSPACE, catalog, resolveCredential: async () => 'fixture-secret', fetch: repositoryFetch(f.github) })
   try {
     const before = await repoState(f.repo); assert.equal((await host.call('bindRepository', request(f.repo))).writeState, 'local_only')
     assert.ok(calls.length > 0); assert.ok(calls.every((args) => args[0] === '-C' && (['rev-parse', 'symbolic-ref', 'for-each-ref'].includes(args[2]) || (args[2] === 'config' && args[3] === '--get'))))
     assert.deepEqual(await repoState(f.repo), before)
   } finally { await host.dispose() }
 })
-test('disabled Local Git stays configured until the output directory is repaired and Host is restarted', async () => {
+test('disabled Local Git recovers after output repair and explicit same-binding revalidation', async () => {
   const { createHash } = await import('node:crypto'), { unlink } = await import('node:fs/promises')
   const { createRepositoryBindingSource } = await import('@harness-projects/client')
   const f = await fixture(), before = await repoState(f.repo)
   const first = await f.host.call('bindRepository', request(f.repo)); await f.host.dispose()
   const output = path.join(path.dirname(f.dataPath), 'worktrees'), localId = first.value.bindingIds[0]
   await mkdir(output); const link = path.join(output, createHash('sha256').update(localId).digest('hex').slice(0, 16)); await symlink(f.repo, link)
-  const options = { dataPath: f.dataPath, workspaceId: WORKSPACE, catalog: PROVIDER_CATALOG, resolveCredential: async () => 'fixture-secret', fetch: (url, init) => { const body = JSON.parse(init.body); body.variables.owner = selected.repositoryOwner; return f.github.fetch(url, { ...init, body: JSON.stringify(body) }) } }
+  const options = { dataPath: f.dataPath, workspaceId: WORKSPACE, catalog: PROVIDER_CATALOG, resolveCredential: async () => 'fixture-secret', fetch: repositoryFetch(f.github) }
   let host = await createHostComposition(options)
   const source = createRepositoryBindingSource({ connectAccount: async () => ({ writeState: 'local_only', saving: false, authoritative: false, value: { accountId: ACCOUNT } }), bindRepository: (actorRef, idempotencyKey, repositoryId, references) => host.call('bindRepository', { actorRef, idempotencyKey, repositoryId, references }), baseline: () => host.call('baseline', {}) }, { actorRef })
   const selection = { localPath: f.repo, owner: selected.repositoryOwner, name: selected.repositoryName }
   try {
     await source.bind(selection); assert.equal(source.getSnapshot().state, 'configured'); assert.equal(source.getSnapshot().activationBlocked, true)
     assert.ok(host.disabled.some(entry => entry.bindingId === localId)); assert.deepEqual(await repoState(f.repo), before)
-    await unlink(link); await source.bind(selection); assert.equal(source.getSnapshot().state, 'configured', 'unchanged Host assembly still needs the documented restart')
+    await unlink(link); await source.bind(selection); assert.equal(source.getSnapshot().state, 'active', 'explicit same-binding validation refreshes the assembly after repair')
     await host.dispose(); host = await createHostComposition(options); await source.bind(selection)
     assert.equal(source.getSnapshot().state, 'active'); assert.equal(host.disabled.length, 0); assert.deepEqual(await repoState(f.repo), before)
   } finally { source.dispose(); await host.dispose() }

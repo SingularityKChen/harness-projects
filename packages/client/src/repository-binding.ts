@@ -3,7 +3,8 @@ import type { ActorRef, BindRepositoryInput } from '@harness-projects/controller
 import type { ProjectErrorCode, ConnectorAccountId, ProjectError, Recovery } from '@harness-projects/domain'
 import { CapabilityKey } from './keys.ts'
 export interface RepositorySelection { readonly localPath: string; readonly owner: string; readonly name: string }
-export interface RepositoryBindingSnapshot { readonly state: 'idle' | 'pending' | 'configured' | 'active' | 'failed'; readonly selection?: RepositorySelection; readonly repositoryId?: string; readonly error?: ProjectError; readonly activationBlocked?: boolean }
+type CiReadAccess = 'available' | 'unavailable' | 'degraded'
+export interface RepositoryBindingSnapshot { readonly state: 'idle' | 'pending' | 'configured' | 'active' | 'failed'; readonly selection?: RepositorySelection; readonly repositoryId?: string; readonly error?: ProjectError; readonly activationBlocked?: boolean; readonly ciReadAccess?: { readonly actions: CiReadAccess; readonly checks: CiReadAccess } }
 export interface RepositoryBindingPort {
   connectAccount(actor: ActorRef, key: string): Promise<unknown>
   bindRepository(actor: ActorRef, key: string, repositoryId: string, references: readonly (Omit<BindRepositoryInput['references'][number], 'accountId'> & { readonly accountId?: ConnectorAccountId })[]): Promise<unknown>
@@ -20,6 +21,13 @@ export interface RepositoryBindingSource {
 const recoveries: Record<ProjectErrorCode, Recovery> = { not_supported: 'manual_execution', permission_denied: 'fix_permission', not_found: 'open_provider', conflict: 'reapply', rate_limited: 'retry', unavailable: 'retry', invalid_input: 'none', ambiguous_result: 'refresh', result_unknown: 'refresh', stale_revision: 'reapply', offline: 'retry' }
 const safe = (code: ProjectErrorCode = 'unavailable'): ProjectError => Object.freeze({ code, recovery: recoveries[code], retryable: recoveries[code] === 'retry', message: '暂时无法绑定仓库，请检查输入或宿主授权', confirmedValue: undefined, attemptedValue: undefined })
 const object = (value: unknown): Record<string, unknown> => { if (!value || typeof value !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw new TypeError('无效仓库响应'); return value as Record<string, unknown> }
+function ciReadAccess(repository: Record<string, unknown> | undefined): { actions: CiReadAccess; checks: CiReadAccess } {
+  const read = (key: string): CiReadAccess => {
+    const entries = Array.isArray(repository?.capabilities) ? repository.capabilities.filter(entry => entry && typeof entry === 'object' && entry.key === key) : []
+    return entries.length === 1 && ['available', 'unavailable', 'degraded'].includes(entries[0].access) ? entries[0].access as CiReadAccess : 'degraded'
+  }
+  return { actions: read(CapabilityKey.DeliveryPipelineRead), checks: read(CapabilityKey.DeliveryCheckRead) }
+}
 function repositoryReady(repository: Record<string, unknown>): boolean {
   if (!Array.isArray(repository.capabilities)) return false
   const capabilities = repository.capabilities.map(object)
@@ -85,9 +93,10 @@ export function createRepositoryBindingSource(port: RepositoryBindingPort, optio
           if (!configured || bound.error) { publish({ state: configured ? 'configured' : 'failed', repositoryId, error: bound.error ?? safe() }); return }
           publish({ state: 'configured', repositoryId })
           const baseline = object(await port.baseline())
-          const repository = Array.isArray(baseline.repositories) ? baseline.repositories.map(object).find(entry => entry.id === repositoryId) : undefined
+          const repositories = Array.isArray(baseline.repositories) ? baseline.repositories.map(object).filter(entry => entry.id === repositoryId) : []
+          const repository = repositories.length === 1 ? repositories[0] : undefined
           const ready = repository !== undefined && repositoryReady(repository)
-          if (live()) publish({ state: ready ? 'active' : 'configured', repositoryId, ...(!ready && repository ? { activationBlocked: true } : {}) })
+          if (live()) publish({ state: ready ? 'active' : 'configured', repositoryId, ciReadAccess: ciReadAccess(repository), ...(!ready && repository ? { activationBlocked: true } : {}) })
         } catch { if (live()) publish({ state: configured ? 'configured' : 'failed', repositoryId, error: safe() }) }
       })()
       pending = task; void task.then(() => { if (pending === task) pending = undefined }); return task

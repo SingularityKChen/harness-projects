@@ -68,7 +68,7 @@ test('same remote follows new Core generations after create/connect/bind on the 
   assert.equal(repository.writeState, 'local_only'); assert.equal(repository.value.bindingIds.length, 3)
   const active = h.host.controller, scheduled = h.clock.live.values().next().value
   await h.service.bindRepository(actor, 'repository', repositoryKey, references(h, linked.value.accountId))
-  assert.equal(h.host.controller, active); assert.equal(h.clock.live.values().next().value, scheduled)
+  assert.notEqual(h.host.controller, active); assert.notEqual(h.clock.live.values().next().value, scheduled); assert.equal(h.clock.live.size, 1)
   await follower.close()
 })
 
@@ -193,14 +193,16 @@ test('a tick admitted during the barrier never joins its drain and never writes 
   const h = await oldPlanning(t), entered = gate(), release = gate(), old = h.instances[0]
   let oldReads = 0; const list = old.listPlanningItems.bind(old)
   old.listPlanningItems = (...args) => { oldReads++; return list(...args) }
-  const mounts = SqliteStorage.prototype.listProviderBindings; let once = true
-  t.mock.method(SqliteStorage.prototype, 'listProviderBindings', async function (...args) { const rows = await mounts.apply(this, args); if (once) { once = false; entered.resolve(); await release.promise } return rows })
+  // Core 的绑定写事务只在 Host configure barrier 内开始；preflight 的指纹只读不能充当这个门。
+  const transaction = SqliteStorage.prototype.transaction; let once = true
+  t.mock.method(SqliteStorage.prototype, 'transaction', async function (...args) { if (once) { once = false; entered.resolve(); await release.promise } return transaction.apply(this, args) })
   const oldController = h.host.controller, put = SqliteStorage.prototype.putPlanningSyncRound; let lateRounds = 0
   t.mock.method(SqliteStorage.prototype, 'putPlanningSyncRound', function (...args) { if (h.host.controller !== oldController) lateRounds++; return put.apply(this, args) })
   const oldTick = h.clock.live.values().next().value
   const request = h.service.bindRepository(actor, 'barrier', repositoryKey, references(h, account().id))
-  await entered.promise; oldTick(); await turn(); assert.equal(oldReads, 0)
-  release.resolve(); const result = await request; assert.equal(result.writeState, 'local_only'); assert.equal(result.activationError, undefined); await turn()
+  await entered.promise
+  try { oldTick(); await turn(); assert.equal(oldReads, 0) } finally { release.resolve() }
+  const result = await request; assert.equal(result.writeState, 'local_only'); assert.equal(result.activationError, undefined); await turn()
   assert.equal(oldReads, 0); assert.equal(h.clock.live.size, 1); assert.equal(h.clock.stopped.length, 1)
   oldTick(); for (let i = 0; i < 5; i++) await turn()
   assert.equal(oldReads, 0); assert.equal(lateRounds, 0, 'retired Core must not begin a SQLite planning round after publication')

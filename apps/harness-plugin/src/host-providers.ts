@@ -1,4 +1,5 @@
-export type { DevelopmentProvider, Storage } from '@harness-projects/capabilities'
+export { AccessLevel } from '@harness-projects/capabilities'
+export type { DevelopmentProvider, DeliveryProvider, ProviderResult, ProviderPage, Storage } from '@harness-projects/capabilities'
 /**
  * Host 的 provider 组合（ADR-0014）：编译期封闭目录（实现键 → 配置 schema + 构造函数）与按已存挂载恢复。
  * 唯一 import provider 包的文件；provider-fake 不得出现在这里。凭据只以句柄存在，值在每次 provider 操作内才经宿主解析。
@@ -30,8 +31,28 @@ export const HOST_SECRET_HANDLES = ['HARNESS_PROJECTS_GITHUB_TOKEN', MANUAL_ISSU
 
 type HostFetch = (url: string, init: RequestInit) => Promise<Response>
 
+/** 仅供本次显式验证和装配使用；不进入配置、存储或 wire。 */
+export interface CiReadObservation {
+  readonly workspaceId: WorkspaceId
+  readonly repositoryId: string
+  readonly owner: string
+  readonly name: string
+  readonly accountStamp: string
+  readonly commit: string | undefined
+  readonly sequence: number
+  readonly observedAt: string
+  readonly actions: AccessLevel
+  readonly checks: AccessLevel
+}
+export const ciAccountStamp = (account: ConnectorAccountRecord | undefined): string => JSON.stringify(account === undefined ? null
+  : [account.id, account.platformFamily, account.platformOrigin, account.identityKind, account.externalId, account.secretHandle])
+const matchesCi = (ci: CiReadObservation, binding: ProviderBindingRecord, configuration: ProviderBuildInput['configuration'], account: ConnectorAccountRecord | undefined): boolean =>
+  binding.workspaceId === ci.workspaceId && binding.domain === 'delivery' && binding.implementationKey === 'github-actions'
+  && configuration.repositoryExternalId === ci.repositoryId && configuration.repositoryOwner === ci.owner && configuration.repositoryName === ci.name && ciAccountStamp(account) === ci.accountStamp
+
 export interface ProviderBuildInput {
   readonly binding: ProviderBindingRecord
+  readonly ci?: CiReadObservation
   /** 未存配置时为 `{}`。 */
   readonly configuration: Readonly<Record<string, string | boolean>>
   readonly account: ConnectorAccountRecord | undefined
@@ -257,12 +278,12 @@ const GITHUB_DEVELOPMENT_ENTRY: CatalogEntry = {
 const GITHUB_ACTIONS_ENTRY: CatalogEntry = {
   definition: GITHUB_ACTIONS_DEFINITION,
   configuration: GITHUB_REPOSITORY,
-  async create({ binding, configuration, account, credential, fetch }) {
+  async create({ binding, configuration, account, credential, fetch, ci }) {
     if (account !== undefined && account.platformOrigin !== GITHUB_ORIGIN) throw new BindingRefused(ProjectErrorCode.NotSupported, 'Actions 挂载的连接账号必须在 github.com 上')
     const access = account?.secretHandle === undefined ? AccessLevel.Unavailable : AccessLevel.Degraded
     return createGithubActionsDeliveryProvider({
-      bindingId: binding.id, repository: githubRepository(configuration), transport: githubRestTransport(fetch, credential), observedAt: new Date().toISOString(),
-      permission: { [CapabilityKey.DeliveryPipelineRead]: access, [CapabilityKey.DeliveryCheckRead]: access },
+      bindingId: binding.id, repository: githubRepository(configuration), transport: githubRestTransport(fetch, credential), observedAt: ci?.observedAt ?? new Date().toISOString(),
+      permission: { [CapabilityKey.DeliveryPipelineRead]: ci && matchesCi(ci, binding, configuration, account) ? ci.actions : access, [CapabilityKey.DeliveryCheckRead]: ci && matchesCi(ci, binding, configuration, account) ? ci.checks : access },
     })
   },
 }
@@ -292,7 +313,7 @@ export function hostStoragePolicy(catalog: ProviderCatalog): StorageValidationPo
  */
 export async function restoreProviders(
   storage: Storage, workspaceId: WorkspaceId, catalog: ProviderCatalog,
-  env: Pick<ProviderBuildInput, 'worktreesDir' | 'fetch'> & { readonly lifetime?: ReturnType<typeof createPlanningLifetime>; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly sessionController?: () => unknown; readonly forceSessionStartFailure?: boolean | undefined; readonly development?: { readonly cache: Map<string, object>; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly fetch: HostFetch } },
+  env: Pick<ProviderBuildInput, 'worktreesDir' | 'fetch'> & { readonly lifetime?: ReturnType<typeof createPlanningLifetime>; readonly ci?: { readonly observation: CiReadObservation; readonly bindingId: ProviderBindingRecord['id'] }; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly sessionController?: () => unknown; readonly forceSessionStartFailure?: boolean | undefined; readonly development?: { readonly cache: Map<string, object>; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly fetch: HostFetch } },
 ): Promise<{ table: CoreProviderTable; disabled: readonly DisabledBinding[] }> {
   const slots: Record<string, unknown> = {}
   const disabled: DisabledBinding[] = []
@@ -318,7 +339,7 @@ export async function restoreProviders(
       const cache = binding.implementationKey === 'development.github' ? env.development : undefined
       const key = JSON.stringify([binding.id, binding.implementationKey, Object.entries(configuration).sort(([a], [b]) => a.localeCompare(b)), account?.id, account?.platformFamily, account?.platformOrigin, account?.identityKind, account?.externalId, handle])
       port = cache?.cache.get(key) ?? await entry.create({
-        binding, configuration, account, sessions: createHostSessionPort(env.sessionController ?? (() => undefined), env.forceSessionStartFailure, env.lifetime), resolveCredential: env.resolveCredential, worktreesDir: env.worktreesDir, fetch: cache?.fetch ?? env.fetch,
+        binding, configuration, account, ...(env.ci?.bindingId === binding.id ? { ci: env.ci.observation } : {}), sessions: createHostSessionPort(env.sessionController ?? (() => undefined), env.forceSessionStartFailure, env.lifetime), resolveCredential: env.resolveCredential, worktreesDir: env.worktreesDir, fetch: cache?.fetch ?? env.fetch,
         credential: async () => (handle === undefined ? undefined : (cache ?? env).resolveCredential(handle)),
       })
       if (cache) { cache.cache.set(key, port); used.add(key) }
