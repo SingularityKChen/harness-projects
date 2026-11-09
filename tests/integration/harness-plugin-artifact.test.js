@@ -26,6 +26,7 @@ import { DatabaseSync } from 'node:sqlite'
 import vm from 'node:vm'
 
 import { parse as parseYaml } from 'yaml'
+import { Context } from '@deepseek-ai/cordis'
 
 import { build } from '../../apps/harness-plugin/scripts/build.mjs'
 
@@ -287,11 +288,12 @@ describe('Harness 插件安装件契约', () => {
       const previousHome = process.env.DSH_HOME
       process.env.DSH_HOME = path.join(tmpRoot, 'profile')
       const effects = []
+      const cordis = new Context()
       const services = new Map()
       await mkdir(process.env.DSH_HOME, { recursive: true })
       const context = {
         invocation: { peer: { id: 'artifact-peer' } },
-        effect(callback) { effects.push(callback()) },
+        effect(callback) { effects.push(cordis.effect(callback)) },
         provide(name, value) { services.set(name, value); return () => services.delete(name) },
         typert: { register() { return async () => {} } },
         get(name) { return name === 'profileContext' ? { dir: process.env.DSH_HOME } : undefined }, // 宿主没有 credentials 服务：Host 照常加载
@@ -307,6 +309,11 @@ describe('Harness 插件安装件契约', () => {
         const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version)
         db.close()
         assert.deepEqual(versions, [1, 2, 3, 4, 5, 6, 7], '包内 migrations 完成迁移 1–7')
+        await effects.at(-1)(); await effects.at(-1)()
+        assert.equal(services.size, 0)
+        await assert.rejects(service.baseline(), /卸载/)
+        await hostModule.apply(context)
+        assert.equal((await services.get('harnessProjects').baseline()).workspace, undefined, '同 artifact 原库可以重新加载')
       } finally {
         if (previousHome === undefined) delete process.env.DSH_HOME
         else process.env.DSH_HOME = previousHome
@@ -408,7 +415,7 @@ describe('Harness 插件安装件契约', () => {
      * 桩流只交付 `frame`（若有）这一个开场 baseline 项，之后挂起（next 永不结算），`ends` 时改为正常结束；`streamError` 让 `$stream` 同步抛错。
      * 页面用真实 React；监督者的计时器记入 `seen.timers`（不真等），`cancelled` 记取消。
      */
-    async function applyClient({ frame, ends, streamError, setup, createChangeRequest, getChangeRequestOperation, resumeChangeRequest } = {}) {
+    async function applyClient({ frame, ends, streamError, setup, createChangeRequest, getChangeRequestOperation, resumeChangeRequest, failSlot = false } = {}) {
       const seen = { registrations: [], live: new Set(), injectedNames: [], contextNames: [], logs: [], streams: [], timers: [], fiberErrors: [] }
       const record = (level) => (...args) => seen.logs.push([level, ...args])
       const clock = {
@@ -436,6 +443,7 @@ describe('Harness 插件安装件契约', () => {
             fiberCtx.effect(callback, `slots.inject(${name})`)
           },
           register(options, component) {
+            if (failSlot) throw new Error('panel initialization failed')
             seen.registrations.push({ options: { ...options }, component })
             const key = `${options.name}:${options.key ?? options.id}`
             seen.live.add(key)
@@ -444,8 +452,11 @@ describe('Harness 插件安装件契约', () => {
         },
       })
       let unload
+      const rootDisposers = []
+      seen.mountDisposals = 0
       const root = {
-        remote: { $mount: async () => async () => {} },
+        remote: { $mount: async () => async () => { seen.mountDisposals++ } },
+        effect(execute) { rootDisposers.push(execute()) },
         inject(names, callback) {
           seen.contextNames.push(...names)
           unload = openFiber((fiberCtx) => callback(child(fiberCtx)), seen)
@@ -457,13 +468,14 @@ describe('Harness 插件安装件契约', () => {
         {
           get(_target, property) {
             if (typeof property === 'symbol') return undefined
-            if (property === 'inject' || exposed.has(property)) return root[property]
+            if (['inject', 'effect', 'fiber', 'on'].includes(property) || exposed.has(property)) return root[property]
             throw new Error(`cannot get property "${String(property)}" without inject`)
           },
         },
       )
       await exported.apply(ctx)
-      seen.unload = await unload
+      const unloadChild = await unload
+      seen.unload = async () => { await unloadChild(); for (const dispose of rootDisposers) await dispose() }
       await seen.settled
       await new Promise((resolve) => setImmediate(resolve))
       return seen
@@ -477,6 +489,68 @@ describe('Harness 插件安装件契约', () => {
       assert.deepEqual([...contextNames].sort(), ['remote.harnessProjects', 'slots'])
       assert.deepEqual([...injectedNames].sort(), ['main', 'sidebar.panellist'])
       assert.equal(registrations.length, 2)
+    })
+
+    it('child 初始化失败撤回 mount，根卸载不会重复释放', async () => {
+      const seen = await applyClient({ failSlot: true })
+      assert.equal(seen.fiberErrors.length, 1)
+      assert.equal(seen.mountDisposals, 1)
+      await seen.unload(); await seen.unload()
+      assert.equal(seen.mountDisposals, 1)
+      assert.equal(seen.live.size, 0)
+    })
+
+    it('真实 Cordis 在 mount 获取中卸载根，迟到 disposer 仍释放一次且不注入 child', async () => {
+      const { exported } = await evaluateClientBundle(path.join(packageDir, 'lib/client.js'))
+      let release, entered, disposals = 0
+      const mounted = new Promise((resolve) => { entered = resolve }), acquired = new Promise((resolve) => { release = resolve })
+      const root = new Context()
+      root.provide('remote', { $mount: async () => { entered(); await acquired; return () => { disposals++ } } })
+      const plugin = root.inject(['remote'], (ctx) => exported.apply(ctx))
+      await mounted
+      const stopped = plugin.dispose()
+      let timer
+      try { await Promise.race([stopped, new Promise((_, reject) => { timer = setTimeout(() => reject(Error('mount blocked root unload')), 500) })]); assert.equal(disposals, 0) }
+      finally { clearTimeout(timer); release(); await stopped }
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.equal(disposals, 1)
+      assert.equal(root.logger.buffer.filter((message) => message.type === 'error').length, 0, '不得向已卸载根注册 effect/child')
+      await plugin.dispose(); assert.equal(disposals, 1)
+    })
+
+    it('真实 Cordis 根拥有 mount；依赖移除后重新注入，初始化失败和重复卸载均只释放一次', async () => {
+      const { exported } = await evaluateClientBundle(path.join(packageDir, 'lib/client.js'), { info() {}, error() {} })
+      for (const fail of [false, true]) {
+        const root = new Context(), live = new Set(); let mounts = 0, disposals = 0, child, failing = fail
+        root.provide('remote', { $mount: async () => { mounts++; return async () => { disposals++ } } })
+        root.provide('remote.harnessProjects', { getWorkspaceSetup: async () => ({ ok: true, value: { workspace: null, planning: { state: 'unbound' } } }) })
+        const slots = { inject: (_name, run) => child.effect(run), register: (options) => {
+          if (failing) throw Error('panel initialization failed')
+          live.add(options.name); return () => live.delete(options.name)
+        } }
+        let removeSlots = root.provide('slots', slots)
+        const load = () => root.inject(['remote'], async (ctx) => exported.apply({ fiber: ctx.fiber, on: ctx.on.bind(ctx), remote: ctx.remote, effect: ctx.effect.bind(ctx),
+          inject: (names, run) => ctx.inject(names, (injected) => { child = injected; return run({ ...injected, remote: { harnessProjects: injected.remote.harnessProjects, $stream: () => { throw Error('offline') } }, slots: injected.slots, effect: injected.effect.bind(injected) }) }),
+        }))
+        let plugin = load()
+        try {
+          await plugin.await(); for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
+          assert.equal(disposals, fail ? 1 : 0)
+          if (!fail) {
+            assert.equal(live.size, 2); await removeSlots(); await new Promise((resolve) => setImmediate(resolve))
+            assert.equal(live.size, 0); assert.equal(disposals, 0, '依赖临时缺席不释放根 mount')
+            removeSlots = root.provide('slots', slots)
+            for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
+            assert.equal(live.size, 2); assert.equal(mounts, 1)
+          } else {
+            await plugin.dispose(); assert.equal(disposals, 1)
+            failing = false; plugin = load(); await plugin.await()
+            for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
+            assert.equal(live.size, 2); assert.equal(mounts, 2, '失败后根重载获得新 mount')
+          }
+        } finally { await plugin.dispose(); await plugin.dispose(); await removeSlots() }
+        assert.equal(disposals, fail ? 2 : 1); assert.equal(live.size, 0)
+      }
     })
 
     it('客户端经 $stream 打开 watch 一次，open 转交同一个 signal，卸载 effect 关闭它', async () => {

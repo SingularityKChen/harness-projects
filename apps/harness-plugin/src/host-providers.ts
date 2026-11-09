@@ -14,6 +14,7 @@ import { createHarnessExecutionProvider, HARNESS_EXECUTION_PROVIDER_DEFINITION, 
 import { HUMAN_EXECUTION_PROVIDER_DEFINITION } from '@harness-projects/provider-execution-human'
 import { createHostHumanExecution, MANUAL_ISSUER_HANDLE } from './host-execution.ts'
 import { createHostSessionPort } from './host-session-adapter.ts'
+import type { createPlanningLifetime } from './host-planning-lifetime.ts'
 import type { CoreProviderTable } from '@harness-projects/core'
 import type { ConnectionCheck } from '@harness-projects/controller'
 import { ProjectErrorCode, projectError, type ProjectError, type WorkspaceId } from '@harness-projects/domain'
@@ -291,7 +292,7 @@ export function hostStoragePolicy(catalog: ProviderCatalog): StorageValidationPo
  */
 export async function restoreProviders(
   storage: Storage, workspaceId: WorkspaceId, catalog: ProviderCatalog,
-  env: Pick<ProviderBuildInput, 'worktreesDir' | 'fetch'> & { readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly sessionController?: () => unknown; readonly forceSessionStartFailure?: boolean | undefined; readonly development?: { readonly cache: Map<string, object>; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly fetch: HostFetch } },
+  env: Pick<ProviderBuildInput, 'worktreesDir' | 'fetch'> & { readonly lifetime?: ReturnType<typeof createPlanningLifetime>; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly sessionController?: () => unknown; readonly forceSessionStartFailure?: boolean | undefined; readonly development?: { readonly cache: Map<string, object>; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly fetch: HostFetch } },
 ): Promise<{ table: CoreProviderTable; disabled: readonly DisabledBinding[] }> {
   const slots: Record<string, unknown> = {}
   const disabled: DisabledBinding[] = []
@@ -317,7 +318,7 @@ export async function restoreProviders(
       const cache = binding.implementationKey === 'development.github' ? env.development : undefined
       const key = JSON.stringify([binding.id, binding.implementationKey, Object.entries(configuration).sort(([a], [b]) => a.localeCompare(b)), account?.id, account?.platformFamily, account?.platformOrigin, account?.identityKind, account?.externalId, handle])
       port = cache?.cache.get(key) ?? await entry.create({
-        binding, configuration, account, sessions: createHostSessionPort(env.sessionController ?? (() => undefined), env.forceSessionStartFailure), resolveCredential: env.resolveCredential, worktreesDir: env.worktreesDir, fetch: cache?.fetch ?? env.fetch,
+        binding, configuration, account, sessions: createHostSessionPort(env.sessionController ?? (() => undefined), env.forceSessionStartFailure, env.lifetime), resolveCredential: env.resolveCredential, worktreesDir: env.worktreesDir, fetch: cache?.fetch ?? env.fetch,
         credential: async () => (handle === undefined ? undefined : (cache ?? env).resolveCredential(handle)),
       })
       if (cache) { cache.cache.set(key, port); used.add(key) }

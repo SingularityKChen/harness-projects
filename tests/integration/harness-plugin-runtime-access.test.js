@@ -48,7 +48,7 @@ async function open(t, watchIntervalMs = 5) {
   const child = { remote: { harnessProjects: remote, $stream: (options) => new RemoteStream(connection, options) },
     effect(callback) { effects.push(callback()) },
     slots: { inject(_name, callback) { callback() }, register(meta, component) { if (meta.name === 'main') Panel = component } } }
-  await apply({ remote: { $mount: async () => {} }, inject(_names, callback) { callback(child) } })
+  await apply({ effect: child.effect, remote: { $mount: async () => async () => {} }, inject(_names, callback) { callback(child) } })
   t.after(async () => { for (const stop of effects.reverse()) await stop?.(); await installed.dispose(); await host.dispose(); await rm(root, { recursive: true, force: true }) })
   const props = Panel().props
   await until(() => props.source.getSnapshot()?.connection.connected)
@@ -262,7 +262,7 @@ async function reconnect(t,h) {
  const effects=[];let Panel
  const remote=new Proxy({},{get:(_,name)=>name==='watch'?(signal)=>carrier.open(installed.service,signal):async(...args)=>({ok:true,value:await installed.service[name](...args)})})
  const child={remote:{harnessProjects:remote,$stream:options=>new RemoteStream(connection,options)},effect(callback){effects.push(callback())},slots:{inject(_name,callback){callback()},register(meta,component){if(meta.name==='main')Panel=component}}}
- await apply({remote:{$mount:async()=>{}},inject(_names,callback){callback(child)}})
+ await apply({effect:child.effect,remote:{$mount:async()=>async()=>{}},inject(_names,callback){callback(child)}})
  const props=Panel().props
  await until(()=>props.source.getSnapshot()?.connection.connected)
  t.after(async()=>{for(const stop of effects.reverse())await stop?.();await installed.dispose();await host.dispose()})

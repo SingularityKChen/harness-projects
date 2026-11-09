@@ -5,14 +5,18 @@ const object = (value: unknown): Record<string, unknown> => value !== null && ty
 const unavailable = () => new Error('Harness session service unavailable')
 
 /** raw 服务只在操作内解析；保留 receiver，固定投影丢弃 prompt、模型错误原文与服务额外字段。 */
-export function createHostSessionPort(resolve: () => unknown, forceStartFailure = false): SessionPort {
+export function createHostSessionPort(resolve: () => unknown, forceStartFailure = false, lifetime?: { readonly signal: AbortSignal; wait<T>(run: () => T | PromiseLike<T>, deadline?: number): Promise<T> }): SessionPort {
   const call = async (name: keyof RawService, args: unknown[], signal?: AbortSignal): Promise<Record<string, unknown>> => {
+    signal = lifetime ? AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]) : signal
     signal?.throwIfAborted()
     let service: RawService | undefined
     try { service = resolve() as RawService | undefined } catch { throw unavailable() }
     const method = service?.[name]
     if (typeof method !== 'function') throw unavailable()
-    const result = await method.apply(service, args)
+    // create 的原生 ABI 只有 input；其它方法收到真正组合的 I/O signal。
+    if (name !== 'create') args[1] = signal
+    const run = () => { signal?.throwIfAborted(); return method.apply(service, args) }
+    const result = await (lifetime ? lifetime.wait(run, Infinity) : run())
     signal?.throwIfAborted()
     return object(result)
   }

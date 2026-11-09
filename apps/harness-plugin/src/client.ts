@@ -6,7 +6,7 @@
  */
 import { createPlanningMappingSource, createPlanningRefreshSource, createExecutionContextReader, createWorkspaceSetupSource, createRepositoryBindingSource, createStartWork, createDeliveryLineageReader, createIssueClosingLinksReader, createChangeRequestCreator, createChangeRequestAssignees } from '@harness-projects/client'
 import { HARNESS_PANEL_TITLE, PlaceholderIcon, bindWorkspaceStatusApp } from '@harness-projects/ui'
-import type { ClientContext, RemoteResult } from './host-surface.ts'
+import { observeRootDisposal, type ClientContext, type RemoteResult } from './host-surface.ts'
 import { CLIENT_REMOTE } from './remote.ts'
 import { openWorkspaceWatch } from './workspace-watch.ts'
 
@@ -20,8 +20,16 @@ const unwrap = async (response: Promise<RemoteResult<unknown>>): Promise<unknown
 export const inject = ['remote']
 
 export async function apply(ctx: ClientContext): Promise<void> {
-  await ctx.remote.$mount(CLIENT_REMOTE)
+  let unmount: (() => Promise<void>) | undefined, stopped = false, stopWait!: () => void
+  const closed = new Promise<void>((resolve) => { stopWait = resolve })
+  let disposal: Promise<void> | undefined
+  const dispose = () => { stopped = true; stopWait(); return unmount ? disposal ??= Promise.resolve().then(unmount) : Promise.resolve() }
+  ctx.effect(() => dispose, 'harness-projects: client remote')
+  observeRootDisposal(ctx, dispose)
+  await Promise.race([closed, ctx.remote.$mount(CLIENT_REMOTE).then((value) => { unmount = value; if (stopped) return dispose() })])
+  if (stopped) return
   ctx.inject(['remote.harnessProjects', 'slots'], (child) => {
+    try {
     // 监督者吸收一切终止、从不向调用方抛错：面板贡献是本 fiber 的 effect，回调抛错时 Cordis 卸载 fiber 会连带撤回面板（D38）
     const workspace = openWorkspaceWatch(child)
     child.effect(() => () => workspace.close(), 'harness-projects: workspace watch')
@@ -88,5 +96,6 @@ export async function apply(ctx: ClientContext): Promise<void> {
       PlaceholderIcon,
       ),
     )
+    } catch (error) { void dispose().catch(() => undefined); throw error }
   })
 }

@@ -124,7 +124,7 @@ test('stop closes admission synchronously, drains scheduled and explicit work be
   for (const callback of h.timers.callbacks) callback()
   await assert.rejects(() => h.host.call('baseline', {}), /已关闭/)
   assert.throws(() => h.host.watch(new AbortController().signal), /已关闭/)
-  await turn(); assert.equal(close.mock.callCount(), 0)
+  await disposal; assert.equal(close.mock.callCount(), 1, 'raw Provider 的迟到值不阻塞已截断的 Core 等待')
   gate.resolve(); await explicit; await disposal
   assert.deepEqual([reads, h.timers.live.size, close.mock.callCount()], [1, 0, 1])
   await turn(); assert.equal(reads, 1)
@@ -193,7 +193,7 @@ test('Host entry discovers late credentials and later provider changes through q
   ctx.typert.register = () => () => {}
   ctx.effect = () => { throw new Error('effect refused') }
   await assert.rejects(() => applyHost(ctx), /effect refused/)
-  assert.deepEqual([close.mock.callCount(), timers.live.size, services.size], [3, 0, 0])
+  assert.deepEqual([close.mock.callCount(), timers.live.size, services.size], [2, 0, 0], '根 effect 拒绝时尚未获取 SQLite')
 })
 
 async function production(t, extra = {}) {
@@ -270,7 +270,7 @@ test('all six promise reads preserve this, expire safely and stop admitting read
   const h = await open(t)
   const lifetime = createPlanningLifetime(10)
   const planning = h.planning
-  const port = lifetime.wrap(planning)
+  const port = lifetime.wrap(planning, undefined, 'planning')
   assert.equal(port.definition, planning.definition)
   assert.equal(port.movePlanningItem, undefined)
   const project = fixtureProjectRef(planning.bindingId)

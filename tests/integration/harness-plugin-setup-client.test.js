@@ -19,7 +19,7 @@ async function mount(methods = {}) {
     bindPlanningSource: async (...args) => { calls.push(['bind', ...args]); return { ok: true, value: local({ bindingId: 'binding-1' }) } },
     refreshPlanning: async (...args) => { calls.push(['refresh', ...args]); return { ok: true, value: local({ ok: true }) } },
     getExecutionContext: async (...args) => { calls.push(['execution', ...args]); return { ok: true, value: { context: null } } }, watch: () => {}, ...methods }
-  await apply({ remote: { $mount: async () => () => {} }, inject: (_names, run) => run({ remote: { harnessProjects: remote,
+  await apply({ effect: (execute) => effects.push(execute()), remote: { $mount: async () => () => {} }, inject: (_names, run) => run({ remote: { harnessProjects: remote,
     $stream: (value) => { options = value; return { restart() {}, dispose: async () => { disposed += 1 }, [Symbol.asyncIterator]: () => ({ next: () => new Promise((resolve) => waiters.push(resolve)) }) } } },
     effect: (execute) => effects.push(execute()), slots: { inject: (_name, run) => run(), register: (config, Panel) => { if (config.name === 'main') slots.push(Panel) } } }) })
   await tick()

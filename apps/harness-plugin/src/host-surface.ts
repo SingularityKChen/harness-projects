@@ -10,6 +10,16 @@ import type { ArgsOf, OPERATIONS, StreamName, UnaryName } from './host-operation
 
 export type SlotComponent = (...args: never[]) => unknown
 
+export interface RootDisposalContext {
+  readonly fiber?: { readonly uid: number | null }
+  on?(name: 'internal/plugin', listener: (fiber: { readonly uid: number | null }) => unknown): unknown
+}
+/** Cordis 在等待 async apply 前先清 uid 并发此公开事件；effect 卸载仍是最终 owner。 */
+export function observeRootDisposal(ctx: RootDisposalContext, dispose: () => unknown): void {
+  const own = ctx.fiber
+  if (own) ctx.on?.('internal/plugin', (fiber) => { if (fiber === own && fiber.uid === null) return dispose() })
+}
+
 export interface MainSlotOptions {
   readonly name: 'main'
   readonly key: string
@@ -62,7 +72,8 @@ export interface ClientInjectedContext {
 }
 
 /** 根 Context 只读 `remote`；namespace 与 slots 只能在注入子 Context 里读取。 */
-export interface ClientContext {
+export interface ClientContext extends RootDisposalContext {
   readonly remote: ClientRemote
+  effect(execute: () => () => unknown, label?: string): unknown
   inject(names: readonly string[], callback: (ctx: ClientInjectedContext) => unknown): unknown
 }

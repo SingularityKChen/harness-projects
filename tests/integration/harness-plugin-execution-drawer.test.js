@@ -37,7 +37,7 @@ test('production apply registers Panel with actual watch source and unwrapped st
   const abort = new AbortController(), stream = { restart() {}, dispose: async () => abort.abort(), async *[Symbol.asyncIterator]() { for await (const value of h.host.watch(abort.signal)) yield { generation: 1, value: json(value), accept() {} } } }
   const disposers = []; let Panel
   const child = { remote: { harnessProjects: { getExecutionContext: async (...args) => ({ ok: true, value: await h.installed.service.getExecutionContext(...args) }), refreshExecutionRun: async (...args) => ({ ok: true, value: await h.installed.service.refreshExecutionRun(...args) }) }, $stream: () => stream }, effect: (run) => disposers.push(run()), slots: { inject: (_, run) => run(), register: (slot, component) => { if (slot.name === 'main') Panel = component } } }
-  await apply({ remote: { $mount: async () => {} }, inject: (_, run) => run(child) })
+  await apply({ effect: child.effect, remote: { $mount: async () => async () => {} }, inject: (_, run) => run(child) })
   t.after(async () => { await Promise.all(disposers.map((run) => run())); await h.close() })
   const app = Panel(); assert.equal(typeof app.props.executionReader, 'function')
   const dto = await app.props.executionReader({ workspaceId: h.workspaceId, workItemId: h.itemId, repositoryId: 'repo-alpha' }); assert.equal(dto.runStatus, 'running')

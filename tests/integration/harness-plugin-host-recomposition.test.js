@@ -158,7 +158,7 @@ test('old scheduled rounds drain before reassembly; stop cancels watch waits and
   void pending.catch(() => undefined)
   const close = t.mock.method(SqliteStorage.prototype, 'close', function () { h.events.push('close'); return originalClose.call(this) })
   h.host.stop(); const remote = h.installed.dispose(); const disposal = remote.then(() => { const result = h.host.dispose(); assert.equal(result, h.host.dispose()); return result })
-  await turn(); assert.equal(close.mock.callCount(), 0)
+  await disposal; assert.equal(close.mock.callCount(), 1, 'stop 截断旧 Provider 等待，无需等待 raw 的迟到结算')
   release.resolve(); await Promise.allSettled([change, pending]); await remote; await disposal
   assert.ok(h.events.indexOf('withdraw') < h.events.indexOf('close')); assert.equal(close.mock.callCount(), 1); assert.equal(h.clock.live.size, 0)
 })

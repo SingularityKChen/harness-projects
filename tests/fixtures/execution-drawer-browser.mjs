@@ -92,7 +92,7 @@ export async function mount(root) {
     },
   } }
   if (location.pathname.startsWith('/projects/')) mountWeb(root, child, disposers)
-  else await apply({ remote: { $mount: async () => {} }, inject: (_, run) => run(child) })
+  else await apply({ effect: child.effect, remote: { $mount: async () => async () => {} }, inject: (_, run) => run(child) })
   return { command, remote, observations: () => observations.slice(), disconnect: () => disconnect?.(), unmount: async () => { root.unmount(); await Promise.all(disposers.reverse().map((run) => run())); await Promise.all([...streams].map(stream => stream.dispose())) } }
 }`
 /** 真实浏览器与 Node 测试共用同一个 Host。HTTP 只是 fixture 的 JSON 载体，不替代产品 reader 或 apply。 */
