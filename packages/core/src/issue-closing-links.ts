@@ -21,10 +21,10 @@ export type IssueClosingLinksObservation = {
 
 type State = IssueClosingLinksObservation['state']
 class Refusal extends Error { readonly state: State; constructor(state: State) { super(state); this.state = state } }
-const owners = new WeakMap<CoreContext, { generation: string; serial: number; epoch: number; authority: Set<string>; sourceVersions: Map<string, number>; missing: Set<string>; requests: Map<string, number>; cache: Map<string, { stamp: string; epoch: number; value: IssueClosingLinksObservation }> }>()
+const owners = new WeakMap<CoreContext, { generation: string; serial: number; epoch: number; negativeReceipt: bigint; authority: Set<string>; sourceVersions: Map<string, number>; missing: Set<string>; requests: Map<string, number>; cache: Map<string, { stamp: string; epoch: number; receipt: bigint; value: IssueClosingLinksObservation }> }>()
 function owner(context: CoreContext) {
   let value = owners.get(context)
-  if (!value) { value = { generation: crypto.randomUUID(), serial: 0, epoch: 0, authority: new Set(), sourceVersions: new Map(), missing: new Set(), requests: new Map(), cache: new Map() }; owners.set(context, value) }
+  if (!value) { value = { generation: crypto.randomUUID(), serial: 0, epoch: 0, negativeReceipt: 0n, authority: new Set(), sourceVersions: new Map(), missing: new Set(), requests: new Map(), cache: new Map() }; owners.set(context, value) }
   return value
 }
 /** 仅本代已观察的 native 准入变化；不泄漏 binding/ref，不借业务 revision 或旧 delivery health。 */
@@ -32,11 +32,20 @@ export function issueClosingLinksAccessVersion(context: CoreContext): string | u
   const state = owners.get(context)
   return state?.epoch ? `${state.generation}:${state.epoch}` : undefined
 }
-function observeAuthority(context: CoreContext, bindingId: string, key: CapabilityKey, denied: boolean, proofEpoch?: number) {
+/** 本 Context 的原始读票据；重复 actual 否定推进 receipt，但不制造 metadata cohort。 */
+export function issueAuthorityReadAccess(context: CoreContext, bindingId: string, keys: readonly CapabilityKey[]) {
+  const state = owner(context)
+  return { generation: state.generation, epoch: state.epoch, receipt: state.negativeReceipt, denied: keys.some(key => state.authority.has(JSON.stringify([bindingId, key]))) }
+}
+export function observeIssueAuthority(context: CoreContext, bindingId: string, key: CapabilityKey, denied: boolean, proof?: Pick<ReturnType<typeof issueAuthorityReadAccess>, 'generation' | 'epoch' | 'receipt'>) {
   const state = owner(context), address = JSON.stringify([bindingId, key])
-  if (denied && !state.authority.has(address)) { state.authority.add(address); state.epoch++; if (key === K.PlanningItemRead) state.sourceVersions.set(address, state.epoch) }
-  // Pending dispatch 不是权限证明；只有本 epoch 已完成身份校验的 actual ack 能解除拒读 cohort。
-  if (!denied && proofEpoch === state.epoch) state.authority.delete(address)
+  if (denied) {
+    state.negativeReceipt++
+    if (key === K.PlanningItemRead) state.sourceVersions.set(address, (state.sourceVersions.get(address) ?? 0) + 1)
+    if (!state.authority.has(address)) { state.authority.add(address); state.epoch++ }
+  }
+  // Pending dispatch / 旧成功不是恢复证明；三份原始因果标记均匹配才解除拒读。
+  if (!denied && proof?.generation === state.generation && proof.epoch === state.epoch && proof.receipt === state.negativeReceipt) state.authority.delete(address)
 }
 function observeResource(context: CoreContext, resource: string, missing: boolean, proofEpoch?: number, proofSourceVersion?: number) {
   const state = owner(context)
@@ -115,7 +124,7 @@ export async function getIssueClosingLinks(context: CoreContext, input: IssueClo
     if (current.fence !== committedFence(context.storage) || current.epoch !== owner(context).epoch) return getIssueClosingLinks(context, input)
     const blocked = unresolved(context, current, entry?.value.links ?? [])
     if (blocked && entry && ['complete', 'partial'].includes(entry.value.state)) { owner(context).cache.delete(input.workItemId); return empty(context, input.workItemId, blocked) }
-    if (entry?.stamp === current.stamp && entry.epoch === current.epoch) return structuredClone(entry.value)
+    if (entry?.stamp === current.stamp && entry.epoch === current.epoch && entry.receipt === owner(context).negativeReceipt) return structuredClone(entry.value)
     owner(context).cache.delete(input.workItemId); return empty(context, input.workItemId, 'unread')
   } catch (error) { owner(context).cache.delete(input.workItemId); return empty(context, input.workItemId, error instanceof Refusal ? error.state : 'unavailable') }
 }
@@ -130,7 +139,7 @@ function allowed(snapshot: ProviderCapabilitySnapshot, bindingId: string, keys: 
   if (snapshot.bindingId !== bindingId) throw new Refusal('partial')
   const effective = effectiveCapabilities(probe ? { ...snapshot, permission: { ...snapshot.capability, [K.PlanningItemRead]: snapshot.permission[K.PlanningItemRead] ?? AccessLevel.Unavailable } } : snapshot, context.policy)
   for (const key of keys) if (!effective.some(e => e.key === key && e.access !== AccessLevel.Unavailable)) {
-    observeAuthority(context, bindingId, key, true)
+    if (!issueAuthorityReadAccess(context, bindingId, [key]).denied) observeIssueAuthority(context, bindingId, key, true)
     throw new Refusal(snapshot.capability[key] && snapshot.permission[key] === AccessLevel.Unavailable ? 'denied' : 'unsupported')
   }
 }
@@ -138,31 +147,33 @@ function result<T>(value: ProviderResult<T>, context: CoreContext, bindingId: st
   if (value.ok) return value.value
   // NOT_FOUND 是该资源明确不可见的回执，不是离线，也不宣称整个 binding 被拒读。
   if (value.error.code === 'not_found') { observeResource(context, resource, true); throw new Refusal('unread') }
-  if (['permission_denied', 'not_supported'].includes(value.error.code)) observeAuthority(context, bindingId, key, true)
+  if (['permission_denied', 'not_supported'].includes(value.error.code)) observeIssueAuthority(context, bindingId, key, true)
   throw new Refusal(value.error.code === 'permission_denied' ? 'denied' : value.error.code === 'not_supported' ? 'unsupported' : 'unavailable')
 }
 export async function refreshIssueClosingLinks(context: CoreContext, input: IssueClosingLinksScope): Promise<IssueClosingLinksObservation> {
   input = { workItemId: input.workItemId }
-  const state = owner(context), request = ++state.serial, authorityEpoch = state.epoch
+  const state = owner(context), request = ++state.serial, ticket = issueAuthorityReadAccess(context, '', []), authorityEpoch = ticket.epoch
   state.requests.set(input.workItemId, request)
   while (state.requests.size > 100) state.requests.delete(state.requests.keys().next().value!)
   let captured: Awaited<ReturnType<typeof scope>> | undefined
+  let sourceFence = committedFence(context.storage), sourceEpoch = `${context.runtimeAccess.epoch}:${context.runtimeAccess.deliveryEpoch}`
+  const sameSource = () => sourceFence === committedFence(context.storage) && sourceEpoch === `${context.runtimeAccess.epoch}:${context.runtimeAccess.deliveryEpoch}`
   const facts: IssueClosingLink[] = [], covered = coverage(context); let pagesRead = 0
   const deadline = Date.now() + 10000, read = <T>(run: () => Promise<T>) => bounded(run, deadline)
   // 否定证据随实际响应观察；deadline 只限制等待与成功摄入，不能吞掉晚到拒读。
-  const actual = <T>(run: () => Promise<ProviderResult<T>>, bindingId: string, key: CapabilityKey, resource: string) => read(async () => result(await run(), context, bindingId, key, resource))
+  const actual = <T>(run: () => Promise<ProviderResult<T>>, bindingId: string, key: CapabilityKey, resource: string) => read(async () => { const value = await run(); if (!sameSource()) throw new Refusal('unread'); return result(value, context, bindingId, key, resource) })
   const checks: (() => Promise<void>)[] = []
   const current = async (acceptDenial = false) => {
     const next = await scope(context, input)
-    if (next.fence !== committedFence(context.storage) || next.epoch !== state.epoch || !acceptDenial && next.epoch !== authorityEpoch || state.requests.get(input.workItemId) !== request || captured && (next.stamp !== captured.stamp || next.fence !== captured.fence || !acceptDenial && next.epoch !== captured.epoch)) throw new Refusal('unread')
+    if (next.fence !== committedFence(context.storage) || next.epoch !== state.epoch || !acceptDenial && (next.epoch !== authorityEpoch || ticket.receipt !== state.negativeReceipt) || state.requests.get(input.workItemId) !== request || captured && (next.stamp !== captured.stamp || next.fence !== captured.fence || !acceptDenial && next.epoch !== captured.epoch)) throw new Refusal('unread')
     return next
   }
   try {
-    captured = await current()
+    captured = await current(); sourceFence = captured.fence; sourceEpoch = `${context.runtimeAccess.epoch}:${context.runtimeAccess.deliveryEpoch}`
     const source = captured
     const sourceResource = JSON.stringify([refKey(source.project), refKey(source.membership), refKey(source.issue)])
     const check = async (provider: { describeCapabilities(): Promise<ProviderCapabilitySnapshot> }, bindingId: string, keys: readonly CapabilityKey[], probe = false) => {
-      await read(async () => allowed(await provider.describeCapabilities(), bindingId, keys, context, probe)); await current()
+      await read(async () => { const snapshot = await provider.describeCapabilities(); if (!sameSource()) throw new Refusal('unread'); allowed(snapshot, bindingId, keys, context, probe) }); await current()
     }
     checks.push(() => check(source.planning, source.binding.ref.bindingId, [K.PlanningItemRead, K.PlanningIssueClosingLinksRead]))
     await check(source.planning, source.binding.ref.bindingId, [K.PlanningItemRead, K.PlanningIssueClosingLinksRead], true)
@@ -178,7 +189,7 @@ export async function refreshIssueClosingLinks(context: CoreContext, input: Issu
         if (refKey(ack.ref) !== refKey(route.repository) || !validIdentity(ack.sourceRepositoryIdentity) || typeof ack.name !== 'string' || !ack.name.trim()) throw new Refusal('partial')
         const key = identityKey(ack.sourceRepositoryIdentity)
         if (repositories.has(key)) throw new Refusal('partial')
-        observeAuthority(context, route.binding.ref.bindingId, K.DevelopmentRepositoryRead, false, authorityEpoch)
+        observeIssueAuthority(context, route.binding.ref.bindingId, K.DevelopmentRepositoryRead, false, ticket)
         observeResource(context, refKey(route.repository), false, authorityEpoch)
         repositories.set(key, { id: candidate.id, route }); checks.push(verify)
       }
@@ -217,7 +228,7 @@ export async function refreshIssueClosingLinks(context: CoreContext, input: Issu
           await current(); await check(route.provider, route.binding.ref.bindingId, [K.DevelopmentRepositoryRead, K.DevelopmentChangeRequestNativeIdentityRead])
           if (!validIdentity(ack.nativeIdentity) || identityKey(ack.nativeIdentity) !== identityKey(link.nativeIdentity) || ack.ref.bindingId !== route.binding.ref.bindingId || ack.ref.objectKind !== 'change_request'
             || !ack.ref.externalId?.trim() || ack.number !== link.number || typeof ack.title !== 'string' || !validUrl(ack.ref.url)) throw new Refusal('partial')
-          observeAuthority(context, route.binding.ref.bindingId, K.DevelopmentChangeRequestNativeIdentityRead, false, authorityEpoch)
+          observeIssueAuthority(context, route.binding.ref.bindingId, K.DevelopmentChangeRequestNativeIdentityRead, false, ticket)
           observeResource(context, targetResource, false, authorityEpoch)
           checks.push(() => check(route.provider, route.binding.ref.bindingId, [K.DevelopmentRepositoryRead, K.DevelopmentChangeRequestNativeIdentityRead]))
           const fact: IssueClosingLink = { repositoryId: target.id, repositoryName: link.repository.name, bindingId: ack.ref.bindingId, externalId: ack.ref.externalId, number: ack.number, title: ack.title, url: ack.ref.url,
@@ -241,17 +252,17 @@ export async function refreshIssueClosingLinks(context: CoreContext, input: Issu
     const complete = Object.values(covered).every(c => c.state === 'complete')
     // 共享读门只有双流均回证才恢复；closing 成功不能清掉 reference 的拒读或缺失。
     if (complete) {
-      for (const key of [K.PlanningItemRead, K.PlanningIssueClosingLinksRead]) observeAuthority(context, source.binding.ref.bindingId, key, false, authorityEpoch)
+      for (const key of [K.PlanningItemRead, K.PlanningIssueClosingLinksRead]) observeIssueAuthority(context, source.binding.ref.bindingId, key, false, ticket)
       observeResource(context, sourceResource, false, authorityEpoch, source.sourceVersion)
     }
     const old = state.cache.get(input.workItemId)
     const offline = Object.values(covered).every(c => c.state === 'unavailable')
-    let value: IssueClosingLinksObservation = offline && old?.stamp === source.stamp && old.epoch === source.epoch && ['complete', 'partial'].includes(old.value.state)
+    let value: IssueClosingLinksObservation = offline && old?.stamp === source.stamp && old.epoch === source.epoch && old.receipt === ticket.receipt && ['complete', 'partial'].includes(old.value.state)
       ? { ...old.value, state: 'partial', stale: true, observedAt: context.clock(), coverage: covered } as IssueClosingLinksObservation
       : { workItemId: input.workItemId, scopeToken: `${state.generation}:${request}`, state: complete ? 'complete' : 'partial', links: facts, stale: !complete, observedAt: context.clock(), coverage: covered }
     const blocked = unresolved(context, source, value.links)
     if (blocked && ['complete', 'partial'].includes(value.state)) value = empty(context, input.workItemId, blocked)
-    state.cache.set(input.workItemId, { stamp: source.stamp, epoch: source.epoch, value }); trim(state); return structuredClone(value)
+    state.cache.set(input.workItemId, { stamp: source.stamp, epoch: source.epoch, receipt: ticket.receipt, value }); trim(state); return structuredClone(value)
   } catch (error) {
     if (state.requests.get(input.workItemId) !== request) return getIssueClosingLinks(context, input)
     const failure = error instanceof Refusal ? error.state : 'unavailable'
@@ -266,18 +277,18 @@ export async function refreshIssueClosingLinks(context: CoreContext, input: Issu
     if (refusal === 'denied' || refusal === 'unsupported') {
       try { captured = await current(true) } catch { state.cache.delete(input.workItemId); return getIssueClosingLinks(context, input) }
     }
-    if (refusal === 'unread' || captured?.fence !== committedFence(context.storage) || captured.epoch !== state.epoch) { state.cache.delete(input.workItemId); return getIssueClosingLinks(context, input) }
+    if (!['denied', 'unsupported'].includes(refusal) && ticket.receipt !== state.negativeReceipt || refusal === 'unread' || captured?.fence !== committedFence(context.storage) || captured.epoch !== state.epoch) { state.cache.delete(input.workItemId); return getIssueClosingLinks(context, input) }
     if (refusal === 'partial' || refusal === 'unavailable') for (const kind of ['native_reference', 'native_closing'] as const) {
       if (covered[kind].state === 'complete') covered[kind] = { state: 'partial', stale: true, observedAt: context.clock() }
     }
     const old = state.cache.get(input.workItemId)
     let value: IssueClosingLinksObservation
-    if (refusal === 'unavailable' && old !== undefined && old.stamp === captured?.stamp && old.epoch === captured.epoch && (old.value.state === 'complete' || old.value.state === 'partial')) value = { ...old.value, state: 'partial', stale: true, observedAt: context.clock(), coverage: covered }
+    if (refusal === 'unavailable' && old !== undefined && old.stamp === captured?.stamp && old.epoch === captured.epoch && old.receipt === ticket.receipt && (old.value.state === 'complete' || old.value.state === 'partial')) value = { ...old.value, state: 'partial', stale: true, observedAt: context.clock(), coverage: covered }
     else if (refusal === 'partial') value = { workItemId: input.workItemId, scopeToken: `${state.generation}:${request}`, state: 'partial', links: facts, stale: true, observedAt: context.clock(), coverage: covered }
     else value = empty(context, input.workItemId, refusal)
     const blocked = unresolved(context, captured, value.links)
     if (blocked && ['complete', 'partial'].includes(value.state)) value = empty(context, input.workItemId, blocked)
-    if (captured) state.cache.set(input.workItemId, { stamp: captured.stamp, epoch: captured.epoch, value }); trim(state)
+    if (captured) state.cache.set(input.workItemId, { stamp: captured.stamp, epoch: captured.epoch, receipt: state.negativeReceipt, value }); trim(state)
     return structuredClone(value)
   }
 }

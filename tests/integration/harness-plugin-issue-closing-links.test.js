@@ -236,3 +236,41 @@ for (const failed of ['PlanningIssueClosingLinks', 'PlanningIssueReferences']) f
   const recovered = (await h.service.refreshIssueClosingLinks(actor, h.id)).value; assert.equal(recovered.state, 'complete'); assert.equal(recovered.links.length, 1)
   assert.equal((await h.service.baseline()).nativeAccessVersion, repeatedVersion)
 })
+
+for (const operation of ['PlanningIssueClosingLinks', 'PlanningIssueReferences', 'DevelopmentChangeRequest']) test('repeated actual denial cannot be erased by another Issue recovery: ' + operation, async t => {
+  const h = await open(t), before = dump(h.dataPath), other = h.ids[1]
+  h.flags.deny = operation; assert.equal((await h.service.refreshIssueClosingLinks(actor, other)).value.state, 'denied')
+  const version = (await h.service.baseline()).nativeAccessVersion
+  h.flags.deny = undefined
+  const hold = { operation, entered: gate(), release: gate() }; h.flags.hold = hold
+  const old = h.service.refreshIssueClosingLinks(actor, h.id); await hold.entered.promise
+  h.flags.deny = operation; assert.equal((await h.service.refreshIssueClosingLinks(actor, other)).value.state, 'denied')
+  assert.equal((await h.service.baseline()).nativeAccessVersion, version, 'repeated denial keeps metadata cohort stable')
+  h.flags.deny = undefined; assert.equal((await h.service.refreshIssueClosingLinks(actor, other)).value.state, 'complete')
+  hold.release.resolve(); assert.deepEqual((await old).value.links, [], 'B recovery cannot renew the ticket of held A')
+  assert.deepEqual((await h.service.getIssueClosingLinks(h.id)).observation.links, [])
+  assert.equal((await h.service.refreshIssueClosingLinks(actor, h.id)).value.state, 'complete', 'a fresh explicit ticket recovers')
+  assert.deepEqual(dump(h.dataPath), before)
+})
+
+for (const changed of ['account', 'configuration', 'binding']) test('production committed source fence rejects old denial after ' + changed, async t => {
+  let storage
+  const fence = SqliteStorage.prototype.committedReadFence
+  t.mock.method(SqliteStorage.prototype, 'committedReadFence', function () { storage = this; return fence.call(this) })
+  const h = await open(t), entered = gate(), release = gate(); t.after(() => release.resolve())
+  const binding = (await storage.listProviderBindings(WORKSPACE)).find(b => b.domain === 'planning'), ref = { workspaceId: WORKSPACE, bindingId: binding.id, domain: 'planning' }
+  h.flags.intercept = async request => {
+    if (request.operationName !== 'PlanningIssueClosingLinks') return
+    h.flags.intercept = undefined; entered.resolve(); await release.promise
+    return new Response(JSON.stringify({ errors: [{ type: 'FORBIDDEN' }] }), { status: 403 })
+  }
+  const pending = h.service.refreshIssueClosingLinks(actor, h.id); await entered.promise
+  if (changed === 'account') { const account = await storage.getConnectorAccount(await storage.getProviderBindingAccount(binding.id)); await storage.putConnectorAccount({ ...account, connectionState: 'disconnected' }); await storage.putConnectorAccount(account) }
+  if (changed === 'configuration') { const config = await storage.getBindingConfiguration(ref); await storage.putBindingConfiguration({ ...config, configuration: { projectNodeId: config.configuration.projectNodeId + 'A' } }); await storage.putBindingConfiguration(config) }
+  if (changed === 'binding') { await storage.putProviderBinding({ ...binding, enabled: false, isDefault: false }); await storage.putProviderBinding(binding) }
+  const afterMutation = dump(h.dataPath)
+  release.resolve(); assert.deepEqual((await pending).value.links, [])
+  assert.equal((await h.service.baseline()).nativeAccessVersion, undefined)
+  assert.equal((await h.service.refreshIssueClosingLinks(actor, h.id)).value.state, 'complete')
+  assert.deepEqual(dump(h.dataPath), afterMutation, 'native reads add no business writes')
+})

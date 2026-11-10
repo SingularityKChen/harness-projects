@@ -72,7 +72,9 @@ for (const denial of ['PlanningIssueClosingLinks', 'PlanningIssueReferences', 'D
   const settledRequests = h.requests.length; await page.waitForTimeout(100); assert.equal(h.requests.length, settledRequests); assert.equal(refreshes(), count, 'repeated same-key denial cannot drive a probe loop')
   // A late actual Host read must also be unable to repopulate the old epoch.
   deny(false); h.flags.hold = true; h.flags.holdOperation = denial.startsWith('PlanningIssue') ? denial : undefined; const old = h.service.refreshIssueClosingLinks(actor, h.item.entityId); await until(() => h.held.length > 0)
-  deny(true); await h.service.refreshIssueClosingLinks(actor, other.entityId); h.release(); assert.deepEqual((await old).value.links, [])
+  deny(true); await h.service.refreshIssueClosingLinks(actor, other.entityId)
+  deny(false); assert.equal((await h.service.refreshIssueClosingLinks(actor, other.entityId)).value.state, 'complete')
+  h.release(); assert.deepEqual((await old).value.links, [], 'another Issue recovery cannot renew this held ticket')
   const requests = h.requests.length, version = (await h.service.baseline()).nativeAccessVersion
   assert.equal((await h.service.getIssueClosingLinks(h.item.entityId)).observation.links.length, 0)
   assert.equal((await h.service.baseline()).nativeAccessVersion, version); await page.waitForTimeout(100); assert.equal(h.requests.length, requests, 'same-key rejection creates no background network loop'); await noFacts()

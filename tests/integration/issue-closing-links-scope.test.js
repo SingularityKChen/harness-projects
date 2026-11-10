@@ -1,7 +1,7 @@
 import '../fixtures/resolution-preflight.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { composeCore } from '@harness-projects/core'
+import { composeCore, issueAuthorityReadAccess, observeIssueAuthority, issueSourceReadAccess } from '@harness-projects/core'
 import { registerRepository } from '../../packages/core/src/development-route.ts'
 import { createFakeProviders, refOf } from '@harness-projects/provider-fake'
 import { CapabilityKey as K, providerOk, providerErr, providerError } from '@harness-projects/capabilities'
@@ -191,4 +191,57 @@ test('final visibility check deadline cannot advertise complete relation coverag
   h.p.planning.describeCapabilities = async () => { if (final && ++checks === 2) t.mock.timers.tick(10001); return describe() }
   const value = await h.refresh(); assert.equal(value.state, 'partial')
   assert.equal(Object.values(value.coverage).every(c => c.state === 'complete'), false)
+})
+
+test('authority recovery requires the complete current Context proof', () => {
+  const context = {}, other = {}, binding = 'planning', key = K.PlanningIssueClosingLinksRead
+  observeIssueAuthority(context, binding, key, true)
+  const first = issueAuthorityReadAccess(context, binding, [key])
+  observeIssueAuthority(context, binding, key, false)
+  observeIssueAuthority(context, binding, key, false, { epoch: first.epoch })
+  assert.equal(issueAuthorityReadAccess(context, binding, [key]).denied, true)
+  observeIssueAuthority(context, binding, key, true)
+  const repeated = issueAuthorityReadAccess(context, binding, [key])
+  assert.equal(repeated.epoch, first.epoch); assert.ok(repeated.receipt > first.receipt)
+  for (const proof of [first, { ...repeated, generation: issueAuthorityReadAccess(other, binding, [key]).generation }]) {
+    observeIssueAuthority(context, binding, key, false, proof)
+    assert.equal(issueAuthorityReadAccess(context, binding, [key]).denied, true)
+  }
+  observeIssueAuthority(context, binding, key, false, repeated)
+  assert.equal(issueAuthorityReadAccess(context, binding, [key]).denied, false)
+  assert.equal(issueAuthorityReadAccess(other, binding, [key]).denied, false)
+})
+for (const changed of ['primary', 'membership', 'projection']) test('a committed source change rejects late native denial: ' + changed, async () => {
+  const h = await fixture(), entered = gate(), release = gate(), original = h.p.planning.listIssueClosingLinks
+  let held = false
+  h.p.planning.listIssueClosingLinks = async input => {
+    if (held) return original(input)
+    held = true; entered.resolve(); await release.promise
+    return providerErr(providerError('permission_denied', 'late source denial'))
+  }
+  const pending = h.refresh(); await entered.promise
+  if (changed === 'primary') { const identity = (await h.p.storage.listIdentitiesForEntity(h.scope.workItemId)).find(i => i.role === 'primary'); await h.p.storage.putExternalIdentity({ ...identity, role: 'historical' }); await h.p.storage.putExternalIdentity(identity) }
+  if (changed === 'membership') { const member = (await h.p.storage.listMemberships(h.workspaceId, h.p.planning.state.projects[0].ref.externalId))[0]; await h.p.storage.putMembership({ ...member, contentExternalId: 'other' }); await h.p.storage.putMembership(member) }
+  if (changed === 'projection') { const projection = await h.p.storage.getPlanningProjection(h.workspaceId, h.scope.workItemId); await h.p.storage.putPlanningProjection(h.workspaceId, projection) }
+  release.resolve(); assert.deepEqual((await pending).links, [])
+  assert.equal((await h.core.queries.getWorkspaceMetadata()).nativeAccessVersion, undefined, 'old source denial cannot revoke the new source')
+  assert.equal((await h.refresh()).state, 'complete')
+})
+
+test('source proof changes on every item denial while independent native authority stays granular', () => {
+  const context = {}, binding = 'planning', input = { project: refOf(binding, 'project', 'project'), membership: refOf(binding, 'project_item', 'member'), issue: refOf(binding, 'issue', 'issue') }
+  const initial = issueSourceReadAccess(context, input)
+  for (const key of [K.PlanningIssueClosingLinksRead, K.DevelopmentChangeRequestNativeIdentityRead]) {
+    observeIssueAuthority(context, binding, key, true)
+    assert.equal(issueSourceReadAccess(context, input).version, initial.version, 'independent native denial cannot hide an Issue target')
+  }
+  observeIssueAuthority(context, binding, K.PlanningItemRead, true)
+  const first = issueSourceReadAccess(context, input)
+  observeIssueAuthority(context, binding, K.PlanningItemRead, true)
+  const repeated = issueSourceReadAccess(context, input)
+  assert.notEqual(first.version, initial.version); assert.notEqual(repeated.version, first.version)
+  assert.equal(repeated.denied, true)
+  observeIssueAuthority(context, binding, K.PlanningItemRead, false, issueAuthorityReadAccess(context, binding, [K.PlanningItemRead]))
+  assert.equal(issueSourceReadAccess(context, input).version, repeated.version, 'fresh recovery never renews an older source proof')
+  assert.equal(issueSourceReadAccess(context, input).denied, false)
 })
