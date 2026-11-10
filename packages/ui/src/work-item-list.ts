@@ -82,11 +82,12 @@ function ItemTable({ rows, navigation, query, sizes }: { rows: readonly VisibleL
 function bodyOf({ body, planningSourceName }: WorkItemListView, query: QueryControls, sizes: WidthControls, presentation: 'table' | 'board', navigation?: ItemNavigation): ReactElement {
   if (body.kind === 'loading') return createElement(LoadingState)
   if (body.kind === 'unavailable') return createElement(UnavailableState, { message: body.message, remaining: body.remaining })
+  const filteredZero = query.result.hasQuery && query.result.loadedReadableCount > 0 && query.result.matchedReadableCount === 0
   const notConfirmed = (body.stale && !body.partial) || body.refreshing // 部分读取的可见行都已确认：不出「最后已知值」横幅
   return createElement(Fragment, null,
     notConfirmed ? createElement(StaleBanner, { source: planningSourceName, at: body.lastUpdatedAt ?? null }) : null,
     body.notice === undefined ? null : createElement('p', null, body.notice),
-    body.rows.length === 0 ? createElement(EmptyState, { confirmed: !notConfirmed }) : presentation === 'board' ? createElement(WorkItemBoard, { rows: query.result.rows, navigation }) : createElement(ItemTable, { rows: query.result.rows, navigation, query, sizes }))
+    body.rows.length === 0 ? createElement(EmptyState, { confirmed: !notConfirmed }) : presentation === 'board' ? filteredZero ? null : createElement(WorkItemBoard, { rows: query.result.rows, navigation }) : createElement(ItemTable, { rows: query.result.rows, navigation, query, sizes }))
 }
 
 export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnnouncement, presentationScopeKey, actions, content, presentation = 'table', heading = '工作项', label = '工作项列表' }: { presentation?: 'table' | 'board'; content?: ReactNode; heading?: string; label?: string; actions?: ReactNode; presentationScopeKey?: string | undefined; view: WorkItemListView; navigation?: ItemNavigation | undefined; headingTabIndex?: number | undefined; statusAnnouncement?: string | undefined }): ReactElement {

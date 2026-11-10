@@ -73,11 +73,14 @@ import { OPERATIONS } from './apps/harness-plugin/src/host-operations.ts'
 ${WEB_ENTRY}
 export async function mount(root) {
   let disconnect
-  const disposers = [], streams = new Set(), observations = []
+  const disposers = [], streams = new Set(), observations = [], unaryObservations = []
   const load = (url, options) => fetch(url + location.search, options)
   const command = async (action, value) => (await load('/control', { method: 'POST', body: JSON.stringify({ action, value }) })).json()
-  const remote = Object.fromEntries(Object.values(OPERATIONS).filter(op => op.mode === 'unary').map(op => [op.name, async (...args) =>
-    (await load('/remote', { method: 'POST', body: JSON.stringify({ name: op.name, input: Object.fromEntries(op.params.map((p, i) => [p.name, args[i]])) }) })).json()]))
+  const remote = Object.fromEntries(Object.values(OPERATIONS).filter(op => op.mode === 'unary').map(op => [op.name, async (...args) => {
+    const result = await (await load('/remote', { method: 'POST', body: JSON.stringify({ name: op.name, input: Object.fromEntries(op.params.map((p, i) => [p.name, args[i]])) }) })).json()
+    unaryObservations.push({ name:op.name,errorCode:result.value?.error?.code,errorMessage:result.value?.error?.message,writeState:result.value?.writeState })
+    return result
+  }]))
   remote.watch = async function* (signal) {
     const response = await load('/watch', { signal }), reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
     let buffer = ''
@@ -100,7 +103,7 @@ export async function mount(root) {
   } }
   if (location.pathname.startsWith('/projects/')) mountWeb(root, child, disposers)
   else await apply({ effect: child.effect, remote: { $mount: async () => async () => {} }, inject: (_, run) => run(child) })
-  return { command, remote, observations: () => observations.slice(), disconnect: () => disconnect?.(), unmount: async () => { root.unmount(); await Promise.all(disposers.reverse().map((run) => run())); await Promise.all([...streams].map(stream => stream.dispose())) } }
+  return { command, remote, unaryObservations: () => unaryObservations.slice(), observations: () => observations.slice(), disconnect: () => disconnect?.(), unmount: async () => { root.unmount(); await Promise.all(disposers.reverse().map((run) => run())); await Promise.all([...streams].map(stream => stream.dispose())) } }
 }`
 /** 真实浏览器与 Node 测试共用同一个 Host。HTTP 只是 fixture 的 JSON 载体，不替代产品 reader 或 apply。 */
 export async function startExecutionServer(options) {
