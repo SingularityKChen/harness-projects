@@ -19,7 +19,12 @@ import { AccessLevel, providerErr, providerError } from '@harness-projects/capab
 export async function createExecutionFixture({ seed } = {}) {
   if (seed === 'execution') return createComposedExecutionPlatform()
   const root = await mkdtemp(path.join(tmpdir(), 'execution-drawer-')), dataPath = path.join(root, 'workspace.sqlite')
-  const make = (options) => { const p = createFakeProviders(options); if (seed === 'query') for (let i=0;i<120;i++) p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Query '+String(i).padStart(3,'0'), 'Safe query body'); if (seed === 'overview') p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Overview gap', 'Gap fixture'); if (seed === 'read') p.planning.addItem(p.planning.state.projects[0].ref, 'draft', '规划项 draft-1', 'draft-1 正文占位'); return p }
+  const make = (options) => { const p = createFakeProviders(options); if (seed === 'board') {
+    const item = p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Board native unknown', 'Board safe body')
+    item.fields = { ...item.fields, nativeValues: { status: { kind:'single_select', optionId:'native-review', name:'Native review' } } }
+    item.content.workItem.sourceNumber = { sourceName:'GitHub', scopeIdentity:{namespace:'repository',id:'board'}, scopeName:'example/board',number:605 }
+  }
+  if (seed === 'query') for (let i=0;i<120;i++) p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Query '+String(i).padStart(3,'0'), 'Safe query body'); if (seed === 'overview') p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Overview gap', 'Gap fixture'); if (seed === 'read') p.planning.addItem(p.planning.state.projects[0].ref, 'draft', '规划项 draft-1', 'draft-1 正文占位'); return p }
   const mounted = [], byDomain = {}, providers = make(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: { projectNodeId: { kind: 'string', required: false, pattern: '.+', maxLength: 100 } }, create: async ({ binding }) => { const provider = seed === 'overview' ? providers[binding.domain] : make({ [binding.domain]: { bindingId: binding.id } })[binding.domain]; byDomain[binding.domain] = provider; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
   const workspaceId = '00000000-0000-4000-8000-000000000282'
   const storage = createSqliteStorage(dataPath, hostStoragePolicy(catalog))
@@ -31,7 +36,9 @@ export async function createExecutionFixture({ seed } = {}) {
   }
   let itemId, runId
   if (seed !== 'empty') {
-    const core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture' }, providers, storage })
+    const planningFieldMapping = seed === 'board' ? { status:{ projectFieldId:'status',options:{todo:'todo',in_progress:'in_progress',done:'done'} } } : undefined
+    const core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture', ...(planningFieldMapping ? { planningFieldMapping } : {}) }, providers, storage })
+    if (planningFieldMapping) await storage.putWorkspacePlanningMapping({ workspaceId,bindingId:providers.planning.bindingId,projectExternalId:providers.planning.state.projects[0].ref.externalId,origin:'user',mapping:planningFieldMapping })
     await storage.putBindingConfiguration({ ref: { workspaceId, bindingId: providers.planning.bindingId, domain: 'planning' }, configuration: { projectNodeId: providers.planning.state.projects[0].ref.externalId } })
     itemId = (await core.queries.listPlanningItems()).find((item) => item.content.title === '规划项 issue-1').entityId
     if (seed === 'overview') {
@@ -49,7 +56,7 @@ export async function createExecutionFixture({ seed } = {}) {
       // 合成夹具预先确认关系；Provider 观察默认只生成 candidate，不能借 CI 成功冒充关系确认。
       for (const item of work) await core.commands.refreshDeliveryFacts({ workItemId: item.entityId, repositoryId: 'repo-alpha' })
       for (const relation of await storage.listRelations(workspaceId)) await core.commands.confirmRelation(relation)
-    } else if (seed !== 'query') { await core.commands.startWork({ task: 'Synthetic explicit task', workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
+    } else if (seed !== 'query' && seed !== 'board') { await core.commands.startWork({ task: 'Synthetic explicit task', workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
     const id = contextIdFor(workspaceId, itemId, 'repo-alpha'); runId = runIdFor(id)
     await storage.putExecutionRun({ ...(await storage.getExecutionRun(runId)), fallback: true }) }
   }

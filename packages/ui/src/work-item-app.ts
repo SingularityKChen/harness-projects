@@ -50,7 +50,7 @@ function screenOf(read: WorkspaceRead | undefined, path: string | undefined, set
     const restored = observation === '当前读取已确认' && sourceAnnouncement.current.observation !== undefined
     sourceAnnouncement.current = { observation, notice: restored ? '规划来源读取已恢复。' : undefined }
   }
-  const sourceNotice = observation === '读取不完整' ? '规划来源读取不完整，显示的是最后已知值。' : observation === '读取不可用' ? '当前无法读取规划来源。' : observation === '读取状态未知' ? '规划来源读取状态尚未确认。' : sourceAnnouncement?.current.notice
+  const sourceNotice = observation === '读取不完整' ? '规划来源读取不完整，请核对各条目的读取状态。' : observation === '读取不可用' ? '当前无法读取规划来源。' : observation === '读取状态未知' ? '规划来源读取状态尚未确认。' : sourceAnnouncement?.current.notice
   const notice = refresh.error ?? (refresh.pending ? '正在刷新，当前显示的是最后已知值' : read.connection.connected ? sourceNotice : DISCONNECTED)
   const denied = read.reason === 'permission_denied' && read.capabilities?.some((entry) => entry.key === 'planning.item.read' && entry.access === 'unavailable')
   const input: WorkItemListReadInput = { read, metadata: { sourceNames: {}, ...(notice ? { safeNotice: notice } : {}) },

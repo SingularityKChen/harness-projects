@@ -189,7 +189,7 @@ test('modal notice uses the same safe source observation while refresh and trans
     const read = { ...f.read, capabilities: [{ key: 'planning.item.read', access: 'available' }], ...extra }
     return renderToStaticMarkup(React.createElement(WorkItemApp, { source: { subscribe: () => () => {}, getSnapshot: () => read }, initialPath: '/projects/workspace/items/ent-modal', announceListStatus: false, refreshSource: { subscribe: () => () => {}, getSnapshot: () => refresh } }))
   }
-  const degraded = render({ reason: 'RAW-REASON-CANARY' }); assert.match(degraded, /<dialog[^]*aria-live="polite"[^>]*>规划来源读取不完整，显示的是最后已知值。/); assert.doesNotMatch(degraded, /RAW-REASON/)
+  const degraded = render({ reason: 'RAW-REASON-CANARY' }); assert.match(degraded, /<dialog[^]*aria-live="polite"[^>]*>规划来源读取不完整，请核对各条目的读取状态。/); assert.doesNotMatch(degraded, /RAW-REASON/)
   assert.doesNotMatch(render(), /规划来源读取不完整/)
   assert.match(render({ reason: 'RAW-REASON-CANARY', connection: { connected: false } }), /<dialog[^]*aria-live="polite"[^>]*>与宿主的连接已中断/)
   assert.match(render({ reason: 'RAW-REASON-CANARY' }, { pending: false, error: '刷新失败的安全提示' }), /<dialog[^]*aria-live="polite"[^>]*>刷新失败的安全提示/)
@@ -209,13 +209,13 @@ test('modal lifecycle announces source recovery once and timestamp-only frames k
     return html.match(/<dialog[^]*?<div role="status" aria-live="polite"[^>]*>([^<]*)<\/div>/)?.[1]
   }
   assert.equal(render(), '')
-  reading = { ...reading, reason: 'RAW-REASON-CANARY' }; assert.equal(render(), '规划来源读取不完整，显示的是最后已知值。')
+  reading = { ...reading, reason: 'RAW-REASON-CANARY' }; assert.equal(render(), '规划来源读取不完整，请核对各条目的读取状态。')
   reading = { ...reading, reason: undefined }; assert.equal(render(), '规划来源读取已恢复。')
   reading = { ...reading, reconciledAt: '2026-10-30T01:00:00Z' }; assert.equal(render(), '规划来源读取已恢复。')
   reading = { ...reading, planningSource: { bindingId: 'new-binding', name: 'New source' } }; render()
   assert.doesNotMatch(html, /<dialog\b/, 'same-workspace binding switch retires the prior detail route')
   navigation.open('ent-modal'); assert.equal(render(), '', 'reopened new source has no prior recovery')
-  reading = { ...reading, reason: 'RAW-REASON-CANARY' }; assert.equal(render(), '规划来源读取不完整，显示的是最后已知值。')
+  reading = { ...reading, reason: 'RAW-REASON-CANARY' }; assert.equal(render(), '规划来源读取不完整，请核对各条目的读取状态。')
   reading = { ...reading, reason: undefined }; assert.equal(render(), '规划来源读取已恢复。')
   reading = { ...reading, reconciledAt: '2026-10-30T02:00:00Z' }; assert.equal(render(), '规划来源读取已恢复。')
   reading = { ...reading, planningSource: undefined, reason: undefined }; render()

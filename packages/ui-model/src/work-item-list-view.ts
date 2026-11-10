@@ -44,6 +44,7 @@ export type VisibleListRow =
   | {
       readonly sourceNumber?: number; readonly numberLabel?: string
       readonly kind: 'item'; readonly key: string; readonly title: string; readonly identity: string
+      readonly nativePlanningStatus?: string
       readonly planningStatus: string; readonly planningStatusKey: NormalizedStatus; readonly engineering: string; readonly source: string
       readonly authority: string; readonly stale: boolean
       /** 迭代 title 与 date-only 目标日期原样显示，缺值统一占位，不做时区换算。 */
@@ -109,6 +110,7 @@ function rowView(row: WorkItemRow, nameOf: (bindingId: string) => string | undef
     kind: 'item', key: row.entityId, title: row.title || '标题未提供',
     identity: (primary && pick(IDENTITY, primary.externalKind)) ?? '身份未知',
     planningStatus: statusText(row),
+    ...(row.planningStatus === NormalizedStatus.Unknown && row.planningFields?.statusName ? { nativePlanningStatus: row.planningFields.statusName } : {}),
     planningStatusKey: typeof row.planningStatus === 'string' && Object.values(NormalizedStatus).includes(row.planningStatus) ? row.planningStatus : NormalizedStatus.Unknown,
     engineering: row.derived.map((flag) => pick(HINTS, flag) ?? '未知提示').join('、') || '无',
     source: (primary && nameOf(primary.bindingId)) ?? '来源名称未提供',

@@ -13,6 +13,8 @@ import { EmptyState, FreshnessBadge, LoadingState, LIST_STYLES, SourceBadge, Sta
 
 import { ColumnResizeHandle, useColumnWidths } from './column-resize.ts'
 import { TableControls } from './table-controls.ts'
+import { TitleLink } from './item-link.ts'
+import { WorkItemBoard } from './work-item-board.ts'
 import { TABLE_COLUMNS } from './table-columns.ts'
 
 const columnWidth = (column: typeof TABLE_COLUMNS[number]): string => column.id === 'title' ? 'var(--hp-title-width)' : `var(--hp-column-${column.id},${column.defaultWidth}px)`
@@ -23,17 +25,6 @@ type QueryControls = { result: LocalTableResult; onChange(conditions: LocalTable
 
 /** 列表页消费的导航契约（ui 无状态回调）：`href` 供真实 href 与修饰键点击，`open` 只在普通左键点击时调用。 */
 export type ItemNavigation = { readonly currentItemId?: string | undefined; readonly href: (itemId: string) => string; readonly open: (itemId: string) => void }
-
-/** 标题 anchor 只给安全 item 行：修饰键 / 中键保留真实 href 交给浏览器，普通左键才走 `open`。 */
-function TitleLink({ itemId, title, navigation }: { itemId: string; title: string; navigation: ItemNavigation }): ReactElement {
-  const onClick = (event: { preventDefault: () => void; button?: number; metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean }): void => {
-    if (event.button !== undefined && event.button !== 0) return
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-    event.preventDefault()
-    navigation.open(itemId)
-  }
-  return createElement('a', { href: navigation.href(itemId), onClick, 'aria-current': navigation.currentItemId === itemId ? 'true' : undefined }, title)
-}
 
 /** redacted 行只显示占位：其它单元格是"—"，不透出是否撤权或删除；行 key 只给框架，不进任何属性。 */
 function ItemRow({ row, navigation, columns }: { row: VisibleListRow; navigation: ItemNavigation | undefined; columns: readonly Column[] }): ReactElement {
@@ -88,17 +79,17 @@ function ItemTable({ rows, navigation, query, sizes }: { rows: readonly VisibleL
       createElement('tbody', null, ...rows.map((row) => createElement(ItemRow, { key: row.key, row, navigation, columns })))))
 }
 
-function bodyOf({ body, planningSourceName }: WorkItemListView, query: QueryControls, sizes: WidthControls, navigation?: ItemNavigation): ReactElement {
+function bodyOf({ body, planningSourceName }: WorkItemListView, query: QueryControls, sizes: WidthControls, presentation: 'table' | 'board', navigation?: ItemNavigation): ReactElement {
   if (body.kind === 'loading') return createElement(LoadingState)
   if (body.kind === 'unavailable') return createElement(UnavailableState, { message: body.message, remaining: body.remaining })
   const notConfirmed = (body.stale && !body.partial) || body.refreshing // 部分读取的可见行都已确认：不出「最后已知值」横幅
   return createElement(Fragment, null,
     notConfirmed ? createElement(StaleBanner, { source: planningSourceName, at: body.lastUpdatedAt ?? null }) : null,
     body.notice === undefined ? null : createElement('p', null, body.notice),
-    body.rows.length === 0 ? createElement(EmptyState, { confirmed: !notConfirmed }) : createElement(ItemTable, { rows: query.result.rows, navigation, query, sizes }))
+    body.rows.length === 0 ? createElement(EmptyState, { confirmed: !notConfirmed }) : presentation === 'board' ? createElement(WorkItemBoard, { rows: query.result.rows, navigation }) : createElement(ItemTable, { rows: query.result.rows, navigation, query, sizes }))
 }
 
-export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnnouncement, presentationScopeKey, actions, content, heading = '工作项', label = '工作项列表' }: { content?: ReactNode; heading?: string; label?: string; actions?: ReactNode; presentationScopeKey?: string | undefined; view: WorkItemListView; navigation?: ItemNavigation | undefined; headingTabIndex?: number | undefined; statusAnnouncement?: string | undefined }): ReactElement {
+export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnnouncement, presentationScopeKey, actions, content, presentation = 'table', heading = '工作项', label = '工作项列表' }: { presentation?: 'table' | 'board'; content?: ReactNode; heading?: string; label?: string; actions?: ReactNode; presentationScopeKey?: string | undefined; view: WorkItemListView; navigation?: ItemNavigation | undefined; headingTabIndex?: number | undefined; statusAnnouncement?: string | undefined }): ReactElement {
   const { body } = view
   const [local, setLocal] = useState({ scopeKey:presentationScopeKey, conditions:defaultLocalTableConditions(), adjusted:false })
   const sameScope = local.scopeKey === presentationScopeKey
@@ -118,6 +109,6 @@ export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnno
     showingList && view.degraded ? createElement('p', null, '读取能力降级：显示的是保守的最后已知值。') : null,
     !showingList ? null : createElement('div', { className:body.kind === 'content' && !body.stale && !body.refreshing ? 'hp-list-confirmed' : undefined, role: 'status', 'aria-live': statusAnnouncement === undefined ? 'polite' : 'off', 'aria-atomic': 'true' }, view.statusText),
     !showingList || statusAnnouncement === undefined ? null : createElement('span', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true', style: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' } }, statusAnnouncement),
-    showingList && body.kind === 'content' ? createElement(TableControls, { ...query, onResetWidths:sizes.reset, readOnly:view.readOnly }) : null),
-    createElement('div', { 'aria-busy': showingList ? busy : undefined, className: 'hp-list-body' }, showingList ? bodyOf(view, query, sizes, navigation) : content))
+    showingList && body.kind === 'content' ? createElement(TableControls, { ...query, onResetWidths:sizes.reset, readOnly:view.readOnly || presentation === 'board', presentation }) : null),
+    createElement('div', { 'aria-busy': showingList ? busy : undefined, className: 'hp-list-body' }, showingList ? bodyOf(view, query, sizes, presentation, navigation) : content))
 }

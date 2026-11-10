@@ -1,6 +1,6 @@
 # 真实只读 Planning Board ExecPlan
 
-> 状态：Active；固定v3已获具名批准，产品实施尚未开始
+> 状态：Active；固定v3产品实施与本地验证已完成，待独立验收及发布
 > 创建：2026-11-10
 > 范围：#605授权已加载Planning的只读Board，不关闭 #145完整能力
 > 规范：根 `PLANS.md`；关联 #603、#604、#145、#599
@@ -46,10 +46,12 @@ v3仅消费Host CSS角色，不import theme JS、不注册/覆盖root主题、�
 | `packages/ui/src/work-item-list.ts` | 48 |
 | `packages/ui/src/work-item-project.ts` | 30 |
 | `packages/ui/src/table-controls.ts` | 20 |
+| `packages/ui/src/work-item-app.ts`仅修正共享partial说明 | 2 |
+| `tests/contract/ui-workspace-status.test.js`既有modal说明期望 | 6 |
 | `tests/contract/ui-planning-board.test.js`与安全投影既有断言 | 102 |
 | 新 `tests/browser/planning-board.test.js` | 215 |
 | `tests/fixtures/execution-drawer-browser.mjs`及`table-geometry-browser.mjs`的必要场景 | 60 |
-| **技术目标** | **744** |
+| **技术目标** | **752** |
 
 文档文件集为本计划、`docs/README.md`索引，目标180–350且严格<1300；技术必须严格<800，不加依赖/配置/兼容/迁移。若新增必要路径先修订此唯一集合和预测，每次结构变更与首个RED后测实际gross加剩余必需工作，完整可信上界到800先停止重估，不能删撤权/焦点/composed证据或压行。单UI/DTO owner串行写，独立最终验收者接手前显式交接，不与 #604并发写共享单元。不得改Status/native依赖或任何上游Planning事实；公开数据和路径脱敏。
 
@@ -114,8 +116,8 @@ Batch2的反例证明规范规划authority、redacted不泄露、共享query/rou
 
 - [x] (2026-11-10 SGT) 既有Draft #612已关联605并以完整 #604分支为base，plan-only Fast Gate通过。
 - [x] (2026-11-10 SGT) 独立重核v3透明列/自然卡高、typed安全分组和前层currentItemId接口；见Global Constraints。
-- [ ] (2026-11-10 SGT) Batch1：等待具名v3整体接受及完整 #604实际可用，重新核对前层与744候选预算。
-- [ ] (2026-11-10 SGT) Batch2：首RED/实际测量→GREEN，真实composed撤权/旧回复/zero writes/唯一详情与v3对照。
+- [x] (2026-11-10 SGT) Batch1：具名v3已批准；冻结父层 `8268f7ba` 已接受，产品分支从 `558ac7bc`实施。首RED时技术实际45行，完整上界718行；不重放或改写父层。
+- [x] (2026-11-10 SGT) Batch2：模型首RED为缺失分组接口；浏览器首RED为缺失Board入口。安全分组、共享query/唯一详情、真实composed权限/旧回复/zero writes、自然卡高与12组响应矩阵已GREEN；37条窄合同、15条共享notice合同、27条浏览器、typecheck与9条边界通过。完整`pnpm test`最终1553 contract + 2185 integration + 226 e2e，共3964条通过；首次contract因两条既有旧说明期望失败，精确更新后重跑通过。
 - [ ] (2026-11-10 SGT) Batch3：独立验收/必要重构、当前head回读，Ready不merge。
 
 ## Surprises & Discoveries
@@ -132,6 +134,10 @@ Decision：v3透明列、自然卡高与Host中性selected+独立focus，使用�
 
 Decision：保护 #605<-#604和 #604<-#603 native先决链，仍在现有stack后层串行。Rationale：人类仅接受v2版式，不授权改native边或把拆叶A当完整 #604。Date/Author：2026-11-10 SGT / independent final spec reviewer。
 
+Decision：将 `work-item-app.ts` 纳入本叶唯一文件集（预测2行gross），把共享partial notice改为不推断行新鲜度的中性说明。Rationale：真实Provider不可锚定项→Host→store产生partial，已确认可见行仍为当前值；旧notice却泛称最后已知值，违反本叶truthful partial验收。保持同一view/statusText与row stale owner，不增加Board读状态。Date/Author：2026-11-10 SGT / 交付协调者具名裁决。
+
+Decision：将 `tests/contract/ui-workspace-status.test.js` 纳入本叶唯一文件集（预测6行gross），精确更新两条既有modal/恢复合同内三处旧说明期望。Rationale：完整suite显示共享notice的直接消费者仍绑定旧文案；保留公告优先级、恢复一次及timestamp稳定的全部判别，不能放宽断言规避行为。Date/Author：2026-11-10 SGT / 交付协调者具名裁决。
+
 ## Idempotence and Recovery
 
 测试/control只在每例临时SQLite、loopback和合成外部端口，无业务网络；view切换本身只改局部mode。读证据/测试可重复；按PR查询避免重复开PR。失败保持Draft并修复，不通过Status或native关系“解锁”。出现超预算先重估独立完整切片，保留父验收。不存在数据迁移/删除，恢复为revert；先保护用户其他改动。
@@ -144,7 +150,7 @@ Decision：保护 #605<-#604和 #604<-#603 native先决链，仍在现有stack�
 
 已按Decision Log取得固定v3视觉同意，进入被授权的产品TDD；以下工程证据状态仍需实际更新。
 
-当前未实施Board产品或TDD；旧plan-only checks不能证明v3分组、视觉、权限或性能。744是新的完整候选预测，必须在 #604实际接口可用后首RED测量重算。完整 #145、#599安装验收及 #606/#607保持原范围；任何临时实现债务另记 `docs/exec-plan/tech-debt-tracker.md`，不删证据维持预算。
+本叶已实施安全Board、共享标题链接、同挂载query与中性partial说明；本地证据不等于远端当前head门禁、独立视觉接受或安装验收。首RED时技术实际45行、可信完整上界718；新增共享notice及其既有合同消费者后技术实际425行，低于800硬限额。完整 #145、#599安装验收及 #606/#607保持原范围；任何临时实现债务另记 `docs/exec-plan/tech-debt-tracker.md`，不删证据维持预算。
 
 ## Bottom Change Note
 
@@ -155,3 +161,5 @@ Decision：保护 #605<-#604和 #604<-#603 native先决链，仍在现有stack�
 2026-11-10 SGT：原完整 #604 因实际806预算门分为 #614基础与详情/设置累计验收；Board实际PR base同步为完成完整 #604 的详情/设置层，仍串行遵守既有 #605 blocked-by #604，不改native规划关系。
 
 2026-11-10 SGT：完整604候选在B8268f7b获本地组合测试与独立代码/视觉接受后，开始Board隔离TDD；原规划Status/native先决不改。最终发布前重放到实际B接受head并按真实base计量；若前层仅文档变化，依生产/fixture指纹记录等价，不冒称在另一head拍照。
+
+2026-11-10 SGT：完成本叶TDD及累计3964条本地测试；真实partial反馈修正共享安全说明，同叶新增其直接合同消费者。独立验收、restack、远端当前head回读与Ready仍由交付协调者执行。
