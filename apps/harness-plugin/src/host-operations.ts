@@ -148,6 +148,7 @@ export const OPERATIONS = defineOperations({
   getPlanningMapping: { mode: 'unary', params: [] },
   setPlanningMapping: { mode: 'unary', params: [...ENVELOPE, param('expectedBindingId', 'BindingId', (value) => nonEmptyString(value, 'bindingId')), param('expectedProjectExternalId', 'ProjectExternalId', (value) => nonEmptyString(value, 'projectExternalId')), param('mapping', 'PlanningMapping', (value) => plainRecord(value, 'mapping'))] },
   getIssueClosingLinks: { mode: 'unary', params: [param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId'))] },
+  refreshIssueDependencies: { mode: 'unary', params: [ENVELOPE[0], param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId'))] },
   refreshIssueClosingLinks: { mode: 'unary', params: [ENVELOPE[0], param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId'))] },
   getDeliveryProjection: { mode: 'unary', params: [param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId')), param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId'))] },
   refreshDeliveryFacts: { mode: 'unary', params: [ENVELOPE[0], param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId')), param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId'))] },

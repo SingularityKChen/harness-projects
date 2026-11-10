@@ -117,11 +117,24 @@ export interface ProviderIssueLinkTarget {
   readonly source: ProviderIssueLinkTargetInput; readonly nativeIssueIdentity: ProviderNativeIdentity; readonly number: number
   readonly repository: { readonly identity: ProviderSourceRepositoryIdentity; readonly name: string }
 }
+export type IssueDependencyDirection = 'blocked_by' | 'blocking'
+export interface ProviderIssueDependency {
+  readonly nativeIdentity: ProviderNativeIdentity
+  readonly repository: { readonly identity: ProviderSourceRepositoryIdentity; readonly name: string }
+  readonly number: number; readonly title: string; readonly url: string; readonly state: 'open' | 'closed'
+}
+export interface ProviderIssueDependenciesInput extends ProviderIssueLinkTargetInput {
+  readonly direction: IssueDependencyDirection; readonly cursor: string | undefined; readonly limit: number
+}
+export interface ProviderIssueDependenciesPage extends ProviderPage<ProviderIssueDependency> {
+  readonly source: ProviderIssueClosingLinksPage['source']; readonly direction: IssueDependencyDirection
+}
 export interface PlanningProvider {
   /** 静态连接实现定义：由实现作者声明，Host 只注入实例与 id（见 `ProviderDefinition`）。 */
   readonly definition: ProviderDefinition
   describeCapabilities(): Promise<ProviderCapabilitySnapshot>
   getIssueLinkTarget?(input: ProviderIssueLinkTargetInput): Promise<ProviderResult<ProviderIssueLinkTarget>>
+  listIssueDependencies?(input: ProviderIssueDependenciesInput): Promise<ProviderResult<ProviderIssueDependenciesPage>>
   listIssueClosingLinks?(input: ProviderIssueClosingLinksInput): Promise<ProviderResult<ProviderIssueClosingLinksPage>>
   getProject(ref: ExternalObjectRef): Promise<ProviderResult<ProviderProject>>
   listPlanningItems(input: ProviderListPlanningItemsInput): Promise<ProviderResult<ProviderPage<ProviderPlanningItem>>>

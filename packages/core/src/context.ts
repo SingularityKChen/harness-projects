@@ -11,6 +11,7 @@ import {
 } from '@harness-projects/domain'
 import { bootstrapWorkspace, PLANNING_SYNC_SCOPE, type BootstrapResult } from './bootstrap.ts'
 import { normalizeScope, rerunPipeline, type DeliveryScope, type DeliveryWriteAttempt } from './delivery.ts'
+import { refreshIssueDependencies, type IssueDependenciesScope, type IssueDependenciesObservation } from './issue-dependencies.ts'
 import { refreshIssueClosingLinks, type IssueClosingLinksScope, type IssueClosingLinksObservation } from './issue-closing-links.ts'
 import { refreshDeliveryFacts, type DeliveryRefreshResult } from './delivery-facts.ts'
 import { reportSyncRoundFailure } from './diagnostics.ts'
@@ -101,6 +102,7 @@ export interface CoreCommands {
   listChangeRequestAssigneeOptions(input: AssigneeOptions): ReturnType<typeof listChangeRequestAssigneeOptions>
   addChangeRequestAssignees(input: AssigneeAdd): Promise<AssigneeResult>
   resumeChangeRequestAssignees(input: AssigneeResume): Promise<AssigneeResult>
+  refreshIssueDependencies(scope: IssueDependenciesScope): Promise<IssueDependenciesObservation>
   refreshIssueClosingLinks(scope: IssueClosingLinksScope): Promise<IssueClosingLinksObservation>
   validateStartWork(workItemId: string): ReturnType<typeof validateStartWork>
   /** 既有引导命令：每次调用独立一轮，不进 `refreshPlanning` 的单飞槽；与刷新并发时由 #305 的轮次栅栏裁决，后开始的一轮胜出。 */
@@ -195,6 +197,7 @@ export async function composeCore(deps: CoreDeps): Promise<CoreApi> {
     commands: {
       bootstrapWorkspace: () => bootstrapWorkspace(context),
       refreshPlanning,
+      refreshIssueDependencies: (scope) => refreshIssueDependencies(context, scope),
       refreshIssueClosingLinks: (scope: IssueClosingLinksScope) => refreshIssueClosingLinks(context, scope),
       listChangeRequestAssigneeOptions: input => listChangeRequestAssigneeOptions(context, input),
       addChangeRequestAssignees: input => addChangeRequestAssignees(context, input),
@@ -235,6 +238,7 @@ export function unavailableCore(reason: string): CoreApi {
     getDeliveryLineage: async () => [],
   }
   const commands: CoreCommands = {
+    refreshIssueDependencies: async (scope) => ({ workItemId: scope.workItemId, blockedBy: { state: 'unsupported', items: [], stale: true }, blocking: { state: 'unsupported', items: [], stale: true } }),
     refreshIssueClosingLinks: (scope) => queries.getIssueClosingLinks(scope),
     bootstrapWorkspace: async () => ({
       ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0, revision: 0, degraded: true, error,

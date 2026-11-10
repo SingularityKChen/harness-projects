@@ -21,6 +21,7 @@ export type CapabilityDomain = (typeof CapabilityDomain)[keyof typeof Capability
 
 /** 稳定 capability key：调用方唯一的按能力分支依据；取值是跨层契约，增删改名即失败。 */
 export const CapabilityKey = {
+  PlanningIssueDependenciesRead: 'planning.issue_dependencies.read',
   PlanningIssueClosingLinksRead: 'planning.issue_closing_links.read',
   PlanningItemRead: 'planning.item.read',
   PlanningItemCreateIssue: 'planning.item.create.issue',

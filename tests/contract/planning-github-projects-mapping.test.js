@@ -178,8 +178,8 @@ test('合成：能力自述只声明已实现的读取（条目与迭代，#133�
   for (const [response, permission] of [[ok(PROJECT), 'available'], [res(401, {}), 'unavailable'], [ok({ data: { node: null } }), 'unavailable'], [new Error('x'), 'degraded']]) {
     const { provider, calls } = scripted([response])
     assert.deepEqual(await provider.describeCapabilities(), {
-      bindingId, capability: { 'planning.issue_closing_links.read': 'available', 'planning.item.read': 'available', 'planning.field.iteration.read': 'available' },
-      permission: { 'planning.issue_closing_links.read': 'degraded', 'planning.item.read': permission, 'planning.field.iteration.read': permission }, observedAt: '2026-09-29T00:00:00.000Z',
+      bindingId, capability: { 'planning.issue_dependencies.read': 'available', 'planning.issue_closing_links.read': 'available', 'planning.item.read': 'available', 'planning.field.iteration.read': 'available' },
+      permission: { 'planning.issue_dependencies.read': 'degraded', 'planning.issue_closing_links.read': 'degraded', 'planning.item.read': permission, 'planning.field.iteration.read': permission }, observedAt: '2026-09-29T00:00:00.000Z',
     })
     assert.equal(calls.length, 1, '两个键共用一次探针')
   }

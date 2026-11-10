@@ -238,3 +238,9 @@ test('creation assignee ABI appends native IDs and rejects malformed input', () 
   assert.deepEqual(ids.parse(['U_2', 'U_1']), ['U_2', 'U_1'])
   for (const value of [null, 'U', [' '], [1], Array(11).fill('U')]) assert.throws(() => ids.parse(value), TypeError)
 })
+
+test('dependency refresh declares actor and work item only, with no relationship write authority', () => {
+  assert.ok(OPERATIONS.refreshIssueDependencies)
+  assert.deepEqual(OPERATIONS.refreshIssueDependencies.params.map(p => p.name), ['actorRef', 'workItemId'])
+  assert.throws(() => parseInput(OPERATIONS.refreshIssueDependencies, { actorRef: { kind: 'user' }, workItemId: 'item', direction: 'parent' }))
+})
