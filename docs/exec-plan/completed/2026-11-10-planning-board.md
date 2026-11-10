@@ -13,7 +13,7 @@
 
 `packages/ui-model/src/work-item-list-view.ts`是读取/权限状态的唯一归约点，`rowView`在redacted早退后复制安全字段；源基线982517c安全行只有显示文字`planningStatus`；前层604计划先暴露稳定规范key，本层开工必须回读其实际接口。`local-table-view.ts`的 `queryVisibleWorkItems`已从安全item计算facets/count并同步清理撤权facet。`packages/ui/src/work-item-list.ts`拥有唯一query及列宽；ProjectPage拥有局部mode、navigation、唯一detail与opener。沿用这条事实链，不再订阅Provider或持有last-good缓存。
 
-计划路径为 `docs/exec-plan/active/2026-11-10-planning-board.md`；分支 `feature/planning-board`、工作树 `.worktrees/planning-board`，PR base `feature/release-detail-settings`。具体参考在 `docs/product/release-visual-target-v3/README.md`及handoff；此前用户仅认可v2版式而v3尚未接受；此观察 Superseded by Decision Log（2026-11-10）的固定v3批准；只有人类点名接受具体v3版本/hash后开始产品实现，#604共享视觉可用后再落地此后继层。独立PR表示可验收/回滚，不表示main-based并发。
+计划路径为 `docs/exec-plan/completed/2026-11-10-planning-board.md`；分支 `feature/planning-board`、工作树 `.worktrees/planning-board`，PR base `feature/release-detail-settings`。具体参考在 `docs/product/release-visual-target-v3/README.md`及handoff；此前用户仅认可v2版式而v3尚未接受；此观察 Superseded by Decision Log（2026-11-10）的固定v3批准；只有人类点名接受具体v3版本/hash后开始产品实现，#604共享视觉可用后再落地此后继层。独立PR表示可验收/回滚，不表示main-based并发。
 
 ## Design / Spec
 
@@ -53,7 +53,7 @@ v3仅消费Host CSS角色，不import theme JS、不注册/覆盖root主题、�
 | `tests/fixtures/execution-drawer-browser.mjs`及`table-geometry-browser.mjs`的必要场景 | 60 |
 | **技术目标** | **752** |
 
-文档文件集为本计划、`docs/README.md`索引，目标180–350且严格<1300；技术必须严格<800，不加依赖/配置/兼容/迁移。若新增必要路径先修订此唯一集合和预测，每次结构变更与首个RED后测实际gross加剩余必需工作，完整可信上界到800先停止重估，不能删撤权/焦点/composed证据或压行。单UI/DTO owner串行写，独立最终验收者接手前显式交接，不与 #604并发写共享单元。不得改Status/native依赖或任何上游Planning事实；公开数据和路径脱敏。
+文档文件集为本计划、`docs/README.md`索引、`docs/development/plugin-bundle-evidence.md`、`docs/product/planning-board-evidence/README.md`与选定静态PNG，目标250–450且严格<1300；技术必须严格<800，不加依赖/配置/兼容/迁移。若新增必要路径先修订此唯一集合和预测，每次结构变更与首个RED后测实际gross加剩余必需工作，完整可信上界到800先停止重估，不能删撤权/焦点/composed证据或压行。单UI/DTO owner串行写，独立最终验收者接手前显式交接，不与 #604并发写共享单元。不得改Status/native依赖或任何上游Planning事实；公开数据和路径脱敏。
 
 ## Plan of Work
 
@@ -103,6 +103,19 @@ v3仅消费Host CSS角色，不import theme JS、不注册/覆盖root主题、�
 
 未参与A/B设计的最终验收者逐条审查issue、真实composed证据、zero writes、redacted/迟到回复与视觉；交接后允许必要refactor，复用Batch2验证，保持单owner/query owner。整理commits、发布检查、严格预算后final push；历史重写先backup ref并走精确lease专家流程。
 
+本地包体在已登记clean父层与候选上使用同一工具/config实测；累计对照设计父层。以下在本叶工作树根运行，先确认三个分支检出对应实际接受版本，路径使用realpath，不使用含`..`的source-root：
+
+    board_root="$(pwd -P)"
+    board_base="$(realpath ../release-detail-settings)"
+    board_design="$(realpath ../release-visual-target)"
+    pnpm --filter @harness-projects/app-harness-plugin exec node "$board_root/apps/harness-plugin/scripts/bundle-report.mjs" --source-root "$board_base" --out "$board_root/.superpowers/bundle-board/base"
+    pnpm --filter @harness-projects/app-harness-plugin exec node "$board_root/apps/harness-plugin/scripts/bundle-report.mjs" --source-root "$board_root" --out "$board_root/.superpowers/bundle-board/head" --base-report "$board_root/.superpowers/bundle-board/base/report.json"
+    pnpm --filter @harness-projects/app-harness-plugin exec node "$board_root/apps/harness-plugin/scripts/bundle-report.mjs" --source-root "$board_design" --out "$board_root/.superpowers/bundle-board/design"
+    pnpm --filter @harness-projects/app-harness-plugin exec node "$board_root/apps/harness-plugin/scripts/bundle-report.mjs" --source-root "$board_root" --out "$board_root/.superpowers/bundle-board/cumulative" --base-report "$board_root/.superpowers/bundle-board/design/report.json"
+
+期望：source.head逐一对应锁定版本、dirty=false，raw/gzip/pack及input/external差值有解释、React仍external，无主题/Loader变化。静态参考与source证据不代替安装验收。
+
+
 复用Batch1命令回读当前head/base、issue、全部checks；GraphQL `repository.pullRequest.reviewThreads`完整分页确认实质线程已解决。实际required Fast Gate通过才用 `gh pr ready`且显式 `-R SingularityKChen/harness-projects`，不merge。计划全部验收后移completed、更新索引；记录 #145完整能力与 #599安装人验仍未成立。
 **回滚**：独立revert本PR移除Board入口；前层视觉及既有List/Delivery继续可用。
 
@@ -118,12 +131,19 @@ Batch2的反例证明规范规划authority、redacted不泄露、共享query/rou
 - [x] (2026-11-10 SGT) 独立重核v3透明列/自然卡高、typed安全分组和前层currentItemId接口；见Global Constraints。
 - [x] (2026-11-10 SGT) Batch1：具名v3已批准；冻结父层 `8268f7ba` 已接受，产品分支从 `558ac7bc`实施。首RED时技术实际45行，完整上界718行；不重放或改写父层。
 - [x] (2026-11-10 SGT) Batch2：模型首RED为缺失分组接口；浏览器首RED为缺失Board入口。安全分组、共享query/唯一详情、真实composed权限/abort旧baseline/zero writes（旧例不证明迟到响应抵达，见round1）、自然卡高与12组响应矩阵已GREEN；37条窄合同、15条共享notice合同、27条浏览器、typecheck与9条边界通过。完整`pnpm test`最终1553 contract + 2185 integration + 226 e2e，共3964条通过；首次contract因两条既有旧说明期望失败，精确更新后重跑通过。
-- [x] (2026-11-10 SGT) Round1：V1短链接22px与I2双重zero说明先RED；最小44px anchor/唯一global zero状态后29条受影响浏览器、52条合同、typecheck与9条边界GREEN。I1保留原abort例，新增真实旧Provider成功响应返回后当前权限复核与轮次栅栏拒绝两例；Provider returned=1、迟到unary真实解析、SQLite及UI持续脱敏，业务写账单为空。新CSS捕获独立归属本轮候选，待独立scoped复评。
-- [ ] (2026-11-10 SGT) Batch3：独立验收/必要重构、当前head回读，Ready不merge。
+- [x] (2026-11-10 SGT) Round1：V1短链接22px与I2双重zero说明先RED；最小44px anchor/唯一global zero状态后29条受影响浏览器、52条合同、typecheck与9条边界GREEN。I1保留原abort例，新增真实旧Provider成功响应返回后当前权限复核与轮次栅栏拒绝两例；Provider returned=1、迟到unary真实解析、SQLite及UI持续脱敏，业务写账单为空。新CSS的40张PNG独立归f23候选；独立scoped代码、视觉、交互及identity均接受，I1/V1/I2已关闭。
+- [x] (2026-11-10 SGT) Batch3：全新独立整体Spec/Quality/Whole capability均APPROVED，无未结finding或必要重构；首次发布dd67a525当前base22db967、required Fast Gate、双向closing605、metadata与完整threads均通过后置Ready。归档后仍按Batch1命令精确回读最终head，未merge。
+
+- [x] (2026-11-10 SGT) 原候选39f73d3与纯文档重放4c6ba51d的480文件等价已独立核验，最终父层为22db967；round1实际候选f23b7d3技术gross493。其29条受影响浏览器、52条合同、clean Board6条、typecheck与9条边界通过；40张新图与480源文件、逐图来源经独立复核，已批准参考未改变。
+- [x] (2026-11-10 SGT) clean实际B父层→f23生产候选client gzip增1143 bytes、完整UI增4058，Host零增量；输入仅新增三个职责清晰模块，external/React保持原合同。正式源码/图像身份与限制见 `docs/product/planning-board-evidence/README.md`。
 
 ## Surprises & Discoveries
 
-旧740预算为v1估算，Superseded by Global Constraints的v3逐项候选（2026-11-10）。本次renderer增加自然卡高/透明列与角色层次空间，技术目标744；前层完成后必须按实际新接口重估，不能假设旧line count有效。typed规范状态改由前层604安全rowView提供，本层仅补Unknown原生显示名，不能按中文格式化文字建列。#604将提供route-derived currentItemId，Board直接复用安全boolean选择；不再另造selection chain。
+旧740预算为v1估算，Superseded by Global Constraints的v3逐项候选（2026-11-10）。本次renderer增加自然卡高/透明列与角色层次空间，技术目标744（Superseded by Global Constraints的752候选及本节最终493实测，2026-11-10）；前层完成后必须按实际新接口重估，不能假设旧line count有效。typed规范状态改由前层604安全rowView提供，本层仅补Unknown原生显示名，不能按中文格式化文字建列。#604将提供route-derived currentItemId，Board直接复用安全boolean选择；不再另造selection chain。
+
+原watch barrier测试会在断连时取消旧流，不能证明frame抵达客户端；该过强解释已在原执行记录原处标Superseded。本轮改用真实同Host/Core的成功Provider响应先hold、既有bootstrap新round确认拒读、再release，实际返回及真实remote解析均可观测。当前权限门与epoch/round门分别拒绝两个真实路径；没有为测试某个内部code改生产保护。
+
+历史39完整3964测试含两条既有 `useLayoutEffect` SSR警告（reflow与plugin artifact的服务端渲染测试），不是零warning；本叶未新增layout effect。M1按真实边界披露，功能失败与既有日志噪声分开；f23仅重复受影响窄验证，不冒称完整suite在该新head重跑。
 
 ## Decision Log
 
@@ -133,7 +153,7 @@ Decision：继续ListPage挂载/query/width owner及typed规范分组，Unknown�
 
 Decision：v3透明列、自然卡高与Host中性selected+独立focus，使用前层scoped currentItemId。Rationale：视觉改进不需要新状态owner或ID泄露。Date/Author：2026-11-10 SGT / independent final spec reviewer。
 
-Decision：保护 #605<-#604和 #604<-#603 native先决链，仍在现有stack后层串行。Rationale：人类仅接受v2版式，不授权改native边或把拆叶A当完整 #604。Date/Author：2026-11-10 SGT / independent final spec reviewer。
+Decision：保护 #605<-#604和 #604<-#603 native先决链，仍在现有stack后层串行。Rationale：原“仅接受v2版式”的观察 Superseded by 本节具名v3批准（2026-11-10）；既有native边仍未获修改授权，拆叶A也不等于完整 #604。Date/Author：2026-11-10 SGT / independent final spec reviewer。
 
 Decision：将 `work-item-app.ts` 纳入本叶唯一文件集（预测2行gross），把共享partial notice改为不推断行新鲜度的中性说明。Rationale：真实Provider不可锚定项→Host→store产生partial，已确认可见行仍为当前值；旧notice却泛称最后已知值，违反本叶truthful partial验收。保持同一view/statusText与row stale owner，不增加Board读状态。Date/Author：2026-11-10 SGT / 交付协调者具名裁决。
 
@@ -142,6 +162,8 @@ Decision：将 `tests/contract/ui-workspace-status.test.js` 纳入本叶唯一�
 Decision：I1初步机制预期“迟到成功值必须返回stale_revision”已 **Superseded by 本轮实际生产观察**：权限仍不可用时，旧值返回后先经 `bootstrap.ts` 当前权限复核得到 `unavailable/failed`；声明恢复但尚未重新确认时，既有epoch/round栅栏才返回 `stale_revision/failed`。Rationale：不为命中特定内部code绕过正确权限门。使用现有UI refresh与既有 `remote.bootstrapWorkspace` 独立轮次，保持同一Host/Core/SQLite/App，不暴露第二Core或生产调试API；只有Provider返回计数及迟到unary真实解析均确认后才断言不回流。旧watch例只证明abort取消。Date/Author：2026-11-10 SGT / 交付协调者按实际证据修正机制裁决。
 
 Decision：V1仅给Board真实标题anchor至少44px块向命中区，保持自然长卡与12px间距；I2由原query owner识别filtered zero并只保留TableControls一处global说明，redacted-only中性空面、真实来源空/未读/拒读仍各自保留。Rationale：不覆盖邻近元数据或把整卡改成button，不增加查询/读取状态owner。Date/Author：2026-11-10 SGT / 独立代码与视觉复评后由交付协调者授权round1。
+
+Decision：只按实际交付事实回填 #604/#605 的ExecPlan归档路径、Batch3，以及 #605 原生open PR对应的Engineering；不写规划Status或任何native blocking边。Rationale：字段指针应指向本次已发布归档文档，工程关联只由当前原生PR事实机械推导；发布后回读字段确认Provider ack，不把Ready当Planning接受。Date/Author：2026-11-10 SGT / 交付协调者。
 
 ## Idempotence and Recovery
 
@@ -155,7 +177,7 @@ Decision：V1仅给Board真实标题anchor至少44px块向命中区，保持自�
 
 已按Decision Log取得固定v3视觉同意，进入被授权的产品TDD；以下工程证据状态仍需实际更新。
 
-本叶已实施安全Board、共享标题链接、同挂载query与中性partial说明；本地证据不等于远端当前head门禁、独立视觉接受或安装验收。首RED时技术实际45行、可信完整上界718；round0最终技术实测424行；round1保留全部安全与视觉范围后技术实测493行，低于800硬限额。完整 #145、#599安装验收及 #606/#607保持原范围；任何临时实现债务另记 `docs/exec-plan/tech-debt-tracker.md`，不删证据维持预算。
+本叶已实施安全Board、共享标题链接、同挂载query与中性partial说明；独立代码、视觉、交互与图像身份接受均已完成；全新独立整体审查及首次发布dd67a525的当前远端门已完成；归档后的精确head仍须按Batch3回读，source证据不等于安装验收。首RED时技术实际45行、可信完整上界718；round0最终技术实测424行；round1保留全部安全与视觉范围后技术实测493行，低于800硬限额。完整 #145、#599安装验收及 #606/#607保持原范围；任何临时实现债务另记 `docs/exec-plan/tech-debt-tracker.md`，不删证据维持预算。
 
 ## Bottom Change Note
 
@@ -170,3 +192,7 @@ Decision：V1仅给Board真实标题anchor至少44px块向命中区，保持自�
 2026-11-10 SGT：完成本叶TDD及累计3964条本地测试；真实partial反馈修正共享安全说明，同叶新增其直接合同消费者。独立验收、restack、远端当前head回读与Ready仍由交付协调者执行。
 
 2026-11-10 SGT：round1修复44px触达和单一筛选零结果说明；保留abort旧例，补真实Provider返回与迟到unary拒绝证据。实际门优先于预设stale code，未扩大到生产安全逻辑改写；旧完整suite的两项既有SSR warning如实披露，不以零失败冒称零warning。
+
+2026-11-10 SGT：I1/V1/I2的独立scoped代码与视觉复评均接受，发布20张静态证据并引用原批准参考；补齐实际父层/候选与累计包体及命令，保留完整3964的真实历史身份和SSR warning，当前远端门与最后整体审查仍待完成。
+
+2026-11-10 SGT：全新独立整体审查、首次dd67发布当前Fast Gate/issue/metadata/threads门通过且已Ready，归档本计划并修正文档索引；最后归档head重新跑远端门，Planning Status和native阻塞关系仍不变。
