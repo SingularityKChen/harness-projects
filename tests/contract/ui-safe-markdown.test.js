@@ -1,6 +1,7 @@
 import '../fixtures/resolution-preflight.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
+import { execFileSync } from 'node:child_process'
 import { test } from 'node:test'
 import { createEntityStore } from '@harness-projects/client'
 import { deriveWorkItemDetailView } from '@harness-projects/ui-model'
@@ -10,10 +11,112 @@ import { wire } from '../fixtures/work-item-wire.mjs'
 const require = createRequire(new URL('../../packages/ui/package.json', import.meta.url))
 const { createElement } = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
-const render = body => renderToStaticMarkup(createElement(WorkItemDetailDrawer, {
-  view: { body: { kind: 'content', title: 'Title', body, planningStatus: '状态', iteration: '—', targetDate: '—', source: 'Source', authority: 'provider', stale: false, refreshing: false } }, onClose() {},
+const render = (body, markdownSource) => renderToStaticMarkup(createElement(WorkItemDetailDrawer, {
+  view: { body: { kind: 'content', title: 'Title', body, markdownSource, planningStatus: '状态', iteration: '—', targetDate: '—', source: 'Source', authority: 'provider', stale: false, refreshing: false } }, onClose() {},
 }))
 const hrefs = html => [...html.matchAll(/href="([^"]*)"/g)].map(match => match[1])
+const github = { namespace: 'github.com/graphql/Repository', repository: 'sample/alpha' }
+
+// Catches missing context, token normalization, unsafe numbers and accepting extra GitHub syntax.
+test('source references link only the two accepted literal forms in the current context', () => {
+  const body = '(#328), sample/beta#329! #9007199254740991'
+  assert.deepEqual(hrefs(render(body, github)), ['https://github.com/sample/alpha/issues/328', 'https://github.com/sample/beta/issues/329', 'https://github.com/sample/alpha/issues/9007199254740991'])
+  assert.match(render(body, github), />sample\/beta#329<\/a>/)
+  for (const source of [undefined, { namespace: 'other/Repository', repository: 'sample/alpha' }, { ...github, repository: '../alpha' }]) assert.deepEqual(hrefs(render(body, source)), [])
+  const rejected = '#0 #01 #9007199254740992 #12a a#12 repo#12 GH-12 @sample deadbee owner@deadbee bad_owner/repo#12 a/../repo#12 /sample/alpha#12 #12/next #12.3'
+  assert.deepEqual(hrefs(render(rejected, github)), [])
+})
+
+// Catches linkifying decoded escapes/entities, code, existing labels, or a text node inside raw HTML.
+test('source references preserve escaped and inert ranges while keeping neighboring literal references', () => {
+  for (const body of [
+    String.raw`\#328 &#35;328 &#x23;328 #328`,
+    String.raw`sample\/alpha#328 sample/alpha\#328 sample/alpha&#35;328 #328`,
+    '`#328 sample/beta#328` #328',
+    '```md\n#328 sample/beta#328\n```\n\n#328',
+    '[#328](https://example.invalid/existing) #328',
+    '[#328][ref] #328\n\n[ref]: https://example.invalid/existing',
+    '![#328](https://example.invalid/image) #328',
+    '<span title="#328"> #328',
+    'before <textarea>#328 sample/beta#328</textarea> #328',
+    'before <title>#328</title> #328',
+    'before <script>#328 `<!--`<script>#328</script>#328</script> #328',
+    'before <!-- #328 --> #328',
+    '<![CDATA[#328]]>\n\n#328',
+  ]) {
+    const expected = body.includes('example.invalid/existing') ? ['https://example.invalid/existing', 'https://github.com/sample/alpha/issues/328']
+      : body.includes('example.invalid/image') ? ['https://example.invalid/image', 'https://github.com/sample/alpha/issues/328'] : ['https://github.com/sample/alpha/issues/328']
+    assert.deepEqual(hrefs(render(body, github)), expected, body)
+  }
+  for (const body of ['before <textarea>#328', '> '.repeat(80) + '#328', '<script>#328</script>', '<![CDATA[#328]]>']) assert.deepEqual(hrefs(render(body, github)), [], body)
+  assert.deepEqual(hrefs(render('<https://github.com/sample/alpha/issues/328> #328', github)), ['https://github.com/sample/alpha/issues/328', 'https://github.com/sample/alpha/issues/328'])
+  assert.deepEqual(hrefs(render('&#97;#328 #328&#49; #328&#46;9 #328', github)), ['https://github.com/sample/alpha/issues/328'])
+})
+
+// Catches treating text offsets as raw source offsets after parser-owned continuation prefixes.
+test('references in multiline Markdown leaves preserve parser text and CRLF source positions', () => {
+  for (const body of ['> first\n> #328', '- first\n  #328', 'line\r\n#328', '> &#35;328\n> #328']) {
+    assert.deepEqual(hrefs(render(body, github)), ['https://github.com/sample/alpha/issues/328'], body)
+  }
+})
+
+// Catches unbounded qualified-token backtracking on ordinary prose; timeout is a generous process guard, not a benchmark.
+test('reference scanning stays bounded on long plain text and preserves repository length limits', () => {
+  const module = new URL('../../packages/ui/src/markdown-references.ts', import.meta.url).href
+  const output = execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import { markdownReferences } from ${JSON.stringify(module)}
+    const source = 'a'.repeat(200000) + ' #328'
+    const tree = { type: 'root', children: [{ type: 'text', value: source, position: { start: { offset: 0 }, end: { offset: source.length } } }] }
+    markdownReferences({ namespace: 'github.com/graphql/Repository', repository: 'sample/alpha' })(tree, { value: source })
+    console.log(JSON.stringify({ plain: tree.children[0].value.length, links: tree.children.filter(node => node.type === 'link').map(node => node.url) }))
+  `], { encoding: 'utf8', timeout: 4000 })
+  assert.deepEqual(JSON.parse(output), { plain: 200001, links: ['https://github.com/sample/alpha/issues/328'] })
+  const maximum = 'a'.repeat(39) + '/' + 'b'.repeat(100)
+  assert.deepEqual(hrefs(render(maximum + '#328', github)), ['https://github.com/' + maximum + '/issues/328'])
+  assert.deepEqual(hrefs(render('a'.repeat(40) + '/repo#328 sample/' + 'b'.repeat(101) + '#328', github)), [])
+})
+
+// Catches ending the inert range at the opening '<' of a raw closing literal, including quoted '>'.
+test('raw-text closing literals stay inert through the full quoted marker while trailing prose links', () => {
+  for (const tag of ['textarea', 'title', 'script', 'style', 'xmp', 'iframe', 'noembed', 'noframes']) {
+    for (const closing of [`</${tag} #2>`, `</${tag}\n#2>`, `</${tag} x="#2">`, `</${tag} x="> #2">`, `</${tag} x='> #2'>`]) {
+      const body = `before <${tag}>#1${closing} #3`
+      assert.deepEqual(hrefs(render(body, github)), ['https://github.com/sample/alpha/issues/3'], body)
+    }
+  }
+})
+
+// Catches HTML leaves inside quoted raw closing attributes reopening or shortening the inert interval.
+test('raw closing attributes keep nested HTML inert and restore real trailing references', () => {
+  for (const tag of ['textarea', 'title', 'script', 'style', 'xmp', 'iframe', 'noembed', 'noframes']) {
+    for (const [closing, number] of [
+      [`</${tag} x="<title>#2"> #3`, 3],
+      [`</${tag} x="<title>#2</title #3> #4"> #5`, 5],
+      [`</${tag} x='<title>#2</title #3> #4'> #5`, 5],
+      [`</${tag} x="<title>#2"> <textarea>#3</textarea> #4`, 4],
+    ]) {
+      const body = `before <${tag}>#1${closing}`
+      assert.deepEqual(hrefs(render(body, github)), ['https://github.com/sample/alpha/issues/' + number], body)
+    }
+  }
+  const comment = render('before <textarea>#1</textarea x="<!--INERT #2"> #3 --> <!--HIDE--> #4', github)
+  assert.deepEqual(hrefs(comment), ['https://github.com/sample/alpha/issues/4'])
+  assert.ok(comment.includes('&lt;!--INERT #2'))
+  assert.doesNotMatch(comment, /HIDE/)
+})
+
+// Catches testing surrogate halves instead of complete letters/numbers/marks around either reference form.
+test('supplementary Unicode and decoded entity word boundaries stay plain while emoji punctuation links', () => {
+  const adjacent = ['中', '𠀀', '𝟡', '𝅥', '&#x20000;', '&#131072;', '&#x1D7E1;', '&#120801;', '&#x1D165;', '&#119141;']
+  for (const token of ['#328', 'sample/beta#328']) {
+    const body = adjacent.map(character => `${character}${token} ${token}${character}`).join(' ') + ' (#329)'
+    assert.deepEqual(hrefs(render(body, github)), ['https://github.com/sample/alpha/issues/329'], body)
+  }
+  assert.deepEqual(hrefs(render('😀#330 #331😀 &#x1F600;#332 #333&#128512;', github)), [
+    'https://github.com/sample/alpha/issues/330', 'https://github.com/sample/alpha/issues/331',
+    'https://github.com/sample/alpha/issues/332', 'https://github.com/sample/alpha/issues/333',
+  ])
+})
 
 // Catches replacing the presenter with plain text, omitting GFM, or normalizing code/Unicode.
 test('detail renders semantic GFM with literal code, Unicode and empty content', () => {

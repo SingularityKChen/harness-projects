@@ -11,6 +11,7 @@
     "@harness-projects/client": "workspace:*",
     "@harness-projects/domain": "workspace:*",
     "@harness-projects/ui-model": "workspace:*",
+    "micromark-util-decode-string": "2.0.1",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1"
   },

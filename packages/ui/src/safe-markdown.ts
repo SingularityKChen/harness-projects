@@ -5,6 +5,7 @@ import Markdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MARKDOWN_STYLES } from './markdown-presentation.ts'
+import { markdownReferences, type MarkdownNode, type MarkdownSource } from './markdown-references.ts'
 
 /** 不使用 base，避免把相对路径升级为当前 Host 的导航；URL 解析前拒绝浏览器会忽略的字符。 */
 function safeURL(value: string | undefined): string | undefined {
@@ -15,7 +16,6 @@ function safeURL(value: string | undefined): string | undefined {
   } catch { return undefined }
 }
 
-interface MarkdownNode { readonly type: string; readonly tagName?: string; children?: MarkdownNode[]; value?: string; readonly position?: { readonly start: { readonly offset?: number | undefined }; readonly end: { readonly offset?: number | undefined } } | undefined }
 const MAX_STRUCTURE_DEPTH = 64
 
 /** remark 阶段先迭代检查；超限时替换为原文 code 节点，避免后续递归 HAST/React 转换与深层 DOM。 */
@@ -33,7 +33,7 @@ function limitStructureDepth(): (tree: MarkdownNode, file: { readonly value: unk
   }
 }
 
-interface HTMLLiteralContext { rawTag: string | undefined; scriptState?: 'normal' | 'escaped' | 'double'; lastOffset?: number }
+interface HTMLLiteralContext { rawTag: string | undefined; scriptState?: 'normal' | 'escaped' | 'double'; lastOffset?: number; referenceEnd?: number }
 
 /** 有限 script-data 状态；双重转义中的 </script> 只退回 escaped，不结束元素。 */
 function scriptEnd(value: string, index: number, context: HTMLLiteralContext): number {
@@ -64,6 +64,18 @@ function rawTextEnd(value: string, index: number, context: HTMLLiteralContext): 
   const closing = new RegExp('</' + context.rawTag + '(?=[\\t\\n\\f\\r />])', 'ig')
   closing.lastIndex = index
   return closing.exec(value)?.index ?? -1
+}
+
+/** 已识别的 raw closing marker 整体惰性；引号里的 > 不结束标记，不解释其他 HTML。 */
+function closingLiteralEnd(source: string, index: number): number {
+  let quote = ''
+  for (; index < source.length; index++) {
+    const character = source[index]!
+    if (quote) { if (character === quote) quote = '' }
+    else if (character === '"' || character === "'") quote = character
+    else if (character === '>') return index + 1
+  }
+  return source.length
 }
 
 /** 只扫描 parser 已识别的 HTML；raw-text/RCDATA、CDATA 和属性仍是惰性字面量。 */
@@ -117,13 +129,25 @@ function hideHTMLComments(): (tree: MarkdownNode, file: { readonly value: unknow
     const pending: { node: MarkdownNode; context: HTMLLiteralContext | undefined }[] = [{ node: tree, context: undefined }]
     while (pending.length > 0) {
       const { node, context } = pending.pop()!
-      if (node.type === 'html' && node.value !== undefined) {
-        const start = node.position?.start.offset, end = node.position?.end.offset
-        // Gaps may advance/end existing raw text; only HTML nodes may OPEN another context.
-        if (context?.rawTag !== undefined && context.lastOffset !== undefined && start !== undefined) {
-          if (rawTextEnd(source.slice(context.lastOffset, start), 0, context) !== -1) context.rawTag = undefined
+      const start = node.position?.start.offset, end = node.position?.end.offset
+      if (context?.rawTag !== undefined && context.lastOffset !== undefined && start !== undefined) {
+        const closing = rawTextEnd(source.slice(context.lastOffset, start), 0, context)
+        if (closing !== -1) {
+          context.referenceEnd = closingLiteralEnd(source, context.lastOffset + closing)
+          context.rawTag = undefined
         }
-        node.value = withoutCommentSpans(node.value, context ?? { rawTag: undefined })
+        context.lastOffset = start
+      }
+      if (context?.rawTag !== undefined && node.type === 'text' && start !== undefined && end !== undefined) {
+        const closing = rawTextEnd(source.slice(start, end), 0, context)
+        node.referenceStart = closing === -1 ? end : closingLiteralEnd(source, start + closing)
+        if (closing !== -1) { context.referenceEnd = node.referenceStart; context.rawTag = undefined }
+        context.lastOffset = end
+      }
+      if (node.type === 'text' && context?.referenceEnd !== undefined) node.referenceStart = Math.max(node.referenceStart ?? 0, context.referenceEnd)
+      if (node.type === 'html' && node.value !== undefined) {
+        // A parser HTML token beginning inside the closing literal cannot open another raw context.
+        if (start === undefined || start >= (context?.referenceEnd ?? 0)) node.value = withoutCommentSpans(node.value, context ?? { rawTag: undefined })
         if (context && end !== undefined) context.lastOffset = end
       }
       // Phrasing siblings share context; independent Markdown blocks and table cells do not.
@@ -160,11 +184,11 @@ const components: Components = {
   table: ({ children }) => createElement('div', { className: 'hp-markdown-table', tabIndex: 0, role: 'region', 'aria-label': '正文表格（可横向滚动）' }, createElement('table', null, children)),
 }
 
-/** 唯一入参是已获准的 body；不接触 Provider、raw store 或来源 URL。 */
-export function SafeMarkdown({ body }: { readonly body: string }): ReactElement {
+/** 当次安全详情 props；不接触 Provider、raw store 或来源 URL。 */
+export function SafeMarkdown({ body, markdownSource }: { readonly body: string; readonly markdownSource?: MarkdownSource | undefined }): ReactElement {
   return createElement('div', { className: 'hp-markdown' },
     createElement('style', null, MARKDOWN_STYLES),
-    createElement(Markdown, { remarkPlugins: [remarkGfm, limitStructureDepth, hideHTMLComments], components,
+    createElement(Markdown, { remarkPlugins: [remarkGfm, limitStructureDepth, hideHTMLComments, [markdownReferences, markdownSource]], components,
       allowedElements: ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'a', 'img', 'input', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'em', 'strong', 'del', 'br', 'hr'],
       urlTransform: value => safeURL(value) ?? '', children: body }))
 }

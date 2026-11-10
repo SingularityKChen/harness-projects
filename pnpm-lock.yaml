@@ -284,6 +284,9 @@ importers:
       '@harness-projects/ui-model':
         specifier: workspace:*
         version: link:../ui-model
+      micromark-util-decode-string:
+        specifier: 2.0.1
+        version: 2.0.1
       react-markdown:
         specifier: 10.1.0
         version: 10.1.0(@types/react@18.3.31)(react@18.3.1)
