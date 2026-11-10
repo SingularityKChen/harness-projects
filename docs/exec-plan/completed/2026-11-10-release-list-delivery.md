@@ -1,9 +1,9 @@
 # 共享工作区、List 与 Delivery 视觉落地 ExecPlan
 
-> 状态：Active；已批准设计，待 A 能力实施与验收
+> 状态：Completed；代码、视觉、包体与当前托管门通过，PR Ready；归档提交仍按规则回读
 > 创建：2026-11-10
 > 规范：根 `PLANS.md`；关联 #614、#604、#603
-> 正式路径：`docs/exec-plan/active/2026-11-10-release-list-delivery.md`
+> 正式路径：`docs/exec-plan/completed/2026-11-10-release-list-delivery.md`
 
 ## Purpose / Big Picture
 
@@ -40,7 +40,7 @@ Delivery保留真实仓库选择、刷新本页、独立读取状态/页码/总�
 | 集合 | 路径 | gross预测 |
 |---|---|---:|
 | 产品 | `workspace-presentation.ts`、`workspace-status.ts`、`work-item-project.ts`、`work-item-app.ts`、`work-item-list.ts`、`table-presentation.ts`、`table-controls.ts`、`list-states.ts`、`delivery-overview.ts`、`execution-presentation.ts`、`table-columns.ts`、`column-resize.ts`；`packages/ui-model/src/work-item-list-view.ts` | 565 |
-| contract | `tests/contract/ui-work-item-list.test.js`、`tests/contract/ui-work-item-list-view.test.js`、`tests/contract/ui-column-resize.test.js`、`tests/contract/ui-workspace-status.test.js` | 70 |
+| contract | `tests/contract/ui-work-item-list.test.js`、`tests/contract/ui-work-item-list-view.test.js`、`tests/contract/ui-column-resize.test.js`、`tests/contract/ui-workspace-status.test.js`、`tests/contract/ui-table-controls.test.js` | 78 |
 | browser | `tests/browser/workspace-header.test.js`、`tests/browser/table-geometry.test.js`、`tests/browser/table-query.test.js`、`tests/browser/table-rq-integration.test.js`、`tests/browser/delivery-overview.test.js`、`tests/browser/workspace-read.test.js`、`tests/browser/table-resize.test.js`、`tests/browser/table-resize-regressions.test.js` | 155 |
 | fixture | `tests/fixtures/table-geometry-browser.mjs`、`tests/fixtures/composed-workspace-browser.mjs` | 34 |
 | 文档 | 本计划、`docs/README.md`、`docs/development/plugin-bundle-evidence.md`的本叶真实结论；协调者交接后打包`docs/product/release-list-delivery-evidence/README.md`及4–6张selected静态PNG（真实截图/对照，无生成器或实现代码） | 单PR严格<1300 |
@@ -114,14 +114,19 @@ Batch1证明实际缺口与准入，Batch2证明List/Delivery与共享角色的�
 
 ## Progress
 
+- [x] (2026-11-10 SGT) 首次Hosted Verify旧option标签契约修复：当前84254b44 source单文件RED（1/2）→GREEN（2/2）；完整pnpm test为contract1550、integration2185、e2e226全通过，各层0 fail/skip/cancelled/todo。只改契约及本计划，新增test提交，不amend已推HEAD。
+
 - [x] (2026-11-10 SGT) v3已批准；完整806停止门确认，保持完整父scope并选定A→B承载。
 - [x] (2026-11-10 SGT) 独立架构/产品拆分审阅后固定唯一文件集、接口与预测，见Global Constraints。
 - [x] (2026-11-10 SGT) Batch1：协调者已实读#614/#611双向关联与准确base；B准备留在依赖叶。真实Header入口selection RED为`aria-current: null != true`；修正规范key用例排序后，以临时移除key归约行取得独立RED，恢复后GREEN。
 - [ ] (2026-11-10 SGT) Batch2：完整A实现、本地86项contract与61项browser已GREEN（零skip/pageerror），typecheck及boundaries已通过；最终截图按冻结源码重启carrier生成并交接，独立设计/代码接受仍由协调者完成。
 - [ ] (2026-11-10 SGT) 独立整分支代码/spec/质量在`ac4980b`获PASS；完整视觉评审Request changes两项P2（F1填值后目的、F2窄summary密度及Host slot）；本轮F1/F2真实RED→GREEN，23/23相关browser及13/13 renderer contract通过、typecheck通过；新head scoped复核仍待协调者。
-- [ ] (2026-11-10 SGT) Batch3：独立验收、clean bundle、最终远端回读及Ready。
+- [x] (2026-11-10 SGT) Batch3本地验收：独立代码/视觉ACCEPT，15源/fixture及88PNG复核，clean实际base/head同工具链bundle通过；6张静态证据自包含公开包已准备。
+- [x] (2026-11-10 SGT) Batch3发布门：当前代码/证据head cde887f7的required Fast Gate及相关CI通过，双向614/611与全量线程回读通过，已Ready不merge；归档后最终head仍须重复当前门。
 
 ## Surprises & Discoveries
+
+首次公开head `84254b44` 的Hosted Browser全套通过，但Verify暴露旧`ui-table-controls`契约仍匹配无字段前缀option。当前source单文件复现RED后只校准精确可视文字；native value/selected、readable count、默认/重置及noMatches安全判断保留。该CI新真实失败支持在当前A source运行一次完整pnpm test，生产/fixture和88张图不变。
 
 B累计全套暴露旧modal生命周期契约仍假定同workspace换binding保持旧route；在A单例复现undefined≠空notice的RED后，仅更新既有contract，经真实navigation.open重开后继续证明degraded/recovery/timestamp与缺binding历史清除，不改变产品scope代码。新增该文件到唯一contract集合；此前86/61不包含这条旧契约，不冒称已覆盖。
 
@@ -173,12 +178,20 @@ A拥有安全row的规范key、过scope的可选currentItemId、受控reset-widt
 
 ## Outcomes & Retrospective
 
+首次Hosted Verify在`84254b44`暴露旧UI-table-controls契约；精确option前缀、value/selected、搜索目的、default/reset与原安全判断校准后，本地完整pnpm test一次通过3961项（contract1550、integration2185、e2e226），各层零失败及skip。此为当前A source本地证据，新head Hosted结果由协调者最终push后回读。整个叶技术714、文档257（以最终numstat为准），剩余必需技术0+77修复余量，上界791<800；生产/fixture与88PNG指纹不变，不重拍或改产品。
+
 独立复核后的F1/F2修复以`ac4980bd2c404c3d3521f2d1610feb61fa420073`为准确fix base；此前86/61及整分支代码PASS继续归属旧head。F1/F2及旧scope契约校准后整个叶实际技术706、文档185（随后文档记录按最终numstat复算），剩余必需技术0+77修复余量，上界783<800；无新源文件或功能延期。本轮23/23相关browser、13/13 renderer、15/15 workspace-status契约及typecheck通过；另以真实binding路由browser复核scope契约，未重跑无关86/61全集。填值控件内目的与normal y196保留、窄summary按真实容器同排、正常短行从233px约收敛至153px且200%自然增长。只运行填值/窄slot判别与相关query/Delivery/header/geometry/RQ回归，不把旧接受移作新head结论；最终本轮head、实际gross、重启carrier截图hash及scoped复核记录写入交接报告。
 
 Batch1及A工程实现已完成本地闭环，首轮`ac4980b`候选树实际技术gross为615：产品302、browser220、contract48、fixture45，包含相对准确设计base的全部新增+删除；没有新增未跟踪产品或配置。首轮以必要实施余量0及77修复余量计，可信上界692，严格小于800；文档仍低于1300。独立验收若再改变源码，须重新按整个叶差分计量，不把旧预测或已跑日志当作新候选证据。
 
-最终本地命令得到86/86 contract、61/61 browser（含完整几何/resize、真实Host读取、Delivery、旧detail/settings/执行消费者），零fail/skip/pageerror；typecheck与boundaries9/9。实测1440/1200表铺满1392/1152，Host44、表头y195.984/44、短行58，真实numberLabel及工程“无”保留，selected只由当前授权route呈现。源码合成before/after/reference和状态矩阵为本地证据，不等于安装Host接受；代码/视觉独立review、clean bundle、静态证据打包与最终远端门由协调者在交接后完成，未声明Ready或关闭#614/#604。
+原首轮观测（Superseded by 本节F1/F2及旧scope契约复验记录，2026-11-10）：本地命令得到86/86 contract、61/61 browser（含完整几何/resize、真实Host读取、Delivery、旧detail/settings/执行消费者），零fail/skip/pageerror；typecheck与boundaries9/9。实测1440/1200表铺满1392/1152，Host44、表头y195.984/44、短行58，真实numberLabel及工程“无”保留，selected只由当前授权route呈现。源码合成before/after/reference和状态矩阵为本地证据，不等于安装Host接受；代码/视觉独立review、clean bundle、静态证据打包与最终远端门由协调者在交接后完成，未声明Ready或关闭#614/#604。
+
+最终交付：本叶技术gross714，公开6张同场景静态对照、生产源/fixture/88PNG指纹及真实包体差值；独立代码、视觉与两次test-only复核均ACCEPT。完整本地3961测试通过；初次托管旧option文字契约失败已按持久可视字段目的订正，当前cde887f7相关CI及required Fast Gate通过后Ready。源视觉/安装验收仍分开；#604后层与#605均未由本叶冒充完成。无新增技术债。
 
 ## Bottom Change Note
 
 2026-11-10 SGT：记录A本地实现、真实RED修复、scope与几何裁决及最终工程证据；静态PNG发布打包交协调者。806停止门后创建自包含A计划；保留完整604，将execution责任归A，固定安全接口、真实对照、旧消费者回归及各层当前发布门。记录已创建A issue #614及既有关系保护；后续易失状态仍按当前远端回读。
+
+2026-11-10 SGT：协调者核验最终4c5eff2a的代码、视觉及test-only独立接受；记录真实clean包体与6张静态公开证据，保持当前远端Ready门未完成的诚实状态。
+
+2026-11-10 SGT：当前发布门通过并Ready后归档，更新索引/Project路径；保留归档amend后精确head再次回读的规则，不merge或改变Planning状态。
