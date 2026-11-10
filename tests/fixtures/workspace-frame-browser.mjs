@@ -19,9 +19,20 @@ import { wire, redacted, T } from './tests/fixtures/work-item-wire.mjs'
 
 export function scene(scenario = 'content', detail = false) {
   const store = createEntityStore()
-  const long = scenario === 'long', numbers = scenario === 'numbers'
+  const long = scenario === 'long', numbers = scenario === 'numbers', reference = scenario === 'reference'
   const number = (scopeName) => ({ sourceNumber: { sourceName:'GitHub',scopeIdentity:{namespace:'github.com/graphql/Repository',id:'opaque-'+scopeName},scopeName,number:449 } })
-  const entities = scenario === 'empty' ? [] : [
+  const entities = reference ? [
+    [554, '为新会话保留可恢复的执行身份', 'in_progress', 'Core 恢复', '2026-11-13'],
+    [604, '统一工作区视觉与导航层次，并在窄屏下保留真实来源与可访问状态', 'in_progress', '现代看板', '2026-11-12'],
+    [605, '呈现真实规划数据的只读看板', 'todo', '现代看板'],
+    [603, '确认本次发布的具体视觉目标', 'todo', '现代看板', '2026-11-11'],
+    [415, '删除发布前旧数据修复路径', 'todo', 'Core 恢复', '2026-11-14'],
+    [416, '明确观察视图与事件表的真实消费者', 'unknown', 'Core 恢复'],
+    [594, '显示来源原生父项与子议题', 'done', '现代看板', '2026-11-10'],
+  ].map(([number, title, planningStatus, iterationTitle, targetDate], index) => wire('item-' + index, { planningStatus,
+    content: { title, body: '在同一工作区阅读规划、查看交付，并始终知道信息来自哪里。', sourceNumber: { sourceName: 'GitHub', scopeIdentity: { namespace: 'github.com/graphql/Repository', id: 'reference' }, scopeName: 'example/project', number } },
+    planningFields: { iterationTitle, targetDate, ...(number === 416 ? { statusName: '待确认' } : {}) },
+  })) : scenario === 'empty' ? [] : [
     wire('ent-aa', { content: { ...(numbers ? number('example/one') : {}), title: long ? '长标题无空格Title'.repeat(24) : '可见工作项', body: long ? '长正文WithoutSpaces'.repeat(200) : '正文-ent-aa' },
       planningFields: { iterationTitle: long ? 'IterationWithoutSpaces'.repeat(10) : 'E1 Sprint 1', targetDate: '2026-09-24' }, derived: ['ci_failing', 'execution_failed'] }),
     ...(numbers ? [wire('ent-cc',{content:{title:'另一仓库工作项',...number('example/two')}}),wire('ent-dd',{content:{title:'Draft工作项 Discuss GitHub example/one#449 GitHub missing/repo#449',externalKind:'draft'}})] : []),
@@ -30,12 +41,13 @@ export function scene(scenario = 'content', detail = false) {
   store.applyBaseline({ revision: 0, entities, source: { revision: 0, freshness: 'fresh', authority: 'provider' } })
   if (scenario === 'stale') store.markAllStale()
   const read = scenario === 'loading' ? undefined : {
-    workspace: { id: 'ws-1', name: long ? '长工作区名称Workspace'.repeat(8) : '浏览器工作区' }, store,
+    workspace: { id: 'ws-1', name: reference ? 'Harness Projects / 交付工作台' : long ? '长工作区名称Workspace'.repeat(8) : '浏览器工作区' }, store,
+    ...(reference ? { planningSource: { bindingId: 'bind-1', name: 'GitHub Projects' } } : {}),
     connection: { connected: scenario !== 'offline' }, lastUpdatedAt: T, reconciledAt: '2026-10-01T07:59:00.000Z',
     capabilities: [{ key: 'planning.item.read', access: 'available' }],
   }
   const source = { subscribe: () => () => {}, getSnapshot: () => read }
-  const initialPath = scenario === 'unresolved' ? '/projects/other/items' : detail ? '/projects/ws-1/items/ent-aa' : undefined
+  const initialPath = scenario === 'unresolved' ? '/projects/other/items' : detail ? '/projects/ws-1/items/' + (reference ? 'item-1' : 'ent-aa') : undefined
   const refreshSource = { subscribe: () => () => {}, getSnapshot: () => ({ pending: false }), refresh: async () => {} }
   // useSyncExternalStore 的 snapshot 在发布之间稳定，不能每次返回新对象。
   const refresh = { pending: false }
@@ -132,12 +144,12 @@ export function mount(element, scenario, params = new URLSearchParams()) {
 
 `
 
-export function buildWorkspaceFrameBundle() {
+export function buildWorkspaceFrameBundle(options = {}) {
   return build({ stdin: { contents: ENTRY, resolveDir: repoRoot }, absWorkingDir: repoRoot,
-    bundle: true, platform: 'browser', format: 'cjs', write: false, metafile: true, external: ['react'], logLevel: 'silent' })
+    bundle: true, platform: 'browser', format: 'cjs', write: false, metafile: true, external: ['react'], logLevel: 'silent', ...options })
 }
 
-const page = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workspace frame fixture</title>
+let page = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workspace frame fixture</title>
 <style>
 /* Host token 的本地主题输入，非安装 Host。font query 以百分比提供等效文字放大。 */
 :root { --dsw-focus-ring-color:#4176e6; --dsw-focus-ring-width:2px; --dsw-alias-state-business-primary:#4176e6; color-scheme:light; color:#20242c; background:#fff; font:15px/1.5 system-ui,sans-serif }
@@ -151,9 +163,16 @@ const app=document.getElementById('app');const width=Number(params.get('rootWidt
 module.exports.mount(app,params.get('scenario')||'content',params)
 </script></body></html>`
 
-export async function startWorkspaceFrameServer(port = 0) {
+const { palette } = JSON.parse(await readFile(new URL('../../docs/product/release-visual-target-v3/host-role-palette-v3.json', import.meta.url), 'utf8'))
+const roleKeys = { 'bg-base':'bg', 'bg-layer-1':'surface', 'label-primary':'text', 'label-secondary':'muted', 'border-l2':'line', 'border-l4':'cardBorder', 'interactive-bg-hover-solid':'soft', 'bg-multi-select':'select', 'button-primary-fill':'primary', 'label-primary-foreground':'onPrimary', 'button-primary-hover':'primaryHover', 'link':'accent' }
+page = page.replace('</style>', Object.entries(palette).map(([mode, values]) => ':root[data-roles=reference][data-theme=' + mode + ']{font-size:14px;' + Object.entries(roleKeys).map(([role, key]) => '--dsw-alias-' + role + ':' + values[key]).join(';') + '}').join('') + '</style>')
+page = page.replace('<script src="/react.js">', '<script>document.documentElement.dataset.roles=new URLSearchParams(location.search).get("roles")||"fallback"</script><script src="/react.js">')
+
+page = page.replace('<div id="app">', '<div id="capture-host" hidden>Harness Projects　 / 交付工作台</div><div id="app">').replace('<script src="/react.js">', '<script>if(new URLSearchParams(location.search).has("capture")){const host=document.getElementById("capture-host");host.hidden=false;host.style.cssText="height:44px;box-sizing:border-box;padding:12px 24px;font:12px/20px system-ui;border-bottom:1px solid var(--dsw-alias-border-l2,CanvasText)";document.getElementById("app").style.height="calc(100dvh - 44px)"}</script><script src="/react.js">')
+
+export async function startWorkspaceFrameServer(port = 0, options = {}) {
   const vendor = (id, file) => readFile(path.join(path.dirname(uiRequire.resolve(id)), 'umd', file), 'utf8')
-  const [bundle, react, reactDOM, jsxText] = await Promise.all([buildWorkspaceFrameBundle(), vendor('react', 'react.development.js'), vendor('react-dom/client', 'react-dom.development.js'), jsxRuntimeScript()])
+  const [bundle, react, reactDOM, jsxText] = await Promise.all([buildWorkspaceFrameBundle(options), vendor('react', 'react.development.js'), vendor('react-dom/client', 'react-dom.development.js'), jsxRuntimeScript()])
   const scripts = { '/jsx-runtime.js': jsxText, '/react.js': react, '/react-dom.js': reactDOM, '/bundle.js': bundle.outputFiles[0].text }
   const server = createServer((request, response) => {
     const route = new URL(request.url, 'http://fixture.invalid').pathname

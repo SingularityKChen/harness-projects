@@ -21,19 +21,19 @@ export function WorkspaceSettings({ children }: { readonly children: readonly [R
 }
 const SETTINGS_STYLES = `
 .hp-settings { container:hp-settings / inline-size; inline-size:100%; min-inline-size:0 }
-.hp-settings-layout { display:grid; grid-template-columns:10rem minmax(0,46rem); gap:2rem; align-items:start }
+.hp-settings-layout { display:grid; grid-template-columns:11.428571rem minmax(0,51.428571rem); gap:2.285714rem; align-items:start }
 .hp-settings-compact { display:none }
 .hp-settings-chooser { flex:1 1 6em; min-inline-size:0; inline-size:100%; min-block-size:44px; padding:.5rem; border:1px solid var(--hp-control-border); border-radius:var(--hp-radius); color:inherit; background:var(--hp-surface); font:inherit; line-height:1.5 }
 .hp-settings-nav { display:flex; flex-direction:column; gap:.25rem }
 .hp-settings-nav button { text-align:start; border-color:transparent; background:transparent }
-.hp-settings-nav button[aria-current] { background:var(--hp-surface); border-color:var(--hp-border); font-weight:650 }
+.hp-settings-nav button[aria-current] { background:var(--hp-selected); border-color:transparent; box-shadow:inset 2px 0 var(--hp-secondary); font-weight:600 }
 .hp-settings-tasks,.hp-settings-panel { min-inline-size:0 }
 .hp-settings-panel[hidden],.hp-settings-panel [hidden] { display:none }
-.hp-settings-panel > header h3 { margin:0; font-size:1.15rem; line-height:1.4 }
-.hp-settings-panel > header p { margin-block:.5rem 1.5rem; opacity:.8 }
+.hp-settings-panel > header h3 { margin:0; font-size:1.285714rem; line-height:1.5 }
+.hp-settings-panel > header p { margin-block:.5rem 1.5rem; color:var(--hp-secondary) }
 .hp-settings-panel .hp-form { margin-block:0; padding-block:0; border:0 }
 .hp-settings-panel .hp-form > h3 { display:none }
-.hp-settings-panel .hp-action-primary { background:CanvasText; color:Canvas; border-color:CanvasText }
+.hp-settings-tasks > div:first-child > p { color:var(--hp-secondary); font-size:.857143rem; line-height:1.5; margin-block:0 var(--hp-space-6) }
 @container hp-settings (max-width:44rem) {
   .hp-settings-layout { grid-template-columns:minmax(0,1fr); gap:.75rem }
   .hp-settings-compact { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; white-space:nowrap }

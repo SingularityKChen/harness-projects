@@ -162,7 +162,7 @@ test('expand and restore preserve current reading progress instead of old mode o
     const body = page.locator('.hp-detail-body')
     assert.equal(await body.evaluate(el => el.scrollTop), 0)
     await toggle(page, false).click(); await settle(page)
-    await body.click({ position: { x: 20, y: 30 } })
+    await body.getByRole('button', { name: '刷新规划', exact: true }).click()
     await page.keyboard.press('PageDown')
     await page.waitForFunction(() => document.querySelector('.hp-detail-body').scrollTop > 0)
     // Wait for the keyboard scroll to finish, so toggle captures the actual current offset.
@@ -222,7 +222,7 @@ test('preview and expanded fit the clipped Host rectangle across widths, short h
         assert.equal(report.mode, expanded ? 'expanded' : 'preview', label)
         assert.ok(Math.abs(report.dialog.top - report.root.top) < 1 && Math.abs(report.dialog.bottom - report.root.bottom) < 1, label)
         assert.ok(report.dialog.left >= report.root.left && report.dialog.right <= report.root.right + 1, label)
-        const previewWidth = Math.min(report.root.width, Math.max(22 * font, Math.min(.38 * report.root.width, 32 * font)))
+        const previewWidth = Math.min(report.root.width, Math.max(22 * font, Math.min(.38 * report.root.width, 36.428571 * font)))
         assert.ok(Math.abs(report.dialog.width - (expanded ? report.root.width : previewWidth)) < 1, label)
         assert.ok(report.bodyRoom >= report.line, label)
         for (const action of report.actions) assert.ok(action.left >= report.dialog.left && action.right <= report.dialog.right + 1 && action.width >= 44 && action.height >= 44, label)
@@ -250,5 +250,65 @@ test('preview and expanded fit the clipped Host rectangle across widths, short h
       const r = el.getBoundingClientRect()
       return { left:r.left,top:r.top,right:r.right,bottom:r.bottom,mode:el.dataset.detailMode }
     }), { left:0,top:0,right:440,bottom:480,mode:'expanded' }, 'Host scroll/resize clips all four edges without resetting expanded mode')
+  })
+})
+
+// Catches detached number/status hierarchy and metadata flattened into unlabelled prose.
+test('safe detail header keeps source number, title and native planning status before semantic metadata', async t => {
+  const server = await startWorkspaceFrameServer(); t.after(() => server.close())
+  const browser = await chromium.launch(); t.after(() => browser.close())
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+  await page.goto(server.url + '/?scenario=reference&detail=1&roles=reference')
+  const dialog = page.getByRole('dialog'); await dialog.waitFor()
+  const header = dialog.locator('.hp-detail-header')
+  assert.match(await header.textContent(), /GitHub.*example\/project.*604.*统一工作区.*进行中/s)
+  assert.equal(await dialog.locator('dl dt').filter({ hasText: '迭代：' }).count(), 1)
+  assert.equal(await dialog.locator('dl dd').filter({ hasText: '现代看板' }).count(), 1)
+  assert.equal(await dialog.locator('h2').count(), 1)
+  const type = await dialog.locator('.hp-detail-title').evaluate(el => { const s = getComputedStyle(el); return [s.fontSize, s.lineHeight] })
+  assert.equal(type[0], '22px'); assert.ok(Math.abs(parseFloat(type[1]) - 30) < .01)
+  assert.ok(Math.abs((await dialog.boundingBox()).width - 510) < 1)
+})
+
+async function narrowReference(t, check) {
+  const server = await startWorkspaceFrameServer(); t.after(() => server.close())
+  const browser = await chromium.launch(); t.after(() => browser.close())
+  const page = await browser.newPage()
+  for (const [font, width] of [[28, 320], [30, 320], [14, 390]]) for (const height of [900, 320]) {
+    await page.setViewportSize({ width, height })
+    await page.goto(server.url + '/?scenario=reference&detail=1&roles=reference&font=200')
+    await page.getByRole('dialog').waitFor()
+    await page.evaluate(size => { document.documentElement.style.fontSize = size + 'px' }, font)
+    for (const expanded of [false, true]) {
+      await settle(page); await check(page, { font, width, height, expanded })
+      await toggle(page, expanded).click()
+    }
+  }
+}
+
+test('narrow 200% safe source number retains a readable line before the title', async t => {
+  await narrowReference(t, async (page, scene) => {
+    const number = await page.locator('.hp-detail-number').evaluate(el => {
+      const header = el.closest('header'), css = getComputedStyle(header), text = getComputedStyle(el)
+      return { width: el.clientWidth, height: el.clientHeight, line: parseFloat(text.lineHeight), available: header.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight) }
+    })
+    assert.ok(number.width >= Math.min(160, number.available) - 1, JSON.stringify({ scene, number }))
+    assert.ok(number.height <= 6 * number.line, JSON.stringify({ scene, number }))
+  })
+})
+
+test('narrow 200% semantic metadata keeps every value readable without escaping glyphs', async t => {
+  await narrowReference(t, async (page, scene) => {
+    const report = await page.locator('.hp-detail-body').evaluate(body => {
+      const css = getComputedStyle(body)
+      return { available: body.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight),
+        values: [...body.querySelectorAll('dl dd')].map(el => ({ width: el.clientWidth, scroll: el.scrollWidth, height: el.clientHeight, line: parseFloat(getComputedStyle(el).lineHeight), top: el.getBoundingClientRect().top, labelTop: el.previousElementSibling.getBoundingClientRect().top })) }
+    })
+    assert.equal(report.values.length, 6)
+    for (const value of report.values) {
+      if (scene.font === 14) assert.ok(Math.abs(value.top - value.labelTop) < 1, 'normal 390px keeps readable metadata columns')
+      assert.ok(value.width >= Math.min(160, report.available) - 1, JSON.stringify({ scene, report }))
+      assert.ok(value.scroll <= value.width + 1 && value.height <= 12 * value.line, JSON.stringify({ scene, value }))
+    }
   })
 })

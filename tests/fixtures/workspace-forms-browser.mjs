@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildBundle } from './work-item-detail-browser.mjs'
+import { jsxRuntimeScript } from './markdown-vm.mjs'
 const requireUi = createRequire(new URL('../../packages/ui/package.json', import.meta.url))
 const ENTRY = `
 import { createElement as h, useState } from 'react'
@@ -60,16 +61,23 @@ window.__forms = controls
 window.ReactDOM.createRoot(document.getElementById('app')).render(h(App))
 void setup.refresh()
 `
-const page = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workspace forms fixture</title>
+let page = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workspace forms fixture</title>
 <style>:root{color-scheme:light;color:#20242c;background:#fff;font:15px/1.5 system-ui;--dsw-focus-ring-color:#4176E6;--dsw-alias-state-business-primary:#4176E6} :root[data-theme=dark]{color-scheme:dark;color:#e3e5eb;background:#191b20;--dsw-focus-ring-color:#7AAAFF;--dsw-alias-state-business-primary:#7AAAFF}html,body{margin:0;height:100%;overflow:hidden}body{display:grid;grid-template-rows:auto minmax(0,1fr)}#app{grid-row:2;display:flex;flex-direction:column;min-height:0;overflow:hidden}#controls{padding:.25rem;max-height:5rem;overflow:auto;display:flex;gap:.5rem;flex-wrap:wrap}#controls button{min-height:44px;font:inherit}</style>
 <div id="controls"><button id="leave">离开设置</button><button id="enter">进入设置</button><button id="refresh">后台刷新</button><button id="theme">切换主题</button><label>待处理步骤 <select id="operation">${['create','planning-account','connect','mapping','repository-account','repository','repository-baseline','execution','setup-read','mapping-read'].map(name => `<option>${name}</option>`).join('')}</select></label><label>返回结果 <select id="outcome">${['success','failed','unknown','conflict','local_only'].map(name => `<option>${name}</option>`).join('')}</select></label><button id="release">释放响应</button><output id="diagnostics" aria-live="polite">pending: none</output></div><div id="app"></div>
 <script>document.documentElement.dataset.theme=new URLSearchParams(location.search).get('theme')||'light';if(new URLSearchParams(location.search).get('controls')==='hidden')document.getElementById('controls').style.display='none';if(new URLSearchParams(location.search).get('font')==='200')document.documentElement.style.fontSize='30px'</script>
-<script src="/react.js"></script><script src="/react-dom.js"></script><script>window.require=id=>{if(id==='react')return React;throw Error(id)};var module={exports:{}};var exports=module.exports</script><script src="/bundle.js"></script>
+<script src="/react.js"></script><script src="/jsx-runtime.js"></script><script src="/react-dom.js"></script><script>window.require=id=>{if(id==='react')return React;if(id==='react/jsx-runtime')return window.ReactJSX;throw Error(id)};var module={exports:{}};var exports=module.exports</script><script src="/bundle.js"></script>
 <script>document.getElementById('release').onclick=()=>{const operation=document.getElementById('operation').value;if(window.__forms.pending().includes(operation))window.__forms.release(operation,document.getElementById('outcome').value);else document.getElementById('diagnostics').textContent='尚无此待处理步骤'};for(const name of ['leave','enter','refresh'])document.getElementById(name).onclick=()=>window.__forms[name]();document.getElementById('theme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark'}</script></html>`
-export async function startServer() {
+const { palette } = JSON.parse(await readFile(new URL('../../docs/product/release-visual-target-v3/host-role-palette-v3.json', import.meta.url), 'utf8'))
+const roleKeys = { 'bg-base':'bg', 'bg-layer-1':'surface', 'label-primary':'text', 'label-secondary':'muted', 'border-l2':'line', 'border-l4':'cardBorder', 'interactive-bg-hover-solid':'soft', 'bg-multi-select':'select', 'button-primary-fill':'primary', 'label-primary-foreground':'onPrimary', 'button-primary-hover':'primaryHover', 'link':'accent' }
+page = page.replace('</style>', Object.entries(palette).map(([mode, values]) => ':root[data-roles=reference][data-theme=' + mode + ']{font-size:14px;' + Object.entries(roleKeys).map(([role, key]) => '--dsw-alias-' + role + ':' + values[key]).join(';') + '}').join('') + '</style>')
+page = page.replace('<script src="/react.js">', '<script>document.documentElement.dataset.roles=new URLSearchParams(location.search).get("roles")||"fallback"</script><script src="/react.js">')
+
+page = page.replace('<div id="app">', '<div id="capture-host" hidden>Harness Projects　 / 交付工作台</div><div id="app">').replace('<script src="/react.js">', '<script>if(new URLSearchParams(location.search).has("capture")){const host=document.getElementById("capture-host");host.hidden=false;host.style.cssText="height:44px;box-sizing:border-box;padding:12px 24px;font:12px/20px system-ui;border-bottom:1px solid var(--dsw-alias-border-l2,CanvasText)";document.getElementById("app").style.height="calc(100dvh - 44px)"}</script><script src="/react.js">')
+
+export async function startServer(bundleBuilder = buildBundle) {
   const umd = (id, file) => readFile(path.join(path.dirname(requireUi.resolve(id)), 'umd', file), 'utf8')
-  const [bundle, react, dom] = await Promise.all([buildBundle(ENTRY), umd('react', 'react.development.js'), umd('react-dom/client', 'react-dom.development.js')])
-  const scripts = { '/bundle.js': bundle.outputFiles[0].text, '/react.js': react, '/react-dom.js': dom }
+  const [bundle, react, dom, jsx] = await Promise.all([bundleBuilder(ENTRY), umd('react', 'react.development.js'), umd('react-dom/client', 'react-dom.development.js'), jsxRuntimeScript()])
+  const scripts = { '/bundle.js': bundle.outputFiles[0].text, '/react.js': react, '/react-dom.js': dom, '/jsx-runtime.js': jsx }
   const server = createServer((request, response) => { const pathname = new URL(request.url, 'http://fixture.invalid').pathname, script = scripts[pathname]; response.writeHead(200, { 'content-type': script ? 'text/javascript' : 'text/html; charset=utf-8', 'cache-control': 'no-store' }); response.end(script ?? page) })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   return { server, url: 'http://127.0.0.1:' + server.address().port, close: () => new Promise(resolve => server.close(resolve)) }

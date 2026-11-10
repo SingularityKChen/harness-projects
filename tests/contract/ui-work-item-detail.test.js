@@ -111,8 +111,8 @@ test('detail-planning-fields-render：真实 SSR 逐字显示两个只读规划�
       process.env.TZ = tz
       const html = drawer(views([wire('ent-aa', { planningStatus: 'unknown', planningFields: { statusName: 'Native Stage', iterationTitle: 'Iteration A', targetDate: '2026-01-01' } })]).detailView)
       for (const text of ['迭代：', 'Iteration A', '目标日期：', '2026-01-01', 'Native Stage（未映射）']) assert.ok(html.includes(text), `${tz}：${text}`)
-      assert.match(html, /<p>迭代：Iteration A<\/p>/, `${tz}：迭代是只读文字行，值紧邻标签，不经过任何格式化`)
-      assert.match(html, /<p>目标日期：2026-01-01<\/p>/, `${tz}：date-only 原样逐字显示：任何时区换算都会改变这一行`)
+      assert.match(html, /<dt>迭代：<\/dt><dd>Iteration A<\/dd>/, `${tz}：迭代是只读文字行，值紧邻标签，不经过任何格式化`)
+      assert.match(html, /<dt>目标日期：<\/dt><dd>2026-01-01<\/dd>/, `${tz}：date-only 原样逐字显示：任何时区换算都会改变这一行`)
     }
   } finally {
     if (original === undefined) delete process.env.TZ
@@ -122,8 +122,8 @@ test('detail-planning-fields-render：真实 SSR 逐字显示两个只读规划�
   const composite = renderToStaticMarkup(createElement(ui.WorkItemProjectPage, {
     listView, detailView: compositeDetail, navigation: { href: (itemId) => itemPath({ projectId: 'ws-1', itemId }), open: () => undefined }, onCloseDetail: () => undefined,
   }))
-  assert.equal(composite.match(/<p>迭代：Iteration A<\/p>/g)?.length, 1, '组合页 SSR 同样逐字显示迭代行（验收表第 4 行的 composite 面）')
-  assert.equal(composite.match(/<p>目标日期：2026-01-01<\/p>/g)?.length, 1, '组合页 SSR 同样逐字显示目标日期行')
+  assert.equal(composite.match(/<dt>迭代：<\/dt><dd>Iteration A<\/dd>/g)?.length, 1, '组合页 SSR 同样逐字显示迭代行（验收表第 4 行的 composite 面）')
+  assert.equal(composite.match(/<dt>目标日期：<\/dt><dd>2026-01-01<\/dd>/g)?.length, 1, '组合页 SSR 同样逐字显示目标日期行')
 
   const hiddenFields = { statusName: 'CANARY-STATUS', iterationTitle: 'CANARY-ITERATION', targetDate: '2099-12-31' }
   const redactedHtml = drawer(views([wire('ent-aa'), redacted('ent-bb', {}, { planningFields: hiddenFields })], { target: { projectId: 'ws-1', itemId: 'ent-bb' } }).detailView)
