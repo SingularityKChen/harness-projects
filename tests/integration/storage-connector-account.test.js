@@ -1,4 +1,4 @@
-/** 连接账号与工作区配置的集成验收（#126）：重启/重开逐字段相等、空库迁移可重复、旧 002 形状在 migrate 之前被拒绝，以及 canary 不出现在任何发布面。共享 6 条用例由 `tests/contract/storage-connector-account.test.js` 在两个适配器上执行。 */
+/** 连接账号与工作区配置的集成验收（#126）：重启/重开逐字段相等、空库迁移可重复、旧 002 形状在 migrate 之前被拒绝，以及 canary 不出现在任何发布面。共享 7 条用例由 `tests/contract/storage-connector-account.test.js` 在两个适配器上执行。 */
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
@@ -35,7 +35,7 @@ const seedVersion2 = (path, accountColumns) => {
   } finally { db.close() }
 }
 
-test('连接账号命名用例守卫：8 个具名用例覆盖共享组与集成专属', () => {
+test('连接账号命名用例守卫：9 个具名用例覆盖共享组与集成专属', () => {
   assert.deepEqual(CONNECTOR_ACCOUNT_NAMED_CASES, [...CONNECTOR_ACCOUNT_SHARED_CASES, 'restart-and-empty-schema-repeatability', 'secret-canary-never-published'])
 })
 

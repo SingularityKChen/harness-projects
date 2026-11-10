@@ -1,4 +1,4 @@
-/** 连接账号与工作区配置的共享契约装配（#126）：6 条共享用例在 Fake 与 SQLite 上同形运行；条数守卫独立写死 6，删掉一条 register(...) 或整组不再装配都会变红。 */
+/** 连接账号与工作区配置的共享契约装配（#126）：7 条共享用例在 Fake 与 SQLite 上同形运行；条数守卫独立写死 7，删掉一条 register(...) 或整组不再装配都会变红。 */
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
@@ -33,14 +33,14 @@ const fakeAdapter = (suffix = '') => ({
 storageConnectorAccountSuite(sqliteAdapter())
 storageConnectorAccountSuite(fakeAdapter())
 
-test('连接账号契约套件守卫：8 个具名用例覆盖共享组与集成专属，且 6 条共享用例在两个适配器上都注册', () => {
-  assert.deepEqual(CONNECTOR_ACCOUNT_NAMED_CASES, ['one-account-three-domains', 'immutable-account-and-anchor-identity', 'configuration-is-workspace-scoped',
+test('连接账号契约套件守卫：9 个具名用例覆盖共享组与集成专属，且 7 条共享用例在两个适配器上都注册', () => {
+  assert.deepEqual(CONNECTOR_ACCOUNT_NAMED_CASES, ['one-account-three-domains', 'immutable-account-and-anchor-identity', 'configuration-is-workspace-scoped', 'configuration-own-properties-roundtrip',
     'trusted-handle-only', 'registration-and-removal-preserve-account', 'metadata-transaction-and-copy-isolation',
     'restart-and-empty-schema-repeatability', 'secret-canary-never-published'])
   assert.equal(countConnectorAccountCases(storageConnectorAccountSuite), CONNECTOR_ACCOUNT_SHARED_CASES.length, '套件条数必须等于独立写死的具名用例表：删掉一条 register(...) 会在这里变红')
   for (const adapter of [sqliteAdapter('-count'), fakeAdapter('-count')]) {
     let registered = 0
     storageConnectorAccountSuite(adapter, () => { registered += 1 })
-    assert.equal(registered, CONNECTOR_ACCOUNT_SHARED_CASES.length, `${adapter.label} 必须注册全部 6 条共享用例`)
+    assert.equal(registered, CONNECTOR_ACCOUNT_SHARED_CASES.length, `${adapter.label} 必须注册全部 7 条共享用例`)
   }
 })
