@@ -53,6 +53,7 @@
 | [2026-11-06-pr549-pr551-review-followup](exec-plan/completed/2026-11-06-pr549-pr551-review-followup.md) | 三项能力 MMP 评审、非阻塞修复与条件收尾 |
 | [2026-11-06-start-work-task-handoff](exec-plan/completed/2026-11-06-start-work-task-handoff.md) | 明确任务交接、原请求安全恢复与同一回执原子拒绝（#547） |
 | [2026-11-06-draft-pull-request](exec-plan/completed/2026-11-06-draft-pull-request.md) | 原生 Draft 创建、严格首次确认与已确认身份恢复（#548） |
+| [2026-11-09-markdown-source-references](exec-plan/completed/2026-11-09-markdown-source-references.md) | 授权来源 Markdown 引用、语法矩阵与性能/惰性边界验收（#587，Refs #539） |
 | [2026-11-06-markdown-readability](exec-plan/completed/2026-11-06-markdown-readability.md) | 任务列表单一标记、空首段行盒与正文注释隐藏（#538/#542） |
 | [2026-11-04-installed-delivery-acceptance](exec-plan/completed/2026-11-04-installed-delivery-acceptance.md) | 已安装候选指南、逐项人类验收与一次有界交付链路（#236/#449/#427/#143，Refs #545/#72） |
 | [2026-11-04-pr534-pr541-review-delivery](exec-plan/completed/2026-11-04-pr534-pr541-review-delivery.md) | 四项 MMP 风险矩阵、独立复评与条件授权交付 |

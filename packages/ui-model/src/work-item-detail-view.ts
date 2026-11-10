@@ -13,6 +13,7 @@ export type WorkItemDetailTarget = { readonly projectId: string; readonly itemId
 
 /** 安全详情的精确字段面；`identity` / `derived` / `lastUpdatedAt` 可省略，其余恒有。 */
 export type WorkItemDetailContent = {
+  readonly markdownSource?: { readonly namespace: string; readonly repository: string }
   readonly issueClosingLinksTarget?: IssueClosingLinksTarget
   readonly executionTarget?: ExecutionTarget
   readonly deliveryAccessTokens?: Readonly<Record<string, string>>
@@ -61,10 +62,16 @@ export function deriveWorkItemDetailView(input: WorkItemListReadInput, target: W
   // 撕裂读（TD-024）：列表行可见而详情已遮蔽时，按详情自己的 contentKind 再判一次，绝不用列表行回填内容。
   if (detail.planning.contentKind === ContentKind.Redacted) return { body: { kind: 'redacted' } }
   const primary = detail.source.primary
+  const number = detail.planning.sourceNumber
+  const markdownSource = primary?.bindingId === input.read.planningSource?.bindingId
+    && (primary?.externalKind === 'issue' || primary?.externalKind === 'change_request')
+    && number !== undefined && number.scopeIdentity.id.trim() !== ''
+    ? { namespace: number.scopeIdentity.namespace, repository: number.scopeName } : undefined
   const identity = primary === undefined ? undefined : { kind: row.identity, externalId: primary.externalId }
   const derived = row.engineering === '无' ? undefined : `派生提示：${row.engineering}`
   return {
     body: {
+      ...(markdownSource === undefined ? {} : { markdownSource }),
       ...(primary?.externalKind === 'issue' && primary.bindingId === input.read.planningSource?.bindingId ? { issueClosingLinksTarget: { workspaceId: target.projectId, workItemId: target.itemId,
         sourceToken: JSON.stringify([input.read.generation, primary]),
         accessToken: JSON.stringify([input.read.generation, input.read.nativeAccessVersion, primary, input.read.planningSource, input.read.capabilities, input.read.repositories]) } } : {}),

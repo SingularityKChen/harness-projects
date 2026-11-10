@@ -33,6 +33,33 @@ const body = (phase, options) => show(phase, options).body
 const failed = (kind, options) => body('failed', { hasReceivedSnapshot: true, cacheVisibility: 'authorized', failure: { kind }, ...options })
 const json = (value) => JSON.stringify(value)
 
+// Catches deriving repository authority from a display name or a stale/different primary binding.
+test('markdown source copies canonical source facts only after the authorized primary planning binding gate', () => {
+  const sourceNumber = { sourceName: 'display-only', scopeIdentity: { namespace: 'github.com/graphql/Repository', id: 'repo-native-id' }, scopeName: 'sample/alpha', number: 328 }
+  const project = (number = sourceNumber, content = {}, planningSource = { bindingId: 'bind-1' }) => body('received', { refreshing: false,
+    entities: [wire('ent-aa', { content: { sourceNumber: number, ...content } })], read: { planningSource } })
+  assert.deepEqual(project().markdownSource, { namespace: 'github.com/graphql/Repository', repository: 'sample/alpha' })
+  assert.deepEqual(project(sourceNumber, { externalKind: 'change_request', contentKind: 'change_request' }).markdownSource, { namespace: 'github.com/graphql/Repository', repository: 'sample/alpha' })
+  for (const number of [{ ...sourceNumber, scopeIdentity: { namespace: 'other/Repository', id: 'repo-native-id' } },
+    ...['sample', '../alpha', 'bad_owner/repo', 'sample/../alpha', 'sample/alpha?x=1'].map(scopeName => ({ ...sourceNumber, scopeName }))]) {
+    assert.deepEqual(project(number).markdownSource, { namespace: number.scopeIdentity.namespace, repository: number.scopeName }, 'syntax dispatch belongs to the renderer, facts stay canonical')
+  }
+  assert.equal(body('received', { refreshing: false, entities: [wire('ent-aa')], read: { planningSource: { bindingId: 'bind-1' } } }).markdownSource, undefined)
+  assert.equal(project(sourceNumber, { bindingId: 'bind-other' }).markdownSource, undefined)
+  assert.equal(project(sourceNumber, { externalKind: 'draft' }).markdownSource, undefined)
+  assert.equal(body('received', { refreshing: false, entities: [wire('ent-aa', { content: { sourceNumber } })] }).markdownSource, undefined)
+  const emptyId = show('received', { refreshing: false, entities: [wire('ent-aa', { content: { sourceNumber } })],
+    tear: wire('ent-aa', { content: { sourceNumber: { ...sourceNumber, scopeIdentity: { namespace: 'github.com/graphql/Repository', id: '' } } } }), read: { planningSource: { bindingId: 'bind-1' } } })
+  assert.equal(emptyId.body.markdownSource, undefined, 'torn detail cannot prove an empty native repository identity')
+  const { input } = make('received', { refreshing: false, entities: [wire('ent-aa', { content: { sourceNumber } })], read: { planningSource: { bindingId: 'bind-1' } } })
+  for (const scopeName of ['sample/alpha', 'sample/beta', 'sample/alpha']) {
+    input.read.store.applyBaseline({ revision: 2, entities: [wire('ent-aa', { content: { sourceNumber: { ...sourceNumber, scopeName } } })], source: { revision: 2, freshness: 'fresh', authority: 'provider' } })
+    assert.equal(deriveWorkItemDetailView(input, TARGET).body.markdownSource.repository, scopeName)
+  }
+  input.read.capabilities = [{ key: READ, access: 'unavailable' }]
+  assert.deepEqual(deriveWorkItemDetailView(input, TARGET).body.kind, 'unavailable')
+})
+
 test('scope-before-store：跨工作区先拒绝，store.list/get 均为 0 次，不回显路由 ID 与旧工作区名', () => {
   const { input, counts } = make('received', { refreshing: false, entities: [VISIBLE, redacted('ent-bb')] })
   for (const target of [{ projectId: 'ws-other', itemId: 'ent-aa' }, { projectId: 'ws-other', itemId: 'SECRET-ITEM' }]) {

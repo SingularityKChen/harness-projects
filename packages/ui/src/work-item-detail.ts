@@ -47,7 +47,7 @@ function contentPanel(body: Extract<WorkItemDetailView['body'], { kind: 'content
     createElement('p', null, '来源身份：', createElement(SourceBadge, { name: body.source, authority: body.authority }),
       body.identity === undefined ? '（来源身份尚未提供）' : `（${body.identity.kind} ${body.identity.externalId}）`),
     createElement('p', null, '规划来源最后确认：', body.reconciledAt === undefined ? '未知' : createElement('time', { dateTime: body.reconciledAt }, body.reconciledAt)),
-    createElement(SafeMarkdown, { body: body.body }),
+    createElement(SafeMarkdown, { body: body.body, markdownSource: body.markdownSource }),
     createElement('p', null, body.derived ?? '无派生提示'),
     createElement('p', null, body.stale || body.refreshing ? '最后已知值，当前结果尚未确认' : '当前值', '（工作区最后接收确认帧：', at, '）'))
 }

@@ -4,6 +4,71 @@ import { test } from 'node:test'
 import { chromium } from 'playwright'
 import { markdownBundle } from '../fixtures/safe-markdown-browser.mjs'
 
+// Catches raw closing-tag attributes turning into native actions after the real source projection.
+test('production raw-text closing markers stay literal and only trailing prose becomes a reference', async t => {
+  const browser = await chromium.launch(); t.after(() => browser.close())
+  const page = await browser.newPage(), requests = [], errors = []
+  await page.route('**/*', route => { requests.push(route.request().url()); return route.abort() })
+  page.on('pageerror', error => errors.push(error.message))
+  await page.setContent('<div id="app"></div>')
+  await page.addScriptTag({ content: await markdownBundle({ production: true }) })
+  for (const tag of ['textarea', 'title', 'script', 'style', 'xmp', 'iframe', 'noembed', 'noframes']) {
+    for (const closing of [`</${tag} #2>`, `</${tag}\n#2>`, `</${tag} x="#2">`, `</${tag} x="> #2">`, `</${tag} x='> #2'>`]) {
+      await page.evaluate(body => window.setMarkdown(body, 'content', 'sample/alpha'), `before <${tag}>#1${closing} #3`)
+      assert.deepEqual(await page.locator('.hp-markdown a').evaluateAll(nodes => nodes.map(node => node.href)), ['https://github.com/sample/alpha/issues/3'], closing)
+      assert.ok((await page.locator('.hp-markdown').innerText()).includes('#2'))
+    }
+  }
+  assert.deepEqual(requests, []); assert.deepEqual(errors, [])
+})
+
+// Catches borrowing a previous item's source, projection bypass, auto-fetching, and inaccessible new links.
+test('production source references follow each authorized detail and stay inert without its context', async t => {
+  const browser = await chromium.launch(); t.after(() => browser.close())
+  const context = await browser.newContext({ viewport: { width: 320, height: 800 } }), page = await context.newPage()
+  const requests = [], errors = []
+  await context.route('**/*', route => { requests.push(route.request().url()); return route.abort() })
+  page.on('pageerror', error => errors.push(error.message))
+  await page.setContent('<style>:root{font:16px/1.5 system-ui}body{margin:0}#app{height:100dvh;display:flex;flex-direction:column}</style><div id="app"></div>')
+  await page.addScriptTag({ content: await markdownBundle({ production: true, composite: true }) })
+  const body = '#328 sample/other#328\n\n\\#328 &#35;328 `#328`\n\nbefore <textarea>#328</textarea>\n\n```md\n#328\n```'
+  const links = page.locator('.hp-markdown a')
+  for (const colorScheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme })
+    for (const repository of ['sample/alpha', 'sample/beta', 'sample/alpha']) {
+      await page.evaluate(({ body, repository }) => window.setMarkdown(body, 'content', repository), { body, repository })
+      assert.deepEqual(await links.evaluateAll(nodes => nodes.map(node => node.href)), [`https://github.com/${repository}/issues/328`, 'https://github.com/sample/other/issues/328'])
+      assert.equal(await links.evaluateAll(nodes => nodes.every(node => node.target === '_blank' && node.rel === 'noopener noreferrer')), true)
+      assert.equal(await page.locator('.hp-markdown a a, .hp-markdown img, .hp-markdown textarea, .hp-markdown script').count(), 0)
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    }
+  }
+  await page.getByRole('button', { name: '关闭详情', exact: true }).focus()
+  for (let index = 0; index < 10 && !(await links.first().evaluate(node => node === document.activeElement)); index++) await page.keyboard.press('Tab')
+  assert.equal(await links.first().evaluate(node => node === document.activeElement), true, 'Tab reaches the native reference')
+  await page.evaluate(body => window.setMarkdown(body, 'content', 'sample/beta'), body)
+  assert.equal(await links.first().evaluate(node => node === document.activeElement), true, 'source update does not steal focus')
+  assert.deepEqual(requests, [], 'render and source changes perform no network requests')
+  const popupPromise = page.waitForEvent('popup')
+  await page.keyboard.press('Enter')
+  const popup = await popupPromise; await popup.close()
+  assert.deepEqual(requests, ['https://github.com/sample/beta/issues/328'], 'Enter opens only the precise current destination')
+  await page.evaluate(body => window.setMarkdown(body, 'content', 'sample/alpha', 'other/Repository'), body)
+  assert.equal(await links.count(), 0, 'unsupported canonical namespace remains plain even with a repository-shaped label')
+  for (const mode of ['content', 'wrong-binding', 'redacted']) {
+    await page.evaluate(({ body, mode }) => window.setMarkdown(body, mode, mode === 'content' ? undefined : 'sample/alpha'), { body, mode })
+    assert.equal(await links.count(), 0, mode)
+  }
+  const drawerPage = await context.newPage()
+  await drawerPage.setContent('<div id="app"></div>')
+  await drawerPage.addScriptTag({ content: await markdownBundle({ production: true }) })
+  for (const mode of ['unavailable', 'unresolved', 'loading', 'wrong-workspace']) {
+    await drawerPage.evaluate(({ body, mode }) => window.setMarkdown(body, mode, 'sample/alpha'), { body, mode })
+    assert.equal(await drawerPage.locator('.hp-markdown').count(), 0, mode)
+  }
+  assert.deepEqual(errors, [])
+})
+
 // Removing the explicit code focus target makes the drawer cycle on its only button.
 test('code-only read-only detail exposes long fenced code to Tab and horizontal arrow scrolling', async t => {
   const browser = await chromium.launch()
