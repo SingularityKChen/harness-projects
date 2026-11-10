@@ -128,3 +128,17 @@ input与external图无新增/移除，React及jsx-runtime沿既有external，bun
 ## 2026-11-11 MMP 修复后的详情层（#604）
 
 clean实际父层7722df51078d0f441fb97c8d259d2814a143cafa与clean整合候选630d24d6a84d44417cf70ea102fb2b0a6adc3e79、同Node26.13.0/pnpm10.28.2/esbuild0.28.2/原build与gzip9实测：client raw766719→769622（+2903）、gzip161476→162014（+538），Host raw697763/gzip159862及hash不变；pack339783→340373（+590）。inputs/externals不变、bundledReact=[]。client SHA-256=`62ee42603ada472a032e538d071733f048de5397c44a6b4f167ba96bd089f210`；pack SHA-256=`e34285a90c43e157fea2068605d45156846c4192546db291fdef77786b132bc0`。后续纯文档保持生产字节；按既有报告工具及本叶ExecPlan命令对锁定clean检出复算，不推及#599/UAT/R1。
+
+## 2026-11-10 只读 Board 与完整 UI 累计增量（#605）
+
+本叶实际PR父层为clean `22db967418d891237c7466ea91cee3efa32fbd94`，clean最终生产候选为 `f23b7d398ce7d4aa4d323b357597777c5af997ab`；设计父层仍为clean `d449f90b12a114cea78f2de97953a4266204b2b9`。Node `v26.13.0`、pnpm `10.28.2`、esbuild `0.28.2`、build源码/config与gzip level9一致，所有source.dirty=false。按本叶ExecPlan Batch3命令复算；后续静态PNG/文档不进入生产输入。
+
+| 对象 | 实际B base bytes | Board候选 bytes | 本叶Δ bytes | 设计父层→完整UI Δ bytes |
+|---|---:|---:|---:|---:|
+| client raw | 767645 | 773888 | 6243 | 19161 |
+| client gzip | 161584 | 162727 | 1143 | 4058 |
+| Host raw | 697763 | 697763 | 0 | 0 |
+| Host gzip | 159862 | 159862 | 0 | 0 |
+| pack tarball | 339920 | 341135 | 1215 | 4303 |
+
+client SHA-256为 `1d8f1b3488434d547e3b583fdb52b45575c47006a7d3789ba49765bc2d4caab5`，Host仍为 `55fd94df342f12a710a18069ae7ce08d5061e1fc398178269a9563a8835036fe`，pack为 `0f3e0e4f8cc90ebfd92f6d720a0441d11711120132fb4175714fe9352a0ac2ac`。input新增纯分组、共享标题链接和Board renderer三个模块；external集合未变、bundledReact=[]。没有依赖或主题/Loader配置增量。pack元数据属于本轮；上述本地构建/图像不是安装Host、人类UAT或R1放行。

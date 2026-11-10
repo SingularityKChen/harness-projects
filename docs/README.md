@@ -26,12 +26,12 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
-| [2026-11-10-planning-board](exec-plan/active/2026-11-10-planning-board.md) | 真实授权数据的只读规划 Board（#605） |
 
 ### Completed
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-10-planning-board](exec-plan/completed/2026-11-10-planning-board.md) | 真实授权数据的只读规划 Board（#605） |
 | [2026-11-10-release-workspace-polish](exec-plan/completed/2026-11-10-release-workspace-polish.md) | 唯一详情、四任务设置与完整共享工作台累计验收（#604） |
 | [2026-11-10-release-list-delivery](exec-plan/completed/2026-11-10-release-list-delivery.md) | 获批 v3 的共享工作区、List 与 Delivery 基础（#614，Refs #604） |
 | [2026-11-10-release-visual-target](exec-plan/completed/2026-11-10-release-visual-target.md) | 首发界面固定视觉参考、工程交接与具名人类设计确认（#603） |
@@ -259,6 +259,7 @@
 | [release-visual-target-v3](product/release-visual-target-v3/README.md) | 获具名批准的Host中性色六面参考、源码对照与工程交接；安装接受独立 |
 | [release-list-delivery-evidence](product/release-list-delivery-evidence/README.md) | 共享工作区、List/Delivery实际源码同场景前后与批准参考对照（#614） |
 | [release-detail-settings-evidence](product/release-detail-settings-evidence/README.md) | 唯一详情、四任务设置与反馈的实际源码前后、固定参考及版本等价说明（#604） |
+| [planning-board-evidence](product/planning-board-evidence/README.md) | 只读Board真实源码、来源分组、44px触达及迟到响应拒绝的静态证据（#605） |
 | [ui-workspace-status.md](product/ui-workspace-status.md) | 工作区摘要的作用域、来源确认、滚动与公告责任 |
 | [board-semantics.md](product/board-semantics.md) | `Status` 与 `Engineering` 字段分别属于规划轴还是工程轴、谁写、不变量 3 在看板上如何被满足、全部内置工作流该开该关、`Size` 为什么是信号而不是控制 |
 | [demo.md](product/demo.md) | Harness Projects 预发布 Demo 的用户路径、验收边界、已知限制与人工走查记录 |
