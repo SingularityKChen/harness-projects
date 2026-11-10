@@ -35,9 +35,10 @@ export function createIssueDependenciesReader(port: { refresh(scope: IssueDepend
     if (response.workspaceId !== scope.workspaceId || response.workItemId !== scope.workItemId) invalid()
     const result = record(response.result, ['writeState', 'saving', 'authoritative', 'value', 'error'])
     if (result.writeState !== 'local_only' || result.saving !== false || result.authoritative !== false || result.error !== undefined) invalid()
-    const value = record(result.value, ['workItemId', 'blockedBy', 'blocking'])
+    const value = record(result.value, ['workItemId', 'blockedBy', 'blocking', 'parent', 'children'])
     if (value.workItemId !== scope.workItemId) invalid()
-    stream(value.blockedBy); stream(value.blocking)
+    stream(value.blockedBy); stream(value.blocking); stream(value.parent); stream(value.children)
+    if ((value.parent as { items: unknown[] }).items.length > 1) invalid()
     return value as unknown as IssueDependenciesObservation
   } }
 }

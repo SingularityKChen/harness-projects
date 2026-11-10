@@ -238,7 +238,7 @@ export function unavailableCore(reason: string): CoreApi {
     getDeliveryLineage: async () => [],
   }
   const commands: CoreCommands = {
-    refreshIssueDependencies: async (scope) => ({ workItemId: scope.workItemId, blockedBy: { state: 'unsupported', items: [], stale: true }, blocking: { state: 'unsupported', items: [], stale: true } }),
+    refreshIssueDependencies: async (scope) => ({ workItemId: scope.workItemId, blockedBy: { state: 'unsupported', items: [], stale: true }, blocking: { state: 'unsupported', items: [], stale: true }, parent: { state: 'unsupported', items: [], stale: true }, children: { state: 'unsupported', items: [], stale: true } }),
     refreshIssueClosingLinks: (scope) => queries.getIssueClosingLinks(scope),
     bootstrapWorkspace: async () => ({
       ok: false, entities: 0, workItems: 0, changeRequests: 0, unanchored: 0, revision: 0, degraded: true, error,
