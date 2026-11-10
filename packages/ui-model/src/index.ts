@@ -21,3 +21,5 @@ export * from './repository-binding.ts'
 export * from './workspace-status.ts'
 export * from './issue-closing-links-view.ts'
 export * from './delivery-overview.ts'
+
+export { derivePlanningBoard, type PlanningBoardGroup } from './planning-board.ts'

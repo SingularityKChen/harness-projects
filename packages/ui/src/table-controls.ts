@@ -3,7 +3,7 @@ import { createElement, type ReactElement } from 'react'
 import { defaultLocalTableConditions, type LocalTableConditions, type LocalTableResult, type LocalTableSort } from '@harness-projects/ui-model'
 import { TABLE_COLUMNS } from './table-columns.ts'
 
-export type TableControlsProps = { readonly result: LocalTableResult; readonly onResetWidths: () => void; readonly readOnly: boolean; readonly onChange: (conditions: LocalTableConditions) => void }
+export type TableControlsProps = { readonly presentation?: 'table' | 'board'; readonly result: LocalTableResult; readonly onResetWidths: () => void; readonly readOnly: boolean; readonly onChange: (conditions: LocalTableConditions) => void }
 const SORT_LABELS = { title:'工作项', planningStatus:'规划状态', iteration:'迭代', targetDate:'目标日期' } as const
 const labelOf = (value: string): string => value === '' || value === '—' ? '未提供/显示为空' : value
 const STYLES = `
@@ -29,7 +29,7 @@ const STYLES = `
 .hp-table-controls :focus-visible { outline:var(--hp-focus-width,var(--dsw-focus-ring-width,2px)) solid var(--hp-focus-color,var(--dsw-focus-ring-color,CanvasText)); outline-offset:2px }
 `
 
-export function TableControls({ result, onChange, onResetWidths, readOnly }: TableControlsProps): ReactElement {
+export function TableControls({ result, onChange, onResetWidths, readOnly, presentation = 'table' }: TableControlsProps): ReactElement {
   const { conditions, facets } = result
   const update = (patch: Partial<LocalTableConditions>): void => onChange({ ...conditions,...patch })
   const facet = (field: 'planningStatus' | 'iteration', label: string): ReactElement => createElement('label', null, label,
@@ -52,13 +52,13 @@ export function TableControls({ result, onChange, onResetWidths, readOnly }: Tab
         update({ sort:column ? { column,direction } as LocalTableSort : null })
       } }, createElement('option', { value:'' }, '默认输入顺序'),
     ...Object.entries(SORT_LABELS).flatMap(([column,label]) => (['asc','desc'] as const).map(direction => createElement('option', { key:`${column}:${direction}`,value:`${column}:${direction}` }, `${label}${direction === 'asc' ? '升序' : '降序'}`))))),
-      createElement('fieldset', null, createElement('legend', null, '显示列'), ...TABLE_COLUMNS.map(column => createElement('label', { key:column.id },
+      presentation === 'board' ? null : createElement('fieldset', null, createElement('legend', null, '显示列'), ...TABLE_COLUMNS.map(column => createElement('label', { key:column.id },
         createElement('input', { type:'checkbox', disabled:!column.optional, checked:conditions.visibleColumns.includes(column.id),
           onChange:(event: { target: { checked: boolean } }) => update({ visibleColumns:event.target.checked ? [...conditions.visibleColumns,column.id] : conditions.visibleColumns.filter(id => id !== column.id) }) }),
         column.label + (column.optional ? '' : '（必显）')))),
-    createElement('button', { type:'button',onClick:() => onChange(defaultLocalTableConditions()) }, '清除条件并恢复默认显示列'),
-    createElement('button', { type:'button', onClick:onResetWidths }, '重置列宽'),
-    createElement('p', null, '拖动列边界，或聚焦边界后用方向键调整。'),
+    createElement('button', { type:'button',onClick:() => onChange(defaultLocalTableConditions()) }, presentation === 'board' ? '清除条件' : '清除条件并恢复默认显示列'),
+    presentation === 'board' ? null : createElement('button', { type:'button', onClick:onResetWidths }, '重置列宽'),
+    presentation === 'board' ? null : createElement('p', null, '拖动列边界，或聚焦边界后用方向键调整。'),
     createElement('p', { className:'hp-query-summary' }, `当前条件：${conditions.search.trim() ? `匹配“${conditions.search}”` : '标题与编号不限'}；规划状态：${conditions.planningStatus === null ? '全部' : labelOf(conditions.planningStatus)}；迭代：${conditions.iteration === null ? '全部' : labelOf(conditions.iteration)}；排序：${sortDescription}`)),
     createElement('p', { className:'hp-query-summary',role:'status','aria-live':'polite','aria-atomic':true },
       `当前已加载可读条目：显示 ${result.matchedReadableCount} 项，共 ${result.loadedReadableCount} 项。${readOnly ? ' 只读规划。' : ''}`,
