@@ -16,7 +16,7 @@ const STYLES = `
 .hp-board-card:hover { background:var(--hp-hover,Canvas) }
 .hp-board-card.hp-board-card-selected { background:var(--hp-selected,Canvas); box-shadow:inset 2px 0 var(--hp-secondary,CanvasText) }
 .hp-board-card h4 { margin:0; font-size:1rem; line-height:1.57143; font-weight:600 }
-.hp-board-card h4 a { display:block }
+.hp-board-card h4 a { display:block; min-block-size:44px }
 .hp-board-card .hp-board-meta, .hp-board-card footer { color:var(--hp-secondary,CanvasText); font-size:.857143rem; line-height:1.833333 }
 .hp-board-fields { display:flex; flex-wrap:wrap; gap:.25rem .75rem }
 .hp-work-items .hp-board-card p { margin:0 }

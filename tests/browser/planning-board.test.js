@@ -81,6 +81,7 @@ test('composed Board shares local query and opens one detail through keyboard wi
     await page.getByRole('searchbox').fill('no matching title')
     assert.equal(await cards(page).count(), 0); assert.equal(await page.locator('.hp-board-column').count(), 0)
     await page.getByText('当前已加载可读条目没有匹配项，请调整或清除条件。', { exact: true }).waitFor()
+    assert.equal(await page.getByText(/没有匹配项|当前没有可显示的工作项/).count(), 1, 'one global filtered-zero explanation')
     await page.getByRole('searchbox').fill('Query 000'); await opener.click()
     await control(server, 'disconnect', true)
     await page.getByRole('dialog').getByText(/连接已中断/).waitFor()
@@ -148,6 +149,11 @@ test('Board renders reference content, transparent groups and natural cards with
       await capture(page, 'before-list-' + width + '-' + (dark ? 'dark' : 'light') + '-' + (zoom ? '200' : '100'))
       await board(page)
       assert.equal(await cards(page).count(), 7)
+      const hit = await page.getByRole('link', { name:'呈现真实规划数据的只读看板',exact:true }).evaluate(el => {
+        const link=el.getBoundingClientRect(),card=el.closest('li').getBoundingClientRect(),source=el.closest('li').querySelector('.hp-board-meta').getBoundingClientRect(),fields=el.closest('li').querySelector('.hp-board-fields').getBoundingClientRect()
+        return {height:link.height,inside:link.left>=card.left&&link.right<=card.right&&link.top>=source.bottom&&link.bottom<=fields.top}
+      })
+      assert.ok(hit.height>=44&&hit.inside, JSON.stringify({width,dark,zoom,hit}))
       assert.deepEqual(await page.locator('.hp-board-column h3').allTextContents(), ['待办3', '进行中2', '已完成1', '未知1'])
       assert.equal(await page.locator('.hp-board-column').evaluateAll(columns => columns.every(el => getComputedStyle(el).backgroundColor === 'rgba(0, 0, 0, 0)')), true)
       const geometry = await page.locator('.hp-board-scroll').evaluate(el => ({ page: document.documentElement.scrollWidth, viewport: innerWidth, width: el.clientWidth, scroll: el.scrollWidth, height: el.clientHeight, scrollHeight: el.scrollHeight }))
@@ -217,5 +223,56 @@ test('Board clears revoked facets in the same publication, rejects hidden mutati
     assert.ok(await long.evaluate(el => el.getBoundingClientRect().height > 80))
     assert.equal(await long.evaluate(el => el.scrollWidth <= el.clientWidth + 1), true)
     await capture(page, 'long-card')
+  })
+})
+
+for (const advertised of [false,true]) test('captured old Provider reply is rejected after denial with permission ' + (advertised ? 'advertised again' : 'still unavailable'), { timeout:60000 }, async t => {
+  await scenario(t, () => startExecutionServer({ seed:'board' }), async (page, server) => {
+    await board(page)
+    await page.getByRole('combobox', { name:'规划状态筛选' }).selectOption('value:Native review（未映射）')
+    const opener = page.getByRole('link', { name:'Board native unknown',exact:true })
+    await opener.click(); await page.getByRole('dialog').waitFor()
+    const initial = await control(server, 'inspect')
+    let release, entered, returned = 0, first = true
+    const gate = new Promise(resolve => { release = resolve }), taken = new Promise(resolve => { entered = resolve })
+    const provider = server.byDomain.planning, read = provider.listPlanningItems.bind(provider)
+    provider.listPlanningItems = async input => {
+      const result = await read(input)
+      if (first) { first = false; entered(result); await gate; returned++ }
+      return result
+    }
+    try {
+      await page.getByRole('dialog').getByRole('button', { name:'刷新规划',exact:true }).click()
+      const old = await Promise.race([taken, new Promise((_, reject) => {
+        AbortSignal.any([t.signal, AbortSignal.timeout(7000)]).addEventListener('abort', () => reject(new Error('Provider barrier not entered')), { once:true })
+      })])
+      assert.equal(old.ok, true)
+      assert.ok(old.value.items.some(item => item.fields.nativeValues?.status?.name === 'Native review'))
+      assert.equal(returned, 0)
+      await control(server, 'permission', { domain:'planning',key:'planning.item.read',enabled:false })
+      const denial = await page.evaluate(() => window.fixture.remote.bootstrapWorkspace({ kind:'user' }, 'board-late-denial'))
+      assert.equal(denial.value.error.code, 'permission_denied')
+      await page.waitForFunction(() => !document.body.innerText.includes('Board native unknown') && !document.body.innerText.includes('Native review'))
+      assert.equal(returned, 0, 'old successful Provider value is still held after the newer denial')
+      if (advertised) await control(server, 'permission', { domain:'planning',key:'planning.item.read',enabled:true })
+      release()
+      await page.waitForFunction(() => window.fixture.unaryObservations().some(value => value.name === 'refreshPlanning'))
+      assert.equal(returned, 1, 'captured successful reply actually returned into the production read round')
+      const replies = await page.evaluate(() => window.fixture.unaryObservations())
+      const late = replies.find(value => value.name === 'refreshPlanning')
+      assert.equal(late.errorCode, advertised ? 'stale_revision' : 'unavailable', JSON.stringify({returned,replies}))
+      assert.equal(late.errorMessage, advertised ? '本轮 Planning 快照已被更新的同步轮次取代' : 'Planning 挂载尚未重新确认')
+      assert.equal(late.writeState, 'failed')
+      assert.ok((await server.storage.listPlanningProjections(server.workspaceId)).every(row => row.content.contentKind === 'redacted' && row.planningFields === undefined))
+      assert.equal(await cards(page).count(), 0)
+      assert.equal(await page.locator('.hp-board-column, .hp-table-controls option, .hp-board-card-selected, .hp-work-items [aria-current]').count(), 0)
+      assert.doesNotMatch(await page.locator('body').ariaSnapshot(), /Board native unknown|Native review|example\/board#605|显示 5 项|共 5 项/)
+      assert.doesNotMatch(await page.locator('body').innerHTML(), /Board native unknown|Native review|example\/board#605/)
+      const after = await control(server, 'inspect')
+      assert.deepEqual(after.external, initial.external)
+      assert.deepEqual(Object.entries(after.calls).filter(([key]) => key.startsWith('write:')), [])
+      await capture(page, 'composed-actual-late-reply-rejected-' + advertised)
+      if (output) await writeFile(output + '/actual-late-reply-' + advertised + '.json', JSON.stringify({ providerReturned:returned,late,denialError:denial.value.error.code,replies,initial,after }, null, 2))
+    } finally { release() }
   })
 })

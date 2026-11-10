@@ -117,7 +117,8 @@ Batch2的反例证明规范规划authority、redacted不泄露、共享query/rou
 - [x] (2026-11-10 SGT) 既有Draft #612已关联605并以完整 #604分支为base，plan-only Fast Gate通过。
 - [x] (2026-11-10 SGT) 独立重核v3透明列/自然卡高、typed安全分组和前层currentItemId接口；见Global Constraints。
 - [x] (2026-11-10 SGT) Batch1：具名v3已批准；冻结父层 `8268f7ba` 已接受，产品分支从 `558ac7bc`实施。首RED时技术实际45行，完整上界718行；不重放或改写父层。
-- [x] (2026-11-10 SGT) Batch2：模型首RED为缺失分组接口；浏览器首RED为缺失Board入口。安全分组、共享query/唯一详情、真实composed权限/旧回复/zero writes、自然卡高与12组响应矩阵已GREEN；37条窄合同、15条共享notice合同、27条浏览器、typecheck与9条边界通过。完整`pnpm test`最终1553 contract + 2185 integration + 226 e2e，共3964条通过；首次contract因两条既有旧说明期望失败，精确更新后重跑通过。
+- [x] (2026-11-10 SGT) Batch2：模型首RED为缺失分组接口；浏览器首RED为缺失Board入口。安全分组、共享query/唯一详情、真实composed权限/abort旧baseline/zero writes（旧例不证明迟到响应抵达，见round1）、自然卡高与12组响应矩阵已GREEN；37条窄合同、15条共享notice合同、27条浏览器、typecheck与9条边界通过。完整`pnpm test`最终1553 contract + 2185 integration + 226 e2e，共3964条通过；首次contract因两条既有旧说明期望失败，精确更新后重跑通过。
+- [x] (2026-11-10 SGT) Round1：V1短链接22px与I2双重zero说明先RED；最小44px anchor/唯一global zero状态后29条受影响浏览器、52条合同、typecheck与9条边界GREEN。I1保留原abort例，新增真实旧Provider成功响应返回后当前权限复核与轮次栅栏拒绝两例；Provider returned=1、迟到unary真实解析、SQLite及UI持续脱敏，业务写账单为空。新CSS捕获独立归属本轮候选，待独立scoped复评。
 - [ ] (2026-11-10 SGT) Batch3：独立验收/必要重构、当前head回读，Ready不merge。
 
 ## Surprises & Discoveries
@@ -138,6 +139,10 @@ Decision：将 `work-item-app.ts` 纳入本叶唯一文件集（预测2行gross�
 
 Decision：将 `tests/contract/ui-workspace-status.test.js` 纳入本叶唯一文件集（预测6行gross），精确更新两条既有modal/恢复合同内三处旧说明期望。Rationale：完整suite显示共享notice的直接消费者仍绑定旧文案；保留公告优先级、恢复一次及timestamp稳定的全部判别，不能放宽断言规避行为。Date/Author：2026-11-10 SGT / 交付协调者具名裁决。
 
+Decision：I1初步机制预期“迟到成功值必须返回stale_revision”已 **Superseded by 本轮实际生产观察**：权限仍不可用时，旧值返回后先经 `bootstrap.ts` 当前权限复核得到 `unavailable/failed`；声明恢复但尚未重新确认时，既有epoch/round栅栏才返回 `stale_revision/failed`。Rationale：不为命中特定内部code绕过正确权限门。使用现有UI refresh与既有 `remote.bootstrapWorkspace` 独立轮次，保持同一Host/Core/SQLite/App，不暴露第二Core或生产调试API；只有Provider返回计数及迟到unary真实解析均确认后才断言不回流。旧watch例只证明abort取消。Date/Author：2026-11-10 SGT / 交付协调者按实际证据修正机制裁决。
+
+Decision：V1仅给Board真实标题anchor至少44px块向命中区，保持自然长卡与12px间距；I2由原query owner识别filtered zero并只保留TableControls一处global说明，redacted-only中性空面、真实来源空/未读/拒读仍各自保留。Rationale：不覆盖邻近元数据或把整卡改成button，不增加查询/读取状态owner。Date/Author：2026-11-10 SGT / 独立代码与视觉复评后由交付协调者授权round1。
+
 ## Idempotence and Recovery
 
 测试/control只在每例临时SQLite、loopback和合成外部端口，无业务网络；view切换本身只改局部mode。读证据/测试可重复；按PR查询避免重复开PR。失败保持Draft并修复，不通过Status或native关系“解锁”。出现超预算先重估独立完整切片，保留父验收。不存在数据迁移/删除，恢复为revert；先保护用户其他改动。
@@ -150,7 +155,7 @@ Decision：将 `tests/contract/ui-workspace-status.test.js` 纳入本叶唯一�
 
 已按Decision Log取得固定v3视觉同意，进入被授权的产品TDD；以下工程证据状态仍需实际更新。
 
-本叶已实施安全Board、共享标题链接、同挂载query与中性partial说明；本地证据不等于远端当前head门禁、独立视觉接受或安装验收。首RED时技术实际45行、可信完整上界718；新增共享notice及其既有合同消费者后技术实际425行，低于800硬限额。完整 #145、#599安装验收及 #606/#607保持原范围；任何临时实现债务另记 `docs/exec-plan/tech-debt-tracker.md`，不删证据维持预算。
+本叶已实施安全Board、共享标题链接、同挂载query与中性partial说明；本地证据不等于远端当前head门禁、独立视觉接受或安装验收。首RED时技术实际45行、可信完整上界718；round0最终技术实测424行；round1保留全部安全与视觉范围后技术实测493行，低于800硬限额。完整 #145、#599安装验收及 #606/#607保持原范围；任何临时实现债务另记 `docs/exec-plan/tech-debt-tracker.md`，不删证据维持预算。
 
 ## Bottom Change Note
 
@@ -163,3 +168,5 @@ Decision：将 `tests/contract/ui-workspace-status.test.js` 纳入本叶唯一�
 2026-11-10 SGT：完整604候选在B8268f7b获本地组合测试与独立代码/视觉接受后，开始Board隔离TDD；原规划Status/native先决不改。最终发布前重放到实际B接受head并按真实base计量；若前层仅文档变化，依生产/fixture指纹记录等价，不冒称在另一head拍照。
 
 2026-11-10 SGT：完成本叶TDD及累计3964条本地测试；真实partial反馈修正共享安全说明，同叶新增其直接合同消费者。独立验收、restack、远端当前head回读与Ready仍由交付协调者执行。
+
+2026-11-10 SGT：round1修复44px触达和单一筛选零结果说明；保留abort旧例，补真实Provider返回与迟到unary拒绝证据。实际门优先于预设stale code，未扩大到生产安全逻辑改写；旧完整suite的两项既有SSR warning如实披露，不以零失败冒称零warning。
