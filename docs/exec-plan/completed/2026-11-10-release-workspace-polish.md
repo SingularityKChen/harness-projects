@@ -1,9 +1,9 @@
 # 详情、设置与完整工作台视觉收口 ExecPlan
 
-> 状态：Active；已批准设计，B在A之上实施，完整#604待累计验收
+> 状态：Completed；本地累计、独立验收与首次当前远端门完成，最终归档head继续回读
 > 创建：2026-11-10
 > 规范：根 `PLANS.md`；关联 #604、#614、#603、#605
-> 正式路径：`docs/exec-plan/active/2026-11-10-release-workspace-polish.md`
+> 正式路径：`docs/exec-plan/completed/2026-11-10-release-workspace-polish.md`
 
 ## Purpose / Big Picture
 
@@ -15,7 +15,7 @@ B分支 `feature/release-detail-settings`，工作树 `.worktrees/release-detail
 
 上游参考 `docs/product/release-visual-target-v3/README.md`、`handoff-v3.md` 及manifest SHA-256 `d714cea12faa96bb6411c4e19c3712914af98bad199dd3787cdb419ecbf48c29` 已获人类“批准 v3，开始实施”。冻结handoff的未接受字样是历史状态，由README/设计ExecPlan的批准记录取代；不重做设计、不改冻结图像、不重复询问。
 
-A计划为 `docs/exec-plan/active/2026-11-10-release-list-delivery.md`，拥有共享Host角色、List/Delivery、安全规范key与scope-derived selection。`WorkItemProjectPage`继续拥有mode、opener与唯一detail；`WorkItemDetailDrawer`保持mounted dialog、preview/expanded、内容矩形observer和读位。`WorkspaceSettings`已有四任务rail/chooser/hidden panels，`WorkspaceSetupGate`与client sources拥有真实表单事务；B只改安全内容头、metadata和局部样式。
+A计划为 `docs/exec-plan/completed/2026-11-10-release-list-delivery.md`，拥有共享Host角色、List/Delivery、安全规范key与scope-derived selection。`WorkItemProjectPage`继续拥有mode、opener与唯一detail；`WorkItemDetailDrawer`保持mounted dialog、preview/expanded、内容矩形observer和读位。`WorkspaceSettings`已有四任务rail/chooser/hidden panels，`WorkspaceSetupGate`与client sources拥有真实表单事务；B只改安全内容头、metadata和局部样式。
 
 ## Design / Spec
 
@@ -122,9 +122,14 @@ B局部验收证明详情与四任务可用、美观及事务安全；累计验�
 - [x] (2026-11-10 SGT) 原完整单PR首真实selection RED；真实settings carrier1/1和相关合同43/43 GREEN，技术42/docs209为当时checkpoint，未改产品。
 - [x] (2026-11-10 SGT) 实测后完整上界806触>=800停止门；独立架构/产品复核确定A→B承载和完整父验收。
 - [x] (2026-11-10 SGT) Batch1本地：承接原42准备；真实安全头/设置列宽RED，以及Host14px预览448→510px RED；实际父层仍锁定ac4980bd，最终远端base由Batch3回读。
-- [ ] (2026-11-10 SGT) Batch2：本地detail/settings浏览器8/8、原事务与Delivery/Execution消费者77/77、A核心回归53/53均GREEN；双主题四宽度before/after各48图、含四任务与四类反馈，另128场景量测通过；独立设计review仍待协调者。
+- [x] (2026-11-10 SGT) Batch2：本地detail/settings浏览器8/8、原事务与Delivery/Execution消费者77/77、A核心回归53/53均GREEN；双主题四宽度before/after各48图、含四任务与四类反馈，另128场景量测通过；该历史等待 Superseded by 本节最终累计证据（2026-11-10）。
 - [x] (2026-11-10 SGT) B独立代码复核F1/F2局部闭合：真实320px/root28与30、preview/expanded及900/320高度先RED；编号和metadata值自然换行后GREEN，正常390保留两列、正常1440几何不变。详情/Markdown/contract32项、消费者26项与typecheck通过；完整累计复验仍待最终A base。
-- [ ] (2026-11-10 SGT) Batch3：A+B累计验收、独立最终review、bundle与远端门、Ready。
+- [x] (2026-11-10 SGT) Batch3：累计源与交互、独立代码/视觉identity、clean bundle及静态证据均齐；首次发布0ee6c0e的实际base37c84f92、PR Fast Gate、双向closing604与完整threads通过后置Ready。本次归档后仍按Batch1命令回读最终head，不沿用旧checks。
+
+- [x] (2026-11-10 18:43 SGT) 最终累计候选8268f7ba（实际父cde887f7）完整3961/3961、组合browser74/74、typecheck通过，零skip/pageerror；before/after各72图及128场景审计绑定同一真实身份。前层旧modal失败已由A安全scope修复，本轮完整suite未复现。
+- [x] (2026-11-10 18:43 SGT) 重放到A最终归档后的clean候选2773147f（实际父37c84f92）；475个生产/测试/app文件逐字等价，图像仍归8268/cde实际拍摄版本。clean本叶client gzip+335、完整A+B+2915，Host无变化，React external及输入图未变。静态证据与完整hash见 `docs/product/release-detail-settings-evidence/README.md`。
+
+- [x] (2026-11-10 SGT) 独立最终Spec/Code quality/A+B累计能力与B Visual/Interaction/图像身份均ACCEPT，无新finding或必要重构；静态11图、真实版本哈希与clean bundle已写入正式证据。当前remote验收仍按Batch3最终head回读。
 
 ## Surprises & Discoveries
 
@@ -132,7 +137,7 @@ B局部验收证明详情与四任务可用、美观及事务安全；累计验�
 
 历史拆叶预测A592/B325及“两个新叶issue各自关闭”的恢复建议，**Superseded by 本计划Context and Orientation与Global Constraints（2026-11-10）**：仅新A issue，B关闭完整604；A400+143、B153+107，guarded上界620/350。execution原12已归A，因为Delivery实际消费；B FORM变化需回归A，不重复记12。
 
-原owner报告selection aria-current为null而非true的真实RED；runtime缺失不是行为RED。已报告typecheck与boundaries9/9通过、settings1/1/相关43/43只证明carrier及既有合同，不证明新叶v3、完整视觉、bundle、hosted CI或安装接受；本计划尚未取得B工程GREEN。
+原owner报告selection aria-current为null而非true的真实RED；runtime缺失不是行为RED。已报告typecheck与boundaries9/9通过、settings1/1/相关43/43只证明carrier及既有合同，不证明新叶v3、完整视觉、bundle、hosted CI或安装接受；本计划当时尚未取得B工程GREEN；该观察 Superseded by Progress最终累计验证（2026-11-10）。
 
 本地checkpoint相对ac4980bd的技术gross216（包含原42准备）、文档gross173；当前没有新增正式路径，剩余已知源码必需改动为0，保留90修复/不确定余量的可信技术上界306，未触>=800停止门。最终base和静态资产交付后的文档预算仍由协调者重计。
 
@@ -162,7 +167,7 @@ B只消费A的Host别名、安全 `planningStatusKey`、过scope `currentItemId`
 
 ## Outcomes & Retrospective
 
-本地B呈现、RED→GREEN、共享消费者回归及真实图像/量测已完成；完整604未完成。实施后记录A+B真实scope/gross、累计证据、偏差与债务，再办理计划闭环；未获得候选图像/独立视觉接受/bundle/当前remote门以前，不将历史GREEN当完整交付。
+本地B呈现、RED→GREEN、共享消费者回归及真实图像/量测已完成；该阶段的“完整604未完成” Superseded by Progress最终累计验证（2026-11-10）。A+B完整scope与关键交互、独立最终验收与首次当前remote门已完成，PR已Ready；归档head的远端门仍按Batch3命令重新回读。B技术gross259，图像与bundle各自绑定真实版本，后续只有文档变化时保持生产身份映射；无新实现债、兼容/迁移层或第二owner。#599安装、人类UAT和R1不由此放行。
 
 ## Bottom Change Note
 
@@ -177,3 +182,9 @@ B只消费A的Host别名、安全 `planningStatusKey`、过scope `currentItemId`
 2026-11-10 SGT：B独立复核两项P2按真实内容宽度与字体自然wrap原地修复，只动detail呈现与既有browser判别；本地修复证据不替代A最终base上的完整累计suite/图像/bundle/远端门。
 
 2026-11-10 SGT：B已重放到已接受A生产与契约树cde887f7；五个B生产文件逐字等于已独立接受979c5b3。当前累计验证与exactbase capture在此clean树执行；前层后续纯文档归档若重放，必须比较生产/fixture指纹、标注真实捕获身份，当前CI仍锁最终head。补充静态公开证据文件集合。
+
+2026-11-10 18:43 SGT：记录最终实际父层上的累计3961+74、144图/128场景与475文件等价重放，补充静态公开证据和clean本叶/累计bundle；保留真实捕获身份，不以文档归档后的新SHA改写历史执行。
+
+2026-11-10 SGT：独立最终代码/累计能力与视觉identity门全部接受，正式静态证据和本叶/累计包体齐备；保留远端门、A先合入及#599/UAT/R1的独立责任。
+
+2026-11-10 SGT：首次accepted发布0ee6c0e当前Fast Gate/metadata/双向closing/完整threads通过且已Ready，归档本计划并修正文档索引；源不变，最终归档head仍须新远端核验，不继承旧checks。
