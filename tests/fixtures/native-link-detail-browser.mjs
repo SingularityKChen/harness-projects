@@ -51,8 +51,17 @@ export async function startNativeDetailServer() {
   const transport = async (url, init) => {
     const request = JSON.parse(init.body), { operationName: op, variables: v } = request; requests.push(request)
     if (/mutation\s/.test(request.query)) throw new Error('Business write forbidden')
-    if (flags.offline && ['PlanningIssueClosingLinks', 'PlanningIssueReferences', 'DevelopmentRepository', 'DevelopmentChangeRequest'].includes(op)) throw new Error('SECRET network error')
+    if (flags.offline && ['PlanningIssueBlockedBy', 'PlanningIssueBlocking', 'PlanningIssueClosingLinks', 'PlanningIssueReferences', 'DevelopmentRepository', 'DevelopmentChangeRequest'].includes(op)) throw new Error('SECRET network error')
+    if (flags.hold && flags.holdOperation === 'PlanningProject' && op === 'PlanningProject') { flags.hold = false; await new Promise(resolve => held.push(resolve)) }
     if (flags.deny === op || (op === (flags.denySource ?? 'PlanningIssueClosingLinks') && flags.denyIssue === v.issue)) return new Response(JSON.stringify({ errors: [{ type: 'FORBIDDEN', message: 'SECRET' }] }), { status: 403 })
+    if (['PlanningIssueBlockedBy', 'PlanningIssueBlocking'].includes(op)) {
+      const direction = op === 'PlanningIssueBlockedBy' ? 'blockedBy' : 'blocking'
+      const target = { __typename: 'Issue', id: direction + '-outside', number: 7, title: direction + ' target', state: 'CLOSED', url: 'https://github.com/other/project/issues/7', repository: { id: 'R_outside', nameWithOwner: 'other/project' } }
+      const content = { __typename: 'Issue', id: v.issue, repository }
+      const result = { data: { project: { __typename: 'ProjectV2', id: v.project }, membership: { __typename: 'ProjectV2Item', id: v.membership, type: 'ISSUE', project: { id: v.project }, content }, issue: { ...content, [direction]: { nodes: flags.dependenciesEmpty || v.after ? [] : [target], pageInfo: { hasNextPage: !!flags.dependenciesPages && !v.after, endCursor: flags.dependenciesPages && !v.after ? direction + '-second' : null } } } } }
+      if (flags.hold && flags.holdOperation === op) { flags.hold = false; await new Promise(resolve => held.push(resolve)) }
+      return new Response(JSON.stringify(result))
+    }
     if (op === 'PlanningIssueLinkTarget') {
       const content = { __typename: 'Issue', id: v.issue, number: 545, repository }
       return new Response(JSON.stringify({ data: { project: { __typename: 'ProjectV2', id: v.project }, membership: { __typename: 'ProjectV2Item', id: v.membership, type: 'ISSUE', project: { id: v.project }, content }, issue: content } }))
@@ -75,7 +84,7 @@ export async function startNativeDetailServer() {
   const makeHost = () => createHostComposition({ dataPath, workspaceId: WORKSPACE, catalog: PROVIDER_CATALOG, fetch: transport, resolveCredential: async () => 'fixture-token', watchIntervalMs: 20, planningTimers: { setInterval: run => run, clearInterval() {} } })
   const install = host => installHostRemote({ invocation: { peer: { id: 'fixture' } }, provide: () => () => {}, typert: { register: () => () => {} } }, host)
   let host = await makeHost(), installed = await install(host)
-  const rebuild = async () => { await installed.dispose(); await host.dispose(); host = await makeHost(); installed = await install(host) }
+  const rebuild = async () => { host.stop(); await installed.dispose(); await host.dispose(); host = await makeHost(); installed = await install(host) }
   const baseline = await installed.service.baseline(), items = baseline.entities.filter(e => e.content.contentKind === 'work_item' && e.content.externalKind === 'issue'), item = baseline.entities.find(e => e.content.contentKind === 'work_item' && e.content.externalKind === 'issue')
   const before = dump(dataPath)
   const { build } = createRequire(new URL('../../apps/harness-plugin/package.json', import.meta.url))('esbuild')
@@ -100,11 +109,11 @@ export async function startNativeDetailServer() {
         let raw = ''; for await (const chunk of request) raw += chunk
         const input = JSON.parse(raw), op = OPERATIONS[input.name], parsed = parseInput(op, input.input); operations.push(input.name)
         const result = await installed.service[input.name](...op.params.map(p => parsed[p.name]))
-        if (input.name === 'getIssueClosingLinks' && flags.holdUi) { flags.holdUi = false; await new Promise(resolve => held.push(resolve)) }
+        if ((input.name === 'getIssueClosingLinks' || input.name === 'refreshIssueDependencies') && flags.holdUi) { flags.holdUi = false; await new Promise(resolve => held.push(resolve)) }
         response.setHeader('content-type', 'application/json'); response.end(JSON.stringify({ ok: true, value: result })); return
       }
       response.writeHead(404); response.end()
-    } catch { response.writeHead(200); response.end(JSON.stringify({ ok: false, error: 'Host unavailable' })) }
+    } catch { if (response.headersSent) { response.end(); return }; response.writeHead(200); response.end(JSON.stringify({ ok: false, error: 'Host unavailable' })) }
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   return { flags, requests, operations, rawPr, repository, item, items, dataPath, before, inputs: Object.keys(bundle.metafile.inputs), get service() { return installed.service }, held, rebuild,

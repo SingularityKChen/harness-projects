@@ -3,7 +3,7 @@
  * 打开时记下 `document.activeElement` 与当时的列表容器，关闭后仅当 opener 仍是该容器成员才回焦，否则聚焦列表标题；
  * 用打开时的容器做包含检查，因为 React 重渲染可能替换容器节点。撤权只更新 content，不关闭重开。
  */
-import type { ExecutionContextReader, StartWork, DeliveryLineageReader, IssueClosingLinksReader, ChangeRequestCreator } from '@harness-projects/client'
+import type { ExecutionContextReader, StartWork, DeliveryLineageReader, IssueClosingLinksReader, IssueDependenciesReader, ChangeRequestCreator } from '@harness-projects/client'
 import { createElement, useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { DeliveryOverviewTargets, WorkItemDetailView, WorkItemListView } from '@harness-projects/ui-model'
@@ -13,10 +13,10 @@ import { DETAIL_STYLES, type LayoutRoot } from './detail-presentation.ts'
 import { DeliveryOverview } from './delivery-overview.ts'
 import { WORKSPACE_STYLES } from './workspace-presentation.ts'
 
-export function WorkItemProjectPage({ listView, deriveOverviewTargets, detailView, navigation, onCloseDetail, executionReader, connected, startWork, onBindRepository, deliveryReader, issueClosingLinksReader, changeRequestCreator, refresh, statusAnnouncement, presentationScopeKey }: {
+export function WorkItemProjectPage({ listView, deriveOverviewTargets, detailView, navigation, onCloseDetail, executionReader, connected, startWork, onBindRepository, deliveryReader, issueClosingLinksReader, issueDependenciesReader, changeRequestCreator, refresh, statusAnnouncement, presentationScopeKey }: {
   readonly deriveOverviewTargets?: (() => DeliveryOverviewTargets) | undefined
   readonly presentationScopeKey?: string | undefined
-  readonly refresh?: { readonly pending: boolean; readonly disabled: boolean; readonly run: () => void } | undefined; readonly issueClosingLinksReader?: IssueClosingLinksReader | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly changeRequestCreator?: ChangeRequestCreator | undefined;
+  readonly refresh?: { readonly pending: boolean; readonly disabled: boolean; readonly run: () => void } | undefined; readonly issueClosingLinksReader?: IssueClosingLinksReader | undefined; readonly issueDependenciesReader?: IssueDependenciesReader | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly changeRequestCreator?: ChangeRequestCreator | undefined;
   readonly statusAnnouncement?: string | undefined
   readonly startWork?: StartWork | undefined
   readonly onBindRepository?: (() => void) | undefined
@@ -59,7 +59,7 @@ export function WorkItemProjectPage({ listView, deriveOverviewTargets, detailVie
     })),
     // 列表的页面级说明也交给抽屉：模态打开时列表 inert，说明只在列表里就既看不到也不被宣告（#379）
     detailView === undefined ? null : createElement(WorkItemDetailDrawer, {
-      view: detailView, layoutRoot, refresh, executionReader, deliveryReader, issueClosingLinksReader, changeRequestCreator, connected, startWork, onBindRepository, notice: listView.body.kind === 'content' ? listView.body.notice : undefined, onClose: onCloseDetail,
+      view: detailView, layoutRoot, refresh, executionReader, deliveryReader, issueClosingLinksReader, issueDependenciesReader, changeRequestCreator, connected, startWork, onBindRepository, notice: listView.body.kind === 'content' ? listView.body.notice : undefined, onClose: onCloseDetail,
     }),
     createElement('style', null, WORKSPACE_STYLES, DETAIL_STYLES, '.hp-view-modes [aria-pressed=true] { font-weight:650; border-color:var(--hp-accent) }'))
 }

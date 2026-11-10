@@ -24,3 +24,6 @@ export * from './create-change-request.ts'
 export * from './issue-closing-links-reader.ts'
 
 export * from './change-request-assignees.ts'
+
+export { createIssueDependenciesReader } from './issue-dependencies-reader.ts'
+export type { IssueDependenciesReader, IssueDependenciesObservation, IssueDependenciesScope } from './issue-dependencies-reader.ts'

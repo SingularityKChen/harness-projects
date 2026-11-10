@@ -37,3 +37,5 @@ export * from './issue-closing-links.ts'
 
 export * from './change-request-issue-link.ts'
 export type { AssigneeRepositoryScope, AssigneeScope, AssigneeQuery, AssigneeOperation, AssigneeAdd, AssigneeResume, AssigneeOptions, AssigneeResult } from './change-request-assignees.ts'
+
+export type { IssueDependenciesScope, IssueDependenciesObservation, IssueDependencyStream } from './issue-dependencies.ts'

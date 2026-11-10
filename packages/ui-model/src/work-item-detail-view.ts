@@ -15,6 +15,7 @@ export type WorkItemDetailTarget = { readonly projectId: string; readonly itemId
 export type WorkItemDetailContent = {
   readonly markdownSource?: { readonly namespace: string; readonly repository: string }
   readonly issueClosingLinksTarget?: IssueClosingLinksTarget
+  readonly issueDependenciesTarget?: IssueClosingLinksTarget
   readonly executionTarget?: ExecutionTarget
   readonly deliveryAccessTokens?: Readonly<Record<string, string>>
   readonly changeRequestAccessToken?: string
@@ -75,6 +76,9 @@ export function deriveWorkItemDetailView(input: WorkItemListReadInput, target: W
       ...(primary?.externalKind === 'issue' && primary.bindingId === input.read.planningSource?.bindingId ? { issueClosingLinksTarget: { workspaceId: target.projectId, workItemId: target.itemId,
         sourceToken: JSON.stringify([input.read.generation, primary]),
         accessToken: JSON.stringify([input.read.generation, input.read.nativeAccessVersion, primary, input.read.planningSource, input.read.capabilities, input.read.repositories]) } } : {}),
+      ...(primary?.externalKind === 'issue' && primary.bindingId === input.read.planningSource?.bindingId ? { issueDependenciesTarget: { workspaceId: target.projectId, workItemId: target.itemId,
+        sourceToken: JSON.stringify([input.read.generation, primary]),
+        accessToken: JSON.stringify([input.read.generation, input.read.nativeAccessVersion, primary, input.read.planningSource, input.read.capabilities]) } } : {}),
       ...(detail.planning.contentKind === ContentKind.WorkItem ? {
         ...(input.read.repositories?.length ? { changeRequestAccessToken: JSON.stringify([input.read.generation, input.read.nativeAccessVersion, primary, input.read.planningSource, input.read.capabilities]), startWorkRepositories: input.read.repositories.map((repository) => {
           // Development 四门必须来自选中仓库的路由；缺少元数据时不能借工作区里另一个连接放行。

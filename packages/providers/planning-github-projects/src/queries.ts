@@ -119,3 +119,15 @@ export const PLANNING_ISSUE_REFERENCES = `query PlanningIssueReferences($project
     }
   }
 }`
+
+/** 两方向各用静态 query；不改变既有录制 query。 */
+export const PLANNING_ISSUE_BLOCKED_BY = `query PlanningIssueBlockedBy($project: ID!, $membership: ID!, $issue: ID!, $first: Int!, $after: String) {
+  project: node(id: $project) { __typename ... on ProjectV2 { id } }
+  membership: node(id: $membership) { __typename ... on ProjectV2Item { id type project { id } content { __typename ... on Issue { id repository { id nameWithOwner } } } } }
+  issue: node(id: $issue) { __typename ... on Issue { id repository { id nameWithOwner } blockedBy(first: $first, after: $after) { nodes { __typename id number title url state repository { id nameWithOwner } } pageInfo { hasNextPage endCursor } } } }
+}`
+export const PLANNING_ISSUE_BLOCKING = `query PlanningIssueBlocking($project: ID!, $membership: ID!, $issue: ID!, $first: Int!, $after: String) {
+  project: node(id: $project) { __typename ... on ProjectV2 { id } }
+  membership: node(id: $membership) { __typename ... on ProjectV2Item { id type project { id } content { __typename ... on Issue { id repository { id nameWithOwner } } } } }
+  issue: node(id: $issue) { __typename ... on Issue { id repository { id nameWithOwner } blocking(first: $first, after: $after) { nodes { __typename id number title url state repository { id nameWithOwner } } pageInfo { hasNextPage endCursor } } } }
+}`
