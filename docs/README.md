@@ -26,6 +26,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
+| [2026-11-10-planning-board](exec-plan/active/2026-11-10-planning-board.md) | 真实授权数据的只读规划 Board（#605） |
 
 ### Completed
 
