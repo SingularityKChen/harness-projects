@@ -90,3 +90,17 @@ client SHA-256 为 `d7c438bc64bb3f68c848276104e10e0e82bd8ccfe405c39ace2eabd87cb7
 测试对单个 `react/cjs`、pnpm nested `react-dom`、错误 React external、双输出、输入/符号链接逃逸、未登记 sourceRoot、dirty 比较、失败/空 pack 和配置/工具链不一致均有拒绝断言；真实产物读盘重算 bytes/gzip/hash，并核对两个 outDir、直接 build 的 JS 一致。已有 artifact 测试继续验证 manifest 白名单、一次 `__ModuleLoader__.load`、package id、factory require、`apply/inject`，并使用同一个真实 React 实例渲染；复用同一 VM helper 的负控还拒绝重复 load 与 `react/private` 的 factory require。
 
 图检查只证明输入路径可识别的 React 包没有打入，不能识别任意第三方重命名/预打包的 React 源码；VM/静态渲染不证明真实 Host 的完整交互或 a11y。本轮没有将候选 UI 安装到用户 Host，也没有把本地验证表述为 hosted CI。
+
+## 2026-11-10 共享工作台呈现增量（#614）
+
+在检出 `docs/release-visual-target` 的clean父树 `d449f90b12a114cea78f2de97953a4266204b2b9` 与 `feature/release-workspace-polish` 的clean生产候选 `4c5eff2a908813baf629de7cdc8987fe3e67bb74` 上，以相同构建工具/config实际生成并pack。Node `v26.13.0`、pnpm `10.28.2`、esbuild `0.28.2`，gzip level9；复算命令见该叶ExecPlan的实际base/head命令组。两次source.dirty均false，后续文档/静态截图提交不进入生产包输入。
+
+| 对象 | base bytes | head bytes | Δ bytes |
+|---|---:|---:|---:|
+| client raw | 754727 | 765728 | 11001 |
+| client gzip | 158669 | 161249 | 2580 |
+| Host raw | 697763 | 697763 | 0 |
+| Host gzip | 159862 | 159862 | 0 |
+| pack tarball | 336832 | 339557 | 2725 |
+
+input与external图无新增/移除，React及jsx-runtime沿既有external，bundledReact=[]。本轮沿原native控件/单一Host角色消费替换旧呈现；没有依赖、build或Loader配置变化。该结论来自实际两边构建与pack，不由“零新依赖”推断；属于本地source证据，不证明安装Host/全主题/WCAG或#599产品接受。
