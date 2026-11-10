@@ -110,3 +110,17 @@ input与external图无新增/移除，React及jsx-runtime沿既有external，bun
 实际main父层为clean `4320baac082fc89106ce8d533a7300a8053024c7`，clean修复候选为 `eff03e790d10d04db7e11ec23795207d31fcffe5`。使用相同Node v26.13.0/pnpm10.28.2/esbuild0.28.2、原生产build及gzip level9实测；不是把原37c测试或旧包体转作新结果。client raw754727→766719（+11992），gzip158669→161476（+2807）；Host raw697763/gzip159862与hash不变；pack336832→339783（+2951）。输入/external集合不变，bundledReact=[]。
 
 候选client SHA-256=`ee6185d5550551f75c55fa17e833c8280fe47b6af9fa2eba3ce5b2b3f7ce14cc`；pack SHA-256=`aad4441f4ca770182b375a39099880599d4c28be9c74a5aac36ca2fd9eeefdd6`。后续仅文档的提交不改变本轮生产输入。按原报告工具在该base与候选的已登记clean检出复算；原本叶ExecPlan Batch3记录命令，输出放本地忽略目录。该数据只证明本地构建，不是安装/#599/UAT/R1接受。
+
+## 2026-11-10 详情设置与完整工作台累计增量（#604）
+
+本叶在clean实际父层 `37c84f92b1164a9c6e719eb73cd437cb1b198912` 与clean生产候选 `2773147f6173448591a9a3eac1cd802ba6d59856` 上实测；另以clean设计父层 `d449f90b12a114cea78f2de97953a4266204b2b9` 测完整A+B增量。Node `v26.13.0`、pnpm `10.28.2`、esbuild `0.28.2`、build源码与配置完全相同，gzip level9，所有source.dirty=false。复算入口为本叶ExecPlan Batch3；后续文档/静态PNG不进入生产输入。
+
+| 对象 | 实际A base bytes | B候选 bytes | 本叶Δ bytes | 设计父层→A+B Δ bytes |
+|---|---:|---:|---:|---:|
+| client raw | 765728 | 767645 | 1917 | 12918 |
+| client gzip | 161249 | 161584 | 335 | 2915 |
+| Host raw | 697763 | 697763 | 0 | 0 |
+| Host gzip | 159862 | 159862 | 0 | 0 |
+| pack tarball | 339557 | 339920 | 363 | 3088 |
+
+候选client SHA-256为 `19cff38a4c8644102894c6e5b21e6f658163ea9412fe15dd0e30a75b8d2b1d18`，Host为 `55fd94df342f12a710a18069ae7ce08d5061e1fc398178269a9563a8835036fe`，pack为 `7b45c8f7c7c3f650031683986f6db7fe91356e5a71b6df5ee5ca8daabf8148b9`。输入/external无增删，bundledReact=[]，没有新主题或Loader配置。pack属于本轮产物，不保证跨环境tar元数据相同。此本地证据与hosted CI、已安装Host和#599人类验收分别成立。
