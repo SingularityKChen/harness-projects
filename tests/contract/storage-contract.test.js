@@ -6,8 +6,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test, { after } from 'node:test'
-import { createFakeStorage, exportFakeStorageState } from '@harness-projects/provider-fake'
+import { createFakeStorage, exportFakeStorageState, injectFakeStorageState, MemoryStorage, emptyStorageData } from '@harness-projects/provider-fake'
 import { createSqliteStorage, openDatabase } from '@harness-projects/storage-sqlite'
+import { storageSnapshotSuite } from './suites/storage-snapshots.js'
 import { STORAGE_SUITE_GROUPS } from './suites/storage.js'
 import { storageIdentityFoundationSuite, storageIdentitySyncSuite } from './suites/storage-identity-membership.js'
 import { storageExecutionDivergenceSuite } from './suites/storage-execution.js'
@@ -28,17 +29,28 @@ const sqliteDir = mkdtempSync(join(tmpdir(), 'storage-sqlite-contract-'))
 let sqliteCount = 0
 after(() => rmSync(sqliteDir, { recursive: true, force: true }))
 const restartSqlite = (storage) => { const location = storage.location; storage.close(); return createSqliteStorage(location) }
-const sqliteAdapter = (label, prefix) => ({ label, makeStorage: () => createSqliteStorage(join(sqliteDir, `${prefix}-${sqliteCount++}.sqlite`)), restart: restartSqlite })
+const sqliteAdapter = (label, prefix) => ({ label, makeStorage: (policy) => createSqliteStorage(join(sqliteDir, `${prefix}-${sqliteCount++}.sqlite`), policy), restart: restartSqlite })
 
 assemble({ label: '内存 Storage 替身', makeStorage: () => createFakeStorage(),
   restart: (storage) => createFakeStorage(exportFakeStorageState(storage)), inject: (storage) => failFakeWrite(storage) },
   ['foundation', 'sync', 'execution', 'identityFoundation', 'identitySync', 'sharedSync'])
-assemble(sqliteAdapter('SQLite Storage（地基组）', 'storage'), ['foundation'])
+const foundationRuns = []
+assemble({ ...sqliteAdapter('SQLite Storage（地基组）', 'storage'), foundationProbe: (storage) => foundationRuns.push(storage) }, ['foundation'])
+after(async () => {
+  assert.equal(foundationRuns.length, 1, 'SQLite foundation 的提交/回滚用例必须真实执行')
+  const [{ storage, initialFence, committedFence }] = foundationRuns
+  assert.equal((await storage.getWorkspace(WORKSPACE))?.name, '工作区')
+  assert.equal(await storage.getWorkspace('ws-rolled-back'), undefined)
+  assert.notEqual(committedFence, initialFence, '真实提交必须推进 fence')
+  assert.equal(storage.committedReadFence(), committedFence, '回滚不得推进提交 fence')
+})
 assemble({ ...sqliteAdapter('SQLite Storage（同步组）', 'storage-sync'), inject: (storage) => failSqliteInsert(storage) }, ['sync', 'sharedSync'])
 assemble(sqliteAdapter('SQLite Storage（身份地基组）', 'storage-identity'), ['identityFoundation'])
 assemble(sqliteAdapter('SQLite Storage（身份同步组）', 'storage-identity-sync'), ['identitySync'])
 // L6 / #120：执行面落地之后，SQLite 侧也注册执行组——执行面的 10 个方法第一次在 SQLite 上跑契约。
 assemble(sqliteAdapter('SQLite Storage（执行组）', 'storage-execution'), ['execution'])
+
+for (const adapter of [{ label: 'Fake isolation', makeStorage: (policy) => createFakeStorage(undefined, policy) }, sqliteAdapter('SQLite isolation', 'snapshot')]) storageSnapshotSuite(adapter)
 
 // 仓库父边在两个适配器上都拒绝悬空引用，错误来源分别为替身存在性检查与 SQLite 外键。
 const fakeDivergence = { label: '内存 Storage 替身（分叉格）', makeStorage: () => createFakeStorage(),
@@ -146,7 +158,7 @@ test('SQLite Storage：结算后泄漏出 work 的 tx、未 await 的 tx 写入�
 // 原子性注入：SQLite 用触发器让 putMembership 的第三条语句 ABORT（前两条 DELETE 已执行，事务回滚是唯一防线）；
 // 替身没有语句层，在它第一次状态赋值处注入（此时它还没有写入任何东西，断言检查的是同一可观察契约）。
 // 判别性落在 SQLite——把 `atomic` 换回 `mutate` 后该用例变红。
-const failFakeWrite = (storage) => { storage.data = new Proxy(storage.data, { set: (target, property, value) => { if (property === 'memberships') throw new Error('注入失败'); return Reflect.set(target, property, value) } }) }
+const failFakeWrite = (storage) => { injectFakeStorageState(storage, (data) => new Proxy(data, { set: (target, property, value) => { if (property === 'memberships') throw new Error('注入失败'); return Reflect.set(target, property, value) } })) }
 const failSqliteInsert = (storage) => { const db = openDatabase(storage.location); try { db.exec("CREATE TRIGGER contract_break BEFORE INSERT ON project_item_membership BEGIN SELECT RAISE(ABORT, '注入失败'); END") } finally { db.close() } }
 const seedSync = async (storage) => { await storage.putWorkspace(workspace('ws-1', '工作区')); await storage.putProviderBinding(bindingRecord('binding-1', 'ws-1')) }
 
@@ -288,4 +300,32 @@ test('内存映射快照导入拒绝同一工作区的第二份权威配置', as
     assert.throws(() => createFakeStorage(invalid), { name: 'RangeError', message: 'workspace planning mapping is already registered' })
   }
   assert.deepEqual(await createFakeStorage(state).getWorkspacePlanningMapping('ws-1'), record)
+})
+
+test('MemoryStorage 公开 constructor 捕获 seed，事务提交/回滚拥有独立状态', async () => {
+  const data = emptyStorageData(); data.workspaces.push(workspace('seed', 'original'))
+  const storage = new MemoryStorage(data), initialFence = storage.committedReadFence()
+  data.workspaces[0].name = 'escaped'; assert.equal((await storage.getWorkspace('seed')).name, 'original'); assert.equal(storage.committedReadFence(), initialFence)
+  await storage.putWorkspace(workspace('direct', 'direct')); assert.equal(data.workspaces.length, 1, '普通写入不能回写 caller seed')
+  await storage.transaction(async (tx) => { await tx.putWorkspace(workspace('committed', 'commit')); await tx.advanceRevision('committed') })
+  assert.equal((await storage.getWorkspace('committed')).name, 'commit'); assert.equal(await storage.currentRevision('committed'), 1)
+  const committedFence = storage.committedReadFence()
+  await assert.rejects(storage.transaction(async (tx) => { await tx.putWorkspace(workspace('rolled-back')); await tx.advanceRevision('committed'); throw Error('rollback') }), /rollback/)
+  assert.equal(await storage.getWorkspace('rolled-back'), undefined); assert.equal(await storage.currentRevision('committed'), 1); assert.equal(storage.committedReadFence(), committedFence)
+  assert.notEqual(committedFence, initialFence); assert.equal(data.workspaces.length, 1)
+})
+test('Fake constructor 与 factory 在克隆前校验原始导入记录', async () => {
+  const p = { allowedSecretHandles: new Set(), configurations: new Map([['harness.fake', {}]]) }, source = createFakeStorage(undefined, p)
+  await source.putWorkspace(workspace('seed')); await source.putProviderBinding({ id: 'seed-binding', workspaceId: 'seed', domain: 'planning', implementationKey: 'harness.fake', enabled: true, isDefault: true })
+  const base = exportFakeStorageState(source), ref = { workspaceId: 'seed', bindingId: 'seed-binding', domain: 'planning' }
+  const badConfigurations = [Object.assign(Object.create({}), {}), Object.defineProperty({}, Symbol('forbidden'), { value: true })]
+  for (const construct of [(data) => new MemoryStorage(data, false, p), (data) => createFakeStorage(data, p)]) {
+    for (const configuration of badConfigurations) assert.throws(() => construct({ ...base, bindingConfigurations: [{ ref, configuration }] }), /plain object/)
+    const externalIntent = { operation: 'addChangeRequestAssignees', sequence: 1, createOperationId: 'create', createReceipt: 'receipt', targetStamp: 'stamp', contextId: 'ctx', ownerGeneration: 1, bindingId: 'seed-binding', state: 'pending', worktree: 'worktree', input: { repository: { bindingId: 'seed-binding', objectKind: 'repository', externalId: 'repo' }, changeRequest: { bindingId: 'seed-binding', objectKind: 'change_request', externalId: 'pr' }, assigneeIds: ['U_1'] }, confirmedIds: [] }
+    Object.defineProperty(externalIntent, Symbol('forbidden'), { value: true })
+    assert.throws(() => construct({ ...base, attempts: [{ id: 'a', workspaceId: 'seed', bindingId: 'seed-binding', commandName: 'addChangeRequestAssignees', idempotencyKey: 'key', state: 'pending', requestFingerprint: 'fp', externalIntent }] }), /invalid Start Work external intent/)
+    const account = Object.assign(Object.create({}), { id: 'account', platformFamily: 'github', platformOrigin: 'https://github.com', identityKind: 'account', externalId: 'user', displayName: 'name', secretHandle: undefined, connectionState: 'connected' })
+    assert.throws(() => construct({ ...base, accounts: [account] }), /connector account must be a plain object/)
+    assert.throws(() => construct({ ...base, planningMappings: [Object.assign(Object.create({}), { workspaceId: 'seed', bindingId: 'seed-binding', projectExternalId: 'project', origin: 'user', mapping: {} })] }), /invalid workspace planning mapping/)
+  }
 })

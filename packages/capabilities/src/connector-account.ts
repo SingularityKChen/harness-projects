@@ -141,6 +141,17 @@ export function bindingRefOf(value: unknown): BindingConfigurationRecord['ref'] 
   return parseBindingRef(record.ref)
 }
 
+/** 入队前捕获原配置形状与字段值；schema 仍按队列内的真实挂载解析，不能先复制抹去原型或符号。 */
+export function bindingConfigurationSnapshot(value: BindingConfigurationRecord): BindingConfigurationRecord {
+  const ref = bindingRefOf(value)
+  const configuration = assertPlainObject(value.configuration, 'binding configuration must be a plain object')
+  const copied: Record<string, string | boolean> = {}
+  for (const name of Object.getOwnPropertyNames(configuration)) Object.defineProperty(copied, name, {
+    value: configuration[name], enumerable: Object.prototype.propertyIsEnumerable.call(configuration, name), writable: true, configurable: true,
+  })
+  return { ref, configuration: copied }
+}
+
 /** 配置闭集解析：未知字段、原型对象、数组、嵌套对象、undefined 与符号一律拒绝，返回独立副本。 */
 export function parseBindingConfiguration(value: unknown, policy: StorageValidationPolicy, implementationKey: string): BindingConfigurationRecord {
   const record = assertPlainObject(value, 'binding configuration record must be a plain object')

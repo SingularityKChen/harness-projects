@@ -13,9 +13,10 @@ export interface FakeWorkspaceBindingMount {
   enabled: boolean
   isDefault: boolean
 }
-function validateGeneration(record: cap.ExecutionContextRecord): void {
-  const n = record.provisioningGeneration
+function contextSnapshot(record: cap.ExecutionContextRecord): cap.ExecutionContextRecord {
+  const { provisioningGeneration: n, ...fields } = record
   if (n !== undefined && (!Number.isSafeInteger(n) || n < 1)) throw new RangeError('provisioning generation must be a positive safe integer')
+  return { ...fields, ...(n === undefined ? {} : { provisioningGeneration: n }) }
 }
 export interface FakeStorageData {
   planningMappings: cap.WorkspacePlanningMappingRecord[]
@@ -96,30 +97,32 @@ function activeTransaction(owner: MemoryStorage): boolean {
   for (let token = TRANSACTION_SCOPE.getStore(); token; token = token.parent) if (token.owner === owner && token.active) return true
   return false
 }
+// 模块私有测试接缝；普通 Storage 与实例公开字段都拿不到内部状态。
+const fakeStateAccess = new WeakMap<MemoryStorage, { read: () => FakeStorageData; inject: (change: (data: FakeStorageData) => FakeStorageData) => void }>()
 export class MemoryStorage implements cap.Storage {
-  /** 内部状态；只应由本文件的导出/导入函数与测试读取，写入一律走 port 方法。 */
-  data: FakeStorageData
+  /** Fake 专属内部状态；测试检查用 exportFakeStorageState，故障注入用 injectFakeStorageState。普通端口不暴露别名。 */
+  #data: FakeStorageData
   /** 事务队列：重叠事务按调用顺序串行，每个事务在前一个 settle 后才克隆状态。 */
   #queue: Promise<unknown> = Promise.resolve()
   #state = { commits: 0, dirty: false }
   /** 事务作用域标记：类型层的 `StorageTransaction = Omit<Storage, 'transaction'>` 不会在运行时移除方法，嵌套事务必须在这里被显式拒绝（L3 计划遗留「嵌套事务在运行时静默吞写」的收口条件）。 */
   #transactionScope: boolean
+  #token: MemoryTransactionToken | undefined
   /** 受信校验策略的**独立副本**：构造时快照，此后调用方再改自己的策略对象不能扩权（#126）。 */
   #policy: cap.StorageValidationPolicy
-  constructor(data: FakeStorageData = emptyStorageData(), transactionScope = false, policy: cap.StorageValidationPolicy = cap.EMPTY_POLICY) {
+  constructor(data: FakeStorageData = emptyStorageData(), transactionScope = false, policy: cap.StorageValidationPolicy = cap.EMPTY_POLICY, token?: MemoryTransactionToken) {
+    this.#token = token
     this.#policy = cap.snapshotPolicy(policy)
-    this.data = data
-    this.data.planningSyncRounds ??= []
-    this.data.planningMappings ??= []
+    this.#data = { ...data, planningSyncRounds: data.planningSyncRounds ?? [], planningMappings: (data.planningMappings ?? []).map(cap.planningMappingRecordSnapshot) }
+    fakeStateAccess.set(this, { read: () => this.#data, inject: (change) => { this.#data = change(this.#data) } })
     const mappingWorkspaces = new Set<domain.WorkspaceId>()
-    for (const record of this.data.planningMappings) {
+    for (const record of this.#data.planningMappings) {
       if (mappingWorkspaces.has(record.workspaceId)) throw new RangeError('workspace planning mapping is already registered')
       mappingWorkspaces.add(record.workspaceId)
-      cap.planningMappingRecordSnapshot(record)
-      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId) || !this.data.workspaceBindings.some((mount) => mount.workspaceId === record.workspaceId && mount.bindingId === record.bindingId && mount.domain === 'planning')) throw new RangeError('planning mapping mount does not exist')
+      if (!this.#data.workspaces.some((workspace) => workspace.id === record.workspaceId) || !this.#data.workspaceBindings.some((mount) => mount.workspaceId === record.workspaceId && mount.bindingId === record.bindingId && mount.domain === 'planning')) throw new RangeError('planning mapping mount does not exist')
     }
-    for (const record of this.data.contexts) validateGeneration(record)
-    this.data.attempts = this.data.attempts.map((record) => {
+    this.#data.contexts = this.#data.contexts.map(contextSnapshot)
+    this.#data.attempts = this.#data.attempts.map((record) => {
       if (record.externalIntent === undefined) return record
       const captured = { ...record, externalIntent: cap.externalIntentSnapshot(record.externalIntent) }
       cap.validateExternalIntentCommand(captured)
@@ -127,21 +130,31 @@ export class MemoryStorage implements cap.Storage {
     })
     this.#transactionScope = transactionScope
     // 导入时校验已存元数据与引用完整性（对抗验证 P3-2）：配置必须有挂载、账号关联必须指向存在的账号，否则孤儿状态会被导入。
-    for (const record of this.data.accounts) cap.parseConnectorAccount(record, this.#policy)
-    for (const record of this.data.bindingConfigurations) {
-      if (!this.data.workspaceBindings.some((mount) => sameMount(mount, record.ref))) throw new RangeError('binding configuration references an unknown workspace mount')
-      const anchor = this.data.providerBindings.find((candidate) => candidate.id === record.ref.bindingId)
+    this.#data.accounts = this.#data.accounts.map((record) => cap.parseConnectorAccount(record, this.#policy))
+    this.#data.bindingConfigurations = this.#data.bindingConfigurations.map((record) => {
+      if (!this.#data.workspaceBindings.some((mount) => sameMount(mount, record.ref))) throw new RangeError('binding configuration references an unknown workspace mount')
+      const anchor = this.#data.providerBindings.find((candidate) => candidate.id === record.ref.bindingId)
       if (anchor === undefined) throw new RangeError('binding configuration references an unknown connection anchor')
-      if (!this.#policy.configurations.has(anchor.implementationKey)) continue // 未声明实现键：导入时隔离，读写口仍拒绝（#132）
-      cap.parseBindingConfiguration(record, this.#policy, anchor.implementationKey)
+      if (!this.#policy.configurations.has(anchor.implementationKey)) return record // 未声明实现键：导入时隔离，读写口仍拒绝（#132）
+      return cap.parseBindingConfiguration(record, this.#policy, anchor.implementationKey)
+    })
+    for (const link of this.#data.bindingAccounts) {
+      if (!this.#data.providerBindings.some((candidate) => candidate.id === link.bindingId)) throw new RangeError('connection anchor does not exist')
+      if (!this.#data.accounts.some((candidate) => candidate.id === link.accountId)) throw new RangeError('connector account does not exist')
     }
-    for (const link of this.data.bindingAccounts) {
-      if (!this.data.providerBindings.some((candidate) => candidate.id === link.bindingId)) throw new RangeError('connection anchor does not exist')
-      if (!this.data.accounts.some((candidate) => candidate.id === link.accountId)) throw new RangeError('connector account does not exist')
-    }
+    this.#data = structuredClone(this.#data)
+  }
+  #assertActive(): void {
+    if (this.#transactionScope && !this.#token?.active) throw new Error('事务作用域已结算：tx.* 只能在所属事务的 work 内使用（常见成因是漏写 await）')
+  }
+  #read<T>(fn: () => T): T | Promise<T> {
+    this.#assertActive()
+    return this.#transactionScope ? this.#mutate(() => structuredClone(fn()), false) : structuredClone(fn())
   }
   #mutate<T>(fn: () => T | PromiseLike<T>, write = true): Promise<T> {
+    this.#assertActive()
     const run = this.#queue.then(async () => {
+      this.#assertActive()
       if (this.#transactionScope && write) this.#state.dirty = true
       const result = fn()
       const value = result && typeof (result as PromiseLike<T>).then === 'function' ? await result : result
@@ -155,64 +168,66 @@ export class MemoryStorage implements cap.Storage {
   async transaction<T>(work: (tx: cap.StorageTransaction) => Promise<T>): Promise<T> {
     if (this.#transactionScope) throw new Error('嵌套事务不被支持：一个事务内不得再开事务')
     return this.#mutate(async () => {
-      const draft = structuredClone(this.data)
-      const staged = new MemoryStorage(draft, true, this.#policy)
       const token: MemoryTransactionToken = { owner: this, active: true, parent: TRANSACTION_SCOPE.getStore() }
+      const staged = new MemoryStorage(this.#data, true, this.#policy, token)
       let result
       try { result = await TRANSACTION_SCOPE.run(token, () => work(staged)) }
       finally { token.active = false }
-      this.data = draft
+      this.#data = staged.#data
       if (staged.#state.dirty) this.#state.commits++
       return result
     }, false)
   }
-  async getWorkspacePlanningMapping(workspaceId: domain.WorkspaceId): Promise<cap.WorkspacePlanningMappingRecord | undefined> {
-    return structuredClone(this.data.planningMappings.find((record) => record.workspaceId === workspaceId))
-  }
+  async getWorkspacePlanningMapping(workspaceId: domain.WorkspaceId): Promise<cap.WorkspacePlanningMappingRecord | undefined> { return this.#read(() => {
+    return this.#data.planningMappings.find((record) => record.workspaceId === workspaceId)
+  }) }
   async putWorkspacePlanningMapping(record: cap.WorkspacePlanningMappingRecord): Promise<void> {
     const parsed = cap.planningMappingRecordSnapshot(record)
     return this.#mutate(() => {
-      if (!this.data.workspaceBindings.some((mount) => mount.workspaceId === parsed.workspaceId && mount.bindingId === parsed.bindingId && mount.domain === 'planning')) throw new RangeError('planning mapping mount does not exist')
-      upsert(this.data.planningMappings, structuredClone(parsed), (item) => item.workspaceId === parsed.workspaceId)
+      if (!this.#data.workspaceBindings.some((mount) => mount.workspaceId === parsed.workspaceId && mount.bindingId === parsed.bindingId && mount.domain === 'planning')) throw new RangeError('planning mapping mount does not exist')
+      upsert(this.#data.planningMappings, structuredClone(parsed), (item) => item.workspaceId === parsed.workspaceId)
     })
   }
   async putWorkspace(record: cap.WorkspaceRecord): Promise<void> {
-    return this.#mutate(() => upsert(this.data.workspaces, record, (w) => w.id === record.id))
+    record = structuredClone(record)
+    return this.#mutate(() => upsert(this.#data.workspaces, record, (w) => w.id === record.id))
   }
-  async getWorkspace(id: domain.WorkspaceId): Promise<cap.WorkspaceRecord | undefined> { return this.data.workspaces.find((w) => w.id === id) }
+  async getWorkspace(id: domain.WorkspaceId): Promise<cap.WorkspaceRecord | undefined> { return this.#read(() => { return this.#data.workspaces.find((w) => w.id === id) }) }
   async putProviderBinding(record: cap.ProviderBindingRecord): Promise<void> {
+    const { enabled, isDefault, ...fields } = record
+    record = structuredClone({ ...fields, enabled, isDefault })
     return this.#mutate(() => {
       if (record.isDefault && !record.enabled) throw new Error('default provider binding must be enabled')
-      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('provider binding workspace does not exist')
-      const anchor = this.data.providerBindings.find((candidate) => candidate.id === record.id)
+      if (!this.#data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('provider binding workspace does not exist')
+      const anchor = this.#data.providerBindings.find((candidate) => candidate.id === record.id)
       if (anchor !== undefined && anchor.implementationKey !== record.implementationKey) {
         throw new Error('provider binding id already points at another implementation')
       }
       const planningTaken = record.domain === cap.CapabilityDomain.Planning && record.enabled
-        && this.data.workspaceBindings.some((mount) => mount.workspaceId === record.workspaceId
+        && this.#data.workspaceBindings.some((mount) => mount.workspaceId === record.workspaceId
           && mount.domain === record.domain && mount.enabled && mount.bindingId !== record.id)
       if (planningTaken) throw new Error('workspace already has an enabled planning binding')
       if (record.isDefault) {
-        this.data.workspaceBindings = this.data.workspaceBindings.map((mount) => mount.workspaceId === record.workspaceId
+        this.#data.workspaceBindings = this.#data.workspaceBindings.map((mount) => mount.workspaceId === record.workspaceId
           && mount.domain === record.domain && mount.bindingId !== record.id && mount.isDefault ? { ...mount, isDefault: false } : mount)
       }
-      if (anchor === undefined) this.data.providerBindings.push({ id: record.id, implementationKey: record.implementationKey })
-      upsert(this.data.workspaceBindings, toBindingMount(record), (mount) => mount.workspaceId === record.workspaceId
+      if (anchor === undefined) this.#data.providerBindings.push({ id: record.id, implementationKey: record.implementationKey })
+      upsert(this.#data.workspaceBindings, toBindingMount(record), (mount) => mount.workspaceId === record.workspaceId
         && mount.bindingId === record.id && mount.domain === record.domain)
     })
   }
-  async listProviderBindings(workspaceId: domain.WorkspaceId): Promise<readonly cap.ProviderBindingRecord[]> {
-    return this.data.workspaceBindings.filter((mount) => mount.workspaceId === workspaceId)
-      .map((mount) => toBindingRecord(mount, this.data.providerBindings))
-  }
+  async listProviderBindings(workspaceId: domain.WorkspaceId): Promise<readonly cap.ProviderBindingRecord[]> { return this.#read(() => {
+    return this.#data.workspaceBindings.filter((mount) => mount.workspaceId === workspaceId)
+      .map((mount) => toBindingRecord(mount, this.#data.providerBindings))
+  }) }
   /** 卸载只删该挂载及其配置；畸形 ref 先以 `RangeError` 拒绝（对抗验证 P3-3），缺失挂载重复移除是 no-op（#126）。 */
   async removeProviderBinding(ref: { readonly workspaceId: domain.WorkspaceId; readonly bindingId: domain.ProviderBindingId; readonly domain: string }): Promise<void> {
     const parsed = cap.parseBindingRef(ref)
     return this.#mutate(() => {
-      if (!this.data.workspaceBindings.some((mount) => sameMount(mount, parsed))) return
-      this.data.workspaceBindings = this.data.workspaceBindings.filter((mount) => !sameMount(mount, parsed))
-      this.data.bindingConfigurations = this.data.bindingConfigurations.filter((record) => !sameMount(record.ref, parsed))
-      if (parsed.domain === 'planning') this.data.planningMappings = this.data.planningMappings.filter((record) => record.workspaceId !== parsed.workspaceId || record.bindingId !== parsed.bindingId)
+      if (!this.#data.workspaceBindings.some((mount) => sameMount(mount, parsed))) return
+      this.#data.workspaceBindings = this.#data.workspaceBindings.filter((mount) => !sameMount(mount, parsed))
+      this.#data.bindingConfigurations = this.#data.bindingConfigurations.filter((record) => !sameMount(record.ref, parsed))
+      if (parsed.domain === 'planning') this.#data.planningMappings = this.#data.planningMappings.filter((record) => record.workspaceId !== parsed.workspaceId || record.bindingId !== parsed.bindingId)
     })
   }
   /** 账号自然键：数组序列化，避免分隔符碰撞；显示名不参与去重。 */
@@ -221,146 +236,155 @@ export class MemoryStorage implements cap.Storage {
   async putConnectorAccount(record: cap.ConnectorAccountRecord): Promise<void> {
     const parsed = cap.parseConnectorAccount(record, this.#policy); const key = this.#accountNaturalKey(parsed)
     return this.#mutate(() => {
-      const sameId = this.data.accounts.find((candidate) => candidate.id === parsed.id)
-      const sameKey = this.data.accounts.find((candidate) => this.#accountNaturalKey(candidate) === key)
+      const sameId = this.#data.accounts.find((candidate) => candidate.id === parsed.id)
+      const sameKey = this.#data.accounts.find((candidate) => this.#accountNaturalKey(candidate) === key)
       if (sameId !== undefined && this.#accountNaturalKey(sameId) !== key) throw new RangeError('connector account id already points at another identity')
       if (sameKey !== undefined && sameKey.id !== parsed.id) throw new RangeError('connector account identity is already registered under another id')
-      upsert(this.data.accounts, structuredClone(parsed), (candidate) => candidate.id === parsed.id)
+      upsert(this.#data.accounts, structuredClone(parsed), (candidate) => candidate.id === parsed.id)
     })
   }
-  /** 账号读口与 SQLite 同判据：复验闭集再返回独立副本（`data` 是公开字段，可能被直接改写）。 */
-  async getConnectorAccount(id: domain.ConnectorAccountId): Promise<cap.ConnectorAccountRecord | undefined> {
-    const found = this.data.accounts.find((candidate) => candidate.id === id)
+  /** 账号读口与 SQLite 同判据：复验闭集再返回独立副本，故障注入的非法值同样拒绝。 */
+  async getConnectorAccount(id: domain.ConnectorAccountId): Promise<cap.ConnectorAccountRecord | undefined> { return this.#read(() => {
+    const found = this.#data.accounts.find((candidate) => candidate.id === id)
     return found === undefined ? undefined : cap.parseConnectorAccount(structuredClone(found), this.#policy)
-  }
-  async listConnectorAccounts(): Promise<readonly cap.ConnectorAccountRecord[]> {
-    return this.data.accounts.map((record) => cap.parseConnectorAccount(structuredClone(record), this.#policy))
-  }
+  }) }
+  async listConnectorAccounts(): Promise<readonly cap.ConnectorAccountRecord[]> { return this.#read(() => {
+    return this.#data.accounts.map((record) => cap.parseConnectorAccount(structuredClone(record), this.#policy))
+  }) }
   /** 初次关联：账号与锚点必须存在且锚点尚无事实；同账号重复是 no-op，换账号或有事实时补账号拒绝（#126）。 */
   async setProviderBindingAccount(bindingId: domain.ProviderBindingId, accountId: domain.ConnectorAccountId): Promise<void> {
     return this.#mutate(() => {
-      if (this.data.providerBindings.every((candidate) => candidate.id !== bindingId)) throw new RangeError('connection anchor does not exist')
-      if (this.data.accounts.every((candidate) => candidate.id !== accountId)) throw new RangeError('connector account does not exist')
-      const current = this.data.bindingAccounts.find((candidate) => candidate.bindingId === bindingId)
+      if (this.#data.providerBindings.every((candidate) => candidate.id !== bindingId)) throw new RangeError('connection anchor does not exist')
+      if (this.#data.accounts.every((candidate) => candidate.id !== accountId)) throw new RangeError('connector account does not exist')
+      const current = this.#data.bindingAccounts.find((candidate) => candidate.bindingId === bindingId)
       if (current !== undefined) {
         if (current.accountId === accountId) return
         throw new RangeError('connection anchor is already associated with another connector account')
       }
       // 事实检查只覆盖替身真正持有的四类（SQLite 侧把 webhook 订阅也算事实，替身没有 webhook port）；检查与写入在同一个队列槽里。
       const bound = (item: { bindingId: domain.ProviderBindingId }): boolean => item.bindingId === bindingId
-      if ([this.data.identities, this.data.cursors, this.data.attempts].some((list) => list.some(bound)) || this.data.observations.some((item) => item.observation.bindingId === bindingId)) {
+      if ([this.#data.identities, this.#data.cursors, this.#data.attempts].some((list) => list.some(bound)) || this.#data.observations.some((item) => item.observation.bindingId === bindingId)) {
         throw new RangeError('connection anchor already has external facts: create a new binding id instead')
       }
-      this.data.bindingAccounts.push({ bindingId, accountId })
+      this.#data.bindingAccounts.push({ bindingId, accountId })
     })
   }
-  async getProviderBindingAccount(bindingId: domain.ProviderBindingId): Promise<domain.ConnectorAccountId | undefined> {
-    return this.data.bindingAccounts.find((candidate) => candidate.bindingId === bindingId)?.accountId
-  }
+  async getProviderBindingAccount(bindingId: domain.ProviderBindingId): Promise<domain.ConnectorAccountId | undefined> { return this.#read(() => {
+    return this.#data.bindingAccounts.find((candidate) => candidate.bindingId === bindingId)?.accountId
+  }) }
   /** 配置写入：先校验 record / ref 外形（畸形 ref 在解引用前以 `RangeError` 拒绝），再查真实挂载与锚点的 implementationKey；不接收调用者声称的实现键。 */
   async putBindingConfiguration(record: cap.BindingConfigurationRecord): Promise<void> {
-    const ref = cap.bindingRefOf(record)
+    record = cap.bindingConfigurationSnapshot(record)
+    const { ref } = record
     return this.#mutate(() => {
-      if (this.data.workspaceBindings.every((mount) => !sameMount(mount, ref))) throw new RangeError('binding configuration references an unknown workspace mount')
-      const anchor = this.data.providerBindings.find((candidate) => candidate.id === ref.bindingId)
+      if (this.#data.workspaceBindings.every((mount) => !sameMount(mount, ref))) throw new RangeError('binding configuration references an unknown workspace mount')
+      const anchor = this.#data.providerBindings.find((candidate) => candidate.id === ref.bindingId)
       if (anchor === undefined) throw new RangeError('binding configuration references an unknown connection anchor')
       const parsed = cap.parseBindingConfiguration(record, this.#policy, anchor.implementationKey)
-      upsert(this.data.bindingConfigurations, structuredClone(parsed), (candidate) => sameMount(candidate.ref, parsed.ref))
+      upsert(this.#data.bindingConfigurations, structuredClone(parsed), (candidate) => sameMount(candidate.ref, parsed.ref))
     })
   }
   /** 配置读口与 SQLite 同判据：按真实锚点 implementationKey 复验后再返回独立副本。 */
   async getBindingConfiguration(ref: { readonly workspaceId: domain.WorkspaceId; readonly bindingId: domain.ProviderBindingId; readonly domain: string }): Promise<cap.BindingConfigurationRecord | undefined> {
     const parsed = cap.parseBindingRef(ref)
-    const found = this.data.bindingConfigurations.find((candidate) => sameMount(candidate.ref, parsed))
+    return this.#read(() => {
+    const found = this.#data.bindingConfigurations.find((candidate) => sameMount(candidate.ref, parsed))
     if (found === undefined) return undefined
-    const anchor = this.data.providerBindings.find((candidate) => candidate.id === parsed.bindingId)
+    const anchor = this.#data.providerBindings.find((candidate) => candidate.id === parsed.bindingId)
     if (anchor === undefined) throw new RangeError('binding configuration references an unknown connection anchor')
     return cap.parseBindingConfiguration(structuredClone(found), this.#policy, anchor.implementationKey)
-  }
+  }) }
   async putEntity(record: domain.Entity): Promise<void> {
-    return this.#mutate(() => upsert(this.data.entities, record, (e) => e.id === record.id))
+    record = structuredClone(record)
+    return this.#mutate(() => upsert(this.#data.entities, record, (e) => e.id === record.id))
   }
   async putExternalIdentity(record: domain.ExternalIdentity): Promise<void> {
+    record = structuredClone(record)
     domain.parseExternalIdentityKind(record.externalKind) // 未知种类在任何写入之前被拒绝（async 里的同步抛出即 Promise 拒绝），与 SQLite 适配器是同一个 RangeError
     return this.#mutate(() => {
       const key = domain.externalObjectKey(record.bindingId, record.externalKind, record.externalId)
-      const index = this.data.identities.findIndex((identity) => domain.externalObjectKey(identity.bindingId, identity.externalKind, identity.externalId) === key)
-      const existing = this.data.identities[index]
-      const sameId = this.data.identities.find((identity) => identity.id === record.id)
+      const index = this.#data.identities.findIndex((identity) => domain.externalObjectKey(identity.bindingId, identity.externalKind, identity.externalId) === key)
+      const existing = this.#data.identities[index]
+      const sameId = this.#data.identities.find((identity) => identity.id === record.id)
       if (sameId !== undefined && sameId !== existing) throw new Error('external identity id already points at another object')
       const entityId = existing?.entityId ?? record.entityId
-      if (!this.data.entities.some((entity) => entity.id === entityId)) throw new Error('external identity entity does not exist')
-      if (!this.data.providerBindings.some((anchor) => anchor.id === record.bindingId)) throw new Error('external identity binding does not exist')
-      const primaryTaken = this.data.identities.some((identity) => identity.entityId === entityId
+      if (!this.#data.entities.some((entity) => entity.id === entityId)) throw new Error('external identity entity does not exist')
+      if (!this.#data.providerBindings.some((anchor) => anchor.id === record.bindingId)) throw new Error('external identity binding does not exist')
+      const primaryTaken = this.#data.identities.some((identity) => identity.entityId === entityId
         && identity.role === domain.IdentityRole.Primary && identity !== existing)
       if (record.role === domain.IdentityRole.Primary && primaryTaken) throw new Error('entity already has a primary external identity')
-      if (existing === undefined) this.data.identities.push(record)
-      else this.data.identities[index] = { ...record, id: existing.id, entityId: existing.entityId }
+      if (existing === undefined) this.#data.identities.push(record)
+      else this.#data.identities[index] = { ...record, id: existing.id, entityId: existing.entityId }
     })
   }
-  async findExternalIdentity(bindingId: domain.ProviderBindingId, externalKind: domain.ExternalIdentityKind, externalId: string): Promise<domain.ExternalIdentity | undefined> {
-    return this.data.identities.find((i) => i.bindingId === bindingId && i.externalKind === externalKind && i.externalId === externalId)
-  }
-  async listIdentitiesForEntity(entityId: domain.EntityId): Promise<readonly domain.ExternalIdentity[]> { return this.data.identities.filter((i) => i.entityId === entityId) }
+  async findExternalIdentity(bindingId: domain.ProviderBindingId, externalKind: domain.ExternalIdentityKind, externalId: string): Promise<domain.ExternalIdentity | undefined> { return this.#read(() => {
+    return this.#data.identities.find((i) => i.bindingId === bindingId && i.externalKind === externalKind && i.externalId === externalId)
+  }) }
+  async listIdentitiesForEntity(entityId: domain.EntityId): Promise<readonly domain.ExternalIdentity[]> { return this.#read(() => { return this.#data.identities.filter((i) => i.entityId === entityId) }) }
   async putMembership(record: cap.MembershipRecord): Promise<void> {
+    record = structuredClone(record)
     return this.#mutate(() => {
-      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('membership workspace does not exist')
+      if (!this.#data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('membership workspace does not exist')
       const key = (m: cap.MembershipRecord): string => JSON.stringify([m.workspaceId, m.projectExternalId, m.contentKind, m.contentExternalId])
-      const replaced = this.data.memberships.filter((m) => key(m) === key(record) && m.itemExternalId !== record.itemExternalId)
+      const replaced = this.#data.memberships.filter((m) => key(m) === key(record) && m.itemExternalId !== record.itemExternalId)
       if (replaced.length > 0) {
         const orphans = new Set(replaced.map((m) => m.itemExternalId))
-        this.data.memberships = this.data.memberships.filter((m) => !(key(m) === key(record) && orphans.has(m.itemExternalId)))
-        this.data.fieldValues = this.data.fieldValues.filter((v) => !(v.workspaceId === record.workspaceId && orphans.has(v.itemExternalId)))
+        this.#data.memberships = this.#data.memberships.filter((m) => !(key(m) === key(record) && orphans.has(m.itemExternalId)))
+        this.#data.fieldValues = this.#data.fieldValues.filter((v) => !(v.workspaceId === record.workspaceId && orphans.has(v.itemExternalId)))
       }
-      upsert(this.data.memberships, record, (m) => m.workspaceId === record.workspaceId && m.itemExternalId === record.itemExternalId)
+      upsert(this.#data.memberships, record, (m) => m.workspaceId === record.workspaceId && m.itemExternalId === record.itemExternalId)
     })
   }
-  async getMembership(workspaceId: domain.WorkspaceId, itemExternalId: string): Promise<cap.MembershipRecord | undefined> {
-    return this.data.memberships.find((m) => m.workspaceId === workspaceId && m.itemExternalId === itemExternalId)
-  }
-  async listMemberships(workspaceId: domain.WorkspaceId, projectExternalId: string): Promise<readonly cap.MembershipRecord[]> {
-    return this.data.memberships
+  async getMembership(workspaceId: domain.WorkspaceId, itemExternalId: string): Promise<cap.MembershipRecord | undefined> { return this.#read(() => {
+    return this.#data.memberships.find((m) => m.workspaceId === workspaceId && m.itemExternalId === itemExternalId)
+  }) }
+  async listMemberships(workspaceId: domain.WorkspaceId, projectExternalId: string): Promise<readonly cap.MembershipRecord[]> { return this.#read(() => {
+    return this.#data.memberships
       .filter((m) => m.workspaceId === workspaceId && m.projectExternalId === projectExternalId)
       .sort(byItemExternalId)
-  }
+  }) }
   async replacePlanningMemberships(scope: { readonly workspaceId: domain.WorkspaceId; readonly projectExternalId: string }, incoming: readonly cap.MembershipRecord[]): Promise<void> {
+    scope = structuredClone(scope)
+    incoming = structuredClone(incoming)
     return this.#mutate(() => {
-      if (!this.data.workspaces.some((workspace) => workspace.id === scope.workspaceId)) throw new Error('membership workspace does not exist')
+      if (!this.#data.workspaces.some((workspace) => workspace.id === scope.workspaceId)) throw new Error('membership workspace does not exist')
       if (incoming.some((record) => record.workspaceId !== scope.workspaceId || record.projectExternalId !== scope.projectExternalId)) {
         throw new Error('membership does not belong to replacement scope')
       }
       const incomingItems = new Set(incoming.map((record) => record.itemExternalId))
-      const staleItems = new Set(this.data.memberships
+      const staleItems = new Set(this.#data.memberships
         .filter((record) => record.workspaceId === scope.workspaceId && record.projectExternalId === scope.projectExternalId && !incomingItems.has(record.itemExternalId))
         .map((record) => record.itemExternalId))
-      this.data.memberships = this.data.memberships.filter((record) => !(record.workspaceId === scope.workspaceId && record.projectExternalId === scope.projectExternalId && staleItems.has(record.itemExternalId)))
-      this.data.fieldValues = this.data.fieldValues.filter((value) => !(value.workspaceId === scope.workspaceId && staleItems.has(value.itemExternalId)))
+      this.#data.memberships = this.#data.memberships.filter((record) => !(record.workspaceId === scope.workspaceId && record.projectExternalId === scope.projectExternalId && staleItems.has(record.itemExternalId)))
+      this.#data.fieldValues = this.#data.fieldValues.filter((value) => !(value.workspaceId === scope.workspaceId && staleItems.has(value.itemExternalId)))
       for (const record of incoming) {
         const key = (candidate: cap.MembershipRecord): string => JSON.stringify([candidate.workspaceId, candidate.projectExternalId, candidate.contentKind, candidate.contentExternalId])
-        const replaced = this.data.memberships.filter((candidate) => key(candidate) === key(record) && candidate.itemExternalId !== record.itemExternalId)
+        const replaced = this.#data.memberships.filter((candidate) => key(candidate) === key(record) && candidate.itemExternalId !== record.itemExternalId)
         const replacedItems = new Set(replaced.map((candidate) => candidate.itemExternalId))
-        this.data.memberships = this.data.memberships.filter((candidate) => !(replacedItems.has(candidate.itemExternalId)
+        this.#data.memberships = this.#data.memberships.filter((candidate) => !(replacedItems.has(candidate.itemExternalId)
           && candidate.workspaceId === record.workspaceId && candidate.projectExternalId === record.projectExternalId))
-        this.data.fieldValues = this.data.fieldValues.filter((value) => !(value.workspaceId === record.workspaceId && replacedItems.has(value.itemExternalId)))
-        upsert(this.data.memberships, structuredClone(record), (candidate) => candidate.workspaceId === record.workspaceId && candidate.itemExternalId === record.itemExternalId)
+        this.#data.fieldValues = this.#data.fieldValues.filter((value) => !(value.workspaceId === record.workspaceId && replacedItems.has(value.itemExternalId)))
+        upsert(this.#data.memberships, structuredClone(record), (candidate) => candidate.workspaceId === record.workspaceId && candidate.itemExternalId === record.itemExternalId)
       }
     })
   }
   async putFieldValue(record: cap.FieldValueRecord): Promise<void> {
+    record = structuredClone(record)
     return this.#mutate(() => {
-      if (!this.data.memberships.some((membership) => membership.workspaceId === record.workspaceId && membership.itemExternalId === record.itemExternalId)) throw new Error('field value membership does not exist')
-      upsert(this.data.fieldValues, record, (v) => v.workspaceId === record.workspaceId
+      if (!this.#data.memberships.some((membership) => membership.workspaceId === record.workspaceId && membership.itemExternalId === record.itemExternalId)) throw new Error('field value membership does not exist')
+      upsert(this.#data.fieldValues, record, (v) => v.workspaceId === record.workspaceId
         && v.itemExternalId === record.itemExternalId && v.projectFieldId === record.projectFieldId)
     })
   }
-  async listFieldValues(workspaceId: domain.WorkspaceId, itemExternalId: string): Promise<readonly cap.FieldValueRecord[]> {
-    return this.data.fieldValues.filter((v) => v.workspaceId === workspaceId && v.itemExternalId === itemExternalId)
-  }
+  async listFieldValues(workspaceId: domain.WorkspaceId, itemExternalId: string): Promise<readonly cap.FieldValueRecord[]> { return this.#read(() => {
+    return this.#data.fieldValues.filter((v) => v.workspaceId === workspaceId && v.itemExternalId === itemExternalId)
+  }) }
   async putPlanningProjection(workspaceId: domain.WorkspaceId, projection: domain.WorkspaceProjection): Promise<void> {
+    projection = structuredClone(projection)
     return this.#mutate(() => {
-      if (!this.data.workspaces.some((workspace) => workspace.id === workspaceId)) throw new Error('projection workspace does not exist')
-      if (!this.data.entities.some((entity) => entity.id === projection.entityId)) throw new Error('projection entity does not exist')
-      upsert(this.data.projections, projection, (p) => p.workspaceId === workspaceId && p.entityId === projection.entityId)
+      if (!this.#data.workspaces.some((workspace) => workspace.id === workspaceId)) throw new Error('projection workspace does not exist')
+      if (!this.#data.entities.some((entity) => entity.id === projection.entityId)) throw new Error('projection entity does not exist')
+      upsert(this.#data.projections, projection, (p) => p.workspaceId === workspaceId && p.entityId === projection.entityId)
     })
   }
 
@@ -372,37 +396,40 @@ export class MemoryStorage implements cap.Storage {
   async replacePlanningProjections(scope: {
     readonly workspaceId: domain.WorkspaceId; readonly bindingId: domain.ProviderBindingId
   }, items: readonly domain.WorkspaceProjection[]): Promise<void> {
+    scope = structuredClone(scope)
+    items = structuredClone(items)
     return this.#mutate(() => {
       const incoming = new Set(items.map((item) => item.entityId))
-      const scoped = new Set(this.data.identities
+      const scoped = new Set(this.#data.identities
         .filter((identity) => identity.bindingId === scope.bindingId)
         .map((identity) => identity.entityId))
-      const stale = new Set(this.data.projections
+      const stale = new Set(this.#data.projections
         .filter((projection) => projection.workspaceId === scope.workspaceId && scoped.has(projection.entityId) && !incoming.has(projection.entityId))
         .map((projection) => projection.entityId))
-      this.data.projections = this.data.projections.filter((projection) => !(projection.workspaceId === scope.workspaceId && stale.has(projection.entityId)))
+      this.#data.projections = this.#data.projections.filter((projection) => !(projection.workspaceId === scope.workspaceId && stale.has(projection.entityId)))
       for (const item of items) {
-        upsert(this.data.projections, item, (p) => p.workspaceId === scope.workspaceId && p.entityId === item.entityId)
+        upsert(this.#data.projections, item, (p) => p.workspaceId === scope.workspaceId && p.entityId === item.entityId)
       }
     })
   }
-  async getPlanningProjection(workspaceId: domain.WorkspaceId, entityId: domain.EntityId): Promise<domain.WorkspaceProjection | undefined> { return this.data.projections.find((p) => p.workspaceId === workspaceId && p.entityId === entityId) }
-  async listPlanningProjections(workspaceId: domain.WorkspaceId): Promise<readonly domain.WorkspaceProjection[]> { return this.data.projections.filter((p) => p.workspaceId === workspaceId) }
+  async getPlanningProjection(workspaceId: domain.WorkspaceId, entityId: domain.EntityId): Promise<domain.WorkspaceProjection | undefined> { return this.#read(() => { return this.#data.projections.find((p) => p.workspaceId === workspaceId && p.entityId === entityId) }) }
+  async listPlanningProjections(workspaceId: domain.WorkspaceId): Promise<readonly domain.WorkspaceProjection[]> { return this.#read(() => { return this.#data.projections.filter((p) => p.workspaceId === workspaceId) }) }
   /** 仓库以外键指向工作区与身份：两者任一不存在即拒绝（与 SQLite 的 `repository` 两条外键同语义，L6 评审 F1）。挂载键是 `(工作区, id)`：同键换外部身份、同工作区同身份换 id 都拒绝且不覆盖，同值重复登记是 no-op（与 SQLite 的复合主键加 `UNIQUE (workspace_id, external_identity_id)` 同语义，#187 / #188）。 */
   async putRepository(record: cap.RepositoryRecord): Promise<void> {
+    record = structuredClone(record)
     return this.#mutate(() => {
-      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('repository workspace does not exist')
-      const identity = this.data.identities.find((candidate) => candidate.id === record.externalIdentityId)
+      if (!this.#data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('repository workspace does not exist')
+      const identity = this.#data.identities.find((candidate) => candidate.id === record.externalIdentityId)
       if (identity === undefined) throw new Error('repository external identity does not exist')
       if (identity.externalKind !== domain.ExternalIdentityKind.Repository) throw new Error('repository external identity is not a repository identity') // TD-004
-      const mounts = this.data.repositories.filter((r) => r.workspaceId === record.workspaceId)
+      const mounts = this.#data.repositories.filter((r) => r.workspaceId === record.workspaceId)
       const sameKey = mounts.find((r) => r.id === record.id)
       if (sameKey !== undefined && sameKey.externalIdentityId !== record.externalIdentityId) throw new Error('repository mount already points at another external identity')
       if (mounts.some((r) => r.externalIdentityId === record.externalIdentityId && r.id !== record.id)) throw new Error('repository external identity is already mounted under another id')
-      upsert(this.data.repositories, record, (r) => r.workspaceId === record.workspaceId && r.id === record.id)
+      upsert(this.#data.repositories, record, (r) => r.workspaceId === record.workspaceId && r.id === record.id)
     })
   }
-  async listRepositories(workspaceId: domain.WorkspaceId): Promise<readonly cap.RepositoryRecord[]> { return this.data.repositories.filter((r) => r.workspaceId === workspaceId) }
+  async listRepositories(workspaceId: domain.WorkspaceId): Promise<readonly cap.RepositoryRecord[]> { return this.#read(() => { return this.#data.repositories.filter((r) => r.workspaceId === workspaceId) }) }
   /**
    * 同一 (工作项, 仓库) 最多一个 active 上下文：写入新的 active 会把旧的置为 closed，并把旧行的
    * `provisioningStartedAt` 清成 `undefined`——端口契约写明该列"终态为 undefined"（L6 评审 F3）。
@@ -412,38 +439,38 @@ export class MemoryStorage implements cap.Storage {
    * （最先检查，早于其余外键与枚举），不论状态 active 或终态；只验证实体存在，种类与规划投影归 core 的可操作项策略。
    */
   async putExecutionContext(record: cap.ExecutionContextRecord): Promise<void> {
+    record = structuredClone(contextSnapshot(record))
     return this.#mutate(() => {
-      validateGeneration(record)
-      if (!this.data.entities.some((entity) => entity.id === record.workItemId)) throw cap.StorageInputError.unregisteredWorkItem()
-      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('execution context workspace does not exist')
-      if (!this.data.repositories.some((r) => r.workspaceId === record.workspaceId && r.id === record.repositoryId)) throw new Error('execution context repository does not exist in the context workspace')
+      if (!this.#data.entities.some((entity) => entity.id === record.workItemId)) throw cap.StorageInputError.unregisteredWorkItem()
+      if (!this.#data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('execution context workspace does not exist')
+      if (!this.#data.repositories.some((r) => r.workspaceId === record.workspaceId && r.id === record.repositoryId)) throw new Error('execution context repository does not exist in the context workspace')
       if (!CONTEXT_STATUSES.includes(record.status)) throw new Error(`execution context status is not a known value: ${record.status}`)
-      if (isActiveContext(record.status)) this.data.contexts = this.data.contexts.map((c) =>
+      if (isActiveContext(record.status)) this.#data.contexts = this.#data.contexts.map((c) =>
         c.workspaceId === record.workspaceId && c.workItemId === record.workItemId && c.repositoryId === record.repositoryId
           && c.id !== record.id && isActiveContext(c.status)
           ? { ...c, status: domain.ExecutionContextStatus.Closed, provisioningStartedAt: undefined } : c)
-      upsert(this.data.contexts, record, (c) => c.id === record.id)
+      upsert(this.#data.contexts, record, (c) => c.id === record.id)
     })
   }
-  async getExecutionContext(id: domain.ExecutionContextId): Promise<cap.ExecutionContextRecord | undefined> { return this.data.contexts.find((c) => c.id === id) }
-  async findActiveExecutionContext(workspaceId: domain.WorkspaceId, workItemId: domain.EntityId, repositoryId: domain.EntityId): Promise<cap.ExecutionContextRecord | undefined> {
-    return this.data.contexts.find((c) =>
+  async getExecutionContext(id: domain.ExecutionContextId): Promise<cap.ExecutionContextRecord | undefined> { return this.#read(() => { return this.#data.contexts.find((c) => c.id === id) }) }
+  async findActiveExecutionContext(workspaceId: domain.WorkspaceId, workItemId: domain.EntityId, repositoryId: domain.EntityId): Promise<cap.ExecutionContextRecord | undefined> { return this.#read(() => {
+    return this.#data.contexts.find((c) =>
       c.workspaceId === workspaceId && c.workItemId === workItemId && c.repositoryId === repositoryId && isActiveContext(c.status))
-  }
+  }) }
   /** 执行运行必须挂在存在的上下文与工作区上、状态必须是已知取值：与 SQLite 的 `execution_run` 两条外键（上下文是 `(workspace_id, context_id)` 复合键：必须在同一工作区）与 `status` 的 CHECK 同语义（L6 评审 F1；第四轮评审补工作区与枚举；第六轮评审补复合键）。 */
   async putExecutionRun(input: cap.ExecutionRunRecord): Promise<void> {
     const record = runSnapshot(input)
     return this.#mutate(() => {
-      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('execution run workspace does not exist')
-      if (!this.data.contexts.some((context) => context.id === record.contextId && context.workspaceId === record.workspaceId)) throw new Error('execution run context does not exist in the run workspace')
+      if (!this.#data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('execution run workspace does not exist')
+      if (!this.#data.contexts.some((context) => context.id === record.contextId && context.workspaceId === record.workspaceId)) throw new Error('execution run context does not exist in the run workspace')
       if (!RUN_STATUSES.includes(record.status)) throw new Error(`execution run status is not a known value: ${record.status}`)
-      upsert(this.data.runs, record, (r) => r.id === record.id)
+      upsert(this.#data.runs, record, (r) => r.id === record.id)
     })
   }
-  async getExecutionRun(id: domain.ExecutionRunId): Promise<cap.ExecutionRunRecord | undefined> {
-    const record = this.data.runs.find((r) => r.id === id)
+  async getExecutionRun(id: domain.ExecutionRunId): Promise<cap.ExecutionRunRecord | undefined> { return this.#read(() => {
+    const record = this.#data.runs.find((r) => r.id === id)
     return record === undefined ? undefined : runSnapshot(record)
-  }
+  }) }
   /**
    * 关系：工作区必须存在，`state` / `source` 必须是 domain 的已知取值，candidate 不接受 `explicit`
    * （`explicit` 按 domain 的 `initialRelationState` 只能进 confirmed）——三条与 SQLite 的
@@ -451,26 +478,28 @@ export class MemoryStorage implements cap.Storage {
    * （#221 对齐：唯一的谱系写者先登记端点），共享执行组有用例钉住。
    */
   async putRelation(workspaceId: domain.WorkspaceId, relation: domain.Relation): Promise<void> {
+    relation = structuredClone(relation)
     return this.#mutate(() => {
-      if (!this.data.workspaces.some((workspace) => workspace.id === workspaceId)) throw new Error('relation workspace does not exist')
-      if (![relation.from, relation.to].every((id) => this.data.entities.some((entity) => entity.id === id))) throw new Error('relation endpoint entity does not exist')
+      if (!this.#data.workspaces.some((workspace) => workspace.id === workspaceId)) throw new Error('relation workspace does not exist')
+      if (![relation.from, relation.to].every((id) => this.#data.entities.some((entity) => entity.id === id))) throw new Error('relation endpoint entity does not exist')
       if (!RELATION_STATES.includes(relation.state)) throw new Error(`relation state is not a known value: ${relation.state}`)
       if (!RELATION_SOURCES.includes(relation.source)) throw new Error(`relation source is not a known value: ${relation.source}`)
       if (relation.state === domain.RelationState.Candidate && relation.source === domain.RelationSource.Explicit) throw new Error('candidate relation source must be deterministic or lineage')
-      const sameKey = (r: (typeof this.data.relations)[number]): boolean => r.workspaceId === workspaceId && r.relation.from === relation.from
+      const sameKey = (r: FakeStorageData['relations'][number]): boolean => r.workspaceId === workspaceId && r.relation.from === relation.from
         && r.relation.to === relation.to && r.relation.type === relation.type
       // 不变量 5：候选不得降级已确认——同键已有 confirmed 时，写入 candidate 是 no-op。
-      if (relation.state !== 'confirmed' && this.data.relations.some((r) => sameKey(r) && r.relation.state === 'confirmed')) return
-      upsert(this.data.relations, { workspaceId, relation }, sameKey)
+      if (relation.state !== 'confirmed' && this.#data.relations.some((r) => sameKey(r) && r.relation.state === 'confirmed')) return
+      upsert(this.#data.relations, { workspaceId, relation }, sameKey)
     })
   }
-  async listRelations(workspaceId: domain.WorkspaceId): Promise<readonly domain.Relation[]> { return this.data.relations.filter((r) => r.workspaceId === workspaceId).map((r) => r.relation) }
-  async getDeliveryFacts(workspaceId: domain.WorkspaceId, contextId: domain.ExecutionContextId): Promise<cap.DeliveryFactsRecord | undefined> { return structuredClone(this.data.deliveryFacts.find((r) => r.workspaceId === workspaceId && r.contextId === contextId)) }
+  async listRelations(workspaceId: domain.WorkspaceId): Promise<readonly domain.Relation[]> { return this.#read(() => { return this.#data.relations.filter((r) => r.workspaceId === workspaceId).map((r) => r.relation) }) }
+  async getDeliveryFacts(workspaceId: domain.WorkspaceId, contextId: domain.ExecutionContextId): Promise<cap.DeliveryFactsRecord | undefined> { return this.#read(() => { return this.#data.deliveryFacts.find((r) => r.workspaceId === workspaceId && r.contextId === contextId) }) }
   /** 整行覆盖；父行是同一工作区里的执行上下文（与 006 的复合外键同语义），缺失即拒绝且不留行。 */
   async putDeliveryFacts(record: cap.DeliveryFactsRecord): Promise<void> {
+    record = structuredClone(record)
     return this.#mutate(() => {
-      if (!this.data.contexts.some((c) => c.id === record.contextId && c.workspaceId === record.workspaceId)) throw new Error('delivery facts context does not exist in the workspace')
-      upsert(this.data.deliveryFacts, structuredClone(record), (r) => r.workspaceId === record.workspaceId && r.contextId === record.contextId)
+      if (!this.#data.contexts.some((c) => c.id === record.contextId && c.workspaceId === record.workspaceId)) throw new Error('delivery facts context does not exist in the workspace')
+      upsert(this.#data.deliveryFacts, structuredClone(record), (r) => r.workspaceId === record.workspaceId && r.contextId === record.contextId)
     })
   }
   /**
@@ -479,15 +508,17 @@ export class MemoryStorage implements cap.Storage {
    * 但**不要求成员关系存在**，账本主体是端口主体，对账可以先于成员关系落账（端口契约的执行段）。
    */
   async recordObservation(record: cap.ObservationRecord): Promise<boolean> {
+    const { sourceVersion, ...observation } = record.observation
+    record = structuredClone({ ...record, observation: { ...observation, sourceVersion } })
     return this.#mutate(() => {
       const { observation } = record
-      if (!this.data.providerBindings.some((binding) => binding.id === observation.bindingId)) throw new Error('observation binding does not exist')
+      if (!this.#data.providerBindings.some((binding) => binding.id === observation.bindingId)) throw new Error('observation binding does not exist')
       cap.assertComparableSourceVersion(observation.sourceVersion)
       const key = `${observation.bindingId}|${observation.dedupeKey}`
       // 去重账本与快照槽位分开：账本按 (bindingId, dedupeKey) 只追加，永不被后来的同版本观察顶掉，
       // 否则"同一观察再投递一次"会第二次返回 true，调用方据此重放副作用。
-      if (this.data.observations.some((item) => `${item.observation.bindingId}|${item.observation.dedupeKey}` === key)) return false
-      const sameSubject = this.data.observations.filter((item) => item.observation.bindingId === observation.bindingId
+      if (this.#data.observations.some((item) => `${item.observation.bindingId}|${item.observation.dedupeKey}` === key)) return false
+      const sameSubject = this.#data.observations.filter((item) => item.observation.bindingId === observation.bindingId
         && item.observation.subject.objectKind === observation.subject.objectKind
         && item.observation.subject.externalId === observation.subject.externalId)
       // 已提交快照 = 该主体里 sourceVersion 最大的那条（相等时取最后写入的一条，即整快照替换）。
@@ -496,84 +527,94 @@ export class MemoryStorage implements cap.Storage {
         if (committed === undefined || compareSourceVersion(item.observation.sourceVersion, committed.observation.sourceVersion) >= 0) committed = item
       }
       if (committed !== undefined && compareSourceVersion(observation.sourceVersion, committed.observation.sourceVersion) < 0) return false
-      this.data.observations.push(record)
+      this.#data.observations.push(record)
       return true
     })
   }
-  async getSyncCursor(workspaceId: domain.WorkspaceId, bindingId: domain.ProviderBindingId, scopeKey: string): Promise<cap.SyncCursorRecord | undefined> {
-    return this.data.cursors.find((c) => c.workspaceId === workspaceId && c.bindingId === bindingId && c.scopeKey === scopeKey)
-  }
+  async getSyncCursor(workspaceId: domain.WorkspaceId, bindingId: domain.ProviderBindingId, scopeKey: string): Promise<cap.SyncCursorRecord | undefined> { return this.#read(() => {
+    return this.#data.cursors.find((c) => c.workspaceId === workspaceId && c.bindingId === bindingId && c.scopeKey === scopeKey)
+  }) }
   async putSyncCursor(record: cap.SyncCursorRecord): Promise<void> {
+    record = structuredClone(record)
     return this.#mutate(() => {
       // 游标的两条父边各自独立（与 SQLite 的 sync_cursor 两条外键同语义，第四轮评审 R4-4；#189 补工作区）；它们不证明该工作区已挂载该连接。
-      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('sync cursor workspace does not exist')
-      if (!this.data.providerBindings.some((anchor) => anchor.id === record.bindingId)) throw new Error('sync cursor binding does not exist')
-      upsert(this.data.cursors, record, (c) => c.workspaceId === record.workspaceId && c.bindingId === record.bindingId && c.scopeKey === record.scopeKey)
+      if (!this.#data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('sync cursor workspace does not exist')
+      if (!this.#data.providerBindings.some((anchor) => anchor.id === record.bindingId)) throw new Error('sync cursor binding does not exist')
+      upsert(this.#data.cursors, record, (c) => c.workspaceId === record.workspaceId && c.bindingId === record.bindingId && c.scopeKey === record.scopeKey)
     })
   }
-  async getPlanningSyncRound(workspaceId: domain.WorkspaceId, bindingId: domain.ProviderBindingId, scopeKey: string): Promise<cap.PlanningSyncRoundRecord | undefined> {
-    return this.data.planningSyncRounds.find((round) => round.workspaceId === workspaceId && round.bindingId === bindingId && round.scopeKey === scopeKey)
-  }
+  async getPlanningSyncRound(workspaceId: domain.WorkspaceId, bindingId: domain.ProviderBindingId, scopeKey: string): Promise<cap.PlanningSyncRoundRecord | undefined> { return this.#read(() => {
+    return this.#data.planningSyncRounds.find((round) => round.workspaceId === workspaceId && round.bindingId === bindingId && round.scopeKey === scopeKey)
+  }) }
   async putPlanningSyncRound(record: cap.PlanningSyncRoundRecord): Promise<void> {
+    const { latestCommittedRound, ...fields } = record
+    record = structuredClone({ ...fields, latestCommittedRound })
     return this.#mutate(() => {
-      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('sync round workspace does not exist')
-      if (!this.data.providerBindings.some((binding) => binding.id === record.bindingId)) throw new Error('sync round binding does not exist')
+      if (!this.#data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('sync round workspace does not exist')
+      if (!this.#data.providerBindings.some((binding) => binding.id === record.bindingId)) throw new Error('sync round binding does not exist')
       if (!Number.isInteger(record.latestStartedRound) || record.latestStartedRound < 1) throw new Error('sync round must be a positive integer')
       if (record.latestCommittedRound !== undefined && (!Number.isInteger(record.latestCommittedRound) || record.latestCommittedRound < 1 || record.latestCommittedRound > record.latestStartedRound)) throw new Error('sync round committed value is invalid')
-      const current = this.data.planningSyncRounds.find((round) => round.workspaceId === record.workspaceId && round.bindingId === record.bindingId && round.scopeKey === record.scopeKey)
+      const current = this.#data.planningSyncRounds.find((round) => round.workspaceId === record.workspaceId && round.bindingId === record.bindingId && round.scopeKey === record.scopeKey)
       if (current !== undefined && record.latestStartedRound < current.latestStartedRound) throw new Error('sync round started value must not move backwards')
       if (current?.latestCommittedRound !== undefined && (record.latestCommittedRound === undefined || record.latestCommittedRound < current.latestCommittedRound)) throw new Error('sync round committed value must not move backwards')
-      upsert(this.data.planningSyncRounds, structuredClone(record), (round) => round.workspaceId === record.workspaceId && round.bindingId === record.bindingId && round.scopeKey === record.scopeKey)
+      upsert(this.#data.planningSyncRounds, structuredClone(record), (round) => round.workspaceId === record.workspaceId && round.bindingId === record.bindingId && round.scopeKey === record.scopeKey)
     })
   }
-  async getReconcileCursor(workspaceId: domain.WorkspaceId): Promise<cap.ReconcileCursorRecord | undefined> {
-    return this.data.reconcileCursors.find((cursor) => cursor.workspaceId === workspaceId)
-  }
+  async getReconcileCursor(workspaceId: domain.WorkspaceId): Promise<cap.ReconcileCursorRecord | undefined> { return this.#read(() => {
+    return this.#data.reconcileCursors.find((cursor) => cursor.workspaceId === workspaceId)
+  }) }
   async putReconcileCursor(record: cap.ReconcileCursorRecord): Promise<void> {
+    record = structuredClone(record)
     return this.#mutate(() => {
       // 对账游标必须属于存在的工作区（与 SQLite 的 reconcile_cursor.workspace_id 外键同语义，第四轮评审 R4-4）。
-      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('reconcile cursor workspace does not exist')
-      upsert(this.data.reconcileCursors, record, (cursor) => cursor.workspaceId === record.workspaceId)
+      if (!this.#data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('reconcile cursor workspace does not exist')
+      upsert(this.#data.reconcileCursors, record, (cursor) => cursor.workspaceId === record.workspaceId)
     })
   }
   /** 写尝试以 (workspace, idempotencyKey) 唯一：同键重放是**幂等覆盖**（与 003 的 `PRIMARY KEY (workspace_id, idempotency_key)` 同模型），`id` 在工作区内唯一。工作区与绑定两条父边、`state` 枚举都与 SQLite 的 `mutation_attempt` 外键与 CHECK 同语义（L6 评审 F1；第四轮评审补工作区与枚举）。 */
-  async findMutationAttempt(workspaceId: domain.WorkspaceId, idempotencyKey: string): Promise<cap.MutationAttemptRecord | undefined> { return structuredClone(this.data.attempts.find((a) => a.workspaceId === workspaceId && a.idempotencyKey === idempotencyKey)) }
+  async findMutationAttempt(workspaceId: domain.WorkspaceId, idempotencyKey: string): Promise<cap.MutationAttemptRecord | undefined> { return this.#read(() => { return this.#data.attempts.find((a) => a.workspaceId === workspaceId && a.idempotencyKey === idempotencyKey) }) }
   async putMutationAttempt(record: cap.MutationAttemptRecord): Promise<void> {
+    const { externalIntent, ...fields } = record
+    record = externalIntent === undefined ? fields : { ...fields, externalIntent: cap.externalIntentSnapshot(externalIntent) }
+    cap.validateExternalIntentCommand(record)
+    record = structuredClone(record)
     return this.#mutate(() => {
-      if (record.externalIntent !== undefined) {
-        record = { ...record, externalIntent: cap.externalIntentSnapshot(record.externalIntent) }
-        cap.validateExternalIntentCommand(record)
-      }
-      if (!this.data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('mutation attempt workspace does not exist')
-      if (!this.data.providerBindings.some((binding) => binding.id === record.bindingId)) throw new Error('mutation attempt binding does not exist')
-      const previous = this.data.attempts.find((a) => a.workspaceId === record.workspaceId && a.idempotencyKey === record.idempotencyKey)
+      if (!this.#data.workspaces.some((workspace) => workspace.id === record.workspaceId)) throw new Error('mutation attempt workspace does not exist')
+      if (!this.#data.providerBindings.some((binding) => binding.id === record.bindingId)) throw new Error('mutation attempt binding does not exist')
+      const previous = this.#data.attempts.find((a) => a.workspaceId === record.workspaceId && a.idempotencyKey === record.idempotencyKey)
       if (record.commandName === 'startWork' && (typeof record.requestFingerprint !== 'string' || record.requestFingerprint.length === 0)) throw new Error('Start Work request fingerprint required')
       if (previous?.requestFingerprint !== undefined && (record.requestFingerprint !== previous.requestFingerprint || record.commandName !== previous.commandName || record.bindingId !== previous.bindingId)) throw new Error('mutation attempt request identity is immutable')
       if (!WRITE_STATES.includes(record.state)) throw new Error(`mutation attempt state is not a known value: ${record.state}`)
-      const clash = this.data.attempts.find((a) => a.workspaceId === record.workspaceId
+      const clash = this.#data.attempts.find((a) => a.workspaceId === record.workspaceId
         && a.id === record.id && a.idempotencyKey !== record.idempotencyKey)
       if (clash !== undefined) throw new Error('mutation attempt id already used in this workspace')
-      upsert(this.data.attempts, structuredClone(record), (a) => a.workspaceId === record.workspaceId && a.idempotencyKey === record.idempotencyKey)
+      upsert(this.#data.attempts, structuredClone(record), (a) => a.workspaceId === record.workspaceId && a.idempotencyKey === record.idempotencyKey)
     })
   }
-  async listMutationAttempts(workspaceId: domain.WorkspaceId): Promise<readonly cap.MutationAttemptRecord[]> { return structuredClone(this.data.attempts.filter((a) => a.workspaceId === workspaceId)) }
-  async currentRevision(workspaceId: domain.WorkspaceId): Promise<number> { return this.data.revisions.find((r) => r.workspaceId === workspaceId)?.revision ?? 0 }
+  async listMutationAttempts(workspaceId: domain.WorkspaceId): Promise<readonly cap.MutationAttemptRecord[]> { return this.#read(() => { return this.#data.attempts.filter((a) => a.workspaceId === workspaceId) }) }
+  async currentRevision(workspaceId: domain.WorkspaceId): Promise<number> { return this.#read(() => { return this.#data.revisions.find((r) => r.workspaceId === workspaceId)?.revision ?? 0 }) }
   async advanceRevision(workspaceId: domain.WorkspaceId): Promise<number> {
     return this.#mutate(() => {
-      if (!this.data.workspaces.some((workspace) => workspace.id === workspaceId)) throw new Error('revision workspace does not exist')
-      const index = this.data.revisions.findIndex((r) => r.workspaceId === workspaceId)
-      const revision = (this.data.revisions[index]?.revision ?? 0) + 1
-      if (index === -1) this.data.revisions.push({ workspaceId, revision })
-      else this.data.revisions[index] = { workspaceId, revision }
+      if (!this.#data.workspaces.some((workspace) => workspace.id === workspaceId)) throw new Error('revision workspace does not exist')
+      const index = this.#data.revisions.findIndex((r) => r.workspaceId === workspaceId)
+      const revision = (this.#data.revisions[index]?.revision ?? 0) + 1
+      if (index === -1) this.#data.revisions.push({ workspaceId, revision })
+      else this.#data.revisions[index] = { workspaceId, revision }
       return revision
     })
   }
 }
 export function createFakeStorage(data: FakeStorageData = emptyStorageData(), policy: cap.StorageValidationPolicy = cap.EMPTY_POLICY): MemoryStorage {
-  return new MemoryStorage(structuredClone(data), false, policy)
+  return new MemoryStorage(data, false, policy)
 }
 /** 导出内部状态：换一个实例导入同一份快照即可模拟重启后读同一份内容。 */
 export function exportFakeStorageState(storage: cap.Storage): FakeStorageData {
   if (!(storage instanceof MemoryStorage)) throw new Error('exportFakeStorageState 只支持 MemoryStorage')
-  return structuredClone(storage.data)
+  return structuredClone(fakeStateAccess.get(storage)!.read())
+}
+
+/** 仅 Fake 故障测试使用：显式替换内部状态，不属于 Storage 端口。 */
+export function injectFakeStorageState(storage: cap.Storage, change: (data: FakeStorageData) => FakeStorageData): void {
+  if (!(storage instanceof MemoryStorage)) throw new Error('injectFakeStorageState 只支持 MemoryStorage')
+  fakeStateAccess.get(storage)!.inject(change)
 }

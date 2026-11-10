@@ -13,7 +13,7 @@ import { StatusPolicy, newWorkspaceId } from '@harness-projects/domain'
 import { StatusPolicyMode, composeCore } from '@harness-projects/core'
 import { createController } from '@harness-projects/controller'
 import { createEntityStore, createSync } from '@harness-projects/client'
-import { FaultKind, createFakeProviders } from '@harness-projects/provider-fake'
+import { FaultKind, createFakeProviders, injectFakeStorageState } from '@harness-projects/provider-fake'
 
 async function compose() {
   const providers = createFakeProviders()
@@ -76,8 +76,8 @@ test('client：删除最高实体修订后，工作区修订仍单调且订阅�
   assert.ok(beforeDelete.revision > first.revision)
   assert.equal(beforeDelete.entities.find((entity) => entity.entityId === target.entityId).source.revision, beforeDelete.revision)
 
-  providers.storage.data.projections = providers.storage.data.projections.filter((projection) => projection.entityId !== target.entityId)
-  const deletedRevision = await providers.storage.advanceRevision(providers.storage.data.workspaces[0].id)
+  injectFakeStorageState(providers.storage, (data) => ({ ...data, projections: data.projections.filter((projection) => projection.entityId !== target.entityId) }))
+  const deletedRevision = await providers.storage.advanceRevision(first.workspace.id)
   const watch = controller.watch({ afterRevision: beforeDelete.revision, seed: beforeDelete })
   const event = await watch.poll()
 

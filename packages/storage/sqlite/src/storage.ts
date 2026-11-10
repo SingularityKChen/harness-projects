@@ -3,7 +3,7 @@
  * 读写路径：每个方法都经过基类的唯一入口（`read` / `mutate` / `write`），因此外部读拿到**结算后**的值、看不到未提交的写入；事务在队列内从 BEGIN IMMEDIATE 持有到 COMMIT / ROLLBACK，重叠事务串行提交，在途事务期间的直接写入等到结算后才执行。多语句写入只有一个原子入口 `atomic`。代价也相同：事务的 work 里必须用 `tx.*`（队列内自等，用 AsyncLocalStorage 标记事务作用域）；嵌套事务在运行时被拒绝，抛错后 ROLLBACK、重开句柄读不到半写行（L3 计划遗留「嵌套事务在运行时静默吞写」）。快速失败文本由基类持有，这里只把它们转出包外；约定文本的整串断言在 `tests/contract/suites/storage.js`。列表顺序：端口未承诺顺序；本实现各列表的排序见各方法（地基面与同步面按 rowid / 业务键，执行面按主键序），调用方不得依赖。
  */
 import type { BindingConfigurationRecord, ConnectorAccountRecord, ProviderBindingRecord, RepositoryRecord, Storage, StorageTransaction, StorageValidationPolicy, WorkspaceRecord } from '@harness-projects/capabilities'
-import { planningMappingRecordSnapshot, type WorkspacePlanningMappingRecord, EMPTY_POLICY, bindingRefOf, parseBindingConfiguration, parseBindingRef, parseConnectorAccount, snapshotPolicy } from '@harness-projects/capabilities'
+import { planningMappingRecordSnapshot, type WorkspacePlanningMappingRecord, EMPTY_POLICY, bindingConfigurationSnapshot, parseBindingConfiguration, parseBindingRef, parseConnectorAccount, snapshotPolicy } from '@harness-projects/capabilities'
 import { parseExternalIdentityKind, type ConnectorAccountId, type Entity, type EntityId, type ExternalIdentity, type ProviderBindingId, type WorkspaceId, type WorkspaceProjection } from '@harness-projects/domain'
 import { openDatabase } from './db.ts'
 import { migrate } from './migrate.ts'
@@ -43,7 +43,9 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   }
   getWorkspace(id: WorkspaceId): Promise<WorkspaceRecord | undefined> { return this.read(() => optional(this.db.prepare('SELECT id, name, status_policy FROM workspace WHERE id = ?').get(id), rowToWorkspace)) }
   /** 绑定写入是两条语句——连接锚点（跨工作区共享）与工作区挂载——必须整体生效：挂载被唯一索引或 CHECK 拒绝时留下孤儿锚点，"被拒绝的挂载不得留下任何行"就不成立。拒绝先于写入：`ON CONFLICT (id) DO NOTHING` 会静默吞掉"同一个 id 换实现"，所以先比对实现键；其余拒绝由 002 的约束给出，事务把它们与前面的写入一起回滚。 */
-  putProviderBinding(record: ProviderBindingRecord): Promise<void> {
+  async putProviderBinding(record: ProviderBindingRecord): Promise<void> {
+    const { enabled, isDefault, ...fields } = record
+    record = structuredClone({ ...fields, enabled, isDefault })
     const write = () => {
       const anchor = this.db.prepare('SELECT implementation_key FROM provider_binding WHERE id = ?').get(record.id) as { implementation_key: string } | undefined
       if (anchor !== undefined && anchor.implementation_key !== record.implementationKey) throw new Error('provider binding id already points at another implementation')
@@ -117,7 +119,8 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   }
   /** 配置写入（#126）：先校验 record / ref 外形（畸形 ref 在解引用之前以 `RangeError` 拒绝），再查真实挂载与它的 implementationKey，按受信 schema 逐字段校验；不接收调用者声称的实现键。 */
   async putBindingConfiguration(record: BindingConfigurationRecord): Promise<void> {
-    const ref = bindingRefOf(record)
+    record = bindingConfigurationSnapshot(record)
+    const { ref } = record
     return this.atomic(() => {
       const mount = this.db.prepare('SELECT b.implementation_key AS implementation_key FROM workspace_binding AS wb JOIN provider_binding AS b ON b.id = wb.binding_id WHERE wb.workspace_id = ? AND wb.binding_id = ? AND wb.domain = ?')
         .get(ref.workspaceId, ref.bindingId, ref.domain) as { implementation_key: string } | undefined
@@ -137,6 +140,7 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   putEntity(record: Entity): Promise<void> { return this.write('INSERT INTO entity (id, kind) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET kind = excluded.kind', record.id, record.kind) }
   /** 身份全局一份：重复登记保留已分配的 id 与 entityId（否则引用会断），只更新角色。种类先过 domain 的解析器：未知种类在任何写入之前以与替身相同的 RangeError（Promise 拒绝）失败，不依赖 002 的 CHECK 措辞；CHECK 是第二道防线。 */
   async putExternalIdentity(record: ExternalIdentity): Promise<void> {
+    record = structuredClone(record)
     parseExternalIdentityKind(record.externalKind)
     return this.atomic(() => {
       const sameId = this.db.prepare(`SELECT ${IDENTITY_COLUMNS} FROM external_identity WHERE id = ?`).get(record.id) as Row | undefined
@@ -153,7 +157,10 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
     return this.read(() => optional(this.db.prepare(`SELECT ${IDENTITY_COLUMNS} FROM external_identity WHERE binding_id = ? AND external_kind = ? AND external_id = ?`).get(bindingId, externalKind, externalId), rowToIdentity))
   }
   listIdentitiesForEntity(entityId: EntityId): Promise<readonly ExternalIdentity[]> { return this.read(() => (this.db.prepare(`SELECT ${IDENTITY_COLUMNS} FROM external_identity WHERE entity_id = ? ORDER BY rowid`).all(entityId) as Row[]).map(rowToIdentity)) }
-  putPlanningProjection(workspaceId: WorkspaceId, projection: WorkspaceProjection): Promise<void> { return this.mutate(() => this.upsertProjection(workspaceId, projection)) }
+  async putPlanningProjection(workspaceId: WorkspaceId, projection: WorkspaceProjection): Promise<void> {
+    projection = structuredClone(projection)
+    return this.mutate(() => this.upsertProjection(workspaceId, projection))
+  }
   /** 投影 UPSERT：put 与 replace 共用；同 `(workspaceId, entityId)` 的第二次写入是覆盖，不是追加。 */
   protected upsertProjection(workspaceId: WorkspaceId, projection: WorkspaceProjection): void {
     const [kind, title, body, number, sourceNumber, reason] = contentColumns(projection.content)
@@ -166,7 +173,9 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   }
   listPlanningProjections(workspaceId: WorkspaceId): Promise<readonly WorkspaceProjection[]> { return this.read(() => (this.db.prepare(`SELECT ${PROJECTION_SELECT} FROM workspace_projection WHERE workspace_id = ? ORDER BY rowid`).all(workspaceId) as Row[]).map(rowToProjection)) }
   /** 收敛语义与内存替身一致：作用域 = 该 binding 的身份所指实体；作用域内未出现在 items 中的投影被移除，作用域外不受影响。刻意不删除实体——身份以外键指向 entity，删了会留下悬空身份；内存替身同语义（实体与身份保留），判据是共享地基组「投影被收敛移除后实体与身份保留，条目可以重新加入」。 */
-  replacePlanningProjections(scope: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId }, items: readonly WorkspaceProjection[]): Promise<void> {
+  async replacePlanningProjections(scope: { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId }, items: readonly WorkspaceProjection[]): Promise<void> {
+    scope = structuredClone(scope)
+    items = structuredClone(items)
     return this.atomic(() => {
       const incoming = items.map((item) => item.entityId)
       const keep = incoming.length === 0 ? '' : ` AND entity_id NOT IN (${incoming.map(() => '?').join(', ')})`
@@ -175,7 +184,8 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
     })
   }
   /** 挂载键是 `(工作区, id)`（#187 / #188）：同值重复登记是 no-op；同键换外部身份响亮失败而不覆盖——`ON CONFLICT … DO NOTHING` 对它是静默忽略，所以先比对；同工作区同身份换 id 由 `UNIQUE (workspace_id, external_identity_id)` 拒绝。 */
-  putRepository(record: RepositoryRecord): Promise<void> {
+  async putRepository(record: RepositoryRecord): Promise<void> {
+    record = structuredClone(record)
     return this.atomic(() => {
       const kind = this.db.prepare('SELECT external_kind FROM external_identity WHERE id = ?').get(record.externalIdentityId) as { external_kind: string } | undefined
       if (kind !== undefined && kind.external_kind !== 'repository') throw new Error('repository external identity is not a repository identity') // TD-004；不存在由外键拒绝
