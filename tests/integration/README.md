@@ -43,7 +43,20 @@
 | `local-git-branch-probe.test.js` | 接管跨页（P1） | 目标分支排在第一页之外时头提交仍被报出（诱饵数与探测页大小的耦合写在文件里） |
 | | 写入已落地但响应丢失（P2） | 分支多于一页时对账读完全部页，不把磁盘上已有的分支判成 `not_found`「创建未生效」 |
 
-**替身边界的如实说明**：`start-work-*` 两个文件用的是离线 Development 替身（外加一处最小的 `createBranch` 覆写，用来复刻真实 provider「同名分支指向别处」的拒绝语义），**不是**真实临时仓库。真实本地 Git 上的恢复与分页证据在 `local-git-start-work-resume.test.js` 与 `local-git-branch-probe.test.js`；四个文件都用离线 storage，SQLite 与进程重启仍归 #141（被 #137 / #120 阻塞）。「重启」在 R2 / R3 里只是「同一 storage、同一 workspace 换一套能力重新组装」。
+**替身边界的如实说明**：`start-work-*` 两个文件用的是离线 Development 替身（外加一处最小的 `createBranch` 覆写，用来复刻真实 provider「同名分支指向别处」的拒绝语义），**不是**真实临时仓库。真实本地 Git 上的恢复与分页证据在 `local-git-start-work-resume.test.js` 与 `local-git-branch-probe.test.js`；四个文件都用离线 storage。「重启」在 R2 / R3 里只是「同一 storage、同一 workspace 换一套能力重新组装」；真实 Git + 文件 SQLite 的关闭重开证据见下一节 #141。
+
+## Start Work 的真实 Git 与 SQLite 恢复组合（#141）
+
+`start-work-local-git-sqlite.test.js` 的四个命名用例均经 `composeCore` + `commands.startWork`，组装临时仓库上的真实 Local Git provider、文件 SQLite 和确定启动失败的离线 Execution 替身。fallback 使用声明人工接管能力的离线执行替身；这证明 Core 的降级与持久化组合，不证明真实人工执行签发者或宿主安装验收。
+
+| 用例 | 可观察证据 |
+|---|---|
+| 工作树创建确定失败 | 仅 worktree add 的 runner 结果被拒绝，其余 Git 命令真实执行；分支与 Failed context 保留，磁盘没有工作树、SQLite 没有 run，主备执行调用均为零 |
+| 主执行确定失败 | Git 分支/工作树及 Ready context 保留；主执行与 fallback 各调用一次，fallback 的 running 记录、签发绑定/引用和 confirmed 关系落到 SQLite，Query 如实回报降级 |
+| 同键与新键唯一性 | Git 失败后同键仍失败、新键可恢复原 context；Ready 后同键重放原操作，新键按任务交接契约报 conflict；分支/工作树总量、SQLite context/worktree/run 全集与外部调用数均不增加 |
+| 关闭重开同一文件 | 关闭原 SQLite handle 并确认不可读，以相同路径的新 handle、新 Provider 实例和新 Core，在任何重放命令前读回完整 context/relations/run/attempt/Query；原键恢复相同引用，新键拒绝且无第二次执行 |
+
+此组合不包含基线前进的第五项矩阵，也不替代 #304 的 native prerequisite、installed recovery 人验或 R1 人类裁决。
 
 ## Start Work 的前置登记（#187 / #188）
 

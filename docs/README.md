@@ -81,6 +81,7 @@
 | [2026-10-30-ui-detail-text-reflow](exec-plan/completed/2026-10-30-ui-detail-text-reflow.md) | 实际App样式归属、放大文字标题重排（#479） |
 | [2026-11-02-core-release-criteria](exec-plan/completed/2026-11-02-core-release-criteria.md) | Core分期范围、Host声明与保留的12+10证据责任（#500） |
 | [2026-11-02-start-work-execution-recovery](exec-plan/completed/2026-11-02-start-work-execution-recovery.md) | 执行回执先持久化、原操作恢复与完整 Ready 校验（#193） |
+| [2026-11-10-durable-start-work](exec-plan/completed/2026-11-10-durable-start-work.md) | 真实 Git＋文件 SQLite 的四项 Start Work 补偿、唯一性与关库重开证据（#141） |
 | [2026-11-02-start-work-execution-uniqueness](exec-plan/completed/2026-11-02-start-work-execution-uniqueness.md) | 公开命令的外部执行唯一性、重启与接管证明（#421） |
 | [2026-11-02-pull-request-detail-creation](exec-plan/completed/2026-11-02-pull-request-detail-creation.md) | 详情创建、真实重载与新连接原操作恢复（#437） |
 | [2026-11-02-pull-request-command-recovery](exec-plan/completed/2026-11-02-pull-request-command-recovery.md) | 持久 PR 创建、操作发现与原操作只读恢复（#494） |
