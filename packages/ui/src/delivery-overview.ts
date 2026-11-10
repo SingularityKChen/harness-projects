@@ -41,11 +41,12 @@ export function DeliveryOverview({ targets, reader, connected, navigation, onBin
     unavailable !== undefined ? h('p', null, unavailable) : h('div', null,
       h('div', { className: 'hp-list-actions' }, h('label', null, '仓库 ', h('select', { 'aria-label': '交付仓库', value: repositoryId, onChange: (event: { target: { value: string } }) => { setRepository(event.target.value); setPage(0) } }, ...repositories.map(id => h('option', { key: id, value: id }, id)))),
         h('button', { type: 'button', disabled: !connected || reader === undefined, onClick: () => setRefreshToken(value => value + 1) }, '刷新本页交付')),
-      h('p', null, `第 ${shownPage + 1} / ${pageCount} 页 · 共 ${items.length} 项；仅展示工程事实，CI 不代表发布接受。`),
+      h('p', { className:'hp-delivery-page' }, `第 ${shownPage + 1} / ${pageCount} 页 · 共 ${items.length} 项；仅展示工程事实，CI 不代表发布接受。`),
       h('p', { role: 'status', 'aria-live': 'polite', 'aria-atomic': true }, status),
+      h('div', { className:'hp-delivery-columns', 'aria-hidden':true }, ...['工作项','变更请求','流水线','检查'].map(label=>h('span',{key:label},label))),
       ...visible.map(item => {
         const scope: DeliveryLineageScope = { workspaceId: item.target.workspaceId, workItemId: item.target.workItemId, repositoryId: repositoryId! }
-        return h('article', { key: item.key, className: 'hp-delivery-row' }, h('div', null, h('h3', null, navigation === undefined ? item.title : h('a', { href: navigation.href(item.key), onClick: (event: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; preventDefault: () => void }) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigation.open(item.key) } } }, item.title)), item.numberLabel === undefined ? null : h('p', null, item.numberLabel)),
+        return h('article', { key: item.key, className: 'hp-delivery-row' }, h('div', null, item.numberLabel === undefined ? null : h('p', null, item.numberLabel), h('h3', null, navigation === undefined ? item.title : h('a', { href: navigation.href(item.key), onClick: (event: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; preventDefault: () => void }) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigation.open(item.key) } } }, item.title))),
           reader === undefined ? h('p', null, '交付读取尚未就绪') : h(DeliveryLineageSection, { scope, reader: generation.reader, connected, accessToken: item.accessTokens[repositoryId!], presentation: 'summary', refreshToken, onSettled: failed => settled(item.key, failed) }))
       }),
       h('nav', { 'aria-label': '交付分页' }, h('button', { type: 'button', disabled: shownPage === 0, onClick: () => setPage(shownPage - 1) }, '上一页'), h('button', { type: 'button', disabled: shownPage + 1 >= pageCount, onClick: () => setPage(shownPage + 1) }, '下一页'))),
@@ -54,13 +55,26 @@ export function DeliveryOverview({ targets, reader, connected, navigation, onBin
 }
 const STYLES = `
 .hp-delivery-overview { min-width:0; overflow-wrap:anywhere }
-.hp-delivery-overview select { max-width:100%; min-height:44px; font:inherit; color:inherit; background:Canvas }
-.hp-delivery-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,3fr); gap:var(--hp-space-4); padding-block:var(--hp-space-4); border-block-start:1px solid var(--hp-border) }
-.hp-delivery-row h3 { margin:0; font-size:1rem; overflow-wrap:anywhere }
-.hp-delivery-row a { color:inherit; text-underline-offset:3px }
+.hp-delivery-overview select { max-width:100%; min-height:44px; font:inherit; color:inherit; background:var(--hp-surface,Canvas); border:1px solid var(--hp-control-border,CanvasText); border-radius:.375rem; padding:.5rem .75rem }
+.hp-delivery-page, .hp-delivery-overview [role=status] { color:var(--hp-secondary,CanvasText); font-size:.857143rem }
+.hp-delivery-row { box-sizing:border-box; display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:var(--hp-space-4); min-height:58px; padding:.607143rem min(1.142857rem,16px); border-block-start:1px solid var(--hp-border) }
+.hp-delivery-row h3 { margin:0; font-size:1rem; line-height:1.57143; font-weight:500; overflow-wrap:anywhere }
+.hp-delivery-row a { text-decoration:none; color:var(--hp-primary,CanvasText); text-underline-offset:3px }
+.hp-delivery-row a:hover, .hp-delivery-row a:focus-visible { text-decoration:underline; text-decoration-color:var(--dsw-alias-link,currentColor) }
+.hp-delivery-row > div > p { margin:0; line-height:1.5; color:var(--hp-secondary,CanvasText); font-size:.857143rem }
+.hp-delivery-columns { display:grid; grid-template-columns:5fr repeat(3,minmax(0,2.333333fr)); min-height:44px; align-items:center; padding-inline:min(1.142857rem,16px); color:var(--hp-secondary,CanvasText); font-size:.857143rem; border-block-end:1px solid var(--hp-border) }
+.hp-delivery-summary li > h4 { position:absolute; inline-size:1px; block-size:1px; overflow:hidden; clip-path:inset(50%) }
+.hp-delivery-summary li p { margin:0; font-size:.857143rem; line-height:1.833333 }
 .hp-delivery-row .hp-delivery-summary { margin:0; padding:0; border:0 }
 .hp-delivery-summary ol { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--hp-space-4); list-style:none; margin:0; padding:0 }
 .hp-delivery-summary li { padding:0; margin:0 }
 .hp-delivery-overview nav { display:flex; flex-wrap:wrap; gap:var(--hp-space-2) }
-@media(max-width:48rem) { .hp-delivery-row,.hp-delivery-summary ol { grid-template-columns:minmax(0,1fr) } }
+@container (max-width:48rem) {
+  .hp-delivery-columns { display:none }
+  .hp-delivery-row,.hp-delivery-summary ol { grid-template-columns:minmax(0,1fr) }
+  .hp-delivery-summary ol { gap:var(--hp-space-2) }
+  .hp-delivery-summary li { display:grid; grid-template-columns:minmax(0,6rem) minmax(0,1fr); column-gap:var(--hp-space-2); align-items:start }
+  .hp-delivery-summary li > h4 { position:static; inline-size:auto; block-size:auto; clip-path:none }
+  .hp-delivery-summary li > :not(h4) { grid-column:2 }
+}
 `

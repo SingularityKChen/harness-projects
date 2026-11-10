@@ -9,14 +9,17 @@ import { TABLE_STYLES } from './table-presentation.ts'
 /** 局部样式只继承 Host 字体/前景/背景；焦点消费公开主题 token，无主题状态或额外导入。 */
 export const LIST_STYLES = TABLE_STYLES + `
 .hp-work-items { min-width:0; max-width:100% }
-.hp-work-items h2 { margin:0 0 .75rem; font-size:1.55rem; line-height:1.35; font-weight:650; overflow-wrap:anywhere }
+.hp-work-items h2 { margin:0; font-size:1.57143rem; line-height:1.36364; font-weight:600; overflow-wrap:anywhere }
 .hp-work-items p { margin:.5rem 0; overflow-wrap:anywhere }
-.hp-work-items .hp-list-meta { font-size:.93em }
-.hp-work-items [role=status] { margin:1rem 0 .75rem; padding:.25rem .75rem; border-inline-start:2px solid var(--hp-border,currentColor); overflow-wrap:anywhere }
+.hp-work-items .hp-list-meta { font-size:.857143rem }
+.hp-work-items .hp-list-confirmed, .hp-work-items .hp-list-read-only { position:absolute; inline-size:1px; block-size:1px; overflow:hidden; clip-path:inset(50%) }
+.hp-work-items .hp-list-context { padding-block-end:0 }
+.hp-work-items .hp-list-toolbar { margin-block-end:1rem }
+.hp-work-items [role=status] { margin:.25rem 0; padding:.25rem .75rem; border-inline-start:2px solid var(--hp-border,currentColor); overflow-wrap:anywhere }
 .hp-work-items .hp-list-wrap { white-space:normal; overflow-wrap:anywhere }
-.hp-work-items a { color:inherit; text-underline-offset:3px; text-decoration-thickness:1px }
+.hp-work-items a { color:inherit; text-underline-offset:3px; text-decoration-thickness:1px; text-decoration-color:var(--dsw-alias-link,currentColor) }
 .hp-work-items a:hover { text-decoration-thickness:2px }
-.hp-work-items :focus-visible { outline:var(--hp-focus-width,var(--dsw-focus-ring-width,2px)) solid var(--hp-focus-color,var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,currentColor))); outline-offset:3px }
+.hp-work-items :focus-visible { outline:var(--hp-focus-width,var(--dsw-focus-ring-width,2px)) solid var(--hp-focus-color,var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,CanvasText))); outline-offset:3px }
 .hp-work-items .hp-list-scroll:focus-visible { outline-offset:2px }
 .hp-work-items .hp-list-state { padding:.75rem 1rem; border-inline-start:3px solid currentColor; background:var(--hp-surface,transparent) }
 `

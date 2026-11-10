@@ -17,7 +17,9 @@ export function executionStyles() {
 .hp-execution h4 { font-weight:600 }
 .hp-execution :where(p,li,summary) { overflow-wrap:anywhere; min-width:0 }
 .hp-execution .hp-execution-repository + .hp-execution-repository { margin-block-start:var(--hp-space-6) }
-.hp-execution-state { font-weight:600 }
+.hp-execution-state { font-weight:500; color:var(--hp-secondary,CanvasText) }
+.hp-execution-state::before { content:''; display:inline-block; inline-size:.5rem; block-size:.5rem; margin-inline-end:.5rem; border:1px solid currentColor; border-radius:50% }
+.hp-execution-state[data-execution-state=passed]::before, .hp-execution-state[data-execution-state=succeeded]::before { background:var(--dsw-alias-state-success-primary,currentColor); border-color:var(--dsw-alias-state-success-primary,currentColor) }
 .hp-execution-meta { font-size:.9em }
 .hp-execution-notice { padding-inline-start:var(--hp-space-3); border-inline-start:2px solid var(--hp-control-border) }
 .hp-execution-source { margin-block:var(--hp-space-2) var(--hp-space-4) }

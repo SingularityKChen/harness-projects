@@ -7,10 +7,11 @@ import { startTableGeometryServer } from '../fixtures/table-geometry-browser.mjs
 
 async function exposeIdentity(page) {
   if (!await page.locator('.hp-table-controls').count()) return
-  const menu=page.getByText('选择显示列',{exact:true});await menu.click()
+  const menu=page.getByText('显示选项',{exact:true});await menu.click()
   await page.getByRole('checkbox',{name:'内容身份',exact:true}).check();await menu.click()
   await page.locator('[data-workspace-setup]').evaluate(el=>{el.scrollTop=el.scrollHeight})
 }
+async function reset(page) { const menu=page.getByText('显示选项',{exact:true});if (!await menu.evaluate(el=>el.parentElement.open)) await menu.click();await page.getByRole('button',{name:'重置列宽',exact:true}).click();await menu.click() }
 async function scene(t,run,{width=1440,height=900,query=''}={}) {
   const server=await startTableGeometryServer()
   let browser,closing
@@ -71,7 +72,7 @@ test('pointer changes actual geometry; cancel, capture loss and unmount have det
     await drag(page,control,-50);await page.evaluate(()=>window.tableFixture.unmount());await page.mouse.up();await page.evaluate(()=>window.tableFixture.mount());await page.locator('tbody tr').last().waitFor();await exposeIdentity(page)
     await handle(page).waitFor();assert.equal(await width(page),104,'unmount clears active session')
     assert.equal(await page.locator('.hp-resizing').count(),0)
-    const fresh=handle(page);await drag(page,fresh,50);await page.getByRole('button',{name:'重置列宽',exact:true}).evaluate(el=>el.click());await page.mouse.up()
+    const fresh=handle(page);await drag(page,fresh,50);await page.getByRole('button',{name:'重置列宽',exact:true,includeHidden:true}).evaluate(el=>el.click());await page.mouse.up()
     assert.equal(await width(page),104);assert.equal(await page.locator('.hp-resizing').count(),0,'reset terminates captured resize')
     await drag(page,handle(page),50);await page.evaluate(()=>window.tableFixture.scope('ws-1','bind-2'));await exposeIdentity(page);await page.mouse.up()
     assert.equal(await width(page),104);assert.equal(await page.locator('.hp-resizing').count(),0,'scope change terminates captured resize')
@@ -93,8 +94,8 @@ test('keyboard and reset share bounds; same scope refresh preserves widths and w
     await control.focus();await page.keyboard.press('End')
     await page.evaluate(()=>window.tableFixture.scope('ws-1','bind-1'));await exposeIdentity(page);await page.waitForFunction(()=>document.querySelector('thead th:nth-child(2)').getBoundingClientRect().width===104)
     await control.focus();await page.keyboard.press('End')
-    await page.getByRole('button',{name:'重置列宽',exact:true}).click();assert.equal(await width(page),104)
-    await page.getByRole('button',{name:'重置列宽',exact:true}).click();assert.equal(await width(page),104,'reset is idempotent')
+    await reset(page);assert.equal(await width(page),104)
+    await reset(page);assert.equal(await width(page),104,'reset is idempotent')
   })
 })
 test('narrow and 200% reset retain dynamic title limit and reachable independent focus targets',async t=>{
@@ -104,7 +105,7 @@ test('narrow and 200% reset retain dynamic title limit and reachable independent
     const before=await width(page,0),client=await page.locator('.hp-list-scroll').evaluate(el=>el.clientWidth)
     assert.ok(before<=client-96)
     const target=await title.boundingBox();assert.ok(target.width>=24&&target.height>=44)
-    await page.getByRole('button',{name:'重置列宽',exact:true}).click()
+    await reset(page)
     assert.ok(await width(page,0)<=client-96,'reset restores host clamp')
     await handle(page,'工作项').focus();assert.equal(await handle(page,'工作项').evaluate(el=>el===document.activeElement),true)
     assert.equal(await page.getByRole('dialog').count(),0)
@@ -142,4 +143,73 @@ test('pointer and keyboard geometry stay usable across Host widths, text zoom an
     },{width:viewportWidth,height:480,query:(zoom?'zoom&':'')+(dark?'dark':'')})
   }
   if(process.env.TABLE_RESIZE_EVIDENCE_OUT) await writeFile(process.env.TABLE_RESIZE_EVIDENCE_OUT+'/matrix.json',JSON.stringify(records,null,2))
+})
+
+test('one effective width map fills the Host and freezes siblings on first resize, with complete auto rollback', async t => {
+  const server=await startTableGeometryServer(),browser=await chromium.launch()
+  t.after(()=>server.close())
+  t.after(()=>browser.close())
+  const page=await browser.newPage({viewport:{width:1200,height:900}})
+  await page.goto(server.url+'/?header&reference')
+  await page.locator('tbody tr').last().waitFor()
+  const geometry=()=>page.evaluate(()=>({
+    client:document.querySelector('.hp-list-scroll').clientWidth,
+    table:document.querySelector('table').getBoundingClientRect().width,
+    columns:[...document.querySelectorAll('thead th')].map(el=>({
+      width:el.getBoundingClientRect().width, right:el.getBoundingClientRect().right,
+      aria:Number(el.querySelector('[role=slider]').getAttribute('aria-valuenow')),
+    })),
+  }))
+  for (const viewport of [1200,1440]) {
+    await page.setViewportSize({width:viewport,height:900})
+    await page.waitForFunction(()=>Math.abs(document.querySelector('table').getBoundingClientRect().width-document.querySelector('.hp-list-scroll').clientWidth)<=1)
+    const g=await geometry()
+    g.columns.forEach(c=>assert.ok(Math.abs(c.width-c.aria)<=1))
+  }
+  const control=handle(page,'规划状态'),before=await geometry()
+  await drag(page,control,24)
+  await page.mouse.up()
+  const after=await geometry()
+  after.columns.forEach((c,i)=>assert.ok(Math.abs(c.width-before.columns[i].width-(i===1?24:0))<=1))
+  assert.ok(Math.abs(after.columns[1].right-before.columns[1].right-24)<=1)
+  await page.getByText('显示选项',{exact:true}).click()
+  await page.getByRole('button',{name:'重置列宽',exact:true}).click()
+  await page.getByText('显示选项',{exact:true}).click()
+  await page.setViewportSize({width:1200,height:900})
+  await page.waitForFunction(()=>Math.abs(document.querySelector('table').getBoundingClientRect().width-document.querySelector('.hp-list-scroll').clientWidth)<=1)
+  const keyBefore=await geometry()
+  await control.focus()
+  await page.keyboard.press('ArrowRight')
+  const keyboard=await geometry()
+  keyboard.columns.forEach((c,i)=>assert.ok(Math.abs(c.width-keyBefore.columns[i].width-(i===1?8:0))<=1))
+  assert.ok(Math.abs(keyboard.columns[1].right-keyBefore.columns[1].right-8)<=1)
+  await page.getByText('显示选项',{exact:true}).click()
+  await page.getByRole('button',{name:'重置列宽',exact:true}).click()
+  await page.getByText('显示选项',{exact:true}).click()
+  await drag(page,control,24)
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+  await page.setViewportSize({width:1440,height:900})
+  await page.waitForFunction(()=>Math.abs(document.querySelector('table').getBoundingClientRect().width-document.querySelector('.hp-list-scroll').clientWidth)<=1)
+  await page.setViewportSize({width:320,height:480})
+  await page.waitForFunction(()=>Number(document.querySelector('thead th [role=slider]').getAttribute('aria-valuemax'))<=document.querySelector('.hp-list-scroll').clientWidth-96)
+  const narrow=await geometry(),title=handle(page,'工作项')
+  assert.ok(Math.abs(narrow.columns[0].width-Number(await title.getAttribute('aria-valuenow')))<=1)
+  assert.ok(Number(await title.getAttribute('aria-valuemax'))<=narrow.client-96)
+  await page.setViewportSize({width:1440,height:900})
+  await page.waitForFunction(()=>Number(document.querySelector('thead th [role=slider]').getAttribute('aria-valuemax'))===640)
+  await title.focus()
+  await page.keyboard.press('End')
+  await page.setViewportSize({width:320,height:480})
+  await page.waitForFunction(()=>Number(document.querySelector('thead th [role=slider]').getAttribute('aria-valuemax'))<320)
+  await control.focus()
+  await page.keyboard.press('ArrowRight')
+  await page.setViewportSize({width:1440,height:900})
+  await page.waitForFunction(()=>Math.abs(document.querySelector('thead th').getBoundingClientRect().width-640)<=1)
+  const manual=await geometry()
+  await drag(page,control,24)
+  await control.dispatchEvent('pointercancel',{pointerId:1,isPrimary:true})
+  await page.mouse.up()
+  const restored=await geometry()
+  restored.columns.forEach((c,i)=>assert.ok(Math.abs(c.width-manual.columns[i].width)<=1))
 })

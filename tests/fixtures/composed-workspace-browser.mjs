@@ -17,7 +17,7 @@ function mountWeb(root, child, disposers) {
     root.render(createElement(WorkItemProjectPage, {
       listView, detailView: route.itemId ? deriveWorkItemDetailView(input, route) : undefined,
       connected: read.connection.connected,
-      navigation: { href: id => itemPath({ projectId, itemId: id }), open: id => navigation.open({ projectId, itemId: id }) },
+      navigation: { currentItemId: route.itemId, href: id => itemPath({ projectId, itemId: id }), open: id => navigation.open({ projectId, itemId: id }) },
       onCloseDetail: () => navigation.close(projectId),
       refresh: { pending: state.pending, disabled: state.pending || !read.connection.connected, run: () => { void refresh.refresh() } },
     }))

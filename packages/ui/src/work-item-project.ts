@@ -46,7 +46,7 @@ export function WorkItemProjectPage({ listView, deriveOverviewTargets, detailVie
 
   // opener 只在用户经列表入口打开时记录：抽屉标题会在挂载时抢焦点，若在 effect 里读 activeElement 会捕获到抽屉标题。
   const routed: ItemNavigation | undefined = navigation === undefined ? undefined : {
-    href: navigation.href,
+    href: navigation.href, currentItemId: navigation.currentItemId,
     open: (itemId) => { opener.current = activeElement(); openerContainer.current = list.current; navigation.open(itemId) },
   }
   const modes = createElement('div', { className: 'hp-list-actions hp-view-modes' }, ...(['items', 'delivery'] as const).map(value => createElement('button', { key: value, type: 'button', 'aria-pressed': mode === value, onClick: () => setMode(value) }, value === 'items' ? '工作项' : '工程交付')))
@@ -61,5 +61,5 @@ export function WorkItemProjectPage({ listView, deriveOverviewTargets, detailVie
     detailView === undefined ? null : createElement(WorkItemDetailDrawer, {
       view: detailView, layoutRoot, refresh, executionReader, deliveryReader, issueClosingLinksReader, issueDependenciesReader, changeRequestCreator, connected, startWork, onBindRepository, notice: listView.body.kind === 'content' ? listView.body.notice : undefined, onClose: onCloseDetail,
     }),
-    createElement('style', null, WORKSPACE_STYLES, DETAIL_STYLES, '.hp-view-modes [aria-pressed=true] { font-weight:650; border-color:var(--hp-accent) }'))
+    createElement('style', null, WORKSPACE_STYLES, DETAIL_STYLES, '.hp-view-modes button { border:0; border-radius:0; background:transparent } .hp-view-modes [aria-pressed=true] { font-weight:600; box-shadow:inset 0 -2px var(--hp-secondary) }'))
 }

@@ -246,3 +246,12 @@ test('字段映射来源由真实状态披露呈现，未配置和异来源时�
     input.read.planningSource.bindingId = 'foreign-binding'; assert.doesNotMatch(markup(), /字段映射|项目<\/dd>/, 'old source mapping cannot survive scope mismatch')
   }
 })
+
+ test('safe planningStatusKey only accepts normalized enum strings, independent of native and engineering facts', () => {
+  for (const [planningStatus, expected] of [['done', 'done'], ['unknown', 'unknown'], ['todo', 'todo'], ['Done', 'unknown'], ['constructor', 'unknown'], [{ toString: () => 'done' }, 'unknown']]) {
+    const rows = received({ entities: [wire('a-safe', { planningStatus, planningFields: { statusName: 'Done' }, derived: ['merged'] }), redacted('z-hidden')] }).body.rows
+    assert.equal(rows[0].planningStatusKey, expected)
+    if (typeof planningStatus !== 'string') assert.equal(rows[0].planningStatus, '未知')
+    assert.deepEqual(rows[1], { kind: 'redacted', key: 'z-hidden' })
+  }
+})

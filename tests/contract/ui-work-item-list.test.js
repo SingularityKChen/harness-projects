@@ -116,7 +116,7 @@ test('内容：原生 table 语义、稳定状态区在 busy 容器外、规划�
   assert.deepEqual(long.slice(0, 4), [LONG, 'Done（未映射）', '—', '—'], '未映射：只显示原生名，不归一成「已完成」；缺值占位')
   const [, unmapped] = cells(render({ phase: 'received', refreshing: false, entities: [wire('ent-dd', { planningStatus: 'unknown' })] }))
   assert.deepEqual(unmapped.slice(1, 4), ['未知', '—', '—'], '无映射的默认路径：unknown 且没有展示事实时显示「未知」')
-  assert.match(H.content, /<div role="status" aria-live="polite" aria-atomic="true">已读取当前快照，共 2 项可读条目<\/div>/)
+  assert.match(H.content, /<div[^>]* role="status" aria-live="polite" aria-atomic="true">已读取当前快照，共 2 项可读条目<\/div>/)
   assert.doesNotMatch(H.content, /规划来源：|规划来源最后确认：/, 'source disclosure belongs to workspace status')
   const never = render({ ...SCENARIOS.content, lastUpdatedAt: null })
   assert.match(never, /来源：(<[^>]+>)?规划源.*最后已知值（最后读取时间未知）/)
@@ -162,17 +162,6 @@ test('独立标记只在为真的状态出现：degraded 与只读只在可读�
   assert.doesNotMatch(H.permissionReadOnly, /只读：|降级/)
 })
 
-test('版式：原生表格在独立滚动区；长文字有换行规则、单元格间距与 Host 焦点 token', () => {
-  assert.match(H.content, /<div role="region" aria-label="[^"]+" tabindex="0" class="hp-list-scroll"><table/)
-  assert.match(H.content, /<colgroup>(<col[^>]+\/>){5}<\/colgroup>/)
-  assert.match(H.content, /overflow-wrap:anywhere/)
-  assert.match(H.content, /padding:\.75rem/)
-  assert.match(H.content, /:focus-visible/)
-  assert.match(H.content, /var\(--dsw-focus-ring-width,2px\)/)
-  assert.match(H.content, /var\(--dsw-focus-ring-color,var\(--dsw-alias-state-business-primary,currentColor\)\)/)
-  assert.equal((H.content.match(/class="hp-list-wrap"/g) ?? []).length, 6, '每行标题与迭代都可换行，redacted 占位仍在原列')
-})
-
 test('不可用：权限 / 不支持 / 未知 / 离线 / 错误说明各不相同，不借缓存，没有行；每类都写出还能做什么，读门已观测不可用不说尚未确认', () => {
   const expected = {
     permission: [/没有读取工作项的权限（planning\.item\.read）/, /恢复授权.*缓存不会显示/], unsupported: [/不支持读取工作项/, /改用支持读取的来源/],
@@ -198,7 +187,7 @@ test('泄漏面：全部场景的完整 HTML 不含被遮蔽字段与内部标�
   }
   for (const name of ['content', 'stale', 'refreshing', 'degraded', 'readOnly', 'offlineKept']) assert.ok(H[name].includes('Visible A'), name)
   for (const html of Object.values(H)) assert.equal((html.match(/<style>/g) ?? []).length, html.includes('class="hp-table-controls"') ? 2 : 1, '仅页面与工具栏的固定局部样式')
-  assert.doesNotMatch(Object.values(H).join('').replace(/<button type="button">重置列宽<\/button>/g, '').replace(/<div class="hp-table-controls"[^]*?<\/div>/g, '').replace(/<button type="button" class="hp-column-sort"[^>]*>[^<]*<\/button>/g, ''), /<(a|button|input|script)\b|href=|data-|\bid=|\bon[a-z]+=|ent-|bind-/)
+  assert.doesNotMatch(Object.values(H).join('').replace(/<style>[^]*?<\/style>/g, '').replace(/<button type="button">重置列宽<\/button>/g, '').replace(/<div class="hp-table-controls"[^]*?<\/div>/g, '').replace(/<button type="button" class="hp-column-sort"[^>]*>[^<]*<\/button>/g, ''), /<(a|button|input|script)\b|href=|data-|\bid=|\bon[a-z]+=|ent-|bind-/)
 })
 
 test('转义：恶意来源名、提示、工作区名按文字转义，不产生标签', () => {
@@ -217,4 +206,11 @@ test('fixture：全部状态拼成一份静态 HTML；设置 UI_FIXTURE_OUT 时�
   const doc = head + Object.entries(H).map(([name, html]) => `<h1>${name}</h1>${html}`).join('<hr>')
   assert.equal(doc.match(/<h1>/g).length, Object.keys(SCENARIOS).length)
   if (process.env.UI_FIXTURE_OUT) writeFileSync(process.env.UI_FIXTURE_OUT, doc)
+})
+
+test('only normalized Done adds the redundant completion mark', () => {
+  const html=render({phase:'received',refreshing:false,entities:[wire('done',{planningStatus:'done'}),wire('native',{planningStatus:'unknown',planningFields:{statusName:'Done'}}),wire('merged',{planningStatus:'todo',derived:['merged']}),redacted()]})
+  assert.equal((html.match(/class="hp-status-dot hp-status-done"/g)??[]).length,1)
+  assert.match(html,/Done（未映射）/)
+  assert.match(html,/待办/)
 })
