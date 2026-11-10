@@ -252,7 +252,8 @@ export class SqliteSyncSurface {
    * false"在换条目这一格上失效，而调用方正是据此决定是否重放副作用；旧条目上的账本行是历史，不随条目 id 消失
    * （003 本轮去掉了账本到成员关系的外键）。三条语句必须整体生效，因此走 `atomic`（根实例上是**一个事务**）。
    */
-  putMembership(record: MembershipRecord): Promise<void> {
+  async putMembership(record: MembershipRecord): Promise<void> {
+    record = structuredClone(record)
     return this.atomic(() => {
       const stale = 'workspace_id = ? AND project_external_id = ? AND content_external_kind = ? AND content_external_id = ? AND item_external_id <> ?'
       const staleParams: readonly WriteParam[] = [record.workspaceId, record.projectExternalId, record.contentKind, record.contentExternalId, record.itemExternalId]
@@ -278,7 +279,9 @@ export class SqliteSyncSurface {
   }
 
   /** 完整 Planning project 读取的成员关系收敛：删除 scope 内不在 incoming 的成员与字段值，再在同一事务中 upsert incoming。实体、身份与账本表不受影响。 */
-  replacePlanningMemberships(scope: { readonly workspaceId: WorkspaceId; readonly projectExternalId: string }, incoming: readonly MembershipRecord[]): Promise<void> {
+  async replacePlanningMemberships(scope: { readonly workspaceId: WorkspaceId; readonly projectExternalId: string }, incoming: readonly MembershipRecord[]): Promise<void> {
+    scope = structuredClone(scope)
+    incoming = structuredClone(incoming)
     return this.atomic(() => {
       if (this.db.prepare('SELECT 1 FROM workspace WHERE id = ?').get(scope.workspaceId) === undefined) throw new Error('membership workspace does not exist')
       if (incoming.some((record) => record.workspaceId !== scope.workspaceId || record.projectExternalId !== scope.projectExternalId)) {
@@ -323,7 +326,9 @@ export class SqliteSyncSurface {
    * `sourceVersion` 缺失时按空串落 `updated_at`，读回时由 `columnToVersion` 还原再比较；非规范载体在入口抛错、不写行。
    * 已提交版本非空且不是规范载体（005 之后旧载体又混进账本）时抛 `LEGACY_COMMITTED_VERSION_MESSAGE`，不再把更新的事实静默判成乱序；内存替身入口已断言，这种状态不可达，所以没有对应守卫。
    */
-  recordObservation(record: ObservationRecord): Promise<boolean> {
+  async recordObservation(record: ObservationRecord): Promise<boolean> {
+    const { sourceVersion, ...observation } = record.observation
+    record = structuredClone({ ...record, observation: { ...observation, sourceVersion } })
     return this.mutate(() => {
       const { observation } = record
       assertComparableSourceVersion(observation.sourceVersion)
@@ -371,7 +376,9 @@ export class SqliteSyncSurface {
     return this.read(() => optional(this.db.prepare(`SELECT ${PLANNING_SYNC_ROUND_COLUMNS} FROM planning_sync_round WHERE workspace_id = ? AND binding_id = ? AND scope_key = ?`).get(workspaceId, bindingId, scopeKey), rowToPlanningSyncRound))
   }
 
-  putPlanningSyncRound(record: PlanningSyncRoundRecord): Promise<void> {
+  async putPlanningSyncRound(record: PlanningSyncRoundRecord): Promise<void> {
+    const { latestCommittedRound, ...fields } = record
+    record = structuredClone({ ...fields, latestCommittedRound })
     return this.atomic(() => {
       const current = this.db.prepare(`SELECT ${PLANNING_SYNC_ROUND_COLUMNS} FROM planning_sync_round WHERE workspace_id = ? AND binding_id = ? AND scope_key = ?`)
         .get(record.workspaceId, record.bindingId, record.scopeKey) as Row | undefined

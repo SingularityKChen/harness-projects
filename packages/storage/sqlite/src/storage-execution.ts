@@ -51,7 +51,9 @@ export class SqliteExecutionSurface extends SqliteSyncSurface {
    * 两条语句（先关同键旧 active、再 UPSERT 新行）必须整体生效，因此走 `atomic`：根实例上第二条语句失败时，第一条
    * 关掉的旧 active 必须随事务回滚，而不是留下"旧行已关、新行没写"的半写（第五轮评审）。
    */
-  putExecutionContext(record: ExecutionContextRecord): Promise<void> {
+  async putExecutionContext(record: ExecutionContextRecord): Promise<void> {
+    const { provisioningGeneration, ...fields } = record
+    record = structuredClone({ ...fields, ...(provisioningGeneration === undefined ? {} : { provisioningGeneration }) })
     // 工作项父边（#196）：写前检查在同一个队列槽、早于自己的 BEGIN，缺失以 `StorageInputError` 拒绝；003 的外键仍是最终防线。
     const preflight = () => {
       const n = record.provisioningGeneration
@@ -105,7 +107,8 @@ export class SqliteExecutionSurface extends SqliteSyncSurface {
    * 方法体里的 `SELECT 1 ... FROM relation` 是**写路径内部**的读改写（判据 + 写入在同一个原子作用域里，中间态不可见），
    * 不是独立的读方法；六个读方法一律走基类的 `read`。
    */
-  putRelation(workspaceId: WorkspaceId, relation: Relation): Promise<void> {
+  async putRelation(workspaceId: WorkspaceId, relation: Relation): Promise<void> {
+    relation = structuredClone(relation)
     return this.atomic(() => {
       const key: readonly [string, string, string, string] = [workspaceId, relation.from, relation.to, relation.type]
       if (relation.state === 'confirmed') {
@@ -156,10 +159,12 @@ export class SqliteExecutionSurface extends SqliteSyncSurface {
    * `created_at` 保留首次写入的时刻（它是"这行什么时候建的"），`updated_at` 随每次覆盖推进；两列都不在端口面上，
    * 因此不构成第二套事实。
    */
-  putMutationAttempt(record: MutationAttemptRecord): Promise<void> {
+  async putMutationAttempt(record: MutationAttemptRecord): Promise<void> {
+    const { externalIntent, ...fields } = record
+    record = externalIntent === undefined ? fields : { ...fields, externalIntent: externalIntentSnapshot(externalIntent) }
+    validateExternalIntentCommand(record)
+    record = structuredClone(record)
     return this.atomic(() => {
-      record = record.externalIntent === undefined ? record : { ...record, externalIntent: externalIntentSnapshot(record.externalIntent) }
-      validateExternalIntentCommand(record)
       const intent = record.externalIntent === undefined ? null : JSON.stringify(record.externalIntent)
       const previous = this.db.prepare('SELECT request_fingerprint, command_name, binding_id FROM mutation_attempt WHERE workspace_id = ? AND idempotency_key = ?').get(record.workspaceId, record.idempotencyKey) as Row | undefined
       if (previous?.request_fingerprint != null && (previous.request_fingerprint !== record.requestFingerprint || previous.command_name !== record.commandName || previous.binding_id !== record.bindingId)) throw new Error('mutation attempt request identity is immutable')

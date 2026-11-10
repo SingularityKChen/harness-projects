@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [PR #600 MMP 评审](pr-600-mmp-review.md) | Storage 快照、事务句柄与基础套件正控制 | 无 P0–P3；独立行为反证与当前版本门，工程验收不代替人验/R1 |
 | [2026-11-10-pr586-pr592-mmp-review](2026-11-10-pr586-pr592-mmp-review.md) | 配置字段、Markdown 引用、权限因果票据与双向阻塞观察 | 首轮无 P0/P1，三项 P2 与一项 P3 按独立修复复评、当前版本门禁和直接条件授权收尾 |
 | [2026-11-09-pr583-pr585-mmp-review](2026-11-09-pr583-pr585-mmp-review.md) | Draft 身份、Host 卸载与 CI 读取观察 | 首审两项 P2，逐当前版本修复/独立复评与条件 rebase 收尾；人验/R1 独立 |
 | [2026-11-09-pr568-pr581-mmp-review](2026-11-09-pr568-pr581-mmp-review.md) | 已确认/创建时负责人意图与跨项交付总览 | 三项 P2 及托管竞态已独立修复复评；AB 已 rebase 合并，C 当前版本条件门与人工接受独立 |

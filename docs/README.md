@@ -132,6 +132,7 @@
 | [2026-09-21-gate-e1-ruling](exec-plan/completed/2026-09-21-gate-e1-ruling.md) | Gate E1 · 裁决与 v1 冻结建议 |
 | [2026-09-21-gate-e1-write-and-events](exec-plan/completed/2026-09-21-gate-e1-write-and-events.md) | Gate E1 · 写确认与事件可靠性 |
 | [2026-09-21-memory-storage-transaction](exec-plan/completed/2026-09-21-memory-storage-transaction.md) | 内存存储事务串行化 |
+| [2026-11-10-storage-isolation](exec-plan/completed/2026-11-10-storage-isolation.md) | 两适配器输入捕获、Fake 快照/事务失效与独立 suite 正控制（#311/#426） |
 | [2026-09-21-merge-gate-layers](exec-plan/completed/2026-09-21-merge-gate-layers.md) | Merge Gate 车道 |
 | [2026-09-21-policy-check-pr-number](exec-plan/completed/2026-09-21-policy-check-pr-number.md) | policy-check 拒绝把 PR 编号当 issue |
 | [2026-09-21-review-blockers-core-invariants](exec-plan/completed/2026-09-21-review-blockers-core-invariants.md) | 核心不变量执行缺口 |

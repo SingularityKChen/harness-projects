@@ -18,13 +18,16 @@ export function storageFoundationSuite(adapter, register = test) {
 
   register(`${label}：事务提交成功、失败整体回滚`, async () => {
     const storage = makeStorage()
+    const initialFence = storage.committedReadFence()
     await storage.transaction((tx) => tx.putWorkspace(workspace()))
+    const committedFence = storage.committedReadFence()
     assert.equal((await storage.getWorkspace(WORKSPACE))?.name, '工作区')
     await assert.rejects(storage.transaction(async (tx) => {
       await tx.putWorkspace(workspace('ws-rolled-back', '不该存在'))
       throw new Error('事务内失败')
     }))
     assert.equal(await storage.getWorkspace('ws-rolled-back'), undefined)
+    adapter.foundationProbe?.({ storage, initialFence, committedFence })
   })
   register(`${label}：规划映射独立保存、深拷贝、回滚并跨重启保留`, async () => {
     let storage = makeStorage(); await seedWorkspace(storage); await storage.putProviderBinding(binding('binding-1'))

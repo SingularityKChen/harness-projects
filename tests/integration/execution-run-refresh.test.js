@@ -7,7 +7,7 @@ import path from 'node:path'
 import * as coreModule from '@harness-projects/core'
 const { composeCore, createContext, refreshExecutionRun, cancelExecutionRun, contextIdFor, runIdFor, readExecutionContext } = coreModule
 import { createController } from '@harness-projects/controller'
-import { createFakeProviders, createFakeExecutionProvider } from '@harness-projects/provider-fake'
+import { createFakeProviders, createFakeExecutionProvider, exportFakeStorageState } from '@harness-projects/provider-fake'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
 const actor = { actorRef: { kind: 'human' } }, T0 = '2026-10-28T01:00:00Z', T1 = '2026-10-28T02:00:00Z'
 async function fixture(t, adapter, statusPolicy = 'provider_authoritative') {
@@ -89,7 +89,7 @@ test('issuer fallback is used after default changes; missing/foreign context nev
   assert.equal((await refreshExecutionRun(changed, h.scope)).ok, false); assert.equal(calls, 1)
 })
 for (const policy of ['provider_authoritative', 'manual_only', 'host_authoritative']) test(`${policy}: terminal refresh leaves Planning facts and revision unchanged`, async (t) => {
-  const h = await fixture(t, 'fake', policy), before = JSON.stringify([await h.core.queries.listPlanningItems(), h.storage.data.memberships, h.storage.data.fieldValues, await h.storage.listPlanningProjections(h.workspaceId), await h.storage.currentRevision(h.workspaceId)])
+  const h = await fixture(t, 'fake', policy), before = JSON.stringify([await h.core.queries.listPlanningItems(), exportFakeStorageState(h.storage).memberships, exportFakeStorageState(h.storage).fieldValues, await h.storage.listPlanningProjections(h.workspaceId), await h.storage.currentRevision(h.workspaceId)])
   for (const status of ['succeeded', 'failed', 'canceled', 'timed_out']) { h.providers.execution.getRun = async (ref) => ({ ok: true, value: { ref, status } }); await h.refresh(); assert.equal((await h.read()).runStatus, status) }
-  assert.equal(JSON.stringify([await h.core.queries.listPlanningItems(), h.storage.data.memberships, h.storage.data.fieldValues, await h.storage.listPlanningProjections(h.workspaceId), await h.storage.currentRevision(h.workspaceId)]), before)
+  assert.equal(JSON.stringify([await h.core.queries.listPlanningItems(), exportFakeStorageState(h.storage).memberships, exportFakeStorageState(h.storage).fieldValues, await h.storage.listPlanningProjections(h.workspaceId), await h.storage.currentRevision(h.workspaceId)]), before)
 })

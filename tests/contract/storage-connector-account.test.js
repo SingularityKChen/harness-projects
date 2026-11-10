@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test, { after } from 'node:test'
-import { createFakeStorage, exportFakeStorageState } from '@harness-projects/provider-fake'
+import { createFakeStorage, exportFakeStorageState, injectFakeStorageState } from '@harness-projects/provider-fake'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
 import { CONNECTOR_ACCOUNT_NAMED_CASES, CONNECTOR_ACCOUNT_SHARED_CASES, countConnectorAccountCases, policy, storageConnectorAccountSuite } from './suites/storage-connector-account.js'
 
@@ -28,7 +28,7 @@ const fakeAdapter = (suffix = '') => ({
   label: `内存 Storage 替身${suffix}`,
   makeStorage: (p = policy()) => createFakeStorage(undefined, p),
   restart: (storage, p = policy()) => createFakeStorage(exportFakeStorageState(storage), p),
-  tamper: (storage) => { if (storage.data.accounts[0]) storage.data.accounts[0].secretHandle = 'DISALLOWED_HANDLE'; if (storage.data.bindingConfigurations[0]) storage.data.bindingConfigurations[0].configuration = { bogus: true } },
+  tamper: (storage) => injectFakeStorageState(storage, (data) => { if (data.accounts[0]) data.accounts[0].secretHandle = 'DISALLOWED_HANDLE'; if (data.bindingConfigurations[0]) data.bindingConfigurations[0].configuration = { bogus: true }; return data }),
 })
 storageConnectorAccountSuite(sqliteAdapter())
 storageConnectorAccountSuite(fakeAdapter())
