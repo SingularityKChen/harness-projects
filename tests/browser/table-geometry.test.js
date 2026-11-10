@@ -8,7 +8,7 @@ import { startTableGeometryServer } from '../fixtures/table-geometry-browser.mjs
 // 删除局部高度、sticky 或标题窄宽夹紧，都会破坏这些实际 DOM 断言。
 async function allColumns(page) {
   if (!await page.locator('.hp-table-controls').count()) return
-  const menu=page.getByText('选择显示列',{exact:true});await menu.click()
+  const menu=page.getByText('显示选项',{exact:true});await menu.click()
   for (const name of ['内容身份','来源','新鲜度']) await page.getByRole('checkbox',{name,exact:true}).check()
   await menu.click()
 }
@@ -54,7 +54,7 @@ test('bounded XY surface freezes header/title with shared column geometry across
       assert.ok(after.top>0&&after.left>0,context+' actual scroll offsets')
       assert.ok(Math.abs(after.header[0].x-before.header[0].x)<=1,context+' corner X')
       assert.ok(Math.abs(after.cells[0].x-before.cells[0].x)<=1,context+' title X')
-      assert.ok(Math.abs(after.header[0].y-(after.surface.y+1))<=1,context+' header Y')
+      assert.ok(Math.abs(after.header[0].y-(after.surface.y))<=1,context+' header Y')
       assert.ok(Math.abs(before.cells[1].x-after.cells[1].x-after.left)<=1,context+' body really moved')
       const layers=await page.evaluate(()=>{
         const s=document.querySelector('.hp-list-scroll').getBoundingClientRect(), h=document.querySelector('thead th').getBoundingClientRect()

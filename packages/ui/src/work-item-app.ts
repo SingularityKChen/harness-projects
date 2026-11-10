@@ -69,7 +69,7 @@ function screenOf(read: WorkspaceRead | undefined, path: string | undefined, set
     children: [createElement(WorkItemProjectPage, {
       listView, deriveOverviewTargets: () => deriveDeliveryOverviewTargets(input), statusAnnouncement, presentationScopeKey: JSON.stringify([projectId, read.planningSource?.bindingId]),
       detailView: itemId === undefined ? undefined : deriveWorkItemDetailView(input, { projectId, itemId }),
-      navigation: { href: (id) => `#${itemPath({ projectId, itemId: id })}`, open: (id) => setPath(itemPath({ projectId, itemId: id })) },
+      navigation: { currentItemId: itemId, href: (id) => `#${itemPath({ projectId, itemId: id })}`, open: (id) => setPath(itemPath({ projectId, itemId: id })) },
       onCloseDetail: () => setPath(undefined), executionReader, deliveryReader, issueClosingLinksReader, issueDependenciesReader, changeRequestCreator, startWork, onBindRepository, connected: read.connection.connected,
       refresh: refreshSource === undefined ? undefined : { pending: refresh.pending, disabled: refresh.pending || !read.connection.connected || !canRefresh, run: () => { void refreshSource.refresh() } },
     })],
@@ -88,13 +88,18 @@ export function WorkItemApp({ source, initialPath, executionReader, startWork, o
   const read = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot)
   const refresh = useSyncExternalStore(refreshSource?.subscribe ?? noRefresh.subscribe, refreshSource?.getSnapshot ?? noRefresh.getSnapshot, refreshSource?.getSnapshot ?? noRefresh.getSnapshot)
   const [path, setPath] = useState(initialPath)
+  const routeScope = useRef<string | undefined>(undefined)
+  const observedScope = read === undefined ? undefined : JSON.stringify([read.workspace.id, read.planningSource?.bindingId])
+  const scopeChanged = observedScope !== undefined && routeScope.current !== undefined && observedScope !== routeScope.current
+  if (observedScope !== undefined) routeScope.current = observedScope
+  if (scopeChanged && path !== undefined) setPath(undefined)
   const root = useRef<DOMElement | null>(null)
   const shown = useRef<string | undefined>(undefined)
   const countAnnouncement = useRef<CountAnnouncement['current']>({ readable: false, text: '' }), countScope = useRef<string | undefined>(undefined)
   const sourceAnnouncement = useRef<SourceAnnouncement['current']>({ observation: undefined, notice: undefined })
   const scope = read?.planningSource?.bindingId === undefined ? undefined : JSON.stringify([read.workspace.id, read.planningSource.bindingId])
   if (scope === undefined || scope !== countScope.current) { countScope.current = scope; countAnnouncement.current = { readable: false, text: '' }; sourceAnnouncement.current = { observation: undefined, notice: undefined } }
-  const { key, children } = screenOf(read, path, setPath, executionReader, startWork, onBindRepository, deliveryReader, changeRequestCreator, refreshSource, refresh, announceListStatus, countAnnouncement, sourceAnnouncement, issueClosingLinksReader, issueDependenciesReader)
+  const { key, children } = screenOf(read, scopeChanged ? undefined : path, setPath, executionReader, startWork, onBindRepository, deliveryReader, changeRequestCreator, refreshSource, refresh, announceListStatus, countAnnouncement, sourceAnnouncement, issueClosingLinksReader, issueDependenciesReader)
   // 首挂（含 StrictMode 的二次挂载）与同一屏内的变化都不动焦点；抽屉关闭后的回焦仍归 WorkItemProjectPage。
   useEffect(() => {
     const previous = shown.current

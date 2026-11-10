@@ -44,7 +44,7 @@ export type VisibleListRow =
   | {
       readonly sourceNumber?: number; readonly numberLabel?: string
       readonly kind: 'item'; readonly key: string; readonly title: string; readonly identity: string
-      readonly planningStatus: string; readonly engineering: string; readonly source: string
+      readonly planningStatus: string; readonly planningStatusKey: NormalizedStatus; readonly engineering: string; readonly source: string
       readonly authority: string; readonly stale: boolean
       /** 迭代 title 与 date-only 目标日期原样显示，缺值统一占位，不做时区换算。 */
       readonly iteration: string; readonly targetDate: string
@@ -96,6 +96,7 @@ const STATUS: Readonly<Record<string, string>> = {
 
 /** 表里只认自有字符串键：原型链键（`constructor`）与非字符串值一律当作缺失。 */
 function pick(table: Readonly<Record<string, string>>, key: string): string | undefined {
+  if (typeof key !== 'string') return undefined
   const value = Object.hasOwn(table, key) ? table[key] : undefined
   return typeof value === 'string' ? value : undefined
 }
@@ -108,6 +109,7 @@ function rowView(row: WorkItemRow, nameOf: (bindingId: string) => string | undef
     kind: 'item', key: row.entityId, title: row.title || '标题未提供',
     identity: (primary && pick(IDENTITY, primary.externalKind)) ?? '身份未知',
     planningStatus: statusText(row),
+    planningStatusKey: typeof row.planningStatus === 'string' && Object.values(NormalizedStatus).includes(row.planningStatus) ? row.planningStatus : NormalizedStatus.Unknown,
     engineering: row.derived.map((flag) => pick(HINTS, flag) ?? '未知提示').join('、') || '无',
     source: (primary && nameOf(primary.bindingId)) ?? '来源名称未提供',
     authority: pick(AUTHORITY, row.source.authority) ?? '来源权威未知',

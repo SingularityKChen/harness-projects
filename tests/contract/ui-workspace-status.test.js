@@ -81,7 +81,7 @@ test('repository has generic unknown/configured facts, no path or invented works
 })
 
 import { createRequire } from 'node:module'
-import { WorkItemApp, bindWorkspaceStatusApp } from '@harness-projects/ui'
+import { WorkItemApp, WorkItemProjectPage, bindWorkspaceStatusApp } from '@harness-projects/ui'
 const uiRequire = createRequire(new URL('../../packages/ui/package.json', import.meta.url)), React = uiRequire('react'), { renderToStaticMarkup } = uiRequire('react-dom/server')
 test('outer status ownership keeps list freshness visible without a second live announcer; standalone default stays live', async t => {
   const f = fixture(t); await f.source.refresh()
@@ -198,20 +198,29 @@ test('modal notice uses the same safe source observation while refresh and trans
 test('modal lifecycle announces source recovery once and timestamp-only frames keep its notice stable', async t => {
   const f = fixture(t), slots = []; let cursor = 0, reading = { ...f.read, capabilities: [{ key: 'planning.item.read', access: 'available' }] }
   f.read.store.applyBaseline({ revision: 1, entities: [wire('ent-modal')], source: { revision: 1, freshness: 'fresh', authority: 'provider' } })
+  let html, navigation
   const source = { subscribe: () => () => {}, getSnapshot: () => reading }, cell = make => slots[cursor++] ??= make()
   const dispatcher = { useSyncExternalStore: (_subscribe, read) => read(), useRef: current => cell(() => ({ current })), useState: value => { const state = cell(() => ({ value })); return [state.value, value => { state.value = value }] }, useEffect() {} }
   const render = () => {
     const internals = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED, before = internals.ReactCurrentDispatcher.current; cursor = 0; internals.ReactCurrentDispatcher.current = dispatcher
     let element; try { element = WorkItemApp({ source, initialPath: '/projects/workspace/items/ent-modal', announceListStatus: false }) } finally { internals.ReactCurrentDispatcher.current = before }
-    return renderToStaticMarkup(element).match(/<dialog[^]*?<div role="status" aria-live="polite"[^>]*>([^<]*)<\/div>/)?.[1]
+    html = renderToStaticMarkup(element)
+    navigation = React.Children.toArray(element.props.children).find(child => child.type === WorkItemProjectPage).props.navigation
+    return html.match(/<dialog[^]*?<div role="status" aria-live="polite"[^>]*>([^<]*)<\/div>/)?.[1]
   }
   assert.equal(render(), '')
   reading = { ...reading, reason: 'RAW-REASON-CANARY' }; assert.equal(render(), '规划来源读取不完整，显示的是最后已知值。')
   reading = { ...reading, reason: undefined }; assert.equal(render(), '规划来源读取已恢复。')
   reading = { ...reading, reconciledAt: '2026-10-30T01:00:00Z' }; assert.equal(render(), '规划来源读取已恢复。')
-  reading = { ...reading, planningSource: { bindingId: 'new-binding', name: 'New source' } }; assert.equal(render(), '', 'same-workspace binding switch clears prior recovery')
+  reading = { ...reading, planningSource: { bindingId: 'new-binding', name: 'New source' } }; render()
+  assert.doesNotMatch(html, /<dialog\b/, 'same-workspace binding switch retires the prior detail route')
+  navigation.open('ent-modal'); assert.equal(render(), '', 'reopened new source has no prior recovery')
   reading = { ...reading, reason: 'RAW-REASON-CANARY' }; assert.equal(render(), '规划来源读取不完整，显示的是最后已知值。')
-  reading = { ...reading, planningSource: undefined, reason: undefined }; assert.equal(render(), '', 'missing binding clears source history')
+  reading = { ...reading, reason: undefined }; assert.equal(render(), '规划来源读取已恢复。')
+  reading = { ...reading, reconciledAt: '2026-10-30T02:00:00Z' }; assert.equal(render(), '规划来源读取已恢复。')
+  reading = { ...reading, planningSource: undefined, reason: undefined }; render()
+  assert.doesNotMatch(html, /<dialog\b/, 'missing binding retires the route and source history')
+  navigation.open('ent-modal'); assert.equal(render(), '', 'reopened unidentified source has no remembered recovery')
   reading = { ...reading, reason: 'RAW-REASON-CANARY' }; render()
   reading = { ...reading, reason: undefined }; assert.equal(render(), '', 'unidentified source cannot claim a remembered recovery')
 })

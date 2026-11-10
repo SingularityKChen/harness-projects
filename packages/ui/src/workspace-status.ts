@@ -8,10 +8,10 @@ const noRefresh = { subscribe: (_listener: () => void) => () => {}, getSnapshot:
 const noSource = { subscribe: (_listener: () => void) => () => {}, getSnapshot: () => undefined }
 const styles = `
 .hp-status-panel{container:hp-status / inline-size;display:flex;flex-direction:column;block-size:100%;min-block-size:0;min-inline-size:0;color:inherit;font:inherit}
-.hp-status-summary{position:relative;flex:0 1 auto;box-sizing:border-box;min-block-size:0;max-block-size:50%;overflow:auto;overscroll-behavior:contain;border-block-end:1px solid color-mix(in srgb,currentColor 22%,transparent);overflow-wrap:anywhere}
-.hp-status-summary summary{padding:.6rem .75rem;min-block-size:44px;box-sizing:border-box;cursor:pointer}
+.hp-status-summary{position:relative;flex:0 1 auto;box-sizing:border-box;min-block-size:0;max-block-size:50%;overflow:auto;overscroll-behavior:contain;box-shadow:inset 0 -1px var(--dsw-alias-border-l2,CanvasText);color:var(--dsw-alias-label-secondary,CanvasText);background:var(--dsw-alias-bg-base,Canvas);font-size:.857143rem;line-height:1.5;overflow-wrap:anywhere}
+.hp-status-summary summary{padding:.857143rem 1.714286rem;min-block-size:44px;box-sizing:border-box;cursor:pointer}
 .hp-status-line{display:inline-grid;align-items:start;grid-template-columns:minmax(0,1fr) auto auto;gap:0 .75em;inline-size:calc(100% - 1.5em);vertical-align:top}
-@container hp-status (max-width:40rem){.hp-status-line{grid-template-columns:repeat(2,minmax(0,1fr))}.hp-status-line>span:first-child{grid-column:1/-1;grid-row:2}}
+@container hp-status (max-width:40rem){.hp-status-summary summary{padding:.6rem .75rem}.hp-status-line{grid-template-columns:repeat(2,minmax(0,1fr))}.hp-status-line>span:first-child{grid-column:1/-1;grid-row:2}}
 .hp-status-summary :focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,currentColor);outline-offset:-3px}
 .hp-status-summary dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:.25rem 1rem;margin:.5rem .75rem}
 .hp-status-summary dl>div{display:flex;flex-wrap:wrap;gap:0 .4em;min-inline-size:0;max-inline-size:100%}

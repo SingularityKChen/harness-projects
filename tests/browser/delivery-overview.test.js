@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdir } from 'node:fs/promises'
 import { chromium } from 'playwright'
+import { startTableGeometryServer } from '../fixtures/table-geometry-browser.mjs'
 import { startExecutionServer } from '../fixtures/execution-drawer-browser.mjs'
 const planningFacts=async h=>(await h.storage.listPlanningProjections(h.workspaceId)).map(({entityId,planningStatus,content,planningFields})=>({entityId,planningStatus,content,planningFields}))
 const evidence='.superpowers/sdd/2026-11-07-delivery-overview/browser'
@@ -88,4 +89,69 @@ test('production Host overview preserves missing failed unknown and fresh CI fac
   await overview.getByText('无法读取工作项，确认授权后重试',{exact:true}).waitFor()
   assert.equal(await overview.locator('article').count(),0);assert.doesNotMatch(await overview.textContent(),/Overview gap|issue-1|ci-overview/)
   const state=await held();assert.ok(Object.entries(state.calls).filter(([key])=>key.startsWith('write:planning')).every(([,count])=>count===0))
+})
+
+test('source-composed overview preserves actual 20-item pagination and reference 1/1 controls', async t => {
+  const server=await startTableGeometryServer(), browser=await chromium.launch()
+  t.after(()=>server.close())
+  t.after(()=>browser.close())
+  const page=await browser.newPage()
+  page.setDefaultTimeout(5000)
+  const errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(server.url+'/?header&reference')
+  await page.locator('tbody tr').last().waitFor()
+  await page.getByRole('button',{name:'工程交付',exact:true}).click()
+  await page.getByText('本页已刷新',{exact:true}).waitFor()
+  assert.equal(await page.locator('.hp-delivery-row').count(),7)
+  const body=page.locator('.hp-list-body')
+  assert.match(await body.evaluate(el=>getComputedStyle(el).overflowY),/auto|scroll/)
+  await body.evaluate(el=>el.scrollTop=el.scrollHeight)
+  assert.equal(await page.locator('.hp-delivery-row').last().evaluate(el=>{const r=el.getBoundingClientRect(),b=el.closest('.hp-list-body').getBoundingClientRect();return r.bottom<=b.bottom+1}),true)
+  for (const name of ['上一页','下一页']) assert.equal(await page.getByRole('button',{name,exact:true}).isDisabled(),true)
+  await page.goto(server.url+'/?header')
+  await page.locator('tbody tr').last().waitFor()
+  await page.evaluate(()=>window.headerFixture.state({repositories:[{id:'example/project',capabilities:[]}]}))
+  await page.getByRole('button',{name:'工程交付',exact:true}).click()
+  await page.getByText('本页已刷新',{exact:true}).waitFor()
+  assert.equal(await page.locator('.hp-delivery-row').count(),20)
+  await page.getByText(/第 1 \/ 6 页 · 共 120 项/).waitFor()
+  await page.getByRole('button',{name:'下一页',exact:true}).click()
+  await page.getByText('本页已刷新',{exact:true}).waitFor()
+  await page.getByText(/第 2 \/ 6 页/).waitFor()
+  assert.equal(await page.getByRole('button',{name:'上一页',exact:true}).isEnabled(),true)
+  await page.getByRole('button',{name:'上一页',exact:true}).click()
+  await page.getByText(/第 1 \/ 6 页/).waitFor()
+  assert.deepEqual(errors,[])
+})
+
+test('narrow Delivery keeps each semantic summary label beside its value in a narrow Host slot', async t => {
+  const server=await startTableGeometryServer(),browser=await chromium.launch()
+  t.after(()=>server.close())
+  t.after(()=>browser.close())
+  const page=await browser.newPage();page.setDefaultTimeout(5000)
+  const records=[],errors=[];page.on('pageerror',error=>errors.push(error.message))
+  for (const viewport of [390,1440]) for (const zoom of [false,true]) {
+    await page.setViewportSize({width:viewport,height:900})
+    await page.goto(server.url+'/?header&reference'+(zoom?'&zoom&dark':''))
+    if (viewport===1440) await page.locator('#app').evaluate(el=>el.style.width='390px')
+    await page.getByRole('button',{name:'工程交付',exact:true}).click()
+    await page.getByText('本页已刷新',{exact:true}).waitFor()
+    const first=page.locator('.hp-delivery-row').first()
+    const groups=await first.locator('.hp-delivery-summary li').evaluateAll(items=>items.map(el=>{
+      const label=el.querySelector('h4'),value=el.querySelector('p'),a=label.getBoundingClientRect(),b=value.getBoundingClientRect()
+      return {label:label.textContent,visible:a.width>1&&a.height>1,beside:Math.abs(a.top-b.top)<3&&b.left>=a.right+4}
+    }))
+    records.push({viewport,zoom,groups,height:await first.evaluate(el=>el.getBoundingClientRect().height)})
+    const body=page.locator('.hp-list-body');await body.evaluate(el=>el.scrollTop=el.scrollHeight)
+    await page.getByRole('button',{name:'下一页',exact:true}).focus()
+    assert.equal(await page.getByRole('button',{name:'下一页',exact:true}).evaluate(el=>{const r=el.getBoundingClientRect(),b=el.closest('.hp-list-body').getBoundingClientRect();return r.top>=b.top-1&&r.bottom<=b.bottom+1}),true)
+    assert.equal(await page.locator('.hp-delivery-row').last().getByRole('heading',{name:'检查',exact:true}).isVisible(),true)
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true)
+  }
+  for (const record of records) {
+    assert.deepEqual(record.groups,[{label:'变更请求',visible:true,beside:true},{label:'流水线',visible:true,beside:true},{label:'检查',visible:true,beside:true}],JSON.stringify(record))
+    if (!record.zoom) assert.ok(record.height<=180,'normal short row retains approved compact density')
+  }
+  assert.deepEqual(errors,[])
 })
