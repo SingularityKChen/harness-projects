@@ -40,17 +40,17 @@ const FOCUSABLE = 'a[href],button,input,select,textarea,[tabindex]:not([tabindex
 /** 时间固定为“工作区最后接收确认帧”：未提供只说未知，不读时钟补事实。 */
 function contentPanel(body: Extract<WorkItemDetailView['body'], { kind: 'content' }>): ReactElement {
   const at = body.lastUpdatedAt === undefined ? '读取时间未知' : createElement('time', { dateTime: body.lastUpdatedAt }, body.lastUpdatedAt)
-  return createElement('div', null,
-    ...(body.numberLabel === undefined ? [] : [createElement('p', null, body.numberLabel)]),
-    createElement('p', null, '规划状态：', body.planningStatus),
-    createElement('p', null, '迭代：', body.iteration),
-    createElement('p', null, '目标日期：', body.targetDate),
-    createElement('p', null, '来源身份：', createElement(SourceBadge, { name: body.source, authority: body.authority }),
-      body.identity === undefined ? '（来源身份尚未提供）' : `（${body.identity.kind} ${body.identity.externalId}）`),
-    createElement('p', null, '规划来源最后确认：', body.reconciledAt === undefined ? '未知' : createElement('time', { dateTime: body.reconciledAt }, body.reconciledAt)),
+  const field = (label: string, value: ReactElement | string): ReactElement => createElement('div', { key: label }, createElement('dt', null, label), createElement('dd', null, value))
+  return createElement('div', { className: 'hp-detail-content' },
     createElement(SafeMarkdown, { body: body.body, markdownSource: body.markdownSource }),
-    createElement('p', null, body.derived ?? '无派生提示'),
-    createElement('p', null, body.stale || body.refreshing ? '最后已知值，当前结果尚未确认' : '当前值', '（工作区最后接收确认帧：', at, '）'))
+    createElement('dl', { className: 'hp-detail-metadata' },
+      field('迭代：', body.iteration), field('目标日期：', body.targetDate),
+      field('来源身份：', createElement('span', null, createElement(SourceBadge, { name: body.source, authority: body.authority }),
+        body.identity === undefined ? '（来源身份尚未提供）' : `（${body.identity.kind} ${body.identity.externalId}）`)),
+      field('规划来源最后确认：', body.reconciledAt === undefined ? '未知' : createElement('time', { dateTime: body.reconciledAt }, body.reconciledAt)),
+      field('读取状态：', body.stale || body.refreshing ? '最后已知值，当前结果尚未确认' : '当前值'),
+      field('工作区最后接收确认帧：', at)),
+    createElement('p', { className: 'hp-detail-derived' }, body.derived ?? '无派生提示'))
 }
 
 function panelBody(body: WorkItemDetailView['body']): ReactElement {
@@ -126,7 +126,9 @@ export function WorkItemDetailDrawer({ view, notice, onClose, executionReader, c
   createElement('style', null, WORKSPACE_STYLES, DETAIL_STYLES),
   createElement('header', { className: 'hp-detail-header' },
     createElement('div', { className: 'hp-detail-heading' },
+      view.body.kind === 'content' && view.body.numberLabel !== undefined ? createElement('p', { className: 'hp-detail-number' }, view.body.numberLabel) : null,
       createElement('h2', { className: 'hp-detail-title', id: titleId, ref: title, tabIndex: -1 }, view.body.kind === 'content' ? view.body.title : '工作项详情'),
+      view.body.kind === 'content' ? createElement('p', { className: 'hp-detail-status' }, '规划状态：', view.body.planningStatus) : null,
       createElement('p', { className: 'hp-detail-mode', id: `${titleId}-mode` }, mode === 'preview' ? '当前为预览模式' : '当前为展开模式')),
     createElement('div', { className: 'hp-detail-actions' },
       createElement('button', { className: 'hp-action', type: 'button', onClick: toggleMode, 'aria-describedby': `${titleId}-mode` }, mode === 'preview' ? '展开详情' : '还原详情'),

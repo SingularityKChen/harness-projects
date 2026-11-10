@@ -1,6 +1,6 @@
 /** 局部正文阅读样式；Host 主题仍拥有颜色和字体，长代码与表格在自己的容器滚动。 */
 export const MARKDOWN_STYLES = `
-.hp-markdown { min-inline-size:0; max-inline-size:72ch; white-space:normal; overflow-wrap:anywhere }
+.hp-markdown { min-inline-size:0; max-inline-size:72ch; white-space:normal; overflow-wrap:anywhere; font-size:1rem; line-height:1.57143 }
 .hp-markdown :where(h1,h2,h3,h4,h5,h6) { margin:var(--hp-space-4) 0 var(--hp-space-2); line-height:1.35; font-weight:650 }
 .hp-markdown h1 { font-size:1.6em }
 .hp-markdown h2 { font-size:1.4em }
@@ -25,5 +25,5 @@ export const MARKDOWN_STYLES = `
 .hp-markdown .task-list-item > input[type="checkbox"],.hp-markdown .task-list-item > p:first-child > input[type="checkbox"] {
   position:absolute; inset-inline-start:-1.4em; inset-block-start:0; inline-size:1em; block-size:1em; margin-block:.3em 0; margin-inline:0;
 }
-.hp-markdown a { color:var(--hp-accent); text-decoration:underline; text-underline-offset:.15em }
+.hp-markdown a { color:inherit; text-decoration:underline; text-decoration-color:var(--dsw-alias-link,var(--hp-accent)); text-underline-offset:.15em }
 `
