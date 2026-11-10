@@ -26,6 +26,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
+| [2026-11-10-release-list-delivery](exec-plan/active/2026-11-10-release-list-delivery.md) | 获批 v3 的共享工作区、List 与 Delivery 基础（#614，Refs #604） |
 
 ### Completed
 
