@@ -117,7 +117,7 @@ export interface ProviderIssueLinkTarget {
   readonly source: ProviderIssueLinkTargetInput; readonly nativeIssueIdentity: ProviderNativeIdentity; readonly number: number
   readonly repository: { readonly identity: ProviderSourceRepositoryIdentity; readonly name: string }
 }
-export type IssueDependencyDirection = 'blocked_by' | 'blocking'
+export type IssueDependencyDirection = 'blocked_by' | 'blocking' | 'parent' | 'children'
 export interface ProviderIssueDependency {
   readonly nativeIdentity: ProviderNativeIdentity
   readonly repository: { readonly identity: ProviderSourceRepositoryIdentity; readonly name: string }

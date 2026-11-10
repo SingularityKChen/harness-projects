@@ -20,16 +20,18 @@ async function fixture(policy) {
   assert.equal(typeof core.commands.refreshIssueDependencies, 'function', 'explicit read must reach production Core commands')
   return { p, core, flags, calls, scope, workspaceId, page: fn => page = fn, refresh: () => core.commands.refreshIssueDependencies(scope) }
 }
-test('two independent streams retain closed external targets and produce no storage writes', async () => {
+test('four independent streams retain closed external targets and produce no storage writes', async () => {
   const h = await fixture(), before = await h.p.storage.currentRevision(h.workspaceId), relations = await h.p.storage.listRelations(h.workspaceId)
   const item = { ...target(), hiddenCount: 99, nativeIdentity: { ...target().nativeIdentity, secret: 'SECRET' } }
-  h.page(input => providerOk({ source: { ...input, repository }, direction: input.direction, items: input.cursor ? [target('second', 'another/project')] : [item], nextCursor: input.cursor ? undefined : input.direction }))
+  h.page(input => providerOk({ source: { ...input, repository }, direction: input.direction, items: input.cursor ? [target('second', 'another/project')] : [item], nextCursor: input.cursor || input.direction === 'parent' ? undefined : input.direction }))
   const v = await h.refresh();
   assert.doesNotMatch(JSON.stringify(v), /hiddenCount|SECRET/)
   assert.equal(v.blockedBy.state, 'complete');
   assert.equal(v.blocking.state, 'complete');
   assert.equal(v.blockedBy.items.length, 2)
-  assert.deepEqual(h.calls.map(c => [c.direction, c.cursor]), [['blocked_by', undefined], ['blocked_by', 'blocked_by'], ['blocking', undefined], ['blocking', 'blocking']])
+  assert.equal(v.parent.state, 'complete'); assert.equal(v.parent.items.length, 1)
+  assert.deepEqual(v.children.items.map(i => [i.repository.name, i.number, i.state]), [['other/project', 7, 'closed'], ['another/project', 7, 'closed']])
+  assert.deepEqual(h.calls.map(c => [c.direction, c.cursor]), [['blocked_by', undefined], ['blocked_by', 'blocked_by'], ['blocking', undefined], ['blocking', 'blocking'], ['parent', undefined], ['children', undefined], ['children', 'children']])
   assert.equal(await h.p.storage.currentRevision(h.workspaceId), before);
   assert.deepEqual(await h.p.storage.listRelations(h.workspaceId), relations)
 })
@@ -42,8 +44,9 @@ test('source, malformed pages, cursor loops and later failures cannot claim empt
     })
     const v = await h.refresh();
     assert.equal(v.blockedBy.state, fault === 'empty' ? 'complete' : 'partial');
+    if (fault === 'budget' || fault === 'later') assert.equal(v.children.state, 'partial')
     assert.deepEqual(v.blockedBy.items, []);
-    assert.ok(h.calls.length <= 20);
+    assert.ok(h.calls.length <= 31);
     assert.doesNotMatch(JSON.stringify(v), /SECRET/)
   }
 })
@@ -171,4 +174,36 @@ for (const code of ['not_found', 'permission_denied', 'not_supported']) test('fa
   h.page(input => providerOk({ source: { ...input, repository }, direction: input.direction, items: [] })); await refresh(); assert.equal(access(), false)
   const before = issueClosingLinksAccessVersion(context); h.flags.denied = true
   assert.equal((await refresh()).blockedBy.state, 'denied'); assert.notEqual(issueClosingLinksAccessVersion(context), before)
+})
+
+
+test('hierarchy streams preserve independent completeness and source-qualified closed targets', async () => {
+  const h = await fixture(), before = await h.p.storage.currentRevision(h.workspaceId)
+  h.page(input => input.direction === 'children' && input.cursor ? providerErr(providerError('unavailable', 'SECRET')) : providerOk({ source: { ...input, repository }, direction: input.direction, items: input.direction === 'parent' ? [] : [target(input.direction)], nextCursor: input.direction === 'children' ? 'second' : undefined }))
+  const v = await h.refresh()
+  assert.equal(v.parent.state, 'complete'); assert.deepEqual(v.parent.items, []); assert.ok(v.parent.observedAt)
+  assert.equal(v.children.state, 'partial'); assert.equal(v.children.items[0].state, 'closed'); assert.equal(v.children.observedAt, undefined)
+  assert.equal(v.blockedBy.state, 'complete'); assert.equal(await h.p.storage.currentRevision(h.workspaceId), before)
+})
+
+for (const fault of ['plural', 'cursor', 'proof', 'repository']) test('invalid parent ' + fault + ' cannot publish false completeness', async () => {
+  const h = await fixture()
+  h.page(input => providerOk({ source: { ...input, repository: fault === 'repository' && input.direction === 'parent' ? { ...repository, id: 'wrong' } : repository, issue: fault === 'proof' && input.direction === 'parent' ? { ...input.issue, externalId: 'wrong' } : input.issue }, direction: input.direction, items: input.direction === 'parent' && fault === 'plural' ? [target('one'), target('two')] : [], nextCursor: input.direction === 'parent' && fault === 'cursor' ? 'bad' : undefined }))
+  const v = await h.refresh(); assert.notEqual(v.parent.state, 'complete'); assert.deepEqual(v.parent.items, [])
+})
+
+for (const change of ['account', 'binding', 'repository', 'denial', 'ordinal']) test('held hierarchy is fenced after ' + change, async () => {
+  const h = await fixture(), entered = gate(), release = gate(); let configuration = 'A'
+  assert.ok((await h.refresh()).children, 'hierarchy observation must exist')
+  h.p.storage.getBindingConfiguration = async () => ({ configuration: { repository: configuration } })
+  h.page(async input => {
+    if (input.direction === 'children') { entered.resolve(); await release.promise }
+    return providerOk({ source: { ...input, repository }, direction: input.direction, items: [target('old-' + input.direction)] })
+  })
+  const pending = h.refresh(); await entered.promise
+  if (change === 'account') h.p.storage.getProviderBindingAccount = async () => 'changed'
+  if (change === 'binding') { const b = (await h.p.storage.listProviderBindings(h.workspaceId)).find(b => b.domain === 'planning'); await h.p.storage.putProviderBinding({ ...b, enabled: false, isDefault: false }) }
+  if (change === 'repository') configuration = 'B'
+  if (change === 'denial' || change === 'ordinal') { h.page(input => change === 'denial' ? providerErr(providerError('permission_denied', 'SECRET')) : providerOk({ source: { ...input, repository }, direction: input.direction, items: [] })); await h.refresh() }
+  release.resolve(); const v = await pending; assert.deepEqual(v.parent.items, []); assert.deepEqual(v.children.items, []); assert.doesNotMatch(JSON.stringify(v), /old-|SECRET/)
 })

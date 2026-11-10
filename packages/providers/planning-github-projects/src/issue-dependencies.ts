@@ -3,7 +3,7 @@ import { AccessLevel, providerErr, providerError, providerOk, type ProviderIssue
 import { ProviderErrorCode, type ProviderBindingId } from '@harness-projects/domain'
 import { classifyResponse, failure } from './classify.ts'
 import { isRecord, type Obj } from './decode.ts'
-import { PLANNING_ISSUE_BLOCKED_BY, PLANNING_ISSUE_BLOCKING } from './queries.ts'
+import { PLANNING_ISSUE_BLOCKED_BY, PLANNING_ISSUE_BLOCKING, PLANNING_ISSUE_PARENT, PLANNING_ISSUE_CHILDREN } from './queries.ts'
 import type { GraphqlTransport } from './transport.ts'
 
 const fail = (): never => { throw new TypeError('响应形状不符') }
@@ -19,10 +19,12 @@ function decode(body: unknown, input: ProviderIssueDependenciesInput): ProviderI
     || issue.__typename !== 'Issue' || issue.id !== input.issue.externalId) fail()
   const sourceRepository = repository(issue.repository), memberRepository = repository(content.repository)
   if (memberRepository.identity.id !== sourceRepository.identity.id || memberRepository.name !== sourceRepository.name) fail()
-  const connection = obj(input.direction === 'blocked_by' ? issue.blockedBy : issue.blocking), info = obj(connection.pageInfo)
-  if (!Array.isArray(connection.nodes) || connection.nodes.length > Math.min(input.limit, 100) || typeof info.hasNextPage !== 'boolean') fail()
+  const connection = input.direction === 'parent' ? undefined : obj(issue[{ blocked_by: 'blockedBy', blocking: 'blocking', children: 'subIssues' }[input.direction]])
+  const nodes = connection ? connection.nodes : issue.parent === null ? [] : [issue.parent]
+  const info = connection ? obj(connection.pageInfo) : undefined
+  if (!Array.isArray(nodes) || nodes.length > Math.min(input.limit, 100) || info && typeof info.hasNextPage !== 'boolean') fail()
   const identities = new Set<string>()
-  const items = (connection.nodes as unknown[]).map((raw) => {
+  const items = (nodes as unknown[]).map((raw) => {
     const node = obj(raw)
     if (node.__typename !== 'Issue' || !['OPEN', 'CLOSED'].includes(str(node.state))
       || !Number.isSafeInteger(node.number) || Number(node.number) < 1) fail()
@@ -36,8 +38,8 @@ function decode(body: unknown, input: ProviderIssueDependenciesInput): ProviderI
     return { nativeIdentity, repository: repo,
       number: Number(node.number), title: str(node.title), url, state: str(node.state).toLowerCase() as 'open' | 'closed' }
   })
-  const nextCursor = info.hasNextPage ? id(info.endCursor) : undefined
-  if (nextCursor !== undefined && nextCursor === input.cursor || !info.hasNextPage && info.endCursor !== null && typeof info.endCursor !== 'string') fail()
+  const nextCursor = info?.hasNextPage ? id(info.endCursor) : undefined
+  if (nextCursor !== undefined && nextCursor === input.cursor || info && !info.hasNextPage && info.endCursor !== null && typeof info.endCursor !== 'string') fail()
   return { source: { project: input.project, membership: input.membership, issue: input.issue, repository: sourceRepository.identity }, direction: input.direction, items, nextCursor }
 }
 
@@ -52,7 +54,7 @@ export function issueDependencies(bindingId: ProviderBindingId, projectNodeId: s
       const { project, membership, issue, cursor, limit } = input
       if ([project, membership, issue].some((ref) => ref.bindingId !== bindingId || typeof ref.externalId !== 'string' || ref.externalId.trim() === '')
         || project.objectKind !== 'project' || project.externalId !== projectNodeId || membership.objectKind !== 'project_item' || issue.objectKind !== 'issue'
-        || !['blocked_by', 'blocking'].includes(input.direction)
+        || !['blocked_by', 'blocking', 'parent', 'children'].includes(input.direction) || input.direction === 'parent' && cursor !== undefined
         || !Number.isInteger(limit) || limit < 1 || cursor !== undefined && (typeof cursor !== 'string' || cursor === '')) {
         return providerErr(providerError(ProviderErrorCode.InvalidInput, '来源读取必须指向本绑定当前项目、成员关系和 Issue，并使用合法分页参数'))
       }
@@ -60,8 +62,9 @@ export function issueDependencies(bindingId: ProviderBindingId, projectNodeId: s
       let requestId: string | undefined, rawClass = 'transport_error'
       let result: ProviderResult<ProviderIssueDependenciesPage>
       try {
-        const response = await transport({ operationName: input.direction === 'blocked_by' ? 'PlanningIssueBlockedBy' : 'PlanningIssueBlocking', query: input.direction === 'blocked_by' ? PLANNING_ISSUE_BLOCKED_BY : PLANNING_ISSUE_BLOCKING,
-          variables: { project: project.externalId, membership: membership.externalId, issue: issue.externalId, first: Math.min(limit, 100), after: cursor ?? null } })
+        const [operationName, query] = ({ blocked_by: ['PlanningIssueBlockedBy', PLANNING_ISSUE_BLOCKED_BY], blocking: ['PlanningIssueBlocking', PLANNING_ISSUE_BLOCKING], parent: ['PlanningIssueParent', PLANNING_ISSUE_PARENT], children: ['PlanningIssueChildren', PLANNING_ISSUE_CHILDREN] } as const)[input.direction]
+        const response = await transport({ operationName, query,
+          variables: { project: project.externalId, membership: membership.externalId, issue: issue.externalId, ...(input.direction === 'parent' ? {} : { first: Math.min(limit, 100), after: cursor ?? null }) } })
         rawClass = 'malformed_response'
         const rawId = response.headers['x-github-request-id']
         requestId = typeof rawId === 'string' && /^[0-9A-F]{1,8}(?::[0-9A-F]{1,16}){3,5}$/i.test(rawId) ? rawId : undefined

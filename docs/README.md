@@ -48,6 +48,7 @@
 | [2026-11-07-source-work-item-numbers](exec-plan/completed/2026-11-07-source-work-item-numbers.md) | 来源工作项编号展示与搜索（#558） |
 | [2026-11-09-native-authority-receipts](exec-plan/completed/2026-11-09-native-authority-receipts.md) | 原生权限否定因果票据、旧响应围栏与粒度回归（#591） |
 | [2026-11-09-native-issue-dependencies](exec-plan/completed/2026-11-09-native-issue-dependencies.md) | 来源原生双向阻塞读取、权限因果围栏与生产详情（#589，Refs #543） |
+| [2026-11-10-native-issue-hierarchy](exec-plan/completed/2026-11-10-native-issue-hierarchy.md) | 来源原生父/子 Issue 读取、独立状态与安全详情导航（#594，Refs #543） |
 | [2026-11-07-source-pr-native-relations](exec-plan/completed/2026-11-07-source-pr-native-relations.md) | 原生来源 PR 引用与关闭关系观察（#562，Refs #556） |
 | [2026-11-07-execution-start-identity](exec-plan/completed/2026-11-07-execution-start-identity.md) | 发送任务前的持久身份（#554） |
 | [2026-11-07-execution-setup-feedback](exec-plan/completed/2026-11-07-execution-setup-feedback.md) | 执行设置原位恢复（#553） |

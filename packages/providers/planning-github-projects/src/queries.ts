@@ -131,3 +131,15 @@ export const PLANNING_ISSUE_BLOCKING = `query PlanningIssueBlocking($project: ID
   membership: node(id: $membership) { __typename ... on ProjectV2Item { id type project { id } content { __typename ... on Issue { id repository { id nameWithOwner } } } } }
   issue: node(id: $issue) { __typename ... on Issue { id repository { id nameWithOwner } blocking(first: $first, after: $after) { nodes { __typename id number title url state repository { id nameWithOwner } } pageInfo { hasNextPage endCursor } } } }
 }`
+
+/** parent 是单项；children 保持独立有界分页，不推断 Issue body。 */
+export const PLANNING_ISSUE_PARENT = `query PlanningIssueParent($project: ID!, $membership: ID!, $issue: ID!) {
+  project: node(id: $project) { __typename ... on ProjectV2 { id } }
+  membership: node(id: $membership) { __typename ... on ProjectV2Item { id type project { id } content { __typename ... on Issue { id repository { id nameWithOwner } } } } }
+  issue: node(id: $issue) { __typename ... on Issue { id repository { id nameWithOwner } parent { __typename id number title url state repository { id nameWithOwner } } } }
+}`
+export const PLANNING_ISSUE_CHILDREN = `query PlanningIssueChildren($project: ID!, $membership: ID!, $issue: ID!, $first: Int!, $after: String) {
+  project: node(id: $project) { __typename ... on ProjectV2 { id } }
+  membership: node(id: $membership) { __typename ... on ProjectV2Item { id type project { id } content { __typename ... on Issue { id repository { id nameWithOwner } } } } }
+  issue: node(id: $issue) { __typename ... on Issue { id repository { id nameWithOwner } subIssues(first: $first, after: $after) { nodes { __typename id number title url state repository { id nameWithOwner } } pageInfo { hasNextPage endCursor } } } }
+}`

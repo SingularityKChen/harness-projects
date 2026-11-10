@@ -105,6 +105,18 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 ## 4. 当前队列
 
+### PR #600 → #601 → #602（2026-11-10）
+
+用户直接条件授权、风险矩阵与独立复评见 [本批记录](../review/2026-11-10-pr600-pr602-mmp-review.md)。原始三个 main PR 无代码依赖；顺序用于组合验收和文档索引接合，不建立 Planning 依赖。
+
+| 位置 | PR / issue | 实际接合与门 |
+|---|---|---|
+| 1（已合并） | #600 / #311、#426 | 无 P0–P3；当前 CI/批准通过，rebase `27bca4c2`，两 issue CLOSED；合入 tree 等于批准 tree。 |
+| 2（已合并） | #601 / #141 | 接合真实 #600 main，独立 9/9、当前 CI/批准通过，rebase `62bac076`，#141 CLOSED；tree 相同。 |
+| 3 | #602 / #594 | 接合实际前两项 main；保留双方 review 索引，完整产品/测试 blob 等于前序预演；相关验证、独立复评、当前 head 托管/批准门和双向 issue 回读后，以 expected head rebase 合并。 |
+
+每个已发布初始 head 保存于 `refs/backup/pr<N>-before-mmp-review-20261110`；整理为一条可独立回滚的 Conventional Commit，最终 push 使用精确 old head lease。逐次重新读取 head/base、完整 checks/threads、当前批准和 issue 关闭关联，合入后读回 merge commit、issue state 与 tree；#543、#201、#304/#554、Planning Status 与 R1 独立。`gh pr view <N> -R SingularityKChen/harness-projects --json state,headRefOid,baseRefOid,mergeCommit,closingIssuesReferences` 为最终易失状态的重算入口。
+
 ### PR #586、#588、#592 → #590（2026-11-10）
 
 直接点名的用户条件授权、完整矩阵和整合证据见 [本轮记录](../review/2026-11-10-pr586-pr592-mmp-review.md)。只有 #592 → #590 是必要原生 stack #593；其他操作顺序不新增 Planning 依赖。

@@ -9,7 +9,7 @@ export interface IssueDependencyStream {
   readonly state: 'unread' | 'complete' | 'partial' | 'denied' | 'unsupported' | 'unavailable'
   readonly items: readonly ProviderIssueDependency[]; readonly stale: boolean; readonly observedAt?: string
 }
-export interface IssueDependenciesObservation { readonly workItemId: string; readonly blockedBy: IssueDependencyStream; readonly blocking: IssueDependencyStream }
+export interface IssueDependenciesObservation { readonly workItemId: string; readonly blockedBy: IssueDependencyStream; readonly blocking: IssueDependencyStream; readonly parent: IssueDependencyStream; readonly children: IssueDependencyStream }
 class Refusal extends Error { readonly state: IssueDependencyStream['state']; constructor(state: IssueDependencyStream['state']) { super(state); this.state = state } }
 const requests = new WeakMap<CoreContext, Map<string, number>>()
 const refKey = (r: { bindingId: string; objectKind: string; externalId: string }) => JSON.stringify([r.bindingId, r.objectKind, r.externalId])
@@ -29,7 +29,7 @@ async function source(context: CoreContext, workItemId: string) {
   const input = { project: { ...project, url: undefined }, issue: { bindingId: primary.bindingId, objectKind: 'issue', externalId: primary.externalId, url: undefined }, membership: { bindingId: primary.bindingId, objectKind: 'project_item', externalId: member.itemExternalId, url: undefined } }
   const accountId = await context.storage.getProviderBindingAccount(binding.ref.bindingId), account = accountId && await context.storage.getConnectorAccount(accountId), config = await context.storage.getBindingConfiguration(binding.ref)
   if (fence !== committedFence(context.storage) || epoch !== context.runtimeAccess.epoch) throw new Refusal('unread')
-  return { input, provider: binding.planning, stamp: JSON.stringify([context.workspaceId, binding.ref, binding.enabled, account, config, input, member, primary, context.policy, epoch]), fence, epoch }
+  return { input, provider: binding.planning, stamp: JSON.stringify([context.workspaceId, binding.ref, binding.enabled, accountId, account, config, input, member, primary, context.policy, epoch]), fence, epoch }
 }
 function allowed(context: CoreContext, snapshot: ProviderCapabilitySnapshot, bindingId: string, probe = false) {
   if (snapshot.bindingId !== bindingId) throw new Refusal('unread')
@@ -46,7 +46,7 @@ function valid(item: ProviderIssueDependency) {
     && ['open', 'closed'].includes(item.state) && item.url === `https://github.com/${item.repository.name}/issues/${item.number}` && new URL(item.url).href === item.url
 }
 export async function refreshIssueDependencies(context: CoreContext, scope: IssueDependenciesScope): Promise<IssueDependenciesObservation> {
-  const workItemId = scope.workItemId, output = (stream: IssueDependencyStream): IssueDependenciesObservation => ({ workItemId, blockedBy: stream, blocking: stream })
+  const workItemId = scope.workItemId, output = (stream: IssueDependencyStream): IssueDependenciesObservation => ({ workItemId, blockedBy: stream, blocking: stream, parent: stream, children: stream })
   let owned = requests.get(context); if (!owned) { owned = new Map(); requests.set(context, owned) }
   const ordinal = (owned.get(workItemId) ?? 0) + 1; owned.set(workItemId, ordinal)
   const deadline = Date.now() + 10000, authority = issueAuthorityReadAccess(context, '', [])
@@ -72,13 +72,13 @@ export async function refreshIssueDependencies(context: CoreContext, scope: Issu
     await check(true)
     const ticket = issueSourceReadAccess(context, captured.input)
     const streams: IssueDependencyStream[] = []; let repository: string | undefined
-    for (const direction of ['blocked_by', 'blocking'] as const) {
+    for (const direction of ['blocked_by', 'blocking', 'parent', 'children'] as const) {
       let cursor: string | undefined, completed = false, pages = 0
       const items: ProviderIssueDependency[] = [], cursors = new Set<string>(), seen = new Set<string>()
       try {
         for (let page = 0; page < 10; page++) {
           await current()
-          const input: ProviderIssueDependenciesInput = { ...structuredClone(captured.input), direction, cursor, limit: 100 }
+          const input: ProviderIssueDependenciesInput = { ...structuredClone(captured.input), direction, cursor, limit: direction === 'parent' ? 1 : 100 }
           const data = await bounded(async () => {
             const result = await captured.provider.listIssueDependencies!(input)
             if (!result.ok) {
@@ -96,7 +96,7 @@ export async function refreshIssueDependencies(context: CoreContext, scope: Issu
           })
           await check()
           if (!data?.source || ['project', 'membership', 'issue'].some(k => refKey(data.source[k as keyof typeof captured.input]) !== refKey(captured.input[k as keyof typeof captured.input])) || data.direction !== direction
-            || data.source.repository?.namespace !== 'github.com/graphql/Repository' || typeof data.source.repository.id !== 'string' || !data.source.repository.id.trim() || !Array.isArray(data.items) || data.items.length > 100) throw new Refusal('partial')
+            || data.source.repository?.namespace !== 'github.com/graphql/Repository' || typeof data.source.repository.id !== 'string' || !data.source.repository.id.trim() || !Array.isArray(data.items) || data.items.length > (direction === 'parent' ? 1 : 100) || direction === 'parent' && data.nextCursor !== undefined) throw new Refusal('partial')
           const sourceRepository = JSON.stringify(data.source.repository)
           if (repository !== undefined && repository !== sourceRepository) throw new Refusal('partial')
           repository = sourceRepository; pages++
@@ -127,6 +127,6 @@ export async function refreshIssueDependencies(context: CoreContext, scope: Issu
     }
     if (issueAuthorityReadAccess(context, captured.input.issue.bindingId, KEYS).denied) throw new Refusal('denied')
     if (issueSourceReadAccess(context, captured.input).missing) throw new Refusal('unread')
-    return { workItemId, blockedBy: streams[0]!, blocking: streams[1]! }
+    return { workItemId, blockedBy: streams[0]!, blocking: streams[1]!, parent: streams[2]!, children: streams[3]! }
   } catch (error) { return output(empty(error instanceof Refusal ? error.state : 'unavailable')) }
 }
