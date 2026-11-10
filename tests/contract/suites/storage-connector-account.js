@@ -1,4 +1,4 @@
-/** 连接账号与工作区配置的共享 Storage 契约套件（#126）：Fake 与 SQLite 同形跑 6 条命名用例；判别性集中在账号自然键不可重绑、配置按真实 implementationKey 分派、重登记/卸载只改挂载。 */
+/** 连接账号与工作区配置的共享 Storage 契约套件（#126）：Fake 与 SQLite 同形跑 7 条命名用例；判别性集中在账号自然键不可重绑、配置按真实 implementationKey 分派、重登记/卸载只改挂载。 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { EMPTY_POLICY, snapshotPolicy } from '@harness-projects/capabilities'
@@ -14,9 +14,9 @@ export const policy = () => ({ allowedSecretHandles: new Set(['HARNESS_FAKE_TOKE
   ['harness.fake', { scope: { kind: 'enum', required: true, values: ['workspace', 'project'] }, label: { kind: 'string', required: false, pattern: '[a-z]+', maxLength: 8 } }],
   ['development.local-git', { repositoryPath: { kind: 'string', required: true, pattern: '/[^\\s]+', maxLength: 512 } }],
 ]) })
-/** 计划 Validation and Acceptance 的 8 个命名用例：6 条共享（本文件）+ 2 条集成专属。 */
+/** 计划 Validation and Acceptance 的 9 个命名用例：7 条共享（本文件）+ 2 条集成专属。 */
 export const CONNECTOR_ACCOUNT_INTEGRATION_CASES = ['restart-and-empty-schema-repeatability', 'secret-canary-never-published']
-export const CONNECTOR_ACCOUNT_SHARED_CASES = ['one-account-three-domains', 'immutable-account-and-anchor-identity', 'configuration-is-workspace-scoped', 'trusted-handle-only', 'registration-and-removal-preserve-account', 'metadata-transaction-and-copy-isolation']
+export const CONNECTOR_ACCOUNT_SHARED_CASES = ['one-account-three-domains', 'immutable-account-and-anchor-identity', 'configuration-is-workspace-scoped', 'configuration-own-properties-roundtrip', 'trusted-handle-only', 'registration-and-removal-preserve-account', 'metadata-transaction-and-copy-isolation']
 export const CONNECTOR_ACCOUNT_NAMED_CASES = [...CONNECTOR_ACCOUNT_SHARED_CASES, ...CONNECTOR_ACCOUNT_INTEGRATION_CASES]
 const ref = (workspaceId, bindingId, domain) => ({ workspaceId, bindingId, domain })
 /** 只计数的注册器：用例体不执行——删掉一条 register(...) 会让条数守卫变红。 */
@@ -94,6 +94,76 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     assert.throws(() => restart(storage, policy()), RangeError, '已声明实现键的坏配置：重开仍整库拒绝')
     const narrowed = restart(storage, { allowedSecretHandles: new Set(), configurations: new Map() })
     await assert.rejects(async () => narrowed.getBindingConfiguration(a), RangeError, '未声明实现键的配置：重开不阻断，读口仍拒绝')
+  })
+  register(`${label}：configuration-own-properties-roundtrip`, async () => {
+    // indexed assignment 会丢掉 __proto__；原型取值会把缺省 constructor/toString 当成继承函数。
+    const optionalSchemaJson = '{"__proto__":{"kind":"boolean","required":false},"constructor":{"kind":"string","required":false,"pattern":"[a-z]*","maxLength":8},"toString":{"kind":"enum","required":false,"values":["workspace","project"]}}'
+    const scenarios = [
+      ['{"__proto__":{"kind":"boolean","required":true}}', '{"__proto__":false}'],
+      ['{"constructor":{"kind":"string","required":true,"pattern":"[a-z]*","maxLength":8}}', '{"constructor":""}'],
+      ['{"toString":{"kind":"enum","required":true,"values":["workspace","project"]}}', '{"toString":"project"}'],
+      [optionalSchemaJson, '{"__proto__":true,"constructor":"repo","toString":"workspace"}'],
+      [optionalSchemaJson, '{}'],
+    ]
+    for (const [schemaJson, configurationJson] of scenarios) {
+      const schema = JSON.parse(schemaJson), expected = JSON.parse(configurationJson)
+      const trusted = { allowedSecretHandles: new Set(), configurations: new Map([['harness.fake', schema]]) }
+      const storage = makeStorage(trusted)
+      await storage.putWorkspace(workspace()); await storage.putProviderBinding(binding('conn-conf', 'planning'))
+      const mount = ref(WORKSPACE, 'conn-conf', 'planning'), input = JSON.parse(configurationJson)
+      const assertStored = async (store) => {
+        const actual = (await store.getBindingConfiguration(mount)).configuration
+        assert.deepEqual(actual, expected, '声明的特殊名字段必须逐字段保真')
+        assert.deepEqual(Object.keys(actual), Object.keys(expected), '声明字段必须保持为 own enumerable 属性')
+        assert.equal(Object.getPrototypeOf(actual), Object.prototype, '返回配置保持普通对象语义')
+        assert.equal(JSON.stringify(actual), configurationJson, 'JSON 不得静默丢失特殊名字段')
+        for (const name of Object.keys(expected)) assert.equal(Object.hasOwn(actual, name), true)
+        return actual
+      }
+      try {
+        await storage.putBindingConfiguration({ ref: mount, configuration: input })
+        for (const name of Object.keys(input)) input[name] = 'changed'
+        const read = await assertStored(storage)
+        for (const name of Object.keys(read)) read[name] = 'changed'
+        await assertStored(storage)
+        for (const name of Object.keys(expected)) {
+          await assert.rejects(storage.putBindingConfiguration({ ref: mount, configuration: { ...expected, [name]: undefined } }), RangeError, 'own undefined 不能作为缺省')
+          for (const raw of [null, [], {}, Symbol('invalid')]) {
+            await assert.rejects(storage.putBindingConfiguration({ ref: mount, configuration: { ...expected, [name]: raw } }), RangeError, '非声明标量必须拒绝')
+          }
+        }
+        if (Object.keys(schema).length === 1) {
+          await assert.rejects(storage.putBindingConfiguration({ ref: mount, configuration: {} }), RangeError, '必填字段缺省不能从原型补值')
+        } else {
+          for (const invalid of [
+            { ...expected, ['__proto__']: 'false' }, { ...expected, constructor: 'UPPER' },
+            { ...expected, constructor: 'toolongvalue' }, { ...expected, toString: 'bogus' },
+            { ...expected, [Symbol('extra')]: true },
+          ]) await assert.rejects(storage.putBindingConfiguration({ ref: mount, configuration: invalid }), RangeError)
+        }
+        await assertStored(storage) // 每种失败都不得覆盖已保存的合法配置。
+        const reopened = restart(storage, trusted)
+        try {
+          await assertStored(reopened)
+          if (Object.keys(schema).length > 1) {
+            await reopened.putBindingConfiguration({ ref: mount, configuration: {} })
+            const absent = (await reopened.getBindingConfiguration(mount)).configuration
+            assert.deepEqual(absent, {}, '缺省 optional 特殊名字段必须保持缺省')
+            for (const name of ['__proto__', 'constructor', 'toString']) assert.equal(Object.hasOwn(absent, name), false)
+          }
+        } finally { reopened.close?.() }
+      } finally { storage.close?.() }
+    }
+    const ordinary = makeStorage()
+    try {
+      await ordinary.putWorkspace(workspace()); await ordinary.putProviderBinding(binding('conn-conf', 'planning'))
+      const mount = ref(WORKSPACE, 'conn-conf', 'planning')
+      await ordinary.putBindingConfiguration({ ref: mount, configuration: { scope: 'workspace' } })
+      for (const name of ['__proto__', 'constructor', 'toString']) {
+        await assert.rejects(ordinary.putBindingConfiguration({ ref: mount, configuration: { scope: 'workspace', [name]: true } }), RangeError, '未声明的特殊名字段仍必须拒绝')
+      }
+      assert.deepEqual((await ordinary.getBindingConfiguration(mount)).configuration, { scope: 'workspace' }, '未知字段拒绝后旧值保持不变')
+    } finally { ordinary.close?.() }
   })
   register(`${label}：trusted-handle-only`, async () => {
     const storage = makeStorage(); await storage.putConnectorAccount(account())

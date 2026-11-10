@@ -105,6 +105,19 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 ## 4. 当前队列
 
+### PR #586、#588、#592 → #590（2026-11-10）
+
+直接点名的用户条件授权、完整矩阵和整合证据见 [本轮记录](../review/2026-11-10-pr586-pr592-mmp-review.md)。只有 #592 → #590 是必要原生 stack #593；其他操作顺序不新增 Planning 依赖。
+
+| 位置 | PR / issue | 接合与门 |
+|---|---|---|
+| 1 | #586 / #309 | 配置字段保真；承担跨 PR 评审索引与归档；docs/README.md 并列插入保留所有条目 |
+| 2 | #588 / #587 | Markdown 两项 P2 修复独立复评；在前项真实 main 后重锁当前 head/base |
+| 3 | #592 / #591 | 因果票据独立修复；在前两项真实 main 后重锁；先于消费者合入 |
+| 4 | #590 / #589 | unavailable 反馈 P2 与归档路径 P3 修复独立复评；消费已合入父协议并完整回读 |
+
+各已发布初始 head 保存在 `refs/backup/pr<N>-before-mmp-review-20261110`。每次最终 push 都用精确 old head lease，核对完整产品/测试 blob、当前 CI/PR Fast Gate、批准、全线程和双向 issue 关联，只执行带预期 head 的 `merge_method=rebase`；native stack 成员使用 async 端点。每条合入后 fetch 实际 main 再重放后续层，不继承旧 head 的批准或旧 CI。合并结果以 `gh pr view <n> --repo SingularityKChen/harness-projects --json state,mergeCommit,headRefOid` 与 issue state 回读，不预写未来 SHA。#539/#543 人验、#459/R1 与 Planning Status 不由本轮工程动作接受。
+
 ### PR #583 → #584 → #585（2026-11-09）
 
 直接条件授权与完整矩阵见[本批记录](../review/2026-11-09-pr583-pr585-mmp-review.md)。三个独立 main PR，不建立原生 stack 或 Planning 依赖。初始完整前序已在仓库外 clone 预演；每条合入后以真实 main 重核。

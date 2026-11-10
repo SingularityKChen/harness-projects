@@ -153,8 +153,8 @@ export function parseBindingConfiguration(value: unknown, policy: StorageValidat
   for (const name of Object.keys(configuration)) if (!Object.hasOwn(schema, name)) reject('binding configuration field is not declared')
   const copied: Record<string, string | boolean> = {}
   for (const [name, rule] of Object.entries(schema)) {
+    if (!Object.hasOwn(configuration, name)) { if (rule.required) reject('binding configuration is missing a required field'); continue }
     const raw = configuration[name]
-    if (raw === undefined) { if (rule.required) reject('binding configuration is missing a required field'); continue }
     if (rule.kind === 'boolean') { if (typeof raw !== 'boolean') reject('binding configuration boolean field must be a boolean') } else if (rule.kind === 'enum') {
       if (typeof raw !== 'string' || !rule.values.includes(raw)) reject('binding configuration enum field is not one of the declared values')
     } else {
@@ -162,7 +162,7 @@ export function parseBindingConfiguration(value: unknown, policy: StorageValidat
       if (raw.length > rule.maxLength) reject('binding configuration string field exceeds the declared max length')
       if (!new RegExp(`^(?:${rule.pattern})$`).test(raw)) reject('binding configuration string field does not match the declared pattern')
     }
-    copied[name] = raw as string | boolean
+    Object.defineProperty(copied, name, { value: raw as string | boolean, enumerable: true, writable: true, configurable: true })
   }
   return { ref, configuration: copied }
 }
