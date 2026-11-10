@@ -1,0 +1,372 @@
+{
+  "reference": "release-workspace-v3",
+  "version": 3,
+  "frozen": true,
+  "status": "frozen static candidate after independent full review and D1/S1/S2 re-review; human acceptance pending",
+  "sourceHead": "982517c73951563797612472339970f015e7c62f",
+  "installed": false,
+  "themeSource": "public @deepseek-ai/dsh-client-ui-theme@0.2.0-rc.2 defaults; not installed computed style",
+  "geometry": {
+    "normalTableHeaderY": 196,
+    "actualShortRowHeight": 58
+  },
+  "matchedFields": [
+    "seven source-qualified numbers",
+    "titles including long #604",
+    "normalized and native planning status",
+    "iteration labels",
+    "target dates"
+  ],
+  "unmatched": [
+    "engineering labels are design examples; source fixture has no derived flags",
+    "source observation language follows respective fixture/reference"
+  ],
+  "assets": [
+    {
+      "file": "list-light-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 143749,
+      "sha256": "141e2103fb056034d4cf3c7f92ec1f9d0d469d9c1be86a8d6c108d323e0cfde2"
+    },
+    {
+      "file": "board-light-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 132999,
+      "sha256": "ef81eae5270db50c7060f486582f7647c01e8f7efd8df54c19022e99f0aca2d5"
+    },
+    {
+      "file": "timeline-light-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 151454,
+      "sha256": "5f93a215a49b711b5982fa25067d0ec3b9bcc3d3924d18c4c21d46208299104c"
+    },
+    {
+      "file": "delivery-light-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 155710,
+      "sha256": "a9b5e3b5f981bf0bdb1153093f3d83ca83209f4c827848a4bd8322dbd8bbaeb0"
+    },
+    {
+      "file": "detail-light-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 191574,
+      "sha256": "10f0bde517529fb92689fd06bb3ec38721a86f9b79d56aa3a512528ee9216db7"
+    },
+    {
+      "file": "settings-light-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 71675,
+      "sha256": "af34442c299967788b7fa4ed63bfbd087e753b0da768e2e61352058baafc16bb"
+    },
+    {
+      "file": "list-dark-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 145628,
+      "sha256": "6ab29930f863720a1d3b961c92fab7092791d0a2414b031cff4168b178f54824"
+    },
+    {
+      "file": "board-dark-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 133923,
+      "sha256": "f2cba570f3b511130c0a1cb32ff492c95618611469de313c9a5992a4f6972ef4"
+    },
+    {
+      "file": "timeline-dark-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 153815,
+      "sha256": "ad2c1c6cad7ee58e0b2765618e839587ce59de5fce9effe98af345c0baea12ca"
+    },
+    {
+      "file": "delivery-dark-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 158268,
+      "sha256": "986fb53cd9ca732d13c7fa4eeb763fb4dbffc6f2b91e7f41a5f331787de14403"
+    },
+    {
+      "file": "detail-dark-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 193257,
+      "sha256": "52dca909f8c4ac7c95d179cb64aefe4040d3891ae991b76cfe970c9323b5821b"
+    },
+    {
+      "file": "settings-dark-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 73094,
+      "sha256": "669581cf60c9301044e312c322f4a8aef03c38a9b01065850996b96f213ef158"
+    },
+    {
+      "file": "release-workspace-v3.png",
+      "dimensions": [
+        1512,
+        1048
+      ],
+      "bytes": 247287,
+      "sha256": "a6c1be0dc3a9b63d4cd67fb90aba103f935ad6ad15a262191fd2275ae1991e7a"
+    },
+    {
+      "file": "overview-light-v3.png",
+      "dimensions": [
+        1512,
+        1560
+      ],
+      "bytes": 367094,
+      "sha256": "9cc75b20ae79200e2116fbc6132830cfdd020502473dff8b355bfe79daec12d8"
+    },
+    {
+      "file": "overview-dark-v3.png",
+      "dimensions": [
+        1512,
+        1560
+      ],
+      "bytes": 439843,
+      "sha256": "f9d913702c33cef6b00924cfca79b198103914fe80350ae0b808ea620d5b221b"
+    },
+    {
+      "file": "responsive-light-v3.png",
+      "dimensions": [
+        1536,
+        3996
+      ],
+      "bytes": 924006,
+      "sha256": "6a56d091c289f5a5889b82a4dee6187b6f0e6ac80920a11dada89bb0d7e43653"
+    },
+    {
+      "file": "responsive-dark-v3.png",
+      "dimensions": [
+        1536,
+        3996
+      ],
+      "bytes": 1099405,
+      "sha256": "ff869f6cbc59d9d60f130325b70d58b50851ab9a69d758c00e15b33903b48a61"
+    },
+    {
+      "file": "v2-v3-exact-viewport-comparison.png",
+      "dimensions": [
+        2952,
+        1948
+      ],
+      "bytes": 597176,
+      "sha256": "6f08f174e0c8ca87028b34b18a40682f802254cbda19e7ff35741fa5e562b17d"
+    },
+    {
+      "file": "source-baseline-v3-comparison.png",
+      "dimensions": [
+        2952,
+        1948
+      ],
+      "bytes": 632445,
+      "sha256": "8a3004b38cb89e21cae5fffa4afbe1d018e387df93e6829fed0ddcbed71d03cc"
+    },
+    {
+      "file": "states-light-1440-v3.png",
+      "dimensions": [
+        1440,
+        1200
+      ],
+      "bytes": 154098,
+      "sha256": "92ad0f2b89d1635d0c3a762cb1a65bfac075b5afdcfedae0e3ce0e5d806903af"
+    },
+    {
+      "file": "page-states-light-1440-v3.png",
+      "dimensions": [
+        1440,
+        1200
+      ],
+      "bytes": 142111,
+      "sha256": "d94959a387d92e4eb0de1307815f89e3d485a5e6010beb7f2c7319d4a2d3be06"
+    },
+    {
+      "file": "display-options-light-1440-v3.png",
+      "dimensions": [
+        1440,
+        1200
+      ],
+      "bytes": 181996,
+      "sha256": "f6f74e6e8cc6d243e9fc1e4cc78c24b98c92bf30c62fba98bddd6feef68f476c"
+    },
+    {
+      "file": "filtered-zero-light-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 66727,
+      "sha256": "4b21d881787410b396709eb956552e6a7f5467756d2c30dc4a7db656b631de45"
+    },
+    {
+      "file": "states-dark-1440-v3.png",
+      "dimensions": [
+        1440,
+        1200
+      ],
+      "bytes": 155408,
+      "sha256": "0cfa2ddc7b3e8690a2ae31ebb719d87803fa9616674d3319b30a921654b04fd4"
+    },
+    {
+      "file": "page-states-dark-1440-v3.png",
+      "dimensions": [
+        1440,
+        1200
+      ],
+      "bytes": 144939,
+      "sha256": "4d08a84e924721c93eb0715ec34c4645b9c5e9f0f83154e2c6e03a4addde7f1d"
+    },
+    {
+      "file": "display-options-dark-1440-v3.png",
+      "dimensions": [
+        1440,
+        1200
+      ],
+      "bytes": 184074,
+      "sha256": "e8e1118049d29029ed3fa376e0e4776a7c499d67629792238711819b9be8ce32"
+    },
+    {
+      "file": "filtered-zero-dark-1440-v3.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "bytes": 68123,
+      "sha256": "f8015249644ed5659ca9a32211f01b986b4ac18cf6fb90496d7e20a827bf9946"
+    },
+    {
+      "file": "empty-states-light-v3.png",
+      "dimensions": [
+        1512,
+        1048
+      ],
+      "bytes": 78022,
+      "sha256": "83bd8e36eaba4709fa5ce8ce0a3fa99162dfcc322a05cc2ef66cf97d4bf234c6"
+    },
+    {
+      "file": "empty-states-dark-v3.png",
+      "dimensions": [
+        1512,
+        1048
+      ],
+      "bytes": 91997,
+      "sha256": "83828721045c6e536956bc8ad8b3e93c3b3daa4f20fd7dc42b9cf8c645a0247b"
+    },
+    {
+      "file": "list-light-390-v3.png",
+      "dimensions": [
+        390,
+        1100
+      ],
+      "bytes": 102504,
+      "sha256": "f43433897f28b7d703d7ea02c89f256e69d623eed558c934e8deca4e9ef57e72"
+    },
+    {
+      "file": "detail-light-390-v3.png",
+      "dimensions": [
+        390,
+        1100
+      ],
+      "bytes": 79390,
+      "sha256": "62cdf5b7ca8b3a571a950d00c59e40e57e8616d5652951dc0b5867c4ee30f4ae"
+    },
+    {
+      "file": "color-detail-light-1440-v3.png",
+      "dimensions": [
+        1440,
+        1200
+      ],
+      "bytes": 108854,
+      "sha256": "83d677deec99d9e6297e64cb24e16873f69c28f2829cd8fc76e89c218dedca67"
+    },
+    {
+      "file": "color-detail-dark-1440-v3.png",
+      "dimensions": [
+        1440,
+        1200
+      ],
+      "bytes": 110875,
+      "sha256": "54dc2c0b442333a3b55a38880f6eab7ca3f0982b1e039b69dd2c0a41dacd2ea4"
+    },
+    {
+      "file": "delivery-light-390-v3.png",
+      "dimensions": [
+        390,
+        1900
+      ],
+      "bytes": 165745,
+      "sha256": "cbf6d681a672cb4177fe62bf5693b967e63e0f8ed862975eda9f418d745b3978"
+    },
+    {
+      "file": "delivery-dark-390-v3.png",
+      "dimensions": [
+        390,
+        1900
+      ],
+      "bytes": 168166,
+      "sha256": "1150d4282ab3ab1862fe0fa6e7f13e3661e28121ba5bb0b12a890dafab268428"
+    }
+  ],
+  "hashPolicy": "SHA-256 binds35 selected PNGs and2 readonly metadata files. The manifest own SHA-256 is reported separately. Freeze is not human approval; later decisions are recorded separately without rewriting frozen assets.",
+  "targetedFinalReviewRepairs": [
+    "Delivery actual repo refresh page state and pagination; no List controls",
+    "denied unknown and uncertain result separated; genuine errors have explicit text",
+    "Start Work pending uses actual 正在提交"
+  ],
+  "humanVisualAcceptanceAtFreeze": false,
+  "freezeDate": "2026-11-10",
+  "timezone": "Asia/Singapore",
+  "review": {
+    "independentFullMatrixReview": "passed",
+    "targetedReReview": "passed",
+    "closedFindings": [
+      "D1",
+      "S1",
+      "S2"
+    ],
+    "humanVisualAcceptance": "separate decision against this exact manifest digest"
+  },
+  "metadata": [
+    {
+      "file": "handoff-v3.md",
+      "bytes": 12797,
+      "sha256": "18faba15147e651075007437848c3b8df328a80e125f0336ef9bd0749cb22900"
+    },
+    {
+      "file": "host-role-palette-v3.json",
+      "bytes": 1349,
+      "sha256": "21076a06ba918c3464ab54316ce1545febc71782e8224b831d15cc04efa3ca7e"
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "reference": "release-workspace-v3",
+  "source": "public theme 0.2.0-rc.2 default roles; no installed sampling",
+  "palette": {
+    "light": {
+      "bg": "#FFFFFF",
+      "surface": "#FFFFFF",
+      "soft": "#F1F3F5",
+      "text": "#0F1115",
+      "muted": "#61666B",
+      "line": "#0000001A",
+      "cardBorder": "#00000029",
+      "edge": "#7D7E81",
+      "accent": "#4176E6",
+      "select": "#F5F6F7",
+      "selectEdge": "#61666B",
+      "primary": "#0F1115",
+      "onPrimary": "#FFFFFF",
+      "good": "#22C55E",
+      "warn": "#F59E0B",
+      "bad": "#EC1313",
+      "layer2": "#FFFFFF",
+      "pressed": "#2631481A",
+      "primaryHover": "#43454A"
+    },
+    "dark": {
+      "bg": "#151517",
+      "surface": "#232324",
+      "soft": "#353638",
+      "text": "#F9FAFB",
+      "muted": "#CFD3D6",
+      "line": "#FFFFFF1F",
+      "cardBorder": "#FFFFFF33",
+      "edge": "#979798",
+      "accent": "#7AAAFF",
+      "select": "#212123",
+      "selectEdge": "#CFD3D6",
+      "primary": "#F9FAFB",
+      "onPrimary": "#0F1115",
+      "good": "#22C55E",
+      "warn": "#F59E0B",
+      "bad": "#F25A5A",
+      "layer2": "#2C2C2E",
+      "pressed": "#FFFFFF24",
+      "primaryHover": "#EBEEF2"
+    }
+  },
+  "controlEdge": "consumer color-mix(label-primary54%, bg-layer-1); not a preexisting named Host token",
+  "humanAcceptance": false
+}
