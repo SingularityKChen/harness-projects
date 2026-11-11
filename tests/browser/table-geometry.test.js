@@ -135,3 +135,33 @@ test('negative controls expose unbounded surface, lost frozen header and title c
     assert.ok((await measure(page)).top>0,'keyboard scroll reaches actual local Y owner')
   })
 })
+
+
+test('offline stale notices and final row remain hit reachable at 390 with 200% text', async t => {
+  await withPage(t,async(page,url)=>{
+    for (const height of [900,480]) {
+      await page.setViewportSize({width:390,height});await page.goto(url+'/?header&zoom&dark')
+      await page.locator('tbody tr').last().waitFor();await page.evaluate(()=>{window.queryFixture.stale();window.headerFixture.state({connection:{connected:false}})})
+      await page.locator('[data-workspace-setup]').evaluate(el=>{el.scrollTop=el.scrollHeight})
+      await page.locator('.hp-list-body').evaluate(el=>{if(/auto|scroll/.test(getComputedStyle(el).overflowY))el.scrollTop=el.scrollHeight})
+      await page.locator('.hp-list-scroll').evaluate(el=>{el.scrollTop=el.scrollHeight})
+      const last=page.locator('tbody').getByRole('link').last()
+      assert.equal(await last.evaluate(el=>{const r=el.getBoundingClientRect();return document.elementFromPoint(r.x+8,r.y+r.height/2)?.closest('a')===el}),true,`last row hit at height ${height}`)
+      await last.click();assert.equal(await page.getByRole('dialog').count(),1)
+    }
+  })
+})
+
+
+test('Tab reveals target-date sort after the sticky title without moving local Y', async t => {
+  await withPage(t,async(page,url)=>{
+    for(const zoom of [false,true]) {
+      await page.setViewportSize({width:390,height:900});await page.goto(url+'/?header'+(zoom?'&zoom':''));await page.locator('tbody tr').last().waitFor()
+      await page.locator('[data-workspace-setup]').evaluate(el=>{el.scrollTop=el.scrollHeight})
+      await page.getByRole('button',{name:'按迭代排序',exact:true}).focus();await page.locator('.hp-list-scroll').evaluate(el=>{el.scrollTop=100})
+      await page.keyboard.press('Tab');await page.keyboard.press('Tab')
+      const focus=await page.getByRole('button',{name:'按目标日期排序',exact:true}).evaluate(el=>{const s=el.closest('.hp-list-scroll'),r=el.getBoundingClientRect(),b=s.getBoundingClientRect(),corner=s.querySelector('thead th').getBoundingClientRect();return {active:el===document.activeElement,visible:r.left>=corner.right-1&&r.right<=b.right+1&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button')===el,top:s.scrollTop}})
+      assert.deepEqual(focus,{active:true,visible:true,top:100})
+    }
+  })
+})

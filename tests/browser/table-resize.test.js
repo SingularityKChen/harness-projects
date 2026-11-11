@@ -213,3 +213,18 @@ test('one effective width map fills the Host and freezes siblings on first resiz
   const restored=await geometry()
   restored.columns.forEach((c,i)=>assert.ok(Math.abs(c.width-manual.columns[i].width)<=1))
 })
+
+
+test('no-op pointer preserves auto layout and active resize uses current title bounds', async t => {
+  await scene(t,async page=>{
+    const control=handle(page,'工作项'),box=await control.boundingBox()
+    await page.mouse.click(box.x+box.width/2,box.y+box.height/2)
+    await page.setViewportSize({width:1440,height:900});await page.waitForFunction(()=>document.querySelector('.hp-list-scroll').clientWidth===1392&&Number(document.querySelector('thead [role=slider]').getAttribute('aria-valuemax'))===640)
+    await page.waitForFunction(()=>Math.abs(document.querySelector('table').getBoundingClientRect().width-document.querySelector('.hp-list-scroll').clientWidth)<=1)
+    await page.setViewportSize({width:390,height:900});await page.waitForFunction(()=>Number(document.querySelector('thead [role=slider]').getAttribute('aria-valuemax'))<390)
+    await drag(page,control,-8)
+    await page.setViewportSize({width:1440,height:900});await page.waitForFunction(()=>document.querySelector('.hp-list-scroll').clientWidth===1392&&Number(document.querySelector('thead [role=slider]').getAttribute('aria-valuemax'))===640)
+    await page.mouse.move(1000,250);await page.mouse.up()
+    assert.equal(await control.getAttribute('aria-valuenow'),'640','live bounds allow the widened title maximum')
+  },{width:1200,query:'header&reference'})
+})
