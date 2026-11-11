@@ -46,6 +46,8 @@ async function capture(page, name) {
   if (!output) return
   await mkdir(output, { recursive: true })
   await page.screenshot({ path: output + '/' + name + '.png' })
+  const rendering = await page.evaluate(() => ({ path:location.pathname + location.search, viewport:{ width:innerWidth,height:innerHeight }, rootFont:getComputedStyle(document.documentElement).font, font:getComputedStyle(document.body).font, theme:document.documentElement.className, devicePixelRatio }))
+  await writeFile(output + '/' + name + '.json', JSON.stringify({ capturedAt:new Date().toISOString(), ...rendering }, null, 2))
 }
 
 test('composed Board shares local query and opens one detail through keyboard without business writes', { timeout: 60000 }, async t => {
@@ -274,5 +276,77 @@ for (const advertised of [false,true]) test('captured old Provider reply is reje
       await capture(page, 'composed-actual-late-reply-rejected-' + advertised)
       if (output) await writeFile(output + '/actual-late-reply-' + advertised + '.json', JSON.stringify({ providerReturned:returned,late,denialError:denial.value.error.code,replies,initial,after }, null, 2))
     } finally { release() }
+  })
+})
+
+
+test('zero authorized items have identical composed List and Board DOM and AX for empty and all-redacted reads', { timeout:60000 }, async t => {
+  await scenario(t, startTableGeometryServer, async (page, server) => {
+    await page.goto(server.url + '/?app&reference')
+    await page.getByRole('link', { name:'呈现真实规划数据的只读看板',exact:true }).waitFor()
+    const observed = []
+    for (const mode of ['list', 'board']) {
+      if (mode === 'board') await board(page)
+      await page.evaluate(() => window.queryFixture.empty())
+      await page.getByText('当前快照没有工作项', { exact:true }).waitFor()
+      const surface = page.locator('.hp-work-items')
+      await capture(page, 'repair-zero-' + mode + '-empty')
+      const empty = { dom:await surface.innerHTML(), ax:await surface.ariaSnapshot() }
+      await page.evaluate(() => window.queryFixture.restore())
+      await page.getByRole('link', { name:'呈现真实规划数据的只读看板',exact:true }).waitFor()
+      await page.evaluate(() => window.queryFixture.revokeFacet())
+      await page.waitForFunction(() => !document.body.innerText.includes('呈现真实规划数据的只读看板'))
+      await capture(page, 'repair-zero-' + mode + '-redacted')
+      observed.push({ mode, empty, redacted:{ dom:await surface.innerHTML(), ax:await surface.ariaSnapshot() } })
+      await page.evaluate(() => window.queryFixture.restore())
+    }
+    for (const { mode,empty,redacted } of observed.toReversed()) assert.deepEqual(redacted, empty, mode + ' authorized-zero equivalence')
+  })
+})
+
+test('Board clear preserves hidden List display columns while clearing only the shared query', { timeout:60000 }, async t => {
+  await scenario(t, startTableGeometryServer, async (page, server) => {
+    await page.goto(server.url + '/?app&reference')
+    await page.getByText('显示选项', { exact:true }).click()
+    const source = page.getByRole('checkbox', { name:'来源',exact:true })
+    await source.check()
+    await page.getByRole('combobox', { name:'排序',exact:true }).selectOption('title:desc')
+    await page.getByRole('searchbox').fill('604')
+    await board(page)
+    await capture(page, 'repair-clear-before')
+    await page.getByRole('button', { name:'清除条件',exact:true }).click()
+    assert.equal(await page.getByRole('searchbox').inputValue(), '')
+    assert.equal(await cards(page).count(), 7)
+    await items(page)
+    await capture(page, 'repair-clear-list')
+    assert.equal(await source.isChecked(), true)
+    assert.equal(await page.getByRole('columnheader', { name:/来源/ }).count(), 1)
+    assert.equal(await page.getByRole('combobox', { name:'排序',exact:true }).inputValue(), '')
+  })
+})
+
+test('Board explains within-group sorting and preserves an inherited List-only Planning sort honestly', { timeout:60000 }, async t => {
+  await scenario(t, startTableGeometryServer, async (page, server) => {
+    await page.goto(server.url + '/?app&reference')
+    await page.getByText('显示选项', { exact:true }).click()
+    const sort = page.getByRole('combobox', { name:'排序',exact:true })
+    await sort.selectOption('planningStatus:desc')
+    await board(page)
+    await page.locator('.hp-board-scroll').waitFor()
+    await capture(page, 'repair-sort-inherited')
+    assert.equal(await sort.inputValue(), 'planningStatus:desc')
+    await page.getByText('保留列表规划状态降序；规范列序固定', { exact:true }).waitFor({ state:'attached' })
+    assert.equal(await sort.evaluate(el => el.selectedOptions[0].disabled), true)
+    assert.match(await page.locator('.hp-table-controls').innerText(), /保留列表规划状态降序.*规范列序固定/)
+    assert.equal(await sort.locator('option[value="planningStatus:asc"]').count(), 0)
+    await items(page)
+    assert.equal(await sort.locator('option[value="planningStatus:asc"]').isEnabled(), true)
+    assert.equal(await page.locator('th[aria-sort="descending"]').innerText(), '规划状态')
+    await board(page)
+    await sort.selectOption('title:desc')
+    assert.match(await page.locator('.hp-table-controls').innerText(), /组内卡片排序：工作项降序/)
+    assert.deepEqual(await page.locator('.hp-board-column h3').allTextContents(), ['待办3','进行中2','已完成1','未知1'])
+    assert.deepEqual(await page.locator('.hp-board-column').first().locator('h4').allTextContents(), ['确认本次发布的具体视觉目标','呈现真实规划数据的只读看板','删除发布前旧数据修复路径'])
+    await capture(page, 'repair-sort-cards')
   })
 })

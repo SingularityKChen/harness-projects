@@ -87,7 +87,7 @@ function bodyOf({ body, planningSourceName }: WorkItemListView, query: QueryCont
   return createElement(Fragment, null,
     notConfirmed ? createElement(StaleBanner, { source: planningSourceName, at: body.lastUpdatedAt ?? null }) : null,
     body.notice === undefined ? null : createElement('p', null, body.notice),
-    body.rows.length === 0 ? createElement(EmptyState, { confirmed: !notConfirmed }) : presentation === 'board' ? filteredZero ? null : createElement(WorkItemBoard, { rows: query.result.rows, navigation }) : createElement(ItemTable, { rows: query.result.rows, navigation, query, sizes }))
+    query.result.loadedReadableCount === 0 ? createElement(EmptyState, { confirmed: !notConfirmed }) : presentation === 'board' ? filteredZero ? null : createElement(WorkItemBoard, { rows: query.result.rows, navigation }) : createElement(ItemTable, { rows: query.result.rows, navigation, query, sizes }))
 }
 
 export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnnouncement, presentationScopeKey, actions, content, presentation = 'table', heading = '工作项', label = '工作项列表' }: { presentation?: 'table' | 'board'; content?: ReactNode; heading?: string; label?: string; actions?: ReactNode; presentationScopeKey?: string | undefined; view: WorkItemListView; navigation?: ItemNavigation | undefined; headingTabIndex?: number | undefined; statusAnnouncement?: string | undefined }): ReactElement {
