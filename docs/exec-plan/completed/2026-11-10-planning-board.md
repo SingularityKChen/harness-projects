@@ -1,6 +1,6 @@
 # 真实只读 Planning Board ExecPlan
 
-> 状态：Completed（原交付批次已归档并发布 Ready）；2026-11-11 MMP 修复批次待独立复评；#599 安装人验仍为独立门
+> 状态：Completed；Batch4 修复、独立复评、公开证据及观察头远端门已完成；本轮按当前 head 执行 rebase merge，#599 安装人验独立。
 > 原页首“Active；固定v3产品实施与本地验证已完成，待独立验收及发布”已 Superseded by 本页 Progress 与 Batch 4（2026-11-11），保留首轮复评未通过事实。
 > 创建：2026-11-10
 > 范围：#605授权已加载Planning的只读Board，不关闭 #145完整能力
@@ -155,7 +155,7 @@ Batch2的反例证明规范规划authority、redacted不泄露、共享query/rou
 - [x] (2026-11-10 SGT) clean实际B父层→f23生产候选client gzip增1143 bytes、完整UI增4058，Host零增量；输入仅新增三个职责清晰模块，external/React保持原合同。正式源码/图像身份与限制见 `docs/product/planning-board-evidence/README.md`。
 
 - [x] (2026-11-11 SGT) Batch4 作者本地修复：三个新增反例先 RED 后 GREEN；受影响浏览器32、合同39、边界9、typecheck及完整3964测试通过。完整suite仍有两项既有SSR warning；来源、截图及每项根因见首轮评审的追加作者证据。
-- [ ] (2026-11-11 SGT) Batch4 独立 MMP 复评、最终整合后 current-head 远端门与全部线程回读；#599 仍独立未接受。
+- [x] (2026-11-11 SGT) Batch4 独立复评和最终组合通过，观察头5771ae92正式批准、全部检查成功、四线程解决；本轮重放只有已批准的前层文档变化，最终文档 push 继续核对当前门；#599独立。
 
 ## Surprises & Discoveries
 
@@ -168,6 +168,8 @@ Batch2的反例证明规范规划authority、redacted不泄露、共享query/rou
 MMP 首个 composed 反例证明零可读分流不只影响 Board：List 的全脱敏占位也能区分空快照。因此最小修复在既有 `bodyOf` 入口统一空态，保留安全 DTO 和 mixed 占位合同；未新增事实源。修复前观测包含真实 empty/all-redacted HTML/AX 差异、Board clear 的来源列丢失及规划状态排序选项有效。
 
 ## Decision Log
+
+Decision：根据本会话人类“继续评审流程”及原 rebase merge 收尾要求，在 #611/#615 合入后合本叶，仅关闭 #605。Rationale：当前源交付五项验收和所有原意见均已独立闭合；#145/#608/#599及R1保持独立，不新增规划关系或Status写入。Date/Author：2026-11-11 SGT / 人类直接指令，评审协调者记录。
 
 Decision：人类明确批准固定 `release-workspace-v3` 的配色、六面视觉参考与工程交接，并授权开始 #604/#605 的TDD实施。原文：“批准 v3，开始实施”。对象manifest SHA-256：`d714cea12faa96bb6411c4e19c3712914af98bad199dd3787cdb419ecbf48c29`。Rationale：这是针对具名完整版本的明确同意，取代此前仅版式认可；没有扩大到merge、Planning Status/native关系或 #599安装验收。Date/Author：2026-11-10 15:08 SGT / 人类伙伴（当前对话），由交付协调者记录。
 
@@ -199,7 +201,7 @@ Decision：MMP 修复使用已有可读计数和原 query owner；Board 新排�
 
 ## Outcomes & Retrospective
 
-已按 Decision Log 取得固定 v3 视觉同意，原交付工程批次与首次 Ready 已归档；2026-11-11 首轮 MMP 复评未通过，修复按 Batch 4 单独交接复评，#599 未接受。原“以下工程证据状态仍需实际更新”表述 Superseded by 本节（2026-11-11）。
+已按 Decision Log 取得固定 v3 视觉同意，原交付工程批次与首次 Ready 已归档；2026-11-11 首轮 MMP 复评未通过，修复按 Batch 4 单独交接复评，#599 未接受。该复评等待 Superseded by Progress 与 PR #612 评审记录最终收尾（2026-11-11）：575行最终技术修复已独立接受，77项针对验证与三项归因变异通过，整合后8项组合及类型通过。原“以下工程证据状态仍需实际更新”表述 Superseded by 本节（2026-11-11）。
 
 本叶已实施安全Board、共享标题链接、同挂载query与中性partial说明；独立代码、视觉、交互与图像身份接受均已完成；全新独立整体审查及首次发布dd67a525的当前远端门已完成；归档后的精确head仍须按Batch3回读，source证据不等于安装验收。首RED时技术实际45行、可信完整上界718；round0最终技术实测424行；round1保留全部安全与视觉范围后技术实测493行，低于800硬限额。完整 #145、#599安装验收及 #606/#607保持原范围；任何临时实现债务另记 `docs/exec-plan/tech-debt-tracker.md`，不删证据维持预算。
 
@@ -222,3 +224,5 @@ Decision：MMP 修复使用已有可读计数和原 query owner；Board 新排�
 2026-11-10 SGT：全新独立整体审查、首次dd67发布当前Fast Gate/issue/metadata/threads门通过且已Ready，归档本计划并修正文档索引；最后归档head重新跑远端门，Planning Status和native阻塞关系仍不变。
 
 2026-11-11 SGT：新增 Batch4 MMP 修复与逐项 RED/GREEN 交接，页首改为原交付 Completed 与本轮待复评；原首轮意见和 #599 安装门独立保留。
+
+2026-11-11 SGT：核销 Batch4 复评与四线程，补575行最终技术实测和实际前层合入后的纯文档重放；以当前head审批/CI及issue回读进入rebase合并，不改产品或素材。

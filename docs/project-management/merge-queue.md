@@ -816,7 +816,7 @@ gh issue reopen 4 -c "被 #108 的关闭引用自动关闭；revise 清单（R1�
 | 顺序 | PR / 关闭项 | 进入下一门的要求 |
 |---|---|---|
 | 已合入 | #611 / #614 | 2026-11-11 SGT 回读 MERGED，main提交 `aee7c704550bba35d0cad51eee37e20ca75fc983`；#614 CLOSED，文件树等于批准头7173f8bc。 |
-| 2 | #615 / #604 | 自动重放后比对完整树，保留详情/四任务及累计 A+B 验收；重新核对新头批准和门禁。 |
+| 已合入 | #615 / #604 | 2026-11-11 SGT 回读 MERGED，main提交 `430a6f9363b7937c8d8d494a78ad301893d2df34`；#604 CLOSED，文件树等于批准头fd41c5e9。 |
 | 3 | #612 / #605 | 自动重放后比对完整树，保留零可读空态、共享查询与单详情；重新核对新头批准和门禁。 |
 
 恢复引用为 `refs/backup/pr<N>-before-authorized-merge-20261111`。每层使用原生 `merge-async`、预期 head 与 `merge_method=rebase`，合入后回读 PR、issue 和真实 main。后层若自动重放则核对文件树，若内容不同回到对应验证门；不凭旧批准合并。#145/#608/#599、Planning Status及R1不由本批关闭。
