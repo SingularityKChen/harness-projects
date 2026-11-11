@@ -69,7 +69,6 @@ export function useColumnWidths(scopeKey: string | undefined, columns: readonly 
     interactionKey: JSON.stringify([scopeKey, state.epoch]),
     begin: (): (() => void) => {
       const before = requested, epoch = state.epoch
-      setState(previous => ({ ...previous, scopeKey, widths:freeze() }))
       return () => setState(previous => previous.scopeKey === scopeKey && previous.epoch === epoch ? { ...previous, widths:before } : previous)
     },
     setWidth: (column: Column, value: number): void => setState(previous => ({ ...previous, scopeKey,
@@ -87,7 +86,7 @@ type CaptureTarget = {
   focus(options?: { preventScroll: boolean }): void; classList: { add(name: string): void; remove(name: string): void }
 }
 type PointerInput = Interaction & { pointerId: number; isPrimary: boolean; button: number; clientX: number; currentTarget: CaptureTarget }
-type Drag = { id: number; x: number; width: number; target: CaptureTarget; change(width: number): void; rollback(): void }
+type Drag = { id: number; x: number; width: number; target: CaptureTarget; rollback(): void }
 
 /** 独立 slider hit area；未来排序按钮只占旁边的 label slot，不共享事件入口。 */
 export function ColumnResizeHandle({ column, bounds = column, width, onChange, onBegin }: { column: Column; bounds?: Bounds | undefined; width: number; onChange(width: number): void; onBegin(): () => void }): ReactElement {
@@ -131,13 +130,16 @@ export function ColumnResizeHandle({ column, bounds = column, width, onChange, o
       event.preventDefault()
       try { event.currentTarget.setPointerCapture(event.pointerId) } catch { return }
       event.currentTarget.focus({ preventScroll: true })
-      active.current = { id: event.pointerId, x: event.clientX, width, target: event.currentTarget, change: onChange, rollback:onBegin() }
+      active.current = { id: event.pointerId, x: event.clientX, width, target: event.currentTarget, rollback:onBegin() }
       event.currentTarget.classList.add('hp-resizing')
     },
     onPointerMove: (event: PointerInput): void => {
       event.stopPropagation()
       const drag = active.current
-      if (drag?.id === event.pointerId) drag.change(clampColumnWidth(bounds, drag.width + event.clientX - drag.x))
+      if (drag?.id === event.pointerId) {
+        const next = clampColumnWidth(bounds, drag.width + event.clientX - drag.x)
+        if (next !== width) onChange(next)
+      }
     },
     onPointerUp: (event: PointerInput): void => end(event, false),
     onPointerCancel: (event: PointerInput): void => end(event, true),

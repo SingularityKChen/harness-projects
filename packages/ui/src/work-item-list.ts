@@ -60,11 +60,27 @@ function ItemRow({ row, navigation, columns }: { row: VisibleListRow; navigation
     }, values?.[column.id] ?? '—')))
 }
 
+type HeaderControl = { closest(selector: string): HeaderControl | null; getBoundingClientRect(): { left: number; right: number }; focus(options: { preventScroll: boolean }): void }
+type HeaderSurface = HeaderControl & { scrollLeft: number; querySelector(selector: string): HeaderControl | null; querySelectorAll(selector: string): ArrayLike<HeaderControl> }
+
 /** 可聚焦的局部滚动容器，焦点轮廓使用公开 Host token，窄屏保留八列。 */
 function ItemTable({ rows, navigation, query, sizes }: { rows: readonly VisibleListRow[]; navigation: ItemNavigation | undefined; query: QueryControls; sizes: WidthControls }): ReactElement {
   const { conditions } = query.result, columns = TABLE_COLUMNS.filter(column => conditions.visibleColumns.includes(column.id))
   const sort = (column: LocalTableSort['column']): void => query.onChange({ ...conditions, sort:conditions.sort?.column !== column ? {column,direction:'asc'} : conditions.sort.direction === 'asc' ? {column,direction:'desc'} : null })
-  return createElement('div', { role: 'region', 'aria-label': '工作项表格，可横向和纵向滚动', tabIndex: 0, ref:sizes.attach, className: 'hp-list-scroll', style:Object.fromEntries(Object.entries(sizes.widths).map(([id,value])=>[`--hp-column-${id}`,`${value}px`])) as CSSProperties },
+  const revealHeader = ({ target, currentTarget }: { target: HeaderControl; currentTarget: HeaderSurface }): void => {
+    if (!target.closest('thead')) return
+    const rect = target.getBoundingClientRect(), bounds = currentTarget.getBoundingClientRect()
+    const start = target.closest('th') === currentTarget.querySelector('th') ? bounds.left : currentTarget.querySelector('th')!.getBoundingClientRect().right
+    if (rect.right > bounds.right) currentTarget.scrollLeft += rect.right - bounds.right
+    else if (rect.left < start) currentTarget.scrollLeft -= start - rect.left
+  }
+  const tabHeader = (event: { key: string; shiftKey: boolean; target: HeaderControl; currentTarget: HeaderSurface; preventDefault(): void }): void => {
+    if (event.key !== 'Tab' || !event.target.closest('thead')) return
+    const controls = Array.from(event.currentTarget.querySelectorAll('thead button, thead [tabindex="0"]'))
+    const next = controls[controls.indexOf(event.target) + (event.shiftKey ? -1 : 1)]
+    if (next) { event.preventDefault(); next.focus({ preventScroll:true }) }
+  }
+  return createElement('div', { role: 'region', 'aria-label': '工作项表格，可横向和纵向滚动', tabIndex: 0, ref:sizes.attach, onFocus:revealHeader, onKeyDownCapture:tabHeader, className: 'hp-list-scroll', style:Object.fromEntries(Object.entries(sizes.widths).map(([id,value])=>[`--hp-column-${id}`,`${value}px`])) as CSSProperties },
     createElement('table', { style: { width: `calc(${columns.map(columnWidth).join(' + ')})` } },
       createElement('colgroup', null, ...columns.map(column => createElement('col', { key: column.id, style: { width: columnWidth(column) } }))),
       createElement('caption', null, '工作项列表'),

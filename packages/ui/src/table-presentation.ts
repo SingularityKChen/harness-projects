@@ -11,7 +11,7 @@ export const TABLE_STYLES = `
 .hp-workspace:has(> .hp-project) > .hp-project { padding:0 }
 .hp-work-items { display:flex; flex-direction:column; flex:1 1 0; min-block-size:0; max-block-size:100%; container-type:inline-size }
 .hp-work-items .hp-list-context { flex:0 1 auto; min-block-size:3rem; max-block-size:50%; overflow:auto }
-.hp-work-items .hp-list-body { display:flex; flex-direction:column; flex:1 0 9.5rem; min-block-size:9.5rem }
+.hp-work-items .hp-list-body { display:flex; flex-direction:column; flex:1 0 9.5rem; min-block-size:9.5rem; overflow:auto; overscroll-behavior:contain }
 .hp-work-items .hp-list-body:has(> .hp-delivery-overview) { flex:1 1 0; overflow:auto; overscroll-behavior:contain }
 .hp-work-items .hp-list-body > :not(.hp-list-scroll) { flex:none }
 .hp-work-items .hp-list-scroll {
