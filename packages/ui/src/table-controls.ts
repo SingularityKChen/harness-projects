@@ -36,6 +36,7 @@ export function TableControls({ result, onChange, onResetWidths, readOnly, prese
     createElement('select', { 'aria-label':`${label}筛选`, value:conditions[field] === null ? 'all' : `value:${conditions[field]}`,
       onChange:(event: { target: { value: string } }) => update({ [field]:event.target.value === 'all' ? null : event.target.value.slice(6) }) },
     createElement('option', { value:'all' }, `${label} · 全部`), ...facets[field].map(value => createElement('option', { key:value,value:`value:${value}` }, `${label} · ${labelOf(value)}`))))
+  const listOnlySort = presentation === 'board' && conditions.sort?.column === 'planningStatus'
   const sortDescription = conditions.sort ? `${SORT_LABELS[conditions.sort.column]}${conditions.sort.direction === 'asc' ? '升序' : '降序'}` : '默认输入顺序'
   return createElement('div', { className:'hp-table-controls', role:'group', 'aria-label':'当前已加载可读条目的局部查询' },
     createElement('style', null, STYLES),
@@ -46,20 +47,21 @@ export function TableControls({ result, onChange, onResetWidths, readOnly, prese
       const menu = event.currentTarget, active = (globalThis as { document?: { activeElement?: unknown } }).document?.activeElement
       if (!menu.open && menu.contains(active)) menu.querySelector('summary')?.focus()
     } }, createElement('summary', null, '显示选项'),
-    createElement('label', null, '排序', createElement('select', { 'aria-label':'排序',value:conditions.sort ? `${conditions.sort.column}:${conditions.sort.direction}` : '',
+    createElement('label', null, presentation === 'board' ? '组内卡片排序' : '排序', createElement('select', { 'aria-label':'排序',value:conditions.sort ? `${conditions.sort.column}:${conditions.sort.direction}` : '',
       onChange:(event: { target: { value: string } }) => {
         const [column,direction] = event.target.value.split(':')
         update({ sort:column ? { column,direction } as LocalTableSort : null })
       } }, createElement('option', { value:'' }, '默认输入顺序'),
-    ...Object.entries(SORT_LABELS).flatMap(([column,label]) => (['asc','desc'] as const).map(direction => createElement('option', { key:`${column}:${direction}`,value:`${column}:${direction}` }, `${label}${direction === 'asc' ? '升序' : '降序'}`))))),
+    listOnlySort ? createElement('option', { value:`planningStatus:${conditions.sort!.direction}`, disabled:true }, `保留列表${sortDescription}；规范列序固定`) : null,
+    ...Object.entries(SORT_LABELS).filter(([column]) => presentation !== 'board' || column !== 'planningStatus').flatMap(([column,label]) => (['asc','desc'] as const).map(direction => createElement('option', { key:`${column}:${direction}`,value:`${column}:${direction}` }, `${label}${direction === 'asc' ? '升序' : '降序'}`))))),
       presentation === 'board' ? null : createElement('fieldset', null, createElement('legend', null, '显示列'), ...TABLE_COLUMNS.map(column => createElement('label', { key:column.id },
         createElement('input', { type:'checkbox', disabled:!column.optional, checked:conditions.visibleColumns.includes(column.id),
           onChange:(event: { target: { checked: boolean } }) => update({ visibleColumns:event.target.checked ? [...conditions.visibleColumns,column.id] : conditions.visibleColumns.filter(id => id !== column.id) }) }),
         column.label + (column.optional ? '' : '（必显）')))),
-    createElement('button', { type:'button',onClick:() => onChange(defaultLocalTableConditions()) }, presentation === 'board' ? '清除条件' : '清除条件并恢复默认显示列'),
+    createElement('button', { type:'button',onClick:() => onChange({ ...defaultLocalTableConditions(), ...(presentation === 'board' ? { visibleColumns:conditions.visibleColumns } : {}) }) }, presentation === 'board' ? '清除条件' : '清除条件并恢复默认显示列'),
     presentation === 'board' ? null : createElement('button', { type:'button', onClick:onResetWidths }, '重置列宽'),
     presentation === 'board' ? null : createElement('p', null, '拖动列边界，或聚焦边界后用方向键调整。'),
-    createElement('p', { className:'hp-query-summary' }, `当前条件：${conditions.search.trim() ? `匹配“${conditions.search}”` : '标题与编号不限'}；规划状态：${conditions.planningStatus === null ? '全部' : labelOf(conditions.planningStatus)}；迭代：${conditions.iteration === null ? '全部' : labelOf(conditions.iteration)}；排序：${sortDescription}`)),
+    createElement('p', { className:'hp-query-summary' }, `当前条件：${conditions.search.trim() ? `匹配“${conditions.search}”` : '标题与编号不限'}；规划状态：${conditions.planningStatus === null ? '全部' : labelOf(conditions.planningStatus)}；迭代：${conditions.iteration === null ? '全部' : labelOf(conditions.iteration)}；${presentation === 'board' ? '组内卡片排序' : '排序'}：${listOnlySort ? '保留列表' : ''}${sortDescription}${presentation === 'board' ? '；看板列按固定规划状态顺序' : ''}`)),
     createElement('p', { className:'hp-query-summary',role:'status','aria-live':'polite','aria-atomic':true },
       `当前已加载可读条目：显示 ${result.matchedReadableCount} 项，共 ${result.loadedReadableCount} 项。${readOnly ? ' 只读规划。' : ''}`,
       result.conditionsAdjusted ? '部分筛选条件已不可用，已清除。' : ''),
