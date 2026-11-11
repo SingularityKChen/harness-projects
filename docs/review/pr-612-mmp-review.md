@@ -33,7 +33,7 @@ Host 保持事实权威，规划与工程分离；修复不新增 Provider 写�
 
 - [x] 2026-11-11 SGT：独立分层评审、验收反例与现有事项检索。
 - [x] 2026-11-11 SGT：由评审账号一次提交 [REQUEST_CHANGES](https://github.com/SingularityKChen/harness-projects/pull/612#pullrequestreview-5851923046)。
-- [ ] 复核修复提交及该提交的实际 base、当前门禁和全线程。
+- [x] 2026-11-11 SGT：完成修复及最终整合的独立复评、正式批准、当前门与全线程回读；观察身份见本记录最终收尾。
 
 ## Surprises & Discoveries
 
@@ -80,3 +80,13 @@ GitHub 双账号、#616 原生栈及 #599 实装验收。
 ### 协调者串行整合验证
 
 2026-11-11 SGT：本叶已重放至已批准8d9175f5；13个自己的技术blob不变，共享模块bodyOf等于已复评Board、ItemTable等于已批准611（AST逐字检查），仅保留合法组合。clean1967a810执行三层8项原关键反例及typecheck通过，含新授权零态/列保留/排序和继承的详情/窄屏/调宽；本轮8图和新actual-base bundle另记录，不重复完整suite或固定源变异。最终用 `gh pr view 612 -R SingularityKChen/harness-projects --json headRefOid,baseRefOid,reviewDecision,statusCheckRollup` 与 `gh pr checks 612 -R SingularityKChen/harness-projects` 回读；原线程待正式复评，不把源码与CI转作安装/#599。
+
+### 最终独立复评与授权收尾（2026-11-11 SGT）
+
+稳定修复 `0fd415e8` 的77项相关契约/浏览器（含9项Board）、typecheck通过；最终固定源 `8b35ec45` 的三项分组变异均被指定用例归因 KILLED，基线与还原后基线 GREEN。授权零态、清除保留List列、固定分组且诚实说明组内排序、计划归档状态四项均闭合。
+
+最终整合观察头 `5771ae9241e31696cb96995ef1d1ed53b3e23498` / #615 `8d9175f5` 获评审账号正式 APPROVE，全部托管检查成功、四条作者回复与线程resolve已回读。13项本叶技术blob保持独立接受版本；共享 `bodyOf` 与已审Board一致，`ItemTable` 与已批准前层一致，8张新整合图及来源hash如实归属 `1967a810`。此前“待独立复评／远端门”结论 Superseded by 本节。
+
+人类“继续评审流程”承接原任务的修复、复评、归档、核对issue与rebase合并。#611已合入 `aee7c704`、#615已合入 `430a6f93`，#614/#604均CLOSED；本叶自动重放为 `5dd8e05e`，完整树只有五份已批准的前层收尾文档差异，产品/测试/所有图像保持原字节。技术gross575；#605五项源交付验收已逐项核销，#145/#608/#599与R1保持原范围。
+
+当前文档提交的CI、批准、全线程和双向关联仍须回读后，才以预期head及 `merge_method=rebase` 经原生端点合并。结果用 `gh pr view 612 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit` 和 #605状态回读；不预写未来结果。
