@@ -15,6 +15,8 @@
 
 [冻结清单](release-workspace-v3-manifest.json)记录35张PNG的SHA-256/字节/尺寸以及两份只读元数据的hash；清单自身SHA-256为`d714cea12faa96bb6411c4e19c3712914af98bad199dd3787cdb419ecbf48c29`。冻结时的未接受描述保留其历史身份，当前接受由ExecPlan记录；任何新的实质视觉变更必须重新具名确认，不能暗改已批准文件。
 
+实现沿用现有控件与 Host CSS 角色。选型证据见[公开组件和插件构建记录](../../development/plugin-bundle-evidence.md#同需求的备选比较)：Host primitives 根入口已在 Loader 基线；单独引入 Radix Dialog 仍需验证主题、Loader 和 React 单例。当前方案不增加组件导入或主题运行时，实际体积由实现层同条件测量。
+
 画面使用7项示例数据，源码基线为`982517c73951563797612472339970f015e7c62f`的生产UI组件+EntityStore合成场景。编号、标题、规划状态、迭代和目标日期匹配；工程提示是单独说明的示意值。**静态稿、源码合成场景、真实composed测试、安装件与人类产品接受分别记录**；当前安装Host/source/artifact身份未由这些图建立。
 
 此版本以公开Host角色为颜色依据，保留已认可的y196/58px正常List/Board几何。小号链接/状态使用清晰中性文字，焦点独立，语义色只作冗余标记；没有整页WCAG或所有Host主题通过的声明。旧v1仅保留[历史指针](../release-visual-target-v1/README.md)。
