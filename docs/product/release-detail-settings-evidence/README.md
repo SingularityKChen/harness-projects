@@ -63,3 +63,14 @@ PNG身份：
 | `after-settings-pending-light-390.png` | `b1beac7dc7b51981f5fb7c593e0fb26b23416ce78b34de567cfa8cbca928c16e` |
 | `after-settings-failed-light-390.png` | `aa59fcf670e762d6f48121af3bc1b0743ab2e36d284c73f6f6ab0ee45012c7bd` |
 | `after-settings-unknown-light-390.png` | `53c63514a8cff019c6271d3254ff3a8e9e80cdcf8c763ed4bd7d5223c7eed495` |
+
+
+## 2026-11-11 MMP 修复对照
+
+[在线连接、条目陈旧及长正文的首视口对照](mmp-stale-source-sheet.png)：同一实际WorkItemApp/client输入，1440与390；来源及条目级当前值/最后已知值与规划状态相邻，完整元数据仍在正文下方。
+
+[320×320、200%文字及超长原生值](mmp-native-metadata-sheet.png)：图中明确区分status滚动位置与raw metadata滚动位置；小视口初始仅见动作栏，不冒称首屏。头部规范“未知”不猜是否未映射，1520字符原生状态、1000字符迭代和950字符身份完整可达；禁止metadata换行的反例已检出。
+
+实际before生产身份为823ff8fa，新增测试/fixture使工作树dirty；三份生产文件精确匹配该baseline。after为clean fec64865，统一使用同fixture/主题/viewport/font和源数据。补充P3中间文案不是最终候选；历史11月10日图像与原SHA保留。局部36、消费者60、边界9与typecheck通过，源会话独立复评结论按对应源哈希复用，最终远端精确提交仍须复评。
+
+[精选图像与技术输入身份索引](mmp-review-evidence.json)记录原PNG hash、crop/scale、source身份和本轮技术文件hash。拼图仅为可查看的静态证据，不把fixture、CI或源码接受当作#599安装、人类UAT或R1放行。原首轮评审与作者逐项RED/GREEN见 `docs/review/pr-615-mmp-review.md`。

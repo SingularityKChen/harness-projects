@@ -1,0 +1,133 @@
+{
+  "date": "2026-11-11 SGT",
+  "pullRequest": 615,
+  "historicalFirstReviewHead": "22db967418d891237c7466ea91cee3efa32fbd94",
+  "localCleanRepairHead": "fec64865955482117bf432e7a855b2eb546b2cf6",
+  "baseAtLocalRepair": "7aa347b7051b3df38c8a72ac1580fc77b42de539",
+  "imageIdentityNote": "Original before/after identities retained; panel source filenames identify observations, not repository links. Subsequent restack does not relabel captures.",
+  "criticalTechnicalSha256": {
+    "packages/ui-model/src/work-item-detail-view.ts": "2a86d05e7f543a19d6861065a54fe92867aec42b77b004abc7894ef5f6d8db25",
+    "packages/ui/src/detail-presentation.ts": "a8db76de50971ac96a723f55703429719114759e693ceb7fd76307acceff401b",
+    "packages/ui/src/form-presentation.ts": "94df6d2958839a1a83dcc2efb163537ecf0c9893cc27f3314c95d9b1097a2452",
+    "packages/ui/src/markdown-presentation.ts": "f39e377edbf4cab6452a2a59afb58d869df0d0df364cce9696918842ab27ec66",
+    "packages/ui/src/work-item-detail.ts": "f8ee300c19bb4753a147607450a8910ff41d59cf99756b27eef0e89bfcba08ae",
+    "packages/ui/src/workspace-settings.ts": "11f34e2977ab0e88fb0cb4fee6b2f08d7a54202e59c13a09adabce09a2beb9c0",
+    "tests/browser/detail-expand.test.js": "247fa00f189ac1b3b2bd1ee5dbb260b34b1f6b6acf5d10abd095683acf5c3385",
+    "tests/browser/workspace-settings-presentation.test.js": "5e93c40535066107e71ac67de30de8f54be4aeb55cb0b55a619027f603fedda7",
+    "tests/contract/ui-work-item-detail-view.test.js": "cc328e928f361c9bc25c699ea43ff3644b94613f724e65fde1d9b801af9c270a",
+    "tests/contract/ui-work-item-detail.test.js": "e55ceb015c9b9fd282fc82462d40a07c796e7c17033c7bd15ad61280031444ad",
+    "tests/fixtures/workspace-forms-browser.mjs": "1a30c2eabc2ce39450a6d54fb57ff6dcf9f549809fd9acca7cfce6da8cc437d3",
+    "tests/fixtures/workspace-frame-browser.mjs": "5a8ba81c24b1baf2fb55c6cc1fdd63a9e0868b8766cfaf02ef20c00f13b621d6"
+  },
+  "sheets": {
+    "mmp-stale-source-sheet.png": {
+      "sha256": "1af9ca043173fc89ae5695b8cd3b532e2fa2c819367199aafdb771e9a3849587",
+      "panelProvenance": {
+        "sha256": "1af9ca043173fc89ae5695b8cd3b532e2fa2c819367199aafdb771e9a3849587",
+        "sources": [
+          {
+            "image": "before/detail-stale-light-1440-100.png",
+            "sha256": "5b5c2579ef4e8b4467ad495d4520a432e9537df97b4033f833f4c07ef3dce88c",
+            "original": [
+              1440,
+              900
+            ],
+            "crop": [
+              930,
+              0,
+              1440,
+              400
+            ]
+          },
+          {
+            "image": "after/detail-stale-light-1440-100.png",
+            "sha256": "a4326b185b287029deb942ce13606d8f5c0a0b94479c3efeea19e068d92977b7",
+            "original": [
+              1440,
+              900
+            ],
+            "crop": [
+              930,
+              0,
+              1440,
+              400
+            ]
+          },
+          {
+            "image": "before/detail-stale-dark-390-100.png",
+            "sha256": "f0db76b213cc2dc3bf83f69f3b3fbb96d632dc7b63f123b276cbd4c7de9a7153",
+            "original": [
+              390,
+              900
+            ],
+            "crop": [
+              0,
+              0,
+              390,
+              400
+            ]
+          },
+          {
+            "image": "after/detail-stale-dark-390-100.png",
+            "sha256": "b1e71b477619ddbfdd596a35c0bd885e989367ff5b9ee1d677e38ae9fad6879f",
+            "original": [
+              390,
+              900
+            ],
+            "crop": [
+              0,
+              0,
+              390,
+              400
+            ]
+          }
+        ]
+      }
+    },
+    "mmp-native-metadata-sheet.png": {
+      "sha256": "6b8d8b793f0809d4b0efd9a0e6721df45171d14c48b4349763d235a72f2971ee",
+      "panelProvenance": {
+        "sha256": "6b8d8b793f0809d4b0efd9a0e6721df45171d14c48b4349763d235a72f2971ee",
+        "sources": [
+          {
+            "image": "before/detail-native-light-320-200-status.png",
+            "sha256": "e0643a8f375bd977d9a00fca2de2537dce93382054d1c6a2bd687d7199b32e6b",
+            "original": [
+              320,
+              320
+            ],
+            "crop": null
+          },
+          {
+            "image": "after/detail-native-light-320-200-status.png",
+            "sha256": "734205c30ce8413ae4a58e3882b01325d7f2ceaf72518e96ab5a572c8c61b4ce",
+            "original": [
+              320,
+              320
+            ],
+            "crop": null
+          },
+          {
+            "image": "after/detail-native-light-320-200-raw-status.png",
+            "sha256": "6d09b0dede363f81081706046fd5308f64df928ff73036c03449c38b7871d8f2",
+            "original": [
+              320,
+              320
+            ],
+            "crop": null
+          },
+          {
+            "image": "after/detail-native-light-320-200-metadata.png",
+            "sha256": "ef4ebcdab98fb9b7ae73a80f212421d78c377c7d376c4ba8554e0732b01d48bb",
+            "original": [
+              320,
+              320
+            ],
+            "crop": null
+          }
+        ]
+      }
+    }
+  },
+  "limitations": "Local production-composed controlled inputs; not installed Host, real platform write/UAT or #599/R1 acceptance."
+}
