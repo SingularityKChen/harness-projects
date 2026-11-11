@@ -76,3 +76,7 @@ GitHub 双账号、#616 原生栈及 #599 实装验收。
 截图按原源码和修复源码分别记录 source head、dirty、逐文件 SHA-256、实际 theme/font/viewport/data、逐 PNG SHA-256；原始日志和带标签接触表留在本次 ignored 执行目录，协调者最终整合后选择静态证据并更新公开来源。图像不随后续 restack 重标身份。浏览器 fixture 与源码结果不构成安装 Host 或 #599 验收，旧 Ready 不构成本轮 MMP 接受。
 
 待协调者独立复核本批提交、实际 base、最终规模、current-head checks 和全部线程后，才决定是否回复或 resolve。本批没有 Provider 写入、规划 Status/native 依赖修改、push 或合并。
+
+### 协调者串行整合验证
+
+2026-11-11 SGT：本叶已重放至已批准8d9175f5；13个自己的技术blob不变，共享模块bodyOf等于已复评Board、ItemTable等于已批准611（AST逐字检查），仅保留合法组合。clean1967a810执行三层8项原关键反例及typecheck通过，含新授权零态/列保留/排序和继承的详情/窄屏/调宽；本轮8图和新actual-base bundle另记录，不重复完整suite或固定源变异。最终用 `gh pr view 612 -R SingularityKChen/harness-projects --json headRefOid,baseRefOid,reviewDecision,statusCheckRollup` 与 `gh pr checks 612 -R SingularityKChen/harness-projects` 回读；原线程待正式复评，不把源码与CI转作安装/#599。

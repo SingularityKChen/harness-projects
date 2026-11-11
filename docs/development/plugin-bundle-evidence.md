@@ -142,3 +142,7 @@ clean实际父层7722df51078d0f441fb97c8d259d2814a143cafa与clean整合候选630
 | pack tarball | 339920 | 341135 | 1215 | 4303 |
 
 client SHA-256为 `1d8f1b3488434d547e3b583fdb52b45575c47006a7d3789ba49765bc2d4caab5`，Host仍为 `55fd94df342f12a710a18069ae7ce08d5061e1fc398178269a9563a8835036fe`，pack为 `0f3e0e4f8cc90ebfd92f6d720a0441d11711120132fb4175714fe9352a0ac2ac`。input新增纯分组、共享标题链接和Board renderer三个模块；external集合未变、bundledReact=[]。没有依赖或主题/Loader配置增量。pack元数据属于本轮；上述本地构建/图像不是安装Host、人类UAT或R1放行。
+
+## 2026-11-11 MMP 修复后的看板层（#605）
+
+clean实际父层8d9175f5305b91d52cbda5201f2f4edfbea1c730与clean整合候选1967a81073f6fd59fd227e9a7effab6354c5dbf5、同Node26.13.0/pnpm10.28.2/esbuild0.28.2/原build及gzip9实测：client raw769622→776686（+7064）、gzip162014→163365（+1351），Host raw697763/gzip159862及hash不变；pack340373→341794（+1421）。仅增加原已声明的grouping/link/Board三个模块，external集合不变，bundledReact=[]。client SHA-256=`2015a06ee9a1401d56c37ed0ac880df4578bec7fceeb6e6692906bc867eac879`；pack SHA-256=`d62e4300174acfdafc08960b7b9066b8279db7fc688c3a3c2ce8536e8c431dfc`。后续纯文档保持生产字节；按本叶原报告命令及锁定clean父层复算，不推及#599/UAT/R1。
