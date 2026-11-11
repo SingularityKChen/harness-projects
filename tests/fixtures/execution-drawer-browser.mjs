@@ -24,6 +24,12 @@ export async function createExecutionFixture({ seed } = {}) {
     item.fields = { ...item.fields, nativeValues: { status: { kind:'single_select', optionId:'native-review', name:'Native review' } } }
     item.content.workItem.sourceNumber = { sourceName:'GitHub', scopeIdentity:{namespace:'repository',id:'board'}, scopeName:'example/board',number:605 }
   }
+  if (seed === 'timeline') for (let i=0;i<24;i++) {
+    const title=['Timeline both','Timeline far','Timeline zero','Timeline early','Timeline invalid'][i] ?? 'Timeline long '+i+' '+ 'LongUnbrokenTitle'.repeat(12)
+    const item=p.planning.addItem(p.planning.state.projects[0].ref,'issue',title,'Synthetic source schedule')
+    const target=['2026-11-11','9999-12-31',undefined,'0001-01-01','invalid'][i] ?? (i>4?'2026-11-12':undefined)
+    item.fields={...item.fields,nativeValues:{...(target?{target:{kind:'date',date:target}}:{}),...(i===0||i===2?{iteration:{kind:'iteration',iterationId:'timeline-'+i,title:'Timeline sprint',startDate:'2026-11-09',durationDays:i===0?7:0}}:{})}}
+  }
   if (seed === 'query') for (let i=0;i<120;i++) p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Query '+String(i).padStart(3,'0'), 'Safe query body'); if (seed === 'overview') p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Overview gap', 'Gap fixture'); if (seed === 'read') p.planning.addItem(p.planning.state.projects[0].ref, 'draft', '规划项 draft-1', 'draft-1 正文占位'); return p }
   const mounted = [], byDomain = {}, providers = make(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: { projectNodeId: { kind: 'string', required: false, pattern: '.+', maxLength: 100 } }, create: async ({ binding }) => { const provider = seed === 'overview' ? providers[binding.domain] : make({ [binding.domain]: { bindingId: binding.id } })[binding.domain]; byDomain[binding.domain] = provider; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
   const workspaceId = '00000000-0000-4000-8000-000000000282'
@@ -36,7 +42,7 @@ export async function createExecutionFixture({ seed } = {}) {
   }
   let itemId, runId
   if (seed !== 'empty') {
-    const planningFieldMapping = seed === 'board' ? { status:{ projectFieldId:'status',options:{todo:'todo',in_progress:'in_progress',done:'done'} } } : undefined
+    const planningFieldMapping = seed === 'timeline' ? {targetDateFieldId:'target',iterationFieldId:'iteration'} : seed === 'board' ? { status:{ projectFieldId:'status',options:{todo:'todo',in_progress:'in_progress',done:'done'} } } : undefined
     const core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture', ...(planningFieldMapping ? { planningFieldMapping } : {}) }, providers, storage })
     if (planningFieldMapping) await storage.putWorkspacePlanningMapping({ workspaceId,bindingId:providers.planning.bindingId,projectExternalId:providers.planning.state.projects[0].ref.externalId,origin:'user',mapping:planningFieldMapping })
     await storage.putBindingConfiguration({ ref: { workspaceId, bindingId: providers.planning.bindingId, domain: 'planning' }, configuration: { projectNodeId: providers.planning.state.projects[0].ref.externalId } })
@@ -56,7 +62,7 @@ export async function createExecutionFixture({ seed } = {}) {
       // 合成夹具预先确认关系；Provider 观察默认只生成 candidate，不能借 CI 成功冒充关系确认。
       for (const item of work) await core.commands.refreshDeliveryFacts({ workItemId: item.entityId, repositoryId: 'repo-alpha' })
       for (const relation of await storage.listRelations(workspaceId)) await core.commands.confirmRelation(relation)
-    } else if (seed !== 'query' && seed !== 'board') { await core.commands.startWork({ task: 'Synthetic explicit task', workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
+    } else if (seed !== 'query' && seed !== 'board' && seed !== 'timeline') { await core.commands.startWork({ task: 'Synthetic explicit task', workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
     const id = contextIdFor(workspaceId, itemId, 'repo-alpha'); runId = runIdFor(id)
     await storage.putExecutionRun({ ...(await storage.getExecutionRun(runId)), fallback: true }) }
   }
@@ -133,12 +139,16 @@ export async function startExecutionServer(options) {
   const vendor = async (id, file) => readFile(path.join(path.dirname(uiRequire.resolve(id)), 'umd', file), 'utf8')
   const [react, reactDOM, jsxText] = await Promise.all([vendor('react', 'react.development.js'), vendor('react-dom/client', 'react-dom.development.js'), jsxRuntimeScript()])
   const scripts = { '/jsx-runtime.js': jsxText, '/react.js': react, '/react-dom.js': reactDOM, '/bundle.js': bundle.outputFiles[0].text }
+  const {palette}=JSON.parse(await readFile(path.join(repoRoot,'docs/product/release-visual-target-v3/host-role-palette-v3.json'),'utf8'))
+  const roles={'bg-base':'bg','bg-layer-1':'surface','label-primary':'text','label-secondary':'muted','border-l2':'line','border-l4':'cardBorder','interactive-bg-hover-solid':'soft','bg-multi-select':'select','button-primary-fill':'primary','label-primary-foreground':'onPrimary','link':'accent'}
+  const roleStyles=Object.entries(palette).map(([mode,values])=>`:root[data-roles][data-theme=${mode}] {font-size:14px;${Object.entries(roles).map(([role,key])=>`--dsw-alias-${role}:${values[key]}`).join(';')}}`).join('')
   const page = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>执行抽屉</title><style>
 /* 仅本地 fixture 的 Host token 与文字大小输入，不代表安装 Host。 */
 :root { --dsw-focus-ring-color:#4176e6; --dsw-focus-ring-width:2px; --dsw-alias-state-business-primary:#4176e6; color-scheme:light; color:#20242c; background:#fff; font:15px/1.5 system-ui,sans-serif }
 :root[data-theme=dark] { --dsw-focus-ring-color:#7aaaff; --dsw-alias-state-business-primary:#7aaaff; color-scheme:dark; color:#e3e5eb; background:#191b20 }
 html,body { margin:0; padding:0; min-width:0; height:100%; overflow:hidden } body { display:grid; grid-template-rows:minmax(0,1fr) } #app { display:flex; flex-direction:column; min-height:0; min-width:0; max-width:100%; overflow:hidden }
-</style><div id="app"></div><script src="/react.js"></script><script src="/jsx-runtime.js"></script><script src="/react-dom.js"></script><script>const params=new URLSearchParams(location.search);document.documentElement.dataset.theme=params.get('theme')==='dark'?'dark':'light';if(params.get('font')==='200')document.documentElement.style.fontSize='30px';window.require=id=>{if(id==='react')return React;if(id==='react/jsx-runtime')return window.ReactJSX;throw Error(id)};var module={exports:{}};var exports=module.exports</script><script src="/bundle.js"></script><script>module.exports.mount(ReactDOM.createRoot(document.getElementById("app"))).then(value=>window.fixture=value)</script></html>`
+${roleStyles}
+</style><div id="app"></div><script src="/react.js"></script><script src="/jsx-runtime.js"></script><script src="/react-dom.js"></script><script>const params=new URLSearchParams(location.search);document.documentElement.dataset.theme=params.get('theme')==='dark'?'dark':'light';if(params.has('roles'))document.documentElement.dataset.roles='';if(params.get('font')==='200')document.documentElement.style.fontSize=params.has('roles')?'28px':'30px';window.require=id=>{if(id==='react')return React;if(id==='react/jsx-runtime')return window.ReactJSX;throw Error(id)};var module={exports:{}};var exports=module.exports</script><script src="/bundle.js"></script><script>module.exports.mount(ReactDOM.createRoot(document.getElementById("app"))).then(value=>window.fixture=value)</script></html>`
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://fixture.invalid'), route = url.pathname, scenario = url.searchParams.get('scenario')

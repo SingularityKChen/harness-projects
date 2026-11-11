@@ -49,12 +49,12 @@ export function WorkItemProjectPage({ listView, deriveOverviewTargets, detailVie
     href: navigation.href, currentItemId: navigation.currentItemId,
     open: (itemId) => { opener.current = activeElement(); openerContainer.current = list.current; navigation.open(itemId) },
   }
-  const modes = createElement('div', { className: 'hp-list-actions hp-view-modes' }, ...(['items', 'board', 'delivery'] as const).map(value => createElement('button', { key: value, type: 'button', 'aria-pressed': mode === value, onClick: () => setMode(value) }, value === 'items' ? '工作项' : value === 'board' ? '看板' : '工程交付')))
+  const modes = createElement('div', { className: 'hp-list-actions hp-view-modes' }, ...(['items', 'board', 'timeline', 'delivery'] as const).map(value => createElement('button', { key: value, type: 'button', 'aria-pressed': mode === value, onClick: () => setMode(value) }, value === 'items' ? '工作项' : value === 'board' ? '看板' : value === 'timeline' ? '时间线' : '工程交付')))
   const actions = createElement('div', { className: 'hp-list-actions' }, modes,
     refresh === undefined ? null : createElement('button', { className: 'hp-action', type: 'button', disabled: refresh.disabled, 'aria-busy': refresh.pending, onClick: refresh.run }, refresh.pending ? '正在刷新规划' : '刷新规划'),
     onBindRepository === undefined ? null : createElement('button', { className: 'hp-action', type: 'button', 'data-workspace-settings': true, onClick: onBindRepository }, '连接设置'))
   return createElement('div', { ref: layoutRoot, className: 'hp-workspace hp-project' },
-    createElement('div', { ref: list, className: 'hp-project-list' }, createElement(WorkItemListPage, { view: listView, navigation: routed, headingTabIndex: -1, statusAnnouncement, presentationScopeKey, actions, presentation:mode === 'board' ? 'board' : 'table',
+    createElement('div', { ref: list, className: 'hp-project-list' }, createElement(WorkItemListPage, { view: listView, navigation: routed, headingTabIndex: -1, statusAnnouncement, presentationScopeKey, actions, presentation:mode === 'timeline' ? 'timeline' : mode === 'board' ? 'board' : 'table',
       ...(mode === 'delivery' && deriveOverviewTargets !== undefined ? { heading: '工程交付', label: '工程交付总览', content: createElement(DeliveryOverview, { key: presentationScopeKey, targets: deriveOverviewTargets(), reader: deliveryReader, connected: connected === true, navigation: routed, onBindRepository }) } : {}),
     })),
     // 列表的页面级说明也交给抽屉：模态打开时列表 inert，说明只在列表里就既看不到也不被宣告（#379）

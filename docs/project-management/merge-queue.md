@@ -113,8 +113,8 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 |---|---|---|
 | 1（已合并） | #618 / #617 | 2026-11-11 rebase `dc69d1c2d74d`；#617 CLOSED；合入 tree 等于批准 tree |
 | 2（已合并） | #619 / #597 | 2026-11-11 rebase `2e45676ef8c2`；#597 CLOSED；合入 tree 等于批准 tree |
-| 3 | #620 / #606 | 对真实前两项 main 接合；原生 async 明确 rebase |
-| 4 | #621 / #607 | 父层合入后 retarget/restack；重新核对产品树与当前批准/CI |
+| 3（已合并） | #620 / #606 | 2026-11-11 rebase `9ab95c499947`；#606 CLOSED；合入 tree 等于批准 tree |
+| 4 | #621 / #607 | 已接合前三项真实 main，完整产品树等于已测组合；本层最终 head 独立复评/当前 CI/批准后 expected-head async rebase，结果以远端回读为准 |
 
 初始发布 head 保存在 `refs/backup/pr<N>-before-mmp-review-20261111`。文档索引冲突保留双方；产品变更退回独立评审。每条最终 push 用精确 lease，重新回读 head/base、全部 checks/threads、双向 issue 及批准；合入后核对 MERGED 与 main tree。#338/#147/#599、Planning Status 和 R1 继续单独验收。
 

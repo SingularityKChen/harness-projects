@@ -23,3 +23,4 @@ export * from './issue-closing-links-view.ts'
 export * from './delivery-overview.ts'
 
 export { derivePlanningBoard, type PlanningBoardGroup } from './planning-board.ts'
+export { derivePlanningTimeline } from './planning-timeline.ts'
