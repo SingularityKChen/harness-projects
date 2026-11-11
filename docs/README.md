@@ -33,6 +33,7 @@
 |---|---|
 | [2026-11-11-code-scanning-hardening](exec-plan/completed/2026-11-11-code-scanning-hardening.md) | 正则回溯修复、HTML 安全断言与告警用途核查（#617） |
 | [2026-11-11-private-host-data](exec-plan/completed/2026-11-11-private-host-data.md) | 私有 Host 数据目录、文件与有界诊断描述符（#597） |
+| [2026-11-11-planning-timeline](exec-plan/completed/2026-11-11-planning-timeline.md) | 只读七日来源日期轴与统一详情 |
 | [2026-11-11-source-schedule](exec-plan/completed/2026-11-11-source-schedule.md) | 来源日期原子持久化、纯公历窗口与统一安全详情（#606） |
 | [2026-11-10-planning-board](exec-plan/completed/2026-11-10-planning-board.md) | 真实授权数据的只读规划 Board（#605） |
 | [2026-11-10-release-workspace-polish](exec-plan/completed/2026-11-10-release-workspace-polish.md) | 唯一详情、四任务设置与完整共享工作台累计验收（#604） |

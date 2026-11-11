@@ -15,6 +15,7 @@ import { ColumnResizeHandle, useColumnWidths } from './column-resize.ts'
 import { TableControls } from './table-controls.ts'
 import { TitleLink } from './item-link.ts'
 import { WorkItemBoard } from './work-item-board.ts'
+import { WorkItemTimeline, type TimelineWindow } from './work-item-timeline.ts'
 import { TABLE_COLUMNS } from './table-columns.ts'
 
 const columnWidth = (column: typeof TABLE_COLUMNS[number]): string => column.id === 'title' ? 'var(--hp-title-width)' : `var(--hp-column-${column.id},${column.defaultWidth}px)`
@@ -22,6 +23,7 @@ type Column = typeof TABLE_COLUMNS[number]
 const sortable = (id: string): id is LocalTableSort['column'] => ['title','planningStatus','iteration','targetDate'].includes(id)
 type WidthControls = ReturnType<typeof useColumnWidths>
 type QueryControls = { result: LocalTableResult; onChange(conditions: LocalTableConditions): void }
+type LocalPresentationState = { scopeKey:string | undefined; conditions:LocalTableConditions; adjusted:boolean; timelineAnchor:string | undefined; timelineOrigin:string | undefined }
 
 /** 列表页消费的导航契约（ui 无状态回调）：`href` 供真实 href 与修饰键点击，`open` 只在普通左键点击时调用。 */
 export type ItemNavigation = { readonly currentItemId?: string | undefined; readonly href: (itemId: string) => string; readonly open: (itemId: string) => void }
@@ -79,7 +81,7 @@ function ItemTable({ rows, navigation, query, sizes }: { rows: readonly VisibleL
       createElement('tbody', null, ...rows.map((row) => createElement(ItemRow, { key: row.key, row, navigation, columns })))))
 }
 
-function bodyOf({ body, planningSourceName }: WorkItemListView, query: QueryControls, sizes: WidthControls, presentation: 'table' | 'board', navigation?: ItemNavigation): ReactElement {
+function bodyOf({ body, planningSourceName }: WorkItemListView, query: QueryControls, sizes: WidthControls, presentation: 'table' | 'board' | 'timeline', timelineWindow:TimelineWindow, navigation?: ItemNavigation, scopeKey?:string): ReactElement {
   if (body.kind === 'loading') return createElement(LoadingState)
   if (body.kind === 'unavailable') return createElement(UnavailableState, { message: body.message, remaining: body.remaining })
   const filteredZero = query.result.hasQuery && query.result.loadedReadableCount > 0 && query.result.matchedReadableCount === 0
@@ -87,18 +89,22 @@ function bodyOf({ body, planningSourceName }: WorkItemListView, query: QueryCont
   return createElement(Fragment, null,
     notConfirmed ? createElement(StaleBanner, { source: planningSourceName, at: body.lastUpdatedAt ?? null }) : null,
     body.notice === undefined ? null : createElement('p', null, body.notice),
-    query.result.loadedReadableCount === 0 ? createElement(EmptyState, { confirmed: !notConfirmed }) : presentation === 'board' ? filteredZero ? null : createElement(WorkItemBoard, { rows: query.result.rows, navigation }) : createElement(ItemTable, { rows: query.result.rows, navigation, query, sizes }))
+    query.result.loadedReadableCount === 0 ? createElement(EmptyState, { confirmed: !notConfirmed }) : presentation !== 'table' ? filteredZero ? null : presentation === 'board' ? createElement(WorkItemBoard, { rows: query.result.rows, navigation }) : createElement(WorkItemTimeline, {key:scopeKey, rows:query.result.rows,navigation,...timelineWindow}) : createElement(ItemTable, { rows: query.result.rows, navigation, query, sizes }))
 }
 
-export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnnouncement, presentationScopeKey, actions, content, presentation = 'table', heading = '工作项', label = '工作项列表' }: { presentation?: 'table' | 'board'; content?: ReactNode; heading?: string; label?: string; actions?: ReactNode; presentationScopeKey?: string | undefined; view: WorkItemListView; navigation?: ItemNavigation | undefined; headingTabIndex?: number | undefined; statusAnnouncement?: string | undefined }): ReactElement {
+export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnnouncement, presentationScopeKey, actions, content, presentation = 'table', heading = '工作项', label = '工作项列表' }: { presentation?: 'table' | 'board' | 'timeline'; content?: ReactNode; heading?: string; label?: string; actions?: ReactNode; presentationScopeKey?: string | undefined; view: WorkItemListView; navigation?: ItemNavigation | undefined; headingTabIndex?: number | undefined; statusAnnouncement?: string | undefined }): ReactElement {
   const { body } = view
-  const [local, setLocal] = useState({ scopeKey:presentationScopeKey, conditions:defaultLocalTableConditions(), adjusted:false })
+  const [local, setLocal] = useState<LocalPresentationState>({ scopeKey:presentationScopeKey, conditions:defaultLocalTableConditions(), adjusted:false, timelineAnchor:undefined, timelineOrigin:undefined })
   const sameScope = local.scopeKey === presentationScopeKey
+  // 定位来源不再可读时，同次 render 丢弃派生窗口；普通切换视图和筛选不改变该窗口。
+  const anchorAllowed = sameScope && body.kind === 'content' && body.rows.some(row => row.kind === 'item' && (local.timelineOrigin === undefined || row.key === local.timelineOrigin))
+  const timelineAnchor = anchorAllowed ? local.timelineAnchor : undefined, timelineOrigin = anchorAllowed ? local.timelineOrigin : undefined
   const computed = queryVisibleWorkItems(body.kind === 'content' ? body.rows : [], sameScope ? local.conditions : defaultLocalTableConditions())
-  if (!sameScope) setLocal({ scopeKey:presentationScopeKey, conditions:defaultLocalTableConditions(), adjusted:false })
-  else if (computed.conditionsAdjusted) setLocal({ scopeKey:presentationScopeKey, conditions:computed.conditions, adjusted:true })
+  if (!sameScope) setLocal({ scopeKey:presentationScopeKey, conditions:defaultLocalTableConditions(), adjusted:false, timelineAnchor:undefined, timelineOrigin:undefined })
+  else if (computed.conditionsAdjusted || timelineAnchor !== local.timelineAnchor) setLocal({ scopeKey:presentationScopeKey, conditions:computed.conditions, adjusted:computed.conditionsAdjusted || local.adjusted, timelineAnchor, timelineOrigin })
   const query: QueryControls = { result:{...computed,conditionsAdjusted:computed.conditionsAdjusted || (sameScope && local.adjusted)},
-    onChange:conditions => setLocal({scopeKey:presentationScopeKey,conditions,adjusted:false}) }
+    onChange:conditions => setLocal({scopeKey:presentationScopeKey,conditions,adjusted:false,timelineAnchor,timelineOrigin}) }
+  const timelineWindow:TimelineWindow = { anchorDate:timelineAnchor, onAnchorChange:(date,origin) => setLocal({ ...local, timelineAnchor:date, timelineOrigin:date === undefined ? undefined : origin ?? timelineOrigin }) }
   const sizes = useColumnWidths(presentationScopeKey,TABLE_COLUMNS.filter(column => computed.conditions.visibleColumns.includes(column.id)))
   const showingList = content === undefined
   const busy = body.kind === 'loading' || (body.kind === 'content' && body.refreshing)
@@ -110,6 +116,6 @@ export function WorkItemListPage({ view, navigation, headingTabIndex, statusAnno
     showingList && view.degraded ? createElement('p', null, '读取能力降级：显示的是保守的最后已知值。') : null,
     !showingList ? null : createElement('div', { className:body.kind === 'content' && !body.stale && !body.refreshing ? 'hp-list-confirmed' : undefined, role: 'status', 'aria-live': statusAnnouncement === undefined ? 'polite' : 'off', 'aria-atomic': 'true' }, view.statusText),
     !showingList || statusAnnouncement === undefined ? null : createElement('span', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true', style: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' } }, statusAnnouncement),
-    showingList && body.kind === 'content' ? createElement(TableControls, { ...query, onResetWidths:sizes.reset, readOnly:view.readOnly || presentation === 'board', presentation }) : null),
-    createElement('div', { 'aria-busy': showingList ? busy : undefined, className: 'hp-list-body' }, showingList ? bodyOf(view, query, sizes, presentation, navigation) : content))
+    showingList && body.kind === 'content' ? createElement(TableControls, { ...query, onResetWidths:sizes.reset, readOnly:view.readOnly || presentation !== 'table', presentation }) : null),
+    createElement('div', { 'aria-busy': showingList ? busy : undefined, className: 'hp-list-body' }, showingList ? bodyOf(view, query, sizes, presentation, timelineWindow,navigation,presentationScopeKey) : content))
 }
