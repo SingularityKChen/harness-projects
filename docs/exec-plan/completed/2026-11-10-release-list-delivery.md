@@ -131,15 +131,15 @@ Batch1证明实际缺口与准入，Batch2证明List/Delivery与共享角色的�
 ## Progress
 
 - [x] (2026-11-11 SGT) Batch4 本地修复：真实组合三项 RED 后修复；相关 browser33、contract55、boundaries9 和 typecheck 通过；尾部 redacted 行额外命中与可读尾项点击复核通过。公开精选来源与有标签拼图已补齐。
-- [ ] (2026-11-11 SGT) 协调者对稳定源码独立复评、串行整合、最新远端门与包体发布；不触及 #599 或 R1 接受。
+- [x] (2026-11-11 SGT) 稳定源码独立复评、公开证据、实际父层包体及观察头7722df51的正式批准/托管门/四线程全部完成；本次文档收尾的最终 push 继续按 Batch3 当前门回读，#599/R1独立。
 
 - [x] (2026-11-10 SGT) 首次Hosted Verify旧option标签契约修复：当前84254b44 source单文件RED（1/2）→GREEN（2/2）；完整pnpm test为contract1550、integration2185、e2e226全通过，各层0 fail/skip/cancelled/todo。只改契约及本计划，新增test提交，不amend已推HEAD。
 
 - [x] (2026-11-10 SGT) v3已批准；完整806停止门确认，保持完整父scope并选定A→B承载。
 - [x] (2026-11-10 SGT) 独立架构/产品拆分审阅后固定唯一文件集、接口与预测，见Global Constraints。
 - [x] (2026-11-10 SGT) Batch1：协调者已实读#614/#611双向关联与准确base；B准备留在依赖叶。真实Header入口selection RED为`aria-current: null != true`；修正规范key用例排序后，以临时移除key归约行取得独立RED，恢复后GREEN。
-- [ ] (2026-11-10 SGT) Batch2：完整A实现、本地86项contract与61项browser已GREEN（零skip/pageerror），typecheck及boundaries已通过；最终截图按冻结源码重启carrier生成并交接，独立设计/代码接受仍由协调者完成。
-- [ ] (2026-11-10 SGT) 独立整分支代码/spec/质量在`ac4980b`获PASS；完整视觉评审Request changes两项P2（F1填值后目的、F2窄summary密度及Host slot）；本轮F1/F2真实RED→GREEN，23/23相关browser及13/13 renderer contract通过、typecheck通过；新head scoped复核仍待协调者。
+- [x] (2026-11-10 SGT) Batch2：完整A实现、本地86项contract与61项browser已GREEN（零skip/pageerror），typecheck及boundaries已通过；最终截图按冻结源码重启carrier生成并交接，独立设计/代码接受仍由协调者完成。该历史等待 Superseded by 本节 Batch3 与 Batch4 完成记录（2026-11-11）。
+- [x] (2026-11-10 SGT) 独立整分支代码/spec/质量在`ac4980b`获PASS；完整视觉评审Request changes两项P2（F1填值后目的、F2窄summary密度及Host slot）；本轮F1/F2真实RED→GREEN，23/23相关browser及13/13 renderer contract通过、typecheck通过；新head scoped复核仍待协调者。该历史等待 Superseded by 本节 Batch3 与 Batch4 完成记录（2026-11-11）。
 - [x] (2026-11-10 SGT) Batch3本地验收：独立代码/视觉ACCEPT，15源/fixture及88PNG复核，clean实际base/head同工具链bundle通过；6张静态证据自包含公开包已准备。
 - [x] (2026-11-10 SGT) Batch3发布门：当前代码/证据head cde887f7的required Fast Gate及相关CI通过，双向614/611与全量线程回读通过，已Ready不merge；归档后最终head仍须重复当前门。
 
@@ -172,6 +172,8 @@ Delivery现有flex链只在List scroll存在时生效，曾令长交付内容在
 原owner在停止点报告真实selection RED（aria-current null而非true）、真实settings smoke1/1及相关合同43/43、typecheck、boundaries9/9；这些是准备载体证据，不是A已实施。共享executionStyles被Delivery调用且拼接FORM_STYLES，故execution-presentation整文件由A拥有；其原12预测从B移A，不额外加12。B改FORM后再回归A Delivery。
 
 ## Decision Log
+
+Decision：根据本评审会话人类“继续评审流程”及原任务的 rebase merge 收尾要求，按 #611 → #615 → #612 逐层合并。Rationale：三个原 P1 已由原实现会话修复、独立复评并正式批准；本层只关闭 #614。每层以当前 head/base/CI/线程/issue 回读为门，不改 Planning Status/native 关系或 #599/R1。Date/Author：2026-11-11 SGT / 人类伙伴直接指令，评审协调者记录。
 
 Decision（2026-11-11 / 本批作者）：以现有 CSS 正文 scroll owner 和原列宽 owner 修复，表头仅消费 DOM 控件顺序。Rationale：不用裁安全事实、第二状态或跨 owner 修改换取可达性；实际 base 采用 #610 合入后的 main，首轮 review SHA 保留为历史。公开旧1200/1024图保留原拍摄 SHA，新离线/长文图绑定修复源，禁止重标为后续 head。
 
@@ -211,7 +213,7 @@ Batch1及A工程实现已完成本地闭环，首轮`ac4980b`候选树实际技�
 
 最终交付：本叶技术gross714，公开6张同场景静态对照、生产源/fixture/88PNG指纹及真实包体差值；Superseded by 本节 Batch4 MMP 修复结果（2026-11-11，历史测试与图像仍归原 head）；独立代码、视觉与两次test-only复核均ACCEPT。完整本地3961测试通过；初次托管旧option文字契约失败已按持久可视字段目的订正，当前cde887f7相关CI及required Fast Gate通过后Ready。源视觉/安装验收仍分开；#604后层与#605均未由本叶冒充完成。无新增技术债。
 
-Batch4 MMP 修复结果：本地三个独有行为与原相关消费者通过；公开宽度、长文、异常与200%画面可由 `docs/product/release-list-delivery-evidence/README.md` 检查。源码捕获时 before/after 均 clean，身份与各PNG指纹随公开精选manifest保留。首轮绿色检查未覆盖组合反例，不能继续当作本批完整验收；独立复评和最终远端门仍待协调者。
+Batch4 MMP 修复结果：本地三个独有行为与原相关消费者通过；公开宽度、长文、异常与200%画面可由 `docs/product/release-list-delivery-evidence/README.md` 检查。源码捕获时 before/after 均 clean，身份与各PNG指纹随公开精选manifest保留。首轮绿色检查未覆盖组合反例，不能继续当作本批完整验收；独立复评和最终远端门仍待协调者。Superseded by 本计划 Progress 与 PR #611 评审记录最终收尾（2026-11-11）：修复源7722df51已独立批准，四项变异归因检出、全部检查成功、四线程解决；最终技术780行，文档以每次实际base重算。
 
 ## Bottom Change Note
 
@@ -222,3 +224,5 @@ Batch4 MMP 修复结果：本地三个独有行为与原相关消费者通过；
 2026-11-10 SGT：协调者核验最终4c5eff2a的代码、视觉及test-only独立接受；记录真实clean包体与6张静态公开证据，保持当前远端Ready门未完成的诚实状态。
 
 2026-11-10 SGT：当前发布门通过并Ready后归档，更新索引/Project路径；保留归档amend后精确head再次回读的规则，不merge或改变Planning状态。
+
+2026-11-11 SGT：核销 Batch4 复评与归档等待，补当前780行实测及直接续令；最终发布与合并结果使用当前远端门，不改变冻结来源。
