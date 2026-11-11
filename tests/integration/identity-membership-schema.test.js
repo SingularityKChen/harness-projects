@@ -246,6 +246,8 @@ test('#27 验收 5：显式 schema 审查——没有列能存 token / key / pas
       'workspace_projection.content_number': '内容', 'workspace_projection.redaction_reason': '枚举：脱敏原因',
       'workspace_projection.field_status_name': '#133 原生选项名（展示）', 'workspace_projection.field_iteration_title': '#133 迭代 title（展示）',
       'workspace_projection.field_target_date': '#133 date-only 目标日期（展示）',
+      'workspace_projection.field_iteration_start_date': '#606 date-only 迭代起始日（来源事实）',
+      'workspace_projection.field_iteration_duration_days': '#606 迭代天数（来源事实）',
       'workspace_projection.revision': '修订号',
     }
     // 只审计 **002 建出的表**：本用例的验收对象是 #27 的迁移，后续迁移（003 起）由各自的用例审计。

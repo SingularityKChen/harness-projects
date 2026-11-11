@@ -16,7 +16,7 @@ export { CLOSED_MESSAGE, CONNECTOR_ACCOUNT_SCHEMA_MESSAGE, LEGACY_COMMITTED_VERS
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。绑定列名与拆表前一致（工作区作用域三列来自挂载、实现键来自连接锚点），`rowToBinding` 因此不用改。
 const BINDING_COLUMNS = 'b.id AS id, wb.workspace_id AS workspace_id, wb.domain AS domain, b.implementation_key AS implementation_key, wb.enabled AS enabled, wb.is_default AS is_default'
 const IDENTITY_COLUMNS = 'id, entity_id, binding_id, external_kind, external_id, role'
-const PROJECTION_COLUMNS = 'workspace_id, entity_id, planning_status, content_kind, content_title, content_body, content_number, source_number_json, redaction_reason, field_status_name, field_iteration_title, field_target_date, revision'
+const PROJECTION_COLUMNS = 'workspace_id, entity_id, planning_status, content_kind, content_title, content_body, content_number, source_number_json, redaction_reason, field_status_name, field_iteration_title, field_iteration_start_date, field_iteration_duration_days, field_target_date, revision'
 /** 读侧逐列 `AS`：大写声明的合法库（闸门按 SQLite 语义大小写不敏感）读回的行键仍是小写，三列事实不因拼写丢失。 */
 const PROJECTION_SELECT = PROJECTION_COLUMNS.split(', ').map((column) => `${column} AS ${column}`).join(', ')
 const REPOSITORY_COLUMNS = 'id, workspace_id, external_identity_id'
@@ -165,8 +165,8 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
   protected upsertProjection(workspaceId: WorkspaceId, projection: WorkspaceProjection): void {
     const [kind, title, body, number, sourceNumber, reason] = contentColumns(projection.content)
     const fields = projection.planningFields
-    this.db.prepare(`INSERT INTO workspace_projection (${PROJECTION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (workspace_id, entity_id) DO UPDATE SET planning_status = excluded.planning_status, content_kind = excluded.content_kind, content_title = excluded.content_title, content_body = excluded.content_body, content_number = excluded.content_number, source_number_json = excluded.source_number_json, redaction_reason = excluded.redaction_reason, field_status_name = excluded.field_status_name, field_iteration_title = excluded.field_iteration_title, field_target_date = excluded.field_target_date, revision = excluded.revision`)
-      .run(workspaceId, projection.entityId, projection.planningStatus, kind, title, body, number, sourceNumber, reason, fields?.statusName ?? null, fields?.iterationTitle ?? null, fields?.targetDate ?? null, projection.revision)
+    this.db.prepare(`INSERT INTO workspace_projection (${PROJECTION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (workspace_id, entity_id) DO UPDATE SET planning_status = excluded.planning_status, content_kind = excluded.content_kind, content_title = excluded.content_title, content_body = excluded.content_body, content_number = excluded.content_number, source_number_json = excluded.source_number_json, redaction_reason = excluded.redaction_reason, field_status_name = excluded.field_status_name, field_iteration_title = excluded.field_iteration_title, field_iteration_start_date = excluded.field_iteration_start_date, field_iteration_duration_days = excluded.field_iteration_duration_days, field_target_date = excluded.field_target_date, revision = excluded.revision`)
+      .run(workspaceId, projection.entityId, projection.planningStatus, kind, title, body, number, sourceNumber, reason, fields?.statusName ?? null, fields?.iterationTitle ?? null, fields?.iterationStartDate ?? null, fields?.iterationDurationDays ?? null, fields?.targetDate ?? null, projection.revision)
   }
   getPlanningProjection(workspaceId: WorkspaceId, entityId: EntityId): Promise<WorkspaceProjection | undefined> {
     return this.read(() => optional(this.db.prepare(`SELECT ${PROJECTION_SELECT} FROM workspace_projection WHERE workspace_id = ? AND entity_id = ?`).get(workspaceId, entityId), rowToProjection))

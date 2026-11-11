@@ -67,7 +67,7 @@ const NATIVE = (option, date) => ({
   iteration: { kind: 'iteration', iterationId: 'iter-1', title: '迭代一', startDate: '2026-09-01', durationDays: 14 },
   target: { kind: 'date', date },
 })
-const REFRESHED = { title: '刷新后的标题', planningFields: { statusName: 'todo', iterationTitle: '迭代一', targetDate: '2026-10-20' } }
+const REFRESHED = { title: '刷新后的标题', planningFields: { statusName: 'todo', iterationTitle: '迭代一', iterationStartDate: '2026-09-01', iterationDurationDays: 14, targetDate: '2026-10-20' } }
 /** 同步要提交的 provider 侧变化；refresh 改标题与目标日期，并把 provider 状态改成与命令的 Done 不同的值，#273 无论怎么定都不会被掩盖。 */
 const CHANGES = {
   redact: redactedAs(RedactionReason.PolicyRestricted),
@@ -262,7 +262,7 @@ for (const [label, makeStorage] of STORAGES) {
     assert.deepEqual(syncFirst.initial, initial, '前置条件：两个参照从同一个确定的工作区出发')
     assert.notEqual(initial.target.content.title, REFRESHED.title, '前置条件：refresh 必须改变标题')
     assert.equal(initial.target.planningStatus, NormalizedStatus.InProgress, '前置条件：初始状态与 refresh 的 todo、命令的 done 都不同')
-    assert.deepEqual(initial.target.planningFields, { statusName: 'in_progress', iterationTitle: '迭代一', targetDate: '2026-10-01' }, '前置条件：目标行带展示字段')
+    assert.deepEqual(initial.target.planningFields, { statusName: 'in_progress', iterationTitle: '迭代一', iterationStartDate: '2026-09-01', iterationDurationDays: 14, targetDate: '2026-10-01' }, '前置条件：目标行带展示字段')
     for (const [order, { outcome }] of [['command→sync', commandFirst], ['sync→command', syncFirst]]) {
       const { decision, sync, target, others, revision } = outcome
       assert.deepEqual([decision.wrote, decision.status, decision.code, sync.ok], [true, NormalizedStatus.Done, undefined, true], `${order}：命令写入、同步提交`)

@@ -125,10 +125,10 @@ function rowToContent(row: Row): PlanningContent {
   return { contentKind: 'work_item', ...sourceNumber, title: text(row, 'content_title'), body: text(row, 'content_body') }
 }
 
-const FIELD_COLUMNS = { statusName: 'field_status_name', iterationTitle: 'field_iteration_title', targetDate: 'field_target_date' } as const
-/** 展示事实三列全空 = 没有可展示的字段值，读回时省略 `planningFields`；只有非空列成为键，与内存替身逐字一致。 */
+const FIELD_COLUMNS = { statusName: 'field_status_name', iterationTitle: 'field_iteration_title', iterationStartDate: 'field_iteration_start_date', iterationDurationDays: 'field_iteration_duration_days', targetDate: 'field_target_date' } as const
+/** 展示事实全空 = 没有可展示的字段值，读回时省略 `planningFields`；只有非空列成为键，与内存替身逐字一致。 */
 function rowToPlanningFields(row: Row): PlanningFieldsSnapshot | undefined {
-  const present = Object.entries(FIELD_COLUMNS).flatMap(([key, column]) => { const value = optionalText(row, column); return value === undefined ? [] : [[key, value]] })
+  const present = Object.entries(FIELD_COLUMNS).flatMap(([key, column]) => { const value = row[column]; return value == null ? [] : [[key, value]] })
   return present.length === 0 ? undefined : Object.fromEntries(present) as PlanningFieldsSnapshot
 }
 

@@ -302,10 +302,18 @@ test('narrow 200% semantic metadata keeps every value readable without escaping 
     const report = await page.locator('.hp-detail-body').evaluate(body => {
       const css = getComputedStyle(body)
       return { available: body.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight),
-        values: [...body.querySelectorAll('dl dd')].map(el => ({ width: el.clientWidth, scroll: el.scrollWidth, height: el.clientHeight, line: parseFloat(getComputedStyle(el).lineHeight), top: el.getBoundingClientRect().top, labelTop: el.previousElementSibling.getBoundingClientRect().top })) }
+        values: [...body.querySelectorAll('dl dd')].map(el => ({
+          label: el.previousElementSibling?.matches('dt') ? el.previousElementSibling.textContent.trim() : '', text: el.textContent.trim(),
+          width: el.clientWidth, scroll: el.scrollWidth, height: el.clientHeight, line: parseFloat(getComputedStyle(el).lineHeight),
+          top: el.getBoundingClientRect().top, labelTop: el.previousElementSibling.getBoundingClientRect().top,
+        })) }
     })
-    assert.equal(report.values.length, 7)
+    for (const label of ['完整规划状态：', '迭代：', '目标日期：', '所属迭代窗口（不是任务工期）：', '来源身份：', '规划来源最后确认：', '读取状态：', '工作区最后接收确认帧：']) {
+      assert.equal(report.values.filter(value => value.label === label).length, 1, `required semantic field: ${label}`)
+    }
+    assert.equal(report.values.find(value => value.label === '所属迭代窗口（不是任务工期）：').text, '来源未提供可用排期')
     for (const value of report.values) {
+      assert.ok(value.label && value.text, JSON.stringify({ scene, value }))
       if (scene.font === 14) assert.ok(Math.abs(value.top - value.labelTop) < 1, 'normal 390px keeps readable metadata columns')
       assert.ok(value.width >= Math.min(160, report.available) - 1, JSON.stringify({ scene, report }))
       assert.ok(value.scroll <= value.width + 1 && value.height <= 12 * value.line, JSON.stringify({ scene, value }))

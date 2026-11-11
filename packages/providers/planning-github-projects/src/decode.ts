@@ -8,7 +8,7 @@ import {
   type ExternalObjectRef, type ProviderIteration, type ProviderPlanningContent, type ProviderPlanningFieldDefinition,
   type ProviderPlanningItem, type ProviderProject,
 } from '@harness-projects/capabilities'
-import { sourceNumberSnapshot } from '@harness-projects/domain'
+import { calendarDateToDay, sourceNumberSnapshot } from '@harness-projects/domain'
 import type { NativePlanningFieldValue } from '@harness-projects/domain'
 
 export type Obj = Readonly<Record<string, unknown>>
@@ -27,13 +27,9 @@ export const isRecord = (value: unknown): value is Obj => typeof value === 'obje
 const obj = (value: unknown): Obj => (isRecord(value) ? value : fail())
 const str = (value: unknown): string => (typeof value === 'string' ? value : fail())
 const id = (value: unknown): string => (str(value) === '' ? fail() : str(value))
-const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/
-/** 只接受真实存在的日历日（`2026-02-30` 失败），不做时区换算。 */
+/** 与 domain 共用 0001–9999 公历日规则，保留原字符串，不借 Instant 校验。 */
 function dateOnly(value: unknown): string {
-  const match = DATE_ONLY.exec(str(value)) ?? fail()
-  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])]
-  const date = new Date(Date.UTC(year, month - 1, day))
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? match[0] : fail()
+  return calendarDateToDay(value) === undefined ? fail() : str(value)
 }
 const days = (value: unknown): number => (Number.isInteger(value) && Number(value) >= 0 ? Number(value) : fail())
 /** 一个 Project 至多 50 个字段（含系统字段），按 100 取的一页必然是全部：`hasNextPage` 不为 false 即前提被打破，整次失败。 */

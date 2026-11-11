@@ -4,7 +4,7 @@
  * 持有 loading 布尔或 last-good 缓存。纯函数：不读时钟、不改入参、不返回原 `WorkItemRow`（它带着 redacted 字段）。
  */
 import { CapabilityKey } from '@harness-projects/client/keys'
-import { AccessLevel, ContentKind, DerivedFlag, NormalizedStatus } from '@harness-projects/domain/values'
+import { AccessLevel, ContentKind, DerivedFlag, NormalizedStatus, calendarDateToDay, calendarIterationWindow, type CalendarIterationWindow } from '@harness-projects/domain/values'
 import { accessIndex } from './capability-access.ts'
 import { formatSourceNumber } from './source-number.ts'
 import { deriveWorkItemList } from './derive.ts'
@@ -49,7 +49,26 @@ export type VisibleListRow =
       readonly authority: string; readonly stale: boolean
       /** 迭代 title 与 date-only 目标日期原样显示，缺值统一占位，不做时区换算。 */
       readonly iteration: string; readonly targetDate: string
+      readonly schedule: SourceSchedule
     }
+/** 安全的来源排期两槽：所属迭代窗口不代表任务工期，缺失与无效不产生几何。 */
+export type SourceSchedule = {
+  readonly target: { readonly kind: 'missing' | 'invalid' } | { readonly kind: 'date'; readonly date: string; readonly day: number }
+  readonly iteration: { readonly kind: 'missing' | 'invalid' }
+    | ({ readonly kind: 'zero'; readonly title: string } & Extract<CalendarIterationWindow, { durationDays: 0 }>)
+    | ({ readonly kind: 'window'; readonly title: string; readonly endDate: string } & CalendarIterationWindow)
+}
+
+function sourceSchedule(fields: WorkItemRow['planningFields']): SourceSchedule {
+  const day = calendarDateToDay(fields?.targetDate)
+  const target: SourceSchedule['target'] = fields?.targetDate === undefined ? { kind: 'missing' }
+    : day === undefined ? { kind: 'invalid' } : { kind: 'date', date: fields.targetDate, day }
+  const window = calendarIterationWindow(fields?.iterationStartDate, fields?.iterationDurationDays)
+  if (window === undefined) return { target, iteration: { kind: fields?.iterationStartDate === undefined && fields?.iterationDurationDays === undefined ? 'missing' : 'invalid' } }
+  const title = fields?.iterationTitle || '迭代名称未提供'
+  return { target, iteration: window.endDate === undefined ? { kind: 'zero', title, ...window } : { kind: 'window', title, ...window } }
+}
+
 export type WorkItemListView = {
   readonly workspaceName: string
   readonly mappingSourceText?: string
@@ -116,6 +135,7 @@ function rowView(row: WorkItemRow, nameOf: (bindingId: string) => string | undef
     source: (primary && nameOf(primary.bindingId)) ?? '来源名称未提供',
     authority: pick(AUTHORITY, row.source.authority) ?? '来源权威未知',
     iteration: row.planningFields?.iterationTitle || '—', targetDate: row.planningFields?.targetDate || '—',
+    schedule: sourceSchedule(row.planningFields),
     stale,
   }
 }

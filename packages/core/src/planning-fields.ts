@@ -26,7 +26,7 @@ export function planningFieldsOf(
   const date = valueOf(mapping?.targetDateFieldId)
   const fields: PlanningFieldsSnapshot = {
     ...(option?.name ? { statusName: option.name } : {}),
-    ...(iteration?.kind === 'iteration' ? { iterationTitle: iteration.title } : {}),
+    ...(iteration?.kind === 'iteration' ? { iterationTitle: iteration.title, iterationStartDate: iteration.startDate, iterationDurationDays: iteration.durationDays } : {}),
     ...(date?.kind === 'date' ? { targetDate: date.date } : {}),
   }
   const mapped = option !== undefined && Object.hasOwn(options, option.optionId) ? options[option.optionId] : undefined

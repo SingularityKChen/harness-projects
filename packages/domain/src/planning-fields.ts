@@ -29,6 +29,8 @@ export interface WorkspacePlanningFieldMapping {
 export interface PlanningFieldsSnapshot {
   readonly statusName?: string
   readonly iterationTitle?: string
+  readonly iterationStartDate?: string
+  readonly iterationDurationDays?: number
   readonly targetDate?: string
 }
 

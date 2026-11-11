@@ -78,7 +78,7 @@ test('可见内容正控：选中行显示标题、正文、状态、来源名�
   assert.deepEqual(shown, {
     executionTarget: { workspaceId: 'ws-1', workItemId: 'ent-aa', repositoryIds: [] },
     kind: 'content', title: 'VISIBLE-TITLE', body: 'VISIBLE-BODY', planningStatus: '待办', planningStatusKey: 'todo', source: '来源一', authority: '提供方权威',
-    identity: { kind: 'PR', externalId: 'ext-1' }, derived: '派生提示：CI 失败、已合并', iteration: '—', targetDate: '—', stale: false, refreshing: false, lastUpdatedAt: T,
+    identity: { kind: 'PR', externalId: 'ext-1' }, derived: '派生提示：CI 失败、已合并', iteration: '—', targetDate: '—', schedule: { target: { kind: 'missing' }, iteration: { kind: 'missing' } }, stale: false, refreshing: false, lastUpdatedAt: T,
   }, '白名单字段面精确相等：多出 locator 或内部键即失败')
 })
 
@@ -115,6 +115,7 @@ test('detail-planning-fields-match-safe-row：详情三字段逐字等于列表�
     executionTarget: { workspaceId: 'ws-1', workItemId: 'ent-aa', repositoryIds: [] },
     kind: 'content', title: '标题-ent-aa', body: '正文-ent-aa', planningStatus: 'Native Stage（未映射）', planningStatusKey: 'unknown', source: '来源一', authority: '提供方权威',
     identity: { kind: 'Issue', externalId: 'ext-ent-aa' }, iteration: 'Iteration A', targetDate: '2026-01-01',
+    schedule: { target: { kind: 'date', date: '2026-01-01', day: 739616 }, iteration: { kind: 'missing' } },
     stale: false, refreshing: false, lastUpdatedAt: T,
   }, '完整白名单字段面：两个新字段恒有且与规划状态同源')
 })
@@ -238,4 +239,21 @@ test('撕裂读复验：列表行可见但详情 getter 返回遮蔽条目时，
 test('契约：接线缺陷响亮失败——可见行存在但详情 getter 取不到目标时抛 TypeError，不回填旧 view', () => {
   const { input } = make('received', { refreshing: false, entities: [VISIBLE], hideGet: true })
   assert.throws(() => deriveWorkItemDetailView(input, TARGET), TypeError)
+})
+
+test('来源排期两槽可共存，同一安全行复制；零天、非法、缺失与二次遮蔽均不伪造任务工期', () => {
+  const fields = { targetDate: '2024-03-01', iterationTitle: 'Sprint', iterationStartDate: '2024-02-28', iterationDurationDays: 3 }
+  const scheduleOf = planningFields => body('received', { refreshing: false, entities: [wire('ent-aa', { planningFields })] }).schedule
+  const expected = { target: { kind: 'date', date: '2024-03-01', day: 738945 }, iteration: { kind: 'window', title: 'Sprint', startDate: '2024-02-28', startDay: 738943, durationDays: 3, endDate: '2024-03-01', endDayExclusive: 738946 } }
+  assert.deepEqual(scheduleOf(fields), expected)
+  const { input } = make('received', { refreshing: false, entities: [wire('ent-aa', { planningFields: fields })] })
+  assert.deepEqual(deriveWorkItemListView(input).body.rows[0].schedule, expected)
+  assert.deepEqual(scheduleOf({ ...fields, iterationDurationDays: 0 }).iteration, { kind: 'zero', title: 'Sprint', startDate: '2024-02-28', startDay: 738943, durationDays: 0, endDayExclusive: 738943 })
+  assert.deepEqual(scheduleOf({ ...fields, targetDate: '2024-02-30', iterationDurationDays: -1 }), { target: { kind: 'invalid' }, iteration: { kind: 'invalid' } })
+  assert.deepEqual(scheduleOf({ iterationTitle: 'Sprint' }), { target: { kind: 'missing' }, iteration: { kind: 'missing' } })
+  const visible = wire('ent-aa', { planningFields: fields })
+  assert.deepEqual(body('received', { refreshing: false, entities: [visible], tear: redacted('ent-aa') }), { kind: 'redacted' })
+  input.read.capabilities = [{ key: READ, access: 'unavailable' }]
+  assert.equal(deriveWorkItemDetailView(input, TARGET).body.kind, 'unavailable')
+  assert.doesNotMatch(json(deriveWorkItemDetailView(input, TARGET)), /2024|Sprint/)
 })

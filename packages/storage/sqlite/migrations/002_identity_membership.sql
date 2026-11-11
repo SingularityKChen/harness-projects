@@ -134,6 +134,8 @@ CREATE TABLE workspace_projection (
   -- #133 列表展示的字段事实（映射的状态字段上的原生选项名、迭代 title、date-only 目标日期）；可空 = 没有该值。规范状态只在 planning_status。
   field_status_name TEXT,
   field_iteration_title TEXT,
+  field_iteration_start_date TEXT,
+  field_iteration_duration_days INTEGER,
   field_target_date TEXT,
   revision INTEGER NOT NULL,
   -- 不变量 6 / Gate E1 行为 2 的 storage 侧强制点：同一工作区里同一实体只有一行投影。

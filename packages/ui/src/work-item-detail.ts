@@ -45,6 +45,9 @@ function contentPanel(body: Extract<WorkItemDetailView['body'], { kind: 'content
     createElement(SafeMarkdown, { body: body.body, markdownSource: body.markdownSource }),
     createElement('dl', { className: 'hp-detail-metadata' },
       field('完整规划状态：', body.planningStatus), field('迭代：', body.iteration), field('目标日期：', body.targetDate),
+      field('所属迭代窗口（不是任务工期）：', body.schedule.iteration.kind === 'window' ? `${body.schedule.iteration.startDate} 至 ${body.schedule.iteration.endDate}`
+        : body.schedule.iteration.kind === 'zero' ? `${body.schedule.iteration.startDate}：零天，无可画区间` : body.schedule.iteration.kind === 'invalid' ? '迭代窗口无效' : '来源未提供可用排期'),
+      ...(body.schedule.target.kind === 'invalid' ? [field('来源目标日：', '目标日期无效')] : []),
       field('来源身份：', createElement('span', null, createElement(SourceBadge, { name: body.source, authority: body.authority }),
         body.identity === undefined ? '（来源身份尚未提供）' : `（${body.identity.kind} ${body.identity.externalId}）`)),
       field('规划来源最后确认：', body.reconciledAt === undefined ? '未知' : createElement('time', { dateTime: body.reconciledAt }, body.reconciledAt)),

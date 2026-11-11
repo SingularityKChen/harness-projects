@@ -12,7 +12,7 @@ const require = createRequire(new URL('../../packages/ui/package.json', import.m
 const { createElement } = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
 const render = (body, markdownSource) => renderToStaticMarkup(createElement(WorkItemDetailDrawer, {
-  view: { body: { kind: 'content', title: 'Title', body, markdownSource, planningStatus: '状态', iteration: '—', targetDate: '—', source: 'Source', authority: 'provider', stale: false, refreshing: false } }, onClose() {},
+  view: { body: { kind: 'content', title: 'Title', body, markdownSource, planningStatus: '状态', iteration: '—', targetDate: '—', schedule: { target: { kind: 'missing' }, iteration: { kind: 'missing' } }, source: 'Source', authority: 'provider', stale: false, refreshing: false } }, onClose() {},
 }))
 const hrefs = html => [...html.matchAll(/href="([^"]*)"/g)].map(match => match[1])
 const github = { namespace: 'github.com/graphql/Repository', repository: 'sample/alpha' }

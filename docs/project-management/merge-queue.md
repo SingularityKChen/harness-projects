@@ -112,7 +112,7 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 | 位置 | PR / issue | 接合与门 |
 |---|---|---|
 | 1（已合并） | #618 / #617 | 2026-11-11 rebase `dc69d1c2d74d`；#617 CLOSED；合入 tree 等于批准 tree |
-| 2 | #619 / #597 | 对真实前项 main 接合，权限/WAL 与 generation4 组合证据保留 |
+| 2（已合并） | #619 / #597 | 2026-11-11 rebase `2e45676ef8c2`；#597 CLOSED；合入 tree 等于批准 tree |
 | 3 | #620 / #606 | 对真实前两项 main 接合；原生 async 明确 rebase |
 | 4 | #621 / #607 | 父层合入后 retarget/restack；重新核对产品树与当前批准/CI |
 
