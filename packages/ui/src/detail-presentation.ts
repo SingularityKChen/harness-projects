@@ -17,6 +17,8 @@ export const DETAIL_STYLES = `
 .hp-detail .hp-detail-number { order:0; flex:1 1 12rem; min-width:min(100%,12rem); align-self:center; margin:0; color:var(--hp-secondary); font-size:.857143rem; line-height:1.5 }
 .hp-detail .hp-detail-title { order:2; flex:1 0 100%; min-width:0; margin:0; max-height:30dvh; overflow:auto; font-size:1.57143rem; line-height:1.36364; outline-offset:-3px }
 .hp-detail .hp-detail-status { order:3; flex:1 0 100%; margin:0; color:var(--hp-secondary); font-size:.857143rem; line-height:1.5; font-weight:600 }
+.hp-detail .hp-detail-evidence { order:4; flex:1 0 100%; min-width:0; margin:0; display:flex; flex-wrap:wrap; gap:.25rem .5rem; color:var(--hp-secondary); font-size:.857143rem; line-height:1.5 }
+.hp-detail .hp-detail-source { min-width:0; max-inline-size:min(100%,20ch); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 .hp-detail .hp-detail-mode { position:absolute; inline-size:1px; block-size:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap }
 .hp-detail .hp-detail-actions { order:1; flex:0 1 auto; min-width:0; display:flex; flex-wrap:wrap; gap:var(--hp-space-2) }
 .hp-detail > .hp-detail-body { flex:1; min-height:calc(max(3em,44px) + 3.428572rem); overflow:auto; padding:1.714286rem; font-size:1rem; line-height:1.57143; overscroll-behavior:contain }

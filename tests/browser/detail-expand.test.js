@@ -304,11 +304,64 @@ test('narrow 200% semantic metadata keeps every value readable without escaping 
       return { available: body.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight),
         values: [...body.querySelectorAll('dl dd')].map(el => ({ width: el.clientWidth, scroll: el.scrollWidth, height: el.clientHeight, line: parseFloat(getComputedStyle(el).lineHeight), top: el.getBoundingClientRect().top, labelTop: el.previousElementSibling.getBoundingClientRect().top })) }
     })
-    assert.equal(report.values.length, 6)
+    assert.equal(report.values.length, 7)
     for (const value of report.values) {
       if (scene.font === 14) assert.ok(Math.abs(value.top - value.labelTop) < 1, 'normal 390px keeps readable metadata columns')
       assert.ok(value.width >= Math.min(160, report.available) - 1, JSON.stringify({ scene, report }))
       assert.ok(value.scroll <= value.width + 1 && value.height <= 12 * value.line, JSON.stringify({ scene, value }))
     }
   })
+})
+
+
+// A connected transport does not confirm a cached item's own content.
+test('connected stale item qualifies the promoted status before a long body', async t => {
+  const server = await startWorkspaceFrameServer(); t.after(() => server.close())
+  const browser = await chromium.launch(); t.after(() => browser.close())
+  const page = await browser.newPage()
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(server.url + '/?scenario=detail-stale&detail=1&roles=reference')
+    const dialog = page.getByRole('dialog'); await dialog.waitFor()
+    assert.equal(await dialog.locator('[role="status"]').first().textContent(), '')
+    const header = dialog.locator('.hp-detail-header')
+    assert.match(await header.textContent(), /来源一.*最后已知/s)
+    const evidence = header.locator('.hp-detail-evidence')
+    const rect = await evidence.boundingBox()
+    assert.ok(rect.y >= 0 && rect.y + rect.height <= 900)
+    assert.ok((await dialog.locator('.hp-detail-content').textContent()).length > 10000)
+    assert.match(await dialog.locator('.hp-detail-metadata').textContent(), /来源身份.*ext-ent-aa.*最后已知/s)
+  }
+})
+
+// Real native values must remain readable, without letting their length dominate the header.
+test('unmapped native status has a bounded honest header and reachable complete raw metadata', async t => {
+  const server = await startWorkspaceFrameServer(); t.after(() => server.close())
+  const browser = await chromium.launch(); t.after(() => browser.close())
+  const page = await browser.newPage({ viewport: { width: 320, height: 320 } })
+  for (const theme of ['light', 'dark']) {
+    await page.goto(server.url + '/?scenario=detail-native&detail=1&roles=reference&font=200&theme=' + theme)
+    const dialog = page.getByRole('dialog'); await dialog.waitFor()
+    const status = dialog.locator('.hp-detail-status')
+    assert.equal(await status.textContent(), '规划状态：未知')
+    assert.ok(await status.evaluate(el => el.clientHeight <= 2 * parseFloat(getComputedStyle(el).lineHeight) + 1))
+    const raw = dialog.locator('.hp-detail-metadata dd').filter({ hasText: 'NativeUnmappedStatus' })
+    assert.equal(await raw.textContent(), 'NativeUnmappedStatus'.repeat(80) + '（未映射）')
+    await raw.scrollIntoViewIfNeeded()
+    for (const token of ['NativeUnmappedStatus', 'RawIterationMetadata', 'RawExternalIdentity']) {
+      const value = dialog.locator('.hp-detail-metadata dd').filter({ hasText: token })
+      assert.equal(await value.evaluate(el => el.scrollWidth <= el.clientWidth + 1), true, token)
+      await value.scrollIntoViewIfNeeded()
+      assert.equal(await value.evaluate(el => { const r=el.getBoundingClientRect(), d=el.closest('dialog').getBoundingClientRect(); return r.bottom>d.top && r.top<d.bottom }), true)
+    }
+    const body = dialog.locator('.hp-detail-body')
+    await body.scrollIntoViewIfNeeded()
+    assert.equal(await body.evaluate(el => { const r=el.getBoundingClientRect(); return r.height <= innerHeight && r.top >= 0 && r.bottom <= innerHeight + 1 }), true)
+    assert.equal(await dialog.count(), 1)
+    await toggle(page, false).click(); await settle(page)
+    assert.equal(await raw.textContent(), 'NativeUnmappedStatus'.repeat(80) + '（未映射）')
+  }
+  await page.goto(server.url + '/?scenario=detail-native&detail=1&roles=reference&font=200&mutant=metadata-nowrap')
+  await page.getByRole('dialog').waitFor(); await settle(page)
+  assert.equal(await page.locator('.hp-detail-metadata dd').filter({ hasText: 'RawIterationMetadata' }).evaluate(el => el.scrollWidth > el.clientWidth + 1), true, 'negative control must kill the prior nowrap mutant')
 })

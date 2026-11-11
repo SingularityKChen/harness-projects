@@ -77,7 +77,7 @@ test('可见内容正控：选中行显示标题、正文、状态、来源名�
   })
   assert.deepEqual(shown, {
     executionTarget: { workspaceId: 'ws-1', workItemId: 'ent-aa', repositoryIds: [] },
-    kind: 'content', title: 'VISIBLE-TITLE', body: 'VISIBLE-BODY', planningStatus: '待办', source: '来源一', authority: '提供方权威',
+    kind: 'content', title: 'VISIBLE-TITLE', body: 'VISIBLE-BODY', planningStatus: '待办', planningStatusKey: 'todo', source: '来源一', authority: '提供方权威',
     identity: { kind: 'PR', externalId: 'ext-1' }, derived: '派生提示：CI 失败、已合并', iteration: '—', targetDate: '—', stale: false, refreshing: false, lastUpdatedAt: T,
   }, '白名单字段面精确相等：多出 locator 或内部键即失败')
 })
@@ -90,7 +90,7 @@ test('detail-planning-fields-match-safe-row：详情三字段逐字等于列表�
     const row = deriveWorkItemListView(input).body.rows.find((candidate) => candidate.key === itemId)
     const { body: shown } = deriveWorkItemDetailView(input, { projectId: 'ws-1', itemId })
     assert.deepEqual(
-      [shown.iteration, shown.targetDate, shown.planningStatus], [row.iteration, row.targetDate, row.planningStatus],
+      [shown.iteration, shown.targetDate, shown.planningStatus, shown.planningStatusKey], [row.iteration, row.targetDate, row.planningStatus, row.planningStatusKey],
       `${itemId}：详情三字段必须逐字等于带 navigation 的列表安全行`,
     )
     for (const field of ['iteration', 'targetDate']) assert.equal(typeof shown[field], 'string', `${itemId}: ${field} 是恒有 string`)
@@ -113,7 +113,7 @@ test('detail-planning-fields-match-safe-row：详情三字段逐字等于列表�
   const { input } = make('received', { refreshing: false, entities })
   assert.deepEqual(deriveWorkItemDetailView(input, TARGET).body, {
     executionTarget: { workspaceId: 'ws-1', workItemId: 'ent-aa', repositoryIds: [] },
-    kind: 'content', title: '标题-ent-aa', body: '正文-ent-aa', planningStatus: 'Native Stage（未映射）', source: '来源一', authority: '提供方权威',
+    kind: 'content', title: '标题-ent-aa', body: '正文-ent-aa', planningStatus: 'Native Stage（未映射）', planningStatusKey: 'unknown', source: '来源一', authority: '提供方权威',
     identity: { kind: 'Issue', externalId: 'ext-ent-aa' }, iteration: 'Iteration A', targetDate: '2026-01-01',
     stale: false, refreshing: false, lastUpdatedAt: T,
   }, '完整白名单字段面：两个新字段恒有且与规划状态同源')
@@ -156,7 +156,7 @@ test('detail-planning-fields-come-from-safe-row-not-raw-detail：详情二次 ge
   const tear = wire('ent-aa', { planningStatus: 'unknown', planningFields: raw })
   const view = show('received', { refreshing: false, entities, tear })
   const shown = view.body
-  assert.deepEqual([shown.kind, shown.iteration, shown.targetDate, shown.planningStatus], ['content', 'SAFE-ITERATION', '2026-01-01', '进行中'],
+  assert.deepEqual([shown.kind, shown.iteration, shown.targetDate, shown.planningStatus, shown.planningStatusKey], ['content', 'SAFE-ITERATION', '2026-01-01', '进行中', 'in_progress'],
     '来源必须是同一次列表安全行复制：从 raw 详情回填或重算会在此处输出 RAW-CANARY / 2000-01-02 / RAW-STATUS（未映射）')
   for (const value of Object.values(raw)) {
     assert.ok(!json(view).includes(value), `${value} 是 raw 详情独有值，不得出现在详情输出的任何字段`)
