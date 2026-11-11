@@ -129,5 +129,27 @@
       }
     }
   },
-  "limitations": "Local production-composed controlled inputs; not installed Host, real platform write/UAT or #599/R1 acceptance."
+  "limitations": "Local production-composed controlled inputs; not installed Host, real platform write/UAT or #599/R1 acceptance.",
+  "serialIntegration": {
+    "sourceHead": "630d24d6a84d44417cf70ea102fb2b0a6adc3e79",
+    "actualParent": "7722df51078d0f441fb97c8d259d2814a143cafa",
+    "ownProductionTestBlobsEqualToIndependentReviewedDaf7": true,
+    "inherited611Sha256": {
+      "packages/ui/src/table-presentation.ts": "d36b6697068ab5504e5ccb21ad8410bdc42cbc590d1307bd700ac80ff506e80e",
+      "packages/ui/src/work-item-list.ts": "2d206e04b75ab6f85e8b18d165b392ec1d77a20f8ffb4599b8a2de7f38d23bad"
+    },
+    "samePNGAfterFinalParent": {
+      "detail-stale-light-1440-100.png": true,
+      "detail-stale-dark-390-100.png": true,
+      "detail-native-light-320-200.png": true,
+      "detail-native-light-320-200-status.png": true,
+      "detail-native-light-320-200-metadata.png": true,
+      "detail-native-light-320-200-raw-status.png": true,
+      "detail-native-dark-320-200.png": true,
+      "detail-native-dark-320-200-status.png": true,
+      "detail-native-dark-320-200-metadata.png": true,
+      "detail-native-dark-320-200-raw-status.png": true
+    },
+    "narrowCombinedValidation": "28 detail/Delivery/safe-view cases and typecheck PASS; original local36/60 preserved as historical receipts"
+  }
 }

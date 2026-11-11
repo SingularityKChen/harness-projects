@@ -74,3 +74,5 @@ PNG身份：
 实际before生产身份为823ff8fa，新增测试/fixture使工作树dirty；三份生产文件精确匹配该baseline。after为clean fec64865，统一使用同fixture/主题/viewport/font和源数据。补充P3中间文案不是最终候选；历史11月10日图像与原SHA保留。局部36、消费者60、边界9与typecheck通过，源会话独立复评结论按对应源哈希复用，最终远端精确提交仍须复评。
 
 [精选图像与技术输入身份索引](mmp-review-evidence.json)记录原PNG hash、crop/scale、source身份和本轮技术文件hash。拼图仅为可查看的静态证据，不把fixture、CI或源码接受当作#599安装、人类UAT或R1放行。原首轮评审与作者逐项RED/GREEN见 `docs/review/pr-615-mmp-review.md`。
+
+串行整合到已批准父层7722df51后，clean630d24d6重新执行28项详情/Delivery/安全投影组合及typecheck，并重拍10张相同输入图；每张PNG与fec64865后图逐字hash相等。精选拼图继续保留原捕获身份，当前整合记录在同一索引，不把历史图改标为新head。

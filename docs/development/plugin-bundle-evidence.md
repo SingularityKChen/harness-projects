@@ -124,3 +124,7 @@ input与external图无新增/移除，React及jsx-runtime沿既有external，bun
 | pack tarball | 339557 | 339920 | 363 | 3088 |
 
 候选client SHA-256为 `19cff38a4c8644102894c6e5b21e6f658163ea9412fe15dd0e30a75b8d2b1d18`，Host为 `55fd94df342f12a710a18069ae7ce08d5061e1fc398178269a9563a8835036fe`，pack为 `7b45c8f7c7c3f650031683986f6db7fe91356e5a71b6df5ee5ca8daabf8148b9`。输入/external无增删，bundledReact=[]，没有新主题或Loader配置。pack属于本轮产物，不保证跨环境tar元数据相同。此本地证据与hosted CI、已安装Host和#599人类验收分别成立。
+
+## 2026-11-11 MMP 修复后的详情层（#604）
+
+clean实际父层7722df51078d0f441fb97c8d259d2814a143cafa与clean整合候选630d24d6a84d44417cf70ea102fb2b0a6adc3e79、同Node26.13.0/pnpm10.28.2/esbuild0.28.2/原build与gzip9实测：client raw766719→769622（+2903）、gzip161476→162014（+538），Host raw697763/gzip159862及hash不变；pack339783→340373（+590）。inputs/externals不变、bundledReact=[]。client SHA-256=`62ee42603ada472a032e538d071733f048de5397c44a6b4f167ba96bd089f210`；pack SHA-256=`e34285a90c43e157fea2068605d45156846c4192546db291fdef77786b132bc0`。后续纯文档保持生产字节；按既有报告工具及本叶ExecPlan命令对锁定clean检出复算，不推及#599/UAT/R1。
