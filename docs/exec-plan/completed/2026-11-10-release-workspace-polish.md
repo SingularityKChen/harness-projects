@@ -1,6 +1,7 @@
 # 详情、设置与完整工作台视觉收口 ExecPlan
 
-> 状态：Completed；本地累计、独立验收与首次当前远端门完成，最终归档head继续回读。Superseded by Batch 4 MMP 修复与待独立复评门（2026-11-11）
+> 状态：Completed；Batch4 修复、独立复评、公开证据、实际父层构建与观察头远端门完成；本轮逐层 rebase merge 仍按当前 head 回读。#599/R1独立。
+> 原页首 Batch4“待独立复评”已 Superseded by 本页 Progress 与 PR #615 评审记录最终收尾（2026-11-11）。
 > 创建：2026-11-10
 > 规范：根 `PLANS.md`；关联 #604、#614、#603、#605
 > 正式路径：`docs/exec-plan/completed/2026-11-10-release-workspace-polish.md`
@@ -135,7 +136,7 @@ B局部验收证明详情与四任务可用、美观及事务安全；累计验�
 ## Progress
 
 - [x] (2026-11-11 SGT) Batch 4：两条原反例先 RED；安全 key 契约 3 项 RED 后 GREEN，详情／挂载／读位／焦点 36/36、相关真实消费者 60/60、typecheck 与 boundaries 9/9 通过。保留首轮评审全文，仅 append 作者修复证据。
-- [ ] Batch 4 后续：协调者重放实际父层、独立复评、重新取当前 remote head/base/checks/threads、发布选定 contact sheet 与 fresh bundle；本叶 local GREEN 不替代这些门。
+- [x] (2026-11-11 SGT) Batch4：实际父层整合、独立复评、公开 contact sheet 与 fresh bundle 均完成；观察头8d9175f5正式批准、全部检查与两线程解决。当前自动重放只继承已核对的上层文档，最终文档 push 后继续重锁当前门。
 
 
 - [x] (2026-11-10 15:08 SGT) 人类批准具名v3及固定manifest，授权实施，无需重询。
@@ -174,6 +175,8 @@ B局部验收证明详情与四任务可用、美观及事务安全；累计验�
 
 ## Decision Log
 
+Decision：依据本评审会话人类“继续评审流程”及原任务的 rebase merge 要求，先合 #611，再将本叶按实际 main 合入，最后 #612。Rationale：完整 #604 的 A+B 验收已独立闭合，P1/P2/P3均修复；当前层只关闭 #604，不接受 #599/R1。Date/Author：2026-11-11 SGT / 人类直接指令，评审协调者记录。
+
 Decision：MMP 两条意见全部在本叶 TDD 修复；协调者明确授权 detail 安全 DTO 和既有 detail-view contract 路径加入唯一写集。Rationale：仅 UI 字符串无法区分真正 mapped 状态与同文 native 标签，复制现有安全 key 比猜中文或读取原始实体更小且安全；redacted/unavailable/loading/unresolved 分支保持完整抹除。Date/Author：2026-11-11 SGT / 协调者授权，本叶 owner 实施。
 
 
@@ -195,7 +198,7 @@ B只消费A的Host别名、安全 `planningStatusKey`、过scope `currentItemId`
 
 ## Outcomes & Retrospective
 
-本地B呈现、RED→GREEN、共享消费者回归及真实图像/量测已完成；该阶段的“完整604未完成” Superseded by Progress最终累计验证（2026-11-10）。A+B完整scope与关键交互、独立最终验收与首次当前remote门已完成，PR已Ready；Superseded by Batch 4 MMP 修复与待独立复评门（2026-11-11）；归档head的远端门仍按Batch3命令重新回读。B技术gross259，图像与bundle各自绑定真实版本，后续只有文档变化时保持生产身份映射；无新实现债、兼容/迁移层或第二owner。#599安装、人类UAT和R1不由此放行。
+本地B呈现、RED→GREEN、共享消费者回归及真实图像/量测已完成；该阶段的“完整604未完成” Superseded by Progress最终累计验证（2026-11-10）。A+B完整scope与关键交互、独立最终验收与首次当前remote门已完成，PR已Ready；Superseded by Batch 4 MMP 修复与待独立复评门（2026-11-11）；归档head的远端门仍按Batch3命令重新回读。B技术gross259为修复前历史值，Superseded by 本次最终修复实测361（2026-11-11）；原349/350为旧预测，未扩大严格800行上限。图像与bundle各自绑定真实版本，后续只有文档变化时保持生产身份映射；无新实现债、兼容/迁移层或第二owner。#599安装、人类UAT和R1不由此放行。
 
 ## Bottom Change Note
 
@@ -220,3 +223,5 @@ B只消费A的Host别名、安全 `planningStatusKey`、过scope `currentItemId`
 2026-11-11 SGT：追加 Batch 4 全部 MMP 意见的真实 RED/GREEN、同输入长值场景与安全 key 决策；原审查正文保留，历史累计验收就地标注 Superseded。源修复交接后仍须协调者独立复评、重放／当前远端门与包体，不触碰 Status/native 边、#599、merge 或 R1。
 
 2026-11-11 SGT：将复评补充 P3 并入 Batch 4，Unknown 头统一中性“未知”，分别验证缺失 native／有未映射 native 两种输入；原文在 metadata 原样保留，局部最终证据更新为 36 项。
+
+2026-11-11 SGT：核销 Batch4 的复评、实际父层构建与两线程门，保留259及349/350的历史归属；当前实际技术361行。原等待结论 Superseded by Progress 与评审记录最终收尾，按新 head 重新回读发布门。
