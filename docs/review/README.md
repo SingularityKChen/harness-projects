@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [PR #618–#621 MMP 批次](2026-11-11-pr618-pr621-mmp-review.md) | 正则安全、Host 私有数据、来源排期与只读 Timeline | 独立全级别矩阵、真实组合验证与逐当前版本条件 rebase 收尾 |
 | [PR #600 MMP 评审](pr-600-mmp-review.md) | Storage 快照、事务句柄与基础套件正控制 | 无 P0–P3；独立行为反证与当前版本门，工程验收不代替人验/R1 |
 | [PR #601 MMP 评审](pr-601-mmp-review.md) | 真实 Git、文件 SQLite 与 Start Work 补偿/重启 | 无 P0–P3；独立行为反证与当前版本门，工程验收不代替人验/R1 |
 | [PR #602 MMP 评审](pr-602-mmp-review.md) | 原生父子 Issue 四方向只读纵线 | 无 P0–P3；#594 工程叶接受，#543 安装人验独立 |

@@ -90,7 +90,10 @@ export async function resolveWorktreePath(rawPath: string, input: WorktreePathIn
   if (raw.split(/[/\\]+/).includes('..')) return reject('parent_segment', '工作树路径不得包含 .. 分量')
 
   const joined = path.isAbsolute(raw) ? raw : path.resolve(input.repositoryPath, raw)
-  const candidate = joined.replace(/[/\\]+$/, '') || joined
+  // 从尾部单次扫描；未锚定起点的分隔符正则会在长输入不匹配时反复重试。
+  let end = joined.length
+  while (end > 0 && (joined[end - 1] === '/' || joined[end - 1] === '\\')) end -= 1
+  const candidate = joined.slice(0, end) || joined
   const target = await canonicalize(candidate)
   const root = await canonicalize(path.resolve(input.allowedRoot))
   if (target === undefined) return reject('unresolvable', `目标不可访问或找不到可规范化的祖先目录：${candidate}`)
