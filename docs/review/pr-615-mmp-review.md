@@ -33,7 +33,7 @@ Host 保持事实权威，规划与工程分离；修复不新增 Provider 写�
 
 - [x] 2026-11-11 SGT：独立分层评审、验收反例与现有事项检索。
 - [x] 2026-11-11 SGT：由评审账号一次提交 [REQUEST_CHANGES](https://github.com/SingularityKChen/harness-projects/pull/615#pullrequestreview-5851932716)。
-- [ ] 复核修复提交及该提交的实际 base、当前门禁和全线程。
+- [x] 2026-11-11 SGT：独立复评原 P1/P2 及补充 P3，核对实际父层、正式批准、检查和全线程；本记录最终收尾给出观察身份。
 
 ## Surprises & Discoveries
 
@@ -83,3 +83,13 @@ GitHub 双账号、#616 原生栈及 #599 实装验收。
 ### 串行整合验证
 
 2026-11-11 SGT：本叶已重放到精确父层7722df51，自己的生产/测试blob逐字等于独立变异7/7检出的daf7df23；仅继承已批准共享层。clean630d24d6新跑28项详情/Delivery/安全view及typecheck通过，10张图与fec后图逐字相等，新actual-base bundle见构建证据。当前远端完整head/base及CI用 `gh pr view 615 -R SingularityKChen/harness-projects --json headRefOid,baseRefOid,reviewDecision,statusCheckRollup` 与 `gh pr checks 615 -R SingularityKChen/harness-projects` 回读；首轮两线程留给精确远端正式复评，作者不resolve。
+
+### 最终独立复评与授权收尾（2026-11-11 SGT）
+
+稳定修复 `daf7df23` 的7项变异均按指定用例归因 KILLED，基线与还原后基线 GREEN；原先存活的元数据 nowrap 已由长原始值浏览器用例检出。核心源码、12项本叶技术指纹和公开图像来源通过独立检查，Unknown 缺失原生名的 P3 也已修复。
+
+完整整合观察头 `8d9175f5305b91d52cbda5201f2f4edfbea1c730` / #611 `7722df51` 获评审账号正式 APPROVE；28项实际父层组合和typecheck通过，全部当前检查成功，两条作者回复及线程resolve完成。真实父层client gzip增538 bytes、Host及依赖图不变；公开图片保留原捕获版本。此前“待独立复评／远端门”结论 Superseded by 本节。
+
+人类续令“继续评审流程”承接原任务的修复、复评、归档、核对issue与rebase合并。#611已合入main `aee7c704` 且#614 CLOSED；本层自动重放为 `b0c231f1`，新旧完整树只有三份已批准的前层文档差异，产品、测试和图像完全相同。本次只核销记录，技术实测361行，原259和349/350预测保留历史归属。#604六项源交付验收已逐项核对；本层当前head的批准/CI/threads/双向关联仍为合并门，#599/UAT/R1独立。
+
+合并结果用 `gh pr view 615 -R SingularityKChen/harness-projects --json state,headRefOid,mergeCommit` 及 #604状态回读；只以预期head、`merge_method=rebase` 经原生端点执行，不预写结果。
