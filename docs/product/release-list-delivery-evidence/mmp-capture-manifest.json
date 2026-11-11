@@ -1,0 +1,130 @@
+{
+  "capturedAt": {
+    "before": "2026-11-11T01:11:56.381Z",
+    "after": "2026-11-11T01:18:13.904Z"
+  },
+  "captureEntry": "tests/fixtures/table-geometry-browser.mjs",
+  "boundary": "Source-composed Header / WorkItemApp / EntityStore with controlled read ports; no installed Host, live Provider, UAT or R1 claim. 200% fixture root font is 28px; default is 14px.",
+  "sources": {
+    "before": {
+      "head": "7aa347b7051b3df38c8a72ac1580fc77b42de539",
+      "base": "4320baac082fc89106ce8d533a7300a8053024c7",
+      "sourceStatus": "",
+      "sourceHashes": {
+        "packages/ui/src/table-presentation.ts": "8c2a0de54504008652b9f1174b1a18d1030798041be6e22937da4d34143160f4",
+        "packages/ui/src/column-resize.ts": "3482e2d3a8f113a28d76293ba2fd35b1b7b9798f63e3f14ed8ea563093f17a50",
+        "packages/ui/src/work-item-list.ts": "bbe1035356752af15870641084b06c373f454b1aaf2d32e45de3dfd9568692b6",
+        "tests/fixtures/table-geometry-browser.mjs": "5c16b11873bc40a9511b2059a1e9dfc20954e79f71bbb1b3d967b7df582dfa63"
+      },
+      "fixture": "real Header / WorkItemApp / EntityStore; controlled read ports; no Provider writes"
+    },
+    "after": {
+      "head": "0992a703029949f9a8aba66231bd37df5ee7e7d2",
+      "base": "4320baac082fc89106ce8d533a7300a8053024c7",
+      "sourceStatus": "",
+      "sourceHashes": {
+        "packages/ui/src/table-presentation.ts": "d36b6697068ab5504e5ccb21ad8410bdc42cbc590d1307bd700ac80ff506e80e",
+        "packages/ui/src/column-resize.ts": "753244481cb1cea3a0c663df11508e0f41fac047ba310dea3ec8e5b91a00e74b",
+        "packages/ui/src/work-item-list.ts": "2d206e04b75ab6f85e8b18d165b392ec1d77a20f8ffb4599b8a2de7f38d23bad",
+        "tests/fixtures/table-geometry-browser.mjs": "5c16b11873bc40a9511b2059a1e9dfc20954e79f71bbb1b3d967b7df582dfa63"
+      },
+      "fixture": "real Header / WorkItemApp / EntityStore; controlled read ports; no Provider writes"
+    }
+  },
+  "sheets": [
+    {
+      "file": "mmp-width-long-light-sheet.png",
+      "size": [
+        1200,
+        1629
+      ],
+      "sha256": "41b89dbc0b27f54c2e138abb040116875a8aacba64993b1bf9d587445f43097d",
+      "layout": "Rows: 1200 reference, 1024 reference, 1200 long. Left before; right after."
+    },
+    {
+      "file": "mmp-offline-stale-200-light-sheet.png",
+      "size": [
+        1560,
+        1590
+      ],
+      "sha256": "1852a2fa808c114c486606f4fa045853682fc656fbb396097b8c1e4196f84031",
+      "layout": "Rows: 390x900, 390x480. Columns: before notices, after notices, before max scroll, after max scroll."
+    },
+    {
+      "file": "mmp-width-long-dark-sheet.png",
+      "size": [
+        1200,
+        1629
+      ],
+      "sha256": "76d892482c820a0c96a6b2982f6edd0b4a4130237fb136a2f95eecbff18e4a60",
+      "layout": "Rows: 1200 reference, 1024 reference, 1200 long. Left before; right after."
+    },
+    {
+      "file": "mmp-offline-stale-200-dark-sheet.png",
+      "size": [
+        1560,
+        1590
+      ],
+      "sha256": "7171c68a49b4805d1b27b52e06073bc41dba6aa3dc7e83204d195bda1979a92a",
+      "layout": "Rows: 390x900, 390x480. Columns: before notices, after notices, before max scroll, after max scroll."
+    }
+  ],
+  "states": [
+    {
+      "id": "normal-1200",
+      "viewport": [
+        1200,
+        900
+      ],
+      "query": "header&reference",
+      "data": "7 safe reference items",
+      "fontPercent": 100,
+      "themeInput": "frozen public Host roles"
+    },
+    {
+      "id": "normal-1024",
+      "viewport": [
+        1024,
+        900
+      ],
+      "query": "header&reference",
+      "data": "7 safe reference items",
+      "fontPercent": 100,
+      "themeInput": "frozen public Host roles"
+    },
+    {
+      "id": "long-1200",
+      "viewport": [
+        1200,
+        900
+      ],
+      "query": "header",
+      "data": "120 readable + 1 redacted; long title/source/iteration",
+      "fontPercent": 100,
+      "themeInput": "system Canvas fallback"
+    },
+    {
+      "id": "stale-900-200",
+      "viewport": [
+        390,
+        900
+      ],
+      "query": "header&zoom + stale/offline hooks",
+      "data": "same 120 readable + 1 redacted; authorized stale",
+      "fontPercent": 200,
+      "themeInput": "system Canvas fallback"
+    },
+    {
+      "id": "stale-480-200",
+      "viewport": [
+        390,
+        480
+      ],
+      "query": "header&zoom + stale/offline hooks",
+      "data": "same 120 readable + 1 redacted; authorized stale",
+      "fontPercent": 200,
+      "themeInput": "system Canvas fallback"
+    }
+  ],
+  "captureIdentity": "The sheets embed the original viewport pixels, scaled only in wide sheets. Both phases use each identical state definition and fixture; original individual PNG hashes are retained locally for independent review."
+}

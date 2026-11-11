@@ -145,8 +145,9 @@ test('offline stale notices and final row remain hit reachable at 390 with 200% 
       await page.locator('[data-workspace-setup]').evaluate(el=>{el.scrollTop=el.scrollHeight})
       await page.locator('.hp-list-body').evaluate(el=>{if(/auto|scroll/.test(getComputedStyle(el).overflowY))el.scrollTop=el.scrollHeight})
       await page.locator('.hp-list-scroll').evaluate(el=>{el.scrollTop=el.scrollHeight})
-      const last=page.locator('tbody').getByRole('link').last()
-      assert.equal(await last.evaluate(el=>{const r=el.getBoundingClientRect();return document.elementFromPoint(r.x+8,r.y+r.height/2)?.closest('a')===el}),true,`last row hit at height ${height}`)
+      const last=page.locator('tbody').getByRole('link').last(),lastRow=page.locator('tbody tr').last()
+      assert.equal(await lastRow.evaluate(el=>{const r=el.getBoundingClientRect();return document.elementFromPoint(r.x+8,r.y+r.height/2)?.closest('tr')===el}),true,`final redacted row hit at height ${height}`)
+      assert.equal(await last.evaluate(el=>{const r=el.getBoundingClientRect();return document.elementFromPoint(r.x+8,r.y+r.height/2)?.closest('a')===el}),true,`last readable link hit at height ${height}`)
       await last.click();assert.equal(await page.getByRole('dialog').count(),1)
     }
   })
