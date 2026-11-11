@@ -20,6 +20,7 @@ import { wire, redacted, T } from './tests/fixtures/work-item-wire.mjs'
 export function scene(scenario = 'content', detail = false) {
   const store = createEntityStore()
   const long = scenario === 'long', numbers = scenario === 'numbers', reference = scenario === 'reference'
+  const detailStale = scenario === 'detail-stale', detailNative = scenario === 'detail-native'
   const number = (scopeName) => ({ sourceNumber: { sourceName:'GitHub',scopeIdentity:{namespace:'github.com/graphql/Repository',id:'opaque-'+scopeName},scopeName,number:449 } })
   const entities = reference ? [
     [554, '为新会话保留可恢复的执行身份', 'in_progress', 'Core 恢复', '2026-11-13'],
@@ -33,16 +34,28 @@ export function scene(scenario = 'content', detail = false) {
     content: { title, body: '在同一工作区阅读规划、查看交付，并始终知道信息来自哪里。', sourceNumber: { sourceName: 'GitHub', scopeIdentity: { namespace: 'github.com/graphql/Repository', id: 'reference' }, scopeName: 'example/project', number } },
     planningFields: { iterationTitle, targetDate, ...(number === 416 ? { statusName: '待确认' } : {}) },
   })) : scenario === 'empty' ? [] : [
-    wire('ent-aa', { content: { ...(numbers ? number('example/one') : {}), title: long ? '长标题无空格Title'.repeat(24) : '可见工作项', body: long ? '长正文WithoutSpaces'.repeat(200) : '正文-ent-aa' },
-      planningFields: { iterationTitle: long ? 'IterationWithoutSpaces'.repeat(10) : 'E1 Sprint 1', targetDate: '2026-09-24' }, derived: ['ci_failing', 'execution_failed'] }),
+    wire('ent-aa', {
+      ...(detailNative ? { planningStatus: 'unknown', source: { freshness: 'degraded' } } : {}),
+      content: {
+        ...(numbers ? number('example/one') : {}),
+        ...(detailNative ? { externalId: 'RawExternalIdentity'.repeat(50) } : {}),
+        title: long ? '长标题无空格Title'.repeat(24) : '可见工作项',
+        body: detailStale ? '条目陈旧时仍须先看见来源与最后已知限定。'.repeat(800) : long ? '长正文WithoutSpaces'.repeat(200) : '正文-ent-aa',
+      },
+      planningFields: {
+        ...(detailNative ? { statusName: 'NativeUnmappedStatus'.repeat(80) } : {}),
+        iterationTitle: detailNative ? 'RawIterationMetadata'.repeat(50) : long ? 'IterationWithoutSpaces'.repeat(10) : 'E1 Sprint 1',
+        targetDate: '2026-09-24',
+      }, derived: ['ci_failing', 'execution_failed'],
+    }),
     ...(numbers ? [wire('ent-cc',{content:{title:'另一仓库工作项',...number('example/two')}}),wire('ent-dd',{content:{title:'Draft工作项 Discuss GitHub example/one#449 GitHub missing/repo#449',externalKind:'draft'}})] : []),
     redacted('ent-bb', {}, { planningFields: { statusName: 'CANARY-STATUS', iterationTitle: 'CANARY-ITERATION', targetDate: '2099-12-31' } }),
   ]
   store.applyBaseline({ revision: 0, entities, source: { revision: 0, freshness: 'fresh', authority: 'provider' } })
-  if (scenario === 'stale') store.markAllStale()
+  if (scenario === 'stale' || detailStale) store.markAllStale()
   const read = scenario === 'loading' ? undefined : {
     workspace: { id: 'ws-1', name: reference ? 'Harness Projects / 交付工作台' : long ? '长工作区名称Workspace'.repeat(8) : '浏览器工作区' }, store,
-    ...(reference ? { planningSource: { bindingId: 'bind-1', name: 'GitHub Projects' } } : {}),
+    ...(reference || detailStale || detailNative ? { planningSource: { bindingId: 'bind-1', name: reference ? 'GitHub Projects' : '来源一' } } : {}),
     connection: { connected: scenario !== 'offline' }, lastUpdatedAt: T, reconciledAt: '2026-10-01T07:59:00.000Z',
     capabilities: [{ key: 'planning.item.read', access: 'available' }],
   }
@@ -134,6 +147,7 @@ export function mount(element, scenario, params = new URLSearchParams()) {
     if (mutant==='padding') text=text.replaceAll('.hp-workspace.hp-detail {','.hp-detail {')+WORKSPACE_STYLES
     if (mutant==='header') text+=' .hp-detail > .hp-detail-header { flex-wrap:nowrap } .hp-detail .hp-detail-title { flex:1 }'
     if (mutant==='outer-scroll') text+=' .hp-workspace.hp-detail { overflow:hidden }'
+    if (mutant==='metadata-nowrap') text+=' .hp-detail .hp-detail-metadata dd, .hp-detail .hp-detail-metadata dd * { white-space:nowrap; overflow-wrap:normal }'
     if (mutant==='body-room') text+=' .hp-detail > .hp-detail-body { min-height:0 }'
     fixtureStyles.textContent=text
   }

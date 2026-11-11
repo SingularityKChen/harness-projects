@@ -289,3 +289,14 @@ test('detail-close-focus：原入口仍在列表时回焦，否则落可聚焦�
     assert.deepEqual(focused, ['opener', 'heading', 'heading'])
   } finally { internals.ReactCurrentDispatcher.current = previous; globalThis.document = doc }
 })
+
+
+// Unknown does not prove that a native label was supplied but unmapped.
+test('unknown header stays neutral with missing or unmapped native status', () => {
+  for (const statusName of [undefined, 'Native Stage']) {
+    const { detailView } = views([wire('ent-aa', { planningStatus: 'unknown', planningFields: statusName === undefined ? {} : { statusName } })])
+    const html = drawer(detailView)
+    assert.match(html, /<p class="hp-detail-status">规划状态：未知<\/p>/)
+    assert.ok(html.includes('<dt>完整规划状态：</dt><dd>' + (statusName === undefined ? '未知' : 'Native Stage（未映射）') + '</dd>'))
+  }
+})

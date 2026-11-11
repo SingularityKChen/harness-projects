@@ -1,7 +1,7 @@
 /** 唯一安全投影（issue #130）：scope → 既有列表门 → 安全行 → 白名单 content；次序固定、阻断态不借缓存、纯函数。 */
 import type { IssueClosingLinksTarget } from './issue-closing-links-view.ts'
 import { repositoryAccessIndex, startWorkAvailability } from './capability-access.ts'
-import { ContentKind } from '@harness-projects/domain/values'
+import { ContentKind, type NormalizedStatus } from '@harness-projects/domain/values'
 import { deriveWorkItemDetail } from './derive.ts'
 import { deriveWorkItemListView, type VisibleListRow, type WorkItemListReadInput } from './work-item-list-view.ts'
 
@@ -25,6 +25,7 @@ export type WorkItemDetailContent = {
   readonly title: string
   readonly body: string
   readonly planningStatus: string
+  readonly planningStatusKey: NormalizedStatus
   /** 迭代标题与 date-only 目标日期：与 `planningStatus` 同一次列表安全行复制，缺值由列表层统一占位 `—`。 */
   readonly iteration: string
   readonly targetDate: string
@@ -90,7 +91,7 @@ export function deriveWorkItemDetailView(input: WorkItemListReadInput, target: W
       ...(input.read.repositories === undefined ? {} : { deliveryAccessTokens: Object.fromEntries(input.read.repositories.map(({ id, capabilities, accessVersion }) => [id, JSON.stringify([capabilities, accessVersion])])) }),
       ...(row.numberLabel === undefined ? {} : { numberLabel: row.numberLabel }),
       kind: 'content', title: row.title, body: detail.planning.body || '正文未提供',
-      planningStatus: row.planningStatus, iteration: row.iteration, targetDate: row.targetDate,
+      planningStatus: row.planningStatus, planningStatusKey: row.planningStatusKey, iteration: row.iteration, targetDate: row.targetDate,
       source: row.source, authority: row.authority,
       ...(identity === undefined ? {} : { identity }),
       ...(derived === undefined ? {} : { derived }),

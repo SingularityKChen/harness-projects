@@ -1,6 +1,6 @@
 # 详情、设置与完整工作台视觉收口 ExecPlan
 
-> 状态：Completed；本地累计、独立验收与首次当前远端门完成，最终归档head继续回读
+> 状态：Completed；本地累计、独立验收与首次当前远端门完成，最终归档head继续回读。Superseded by Batch 4 MMP 修复与待独立复评门（2026-11-11）
 > 创建：2026-11-10
 > 规范：根 `PLANS.md`；关联 #604、#614、#603、#605
 > 正式路径：`docs/exec-plan/completed/2026-11-10-release-workspace-polish.md`
@@ -36,10 +36,11 @@ B消费A共享Host角色，不复制主题：Canvas/CanvasText与成对ButtonFac
 | 集合 | 路径 | gross预测 |
 |---|---|---:|
 | 产品 | `detail-presentation.ts`、`work-item-detail.ts`、`workspace-settings.ts`、`form-presentation.ts`、`markdown-presentation.ts` | 153 |
-| contract | `tests/contract/ui-work-item-detail.test.js` | 5 |
+| contract | `tests/contract/ui-work-item-detail.test.js`、`tests/contract/ui-work-item-detail-view.test.js` | 5 + 修复实测 |
+| 安全投影修复 | `packages/ui-model/src/work-item-detail-view.ts`；只复制既有安全行的规范状态 key | 修复实测 |
 | browser | `tests/browser/detail-expand.test.js`、`tests/browser/workspace-settings-presentation.test.js` | 65 |
 | fixture | `tests/fixtures/workspace-frame-browser.mjs`、`tests/fixtures/workspace-forms-browser.mjs`（含JSX修复） | 37 |
-| 文档 | 本计划、`docs/README.md`、`docs/development/plugin-bundle-evidence.md`、`docs/product/release-detail-settings-evidence/README.md`与选定静态PNG的本叶/累计真实结论 | 单PR严格<1300 |
+| 文档 | 本计划、`docs/README.md`、`docs/development/plugin-bundle-evidence.md`、`docs/product/release-detail-settings-evidence/README.md`与选定静态PNG的本叶/累计真实结论、`docs/review/pr-615-mmp-review.md` 作者追加证据 | 单PR严格<1300 |
 
 代表点260、修复/不确定余量90、B可信上界350均是预测；execution原12由B移A，未增加总体产品553。现有settings smoke35及JSX+4/-3=7共42实测全部归B，不能把它们当v3完成或重复计42。B相对真实A base计所有adds+deletes、测试/fixture/config与必需未提交/未跟踪文件；首RED、结构变化、final push前重算实际+剩余必需+已知修复。可信上界>=800停止扩写，技术严格<800/docs严格<1300；不压行、删安全测试或藏生成目录。新增路径先修清单/预算。
 
@@ -112,11 +113,30 @@ Host权威、未ack/reconcile不Saved、secret只存句柄、规划与工程正�
 
 整理commit与publication人工五类审查后final push；已推历史重写先backup ref并走 `git-expert-operations` 精确lease。复用Batch1当前head/base/checks/完整threads/issue关联回读，独立结论与必需checks通过才Ready。父scope未完成时B保持Draft，不提前自动关闭604；#605仍受完整604先决约束。**回滚**：先B后A，Board等后层已落地则先撤后层；不删除共享base/用户worktree。
 
+### Batch 4 · MMP 全部意见修复（2026-11-11）
+
+**最小闭环**：在线连接下陈旧条目与长正文仍在首屏给出条目来源／最后已知限定；超长未映射状态在头部保持简短且诚实，原文在可达 metadata 中完整保留。只调整本叶文件集合；协调者额外批准安全 DTO 与其既有契约路径，不改共享列表／表格／Board／宽度 owner。
+
+**根因与设计**：详情把安全状态提升到 header，却把 source/stale 留在长正文之后；header 又直接放入任意长 native 文本。继续使用 `row.stale`、`view.body.refreshing` 与安全来源名，在状态旁显示简短来源和“当前值／最后已知值”；来源长名可省略显示，完整 source/authority/identity/time 仍在原 dl。将列表安全行的 `planningStatusKey` 同次复制到 detail content，Unknown 头显示“未知”，完整 `planningStatus` 原样新增到 dl。不从本地化显示文本猜规范状态，不读第二次 raw getter 重算，不新增状态权威。
+
+默认在检出 `feature/release-detail-settings` 的本叶根执行；采用服务端自动 restack 后的修复起点 `823ff8faeaf396f6ba95a3b1f004d1db246bd76c`，实际父层 `7aa347b7051b3df38c8a72ac1580fc77b42de539`（2026-11-11 观察）。这两个 SHA 用于本次历史执行归因，协调者后续重放必须重新取实际 base/head。
+
+    pnpm test:file tests/contract/ui-work-item-detail-view.test.js tests/contract/ui-work-item-detail.test.js tests/browser/detail-expand.test.js
+    pnpm test:file tests/browser/workspace-execution.test.js tests/browser/delivery-overview.test.js tests/browser/workspace-settings-presentation.test.js tests/contract/ui-safe-markdown.test.js tests/contract/ui-workspace-status.test.js
+
+期望分别 36/36、60/60，零 skip；其中真实组合 `WorkItemApp` 测 connected + stale + 16000 字正文，以及 320×320 / 200% 的 1520 字未映射 native、1000 字 iteration、950 字 external identity。宽窄首屏 source/stale、Unknown 头最多两行、完整 raw metadata 的实际滚动可达与无水平溢出必须成立；`metadata-nowrap` 负控必须被相同长值断言检出。复用 Batch 1 的 typecheck/boundaries 与发布扫描命令；没有共享样式／事务改动，不重复完整 suite。
+
+before/after 使用同场景、主题、字体、viewport 与 fixture，保留实际 HEAD/dirty、生产／fixture／PNG／浏览器 bundle SHA-256；窄屏初始动作区截图相同，另拍真实滚动到 status 与 metadata 的画面，不把滚动后图称为首屏。选择公开 contact sheet 和重放后的包体由协调者最终发布；原旧图像／bundle 身份不改写。**回滚**：revert 本次修复提交恢复本叶原呈现，保留历史评审全文与 RED 证据；无数据迁移或外部写入。
+
 ## Validation and Acceptance
 
 B局部验收证明详情与四任务可用、美观及事务安全；累计验收还必须证明A的workspace/List/Delivery完整保留。功能测试、同场景真实图像、独立设计review、clean bundle及当前remote门各自成立，任何一项缺失不能关闭604。静态稿/source Ready不是#599安装美观/真实数据交互、人类UAT或R1放行。
 
 ## Progress
+
+- [x] (2026-11-11 SGT) Batch 4：两条原反例先 RED；安全 key 契约 3 项 RED 后 GREEN，详情／挂载／读位／焦点 36/36、相关真实消费者 60/60、typecheck 与 boundaries 9/9 通过。保留首轮评审全文，仅 append 作者修复证据。
+- [ ] Batch 4 后续：协调者重放实际父层、独立复评、重新取当前 remote head/base/checks/threads、发布选定 contact sheet 与 fresh bundle；本叶 local GREEN 不替代这些门。
+
 
 - [x] (2026-11-10 15:08 SGT) 人类批准具名v3及固定manifest，授权实施，无需重询。
 - [x] (2026-11-10 SGT) 原完整单PR首真实selection RED；真实settings carrier1/1和相关合同43/43 GREEN，技术42/docs209为当时checkpoint，未改产品。
@@ -133,6 +153,11 @@ B局部验收证明详情与四任务可用、美观及事务安全；累计验�
 
 ## Surprises & Discoveries
 
+2026-11-11 补充 P3：头部中间候选曾一律“未知（未映射）”，缺失 native 标签时会过度断言；两项真实 RED 后改为中性“未知”，缺失与有 native 的完整 metadata 各有正控。该项未增加 DTO flag 或后缀解析。
+
+2026-11-11 MMP：原短 native／短 metadata 的绿色测试不足以证明任意长值。真实 RED 下未映射状态头高约 4706.5px、正文 y5113.2；同输入修复后状态一行约 38.6px，正文 y552.4，短高度沿既有外层滚动可达。在线条目 source/stale 的首屏缺失与页面 live notice 为空是同时存在的，不能用 transport connected 推断条目已确认。首次新增 fixture 未配置来源名，纠正后在原生产源码上重新取得具名来源 RED；这次 fixture 接线错误没有记为产品行为通过。
+
+
 历史完整单PR方案为产品553+测试fixture219+余量3=775；**Superseded by 本节实测修订与Global Constraints（2026-11-10）**。首真实carrier发现forms缺react/jsx-runtime，需要7 gross接线，smoke35；geometry120项/frame2项且无参考Host角色，原fixture40不能覆盖7项同场景，修订为71。完整553+179+71+3=806是可信上界，不是实际diff或数学下限；已触门，未继续产品扩写。
 
 历史拆叶预测A592/B325及“两个新叶issue各自关闭”的恢复建议，**Superseded by 本计划Context and Orientation与Global Constraints（2026-11-10）**：仅新A issue，B关闭完整604；A400+143、B153+107，guarded上界620/350。execution原12已归A，因为Delivery实际消费；B FORM变化需回归A，不重复记12。
@@ -148,6 +173,9 @@ B局部验收证明详情与四任务可用、美观及事务安全；累计验�
 独立复核发现窄200%下header动作占满grid、编号0px宽，以及metadata的6rem标签最小列将dd压到0–7px。真实RED为root28编号0×900、来源身份dd7×1672；局部intrinsic flex-wrap修复后196×108及196×176，root30分别约190×116及190×236。字段、原scroll/mounted owner与安全测试均保留；正常1440编号284.5px、值337.125px前后相等。相对冻结A技术gross现为259，剩余已知必需产品改动0，保留90修复余量的可信上界349；文档以最终numstat回读。
 
 ## Decision Log
+
+Decision：MMP 两条意见全部在本叶 TDD 修复；协调者明确授权 detail 安全 DTO 和既有 detail-view contract 路径加入唯一写集。Rationale：仅 UI 字符串无法区分真正 mapped 状态与同文 native 标签，复制现有安全 key 比猜中文或读取原始实体更小且安全；redacted/unavailable/loading/unresolved 分支保持完整抹除。Date/Author：2026-11-11 SGT / 协调者授权，本叶 owner 实施。
+
 
 Decision：具名v3已获“批准 v3，开始实施”。Rationale：明确针对固定manifest的完整视觉同意，取代仅v2版式认可；不扩大到merge、Status/native边或#599接受。Date/Author：2026-11-10 15:08 SGT / 人类伙伴，协调者记录。
 
@@ -167,7 +195,7 @@ B只消费A的Host别名、安全 `planningStatusKey`、过scope `currentItemId`
 
 ## Outcomes & Retrospective
 
-本地B呈现、RED→GREEN、共享消费者回归及真实图像/量测已完成；该阶段的“完整604未完成” Superseded by Progress最终累计验证（2026-11-10）。A+B完整scope与关键交互、独立最终验收与首次当前remote门已完成，PR已Ready；归档head的远端门仍按Batch3命令重新回读。B技术gross259，图像与bundle各自绑定真实版本，后续只有文档变化时保持生产身份映射；无新实现债、兼容/迁移层或第二owner。#599安装、人类UAT和R1不由此放行。
+本地B呈现、RED→GREEN、共享消费者回归及真实图像/量测已完成；该阶段的“完整604未完成” Superseded by Progress最终累计验证（2026-11-10）。A+B完整scope与关键交互、独立最终验收与首次当前remote门已完成，PR已Ready；Superseded by Batch 4 MMP 修复与待独立复评门（2026-11-11）；归档head的远端门仍按Batch3命令重新回读。B技术gross259，图像与bundle各自绑定真实版本，后续只有文档变化时保持生产身份映射；无新实现债、兼容/迁移层或第二owner。#599安装、人类UAT和R1不由此放行。
 
 ## Bottom Change Note
 
@@ -188,3 +216,7 @@ B只消费A的Host别名、安全 `planningStatusKey`、过scope `currentItemId`
 2026-11-10 SGT：独立最终代码/累计能力与视觉identity门全部接受，正式静态证据和本叶/累计包体齐备；保留远端门、A先合入及#599/UAT/R1的独立责任。
 
 2026-11-10 SGT：首次accepted发布0ee6c0e当前Fast Gate/metadata/双向closing/完整threads通过且已Ready，归档本计划并修正文档索引；源不变，最终归档head仍须新远端核验，不继承旧checks。
+
+2026-11-11 SGT：追加 Batch 4 全部 MMP 意见的真实 RED/GREEN、同输入长值场景与安全 key 决策；原审查正文保留，历史累计验收就地标注 Superseded。源修复交接后仍须协调者独立复评、重放／当前远端门与包体，不触碰 Status/native 边、#599、merge 或 R1。
+
+2026-11-11 SGT：将复评补充 P3 并入 Batch 4，Unknown 头统一中性“未知”，分别验证缺失 native／有未映射 native 两种输入；原文在 metadata 原样保留，局部最终证据更新为 36 项。
