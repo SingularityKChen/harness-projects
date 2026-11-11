@@ -157,10 +157,17 @@ test('redacted-planning-field-differential：遮蔽行单字段变异不改变�
 })
 
 test('text-is-escaped：标题、正文按文字转义，不产生可执行标签', () => {
-  const html = drawer(views([wire('ent-aa', { content: { title: '<img src=x onerror=alert(1)>', body: '<script>alert(1)</script>' } })]).detailView)
-  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/)
-  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/)
-  assert.doesNotMatch(html, /<(img|script)[ >]/)
+  const cases = [
+    ['<img src=x onerror=alert(1)>', '<script>alert(1)</script>', '&lt;img src=x onerror=alert(1)&gt;', '&lt;script&gt;alert(1)&lt;/script&gt;'],
+    ['<IMG SRC=x ONERROR=alert(1)>', '<SCRIPT>alert(1)</SCRIPT>', '&lt;IMG SRC=x ONERROR=alert(1)&gt;', '&lt;SCRIPT&gt;alert(1)&lt;/SCRIPT&gt;'],
+    ['<ImG\tsrc=x onerror=alert(1)>', '<ScRiPt\n>alert(1)</ScRiPt>', '&lt;ImG\tsrc=x onerror=alert(1)&gt;', '&lt;ScRiPt\n&gt;alert(1)&lt;/ScRiPt&gt;'],
+  ]
+  for (const [title, body, escapedTitle, escapedBody] of cases) {
+    const html = drawer(views([wire('ent-aa', { content: { title, body } })]).detailView)
+    assert.ok(html.includes(escapedTitle), '恶意标题仍作为转义文本可见')
+    assert.ok(html.includes(escapedBody), '恶意正文仍作为转义文本可见')
+    assert.doesNotMatch(html, /<(img|script)(?=[\s/>])/i)
+  }
 })
 
 test('事件回调机械判据：Escape 只有 cancel 单次关闭；Tab 接受 NodeList 且循环不逃出', () => {

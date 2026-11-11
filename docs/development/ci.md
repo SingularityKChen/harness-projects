@@ -178,6 +178,8 @@ CI workflow 的 action 必须 pin 到 40 位 commit；checkout 必须关闭 pers
 
 详细判定和 fail-closed 退出码见 repository-rules.md。CI 必须使 workflow-check 通过后才宣称门禁完整。解析失败、未知 jobs 结构、无 workflow 文件和空 jobs 都是检查失败，不可当作“没有需要检查的内容”。
 
+W3 对外部 `uses` 分开检查路径和提交引用：路径至少包含非空的 owner/repo 两段，可继续带非空子路径，各段不得含空白或 `@`；最后一个 `@` 后必须恰为 40 位十六进制提交。step 与可复用 job 共用此判据，`./` 本地引用保留豁免。显式分段避免畸形输入在重叠路径正则中指数回溯，空段、额外 `@` 和提交尾部空白均失败闭合。
+
 ## 合并后的演进
 
 Merge queue / merge_group、integration、E2E 和 weekly regression 只有在仓库出现对应真实测试、耗时基线和稳定入口后才新增。新增 lane 先写 ExecPlan，证明它提供新的系统反馈；不得把同一组契约测试复制到多个 workflow 来制造覆盖率。

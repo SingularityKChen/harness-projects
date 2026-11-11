@@ -4,6 +4,7 @@
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -80,6 +81,34 @@ for (const capabilities of [{ branchCreate: false }, { worktreeCreate: false }, 
   }
   localGitSuite(fixture, capabilities)
 }
+
+test('路径安全：长分隔符输入有界返回结构化拒绝，不阻塞调用进程', () => {
+  const moduleUrl = new URL('../../packages/providers/development-local-git/src/paths.ts', import.meta.url).href
+  const script = `
+    import { resolveWorktreePath } from ${JSON.stringify(moduleUrl)};
+    import os from 'node:os';
+    const input = { repositoryPath: os.tmpdir(), allowedRoot: os.tmpdir() };
+    const result = await resolveWorktreePath('/'.repeat(300000) + 'x', input);
+    console.log(JSON.stringify({ ok: result.ok, reason: result.reason }));
+  `
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], { encoding: 'utf8', timeout: 5000 })
+  assert.equal(result.error, undefined, '路径校验必须在子进程期限内完成，不能在最终拒绝之前重复扫描分隔符')
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(JSON.parse(result.stdout), { ok: false, reason: 'unresolvable' })
+})
+
+test('路径安全：只去掉尾部分隔符，保留正常目标与全分隔符根路径', async (t) => {
+  const fixture = await fixtureFor(t)
+  const target = path.join(fixture.root, 'new-worktree')
+  const input = { repositoryPath: fixture.repositoryPath, allowedRoot: fixture.root }
+  for (const suffix of ['', '/', '\\', '/\\//']) {
+    assert.deepEqual(await resolveWorktreePath(target + suffix, input), { ok: true, path: target })
+  }
+  if (path.sep === '/') {
+    assert.deepEqual(await resolveWorktreePath('////', { ...input, allowedRoot: '/' }), { ok: true, path: '/' })
+  }
+})
+
 test('路径安全：越界、含 .. 与符号链接逃逸都在任何 Git 命令之前被拒（零次调用）', async (t) => {
   const fixture = await fixtureFor(t)
   const outsideDirectory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'local-git-outside-')))

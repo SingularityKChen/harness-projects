@@ -191,13 +191,20 @@ test('泄漏面：全部场景的完整 HTML 不含被遮蔽字段与内部标�
 })
 
 test('转义：恶意来源名、提示、工作区名按文字转义，不产生标签', () => {
-  const evil = render({
-    ...SCENARIOS.stale, workspace: '<i>W</i>',
-    metadata: { planningSourceName: '<img src=x onerror=alert(1)>', sourceNames: { 'bind-1': '<b>来源</b>' }, safeNotice: '<script>alert(1)</script>' },
-  })
-  assert.match(evil, /&lt;img src=x onerror=alert\(1\)&gt;/)
-  assert.match(evil, /&lt;script&gt;/)
-  assert.doesNotMatch(evil, /<(img|script|b|i)[ >]/)
+  const cases = [
+    ['<img src=x onerror=alert(1)>', '<script>alert(1)</script>', '&lt;img src=x onerror=alert(1)&gt;', '&lt;script&gt;alert(1)&lt;/script&gt;'],
+    ['<IMG SRC=x ONERROR=alert(1)>', '<SCRIPT>alert(1)</SCRIPT>', '&lt;IMG SRC=x ONERROR=alert(1)&gt;', '&lt;SCRIPT&gt;alert(1)&lt;/SCRIPT&gt;'],
+    ['<ImG\tsrc=x onerror=alert(1)>', '<ScRiPt\n>alert(1)</ScRiPt>', '&lt;ImG\tsrc=x onerror=alert(1)&gt;', '&lt;ScRiPt\n&gt;alert(1)&lt;/ScRiPt&gt;'],
+  ]
+  for (const [planningSourceName, safeNotice, escapedSource, escapedNotice] of cases) {
+    const evil = render({
+      ...SCENARIOS.stale, workspace: '<i>W</i>',
+      metadata: { planningSourceName, sourceNames: { 'bind-1': '<b>来源</b>' }, safeNotice },
+    })
+    assert.ok(evil.includes(escapedSource), '恶意来源名仍作为转义文本可见')
+    assert.ok(evil.includes(escapedNotice), '恶意提示仍作为转义文本可见')
+    assert.doesNotMatch(evil, /<(img|script|b|i)(?=[\s/>])/i)
+  }
 })
 
 test('fixture：全部状态拼成一份静态 HTML；设置 UI_FIXTURE_OUT 时写出供人工视觉验收', () => {

@@ -141,6 +141,34 @@ test('W3：uses 使用可移动 tag', () => {
   assertOnlyRule(baseline.replace('actions/checkout@11d5960a326750d5838078e36cf38b85af677262', 'actions/checkout@v4'), 'W3');
 });
 
+for (const [scope, workflow, original] of [
+  ['step', baseline, 'actions/checkout@11d5960a326750d5838078e36cf38b85af677262'],
+  ['job', reusableWorkflowPinned, 'some-org/some-repo/.github/workflows/build.yml@1111111111111111111111111111111111111111'],
+]) {
+  test(`W3：${scope} 的畸形长引用有界拒绝，不因路径分段回溯卡住检查进程`, () => {
+    const adversarial = '!/'.repeat(80) + '@' + '0'.repeat(39) + 'X';
+    const fixture = withWorkflow(workflow.replace(original, JSON.stringify(adversarial)));
+    try {
+      const result = spawnSync(process.execPath, [SCRIPT, fixture.root], { encoding: 'utf8', timeout: 5000 });
+      assert.equal(result.error, undefined, 'W3 必须在子进程期限内完成，不能让回溯占满检查时间');
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(result.stdout, /\[W3\]/);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test(`W3：${scope} 接受合法固定引用，拒绝空路径段、额外 @ 与 SHA 尾部空白`, () => {
+    const sha = '0123456789abcdef0123456789abcdef01234567';
+    for (const uses of [`owner/repo@${sha}`, `Owner/Repo/nested/action@${sha.toUpperCase()}`, `owner/repo/.github/workflows/build.yml@${sha}`]) {
+      assertNoFinding(workflow.replace(original, JSON.stringify(uses)));
+    }
+    for (const uses of [`owner//repo@${sha}`, `owner/repo/@${sha}`, `owner@extra/repo@${sha}`, `owner/repo@${sha}\n`, `owner/repo@${sha}x`]) {
+      assertOnlyRule(workflow.replace(original, JSON.stringify(uses)), 'W3');
+    }
+  });
+}
+
 // -----------------------------------------------------------------------
 // W3：可复用 workflow 调用（issue #38 表格第 2 行）
 // -----------------------------------------------------------------------

@@ -15,7 +15,15 @@ export const RULES = [
   { id: 'W7', title: 'jobs 必须是非空映射' },
 ];
 
-const PINNED_USE = /^[^/\s]+\/[^@\s]+(?:\/[^@\s]+)*@[0-9a-fA-F]{40}$/;
+/** W3 的路径分段与 ref 分开校验，避免 repo 与重复子路径都消费斜杠导致回溯。 */
+function isPinnedUse(uses) {
+  const at = uses.lastIndexOf('@');
+  if (at === -1) return false;
+  const ref = uses.slice(at + 1);
+  if (ref.length !== 40 || !/^[0-9a-fA-F]+$/.test(ref)) return false;
+  const segments = uses.slice(0, at).split('/');
+  return segments.length >= 2 && segments.every((segment) => segment.length > 0 && !/[@\s]/.test(segment));
+}
 
 function finding(rule, file, job, message) {
   return { rule, file, job, message };
@@ -234,7 +242,7 @@ function inspectJob(job, jobName, file, pushCoversMain) {
   if (isCallJob(job)) {
     // timeout-minutes 与 steps 不在 GitHub 允许的键里；W1/W2 对这类 job
     // 不适用，要求就是制造一个无法满足的红门禁。
-    if (!job.uses.startsWith('./') && !PINNED_USE.test(job.uses)) {
+    if (!job.uses.startsWith('./') && !isPinnedUse(job.uses)) {
       findings.push(finding('W3', file, jobName, `job 的 uses 引用必须固定到 40 位提交：${job.uses}`));
     }
     findings.push(...jobPermissionsOverride(job, file, jobName));
@@ -253,7 +261,7 @@ function inspectJob(job, jobName, file, pushCoversMain) {
     const steps = Array.isArray(job.steps) ? job.steps : [];
     for (const step of steps) {
       if (!isObject(step)) continue;
-      if (typeof step.uses === 'string' && !step.uses.startsWith('./') && !PINNED_USE.test(step.uses)) {
+      if (typeof step.uses === 'string' && !step.uses.startsWith('./') && !isPinnedUse(step.uses)) {
         findings.push(finding('W3', file, jobName, `step 的 uses 引用必须固定到 40 位提交：${step.uses}`));
       }
       if (typeof step.uses === 'string' && usesActionName(step.uses) === CHECKOUT_ACTION) {

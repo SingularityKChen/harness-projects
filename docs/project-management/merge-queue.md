@@ -105,6 +105,19 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 ## 4. 当前队列
 
+### PR #618 → #619 → #620 → #621（2026-11-11）
+
+用户直接条件授权、全矩阵和组合证据见 [本轮记录](../review/2026-11-11-pr618-pr621-mmp-review.md)。只有 #620 → #621 是原生 stack #622，其余顺序用于工程接合，不建立 Planning 依赖。
+
+| 位置 | PR / issue | 接合与门 |
+|---|---|---|
+| 1 | #618 / #617 | 线性校验和安全断言；当前 head 证据/CI/批准后 rebase |
+| 2 | #619 / #597 | 对真实前项 main 接合，权限/WAL 与 generation4 组合证据保留 |
+| 3 | #620 / #606 | 对真实前两项 main 接合；原生 async 明确 rebase |
+| 4 | #621 / #607 | 父层合入后 retarget/restack；重新核对产品树与当前批准/CI |
+
+初始发布 head 保存在 `refs/backup/pr<N>-before-mmp-review-20261111`。文档索引冲突保留双方；产品变更退回独立评审。每条最终 push 用精确 lease，重新回读 head/base、全部 checks/threads、双向 issue 及批准；合入后核对 MERGED 与 main tree。#338/#147/#599、Planning Status 和 R1 继续单独验收。
+
 ### PR #600 → #601 → #602（2026-11-10）
 
 用户直接条件授权、风险矩阵与独立复评见 [本批记录](../review/2026-11-10-pr600-pr602-mmp-review.md)。原始三个 main PR 无代码依赖；顺序用于组合验收和文档索引接合，不建立 Planning 依赖。
