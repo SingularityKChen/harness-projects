@@ -33,7 +33,7 @@ Host 保持事实权威，规划与工程分离；修复不新增 Provider 写�
 
 - [x] 2026-11-11 SGT：独立分层评审、验收反例与现有事项检索。
 - [x] 2026-11-11 SGT：由评审账号一次提交 [REQUEST_CHANGES](https://github.com/SingularityKChen/harness-projects/pull/611#pullrequestreview-5851939385)。
-- [ ] 复核修复提交及该提交的实际 base、当前门禁和全线程。
+- [x] 2026-11-11 SGT：独立复评修复及整合提交，核对实际 base、当前门禁、正式批准与全线程，结论见本记录最终收尾。
 
 ## Surprises & Discoveries
 
@@ -60,7 +60,7 @@ GitHub 双账号、#616 原生栈及 #599 实装验收。
 2026-11-11 SGT：记录首轮风险矩阵、关键反例与当前 review。
 
 
-## 作者修复证据（2026-11-11 SGT，待独立复评）
+## 作者修复证据（2026-11-11 SGT；已通过本记录最终独立复评）
 
 首轮全文保留。修复从服务端自动重放 head `7aa347b7051b3df38c8a72ac1580fc77b42de539` 开始，实际 base 为 main `4320baac082fc89106ce8d533a7300a8053024c7`；首轮 review SHA 只作历史观察。
 
@@ -78,3 +78,11 @@ GitHub 双账号、#616 原生栈及 #599 实装验收。
 ### 协调者整合与当前远端证据门
 
 2026-11-11 SGT：用户原独立评审者的三份生产SHA与本候选逐字一致；复用其真实七行、正反Tab及100/200%复核结论，不重复派审。main4320上的fresh clean bundle已重算，见构建证据。最终推送后用 `gh pr view 611 -R SingularityKChen/harness-projects --json headRefOid,baseRefOid,reviewDecision,statusCheckRollup`、`gh pr checks 611 -R SingularityKChen/harness-projects` 与完整分页threads回读当前head；作者不resolve首轮线程，REQUEST_CHANGES仅由评审会话按稳定远端版本复评。
+
+### 最终独立复评与授权收尾（2026-11-11 SGT）
+
+修复源与公开证据在 `7722df51078d0f441fb97c8d259d2814a143cafa` / main `4320baac082fc89106ce8d533a7300a8053024c7` 完成独立复评并由评审账号正式 APPROVE；三份修复源码与原七行离线及正反 Tab 探针逐字一致。最终四项变异均按指定用例 KILLED，基线与还原后基线 GREEN；六张补充拼图及来源索引通过。该观察头的全部托管检查成功，四条作者回复及线程 resolve 已回读。
+
+当前技术 gross 为780，原714及755预算仅属修复前观测。六个既有提交分别承载计划、呈现、验收、交互修复、尾行及公开证据、实际父层包体，没有 debug/fixup。此前“待协调者复评”的结论 Superseded by 本节；文档收尾不改产品/测试/图片。
+
+人类本会话原任务明确要求修复、复评、归档、核对 issue 后 rebase merge，本轮直接续令为“继续评审流程”，覆盖 #611 → #615 → #612。合并只通过原生栈端点，指定预期 head 和 `merge_method=rebase`；每次最终 push 重读实际 base/head、全部 threads、正式批准、双向 issue 和 Fast Gate。合并结果以 `gh pr view 611 -R SingularityKChen/harness-projects --json state,mergeCommit,headRefOid` 及 #614 状态回读，不预写结果。#604 后层、#599 及 R1 保持各自范围。
