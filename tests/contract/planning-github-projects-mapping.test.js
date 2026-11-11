@@ -120,6 +120,8 @@ const MALFORMED = [
   ['fieldValues 还有下一页（前提被打破，不截断发布）', row(1, 'ISSUE', {}, { fieldValues: fieldValues([], true) })],
   ['同一条目同一字段出现两次', row(1, 'ISSUE', {}, { fieldValues: fieldValues([select('field-s', 'a'), select('field-s', 'b')]) })],
   ['日期值不是真实日历日', row(1, 'ISSUE', {}, { fieldValues: fieldValues([dateValue('2026-02-30')]) })],
+  ['目标日的零年不在公历域', row(1, 'ISSUE', {}, { fieldValues: fieldValues([dateValue('0000-01-01')]) })],
+  ['迭代起始日的零年不在公历域', row(1, 'ISSUE', {}, { fieldValues: fieldValues([iterationValue({ startDate: '0000-01-01' })]) })],
   ['迭代工期为负', row(1, 'ISSUE', {}, { fieldValues: fieldValues([iterationValue({ duration: -1 })]) })],
   ['字段值节点缺 __typename', row(1, 'ISSUE', {}, { fieldValues: fieldValues([{ field: { id: 'field-s', name: 'S' }, optionId: 'a', name: 'A' }]) })],
   ['同一字段既有空 optionId 又有值（空值也参与同字段去重）', row(1, 'ISSUE', {}, { fieldValues: fieldValues([select('field-s', null, null), select('field-s', 'a')]) })],

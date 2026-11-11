@@ -3,7 +3,7 @@
  * 值按 project field id 定位，同一 option id 在两个 Project 互不影响（R2）；再次同步整行覆盖展示事实；redacted 内容（含违约
  * Provider 带着的值）不产出字段事实；映射在注册时校验并冻结。原生值来自 Project A 的录制；Project B 没有回放夹具，按沙箱登记
  * 与 E1-2 实验 1 的读回合成（`docs/architecture/gate-e1-sandbox.md`、`docs/architecture/gate-e1-membership-and-draft.md`）。
- * SQLite 文件库关闭重开后，规范状态与三列展示事实逐字读回；回放账本没有未命中。
+ * SQLite 文件库关闭重开后，规范状态与五列展示事实逐字读回；回放账本没有未命中。
  */
 import '../fixtures/resolution-preflight.mjs';
 
@@ -13,6 +13,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { bootstrapWorkspace, createContext, createQueries } from '@harness-projects/core'
+import { createEntityStore } from '@harness-projects/client'
+import { toWireEntity } from '@harness-projects/controller'
+import { deriveWorkItemDetailView } from '@harness-projects/ui-model'
 import { RedactionReason, newProviderBindingId, newWorkspaceId } from '@harness-projects/domain'
 import { createFakePlanningProvider, createFakeStorage, fixtureProjectRef } from '@harness-projects/provider-fake'
 import { createGithubProjectsPlanningProvider } from '@harness-projects/provider-planning-github-projects'
@@ -82,14 +85,17 @@ for (const [label, makeStorage] of STORAGES) {
   test(`${label}：只归一映射列出的 option；未列出的只留原生名；迭代与目标日期按角色取，读回逐字一致`, async () => {
     const views = await syncProjectA(makeStorage, FULL_MAPPING)
     assert.deepEqual(fieldsOf(views, ALPHA), ['todo', { statusName: 'Todo' }])
-    assert.deepEqual(fieldsOf(views, WITH_FIELDS), ['unknown', { statusName: 'In Progress', iterationTitle: 'E1 Sprint 1', targetDate: '2026-09-24' }],
+    assert.deepEqual(fieldsOf(views, WITH_FIELDS), ['unknown', { statusName: 'In Progress', iterationTitle: 'E1 Sprint 1', iterationStartDate: '2026-09-21', iterationDurationDays: 7, targetDate: '2026-09-24' }],
       'In Progress 未被映射：规范状态是 unknown，原生名只作为展示事实')
   })
 
   test(`${label}：同一 Issue 在两个 Project 的状态按各自的字段 id 定位（R2），一个 Project 的映射不会套到另一个`, async () => {
     const options = { [IN_PROGRESS]: 'in_progress', [DONE]: 'done' }
     const mappedA = await syncProjectA(makeStorage, statusMapping(STATUS_A, options))
-    const mappedB = await syncGithub(makeStorage, PROJECT_B, projectB(), statusMapping(STATUS_B, options))
+    const windowB = { __typename: 'ProjectV2ItemFieldIterationValue', field: { id: 'iteration-b', name: 'Sprint' }, iterationId: 'i-b', title: 'B Sprint', startDate: '2026-11-01', duration: 2 }
+    const mappedB = await syncGithub(makeStorage, PROJECT_B, projectB([select(STATUS_B, DONE, 'Done'), windowB]), { ...statusMapping(STATUS_B, options), iterationFieldId: ITERATION_A })
+    const ownB = await syncGithub(makeStorage, PROJECT_B, projectB([windowB]), { iterationFieldId: 'iteration-b' })
+    assert.deepEqual(fieldsOf(ownB, SHARED), ['unknown', { iterationTitle: 'B Sprint', iterationStartDate: '2026-11-01', iterationDurationDays: 2 }], 'B 的日期只按 B 的 field id 读取；A 的映射不会串入 B')
     const foreign = await syncGithub(makeStorage, PROJECT_B, projectB(), statusMapping(STATUS_A, options))
     assert.deepEqual([fieldsOf(mappedA, SHARED), fieldsOf(mappedB, SHARED), fieldsOf(foreign, SHARED)],
       [['in_progress', { statusName: 'In Progress' }], ['done', { statusName: 'Done' }], ['unknown', undefined]],
@@ -110,14 +116,46 @@ for (const [label, makeStorage] of STORAGES) {
     for (const externalId of ['issue-1', 'issue-2']) item(externalId).fields = { ...item(externalId).fields, nativeValues: values('todo', { due: { kind: 'date', date: '2026-09-24' } }) }
     const mapping = { ...statusMapping('status', { todo: 'todo', done: 'done' }), iterationFieldId: 'sprint', targetDateFieldId: 'due' }
     const context = await createContext({ workspace: { id: newWorkspaceId(), name: '字段', project: fixtureProjectRef(bindingId), planningFieldMapping: mapping }, providers: { planning, storage: makeStorage() } })
-    assert.equal((await bootstrapWorkspace(context)).ok, true)
+    const first = await bootstrapWorkspace(context)
+    assert.equal(first.ok, true)
+    assert.equal((await bootstrapWorkspace(context)).revision, first.revision, '同值不推进 revision')
+    item('issue-2').fields.nativeValues.sprint = { ...sprint, startDate: '2026-09-02', durationDays: 0 }
+    const changed = await bootstrapWorkspace(context)
+    assert.equal(changed.revision, first.revision + 1, '仅窗口变化也推进同一投影 revision')
+    assert.deepEqual(fieldsOf(await createQueries(context).listPlanningItems(), 'issue-2')[1], { statusName: 'todo', iterationTitle: 'Sprint 1', iterationStartDate: '2026-09-02', iterationDurationDays: 0, targetDate: '2026-09-24' })
     item('issue-1').content = { kind: 'redacted', reason: RedactionReason.PermissionDenied } // 原生值仍挂着：违约 Provider
     item('issue-2').fields = { ...item('issue-2').fields, nativeValues: values('done') }
     assert.equal((await bootstrapWorkspace(context)).ok, true)
     const views = await createQueries(context).listPlanningItems()
     assert.deepEqual(fieldsOf(views, 'issue-1'), ['unknown', undefined], '转为 redacted：不产出、也不留下任何字段事实')
-    assert.deepEqual(fieldsOf(views, 'issue-2'), ['done', { statusName: 'done', iterationTitle: 'Sprint 1' }], '正控：状态更新、日期清空；迭代起始日不是目标日期')
+    assert.deepEqual(fieldsOf(views, 'issue-2'), ['done', { statusName: 'done', iterationTitle: 'Sprint 1', iterationStartDate: '2026-09-01', iterationDurationDays: 14 }], '正控：状态更新、目标日期清空；迭代起始日不是目标日期')
+    item('issue-2').fields = { ...item('issue-2').fields, nativeValues: {} }
+    assert.equal((await bootstrapWorkspace(context)).ok, true)
+    assert.deepEqual(fieldsOf(await createQueries(context).listPlanningItems(), 'issue-2'), ['unknown', undefined], '窗口清空与其他字段同次撤回')
   })
+
+  test(`${label}：较旧日期轮不能在新轮清空窗口后恢复日期`, async () => {
+    const bindingId = newProviderBindingId(), planning = createFakePlanningProvider({ bindingId }), storage = makeStorage()
+    const item = planning.state.items.find(entry => entry.ref.externalId === 'issue-1')
+    item.fields.nativeValues = { sprint: { kind: 'iteration', iterationId: 'i', title: 'Old sprint', startDate: '2026-11-01', durationDays: 2 } }
+    const context = await createContext({ workspace: { id: newWorkspaceId(), name: '轮次', project: fixtureProjectRef(bindingId), planningFieldMapping: { iterationFieldId: 'sprint' } }, providers: { planning, storage } })
+    assert.equal((await bootstrapWorkspace(context)).ok, true)
+    const original = planning.listPlanningItems.bind(planning)
+    let nested = false
+    planning.listPlanningItems = async input => {
+      const page = await original(input)
+      if (nested) return page
+      nested = true
+      item.fields.nativeValues = {}
+      assert.equal((await bootstrapWorkspace(context)).ok, true)
+      return page
+    }
+    const older = await bootstrapWorkspace(context)
+    assert.deepEqual([older.ok, older.error?.code], [false, 'stale_revision'])
+    assert.deepEqual(fieldsOf(await createQueries(context).listPlanningItems(), 'issue-1'), ['unknown', undefined])
+    storage.close?.()
+  })
+
 }
 
 const register = (planningFieldMapping, storage = createFakeStorage(), id = newWorkspaceId()) =>
@@ -145,18 +183,37 @@ test('非法映射在注册前以 TypeError 拒绝，不写任何行：unknown �
   }
 })
 
-test('SQLite 文件库：规范状态与展示事实随投影确认，关闭重开后逐字读回', async () => {
+for (const date of [undefined, '0001-01-01', '0099-12-31', '9999-12-31']) test(`SQLite 文件库：来源日期 ${date ?? '原始录制'} 经真实解码、关闭重开与安全详情逐字读回`, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'planning-fields-'))
   const path = join(dir, 'workspace.sqlite')
   try {
     let context
-    const views = await syncProjectA(() => createSqliteStorage(path), FULL_MAPPING, (registered) => { context = registered })
+    const recording = structuredClone(fixture)
+    if (date !== undefined) {
+      for (const exchange of recording.exchanges) {
+        for (const item of exchange.body.data.node.items?.nodes ?? []) {
+          for (const value of item.fieldValues.nodes) {
+            if (value.__typename === 'ProjectV2ItemFieldDateValue') value.date = date
+            if (value.__typename === 'ProjectV2ItemFieldIterationValue') { value.startDate = date; value.duration = 1 }
+          }
+        }
+      }
+    }
+    const replay = createReplay(recording)
+    misses.push(replay.misses)
+    const views = await syncGithub(() => createSqliteStorage(path), PROJECT_A, replay.transport, FULL_MAPPING, (registered) => { context = registered })
     context.storage.close()
     const reopened = createSqliteStorage(path)
     try {
       const reread = await createQueries({ ...context, storage: reopened }).listPlanningItems()
       assert.deepEqual(reread, views)
-      assert.deepEqual(fieldsOf(reread, WITH_FIELDS), ['unknown', { statusName: 'In Progress', iterationTitle: 'E1 Sprint 1', targetDate: '2026-09-24' }], '正控：三列展示事实确实落库')
+      const store = createEntityStore()
+      store.applyBaseline({ revision: 1, entities: reread.map(view => toWireEntity(view, 'provider')), source: { revision: 1, freshness: 'fresh', authority: 'provider' } })
+      const selected = reread.find(view => view.content.identity.externalId === WITH_FIELDS)
+      const input = { phase: 'received', refreshing: false, metadata: { sourceNames: {} }, read: { workspace: { id: context.workspaceId, name: '字段' }, store, connection: { connected: true }, capabilities: [{ key: 'planning.item.read', access: 'available' }] } }
+      const detail = deriveWorkItemDetailView(input, { projectId: context.workspaceId, itemId: selected.entityId }).body
+      assert.deepEqual([detail.schedule.target.date, detail.schedule.iteration.startDate, detail.schedule.iteration.endDate], [date ?? '2026-09-24', date ?? '2026-09-21', date ?? '2026-09-27'], '真实解码、落库重开与 wire/client 后同一详情保留两槽')
+      assert.deepEqual(fieldsOf(reread, WITH_FIELDS), ['unknown', { statusName: 'In Progress', iterationTitle: 'E1 Sprint 1', iterationStartDate: date ?? '2026-09-21', iterationDurationDays: date === undefined ? 7 : 1, targetDate: date ?? '2026-09-24' }], '正控：五列展示事实确实落库')
     } finally { reopened.close() }
   } finally {
     rmSync(dir, { recursive: true, force: true })

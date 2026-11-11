@@ -1,7 +1,8 @@
 // #414：准入拒绝不能改动任何既有 schema、行、账本或世代。
 import '../fixtures/resolution-preflight.mjs'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -24,7 +25,7 @@ const incompatible = (reason) => (error) => {
   assert.equal(error.constructor.name, 'IncompatibleDatabaseError')
   assert.equal(error.code, 'incompatible_database')
   if (reason) assert.equal(error.reason, reason)
-  assert.equal(error.expectedGeneration, 3)
+  assert.equal(error.expectedGeneration, 4)
   assert.equal(typeof error.actualGeneration, 'number')
   assert.equal(error.action, 'back_up_and_rebuild')
   assert.match(error.message, /备份/)
@@ -35,9 +36,9 @@ const withoutIntent = (sql) => sql.replace(/^.*external_intent_json.*\n/gm, '')
 const cases = [
   ['prior-start-work-only-intent-check', (db) => fixture(db, versions.length, (sql) => sql.replace(/external_intent_json TEXT CHECK[^\n]+/, "external_intent_json TEXT CHECK (external_intent_json IS NULL OR (command_name = 'startWork' AND json_valid(external_intent_json) AND json_type(external_intent_json) = 'object')),")), 'schema_shape'],
   ['old-generation-two', (db) => { fixture(db, versions.length, withoutIntent); db.exec("INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=2") }, 'generation'],
-  ...[0, 3].map((generation) => [`masked-old-intent-shape-${generation}`, (db) => { fixture(db, versions.length, withoutIntent); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
+  ...[0, 4].map((generation) => [`masked-old-intent-shape-${generation}`, (db) => { fixture(db, versions.length, withoutIntent); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
   ['old-generation-one', (db) => { fixture(db, versions.length, withoutOwner); db.exec("INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=1") }, 'generation'],
-  ...[0, 3].map((generation) => [`masked-old-owner-shape-${generation}`, (db) => { fixture(db, versions.length, withoutOwner); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
+  ...[0, 4].map((generation) => [`masked-old-owner-shape-${generation}`, (db) => { fixture(db, versions.length, withoutOwner); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
   ['prefix1', (db) => fixture(db, 1), 'version_list'],
   ['prefix2', (db) => fixture(db, 2), 'version_list'],
   ['prefix4', (db) => fixture(db, 4), 'version_list'],
@@ -49,7 +50,7 @@ const cases = [
   ['quoted-ledger-primary-key', (db) => { fixture(db, versions.length, (sql) => sql.replace('version INTEGER PRIMARY KEY', 'version INTEGER "PRIMARY" "KEY"')); assert.equal(db.prepare('PRAGMA table_info(schema_migrations)').all().find((row) => row.name === 'version').pk, 0) }, 'schema_shape'],
   ['quoted-ledger-not-null', (db) => { fixture(db, versions.length, (sql) => sql.replace('applied_at TEXT NOT NULL', 'applied_at TEXT "NOT" "NULL"')); assert.equal(db.prepare('PRAGMA table_info(schema_migrations)').all().find((row) => row.name === 'applied_at').notnull, 0) }, 'schema_shape'],
   ['generation', (db) => db.exec('PRAGMA user_version=99'), 'generation'],
-  ['marked-wrong', (db) => { fixture(db, 1); db.exec('PRAGMA user_version=3') }, 'version_list'],
+  ['marked-wrong', (db) => { fixture(db, 1); db.exec('PRAGMA user_version=4') }, 'version_list'],
   ['unknown', (db) => { fixture(db); db.exec('CREATE TABLE sqliteX_extra(value TEXT); INSERT INTO sqliteX_extra VALUES (\'keep\')') }, 'unknown_objects'],
   ['unicode-identifier', (db) => fixture(db, versions.length, (sql) => sql.replaceAll('workspace', 'worKspace')), 'unknown_objects'],
   ['malformed-ledger', (db) => db.exec('CREATE TABLE schema_migrations (garbage TEXT); INSERT INTO schema_migrations VALUES (\'keep\')'), 'schema_shape'],
@@ -113,7 +114,7 @@ for (const whitespace of [' ', '\t', '\n', '\f', '\r']) test(`SQLite ASCII 空�
     const before = snapshot(db)
     assert.deepEqual(sqlite.migrate(db), { applied: [], version: 7 })
     sqlite.createSqliteStorage(file).close()
-    assert.deepEqual(snapshot(db), { ...before, generation: 3 })
+    assert.deepEqual(snapshot(db), { ...before, generation: 4 })
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }) }
 })
 
@@ -124,7 +125,7 @@ for (const quoted of [false, true]) test(`实际完整当前链有数据（引�
     fixture(db, versions.length, (sql) => quoted ? sql.replace(/\bid\b/g, '"ID"') : sql); db.exec("INSERT INTO workspace(id,name,status_policy) VALUES ('kept','kept','provider_authoritative')")
     const before = snapshot(db)
     assert.deepEqual(sqlite.migrate(db), { applied: [], version: 7 })
-    assert.deepEqual(snapshot(db), { ...before, generation: 3 })
+    assert.deepEqual(snapshot(db), { ...before, generation: 4 })
     const stamped = snapshot(db)
     sqlite.createSqliteStorage(file).close()
     for (let i = 0; i < 2; i++) assert.deepEqual(sqlite.migrate(db), { applied: [], version: 7 })
@@ -181,4 +182,23 @@ test('资源与写锁失败保留原错误，工厂失败释放句柄', () => {
       db.exec('BEGIN EXCLUSIVE; ROLLBACK')
     } finally { db.close() }
   } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+// 旧的完整 schema 即使伪装为当前 generation，也不得补列、盖章或改写文件。
+for (const generation of [0, 3, 4]) test(`旧日期投影 shape @${generation}：拒绝后逻辑与文件 hash 均不变`, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'baseline-schedule-')), file = join(dir, 'workspace.sqlite')
+  const db = sqlite.openDatabase(file)
+  let closed = false
+  try {
+    fixture(db, versions.length, sql => sql.replace(/^.*field_iteration_(?:start_date|duration_days).*\n/gm, ''))
+    db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`)
+    const before = snapshot(db)
+    db.close(); closed = true
+    const hash = () => createHash('sha256').update(readFileSync(file)).digest('hex')
+    const original = hash()
+    assert.throws(() => sqlite.createSqliteStorage(file), incompatible(generation === 3 ? 'generation' : 'schema_shape'))
+    assert.equal(hash(), original)
+    const reopened = sqlite.openDatabase(file)
+    try { assert.deepEqual(snapshot(reopened), before) } finally { reopened.close() }
+  } finally { if (!closed) db.close(); rmSync(dir, { recursive: true, force: true }) }
 })

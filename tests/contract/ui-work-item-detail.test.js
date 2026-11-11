@@ -307,3 +307,13 @@ test('unknown header stays neutral with missing or unmapped native status', () =
     assert.ok(html.includes('<dt>完整规划状态：</dt><dd>' + (statusName === undefined ? '未知' : 'Native Stage（未映射）') + '</dd>'))
   }
 })
+
+test('真实日期与所属迭代窗口在唯一详情同时呈现，明确不是任务工期，零天与无值诚实说明', () => {
+  const fields = { targetDate: '2024-03-01', iterationTitle: 'Sprint', iterationStartDate: '2024-02-28', iterationDurationDays: 3 }
+  const render = planningFields => drawer(views([wire('ent-aa', { planningFields })]).detailView)
+  assert.match(render(fields), /2024-02-28.*2024-03-01/)
+  assert.match(render(fields), /所属迭代窗口.*不是任务工期/)
+  assert.match(render({ ...fields, iterationDurationDays: 0 }), /零天，无可画区间/)
+  assert.match(render({}), /来源未提供可用排期/)
+  assert.match(render({ ...fields, iterationStartDate: '2024-02-30' }), /迭代窗口无效/)
+})
