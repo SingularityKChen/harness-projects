@@ -97,5 +97,38 @@
       }
     }
   },
-  "limitations": "Local production-composed controlled inputs; not installed Host, real platform write/UAT or #599/R1 acceptance."
+  "limitations": "Local production-composed controlled inputs; not installed Host, real platform write/UAT or #599/R1 acceptance.",
+  "serialIntegration": {
+    "head": "1967a81073f6fd59fd227e9a7effab6354c5dbf5",
+    "actualBase": "8d9175f5305b91d52cbda5201f2f4edfbea1c730",
+    "unchangedReviewedOwnTechnicalBlobs": 13,
+    "sharedModule": "bodyOf AST text matches independently reviewed8b35; ItemTable AST text matches approved6117722",
+    "currentSourceSha256": {
+      "packages/ui/src/work-item-list.ts": "f1ba50a99498721f128721299858de880875150f53d22a2eb89bd5cddb0624bd",
+      "packages/ui/src/table-controls.ts": "2b78bbdbc66bb9ecacc8e2da7e32f7a586f6d599732751420af52884b11cf6ee",
+      "packages/ui/src/table-presentation.ts": "d36b6697068ab5504e5ccb21ad8410bdc42cbc590d1307bd700ac80ff506e80e",
+      "tests/browser/planning-board.test.js": "b5484dc896a18ae453461b35e79c0bf145482bdc7be5cf6e09c82fef6dbaa01e"
+    },
+    "newComposedPNGsha256": {
+      "repair-clear-before.png": "16a6fa3a1bc69284a884a858bfd921baca1b7a4341e14f639f73e1a4f305e71f",
+      "repair-clear-list.png": "b17c2530175994d85f9c75e2c29cc3bb4f34dde29f128d2725a930892bbefe6d",
+      "repair-sort-cards.png": "2750cbbc088a1a2da819026425f39196d53e5585713cce12972d78064836b9e0",
+      "repair-sort-inherited.png": "62d0c30df253628cd2f94a9074cc6711e6fd72af596462f7ef509ed05963faf5",
+      "repair-zero-board-empty.png": "66d3d1dc09980941a2db79018e64b4b43978c658aae50b944c46fa2cb94e726e",
+      "repair-zero-board-redacted.png": "66d3d1dc09980941a2db79018e64b4b43978c658aae50b944c46fa2cb94e726e",
+      "repair-zero-list-empty.png": "b4161dade84eb128d7f0d6701a467da531cab195589b13523197b4f9e2b88ccb",
+      "repair-zero-list-redacted.png": "5b8347fb58e7c20e4d12597e50c8157530a71b5349d85d1890671ab87458a6db"
+    },
+    "samePNGAsEf102": {
+      "repair-clear-before.png": false,
+      "repair-clear-list.png": false,
+      "repair-sort-cards.png": false,
+      "repair-sort-inherited.png": false,
+      "repair-zero-board-empty.png": false,
+      "repair-zero-board-redacted.png": false,
+      "repair-zero-list-empty.png": false,
+      "repair-zero-list-redacted.png": false
+    },
+    "validation": "8 current-parent critical cases plus typecheck; no full-suite/mutation repetition"
+  }
 }

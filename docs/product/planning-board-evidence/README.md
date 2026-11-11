@@ -88,3 +88,5 @@
 Before为本地候选树中精确物化46d86da5两份原版生产源的dirty观察，采集后恢复；不是把后来候选写成原始commit。after为clean ef102f30；用户独立复评0fd415e8与此候选production/apps无差异，只有两行测试拍照顺序调整，最终clean三项关键浏览器已重跑。完整3964为此前相同生产修复树的运行，含两项既有SSR warning；最终窄32浏览器/39合同/9边界/typecheck通过，最终远端精确提交仍须复评。
 
 [精选图像与技术输入身份索引](mmp-review-evidence.json)记录原PNG hash、crop/scale、source身份和本轮技术文件hash。拼图仅为可查看的静态证据，不把fixture、CI或源码接受当作#599安装、人类UAT或R1放行。原首轮评审与作者逐项RED/GREEN见 `docs/review/pr-612-mmp-review.md`。
+
+串行整合到已批准父层8d9175f5后，clean1967a810验证三层8项关键组合及typecheck，录制8张本轮截图；共享work-item-list模块的bodyOf逐字保留已复评Board，ItemTable逐字保留已批准共享层。其余13本叶技术blob不变。当前图像hash与旧图等价情况记录在同一索引，历史图不重标；原固定源变异及完整suite不重复。
