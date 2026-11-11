@@ -79,3 +79,7 @@ GitHub 双账号、#616 原生栈及 #599 实装验收。
 复评指出中间修复的“未知（未映射）”会对完全缺失 native 标签的输入多断言未映射。上节“未知（未映射）”／77.2px 与 35 项为中间候选观察，**Superseded by 本节最终中性摘要与 36 项局部验证（2026-11-11）**，保留该历史。
 
 缺失 native 的 SSR 与有 native 的真实组合 browser 各先 RED（22 项中 20 通过、2 失败），随后头部统一“未知”；完整 `未知` 或 `Native Stage（未映射）` 仍在 dl 逐字断言。最终 320×320、200% 状态一行约 38.6px，正文 y552.4；局部 36/36、消费者 60/60、typecheck、boundaries 9/9。没有新增 DTO flag、后缀解析或状态权威；后续独立复评与集成门仍由协调者执行。
+
+### 串行整合验证
+
+2026-11-11 SGT：本叶已重放到精确父层7722df51，自己的生产/测试blob逐字等于独立变异7/7检出的daf7df23；仅继承已批准共享层。clean630d24d6新跑28项详情/Delivery/安全view及typecheck通过，10张图与fec后图逐字相等，新actual-base bundle见构建证据。当前远端完整head/base及CI用 `gh pr view 615 -R SingularityKChen/harness-projects --json headRefOid,baseRefOid,reviewDecision,statusCheckRollup` 与 `gh pr checks 615 -R SingularityKChen/harness-projects` 回读；首轮两线程留给精确远端正式复评，作者不resolve。
