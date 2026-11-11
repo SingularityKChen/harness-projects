@@ -104,3 +104,9 @@ client SHA-256 为 `d7c438bc64bb3f68c848276104e10e0e82bd8ccfe405c39ace2eabd87cb7
 | pack tarball | 336832 | 339557 | 2725 |
 
 input与external图无新增/移除，React及jsx-runtime沿既有external，bundledReact=[]。本轮沿原native控件/单一Host角色消费替换旧呈现；没有依赖、build或Loader配置变化。该结论来自实际两边构建与pack，不由“零新依赖”推断；属于本地source证据，不证明安装Host/全主题/WCAG或#599产品接受。
+
+## 2026-11-11 MMP 修复后的共享层（#614）
+
+实际main父层为clean `4320baac082fc89106ce8d533a7300a8053024c7`，clean修复候选为 `eff03e790d10d04db7e11ec23795207d31fcffe5`。使用相同Node v26.13.0/pnpm10.28.2/esbuild0.28.2、原生产build及gzip level9实测；不是把原37c测试或旧包体转作新结果。client raw754727→766719（+11992），gzip158669→161476（+2807）；Host raw697763/gzip159862与hash不变；pack336832→339783（+2951）。输入/external集合不变，bundledReact=[]。
+
+候选client SHA-256=`ee6185d5550551f75c55fa17e833c8280fe47b6af9fa2eba3ce5b2b3f7ce14cc`；pack SHA-256=`aad4441f4ca770182b375a39099880599d4c28be9c74a5aac36ca2fd9eeefdd6`。后续仅文档的提交不改变本轮生产输入。按原报告工具在该base与候选的已登记clean检出复算；原本叶ExecPlan Batch3记录命令，输出放本地忽略目录。该数据只证明本地构建，不是安装/#599/UAT/R1接受。
