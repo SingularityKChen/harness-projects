@@ -1,0 +1,101 @@
+{
+  "date": "2026-11-11 SGT",
+  "pullRequest": 612,
+  "historicalFirstReviewHead": "200803e2ccf05a4163032ecd6d9a291771e1817c",
+  "localCleanRepairHead": "ef102f3030d90d4ad0ae6c406c781dad8a23dcf0",
+  "baseAtLocalRepair": "823ff8faeaf396f6ba95a3b1f004d1db246bd76c",
+  "imageIdentityNote": "Original before/after identities retained; panel source filenames identify observations, not repository links. Subsequent restack does not relabel captures.",
+  "criticalTechnicalSha256": {
+    "packages/ui-model/src/index.ts": "17b337aa523ba2c640bcdafd070be9008ce59f8459e20d38d16b56617b335c2a",
+    "packages/ui-model/src/planning-board.ts": "6bba4dc285431d369b148a14cd240b1591b6d398db46d691515fa6529d62a2d8",
+    "packages/ui-model/src/work-item-list-view.ts": "b0fd83a7747879db13198332124c96462f0b1d28ddc9eeefc7c6b8904e661359",
+    "packages/ui/src/item-link.ts": "19ac767f5ef90d1d196265bb66959d8042376675f1162abbe1ba7515dbf1b294",
+    "packages/ui/src/table-controls.ts": "2b78bbdbc66bb9ecacc8e2da7e32f7a586f6d599732751420af52884b11cf6ee",
+    "packages/ui/src/work-item-app.ts": "b7f5f4ef87b862cc70690808523889dcdfc2934cdfc88ca602a9c718235ccf5b",
+    "packages/ui/src/work-item-board.ts": "9bf9bf56d5ae994910aa4fbf934cf36a5f484af885b18321d9f383f5b5db830b",
+    "packages/ui/src/work-item-list.ts": "48c8e6cf47748693cc6f6bab4fa23db18d963958a78fc64cdedbffaaef46a0b5",
+    "packages/ui/src/work-item-project.ts": "fae9764100d9d2c08cd90494171e76e26a9df27d2b5d9f7a6ee7c73e462674f8",
+    "tests/browser/planning-board.test.js": "b5484dc896a18ae453461b35e79c0bf145482bdc7be5cf6e09c82fef6dbaa01e",
+    "tests/contract/ui-planning-board.test.js": "e777952a1f1026d873c4c711c1a601309e4fc54a730e49c035b8414876fee89f",
+    "tests/contract/ui-workspace-status.test.js": "ce7f4fc66f2a77fecf6eae04a2b3c0d1bf9b7d986f6c4153c7962c11d2da63dc",
+    "tests/fixtures/execution-drawer-browser.mjs": "2faf05148f70c8754f8f7b79996748a18cfd435ad1ae14026fd78ee8ae5c8a4b",
+    "tests/fixtures/table-geometry-browser.mjs": "731740ad0efab54c32e8d3eee3c5fdc28e20e057459b41be29ed42d217dc0f7f"
+  },
+  "sheets": {
+    "mmp-authorized-zero-sheet.png": {
+      "sha256": "ac38d80ea647de0b23693cd69737aafd50ca796cb37c69d17dec47f5d510414e",
+      "panelProvenance": {
+        "file": "p1-authorized-zero-contact.png",
+        "sha256": "ac38d80ea647de0b23693cd69737aafd50ca796cb37c69d17dec47f5d510414e",
+        "panels": [
+          [
+            "before",
+            "repair-zero-board-empty",
+            "Before: empty confirmed snapshot"
+          ],
+          [
+            "before",
+            "repair-zero-board-redacted",
+            "Before: all-redacted confirmed snapshot"
+          ],
+          [
+            "after",
+            "repair-zero-board-empty",
+            "After: empty confirmed snapshot"
+          ],
+          [
+            "after",
+            "repair-zero-board-redacted",
+            "After: all-redacted confirmed snapshot"
+          ]
+        ],
+        "crop": [
+          0,
+          0,
+          1440,
+          360
+        ],
+        "scale": 0.5,
+        "scope": "Scope: current loaded readable items; equality does not establish total Provider/Project emptiness."
+      }
+    },
+    "mmp-query-controls-sheet.png": {
+      "sha256": "f48560cb89c76f167fa9e6976c2def42255846bf3dcb934c64e8cf175c1fdc8f",
+      "panelProvenance": {
+        "file": "p2-query-controls-contact.png",
+        "sha256": "f48560cb89c76f167fa9e6976c2def42255846bf3dcb934c64e8cf175c1fdc8f",
+        "panels": [
+          [
+            "before",
+            "repair-clear-list",
+            "Before: List after Board clear loses Source column"
+          ],
+          [
+            "before",
+            "repair-sort-inherited",
+            "Before: Planning sort offered as ordinary Board sort"
+          ],
+          [
+            "after",
+            "repair-clear-list",
+            "After: List after Board clear retains Source column"
+          ],
+          [
+            "after",
+            "repair-sort-inherited",
+            "After: inherited sort retained; fixed column order stated"
+          ]
+        ],
+        "crop": [
+          0,
+          0,
+          1440,
+          560
+        ],
+        "scale": 0.5,
+        "scope": "Controls share one query owner; Board clear retains List display columns and canonical groups stay fixed."
+      }
+    }
+  },
+  "limitations": "Local production-composed controlled inputs; not installed Host, real platform write/UAT or #599/R1 acceptance."
+}

@@ -77,3 +77,14 @@
 | `parent-list-1440-dark.png` | `558ac7bc5f62` | `4cda926b388922251c850bcf9372726ab500217f14ff0e8baa46024d1d4f80e4` |
 | `parent-list-1440-light.png` | `558ac7bc5f62` | `70138abd3ff4521c6ed07e3c57753efe24e2b824c9f80d547a5a4a9d677f621e` |
 | `unknown-read-capability.png` | `f23b7d398ce7` | `f3c9d99663caf86f441a85e983424b80a86820d216c623795abc0c78189add83` |
+
+
+## 2026-11-11 MMP 修复对照
+
+[零可读授权投影等价](mmp-authorized-zero-sheet.png)：同一confirmed read的空输入与全redacted输入，在真实组成List/Board的DOM及AX中使用同一零态。判断范围始终是当前已加载可读条目，不外推完整Provider/Project总量；stale、loading、denied及filtered-zero保持独立。
+
+[共享查询清除与组内排序](mmp-query-controls-sheet.png)：List来源列经Board清除后保留；Board新选择仅为有意义的组内排序，继承List状态排序显示真实disabled已选标记且规范列序固定；回List原排序仍保留。
+
+Before为本地候选树中精确物化46d86da5两份原版生产源的dirty观察，采集后恢复；不是把后来候选写成原始commit。after为clean ef102f30；用户独立复评0fd415e8与此候选production/apps无差异，只有两行测试拍照顺序调整，最终clean三项关键浏览器已重跑。完整3964为此前相同生产修复树的运行，含两项既有SSR warning；最终窄32浏览器/39合同/9边界/typecheck通过，最终远端精确提交仍须复评。
+
+[精选图像与技术输入身份索引](mmp-review-evidence.json)记录原PNG hash、crop/scale、source身份和本轮技术文件hash。拼图仅为可查看的静态证据，不把fixture、CI或源码接受当作#599安装、人类UAT或R1放行。原首轮评审与作者逐项RED/GREEN见 `docs/review/pr-612-mmp-review.md`。
