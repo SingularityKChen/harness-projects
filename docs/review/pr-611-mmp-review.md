@@ -74,3 +74,7 @@ GitHub 双账号、#616 原生栈及 #599 实装验收。
 本地修复源 `0992a703029949f9a8aba66231bd37df5ee7e7d2` 的相关浏览器33/33、契约55/55、边界9/9与typecheck通过；末尾redacted行的额外断言单独1/1通过。用例及命令在原 ExecPlan Batch4，完整日志保留于本批 ignored 运行目录。中间两次浏览器32/33是新测试等待ResizeObserver不足，已改为等待真实table/client宽度及ARIA边界；这些失败未冒称通过。
 
 作者证据不更改首轮 REQUEST_CHANGES，也不替代最新远端检查、协调者独立复评、实装 #599 或 R1。未 push、回复/resolve线程、合并或修改规划字段/依赖。
+
+### 协调者整合与当前远端证据门
+
+2026-11-11 SGT：用户原独立评审者的三份生产SHA与本候选逐字一致；复用其真实七行、正反Tab及100/200%复核结论，不重复派审。main4320上的fresh clean bundle已重算，见构建证据。最终推送后用 `gh pr view 611 -R SingularityKChen/harness-projects --json headRefOid,baseRefOid,reviewDecision,statusCheckRollup`、`gh pr checks 611 -R SingularityKChen/harness-projects` 与完整分页threads回读当前head；作者不resolve首轮线程，REQUEST_CHANGES仅由评审会话按稳定远端版本复评。
