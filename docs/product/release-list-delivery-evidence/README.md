@@ -46,3 +46,28 @@
 | `list-light-1440-comparison.png` | 4320×940 | 443820 | `486d4cbb52f3e1750d7dd22d1e3c286436d92d7d9453209235d75ed1b90aecb2` |
 | `narrow-dark-390-sheet.png` | 1560×940 | 313632 | `478b53396780dc441b1009023731bad0a088858c3396c3495216a711795a7951` |
 | `narrow-light-390-sheet.png` | 1560×940 | 308607 | `5b209e4d99c7ec070f2fad6aa5d539d8d715401b2368ca4a8e413ca5e999ca6a` |
+
+
+## MMP 精选对照补齐（2026-11-11）
+
+首轮正常画面与绿色检查的完整性结论 Superseded by 本节组合反例与作者修复证据；既有图片仍归原捕获 head。以下拼图保留原始视口像素，宽图每列缩至600px，窄图保持390px；可打开原图检查。源码夹具仍为真实 Header、WorkItemApp 和 EntityStore，受控读取端口不代表安装 Host 或线上 Provider。
+
+历史宽度图取自2026-11-10已有捕获：左为 `d449f90b12a114cea78f2de97953a4266204b2b9`，右为 clean 候选 `4c5eff2a908813baf629de7cdc8987fe3e67bb74`。四行依次 List1200、List1024、Delivery1200、Delivery1024；900px高、100%字号、同七条参考数据、冻结公开 Host 角色输入。来源与精选PNG hash见 [历史宽度索引](mmp-historical-width-manifest.json)，旧图不冒充本轮修复。
+
+![历史浅色1200与1024](mmp-historical-widths-light-sheet.png)
+
+![历史深色1200与1024](mmp-historical-widths-dark-sheet.png)
+
+以下本轮对照左为 `7aa347b7051b3df38c8a72ac1580fc77b42de539`，右为源码 clean 的 `0992a703029949f9a8aba66231bd37df5ee7e7d2`，相同fixture输入。每图依次1200/1024参考七项、1200长文120可读项+1 redacted；Unknown保留来源原生“待确认”。长文及离线状态使用系统Canvas fallback，参考场景使用冻结公开Host角色；两主题分开，字体14px。
+
+![本轮浅色宽度与长文](mmp-width-long-light-sheet.png)
+
+![本轮深色宽度与长文](mmp-width-long-dark-sheet.png)
+
+离线陈旧拼图上下为390×900与390×480，200%字号即根字体28px。四列为修复前提示、修复后提示、修复前最大滚动、修复后最大滚动；仅滚实际auto/scroll owner，保留所有安全事实，没有裁字来假装可达。修复后表格分别位于y618.80–884.80及198.19–464.19；尾部redacted行真实命中，最后可读链接命中并能打开唯一详情。
+
+![浅色离线陈旧与200%](mmp-offline-stale-200-light-sheet.png)
+
+![深色离线陈旧与200%](mmp-offline-stale-200-dark-sheet.png)
+
+[本轮精选来源索引](mmp-capture-manifest.json) 包含捕获时间、准确head/base、源码/fixture SHA-256、主题/字号/数据身份和拼图hash；完整原始运行日志与个图hash由本地独立复核保留。新图与旧图分别标记，不因后续重放改变归属。本地验证只覆盖源码组合；200%字号不等于所有浏览器缩放/AT，实装、UAT和R1仍独立。

@@ -49,6 +49,8 @@ Delivery保留真实仓库选择、刷新本页、独立读取状态/页码/总�
 
 A不带B已有35行settings smoke及7 gross JSX修复。Host仍拥有权威状态，未Provider ack/reconcile不Saved；凭据只存secret句柄。无Provider/core/schema/持久化迁移、额外事实源、业务写入、build/manifest/lock/workflow修改；无merge、Status或native关系写入。
 
+MMP 修复仅重开既有表格呈现、列宽与 ItemTable 表头焦点区域；`bodyOf` 与页面 owner 归后层。测试只补既有 geometry/resize 文件；公开新增文件限既有证据目录中的 `mmp-*.png`、两份 `mmp-*-manifest.json` 和本轮评审记录；用户另授权机械核销继承的 `docs/review/pr-610-mmp-review.md` 最后CI／合并待办。不改共享索引、v3 冻结素材或其他运行态内容。全叶技术严格 <800、文档严格 <1300，所有增删和 JSON 均计入。
+
 ## Plan of Work
 
 ### Batch 1 · 载体与真实RED
@@ -108,11 +110,28 @@ A不带B已有35行settings smoke及7 gross JSX修复。Host仍拥有权威状�
 
 期望两report source.head匹配已锁定base/head、source.dirty=false，raw/gzip/pack/inputs/externals实际delta可解释、React external且bundledReact=[]；无theme module/build漂移。旧baseline或dirty观察不当candidate证据。**回滚**：B未落地可revert A；后层已消费则按Board/B→A逆序，保留恢复锚点。
 
+### Batch 4 · 首轮 MMP 反例修复（2026-11-11）
+
+最小闭环：离线陈旧提示增长后仍可抵达表格尾行；无位移调宽保持自动布局，捕获中变化使用当前边界；Tab 揭示表头排序并保留局部 Y；公开补齐宽度与状态对照。文件集合沿用 Global Constraints。
+
+先在真实 Header→WorkItemApp→EntityStore 夹具复现，不加 Provider、store、theme 或 router。选择正文现有容器滚动，拒绝裁掉安全提示或改写 `bodyOf`；保留表格自己的 XY/sticky。调宽开始只保存恢复快照，实际值变化才固定偏好；Tab 仅在原表头控件之间以 preventScroll 依原 DOM 顺序转移，边界维持浏览器顺序。
+
+本批复用 Batch1 的 typecheck、boundaries、发布检查与相关测试命令；具体窄测试为以下命令，期望三个新反例先 RED 后 GREEN，现有取消/reset/scope 与安全反例保留：
+
+    node --test --test-timeout=120000 --test-name-pattern='offline stale|Tab reveals|no-op pointer' tests/browser/table-geometry.test.js tests/browser/table-resize.test.js
+    pnpm test:file tests/browser/table-geometry.test.js tests/browser/table-resize.test.js tests/browser/table-resize-regressions.test.js tests/browser/table-query.test.js tests/browser/table-rq-integration.test.js tests/browser/workspace-header.test.js tests/browser/delivery-overview.test.js
+    pnpm test:file tests/contract/ui-column-resize.test.js tests/contract/ui-local-table-view.test.js tests/contract/ui-table-controls.test.js tests/contract/ui-work-item-list.test.js tests/contract/ui-work-item-list-view.test.js tests/contract/ui-workspace-status.test.js
+
+回滚只撤本批本地提交，保留首轮意见与旧截图身份；后层集成仍由协调者串行处理。当前远端、重放后包体、独立复评、实装和 R1 各自回读，不由本批本地通过代替。
+
 ## Validation and Acceptance
 
 Batch1证明实际缺口与准入，Batch2证明List/Delivery与共享角色的完整可用/视觉/安全闭环，Batch3证明当前head可审阅；三者不能替代。A独立关闭新A issue，Refs604，不能关闭原604或解锁605。Ready、source测试、静态稿、installed Host美观和人类产品/UAT接受分别记录；#599安装验收与R1独立。
 
 ## Progress
+
+- [x] (2026-11-11 SGT) Batch4 本地修复：真实组合三项 RED 后修复；相关 browser33、contract55、boundaries9 和 typecheck 通过；尾部 redacted 行额外命中与可读尾项点击复核通过。公开精选来源与有标签拼图已补齐。
+- [ ] (2026-11-11 SGT) 协调者对稳定源码独立复评、串行整合、最新远端门与包体发布；不触及 #599 或 R1 接受。
 
 - [x] (2026-11-10 SGT) 首次Hosted Verify旧option标签契约修复：当前84254b44 source单文件RED（1/2）→GREEN（2/2）；完整pnpm test为contract1550、integration2185、e2e226全通过，各层0 fail/skip/cancelled/todo。只改契约及本计划，新增test提交，不amend已推HEAD。
 
@@ -125,6 +144,8 @@ Batch1证明实际缺口与准入，Batch2证明List/Delivery与共享角色的�
 - [x] (2026-11-10 SGT) Batch3发布门：当前代码/证据head cde887f7的required Fast Gate及相关CI通过，双向614/611与全量线程回读通过，已Ready不merge；归档后最终head仍须重复当前门。
 
 ## Surprises & Discoveries
+
+MMP 真实反例证明旧正常矩阵未覆盖离线+陈旧+窄屏+200% 的组合；提示兄弟节点没有可滚动的正文承载，溢出最终被祖先裁剪。表头 native Tab 还会把 sticky 的文档位置拉回，故只做水平 reveal 不足以保留 Y。新调宽测试两次先读到 ResizeObserver 完成前的旧几何，改等真实 table/client 宽度和 ARIA 边界，不靠固定 sleep；失败日志保留为中间证据。
 
 首次公开head `84254b44` 的Hosted Browser全套通过，但Verify暴露旧`ui-table-controls`契约仍匹配无字段前缀option。当前source单文件复现RED后只校准精确可视文字；native value/selected、readable count、默认/重置及noMatches安全判断保留。该CI新真实失败支持在当前A source运行一次完整pnpm test，生产/fixture和88张图不变。
 
@@ -151,6 +172,8 @@ Delivery现有flex链只在List scroll存在时生效，曾令长交付内容在
 原owner在停止点报告真实selection RED（aria-current null而非true）、真实settings smoke1/1及相关合同43/43、typecheck、boundaries9/9；这些是准备载体证据，不是A已实施。共享executionStyles被Delivery调用且拼接FORM_STYLES，故execution-presentation整文件由A拥有；其原12预测从B移A，不额外加12。B改FORM后再回归A Delivery。
 
 ## Decision Log
+
+Decision（2026-11-11 / 本批作者）：以现有 CSS 正文 scroll owner 和原列宽 owner 修复，表头仅消费 DOM 控件顺序。Rationale：不用裁安全事实、第二状态或跨 owner 修改换取可达性；实际 base 采用 #610 合入后的 main，首轮 review SHA 保留为历史。公开旧1200/1024图保留原拍摄 SHA，新离线/长文图绑定修复源，禁止重标为后续 head。
 
 Decision：独立视觉F1/F2只在TableControls/DeliveryOverview及其判别browser修复，不重启已批准v3；稳定共享roles/DTO/route/width在`ac4980b`已获独立代码PASS后，A修复与B detail/settings/forms以互不重叠源文件并行。Rationale：F1需填值后保留控件内目的与每个option字段前缀；F2需按实际组件容器宽，将窄summary label/value同排、允许自然增长。两方交接前不重放dirty tree，最终集成回归由协调者执行。Date/Author：2026-11-10 SGT / 协调者裁决、各子系统唯一owner。
 
@@ -186,9 +209,13 @@ Batch1及A工程实现已完成本地闭环，首轮`ac4980b`候选树实际技�
 
 原首轮观测（Superseded by 本节F1/F2及旧scope契约复验记录，2026-11-10）：本地命令得到86/86 contract、61/61 browser（含完整几何/resize、真实Host读取、Delivery、旧detail/settings/执行消费者），零fail/skip/pageerror；typecheck与boundaries9/9。实测1440/1200表铺满1392/1152，Host44、表头y195.984/44、短行58，真实numberLabel及工程“无”保留，selected只由当前授权route呈现。源码合成before/after/reference和状态矩阵为本地证据，不等于安装Host接受；代码/视觉独立review、clean bundle、静态证据打包与最终远端门由协调者在交接后完成，未声明Ready或关闭#614/#604。
 
-最终交付：本叶技术gross714，公开6张同场景静态对照、生产源/fixture/88PNG指纹及真实包体差值；独立代码、视觉与两次test-only复核均ACCEPT。完整本地3961测试通过；初次托管旧option文字契约失败已按持久可视字段目的订正，当前cde887f7相关CI及required Fast Gate通过后Ready。源视觉/安装验收仍分开；#604后层与#605均未由本叶冒充完成。无新增技术债。
+最终交付：本叶技术gross714，公开6张同场景静态对照、生产源/fixture/88PNG指纹及真实包体差值；Superseded by 本节 Batch4 MMP 修复结果（2026-11-11，历史测试与图像仍归原 head）；独立代码、视觉与两次test-only复核均ACCEPT。完整本地3961测试通过；初次托管旧option文字契约失败已按持久可视字段目的订正，当前cde887f7相关CI及required Fast Gate通过后Ready。源视觉/安装验收仍分开；#604后层与#605均未由本叶冒充完成。无新增技术债。
+
+Batch4 MMP 修复结果：本地三个独有行为与原相关消费者通过；公开宽度、长文、异常与200%画面可由 `docs/product/release-list-delivery-evidence/README.md` 检查。源码捕获时 before/after 均 clean，身份与各PNG指纹随公开精选manifest保留。首轮绿色检查未覆盖组合反例，不能继续当作本批完整验收；独立复评和最终远端门仍待协调者。
 
 ## Bottom Change Note
+
+2026-11-11 SGT：重开 Batch4 关闭首轮 MMP 四项意见的本地修复与可检查证据；保留旧结论并就地标注被推翻的完整性，实装/UAT/R1 仍独立。
 
 2026-11-10 SGT：记录A本地实现、真实RED修复、scope与几何裁决及最终工程证据；静态PNG发布打包交协调者。806停止门后创建自包含A计划；保留完整604，将execution责任归A，固定安全接口、真实对照、旧消费者回归及各层当前发布门。记录已创建A issue #614及既有关系保护；后续易失状态仍按当前远端回读。
 

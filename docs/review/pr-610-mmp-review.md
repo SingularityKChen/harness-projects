@@ -33,7 +33,7 @@
 
 - [x] 2026-11-11 SGT：首轮独立视觉交接审阅；一次性提交 1 条 P2 并 APPROVE。
 - [x] 2026-11-11 SGT：独立复评确认链接直接到既有比较，包含 Host 根入口、Loader、选择性 Radix Dialog 和保留现行控件的决策；38 个冻结文件与首轮字节完全相同。
-- [ ] 回读最终当前 head 的 CI 与合并结果。
+- [x] 2026-11-11 SGT：协调者已回读修订 `bd3a9152109a8cbbdd35f1363717e5bf58dbfc01` 的 CI 与独立复评通过；09:00:52 SGT 以 rebase merge 合入 `4320baac082fc89106ce8d533a7300a8053024c7`，#603 为 CLOSED。
 
 ## Surprises & Discoveries
 
@@ -58,3 +58,5 @@ GitHub 双账号；栈 #616 逐层进入实际 main；合并前使用当前 head
 ## Bottom Change Note
 
 2026-11-11 SGT：记录首轮矩阵及冻结证据，明确唯一 P2 的修复边界。
+
+2026-11-11 SGT：按用户授权核销最后的 CI／合并待办；原回读命令、历史首轮观察和冻结参考保持。

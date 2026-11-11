@@ -1,0 +1,208 @@
+{
+  "capturedAt": "2026-11-10T09:44:37.014357+00:00",
+  "candidateHead": "4c5eff2a908813baf629de7cdc8987fe3e67bb74",
+  "baseHead": "d449f90b12a114cea78f2de97953a4266204b2b9",
+  "candidateDirty": false,
+  "sourceComposed": true,
+  "installedHost": false,
+  "productionAndFixtureSha256": {
+    "packages/ui-model/src/work-item-list-view.ts": "9e985f79a7f0e7e22e0a07e3374e973d5a60d629a9c844bf7456bc03d36e8ab1",
+    "packages/ui/src/column-resize.ts": "3482e2d3a8f113a28d76293ba2fd35b1b7b9798f63e3f14ed8ea563093f17a50",
+    "packages/ui/src/delivery-overview.ts": "1d32bf7138507ddbf963c5c123fc8d536b0cc88b0f3a84cf8f9f7adef284959c",
+    "packages/ui/src/execution-presentation.ts": "7be49ce9918fdb02342eb98d849b99de61b052cddbdf0a3cac9748e8d39c6f86",
+    "packages/ui/src/list-states.ts": "01e793965ca72c792f0bcc42f6f864007b4467c7b72602d507f51543baefdcd4",
+    "packages/ui/src/table-columns.ts": "db6251c46a9e909a04f21c3f7975963bc5b4f7f10d77ef7a7f699707a7e0d391",
+    "packages/ui/src/table-controls.ts": "8d8fa01956702325911550e87973383130123194d60d586556e31b3f7223fc53",
+    "packages/ui/src/table-presentation.ts": "8c2a0de54504008652b9f1174b1a18d1030798041be6e22937da4d34143160f4",
+    "packages/ui/src/work-item-app.ts": "aaaf2bdc63b8052ef71c1fa9fbdfb3bf1706f90d68ce16a52f625821ef388463",
+    "packages/ui/src/work-item-list.ts": "bbe1035356752af15870641084b06c373f454b1aaf2d32e45de3dfd9568692b6",
+    "packages/ui/src/work-item-project.ts": "4967f8f486b698e12c0edc47e4c8a3b85f5e966029bdf08f66b0c0fa5d1c65e0",
+    "packages/ui/src/workspace-presentation.ts": "1e246ac0fd79d9ec23b9a0068d5b851f63d1412c6a4ce25df5bfe63420ced123",
+    "packages/ui/src/workspace-status.ts": "a745c712fb41f5be28fbb190e36ef99f631ed9eb6d8ffe9c5152cf0c4456c1d3",
+    "tests/fixtures/table-geometry-browser.mjs": "5c16b11873bc40a9511b2059a1e9dfc20954e79f71bbb1b3d967b7df582dfa63",
+    "tests/fixtures/composed-workspace-browser.mjs": "4932bd0351bddc03b3fb70c7ab595174a8e58a832aa84a8fc39ebb4a86bbcfa7"
+  },
+  "baseProductionSha256": {
+    "packages/ui-model/src/work-item-list-view.ts": "b8bf0dd342caa06a2f5954f8a7e19568a404deb14dd5130bf08e2827e054c6e6",
+    "packages/ui/src/column-resize.ts": "a4b7b4b7ea76cfd2b730f4b7f3c0b94516ca71a69b337948c2fad345dc7b597d",
+    "packages/ui/src/delivery-overview.ts": "6823c4d92a8dbb82cee71004a4a204e541799e077a2440af3c97252d457318e3",
+    "packages/ui/src/execution-presentation.ts": "4a2005f341a29b99ed4986d1db1b1e68656f30801cd8d68f3f7100c39a61f3e6",
+    "packages/ui/src/list-states.ts": "df95e8304bce58a0f4666b9f959523fb2919ba47bd62763995acf0dbc50c851f",
+    "packages/ui/src/table-columns.ts": "f19be08b09067131bc42b0d7dc0fd5ef5850d221e541d5885e533e6f1982c0cc",
+    "packages/ui/src/table-controls.ts": "064136ff7e0aa2e2e277fff41a07026104c44d83608a57a726b2c77a4a7c57eb",
+    "packages/ui/src/table-presentation.ts": "233bac4f4f47337abb3ef758403171f348d58f4456346a4ce768358569977dc0",
+    "packages/ui/src/work-item-app.ts": "55d1bf86755c889c200fa42811385e101e271c7cf17497aa1f5afd19d846c878",
+    "packages/ui/src/work-item-list.ts": "d68bbc6a2507dd5798a7f5ccc543b219a69d26d457d1b34a4c4836063f12bbfe",
+    "packages/ui/src/work-item-project.ts": "965cf32a437693a74f845166fa852f327778cc64979a79d3a44c1f0c2a6d0a0d",
+    "packages/ui/src/workspace-presentation.ts": "cd2213a22ec070a9cd07a1cd2dc8541193816fdad0f7aaecbffe0bb3ec425800",
+    "packages/ui/src/workspace-status.ts": "be010b714533604ac50e831406711904f1cc249a44de293f50f396d69c16d9a8"
+  },
+  "fixture": "startTableGeometryServer: ?header&reference, 7 safe items / default 5 of 8 visible fields; source EntityStore and client snapshot; synthetic delivery gaps, no fabricated CI",
+  "themeInput": "frozen public Host-role metadata, inherited by production CSS; fallback scene omits roles",
+  "beforeMethod": "same frozen fixture, esbuild onLoad reads ui/ui-model production files from exact base commit; no baseline worktree mutation",
+  "boundary": "Historical 2026-11-10 evidence, selected from existing captures. Not recaptured or relabeled as the 2026-11-11 repair head.",
+  "screenshots": [
+    {
+      "path": "before-exact/delivery-dark-1024.png",
+      "sha256": "1454a948cceed3fce0cf3b2786a07b76611a885cb24b8d3a86beb32f0fef6ff3",
+      "bytes": 60200,
+      "dimensions": [
+        1024,
+        900
+      ]
+    },
+    {
+      "path": "before-exact/delivery-dark-1200.png",
+      "sha256": "ba4aed16a780f569b7fe66369fb321df0ab39993077b8acbb095fa7cc82a2931",
+      "bytes": 61355,
+      "dimensions": [
+        1200,
+        900
+      ]
+    },
+    {
+      "path": "before-exact/delivery-light-1024.png",
+      "sha256": "444a6b51811bf54a915f461a8ec1a08a91674d8dd459434f924aedb4abba21c0",
+      "bytes": 60072,
+      "dimensions": [
+        1024,
+        900
+      ]
+    },
+    {
+      "path": "before-exact/delivery-light-1200.png",
+      "sha256": "f692c4c50d18cd15be04fb07312aba489886d466c675f73fb040892320c70a5c",
+      "bytes": 61204,
+      "dimensions": [
+        1200,
+        900
+      ]
+    },
+    {
+      "path": "before-exact/list-dark-1024.png",
+      "sha256": "07b229f330a7494d954c6f7cfe6d09e9b24cefac7f87ff4d978ede767987a6db",
+      "bytes": 117165,
+      "dimensions": [
+        1024,
+        900
+      ]
+    },
+    {
+      "path": "before-exact/list-dark-1200.png",
+      "sha256": "f16fe2130e98d58e81f11b060ee2ed82ffc4fdc0796963c1aaff5cdf557692a1",
+      "bytes": 118853,
+      "dimensions": [
+        1200,
+        900
+      ]
+    },
+    {
+      "path": "before-exact/list-light-1024.png",
+      "sha256": "68b45a28ace228b71f9b3a8a4ca74f8d426638d74eaca4312533e92f7f7fcba8",
+      "bytes": 117290,
+      "dimensions": [
+        1024,
+        900
+      ]
+    },
+    {
+      "path": "before-exact/list-light-1200.png",
+      "sha256": "c728f8c44d52e4ec5e1659beb77a3bb475586e63f97ac3a2feff28abd9d20a9d",
+      "bytes": 118972,
+      "dimensions": [
+        1200,
+        900
+      ]
+    },
+    {
+      "path": "final/delivery-dark-1024.png",
+      "sha256": "b058306ed57821fea327115966e0951182e74f2f1caeb9a8410d831ba988d536",
+      "bytes": 120895,
+      "dimensions": [
+        1024,
+        900
+      ]
+    },
+    {
+      "path": "final/delivery-dark-1200.png",
+      "sha256": "cb8ab2c2f1eb1eeac1fe6eff047f2dc01ba5aea34ca47a239e4731b8851fa2d0",
+      "bytes": 131403,
+      "dimensions": [
+        1200,
+        900
+      ]
+    },
+    {
+      "path": "final/delivery-light-1024.png",
+      "sha256": "93552a3fb8d446d2176a702dcfa17a743264c10b4b909657f76cb24b1d8eaf4d",
+      "bytes": 120679,
+      "dimensions": [
+        1024,
+        900
+      ]
+    },
+    {
+      "path": "final/delivery-light-1200.png",
+      "sha256": "feb89d2cc740396a0d6856989b99d88ccaf964d77227589caec9c74d6fa979eb",
+      "bytes": 131115,
+      "dimensions": [
+        1200,
+        900
+      ]
+    },
+    {
+      "path": "final/list-dark-1024.png",
+      "sha256": "3c9ce3bc7fa8bdb0fe0102b4b261dd07a264aad9c92bcd92c672a0fcf4927c9a",
+      "bytes": 120225,
+      "dimensions": [
+        1024,
+        900
+      ]
+    },
+    {
+      "path": "final/list-dark-1200.png",
+      "sha256": "3350ed2f3f14345f84d994073474a478208c7309c75c257538d4b47566d15728",
+      "bytes": 124848,
+      "dimensions": [
+        1200,
+        900
+      ]
+    },
+    {
+      "path": "final/list-light-1024.png",
+      "sha256": "77808c03dce0fd394193c7876ab508e84c037adf84e2349ca982aaa315ac6837",
+      "bytes": 117817,
+      "dimensions": [
+        1024,
+        900
+      ]
+    },
+    {
+      "path": "final/list-light-1200.png",
+      "sha256": "93acbcb1416c3c39c6f94bf5b0c8d5c2657b9b647ff1f7005c73908f3e9c78b8",
+      "bytes": 122009,
+      "dimensions": [
+        1200,
+        900
+      ]
+    }
+  ],
+  "sheets": [
+    {
+      "file": "mmp-historical-widths-light-sheet.png",
+      "dimensions": [
+        1200,
+        2198
+      ],
+      "sha256": "1afd72c1816dcfcb1c69f4b2289c76b409f2094202a33e3a9328bcd8b3cdea31"
+    },
+    {
+      "file": "mmp-historical-widths-dark-sheet.png",
+      "dimensions": [
+        1200,
+        2198
+      ],
+      "sha256": "fadb3a611ddce082f205b0def0f8c25b3ed52898a633a45e4aa870b3366b057c"
+    }
+  ]
+}
