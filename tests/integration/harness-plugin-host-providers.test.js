@@ -237,7 +237,7 @@ test('AC5 AC6 新进程重启恢复执行上下文与谱系，工作树在检出
   assert.deepEqual(tables.map((table) => after[table]), tables.map((table) => before[table]), '新进程重启不改写实体、身份、仓库、执行上下文与谱系关系')
 })
 
-// 数据根落在仓库检出之内时，允许根随之落进检出，挂载必须被禁用：守卫比的是检出根（repositoryPath 可以是检出的子目录），数据根或仓库路径经符号链接给出时也绕不过它。
+// 数据根落在仓库检出之内时，允许根随之落进检出，挂载必须被禁用：守卫比的是检出根（repositoryPath 可以是检出的子目录）。数据根本身为符号链接时，Host 在开库前拒绝；仓库路径链接仍受挂载守卫约束。
 // 只覆盖这四种形状：数据根下的 worktrees 或摘要分量本身是符号链接时守卫看不到，承接 #338（#132 计划 D35）。
 const link = async (target, at) => { await mkdir(target, { recursive: true }); await symlink(target, at); return at }
 for (const [shape, layout] of [
@@ -252,6 +252,13 @@ for (const [shape, layout] of [
     await mkdir(repositoryPath, { recursive: true })
     const dataPath = path.join(dataDir, 'workspace.sqlite')
     await seed(dataPath, PROVIDER_CATALOG, seedStartable(repositoryPath))
+    if (shape === '数据根经符号链接给出') {
+      const bytes = await readFile(dataPath), before = dump(dataPath)
+      await assert.rejects(() => createHostComposition(options(dataPath)), { name: 'HostAuthorityError', message: 'Host project data is unavailable' })
+      assert.deepEqual(await readFile(dataPath), bytes, '被链接的外部数据库字节不变')
+      assert.deepEqual(dump(dataPath), before, '被链接的外部数据库逻辑内容不变')
+      return
+    }
     const host = await createHostComposition(options(dataPath))
     try {
       assert.deepEqual(host.disabled.map((item) => [item.bindingId, item.error.code]), [[LOCAL, 'invalid_input']], '数据根在检出之内：允许根随之落进检出，挂载被禁用')
