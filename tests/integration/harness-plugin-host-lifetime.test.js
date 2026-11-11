@@ -89,7 +89,10 @@ for (const mode of ['resolve', 'never', 'reject']) test(`real Cordis Host ${mode
     assert.equal(close.mock.callCount(), 1)
     let raw = await log(), diagnostics = rows(raw)
     assert.deepEqual(diagnostics.map(row => row.event), mode === 'resolve' ? [] : mode === 'never' ? ['shutdownDeadlineExceeded'] : ['shutdownFailed', 'shutdownFailed'])
-    if (mode === 'never') { reject(errors[0]); await turn(); raw = await log(); diagnostics = rows(raw); assert.equal(diagnostics.filter(row => row.event === 'shutdownFailed').length, 2, 'late rejections are consumed and diagnosed per disposer') }
+    if (mode === 'never') {
+      reject(errors[0]); await turn(); await turn()
+      assert.equal(await log(), raw, '截止后日志已关闭；迟到拒绝被消费，不重开路径或追加诊断')
+    }
     assert.equal(raw.includes(canary), false, 'message, stack, path and cause must never reach diagnostics')
     assert.equal(raw.includes(root), false)
     for (const row of diagnostics.filter(row => row.event === 'shutdownFailed')) {

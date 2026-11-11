@@ -1,13 +1,13 @@
 export type { BindRepositoryInput, CommandResult } from '@harness-projects/controller'
 import type { ExternalObjectRef, PlanningProvider, ProviderPlanningFieldDefinition, Storage, WorkspacePlanningMappingRecord } from '@harness-projects/capabilities'
 import { CapabilityKey } from '@harness-projects/capabilities'
-import { mkdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { createWorkspaceSetup, composeCore, unavailableCore, createPlanningReconciler, type PlanningReconciler, type PlanningReconcilerTimers, type CoreApi } from '@harness-projects/core'
 import { createConnectionCommands, createSetupCommands, type CommandResult, createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
 import { createSqliteStorage, type SqliteStorage } from '@harness-projects/storage-sqlite'
 import type { ExecutionContextDTO, WorkspaceSetupDTO } from '@harness-projects/client'
 import { StatusPolicy, ProjectErrorCode, projectError, type ProjectError, type ConnectorAccountId, type WorkspaceId, type WorkspacePlanningFieldMapping } from '@harness-projects/domain'
+import { preparePrivateProjectData } from './host-private-data.ts'
 import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
 import { createHostPlanningMapping } from './host-planning-mapping.ts'
 import { createPlanningLifetime, drainUntil } from './host-planning-lifetime.ts'
@@ -186,12 +186,10 @@ const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness',
 export async function createHostComposition(options: HostCompositionOptions): Promise<HostComposition> {
   const intervalMs = options.planningIntervalMs ?? 60_000
   if (!Number.isFinite(intervalMs) || intervalMs < 60_000 || intervalMs > 2_147_483_647) throw new RangeError('Planning refresh interval is invalid')
-  const dataDir = path.dirname(options.dataPath)
   options.owner?.signal.throwIfAborted()
-  await mkdir(dataDir, { recursive: true })
-  const worktreesDir = path.join(await realpath(dataDir), 'worktrees')
-  options.owner?.signal.throwIfAborted()
-  const log = createDiagnosticLog(path.join(dataDir, 'diagnostics.log'))
+  const prepared = await preparePrivateProjectData(options.dataPath, options.owner?.signal)
+  const worktreesDir = path.join(prepared.directory, 'worktrees')
+  const log = createDiagnosticLog(prepared.logFd)
   const diagnoseShutdown: HostComposition['diagnoseShutdown'] = (event, error) => log.write(event, error === undefined ? {} : describeError(error))
   /** Controller 的任何拒绝上 wire 前都经这里：原因先进诊断日志，调用方只看到固定文案。`closed` 与输入校验留在它之外（固定中文文案，不含运行期原文）。 */
   const guarded = async <T>(run: () => Promise<T>): Promise<T> => {
@@ -253,9 +251,11 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
 
   const dispose = (deadline = stopDeadline ?? options.owner?.stop() ?? Date.now() + 1000): Promise<void> => disposal ??= (async () => {
     stop()
-    if (!await drainUntil([...pending], deadline)) diagnoseShutdown('shutdownDeadlineExceeded')
-    storage?.close()
-    options.owner?.signal.removeEventListener('abort', abortStartup)
+    try {
+      if (!await drainUntil([...pending], deadline)) diagnoseShutdown('shutdownDeadlineExceeded')
+      storage?.close()
+    } catch (error) { diagnoseShutdown('shutdownFailed', error); throw error }
+    finally { options.owner?.signal.removeEventListener('abort', abortStartup); log.close() }
   })()
   const abortStartup = () => { void dispose().catch((error) => diagnoseShutdown('shutdownFailed', error)) }
   options.owner?.signal.addEventListener('abort', abortStartup, { once: true })
@@ -423,6 +423,8 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         }, true, false, ci)
       },
     }, guarded)
+    // 启动期中止自行回收；交付后由 Host 先撤 remote、写 shutdown 诊断，再 dispose 关闭日志。
+    options.owner?.signal.removeEventListener('abort', abortStartup)
     return {
       get controller() { return current.controller }, get disabled() { return current.disabled }, get activationError() { return activationError },
       call: async (name, input) => {

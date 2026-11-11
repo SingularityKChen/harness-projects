@@ -32,6 +32,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-11-11-code-scanning-hardening](exec-plan/completed/2026-11-11-code-scanning-hardening.md) | 正则回溯修复、HTML 安全断言与告警用途核查（#617） |
+| [2026-11-11-private-host-data](exec-plan/completed/2026-11-11-private-host-data.md) | 私有 Host 数据目录、文件与有界诊断描述符（#597） |
 | [2026-11-10-planning-board](exec-plan/completed/2026-11-10-planning-board.md) | 真实授权数据的只读规划 Board（#605） |
 | [2026-11-10-release-workspace-polish](exec-plan/completed/2026-11-10-release-workspace-polish.md) | 唯一详情、四任务设置与完整共享工作台累计验收（#604） |
 | [2026-11-10-release-list-delivery](exec-plan/completed/2026-11-10-release-list-delivery.md) | 获批 v3 的共享工作区、List 与 Delivery 基础（#614，Refs #604） |

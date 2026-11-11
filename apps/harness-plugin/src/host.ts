@@ -52,7 +52,9 @@ export async function apply(ctx: HostRemoteContext & RootDisposalContext & { eff
   ctx.effect(() => dispose, 'harness-projects: host composition')
   observeRootDisposal(ctx, dispose)
   try {
-    const dataPath = await lifetime.wait(() => profileDataPath(ctx), Infinity)
+    const resolving = profileDataPath(ctx, lifetime.signal)
+    acquisitions.push(resolving)
+    const dataPath = await lifetime.wait(() => resolving, Infinity)
     const opening = createHostComposition({
       owner, dataPath, workspaceId: WORKSPACE_ID, catalog: PROVIDER_CATALOG,
       sessionController: () => ctx.get?.('sessionController'),

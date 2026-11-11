@@ -7,7 +7,7 @@
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -118,7 +118,8 @@ test('C1 已存研发与 Actions 挂载在启动时组合并经宿主出口读�
 
   const configurations = Object.fromEntries(JSON.parse(dump(dataPath).workspace_binding).map((row) => [row.binding_id, row.configuration_json]))
   for (const id of [DEV, ACTIONS]) assert.deepEqual(Object.keys(JSON.parse(configurations[id])).sort(), ['repositoryExternalId', 'repositoryName', 'repositoryOwner'], '挂载配置恰为三个字段')
-  assert.deepEqual(await readdir(dataDir, { recursive: true }), ['workspace.sqlite'], '扫描范围：存储不开 WAL（没有 -wal、-shm），C1 没有失败路径、不写诊断日志')
+  assert.deepEqual((await readdir(dataDir, { recursive: true })).sort(), ['diagnostics.log', 'workspace.sqlite'], '扫描范围：存储不开 WAL；Host 预开已验证的诊断文件')
+  assert.equal(await readFile(path.join(dataDir, 'diagnostics.log'), 'utf8'), '', '成功路径不写诊断内容')
   for (const needle of [CANARY, Buffer.from(CANARY).toString('base64')]) assert.equal(await occurrences(dataDir, needle), 0, `库文件不含凭据值：${needle}`)
   assert.ok(await occurrences(dataDir, HANDLE) >= 1, '阳性对照：同一扫描找得到库里存的句柄名')
   assert.equal(JSON.stringify([wire, disabled, ports.disabled]).includes(CANARY), false, 'wire 与禁用记录不含凭据值')
