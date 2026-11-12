@@ -80,6 +80,8 @@
 | 交付事实变化推进工作区修订号 | 修订号的快照里没有交付事实，推进只会产生空 delta（#220） |
 | 存平台原样的 `status` / `conclusion`，读时再映射 | 要改 `chain-facts` 的读出形状，当时与 #232 正在重写的读取冲突；#232 的 base 片 #295 已合并（`factFor(status, conclusion)`），改存原样值仍不服务任何 #221 验收，登记为 TD-043 |
 
+**Superseded by 当前版本派生（2026-11-11，#415/#416）**：旧 `committed_observation` 完整快照视图退役；`committed_observation_version` 只按三维端口主体派生最大版本并由写入定序消费。原始 payload 全留在唯一观察账本，仍不承担工作区交付集合的最后确认快照。当前设计见 `docs/exec-plan/completed/2026-11-11-source-version-contract.md`。
+
 ## Consequences
 
 - 迁移 `006_delivery_facts.sql` 新增 `delivery_fact` 表。#223 合并 SQLite 基线时必须把它并入；控制计划里的 `005_delivery_facts.sql` 已过期，因为 005 被 #203 的载体世代占用。

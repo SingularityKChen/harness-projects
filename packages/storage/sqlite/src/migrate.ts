@@ -14,7 +14,7 @@ export interface MigrateResult {
   readonly version: number
 }
 
-export const CURRENT_SCHEMA_GENERATION = 4
+export const CURRENT_SCHEMA_GENERATION = 5
 export type IncompatibleDatabaseReason = 'generation' | 'version_list' | 'schema_shape' | 'unknown_objects'
 export class IncompatibleDatabaseError extends Error {
   readonly code = 'incompatible_database'
@@ -96,10 +96,8 @@ export function migrate(db: WorkspaceDatabase, options: MigrateOptions = {}): Mi
     if (generation !== 0 && generation !== CURRENT_SCHEMA_GENERATION) throw new IncompatibleDatabaseError('generation', generation)
     const empty = schema(db).length === 0
     if (empty) {
-      for (const entry of entries) entry.data?.preflight(db)
       for (const [index, entry] of entries.entries()) {
         db.exec(sql[index]!)
-        entry.data?.apply(db)
         db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(entry.version, new Date().toISOString())
       }
     }

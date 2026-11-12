@@ -881,9 +881,9 @@ const a=pick("origin/main"),b=pick("HEAD");console.log(JSON.stringify({minus:a.f
 - 本地开发库：比较器是全函数，所以旧库里若残留 `'v9'` 这类非规范 `updated_at` 行，不会抛错，但会让规范的新观察被判成更旧。今天没有生产路径写过观察版本，测试库都是临时目录；MMP 前的处置是删除库文件重建，与 `REWRITTEN_003_MESSAGE`（`storage-sync.ts:58`）的先例一致。**Superseded by 本节的 R1 条目（2026-09-30）**：评审 5352511875 否定了删库这一处置；另外，`REWRITTEN_003_MESSAGE` 实际在 `storage-sync.ts:60`。
 - 合并后回滚：由人类伙伴发起 PR，`git revert` 实现提交与验收批次的 `test(capabilities)` 提交；后者的 C5 调用实现导出的函数，只回滚实现会让它变红，所以要先回滚它或一起回滚。证据提交与计划提交可以一并 revert。没有 DDL 或数据迁移，库不需要处理（**Superseded by 本节的 R1 条目（2026-09-30）**：R1 增加了纯数据迁移 005，回滚后已迁移的库需要处理）。如果 #70 已经以本分支为 base 或已合并，要先让 #70 去掉对 `sourceVersionFromTimestamp` 的调用（回滚后它会编译失败，失败是可见的），或者先回滚 #70。
 - **（R1）测试与原型可重复**：新用例都在临时目录建库并在结束时删除；真 main 带外证据在仓库外的临时目录里做，不改仓库。
-- **（R1）运行期被拒绝的库**（`LegacySourceVersionError`）分三档：
+- **（R1）运行期被拒绝的库**（`LegacySourceVersionError`）分三档： **Superseded by 当前合同收敛（2026-11-11）**：以下三档及本节旧回滚恢复操作仅保留历史，不再是当前产品处置；repair、归一与降级均已退役。当前应停止相关写入，先备份并核对所需数据，再由用户决定在新位置重建，见 `docs/exec-plan/completed/2026-11-11-source-version-contract.md`。
   - **档 0（默认）**：什么也不做。库文件逐字节不变，`schema_migrations` 保持原样，本修复之前的版本仍可打开并继续使用它。拒绝路径的「逐字节不变」有一个驱动层例外：库旁如果有热日志 `<库文件>-journal`，SQLite 首次读取时会自动回滚它。
-  - **档 1（推荐）**：显式修复，保留全部行。
+  - **档 1（推荐）**：显式修复，保留全部行。 **Superseded by 当前合同收敛（2026-11-11）**：此历史推荐和下列 repair 命令已退役，当前处置为停止写入、备份核对，由用户决定在新位置重建。
     1. 停掉所有打开该库的进程。如果有热日志，先用任一版本正常打开一次，让 SQLite 回滚它。
     2. 在检出含 R1 的 `fix/source-version-order`（或合并后的 `main`）的仓库根目录运行下面的命令。`<库文件>` 与 `<备份文件>` 写绝对路径；`<备份文件>` 必须不存在，而且不要放在同步盘或公开目录里。
 
@@ -894,7 +894,7 @@ const a=pick("origin/main"),b=pick("HEAD");console.log(JSON.stringify({minus:a.f
     3. 输出里的 `demoted` 列出被降为无版本的行。重新打开库时 005 会自动应用，然后对清单里的绑定触发一次全量对账。
     4. 核对：备份文件存在，并且 `node -e "const {DatabaseSync}=require('node:sqlite');console.log(new DatabaseSync(process.argv[1],{readOnly:true}).prepare('PRAGMA integrity_check').get().integrity_check)" <备份文件>` 输出 `ok`。
   - **档 2**：只有人类伙伴判定这个库可以重建时才删库。它不是推荐路径。
-- **（R1）守卫触发**（`LEGACY_COMMITTED_VERSION_MESSAGE`）：说明 005 之后仍有旧载体进入账本。先停掉旧版本进程，再运行档 1 的同一条命令（修复函数不要求版本 5 未应用），然后重开。
+- **（R1）守卫触发**（`LEGACY_COMMITTED_VERSION_MESSAGE`）：说明 005 之后仍有旧载体进入账本。先停掉旧版本进程，再运行档 1 的同一条命令（修复函数不要求版本 5 未应用），然后重开。 **Superseded by 当前合同收敛（2026-11-11）**：守卫保留在新观察写入时拒绝，已删除修复函数不再是恢复入口；应停止相关写入、备份核对，由用户决定在新位置重建。
 - **（R1）合并后回滚**：
   - revert R1 的实现提交后，已迁移到 5 的库会被旧代码的前缀断言显式拒绝。
   - 恢复：先备份，再执行 `DELETE FROM schema_migrations WHERE version = 5`。005 不改 DDL，归一值与 `''` 都能被旧代码接受。

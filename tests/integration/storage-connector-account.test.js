@@ -173,3 +173,28 @@ test('secret-canary-never-published', async () => {
   assert.deepEqual(published.map((record) => Object.keys(record).sort()), [['domain', 'enabled', 'id', 'implementationKey', 'isDefault', 'workspaceId'].sort()], '发布面只含原挂载字段：不得出现句柄或配置')
   assert.ok(!scan(JSON.stringify(published)), '发布面不得出现 canary')
 })
+
+test('webhook-only 事实阻止卸载连接补绑账号，重开仍拒绝', async () => {
+  const path = join(tempDir('connector-account-webhook-'), 'workspace.sqlite')
+  let storage = createSqliteStorage(path, policy())
+  try {
+    await storage.putWorkspace(workspace())
+    await storage.putConnectorAccount(account())
+    await storage.putProviderBinding(binding('with-webhook', 'planning'))
+    await storage.putProviderBinding(binding('without-facts', 'development'))
+    const db = openDatabase(path)
+    try { db.prepare('INSERT INTO webhook_subscription VALUES (?, ?, ?, ?, ?, ?)').run('subscription-1', WORKSPACE, 'with-webhook', 'scope', 'issues', 0) } finally { db.close() }
+    await storage.removeProviderBinding({ workspaceId: WORKSPACE, bindingId: 'with-webhook', domain: 'planning' })
+    assert.deepEqual((await storage.listProviderBindings(WORKSPACE)).map((record) => record.id), ['without-facts'], '只卸载挂载，不删除连接级订阅事实')
+    const refused = async () => {
+      await assert.rejects(storage.setProviderBindingAccount('with-webhook', 'account-1'), /connection anchor already has external facts/)
+      assert.equal(await storage.getProviderBindingAccount('with-webhook'), undefined, '拒绝不写账号关联')
+    }
+    await refused()
+    storage.close()
+    storage = createSqliteStorage(path, policy())
+    await refused()
+    await storage.setProviderBindingAccount('without-facts', 'account-1')
+    assert.equal(await storage.getProviderBindingAccount('without-facts'), 'account-1', '没有外部事实的连接仍可初次关联')
+  } finally { storage.close() }
+})

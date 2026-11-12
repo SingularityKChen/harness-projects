@@ -55,7 +55,7 @@ Batch 0 先交付最后那一半：只读仓库的人能在 `docs/product/vertic
 
 SQLite 目标是发布前单一空库建表基线。允许不支持旧开发库的自动升级，但不得静默丢弃本机数据：压缩前列出实际库文件与持有人，逐项判可重建或需导出；发现真实不可丢数据、已部署实例或用户不接受重建时停止压缩，另设计向前迁移。保留 `migrate.ts` 的事务内版本复读、原子记账和失败回滚。新 001 建立 `schema_generation` 表，在同一事务内写唯一一行 `(id=1, baseline='prelaunch-v1')`；**Superseded by `docs/exec-plan/completed/2026-10-28-storage-baseline-admission.md` Design / Spec（2026-10-28，#414）**：准入使用原生 `user_version` 加当前 manifest 派生结构，不增加 marker 表；当前完整 1–7 仍可打开，物理折叠由 #417 独立承担；迁移运行器在跳过任何已应用版本前校验标记与预期清单，旧 [1] 与 [1,2,3,4] 均 fail closed，空库以外的未知表也拒绝。新空库运行 `PRAGMA foreign_key_check` 与 `PRAGMA integrity_check` 并断言无错误。
 
-"dead code"经过定义、导出/调用点、运行时入口、测试替身、公共契约五重排查。`CoreNamespace<T>` 的可调用形状和 `DeliveryScope` 的字符串形状只是候选；`committed_observation` 视图与 `webhook_subscription` 表可能承载 Gate E1 正式事实，先决定保留消费者或删除后的设计修订；`git-provisioning.ts` 的默认 `recordStep` 有直接测试消费者，不列为 dead code。测试分三类：业务不变量、公开契约与发布门禁必须保留或加强；仅锁句式或源码行文本的断言改为结构化/行为判据；承担防漂移职责的历史证据测试保留明确的 authority 与反例。
+"dead code"经过定义、导出/调用点、运行时入口、测试替身、公共契约五重排查。`CoreNamespace<T>` 的可调用形状和 `DeliveryScope` 的字符串形状只是候选；`committed_observation` 视图与 `webhook_subscription` 表可能承载 Gate E1 正式事实，先决定保留消费者或删除后的设计修订；`git-provisioning.ts` 的默认 `recordStep` 有直接测试消费者，不列为 dead code。 **Superseded by #415/#416 当前裁定（2026-11-11）**：旧完整快照视图退役，只保留由 runtime 消费的三维最大版本派生；webhook 表由账号关联的外部事实守卫消费而保留，具体台账见 `docs/exec-plan/completed/2026-11-11-source-version-contract.md`。测试分三类：业务不变量、公开契约与发布门禁必须保留或加强；仅锁句式或源码行文本的断言改为结构化/行为判据；承担防漂移职责的历史证据测试保留明确的 authority 与反例。
 
 ### Batch 0 规格（#217）
 
@@ -241,7 +241,7 @@ SQLite 目标是发布前单一空库建表基线。允许不支持旧开发库�
 
 ### Batch 5 · Gate E1 裁决后的 SQLite 基线合并（#223）
 
-2026-10-28 局部交付：#414 的世代/结构准入与整体原子初始化见 `docs/exec-plan/completed/2026-10-28-storage-baseline-admission.md`；本批旧“两个 PR”与 `[1]` 目标仅作为历史总方案保留，Superseded by #223 当前拆分（#414/#415/#416/#417）。#223 本身未关闭，旧 repair 退役、消费者裁定及物理折叠仍未完成。
+2026-10-28 局部交付：#414 的世代/结构准入与整体原子初始化见 `docs/exec-plan/completed/2026-10-28-storage-baseline-admission.md`；本批旧“两个 PR”与 `[1]` 目标仅作为历史总方案保留，Superseded by #223 当前拆分（#414/#415/#416/#417）。#223 本身未关闭，旧 repair 退役、消费者裁定及物理折叠仍未完成。 **Superseded by #415 局部实施（2026-11-11）**：历史 repair、data hook 与重复旧形状判据已退役，当前损坏拒绝改由同步集成场景接管，见 `docs/exec-plan/completed/2026-11-11-source-version-contract.md`。该项本地验证不代表独立验收或合并；#223、#416 消费者裁定及 #417 物理折叠仍开放。 **Superseded by 联合 #415/#416 实施（2026-11-11）**：当前合同并为 PR #623，新增版本派生真实 reader、明确 generation 5，并保留 webhook 身份守卫；整体联合验收与回滚，#223 与 #417 仍不由本次关闭。
 
 前置是人类对 #4 的具体裁决、#190 #195 #196 #221 合并、当前端口与关系模型定案，以及"本机有哪些库、是否可重建"的逐项清单；缺任一前置只做空库原型。第一个 PR 加世代守卫，第二个 PR 合并迁移。主文件 `packages/storage/sqlite/migrations/*.sql`、`src/migrations.ts`、`src/migrate.ts`、`src/storage-sync.ts` 及 schema/runner/端口测试。在可丢弃临时库把现行 001–004（若 Batch 3 新增 005，也包括它）重写成一份 001 完整建库基线；保留活合同的 `execution_run.provider_ref_json` / `fallback`、连接/成员约束和原子版本记账。`migrate.ts` 在判断"版本 1 已应用，可跳过"之前先验证：空库无用户表才允许建库；非空库必须有匹配的 generation 与完整清单；否则以结构化"旧库需备份并重建"失败，不执行 DDL 或业务写入。测试分别构造旧 [1]、[1,2]、[1,2,3,4]、旧 003 表形、未知用户表和损坏版本表，断言拒绝前后 schema/行数据未变。新库执行两次迁移（第一次 [1]、第二次 []），用第二连接、进程重启、并发启动和故障注入验证；`PRAGMA foreign_key_check` 零行、`PRAGMA integrity_check` 为 `ok`。正式删除前分别裁定 `committed_observation` 视图与 `webhook_subscription` 表的消费者。运行 `node --test tests/integration/migration-runner.test.js tests/integration/storage-sync-surface.test.js tests/integration/identity-membership-schema.test.js tests/integration/execution-relation-write-schema.test.js tests/contract/storage-contract.test.js` 与 `pnpm verify`。
 
