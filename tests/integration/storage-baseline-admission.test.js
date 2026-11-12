@@ -29,6 +29,10 @@ const incompatible = (reason) => (error) => {
   assert.equal(typeof error.actualGeneration, 'number')
   assert.equal(error.action, 'back_up_and_rebuild')
   assert.match(error.message, /备份/)
+  assert.match(error.message, /原数据库已保留/)
+  assert.match(error.message, /保留.*数据.*显式迁移|显式迁移.*保留.*数据/)
+  assert.match(error.message, /不要仅修改数据库.*号/)
+  assert.match(error.message, /https:\/\/github\.com\/SingularityKChen\/harness-projects\/blob\/main\/docs\/product\/demo-install\.md#database-recovery/)
   return true
 }
 const withoutOwner = (sql) => sql.replace(/^.*provisioning_generation.*\n/gm, '')

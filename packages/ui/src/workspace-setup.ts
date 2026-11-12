@@ -33,6 +33,7 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   const setup = snapshot.setup, view = workspaceSetupView(snapshot, 'GitHub')
   const scope = JSON.stringify([identity.current.generation, setup?.workspace?.id, setup?.planning.bindingId, setup?.planning.projectNodeId])
   const name = draft?.scope === scope ? draft.name ?? '' : '', project = draft?.scope === scope ? draft.project : undefined
+  const hasDraft = draft?.scope === scope && (draft.name !== undefined || draft.project !== undefined)
   const confirmed = setup?.planning.state === 'confirmed' && setup.workspace !== null
   const settings = navigation?.source === setupSource ? navigation.view === 'settings' : !setup || setup.workspace === null || !['unbound', 'confirmed'].includes(setup.planning.state)
   const mounted = settings || visited === scope || (setup?.planning.state === 'unbound' && repositoryBindingSource !== undefined)
@@ -77,7 +78,7 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   const submit = (): void => { if (setup?.workspace === null) void setupSource.create(name); else void setupSource.connect(project ?? setup?.planning.projectNodeId ?? '') }
   const recovery = (): void => {
     if (snapshot.failure === 'install' && snapshot.error?.code === 'result_unknown') void setupSource.recoverExecution()
-    else if (snapshot.failure === 'read') void setupSource.refresh()
+    else if (snapshot.failure === 'read') void setupSource.refresh(false)
     else if (view.recovery?.action === 'refresh') void setupSource.refresh(setup?.planning.state === 'degraded')
     else if (snapshot.failure === 'install') void setupSource.installExecution()
     else if (snapshot.failure === 'create') void setupSource.create(name)
@@ -87,7 +88,14 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
     else submit()
   }
   const button = (label: string, action: () => void, primary = false): ReactElement => h('button', { className: primary ? 'hp-action hp-action-primary' : 'hp-action', type: 'button', disabled: snapshot.pending, onClick: (event?: { currentTarget: DOMElement }) => { submitted.current = true; submittedFrom.current = event?.currentTarget ?? form.current; action() } }, label)
-  const errorSummary = (id = 'setup-error'): ReactElement | null => view.error ? h('div', { id, className: 'hp-form-notice', role: 'alert', tabIndex: -1, 'data-form-error': true }, h('strong', null, '工作区设置未完成'), h('p', null, view.error.code === 'result_unknown' || view.error.code === 'ambiguous_result' ? '结果未知，请重新读取确认。' : view.error.message), h('p', null, '草稿已保留，请按以下提示恢复。'), view.recovery?.action ? button(view.recovery.label, recovery) : h('p', null, view.recovery?.label)) : null
+  const errorSummary = (id = 'setup-error'): ReactElement | null => view.error ? h('div', { id, className: 'hp-form-notice', role: 'alert', tabIndex: -1, 'data-form-error': true },
+    h('strong', null, view.errorTitle), h('p', null, view.error.message),
+    hasDraft ? h('p', null, '本页输入仍保留，尚未确认保存。') : null,
+    view.recovery?.action ? button(view.recovery.label, recovery) : h('p', null, view.recovery?.label),
+    h('details', null, h('summary', null, '查看恢复说明'),
+      h('p', null, '先在宿主检查 Harness Projects 插件的启动错误，处理后重新读取设置。'),
+      h('p', null, '如果宿主提示数据库版本不兼容，请先停止使用该数据库的宿主并完成备份。保留原数据库中的数据需要显式迁移或使用匹配版本；新位置重建不会迁移原数据。不要修改版本标记绕过检查。'),
+      h('a', { href: 'https://github.com/SingularityKChen/harness-projects/blob/main/docs/development/backup-rollback.md', target: '_blank', rel: 'noopener noreferrer' }, '查看备份与恢复步骤'))) : null
   const recoveryOutlet = h('div', { key: 'setup-recovery', ref: errors }, errorSummary()), children: ReactElement[] = []
   if (!setup) { children.push(recoveryOutlet); if (!view.error) children.push(h('p', null, '正在读取工作区设置。')) }
   else {

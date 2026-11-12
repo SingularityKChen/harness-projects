@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { CapabilityKey, ProjectErrorCode, externalIntentSnapshot, projectError, type ChangeRequestExternalIntent, type DevelopmentProvider, type MutationAttemptRecord, type ProviderChangeRequest, type StorageTransaction } from '@harness-projects/capabilities'
+import { CapabilityKey, ProjectErrorCode, externalIntentSnapshot, projectError, type ChangeRequestExternalIntent, type OriginalChangeRequestReceipt, type DevelopmentProvider, type MutationAttemptRecord, type ProviderChangeRequest, type StorageTransaction } from '@harness-projects/capabilities'
 import { EntityKind, type EntityId, type ProjectError } from '@harness-projects/domain'
 import { chainNode, worktreeEntityId } from './chain-facts.ts'
 import { matchesPrTarget as matchesTarget } from './change-request-target.ts'
@@ -13,10 +13,12 @@ import { gateBinding } from './capabilities.ts'
 import { selectChangeRequestIssue, verifyChangeRequestIssue, confirmChangeRequestIssue, getChangeRequestIssueOptions, assertChangeRequestIssueSource, visibleChangeRequestIssue, issueTargetStamp, issueClause, type IssueRelation } from './change-request-issue-link.ts'
 import { continueCreationAssignees, creationAssigneeSummary, preflightCreationAssignees, type CreationAssignment } from './change-request-assignees.ts'
 import { refreshDeliveryFacts } from './delivery-facts.ts'
+import { committedFence } from './runtime-access.ts'
 
 export interface PrScope { readonly workItemId: string; readonly repositoryId: string }
 export interface PrOperationQuery extends PrScope { readonly operationId?: string }
 export type PrOperationView = { readonly kind: 'none' } | { readonly kind: 'blocked'; readonly reason: 'unavailable' | 'ambiguous' | 'invalid_operation' }
+  | { readonly kind: 'history'; readonly operationId: string; readonly state: 'saved'; readonly head: string; readonly base: string; readonly title: string; readonly draft: boolean }
   | { readonly kind: 'operation'; readonly operationId: string; readonly state: MutationAttemptRecord['state']; readonly currentTarget: boolean; readonly targetStamp: string; readonly head: string; readonly base: string; readonly title: string; readonly draft: boolean; readonly issueRelation: IssueRelation; readonly issueTarget?: { readonly repositoryName: string; readonly number: number }; readonly requestedAssigneeIds?: readonly string[]; readonly assignment?: CreationAssignment }
 type Actor = { readonly kind: string; readonly id?: string }
 export interface CreateChangeRequestRequest extends PrScope { readonly base: string; readonly title: string; readonly body: string; readonly draft?: boolean; readonly issueRelation?: IssueRelation | undefined; readonly issueTargetStamp?: string | undefined; readonly assigneeIds?: readonly string[] | undefined; readonly actor: Actor; readonly idempotencyKey: string }
@@ -48,9 +50,9 @@ function actorSnapshot(actor: Actor): Actor {
   if (!text(kind) || (id !== undefined && typeof id !== 'string')) throw invalid()
   return { kind, ...(id === undefined ? {} : { id }) }
 }
-function canonical(workspace: string, actor: Actor, intent: ChangeRequestExternalIntent, body: string): string {
+function canonical(workspace: string, actor: Actor, intent: ChangeRequestExternalIntent | OriginalChangeRequestReceipt, body: string): string {
   return JSON.stringify({ command: 'createChangeRequest', version: 1, workspace, actor, repository: intent.input.repository, binding: intent.bindingId,
-    contextId: intent.contextId, generation: intent.ownerGeneration, head: intent.input.head, worktree: intent.worktree, base: intent.input.base, title: intent.input.title, body, draft: intent.input.draft, issueSelection: intent.issueSelection, ...(intent.requestedAssigneeIds === undefined ? {} : { requestedAssigneeIds: intent.requestedAssigneeIds }) })
+    contextId: intent.contextId, generation: intent.ownerGeneration, head: intent.input.head, worktree: intent.worktree, base: intent.input.base, title: intent.input.title, body, draft: intent.input.draft, ...(intent.requestFormat === 'original' ? {} : { issueSelection: intent.issueSelection }), ...(intent.requestedAssigneeIds === undefined ? {} : { requestedAssigneeIds: intent.requestedAssigneeIds }) })
 }
 async function readRoute(context: CoreContext, storage: StorageTransaction, scope: PrScope, bindingId?: string, capability: CapabilityKey = CapabilityKey.DevelopmentChangeRequestCreate, readKeys: readonly CapabilityKey[] = [CapabilityKey.DevelopmentRepositoryRead, CapabilityKey.DevelopmentChangeRequestRead]): Promise<Route> {
   const repo = (await storage.listRepositories(context.workspaceId)).find((repo) => repo.id === scope.repositoryId)
@@ -81,11 +83,21 @@ async function resolveOperation(context: CoreContext, query: PrOperationQuery, s
     if (attempt.commandName !== 'createChangeRequest' || attempt.workspaceId !== context.workspaceId || intent?.operation !== 'createChangeRequest' || intent.contextId !== contextId
       || intent.bindingId !== attempt.bindingId || intent.input.repository.bindingId !== attempt.bindingId || intent.input.repository.externalId !== query.repositoryId
       || (attempt.errorCode !== undefined && !Object.values(ProjectErrorCode).includes(attempt.errorCode)) || intent.state !== attempt.state || attempt.id !== `pr-${hash(attempt.idempotencyKey)}` || (intent.confirmedRef !== undefined && intent.confirmedRef.bindingId !== intent.bindingId) || !text(attempt.requestFingerprint) || !text(attempt.idempotencyKey) || (attempt.state === 'saved' && intent.confirmedRef === undefined)) throw invalid()
-    const fingerprint = attempt.requestFingerprint, suffix = `\n${marker(fingerprint, attempt.idempotencyKey)}`, managed = issueClause(intent.issueSelection), body = intent.input.body.slice(0, -suffix.length - managed.length)
+    const fingerprint = attempt.requestFingerprint, suffix = `\n${marker(fingerprint, attempt.idempotencyKey)}`, managed = intent.requestFormat === 'original' ? '' : issueClause(intent.issueSelection), body = intent.input.body.slice(0, -suffix.length - managed.length)
     const actor = actorSnapshot(JSON.parse(fingerprint).actor)
     if (!intent.input.body.endsWith(`${managed}${suffix}`) || body.includes(PREFIX) || canonical(context.workspaceId, actor, intent, body) !== fingerprint) throw invalid()
     let route: Route
     try { route = await readRoute(context, storage, query, attempt.bindingId) } catch { return { kind: 'blocked', reason: 'unavailable' } }
+    if (intent.requestFormat === 'original') {
+      const identity = await storage.findExternalIdentity(intent.bindingId, 'change_request', intent.confirmedRef.externalId)
+      const worktree = worktreeEntityId(context.workspaceId, query.repositoryId, query.workItemId)
+      if (!identity || !(await storage.listRelations(context.workspaceId)).some(edge => edge.from === identity.entityId && edge.to === worktree && edge.type === 'produced_by' && edge.state === 'confirmed' && edge.source === 'explicit')) throw invalid()
+      // 最后一次谱系 await 之后重新验证当前 scope；只读已知准入，不访问 Provider。
+      await readRoute(context, storage, query, attempt.bindingId)
+      const current = context.runtimeAccess.deliveryRegistry(query.repositoryId).bindings.find(binding => binding.ref.bindingId === attempt.bindingId)
+      if ([CapabilityKey.DevelopmentRepositoryRead, CapabilityKey.DevelopmentChangeRequestRead].some(key => !gateBinding(current, key, 'read').allowed)) return { kind: 'blocked', reason: 'unavailable' }
+      return { kind: 'history', operationId: attempt.id, state: 'saved', head: intent.input.head, base: intent.input.base, title: intent.input.title, draft: intent.input.draft }
+    }
     const targetStamp = stamp(context.workspaceId, query, intent)
     const currentTarget = matchesTarget(context.workspaceId, query, record, intent)
     return { kind: 'resolved', operation: { attempt, intent, route, targetStamp, currentTarget } }
@@ -93,7 +105,8 @@ async function resolveOperation(context: CoreContext, query: PrOperationQuery, s
 }
 export async function getChangeRequestOperation(context: CoreContext, query: PrOperationQuery): Promise<PrOperationView> {
   try {
-    return await context.storage.transaction(async tx => {
+    const epoch = context.runtimeAccess.epoch, accessEpoch = context.runtimeAccess.deliveryEpoch, fence = committedFence(context.storage)
+    const result = await context.storage.transaction<PrOperationView>(async tx => {
       const resolved = await resolveOperation(context, query, tx)
       if (resolved.kind !== 'resolved') return resolved
       const { attempt, intent, targetStamp } = resolved.operation
@@ -107,6 +120,9 @@ export async function getChangeRequestOperation(context: CoreContext, query: PrO
       }
       return { ...summary, kind: 'operation', operationId: attempt.id, state: attempt.state, currentTarget, targetStamp, head: intent.input.head, base: intent.input.base, title: intent.input.title, draft: intent.input.draft, issueRelation: intent.issueSelection.relation, ...(intent.issueSelection.relation === 'none' || !await visibleChangeRequestIssue(context, query, intent.issueSelection, tx) ? {} : { issueTarget: { repositoryName: intent.issueSelection.target.repository.name, number: intent.issueSelection.target.number } }) }
     })
+    // 覆盖最后权限 await 与事务完成之间到达的拒读，以及撤权后重授的旧收据。
+    if (result.kind === 'history' && (epoch !== context.runtimeAccess.epoch || accessEpoch !== context.runtimeAccess.deliveryEpoch || context.runtimeAccess.denied || fence !== committedFence(context.storage))) return { kind: 'blocked', reason: 'unavailable' }
+    return result
   } catch { return { kind: 'blocked', reason: 'unavailable' } }
 }
 /** 可变 Draft 状态不能排除同 marker 的身份候选，否则会掩盖歧义。 */
@@ -225,6 +241,7 @@ export async function createChangeRequest(context: CoreContext, input: CreateCha
     request = { assigneeIds, workItemId, repositoryId, base, title, body, draft: draft ?? false, ...(issueRelation === undefined ? {} : { issueRelation }), idempotencyKey, actor }
     const previous = await context.storage.findMutationAttempt(context.workspaceId, idempotencyKey)
       ?? (await context.storage.listMutationAttempts(context.workspaceId)).find(row => row.commandName === 'createChangeRequest' && row.externalIntent?.contextId === contextIdFor(context.workspaceId, workItemId, repositoryId) && ['pending', 'unknown'].includes(row.state))
+    if (previous?.externalIntent?.operation === 'createChangeRequest' && previous.externalIntent.requestFormat === 'original') throw projectError(ProjectErrorCode.Conflict, '旧版已确认 PR 收据只供读取')
     const savedSelection = previous?.externalIntent?.operation === 'createChangeRequest' ? previous.externalIntent.issueSelection : undefined
     if (savedSelection && issueRelation !== undefined && savedSelection.relation !== issueRelation) throw projectError(ProjectErrorCode.Conflict, '原操作已保存不同的 Issue 选择')
     if (savedSelection) await assertChangeRequestIssueSource(context, workItemId, savedSelection)

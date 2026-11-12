@@ -32,7 +32,7 @@ export function CreateChangeRequestSection({ scope, creator, connected, accessTo
   useEffect(() => { const previous = observed.current; observed.current = access; if (previous.owner === current && previous !== access && connected) void lookup(undefined, true) }, [access])
   const saved = view?.owner === current ? view.read?.operation : undefined
   // 负责人收据遮蔽旧身份与正面确认；明确失败仍是原操作的保守负面事实。
-  const operation = saved?.kind === 'operation' && (view?.access !== access || view.assigneeAccess !== assigneeAccess) ? {
+  const operation = saved?.kind === 'history' && view?.access !== access ? { kind: 'blocked' as const, reason: 'unavailable' as const } : saved?.kind === 'operation' && (view?.access !== access || view.assigneeAccess !== assigneeAccess) ? {
     ...saved, ...(view?.access === access ? {} : { issueTarget: undefined }), requestedAssigneeIds: undefined,
     assignment: (saved.assignment?.state === 'none' || saved.assignment?.state === 'failed') ? saved.assignment : { state: 'unknown' as const },
   } : saved
@@ -90,6 +90,8 @@ export function CreateChangeRequestSection({ scope, creator, connected, accessTo
   const assignmentStatus = assignmentMessage ? h('p', { role: 'status' }, assignmentMessage, operation?.kind === 'operation' && !operation.requestedAssigneeIds ? '；原负责人意图已保存，身份暂不可读取' : '') : null
   const status = h('p', { role: 'status' }, `${message}${confirmed ? relationMessage : ''}`)
   const repair = value?.recovery === 'fix_permission' && onConnect !== undefined ? h('button', { type: 'button', onClick: onConnect }, '打开连接设置') : null
+  if (operation?.kind === 'history') return h('section', { 'aria-label': '创建变更请求' }, h('h4', null, '创建变更请求'),
+    h('p', null, `旧版已确认 PR 历史记录：${operation.title}；${operation.head} → ${operation.base}（${operation.draft ? '创建时为草稿' : '创建时为普通 PR'}）。仅供查看，不表示外部 PR 当前状态。`))
   if (!connected || operation?.kind !== 'none') return h('section', { 'aria-label': '创建变更请求' }, h('h4', null, '创建变更请求'), status, assignmentStatus,
     operation?.kind === 'operation' ? h('p', null, `已保存原请求（${operation.draft ? '草稿 PR' : '普通 PR'}）：${operation.title}；${operation.head} → ${operation.base}；${operation.issueRelation === 'none' ? '不关联 Issue' : `${operation.issueTarget === undefined ? '原关联目标不可见，请重新验证来源' : `${operation.issueRelation === 'closing' ? 'Closes' : 'Refs'} ${operation.issueTarget.repositoryName}#${operation.issueTarget.number}`}`}`) : null, repair,
     h('button', { type: 'button', className: 'hp-action', disabled: !connected || busy || (operation?.kind === 'operation' && (view?.access !== access || !operation.currentTarget)), onClick: () => { if (operation?.kind === 'operation') void run(true); else void lookup() } }, operation?.kind === 'operation' ? assignment && ['unknown', 'pending', 'conflict'].includes(assignment.state) ? '核对创建时负责人' : '读回原操作' : '重新读取'),

@@ -211,7 +211,7 @@ async function readChangeRequest(context: CoreContext, route: Extract<ReadRoute,
   let explicit = (await context.storage.listRelations(context.workspaceId)).filter((edge) => edge.to === worktreeId && edge.type === 'produced_by' && edge.source === 'explicit' && edge.state === 'confirmed')
   const record = await context.storage.getExecutionContext(contextIdFor(context.workspaceId, scope.workItemId, scope.repositoryId ?? ''))
   const operations = (await context.storage.listMutationAttempts(context.workspaceId)).filter((attempt) => attempt.commandName === 'createChangeRequest'
-    && attempt.externalIntent?.operation === 'createChangeRequest' && matchesPrTarget(context.workspaceId, scope, record, attempt.externalIntent)
+    && attempt.externalIntent?.operation === 'createChangeRequest' && attempt.externalIntent.requestFormat !== 'original' && matchesPrTarget(context.workspaceId, scope, record, attempt.externalIntent)
     && ['pending', 'unknown', 'saved'].includes(attempt.state))
   // 未确认且尚无显式边时仍允许 ProviderRead 发现 candidate；有显式历史后不能靠同 SHA 重新猜身份。
   if (operations.length > 0 && (explicit.length > 0 || operations.some((attempt) => attempt.state === 'saved'))) {

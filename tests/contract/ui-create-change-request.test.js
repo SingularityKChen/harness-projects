@@ -8,6 +8,24 @@ const scope = { workspaceId: 'ws', workItemId: 'wi', repositoryId: 'repo' }, int
 const wire = (state) => ({ writeState: state, saving: state === 'pending', authoritative: ['confirmed', 'reconciled'].includes(state), value: { phase: state, ...(['confirmed', 'reconciled'].includes(state) ? { ref: { bindingId: 'dev', objectKind: 'change_request', externalId: 'PR_1' }, entityId: 'pr-id', lineageStale: false } : {}) } })
 const operation = { kind: 'operation', operationId: 'op-1', state: 'unknown', currentTarget: true, targetStamp: 'target-1', head: 'feature/work', base: 'main', title: '原请求', draft: true, issueRelation: 'none' }
 const read = (value = operation) => ({ ...scope, operation: value })
+test('original PR history is a strict read-only summary and exposes no recovery or assignment action', async () => {
+  const history = { kind: 'history', operationId: 'original-pr', state: 'saved', title: 'Historical title', head: 'feature/original', base: 'main', draft: false }
+  const creator = client.createChangeRequestCreator({ operation: async () => read(history) }, { kind: 'user' })
+  assert.deepEqual(await creator.operation(scope), read(history))
+  for (const patch of [{ state: 'unknown' }, { issueRelation: 'none' }, { assignment: { state: 'none' } }, { currentTarget: true }, { draft: undefined }]) {
+    const invalid = client.createChangeRequestCreator({ operation: async () => read({ ...history, ...patch }) }, { kind: 'user' })
+    await assert.rejects(() => invalid.operation(scope), TypeError)
+  }
+  const { CreateChangeRequestSection } = await import('../../packages/ui/src/create-change-request-section.ts')
+  const props = { scope, connected: true, accessToken: 'before', creator, onConfirmed() { assert.fail('history cannot confirm a current write') } }
+  const render = componentHarness(CreateChangeRequestSection, props)
+  render(); await Promise.resolve(); await Promise.resolve()
+  const tree = render(), text = JSON.stringify(tree)
+  assert.match(text, /旧版已确认 PR 历史记录.*Historical title/)
+  assert.doesNotMatch(text, /"type":"(?:button|form)"|ChangeRequestAssignees/)
+  props.accessToken = 'after'
+  assert.doesNotMatch(JSON.stringify(render()), /Historical title/, 'stale read authorization cannot expose history')
+})
 test('PR creator observes durable operation after lost response and resumes without replaying intent', async () => {
   const calls = []; let release, keys = 0
   const creator = client.createChangeRequestCreator({

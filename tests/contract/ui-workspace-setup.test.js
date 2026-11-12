@@ -86,12 +86,40 @@ test('real source renders labeled creation, unique workspace and configured reco
   const read = { workspace: { id: 'ws-1', name: 'Fixture' }, store, connection: { connected: true }, capabilities: [] }
   assert.match(html(f.source, read), /连接设置/)
 })
-test('recovery exposes fixed safe guidance and only retry, refresh and reapply have local actions', async () => {
+test('all setup errors explain safe next steps and only retry, refresh and reapply have local actions', async () => {
   const f = fixture()
-  for (const [code, recovery, label, actionable] of [['unavailable', 'retry', '重试', true], ['result_unknown', 'refresh', '重新读取', true], ['conflict', 'reapply', '重新应用', true], ['not_found', 'open_provider', '前往来源平台检查项目', false], ['permission_denied', 'fix_permission', '请在宿主检查访问授权', false], ['not_supported', 'manual_execution', '请联系管理员人工处理', false], ['invalid_input', 'none', '请检查输入', false]]) {
+  for (const [code, recovery, label, actionable, guidance] of [
+    ['unavailable', 'retry', '重试', true, /检查宿主.*启动/],
+    ['result_unknown', 'refresh', '重新读取', true, /结果未知.*重新读取/],
+    ['ambiguous_result', 'refresh', '重新读取', true, /结果未知.*重新读取/],
+    ['conflict', 'reapply', '重新应用', true, /设置已.*变化.*核对/],
+    ['stale_revision', 'reapply', '重新应用', true, /版本已更新.*核对/],
+    ['not_found', 'open_provider', '前往来源平台检查项目', false, /项目不存在或当前授权不可见.*核对/],
+    ['permission_denied', 'fix_permission', '请在宿主检查访问授权', false, /访问被拒绝.*宿主.*授权/],
+    ['not_supported', 'manual_execution', '请联系管理员人工处理', false, /当前宿主不支持.*恢复说明/],
+    ['invalid_input', 'none', '请检查输入', false, /输入未通过检查.*修改/],
+    ['rate_limited', 'retry', '重试', true, /速率限制.*稍后/],
+    ['offline', 'retry', '重试', true, /无法连接.*恢复连接/],
+  ]) {
     f.set({ ...setup(), error: error(code, recovery) }); await f.source.refresh(); const out = html(f.source)
     assert.match(out, /role="alert"/); assert.ok(out.includes(label)); assert.doesNotMatch(out, /RAW-CANARY/)
+    assert.match(out, guidance, code)
     assert.equal(out.includes(`>${label}</button>`), actionable)
+  }
+})
+
+test('verified connection causes keep their specific guidance ahead of generic error codes', async () => {
+  for (const [cause, code, recovery, guidance] of [
+    ['credential_rejected', 'permission_denied', 'fix_permission', /GitHub 拒绝了当前凭据.*更新凭据/],
+    ['permission_missing', 'permission_denied', 'fix_permission', /GitHub 明确报告所需权限不足.*补充授权/],
+    ['target_unavailable', 'not_found', 'open_provider', /项目不存在或当前授权不可见.*GitHub.*访问范围/],
+  ]) {
+    const f = fixture({ connectAccount: async () => result(undefined, { writeState: 'failed', error: error(code, recovery), connectionFailure: { cause } }) })
+    f.set(setup()); await f.source.refresh(); await f.source.connect('PVT_1')
+    assert.equal(f.source.getSnapshot().connectionFailure.cause, cause)
+    const out = html(f.source)
+    assert.match(out, guidance); assert.doesNotMatch(out, /RAW-CANARY|已保存|草稿已保留/)
+    f.source.dispose()
   }
 })
 const find = (node, type) => Array.isArray(node) ? node.flatMap((child) => find(child, type)) : node && typeof node === 'object' ? [...(node.type === type ? [node] : []), ...find(node.props?.children, type)] : []
@@ -200,7 +228,11 @@ test('form retains editable drafts through failure, disables pending, and refocu
     assert.equal(find(app.render(), 'input')[0].props.disabled, true)
     reject(new Error('RAW-CANARY')); await new Promise((resolve) => setImmediate(resolve))
     assert.equal(find(app.render(), 'input')[0].props.value, 'Keep my draft'); assert.equal(focused, 0)
+    assert.match(renderToStaticMarkup(app.render()), /本页输入仍保留，尚未确认保存/)
     f.set(setup()); await f.source.refresh(); app.render(); app.flush(); assert.equal(focused, 1)
+    f.set({ ...setup(), error: error() }); await f.source.refresh()
+    assert.doesNotMatch(renderToStaticMarkup(app.render()), /本页输入仍保留|草稿已保留/)
+    f.set(setup()); await f.source.refresh()
     find(app.render(), 'button').find((button) => button.props.children === '继续连接项目').props.onClick()
     app.render(); app.flush(); assert.equal(focused, 2)
     f.set(setup('configured')); await f.source.refresh(); app.render(); app.flush()
@@ -217,14 +249,24 @@ test('degraded read without activation error has a reconcile action; recovery ac
   await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
   assert.equal(f.calls[0][0], 'refresh')
 })
-test('initial read retry reads setup again, never submits an empty connect intent', async () => {
-  let fail = true
-  const f = fixture({ getWorkspaceSetup: async () => { if (fail) throw new Error('RAW-CANARY'); return empty } })
+test('initial read recovery has no fictional draft and only rereads settings with static Host help', async () => {
+  let fail = true, reads = 0
+  const f = fixture({ getWorkspaceSetup: async () => { reads++; if (fail) throw new Error('RAW-CANARY'); return empty } })
   await f.source.refresh(); fail = false
   const app = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
-  find(app.render(), 'button').find((button) => button.props.children === '重试').props.onClick()
+  const out = renderToStaticMarkup(app.render())
+  assert.doesNotMatch(out, /草稿已保留|本页输入仍保留|已保存|RAW-CANARY/)
+  assert.match(out, /无法读取工作区设置/)
+  assert.match(out, /无法确认是否已有工作区/)
+  const help = find(app.render(), 'details')[0]
+  assert.ok(help, 'Host recovery help remains available without a working endpoint')
+  assert.match(renderToStaticMarkup(help), /启动错误|原数据库|迁移/)
+  const link = find(help, 'a')[0]
+  assert.equal(link.props.href, 'https://github.com/SingularityKChen/harness-projects/blob/main/docs/development/backup-rollback.md')
+  assert.equal(link.props.target, '_blank'); assert.match(link.props.rel, /noopener/); assert.match(link.props.rel, /noreferrer/)
+  find(app.render(), 'button').find((button) => button.props.children === '重新读取设置').props.onClick()
   await new Promise((resolve) => setImmediate(resolve))
-  assert.deepEqual(f.source.getSnapshot().setup, empty); assert.equal(f.calls.length, 0)
+  assert.deepEqual(f.source.getSnapshot().setup, empty); assert.equal(reads, 2); assert.equal(f.calls.length, 0)
 })
 test('failed planning reconcile retries planning after recovery instead of only rereading degraded setup', async () => {
   for (const throws of [false, true]) {
@@ -273,7 +315,11 @@ test('cached unbound, confirmed and degraded read failures retry only setup read
     if (state === 'unbound') find(app.render(), 'button').find((button) => button.props.children === '继续连接项目').props.onClick()
     const input = find(app.render(), 'input')[0]; input?.props.onChange({ target: { value: 'PVT_DRAFT' } })
     fail = true; await f.source.refresh(); assert.equal(f.source.getSnapshot().failure, 'read'); fail = false
-    find(app.render(), 'button').find((button) => button.props.children === '重试').props.onClick()
+    const out = renderToStaticMarkup(app.render())
+    assert.match(out, /未能读取最新工作区设置/)
+    assert.doesNotMatch(out, /草稿已保留|已保存/)
+    if (input) assert.match(out, /本页输入仍保留，尚未确认保存/)
+    find(app.render(), 'button').find((button) => button.props.children === '重新读取设置').props.onClick()
     await new Promise((resolve) => setImmediate(resolve))
     assert.equal(reads, 3); assert.equal(f.calls.length, 0); assert.equal(f.source.getSnapshot().error, undefined)
     if (input) assert.equal(find(app.render(), 'input')[0].props.value, 'PVT_DRAFT')
@@ -351,7 +397,7 @@ test('Host null read error is error-only before discovery and preserves confirme
     assert.equal(f.source.getSnapshot().setup, confirmed); assert.equal(f.source.getSnapshot().failure, 'read')
     assert.doesNotMatch(html(f.source), /工作区名称|创建工作区|<form|正在读取工作区设置/)
     const app = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
-    find(app.render(), 'button').find((button) => button.props.children === '重试').props.onClick()
+    find(app.render(), 'button').find((button) => button.props.children === '重新读取设置').props.onClick()
     await new Promise((resolve) => setImmediate(resolve))
     assert.equal(reads, cached ? 3 : 2); assert.equal(f.calls.length, 0)
     assert.equal(f.source.getSnapshot().error.code, 'unavailable'); assert.equal(f.source.getSnapshot().setup, confirmed)

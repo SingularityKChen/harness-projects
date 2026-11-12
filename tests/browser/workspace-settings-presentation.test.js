@@ -24,7 +24,7 @@ test('real settings carrier retains four tasks, draft and pending/unknown recove
   assert.equal(await project.isDisabled(), true)
   assert.doesNotMatch(await page.locator('#app').innerText(), /Saved|已保存|规划连接已确认/)
   await page.evaluate(() => window.__forms.release('planning-account', 'unknown'))
-  await page.getByRole('alert').getByText('结果未知，请重新读取确认。', { exact: true }).waitFor()
+  await page.getByRole('alert').getByText('结果未知，请重新读取设置确认。', { exact: true }).waitFor()
   assert.equal(await project.inputValue(), 'PVT_draft')
   await page.setViewportSize({ width: 390, height: 900 })
   const chooser = page.getByRole('combobox', { name: '任务', exact: true }); await chooser.selectOption('repository')
