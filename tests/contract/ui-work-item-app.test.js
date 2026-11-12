@@ -102,11 +102,6 @@ test('列表与链接：缺省是当前工作区列表；列表点击与链接�
   page(opened).onCloseDetail()
   assert.equal(renderToStaticMarkup(app.render()), list, '关闭详情回到列表')
 
-  const Panel = ui.bindWorkItemApp(source)
-  const element = Panel() // 没有 dispatcher：组件里若有 hook，这里就抛 TypeError
-  assert.deepEqual([element.type, element.props.source], [ui.WorkItemApp, source])
-  assert.equal(renderToStaticMarkup(React.createElement(Panel)), list, 'bindWorkItemApp 的面板就是 WorkItemApp')
-
   source.set(readOf({ id: 'ws-2' })) // D13：关闭详情回到「当前工作区」的列表，路由不钉在打开详情时的工作区
   assert.ok(renderToStaticMarkup(app.render()).includes('<a href="#/projects/ws-2/items/ent-aa">'), '关闭详情之后工作区切换：显示新工作区的列表，不落到 unresolved')
 })

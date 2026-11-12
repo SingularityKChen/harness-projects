@@ -108,8 +108,3 @@ export function WorkItemApp({ source, initialPath, executionReader, startWork, o
   }, [key])
   return createElement('section', { 'aria-label': HARNESS_PANEL_TITLE, className: 'hp-workspace', ref: root }, ...children, createElement('style', null, WORKSPACE_STYLES))
 }
-
-/** 壳只拿到一个无 hook 的组件：不写 `createElement`、不 import react，面板只算一次。 */
-export function bindWorkItemApp(source: WorkspaceSource, executionReader?: ExecutionContextReader, deliveryReader?: DeliveryLineageReader): () => ReactElement {
-  return () => createElement(WorkItemApp, { source, executionReader, deliveryReader })
-}
