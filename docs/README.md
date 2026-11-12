@@ -52,6 +52,7 @@
 | [2026-11-07-test-execution](exec-plan/completed/2026-11-07-test-execution.md) | 单次分层执行与已完成进度轨道退役（#573） |
 | [2026-11-07-client-push-only](exec-plan/completed/2026-11-07-client-push-only.md) | Client 单一推流帧接受点与旧 pull 生命周期退役（#575） |
 | [2026-11-07-read-model-retirement](exec-plan/completed/2026-11-07-read-model-retirement.md) | 退役无运行时消费者的展示投影（#574） |
+| [2026-11-11-ui-binding-retirement](exec-plan/completed/2026-11-11-ui-binding-retirement.md) | 无消费者工作项包装退役，保留活跃设置浏览器证据（#453） |
 | [2026-11-07-delivery-overview](exec-plan/completed/2026-11-07-delivery-overview.md) | 跨工作项 PR/CI 工程交付总览（#281） |
 | [2026-11-07-source-work-item-numbers](exec-plan/completed/2026-11-07-source-work-item-numbers.md) | 来源工作项编号展示与搜索（#558） |
 | [2026-11-09-native-authority-receipts](exec-plan/completed/2026-11-09-native-authority-receipts.md) | 原生权限否定因果票据、旧响应围栏与粒度回归（#591） |

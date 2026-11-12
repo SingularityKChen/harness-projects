@@ -111,7 +111,7 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 | 顺序 | PR / issue | 当前版本门 |
 |---|---|---|
-| 1 | #623 / #415、#416 | 一项 P2 判别证据修复独立复评，完整变异表、当前 Fast Gate 与批准后 expected-head rebase |
+| 1（已合并） | #623 / #415、#416 | 2026-11-12 rebase `3b86d30f401e`；两 issue CLOSED，合入 tree 与批准 tree 相同 |
 | 2 | #625 / #453 | 接合 #623 后真实 main，保留双方 Completed/Review 索引；组合窄验证、当前 Fast Gate 与批准后 expected-head rebase |
 
 原始发布 head 保存在 `refs/backup/pr<N>-before-mmp-review-20261112`。最终 push 采用精确 old-head lease；每次重新读取 head/base、全部 checks/threads、双向 issue 关联与当前批准。合入后核对 MERGED、issue state 与 tree。#223/#224/#413、安装人验、Planning Status 和 R1 各自保留接受权。
