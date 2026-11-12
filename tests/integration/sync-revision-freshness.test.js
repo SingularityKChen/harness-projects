@@ -510,22 +510,22 @@ for (const [label, make] of STORAGES) {
   })
 }
 
-test('诊断出口：SQLite 账本里的旧载体（TD-020 起点）让一轮异常中止，宿主收到的原文含 repairLegacySource，命令结果不含（TD-030）', async () => {
+test('诊断出口：SQLite 账本里的旧载体让一轮异常中止，重建处置只给宿主，不进命令结果（TD-030）', async () => {
   const probe = hostDiagnostics()
   const storage = createSqliteStorage(':memory:')
   const world = await setup(storage, { diagnostics: probe.diagnostics })
   const core = await world.open()
   const { planning } = world.providers
   const { ref } = recordOf(world.providers, 'issue-1')
-  // 迁移 005 之后仍混进账本的旧载体：经内部句柄写一条版本为 `v9` 的已提交观察，再对同一对象发规范版本的观察（内存替身的入口已断言，这种状态不可达）。
+  // 完整当前账本里混入的非规范载体：经内部句柄写一条版本为 `v9` 的已提交观察，再对同一对象发规范版本的观察（内存替身的入口已断言，这种状态不可达）。
   storage.db.prepare('INSERT INTO sync_observation (binding_id, object_kind, object_external_id, observed_at, dedupe_key, updated_at, snapshot_json, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .run(planning.bindingId, ref.objectKind, ref.externalId, T(0), 'legacy-1', 'v9', '{}', 'processed')
   planning.emitObservation({ ref, type: 'issue.updated', stableFields: { v: 2 }, sourceVersion: sourceVersionFromTimestamp('2026-10-04T00:00:02Z') })
 
-  const message = await assertRoundFailed(world, core, /repairLegacySource|v9|已提交版本/, '旧载体')
+  const message = await assertRoundFailed(world, core, /请停止相关写入|v9|已提交版本/, '旧载体')
   assert.equal(probe.seen.length, 1, '恰好交给宿主一次')
-  assert.match(probe.seen[0].message, /repairLegacySource/, '宿主拿到可操作的修复指令')
-  assert.doesNotMatch(message, /repairLegacySource/, '修复指令只给宿主，不进命令结果')
+  assert.match(probe.seen[0].message, /请停止相关写入，先备份并核对所需数据，再由用户决定在新位置重建/, '宿主拿到具体的备份核对与用户重建处置')
+  assert.doesNotMatch(message, /请停止相关写入|备份|核对|新位置重建/, '恢复处置只给宿主，不进命令结果')
 })
 
 test('客户端时间：冷启动被拒或成功之后被拒，lastUpdatedAt 都不前进（#199 评论的建议验收）', async () => {

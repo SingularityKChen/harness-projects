@@ -95,23 +95,12 @@ CREATE TABLE sync_observation (
 -- 端口也不必靠"先查后插"维持只追加（查与插之间的窗口在库层被关掉）。
 CREATE UNIQUE INDEX sync_observation_dedupe ON sync_observation (binding_id, dedupe_key);
 
--- committed_observation：每个**端口主体**的已提交快照 = updated_at 最大、同版本时 observed_at 最新、
--- 再同则 rowid 最大（最后追加）的那一行。主体键与端口 subject 逐字相同：本层只有内存替身，SQLite 实现由
--- L4–L6 接入，接入后必须按同一个键定序。同版本时替身取最后写入、本视图取 observed_at 最新，两者可能选出不同快照（统一规则见 #201）。
--- 比较是 SQLite 的 BINARY（UTF-8 字节序），在规范载体上与 `compareSourceVersion` 的码点序等价。
--- R4 的"乱序观察不得覆盖新观察"因此是**构造性**的：旧行即使落进账本也永远不是 committed，不需要触发器。
--- 它是视图而不是表：committed 是由账本派生的当前事实，物化成第二张表就是同一事实的第二个家。
-CREATE VIEW committed_observation AS
-SELECT ledger.* FROM sync_observation AS ledger
-WHERE NOT EXISTS (
-  SELECT 1 FROM sync_observation AS newer
-  WHERE newer.binding_id = ledger.binding_id
-    AND newer.object_kind = ledger.object_kind
-    AND newer.object_external_id = ledger.object_external_id
-    AND (newer.updated_at > ledger.updated_at
-      OR (newer.updated_at = ledger.updated_at AND newer.observed_at > ledger.observed_at)
-      OR (newer.updated_at = ledger.updated_at AND newer.observed_at = ledger.observed_at AND newer.rowid > ledger.rowid))
-);
+-- 当前写入定序只需每个端口主体的最大版本；账本保留全部原始观察，不派生未消费的快照。
+-- 规范载体的 BINARY（UTF-8 字节序）与 capabilities 比较器的码点序等价。
+CREATE VIEW committed_observation_version AS
+SELECT binding_id, object_kind, object_external_id, MAX(updated_at) AS updated_at
+FROM sync_observation
+GROUP BY binding_id, object_kind, object_external_id;
 
 -- sync_cursor：增量游标属于工作区、provider binding 与调用方 scope（ADR-0006：同步健康度是工作区级事实，#189）。两条外键各自独立，只证明父行存在，不证明该工作区已挂载该连接（本层计划 Batch L3-A）。
 CREATE TABLE sync_cursor (

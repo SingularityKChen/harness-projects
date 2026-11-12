@@ -146,30 +146,6 @@ test('R8：写尝试一行一键，写入是幂等覆盖，id 在工作区内唯
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM mutation_attempt WHERE idempotency_key='content-1'").get().n, 2, '同一幂等键在两个工作区各有一行')
 }))
 
-test('R4：committed_observation 的主体与端口 subject 逐字相同，每个主体只给最新的一行', () => withDatabase((db) => {
-  migrate(db); seed(db)
-  db.exec("INSERT INTO sync_observation VALUES ('binding-1','issue','issue-1','t1','k1','2026-09-21T07:11:54Z','{\"v\":2}','processed')")
-  db.exec("INSERT INTO sync_observation VALUES ('binding-1','issue','issue-1','t2','k2','2026-09-21T07:10:00Z','{\"v\":1}','processed')")
-  // 主体含 binding_id：两个绑定观察同一内容时各有一行 committed（AGENTS.md §1.1 不变量 2 允许一个工作区连多个提供方）。
-  db.exec("INSERT INTO sync_observation VALUES ('binding-2','issue','issue-1','t9','k3','2026-09-21T07:12:00Z','{\"v\":3}','processed')")
-  const subjects = db.prepare("SELECT binding_id, updated_at FROM committed_observation ORDER BY binding_id").all().map((row) => ({ ...row }))
-  assert.deepEqual(subjects, [{ binding_id: 'binding-1', updated_at: '2026-09-21T07:11:54Z' }, { binding_id: 'binding-2', updated_at: '2026-09-21T07:12:00Z' }], '主体 = 端口 subject，两个绑定各有一行 committed')
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM committed_observation WHERE binding_id='binding-1'").get().n, 1, '每个主体只有一行 committed：旧行永远不是 committed')
-  // 同版本时取 observed_at 最新的一行（R4 的"相等时整快照替换"）。
-  db.exec("INSERT INTO sync_observation VALUES ('binding-1','issue','issue-1','t3','k4','2026-09-21T07:11:54Z','{\"v\":22}','processed')")
-  assert.equal(db.prepare("SELECT snapshot_json FROM committed_observation WHERE binding_id='binding-1'").get().snapshot_json, '{"v":22}')
-  // 版本载体缺失落空串：空串小于任何合法载体，因此它永远不是 committed（读回时由端口还原成 undefined）。
-  db.exec("INSERT INTO sync_observation VALUES ('binding-3','issue','issue-1','t4','k5','','{\"v\":0}','processed')")
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM committed_observation WHERE binding_id='binding-3'").get().n, 1, '只有一条时它就是 committed')
-  db.exec("INSERT INTO sync_observation VALUES ('binding-3','issue','issue-1','t5','k6','2026-09-21T07:13:00Z','{\"v\":9}','processed')")
-  assert.equal(db.prepare("SELECT updated_at FROM committed_observation WHERE binding_id='binding-3'").get().updated_at, '2026-09-21T07:13:00Z', '空串编码必须小于任何合法载体')
-  // 定序主体是三元组（第五轮评审）：同一 binding 下另一个对象的更旧版本、同 id 不同种类，都各自是 committed，互不遮蔽。
-  db.exec("INSERT INTO sync_observation VALUES ('binding-1','issue','issue-2','t6','k7','2026-09-21T07:00:00Z','{\"v\":5}','processed')")
-  db.exec("INSERT INTO sync_observation VALUES ('binding-1','draft','issue-1','t7','k8','2026-09-21T07:00:00Z','{\"v\":6}','processed')")
-  assert.deepEqual(db.prepare("SELECT object_kind, object_external_id FROM committed_observation WHERE binding_id='binding-1' ORDER BY object_kind, object_external_id").all()
-    .map((row) => `${row.object_kind}/${row.object_external_id}`), ['draft/issue-1', 'issue/issue-1', 'issue/issue-2'], '主体的三个维度缺任何一个，都会有一行被遮蔽')
-}))
-
 test('不变量 5：两张关系表的 source 词表恰好是 domain 的 RelationSource（候选表去掉 explicit），LLM 进不了关系语义', () => withDatabase((db) => {
   migrate(db)
   const vocabulary = (table) => [...db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table).sql.match(/source TEXT NOT NULL CHECK \(source IN \(([^)]*)\)\)/)[1].matchAll(/'([^']+)'/g)].map((match) => match[1]).sort()

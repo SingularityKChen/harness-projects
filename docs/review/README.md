@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [PR #623 MMP 评审](pr-623-mmp-review.md) | 当前存储世代、观察版本派生与三维主体隔离 | 完整风险矩阵、独立复评与当前 head 条件 rebase 收尾；人验/R1 独立 |
 | [PR #618–#621 MMP 批次](2026-11-11-pr618-pr621-mmp-review.md) | 正则安全、Host 私有数据、来源排期与只读 Timeline | 独立全级别矩阵、真实组合验证与逐当前版本条件 rebase 收尾 |
 | [PR #600 MMP 评审](pr-600-mmp-review.md) | Storage 快照、事务句柄与基础套件正控制 | 无 P0–P3；独立行为反证与当前版本门，工程验收不代替人验/R1 |
 | [PR #601 MMP 评审](pr-601-mmp-review.md) | 真实 Git、文件 SQLite 与 Start Work 补偿/重启 | 无 P0–P3；独立行为反证与当前版本门，工程验收不代替人验/R1 |

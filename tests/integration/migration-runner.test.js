@@ -14,6 +14,7 @@ import { Worker } from 'node:worker_threads'
 
 import {
   BUSY_TIMEOUT_MS,
+  CURRENT_SCHEMA_GENERATION,
   MIGRATIONS,
   assertManifestIntegrity,
   migrate,
@@ -115,7 +116,7 @@ test('双 Worker 屏障同时打开空库：只有一个进程初始化完整链
     assert.deepEqual(applied, [[], [1, 2, 3, 4, 5, 6, 7]])
     withDatabase(dir, (db) => {
       assert.deepEqual(appliedVersions(db), [1, 2, 3, 4, 5, 6, 7])
-      assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4)
+      assert.equal(db.prepare('PRAGMA user_version').get().user_version, CURRENT_SCHEMA_GENERATION)
       assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok')
       assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
     })

@@ -25,8 +25,8 @@
  * 收窄为规范载体（定宽 UTC 纳秒时间戳），在这个定义域上码点序、视图的 BINARY 字节序与时间序三者相同。
  * `recordObservation` 在入口调用 `assertComparableSourceVersion` 拒绝其余载体（含非 ASCII、秒级或变精度时间戳、带偏移写法、
  * 不定长编号），让"载体必须可比"从注释变成契约（#203）；归一由 provider 用 `sourceVersionFromTimestamp` 完成。
- * 入口断言只挡**新**观察：旧版本写过的库里已持久化的旧载体由迁移 005 处理（能归一的归一，不能的整库拒绝，见 `source-version-carrier.ts`），
- * 005 之后仍混进账本的旧载体在 `recordObservation` 读到已提交版本时响亮失败（`LEGACY_COMMITTED_VERSION_MESSAGE`）。
+ * 打开期由 `migrate` 校验完整当前结构，不改写账本内容；新观察通过去重后，若读到非规范的已提交版本，
+ * `recordObservation` 响亮失败（`LEGACY_COMMITTED_VERSION_MESSAGE`），由用户备份核对并决定重建。
  *
  * 落库形态（安全，本层决定）：`snapshot_json` **原样**持久化整条 `ProviderObservation`——`payload` 由 provider 负责脱敏，storage 不裁剪、不改写、不丢弃（见 `ProviderObservation` 的契约注释；本层计划遗留「`payload` 由 provider 先脱敏」已收口）。
  */
@@ -34,7 +34,6 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { assertComparableSourceVersion, compareSourceVersion, isComparableSourceVersion, parseBindingConfiguration, parseConnectorAccount, snapshotPolicy, EMPTY_POLICY, type FieldValueRecord, type MembershipRecord, type ObservationRecord, type PlanningSyncRoundRecord, type ReconcileCursorRecord, type StorageTransaction, type StorageValidationPolicy, type SyncCursorRecord } from '@harness-projects/capabilities'
 import type { ProviderBindingId, WorkspaceId } from '@harness-projects/domain'
 import type { WorkspaceDatabase } from './db.ts'
-import { assertRewritten003Shape } from './source-version-carrier.ts'
 import { optional, rowToBindingConfiguration, rowToConnectorAccount, rowToFieldValue, rowToMembership, rowToPlanningSyncRound, rowToReconcileCursor, rowToSyncCursor, type Row } from './storage-rows.ts'
 
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。
@@ -64,47 +63,8 @@ function activeTransaction(owner: SqliteSyncSurface): boolean {
   return false
 }
 
-/**
- * 迁移 005 之后账本里仍有旧载体（迁移之前就已打开库的旧版本进程继续写入，或裸 SQL 写入）：已提交版本不是规范载体，
- * 更新的规范观察无法与它定序。响亮失败，不再静默返回 `false`；处置指向显式修复函数。约定整串，由 U8 钉住。
- */
-export const LEGACY_COMMITTED_VERSION_MESSAGE = '已提交版本不是规范载体（账本里有旧版本写入的观察版本载体）：请停掉旧版本进程，调用 repairLegacySourceVersions(<库文件>, { backupPath }) 先备份再修复，然后重试'
-
-/** #126：已应用版本 2 但缺连接账号表/列（含残缺列集）的旧库必须在迁移之前只读拒绝；目录、文件与版本保持原样。 */
-export const CONNECTOR_ACCOUNT_SCHEMA_MESSAGE = '本地库是加入连接账号之前的 002（缺 connector_account 表/列，或 provider_binding.connector_account_id / workspace_binding.configuration_json 列）：请显式决定并删除库文件重建（程序不会升级也不会删库）'
-
-/** 版本 2 的账号必需列：逐项比对列集，不只看表存在（对抗验证 P2-R2 的 `connector_account(id)` 残缺库）。 */
-const CONNECTOR_ACCOUNT_COLUMNS = ['id', 'platform_family', 'platform_origin', 'identity_kind', 'external_id', 'display_name', 'secret_handle', 'connection_state'] as const
-
-/** #133：投影表在、却缺字段展示列的旧 002 库，同样在迁移之前只读拒绝。 */
-export const PLANNING_FIELD_SCHEMA_MESSAGE = '本地库是加入规划字段展示列之前的 002（workspace_projection 缺 field_status_name / field_iteration_title / field_target_date 列）：请显式决定并删除库文件重建（程序不会升级也不会删库）'
-
-/**
- * #126 的形状判据（唯一一份）：已应用版本 2 却缺账号表或必需列时为真——表整体缺失或只有部分列的损坏库都会先被 003–005 部分迁移（对抗验证 P2-2/P2-R2）。工厂在 `migrate` 前只读拒绝，构造函数兜底；空库返回 false。
- * 列名比对按 SQLite 语义大小写不敏感（P3-R4）：`pragma_table_info` 返回声明拼写，逐字比对会误拒大写声明的合法库。
- */
-export function isConnectorAccountShapeMissing(db: WorkspaceDatabase): boolean {
-  const hasTable = (name: string): boolean => db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined
-  if (!hasTable('schema_migrations') || !(db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]).some((row) => row.version === 2)) return false
-  const columns = (table: string): readonly string[] => (db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as { name: string }[]).map((row) => row.name.toLowerCase())
-  if (!hasTable('connector_account')) return true
-  const accountColumns = columns('connector_account')
-  return CONNECTOR_ACCOUNT_COLUMNS.some((name) => !accountColumns.includes(name))
-    || !columns('provider_binding').includes('connector_account_id') || !columns('workspace_binding').includes('configuration_json')
-}
-
-/**
- * 002 原位改写后的形状闸门（#126、#133）：工厂在 `migrate` 之前、003 的 preflight 与构造函数都调用它，账号判据在前。
- * #133 只判「投影表在、展示列缺」——正是 #133 之前建的库；空库没有投影表，不判定。
- */
-export function assert002Shape(db: WorkspaceDatabase): void {
-  if (isConnectorAccountShapeMissing(db)) throw new Error(CONNECTOR_ACCOUNT_SCHEMA_MESSAGE)
-  const projection = (db.prepare("SELECT name FROM pragma_table_info('workspace_projection')").all() as { name: string }[]).map((row) => row.name.toLowerCase())
-  if (projection.length > 0 && ['field_status_name', 'field_iteration_title', 'field_target_date'].some((name) => !projection.includes(name))) throw new Error(PLANNING_FIELD_SCHEMA_MESSAGE)
-  if (projection.length > 0 && !projection.includes('source_number_json')) throw new Error('Planning source number schema is outdated: rebuild explicitly')
-  const mapping = (db.prepare("SELECT name FROM pragma_table_info('workspace_planning_mapping')").all() as { name: string }[]).map((row) => row.name.toLowerCase())
-  if (projection.length > 0 && ['workspace_id', 'binding_id', 'domain', 'project_external_id', 'origin', 'mapping_json'].some((column) => !mapping.includes(column))) throw new Error('Planning mapping schema is outdated: rebuild explicitly')
-}
+/** 当前账本的已提交版本不是规范载体时，写入期拒绝定序；不自动改写或降级已有事实。 */
+export const LEGACY_COMMITTED_VERSION_MESSAGE = '已提交版本不是规范载体：请停止相关写入，先备份并核对所需数据，再由用户决定在新位置重建。'
 
 /** 列值 → 端口版本：`undefined` 的 `sourceVersion` 落库时空串（列 NOT NULL），读回必须还原，否则两条都没有 `sourceVersion` 的合法观察里第二条会被判成乱序。 */
 const columnToVersion = (value: string | undefined): string | undefined => (value === '' ? undefined : value)
@@ -116,7 +76,7 @@ const closeQuietly = (db: WorkspaceDatabase): void => { try { db.close() } catch
 
 /**
  * 写者 / 读者路径机制 + 同步面。机制只在这里声明一次：子类（执行面、地基面）不再各写一份队列。
- * 私有 `#` 辅助（`#assertRewrittenSchema` / `#hasSeenObservation` / `#committedVersion`）**不是入口**：它们只在构造函数里
+ * 私有 `#` 辅助（`#assertStoredMetadata` / `#hasSeenObservation` / `#committedVersion`）**不是入口**：它们只在构造函数里
  * 或 `mutate` 体内被调用，自己从不单独碰连接——因此"读必须经过 `read`"这条对端口方法成立，对它们也成立。
  * 端口三组的方法已全部落地（Batch L6 之后没有未实现桩），因此本类不再继承 `UnimplementedPort`。
  */
@@ -140,21 +100,11 @@ export class SqliteSyncSurface {
     this.#state = state ?? { closed: false, commits: 0, dirty: false }; this.#token = token
     // 失败一律关句柄（P2-R1）；工厂已快照过一次（P3-R3），复用副本以免二次读有状态 getter。
     if (!scoped) {
-      try { this.#policy = snapshotPolicy(policy); this.#assertRewrittenSchema(); this.#assertConnectorAccountSchema(); this.#assertStoredMetadata() } catch (error) { closeQuietly(this.db); throw error }
+      try { this.#policy = snapshotPolicy(policy); this.#assertStoredMetadata() } catch (error) { closeQuietly(this.db); throw error }
     } else {
       this.#policy = policy
     }
   }
-
-  /**
-   * 003 重写后的库自检（P3）：`migrate()` 只按**版本号**判断是否已应用、不校验迁移体内容，因此已应用版本 3 的旧库
-   * 会保留旧列集合，直到第一次写观察才炸在驱动层（实测 `recordObservation -> no such column: dedupe_key`）。这里把
-   * 驱动级报错换成一句可执行的处置。只在根实例上跑（作用域实例共用同一个刚查过的句柄）；未迁移时不判定。
-   */
-  #assertRewrittenSchema(): void { assertRewritten003Shape(this.db) }
-
-  /** #126 / #133 的 schema 自检：缺连接账号或字段展示列的旧库换一句可执行处置，替代驱动级报错。只在根实例上跑。 */
-  #assertConnectorAccountSchema(): void { assert002Shape(this.db) }
 
   /** #126 的已存元数据自检：用当前策略重放账号与配置的闭集校验（漏策略的空库合法，有不匹配行的库在打开时拒绝）；配置按真实锚点的 implementationKey 分派。 */
   #assertStoredMetadata(): void {
@@ -350,14 +300,9 @@ export class SqliteSyncSurface {
     return row !== undefined
   }
 
-  /**
-   * 已提交版本：同一**端口主体** `(绑定, 对象种类, 对象 id)` 里 `updated_at` 最大、同版本时 `observed_at` 最新的
-   * 那一行（与 `committed_observation` 视图同一判据）。主体与端口 subject 逐字相同：一个工作区可以连接多个提供方，
-   * 各自的版本序列互不相干，少了 binding 这一维第二个 provider 的首条观察会被判成乱序而静默返回 `false`。
-   */
+  /** 当前主体的最大版本由唯一派生视图选择；无行与空串都还原成无版本。 */
   #committedVersion(bindingId: ProviderBindingId, objectKind: string, objectExternalId: string): string | undefined {
-    const row = this.db.prepare(`SELECT updated_at FROM sync_observation WHERE binding_id = ? AND object_kind = ? AND object_external_id = ?
-      ORDER BY updated_at DESC, observed_at DESC LIMIT 1`).get(bindingId, objectKind, objectExternalId) as { updated_at: string } | undefined
+    const row = this.db.prepare(`SELECT updated_at FROM committed_observation_version WHERE binding_id = ? AND object_kind = ? AND object_external_id = ?`).get(bindingId, objectKind, objectExternalId) as { updated_at: string } | undefined
     return row === undefined ? undefined : columnToVersion(row.updated_at)
   }
 

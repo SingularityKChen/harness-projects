@@ -63,7 +63,7 @@ export interface ProviderReconcileScope { readonly scopeKey: string; readonly cu
 /**
  * 定序约定（R4）：`sourceVersion` 的**唯一合法载体**是规范载体——定宽 30 字节的 UTC 纳秒时间戳
  * `YYYY-MM-DDTHH:MM:SS.fffffffffZ`（如 `2026-09-21T07:11:54.500000000Z`）。在这个定义域上，码点序、UTF-16
- * 码元序、UTF-8 字节序（SQLite BINARY）与时间序四者相同，`compareSourceVersion` 与 `committed_observation`
+ * 码元序、UTF-8 字节序（SQLite BINARY）与时间序四者相同，`compareSourceVersion` 与 `committed_observation_version`
  * 视图因此同判据（RFC 3339 §5.1：同一时区写法、同样小数位数时可以按字符串排序）。
  * 未归一的时间戳（小数位数不同的 `54Z` 与 `54.500Z`、带偏移的 `+08:00`）、不定长编号（`v9` / `v10`）、sha 都**不是**
  * 载体：它们会把更新的观察判成乱序而静默丢弃，所以入口直接拒绝（#203），不再返回 `false`。
@@ -155,7 +155,7 @@ export function assertComparableSourceVersion(value: string | undefined): void {
 /**
  * 版本定序的**唯一判据**（R4）：按码点序比较，`undefined` 视为最小。
  * 定义域是规范载体加 `undefined`：在这个域上码点序 = UTF-8 字节序（SQLite BINARY）= 时间序，storage 实现接入后
- * 必须与 `committed_observation` 视图同判据。在任意串上它仍是全函数（码点序），不会抛错。
+ * 必须与 `committed_observation_version` 视图同判据。在任意串上它仍是全函数（码点序），不会抛错。
  */
 export function compareSourceVersion(left: string | undefined, right: string | undefined): number {
   if (left === right) return 0

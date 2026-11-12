@@ -176,6 +176,7 @@
 | [2026-10-28-plugin-bundle-evidence](exec-plan/completed/2026-10-28-plugin-bundle-evidence.md) | Host 公开组件与同配置 bundle/pack 证据（#428） |
 | [2026-09-29-harness-plugin-reprobe](exec-plan/completed/2026-09-29-harness-plugin-reprobe.md) | 宿主嵌入复探（issue #225） |
 | [2026-09-29-source-version-order](exec-plan/completed/2026-09-29-source-version-order.md) | 观察版本载体收窄与定序 |
+| [2026-11-11-source-version-contract](exec-plan/completed/2026-11-11-source-version-contract.md) | 当前观察版本派生、历史修复退役与订阅身份守卫（#415/#416） |
 | [2026-09-29-start-work-resume-evidence](exec-plan/completed/2026-09-29-start-work-resume-evidence.md) | 2026-09-29-start-work-resume-evidence —— 补齐 Start Work 恢复的剩余闭环（#183） |
 | [2026-10-28-start-work-request-binding](exec-plan/completed/2026-10-28-start-work-request-binding.md) | 开始工作首请求耐久绑定、无副作用冲突与真实重启/并发验证（#194） |
 | [2026-10-29-start-work-visibility](exec-plan/completed/2026-10-29-start-work-visibility.md) | 不可见目标的事务准入与 Controller 重放守卫（#349） |

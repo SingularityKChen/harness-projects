@@ -182,6 +182,7 @@ function sharedSyncSuite({ label, makeStorage, inject }, test) {
     const at = (key, kind, version) => observation(key, 'pending', { subject: { bindingId: 'binding-1', objectKind: kind, externalId: 'shared-1', url: undefined }, sourceVersion: version, receivedTime: version })
     assert.equal(await storage.recordObservation(at('issue-new', 'issue', '2026-09-21T07:11:54.000000000Z')), true)
     assert.equal(await storage.recordObservation(at('draft-old', 'draft', '2026-09-21T07:10:00.000000000Z')), true, 'draft 比的是自己的种类，不是 issue 的已提交版本')
+    assert.equal(await storage.recordObservation(at('draft-older', 'draft', '2026-09-21T07:09:00.000000000Z')), false, 'draft 的新去重键仍须拒绝早于本种类已提交版本的观察')
   })
   // 版本缺失（sourceVersion: undefined）在两个实现上必须给出同一答案：它是"没有版本"，不是"版本为空串"。
   // SQLite 侧 undefined 落成空串（updated_at 是 NOT NULL），读回时必须还原成 undefined 再比较；否则第二条

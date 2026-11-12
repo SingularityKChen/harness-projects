@@ -1,10 +1,9 @@
 // 集成层：Storage 端口的同步面在文件库上的用例（`tests/integration/README.md` 的 "event dedupe"，外加
-// R1 的成员关系、R4 的观察定序与 committed 视图、R5 的游标作用域与引用完整性）。每个用例一个临时目录，
+// R1 的成员关系、R4 的观察定序与原始账本、R5 的游标作用域与引用完整性）。每个用例一个临时目录，
 // 用例之间不共享状态；断言说明它保护哪条不变量，而不是它调用了哪个函数。
 //
-// 账本与 `committed_observation` 视图**没有端口读取接口**（控制计划 D6 刻意不新增观察查询），因此这里从
-// 第二个连接直接读表与视图：committed 是由账本派生的当前事实，本层要钉住的是这个结构本身。账本主体与
-// committed 的主体都是**端口主体** `(binding_id, object_kind, object_external_id)`，账本也不引用成员关系
+// 账本没有端口读取接口，因此从第二个连接读取追加行，验证去重、定序与原始 payload 保留。
+// 账本主体是**端口主体** `(binding_id, object_kind, object_external_id)`，也不引用成员关系
 // （L3 的 003）：观察只带内容引用，落点就是端口主体本身，**不解析成员关系**——对账先到、成员关系后到也能记账。
 // 本层钉的是端口面：`recordObservation` 的 true / false、账本行数与 003 重写后的库自检。
 
@@ -51,18 +50,16 @@ async function seed(storage) {
   await storage.putProviderBinding(binding())
 }
 
-/** 从第二个连接读账本 / committed 视图：视图不是端口面，但它是"乱序不覆盖"的结构保证。行映射成普通对象，断言不必知道驱动的行原型。 */
+/** 第二连接读原始账本；行映射成普通对象，断言不依赖驱动的行原型。 */
 function readSync(location, sql, ...params) {
   const db = openDatabase(location)
   try { return db.prepare(sql).all(...params).map((row) => ({ ...row })) } finally { db.close() }
 }
-const ledger = (location) => readSync(location, 'SELECT object_external_id, observed_at, updated_at, state FROM sync_observation ORDER BY observed_at, dedupe_key')
-const committed = (location) => readSync(location, `SELECT object_external_id, observed_at, updated_at, snapshot_json FROM committed_observation
-  WHERE binding_id = ? AND object_kind = ? AND object_external_id = ? ORDER BY observed_at`, BINDING, OBJECT_KIND, OBJECT)
+const ledger = (location) => readSync(location, 'SELECT object_external_id, observed_at, updated_at, snapshot_json, state FROM sync_observation ORDER BY observed_at, dedupe_key')
 
 /** 同步面的可观测摘要：一次投递与 N 次投递必须得到同一份摘要（README 的 "event dedupe"）。 */
 async function digest(storage, location) {
-  return { ledger: ledger(location), committed: committed(location),
+  return { ledger: ledger(location),
     memberships: await storage.listMemberships(WORKSPACE, PROJECT), fieldValues: await storage.listFieldValues(WORKSPACE, ITEM) }
 }
 
@@ -102,9 +99,30 @@ test('观察账本：同一主体、同一接收时刻的两条不同观察互�
       assert.equal(ledger(location).length, 2, '两条不同观察都必须留在账本里：只追加，不互相顶掉')
       assert.equal(await storage.recordObservation(first), false, '第一条再投递必须返回 false——它的账本行没有被顶掉')
       assert.equal(ledger(location).length, 2, '重复投递不得再落一行')
-      const rows = committed(location)
-      assert.equal(rows.length, 1, '同一主体只有一个 committed 快照：同版本同接收时刻由追加序 tie-break')
-      assert.equal(JSON.parse(rows[0].snapshot_json).observation.payload.status, 'Done', 'committed 取最后追加的那一行')
+      assert.deepEqual(ledger(location).map((row) => JSON.parse(row.snapshot_json).observation.payload.status).sort(), ['Done', 'Todo'], '同版本同接收时刻仍保留两份原始 payload')
+    } finally { storage.close() }
+  })
+})
+
+test('当前账本损坏：重开保留原值，相关主体的新观察拒绝且不追加', async () => {
+  await withTempDir(async (dir) => {
+    const location = join(dir, 'workspace.sqlite')
+    let storage = createSqliteStorage(location)
+    try {
+      await seed(storage)
+      assert.equal(await storage.recordObservation(delivered({ sourceVersion: V1 })), true)
+      const db = openDatabase(location)
+      try { db.prepare('UPDATE sync_observation SET updated_at = ? WHERE binding_id = ? AND object_kind = ? AND object_external_id = ?').run('v9', BINDING, OBJECT_KIND, OBJECT) } finally { db.close() }
+      storage.close()
+      storage = createSqliteStorage(location)
+      const before = ledger(location)
+      assert.equal(before[0]?.updated_at, 'v9', '打开期只校验结构，不归一或降级账本内容')
+      await assert.rejects(storage.recordObservation(delivered({ sourceVersion: V2, stablePayloadFields: { status: 'Done' }, payload: { status: 'Done' } })), {
+        message: '已提交版本不是规范载体：请停止相关写入，先备份并核对所需数据，再由用户决定在新位置重建。',
+      }, '写入时响亮拒绝，并提供保留数据的处置')
+      assert.deepEqual(ledger(location), before, '被拒绝的新观察不得留下账本行')
+      assert.equal(await storage.recordObservation(delivered({ subject: { bindingId: BINDING, objectKind: OBJECT_KIND, externalId: 'issue-2', url: undefined } })), true, '其他主体仍可正常写入')
+      assert.equal(ledger(location).length, 2)
     } finally { storage.close() }
   })
 })
@@ -121,13 +139,12 @@ test('观察定序：v1 → v3 → v2 的到达顺序必须判成 [true, true, f
       const applied = [await storage.recordObservation(at('k1', V1)), await storage.recordObservation(at('k2', V3)), await storage.recordObservation(at('k3', V2))]
       assert.deepEqual(applied, [true, true, false], '介于中间的版本必须被拒绝：判据是已提交版本的最大值，不是最旧值')
       assert.equal(ledger(location).length, 2, '被拒绝的乱序观察不得落进账本')
-      assert.equal(committed(location)[0]?.updated_at, V3, '乱序观察不得改变已提交快照')
       assert.equal(await storage.recordObservation(at('k4', V1)), false, '更旧的版本同样必须被拒绝')
     } finally { storage.close() }
   })
 })
 
-test('观察定序：更旧的版本不落账本，同版本整快照替换', async () => {
+test('观察定序：更旧的版本不落账本，同版本追加并保留原始 payload', async () => {
   await withTempDir(async (dir) => {
     const location = join(dir, 'workspace.sqlite')
     const storage = createSqliteStorage(location)
@@ -137,35 +154,10 @@ test('观察定序：更旧的版本不落账本，同版本整快照替换', as
       assert.equal(await storage.recordObservation(delivered({ sourceVersion: V1, stablePayloadFields: { status: 'Blocked' } })), false,
         '更旧的 sourceVersion 必须返回 false，调用方不得读成"已应用"')
       assert.equal(ledger(location).length, 1, '被拒绝的乱序观察不得落进账本')
-      assert.equal(committed(location)[0]?.updated_at, V2, '乱序观察不得改变已提交快照')
       const replacement = delivered({ sourceVersion: V2, receivedTime: V3, stablePayloadFields: { status: 'Done' }, payload: { status: 'Done' } })
-      assert.equal(await storage.recordObservation(replacement), true, '同版本、不同 dedupeKey 的观察必须被应用（整快照替换）')
+      assert.equal(await storage.recordObservation(replacement), true, '同版本、不同 dedupeKey 的观察必须被应用')
       assert.equal(ledger(location).length, 2, '替换是追加一行，不是把已见 key 的账本行顶掉')
-      const [latest] = committed(location)
-      assert.equal(latest?.observed_at, V3, '同版本时 committed 取本地接收时刻最新的那一行')
-      assert.equal(JSON.parse(latest.snapshot_json).observation.payload.status, 'Done', '同版本是整快照替换，不是逐字段合并')
-    } finally { storage.close() }
-  })
-})
-
-test('committed_observation：committed 是每个端口主体 updated_at 最大、同版本时 observed_at 最新的那一行', async () => {
-  await withTempDir(async (dir) => {
-    const location = join(dir, 'workspace.sqlite')
-    const storage = createSqliteStorage(location)
-    try {
-      await seed(storage)
-      await storage.recordObservation(delivered({ sourceVersion: V2 }))
-      await storage.recordObservation(delivered({ sourceVersion: V3, receivedTime: V3, stablePayloadFields: { status: 'In Progress' }, payload: { status: 'In Progress' } }))
-      // 端口会拒绝乱序观察（上一条用例），但账本是结构：这里直接写一行更旧的版本，证明"乱序不覆盖"是**构造性**的。
-      const db = openDatabase(location)
-      try {
-        db.prepare(`INSERT INTO sync_observation (binding_id, object_kind, object_external_id, observed_at, dedupe_key, updated_at, snapshot_json, state)
-          VALUES (?, ?, ?, '2026-09-21T07:12:00Z', 'stale-key', '2026-09-21T07:09:00.000000000Z', '{"stale":true}', 'processed')`).run(BINDING, OBJECT_KIND, OBJECT)
-      } finally { db.close() }
-      const rows = committed(location)
-      assert.equal(rows.length, 1, '每个主体只有一个 committed 快照')
-      assert.equal(rows[0]?.updated_at, V3, '更旧的行即使落进账本，也永远不是 committed')
-      assert.equal(JSON.parse(rows[0].snapshot_json).observation.payload.status, 'In Progress')
+      assert.deepEqual(ledger(location).map((row) => JSON.parse(row.snapshot_json).observation.payload.status), ['Todo', 'Done'], '新观察不改写或合并原始 payload')
     } finally { storage.close() }
   })
 })
@@ -263,10 +255,10 @@ test('引用完整性：成员关系必须属于存在的工作区，字段值�
   })
 })
 
-/** 把 `sync_observation` 退回重写前的列集合：`migrate()` 只按版本号判断是否已应用，因此旧库一直"看起来是新的"。 */
+/** 构造重写前列集合的旧库，验证当前完整结构准入拒绝它。 */
 function rewriteObservationTable(db, columns) {
   db.exec('PRAGMA foreign_keys = OFF')
-  db.exec('DROP VIEW committed_observation')
+  db.exec('DROP VIEW committed_observation_version')
   db.exec('DROP INDEX sync_observation_dedupe')
   db.exec(`CREATE TABLE sync_observation_pre_rewrite (${columns})`)
   db.exec('DROP TABLE sync_observation')

@@ -1,25 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { WorkspaceDatabase } from './db.ts'
-import { assert002Shape } from './storage-sync.ts'
-import { SOURCE_VERSION_CARRIER_STEP } from './source-version-carrier.ts'
-
-/**
- * 迁移的数据步骤：迁移体只能表达 DDL 与常量 SQL，而「已有行的值是否在定义域内」要靠 JS 判定（归一规则在 capabilities）。
- * `preflight` 只读，在应用**任何**待应用迁移之前对所有待应用条目运行；`apply` 在该迁移的写事务内、迁移体之后执行，
- * 与版本记录同生共死，并且必须重新判定（预检与事务之间可能有并发写入）。
- */
-export interface MigrationDataStep {
-  preflight(db: WorkspaceDatabase): void
-  apply(db: WorkspaceDatabase): void
-}
-
-/** 一次迁移：单调递增的版本号 + 迁移体文件名，可带一个数据步骤。 */
+/** 一次迁移：单调递增的版本号 + 迁移体文件名。 */
 export interface Migration {
   readonly version: number
   readonly file: string
-  readonly data?: MigrationDataStep
 }
 
 /**
@@ -32,10 +17,10 @@ export interface Migration {
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, file: '001_init.sql' },
   { version: 2, file: '002_identity_membership.sql' },
-  { version: 3, file: '003_control_facts.sql', data: { preflight: assert002Shape, apply: () => {} } },
+  { version: 3, file: '003_control_facts.sql' },
   { version: 4, file: '004_execution_run_identity.sql' },
-  // 005 不含 DDL：载体世代步骤（#203），`schema_migrations` 里的 5 是世代标记。
-  { version: 5, file: '005_source_version_carrier.sql', data: SOURCE_VERSION_CARRIER_STEP },
+  // 005 保留历史版本位置；载体归一与修复数据步骤已退役（#415）。
+  { version: 5, file: '005_source_version_carrier.sql' },
   { version: 6, file: '006_delivery_facts.sql' },
   { version: 7, file: '007_planning_sync_round.sql' },
 ]

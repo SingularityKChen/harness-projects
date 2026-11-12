@@ -9,9 +9,9 @@ import { openDatabase } from './db.ts'
 import { migrate } from './migrate.ts'
 import { contentColumns, optional, rowToBinding, rowToBindingConfiguration, rowToConnectorAccount, rowToIdentity, rowToProjection, rowToRepository, rowToWorkspace, toFlag, type Row } from './storage-rows.ts'
 import { SqliteExecutionSurface } from './storage-execution.ts'
-import { assert002Shape, type TransactionToken } from './storage-sync.ts'
+import type { TransactionToken } from './storage-sync.ts'
 
-export { CLOSED_MESSAGE, CONNECTOR_ACCOUNT_SCHEMA_MESSAGE, LEGACY_COMMITTED_VERSION_MESSAGE, NESTED_TRANSACTION_MESSAGE, OUTER_INSTANCE_MESSAGE, PLANNING_FIELD_SCHEMA_MESSAGE, SETTLED_TRANSACTION_MESSAGE } from './storage-sync.ts'
+export { CLOSED_MESSAGE, LEGACY_COMMITTED_VERSION_MESSAGE, NESTED_TRANSACTION_MESSAGE, OUTER_INSTANCE_MESSAGE, SETTLED_TRANSACTION_MESSAGE } from './storage-sync.ts'
 
 // 列清单只写一次：不写 SELECT *，加列时形状变化必须是显式的，而不是被映射层静默忽略。绑定列名与拆表前一致（工作区作用域三列来自挂载、实现键来自连接锚点），`rowToBinding` 因此不用改。
 const BINDING_COLUMNS = 'b.id AS id, wb.workspace_id AS workspace_id, wb.domain AS domain, b.implementation_key AS implementation_key, wb.enabled AS enabled, wb.is_default AS is_default'
@@ -203,8 +203,7 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
 }
 
 /**
- * 打开（必要时创建）库、应用缺失迁移并返回端口实现；迁移幂等，失败关句柄后原样抛出。
- * `preflight`（#126）：旧 002 形状（版本 2 已记账但没有连接账号表/列）必须在任何待应用迁移之前只读拒绝（`migrate` 只按版本号跳过）；拒绝零写入，构造函数自检再查同一判据。
+ * 打开当前库或原子初始化空库并返回端口实现；`migrate` 是完整结构准入的唯一拥有者，失败关句柄后原样抛出。
  * 受信策略先在任何 IO 之前快照（P2-R1）并把同一份交给构造函数（P3-R3）：非法策略不留迁移写入、不打开句柄；二次读有状态 getter 会把失败推到 migrate 之后。构造函数也在 `try` 内。
  */
 export interface SqliteStorageOptions {
@@ -220,7 +219,6 @@ export function createSqliteStorage(
   const db = openDatabase(location)
   try {
     migrate(db, options.migrationsDir === undefined ? {} : { dir: options.migrationsDir })
-    assert002Shape(db)
     return new SqliteStorage(location, db, false, undefined, undefined, snapshot)
   } catch (error) { try { db.close() } catch { /* 构造函数已关：幂等 */ } throw error }
 }
