@@ -23,7 +23,7 @@ export class IncompatibleDatabaseError extends Error {
   readonly reason: IncompatibleDatabaseReason
   readonly actualGeneration: number
   constructor(reason: IncompatibleDatabaseReason, actualGeneration: number) {
-    super('数据库不符合当前基线。请停止打开进程，先备份并核对所需数据，再由用户决定在新位置重建。')
+    super('数据库不符合当前基线，原数据库已保留。请先退出使用该库的宿主并备份。保留现有数据需要显式迁移，或恢复与该库匹配的旧版；新位置重建会得到空工作区。不要仅修改数据库世代号。具体操作：https://github.com/SingularityKChen/harness-projects/blob/main/docs/product/demo-install.md#database-recovery')
     this.name = 'IncompatibleDatabaseError'
     this.reason = reason
     this.actualGeneration = actualGeneration

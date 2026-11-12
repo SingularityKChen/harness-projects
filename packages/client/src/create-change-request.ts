@@ -6,6 +6,7 @@ export interface ChangeRequestIssueOptions { readonly targetStamp?: string; read
 export interface CreationAssignment { readonly state: 'none' | 'pending' | 'confirmed' | 'unknown' | 'failed' | 'conflict'; readonly operationId?: string; readonly reason?: 'not_supported' | 'permission_denied' }
 export interface ChangeRequestIntent extends DeliveryLineageScope { readonly base: string; readonly title: string; readonly body: string; readonly draft?: boolean; readonly issueRelation?: IssueRelation; readonly issueTargetStamp?: string | undefined; readonly assigneeIds?: readonly string[] | undefined }
 export type ChangeRequestOperation = { readonly kind: 'none' } | { readonly kind: 'blocked'; readonly reason: 'unavailable' | 'ambiguous' | 'invalid_operation' }
+  | { readonly kind: 'history'; readonly operationId: string; readonly state: 'saved'; readonly head: string; readonly base: string; readonly title: string; readonly draft: boolean }
   | { readonly kind: 'operation'; readonly operationId: string; readonly state: string; readonly currentTarget: boolean; readonly targetStamp: string; readonly head: string; readonly base: string; readonly title: string; readonly draft: boolean; readonly issueRelation: IssueRelation; readonly issueTarget?: { readonly repositoryName: string; readonly number: number }; readonly requestedAssigneeIds?: readonly string[]; readonly assignment?: CreationAssignment }
 export interface ChangeRequestOperationRead extends DeliveryLineageScope { readonly operation: ChangeRequestOperation }
 export interface ChangeRequestCreation { readonly assignment?: CreationAssignment; readonly writeState: CommandWriteState; readonly operationId?: string; readonly targetStamp?: string; readonly lineageStale?: boolean; readonly recovery?: string; readonly relationState?: 'none' | 'pending' | 'confirmed' | 'denied' | 'unknown' }
@@ -76,7 +77,11 @@ export function createChangeRequestCreator(port: Port, actor: ActorRef, makeKey:
       const dto = record(await port.operation(actor, scope.workItemId, scope.repositoryId, operationId), ['workspaceId', 'workItemId', 'repositoryId', 'operation'])
       for (const key of ['workspaceId', 'workItemId', 'repositoryId'] as const) if (!text(dto[key]) || dto[key] !== scope[key]) throw new TypeError('PR 作用域不合契约')
       const value = record(dto.operation, ['kind', 'reason', 'operationId', 'state', 'currentTarget', 'targetStamp', 'head', 'base', 'title', 'draft', 'issueRelation', 'issueTarget', 'requestedAssigneeIds', 'assignment'])
-      record(value, value.kind === 'none' ? ['kind'] : value.kind === 'blocked' ? ['kind', 'reason'] : ['kind', 'operationId', 'state', 'currentTarget', 'targetStamp', 'head', 'base', 'title', 'draft', 'issueRelation', 'issueTarget', 'requestedAssigneeIds', 'assignment'])
+      record(value, value.kind === 'none' ? ['kind'] : value.kind === 'blocked' ? ['kind', 'reason'] : value.kind === 'history' ? ['kind', 'operationId', 'state', 'head', 'base', 'title', 'draft'] : ['kind', 'operationId', 'state', 'currentTarget', 'targetStamp', 'head', 'base', 'title', 'draft', 'issueRelation', 'issueTarget', 'requestedAssigneeIds', 'assignment'])
+      if (value.kind === 'history') {
+        if (value.state !== 'saved' || ['operationId', 'head', 'base', 'title'].some(key => !text(value[key])) || typeof value.draft !== 'boolean' || (operationId !== undefined && value.operationId !== operationId)) throw new TypeError('原合同 PR 历史收据无效')
+        return dto as unknown as ChangeRequestOperationRead
+      }
       if (value.kind === 'operation') {
         assignment(value.assignment)
         if (value.requestedAssigneeIds !== undefined && (ids(value.requestedAssigneeIds).length === 0 || JSON.stringify(ids(value.requestedAssigneeIds)) !== JSON.stringify(value.requestedAssigneeIds))) throw new TypeError('原负责人 IDs 无效')

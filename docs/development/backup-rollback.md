@@ -188,3 +188,76 @@ pnpm test:file tests/integration/storage-baseline-admission.test.js tests/integr
 ```
 
 测试通过不代替实际演练；工程子 issue #532、PR Ready 与本记录均不代替父 #369/#73 的人类 R1-12 裁决。
+
+## 显式迁移与备份的边界
+
+本流程的Backup API和匹配产物回滚保存同一逻辑数据库，不提供通用代际转换。数据库不符合当前准入时先按[恢复指引](../product/demo-install.md#database-recovery)选择保留数据还是新建空库。明确授权的迁移必须单独记录源/目标schema及JSON合同差异；全表旧列、必要rowid、关系、原执行/请求身份和Git定位都需保全。严格schema通过不能代替当前decoder和纯读恢复验证。
+
+尤其是已确认外部操作，不能为补齐新字段重写原fingerprint、body marker或幂等键；旧unknown操作也不能借迁移改成成功或重新派发。若当前代码无法安全读取原记录，先解决受限的只读历史合同或明确停止，不丢弃行来让检查变绿。原始操作数据、指纹、数据库及截图只留私有目录，公开记录仅保存可分享的结论、验证命令和范围。
+
+## Desktop 与自定义 profile 的停机备份
+
+前文的Web演练变量和sandbox允许根不能直接照抄到真实Desktop。以下模板从明确选定的插件数据根备份，只新建私有备份目录，不移动工作树、不覆盖已有文件，也不改变库代际。先彻底退出对应Harness/dsh，再把 `HP_BACKUP_DATA` 换成实际profile的插件数据根；默认Desktop如下：
+
+```sh
+HP_BACKUP_DATA="$HOME/.dsh/profiles/desktop/harness-projects"
+python3 - "$HP_BACKUP_DATA" <<'PY'
+import hashlib, json, os, sqlite3, stat, subprocess, sys, tempfile
+from pathlib import Path
+root = Path(sys.argv[1]).expanduser().absolute()
+assert '..' not in root.parts and root.resolve(strict=True) == root
+assert root.is_dir() and root.stat().st_uid == os.getuid() and not root.stat().st_mode & 0o022
+source = root / 'workspace.sqlite'
+def unopened():
+    for suffix in ['', '-wal', '-shm', '-journal']:
+        p = Path(str(source) + suffix)
+        try:
+            st = p.lstat()
+        except FileNotFoundError:
+            continue
+        assert stat.S_ISREG(st.st_mode) and st.st_uid == os.getuid() and st.st_nlink == 1
+        r = subprocess.run(['lsof', '-t', str(p)], capture_output=True, text=True)
+        assert r.returncode in (0, 1) and not r.stdout.strip() and not r.stderr.strip(), 'database open or check failed'
+def digest(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+        separators=(',', ':'), default=lambda b: {'blob': bytes(b).hex()}).encode()).hexdigest()
+def inspect(c):
+    assert c.execute('PRAGMA integrity_check').fetchall() == [('ok',)]
+    assert c.execute('PRAGMA foreign_key_check').fetchall() == []
+    schema = c.execute("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY name").fetchall()
+    rows = {}
+    for kind, name, _, _ in schema:
+        if kind != 'table':
+            continue
+        quoted = '"' + name.replace('"', '""') + '"'
+        rows[name] = c.execute('SELECT rowid,* FROM ' + quoted + ' ORDER BY rowid').fetchall()
+    return {'generation': c.execute('PRAGMA user_version').fetchone()[0],
+        'schemaSha256': digest(schema), 'rowsSha256': digest(rows),
+        'tableCounts': {name: len(value) for name, value in rows.items()}}
+unopened()
+original = hashlib.sha256(source.read_bytes()).hexdigest()
+out = Path(tempfile.mkdtemp(prefix='database-backup-', dir=root))
+os.chmod(out, 0o700)
+target = out / 'workspace.sqlite'
+fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+os.close(fd)
+src = sqlite3.connect(source.as_uri() + '?mode=ro', uri=True)
+dst = sqlite3.connect(target)
+try:
+    before = inspect(src)
+    src.backup(dst)
+    assert before == inspect(src) == inspect(dst)
+finally:
+    dst.close()
+    src.close()
+unopened()
+assert hashlib.sha256(source.read_bytes()).hexdigest() == original
+proof = {**before, 'backupSha256': hashlib.sha256(target.read_bytes()).hexdigest()}
+fd = os.open(out / 'receipt.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, 'w') as f:
+    json.dump(proof, f, ensure_ascii=False, indent=2)
+print('Verified backup:', target)
+PY
+```
+
+预期生成当前数据根下唯一的 `database-backup-*` 目录，内有0600数据库与私有receipt；逻辑内容、既有rowid、schema、代际和所有表计数相等，integrity通过且外键检查为空。若还有打开者、路径/owner/文件类型不安全或校验不等，命令失败，保持停机并保留原件，不删除失败目录来掩盖证据。备份后继续保留原主库和已有sidecar；不要把旧sidecar拼到独立快照上。该备份不是迁移工具，后续转换仍需单独验证目标合同。

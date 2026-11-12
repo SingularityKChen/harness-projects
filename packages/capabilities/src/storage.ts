@@ -120,18 +120,25 @@ export type StartWorkExternalIntent = StartWorkExternalOperation & {
 }
 export type ChangeRequestIssueSelection = { readonly relation: 'none' } | { readonly relation: 'reference' | 'closing'; readonly target: import('./planning-provider.ts').ProviderIssueLinkTarget }
 export type ChangeRequestExternalIntent = {
+  readonly requestFormat?: never
   readonly operation: 'createChangeRequest'; readonly input: ProviderCreateChangeRequestInput & { readonly draft: boolean }
   readonly contextId: ExecutionContextId; readonly ownerGeneration: number; readonly bindingId: ProviderBindingId; readonly state: WriteState
   readonly worktree: string; readonly confirmedRef?: ExternalObjectRef
   readonly issueSelection: ChangeRequestIssueSelection
   readonly requestedAssigneeIds?: readonly string[]
 }
+/** 显式运维转换的原合同确认收据；只读，不是可恢复或可继续写入的意图。 */
+export type OriginalChangeRequestReceipt = Omit<ChangeRequestExternalIntent, 'requestFormat' | 'state' | 'confirmedRef' | 'issueSelection' | 'requestedAssigneeIds'> & {
+  readonly requestFormat: 'original'; readonly state: 'saved'; readonly confirmedRef: ExternalObjectRef
+  readonly issueSelection?: never; readonly requestedAssigneeIds?: never
+}
 export type ChangeRequestAssigneeIntent = Pick<ChangeRequestExternalIntent, 'contextId' | 'ownerGeneration' | 'bindingId' | 'state' | 'worktree'> & {
   readonly operation: 'addChangeRequestAssignees'; readonly sequence: number; readonly createOperationId: string; readonly createReceipt: string; readonly targetStamp: string
   readonly input: { readonly repository: ExternalObjectRef; readonly changeRequest: ExternalObjectRef; readonly assigneeIds: readonly string[] }; readonly confirmedIds: readonly string[]
 }
-export type ExternalIntent = StartWorkExternalIntent | ChangeRequestExternalIntent | ChangeRequestAssigneeIntent
+export type ExternalIntent = StartWorkExternalIntent | ChangeRequestExternalIntent | OriginalChangeRequestReceipt | ChangeRequestAssigneeIntent
 export function validateExternalIntentCommand(record: MutationAttemptRecord): void {
+  if (record.externalIntent?.operation === 'createChangeRequest' && record.externalIntent.requestFormat === 'original' && record.state !== 'saved') throw new TypeError('original PR receipt must be saved')
   if (record.externalIntent !== undefined && ['createChangeRequest', 'addChangeRequestAssignees'].includes(record.externalIntent.operation) && (!record.requestFingerprint || record.externalIntent.bindingId !== record.bindingId)) throw new TypeError('invalid PR attempt identity')
   if (record.externalIntent !== undefined && record.commandName !== (['createChangeRequest', 'addChangeRequestAssignees'].includes(record.externalIntent.operation) ? record.externalIntent.operation : 'startWork')) throw new TypeError('external intent command mismatch')
 }
@@ -162,10 +169,15 @@ export function externalIntentSnapshot(value: ExternalIntent): ExternalIntent {
       input: { repository: ref(input.repository, 'repository'), changeRequest: ref(input.changeRequest, 'change_request'), assigneeIds: ids(input.assigneeIds) } }
   }
   if (operation === 'createChangeRequest') {
-    if (Object.keys(value).some((key) => !['operation', 'input', 'contextId', 'ownerGeneration', 'bindingId', 'state', 'worktree', 'confirmedRef', 'issueSelection', 'requestedAssigneeIds'].includes(key))
+    if (Object.keys(value).some((key) => !['operation', 'input', 'contextId', 'ownerGeneration', 'bindingId', 'state', 'worktree', 'confirmedRef', 'issueSelection', 'requestedAssigneeIds', 'requestFormat'].includes(key))
       || Object.keys(input).some((key) => !['repository', 'head', 'base', 'title', 'body', 'draft'].includes(key))) return fail()
     const { repository, head, base: targetBase, title, body, draft } = input
     const { worktree, confirmedRef } = value
+    if (Object.hasOwn(value, 'requestFormat')) {
+      if (value.requestFormat !== 'original' || state !== 'saved' || confirmedRef === undefined || Object.hasOwn(value, 'issueSelection') || Object.hasOwn(value, 'requestedAssigneeIds') || typeof body !== 'string' || typeof draft !== 'boolean') return fail()
+      return { ...base, operation, requestFormat: 'original', state: 'saved', confirmedRef: ref(confirmedRef, 'change_request'), worktree: text(worktree),
+        input: { repository: ref(repository, 'repository'), head: text(head), base: text(targetBase), title: text(title), body, draft } }
+    }
     const selection = value.issueSelection
     if (!selection || !['none', 'reference', 'closing'].includes(selection.relation)) return fail()
     let issueSelection: ChangeRequestIssueSelection = { relation: 'none' }

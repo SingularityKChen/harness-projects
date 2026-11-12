@@ -60,6 +60,22 @@ npx --yes --package @deepseek-ai/dsh@0.2.0-rc.2 dsh web --patch "$HP_DEMO_SCRATC
 
 连接规划服务时，凭据参考名为 `HARNESS_PROJECTS_GITHUB_TOKEN`；通过宿主 credentials 服务配置，Project 数据库只保存句柄。不要把 token 放在工作区名称、配置文案或本指南中。连接、仓库绑定、完整 demo 走查分别遵循其产品指南与验收范围。
 
+<a id="database-recovery"></a>
+
+## 数据库不兼容时如何恢复
+
+出现 `IncompatibleDatabaseError` 时，插件尚未完成开库；同一个旧库反复启用或在连接设置重试不会完成升级。原数据库仍保留，先决定是保留已有工作区、连接配置与执行历史，还是另建空工作区。没有明确迁移步骤与授权时，不运行修复SQL、不仅改 `PRAGMA user_version`，也不把新建空库称为迁移。
+
+**先定位与停机**：彻底退出使用该profile的Harness/dsh，确认没有数据库打开者。macOS桌面默认profile可在Finder按Command-Shift-G打开 `~/.dsh/profiles/desktop/harness-projects/`；Web默认profile对应 `~/.dsh/profiles/web/harness-projects/`。这两个路径只适用于默认DSH_HOME，实际以宿主选定的profile目录为准，自定义位置从启动配置核对，不按示例猜测。
+
+**保留数据**：先按[Desktop与自定义profile停机备份](../development/backup-rollback.md#desktop-与自定义-profile-的停机备份)生成并核验独立快照（Web演练的sandbox变量不能照抄到Desktop），保留原主库、WAL/SHM/journal、匹配旧安装包及用户Git现场。可先恢复匹配该库的已知旧包；若选择迁移，必须明确源/目标结构和持久操作合同，在副本通过数据保全、当前reader、完整性与外键检查后再切换。备份完成本身不表示迁移完成，通用备份流程也不承诺支持任意旧代际。
+
+**明确选择空工作区时**：停机备份并核对后，才把 `workspace.sqlite` 及存在的同名 `-wal`、`-shm`、`-journal` 一起归档到新的不存在目录，保留原件。重新启动会在原数据库位置建立当前空库，需要重新创建/连接工作区；旧历史不会自动带入。只处理数据库文件，**不要移动、删除或重命名整个插件数据目录及其中worktrees**，Git登记可能依赖这些原路径。
+
+切换失败应保持打开者停止，保留新旧两套文件，按核验过的旧库与匹配包恢复，不能混用新旧sidecar。操作后重新核对实际Host、包摘要与12个安装文件，再验证已有工作区和执行身份；不通过再次Start Work或创建PR证明迁移成功。
+
+设置页若只显示“无法读取工作区设置”，先在宿主插件管理页检查具体启动错误；`unavailable`不等于凭据被拒绝，也不能据此认定数据库损坏。处理启动问题后使用“重新读取设置”，该动作只读。页面中的“本页输入仍保留，尚未确认保存”只描述当前页面输入，不代表已持久保存或重启后会恢复。
+
 ## 当前数据根与旧库保留
 
 当前插件以官方 launcher 提供的 `profileContext.dir` 为权威目录，realpath 核对后将数据库写入该 profile 的 `harness-projects/workspace.sqlite`，工作树与诊断位于同一插件数据目录。上述固定 Web profile 对应 `$DSH_HOME/profiles/web/harness-projects/`；自定义 profile 各有自己的目录。同一 profile 重启沿同一路径，两个 profile 不共享数据库。home 与 tilde 由官方 launcher 解析，插件不再自行按环境变量或用户 home 重建根；缺失或无效 profile 元数据会在开库前拒绝。
