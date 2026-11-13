@@ -151,13 +151,27 @@ export class SqliteSyncSurface {
     return this.mutate(() => { this.db.prepare(sql).run(...params) })
   }
   /**
-   * 多语句写入的**唯一原子入口**（2026-09-24 评审）：作用域实例已在事务内，直接执行；根实例上包一层
+   * 多语句写入的**唯一原子入口**（2026-09-24 评审）：作用域实例已在事务内，用保存点保证本次操作失败也不留下部分修改；根实例上包一层
    * 事务。写者路径因此只有"单语句"与"一个原子作用域"两种，方法体不再各自决定要不要开事务。
    * 可选 `preflight`（#196）与 `fn` 在**同一个队列槽**里连续执行：根实例上它先于 `BEGIN`，失败时本方法不开事务；
    * 作用域实例上先于 `fn`、不开嵌套事务。它同步读、不写，也不是第二个排队点——外部先读再排写会有检查与写入之间的窗口。
    */
   protected atomic<T>(fn: () => T, preflight?: () => void): Promise<T> {
-    if (this.scoped) return this.mutate(() => { preflight?.(); return fn() })
+    if (this.scoped) return this.mutate(() => {
+      preflight?.()
+      const dirty = this.#state.dirty
+      this.db.exec('SAVEPOINT storage_atomic')
+      try {
+        const result = fn() // atomic 回调同步，保存点内不让出当前队列槽。
+        this.db.exec('RELEASE storage_atomic')
+        this.#state.dirty = true
+        return result
+      } catch (error) {
+        try { this.db.exec('ROLLBACK TO storage_atomic'); this.db.exec('RELEASE storage_atomic') } catch { /* SQLite 可能已整体回滚或关闭，保留原始异常。 */ }
+        this.#state.dirty = dirty
+        throw error
+      }
+    }, false)
     return this.#transact(async () => fn(), preflight, true)
   }
 
