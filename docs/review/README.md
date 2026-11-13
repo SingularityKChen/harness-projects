@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [PR #627 MMP 评审](pr-627-mmp-review.md) | 启动/设置恢复、旧版确认收据只读与撤权围栏 | 三路独立全级别复核、真实回归及定向变异；人验/R1 独立 |
 | [PR #625 MMP 评审](pr-625-mmp-review.md) | 无消费者 UI 包装退役、活跃装配与浏览器证据 | 完整风险矩阵、独立复评与当前 head 条件 rebase 收尾；人验/R1 独立 |
 | [PR #623 MMP 评审](pr-623-mmp-review.md) | 当前存储世代、观察版本派生与三维主体隔离 | 完整风险矩阵、独立复评与当前 head 条件 rebase 收尾；人验/R1 独立 |
 | [PR #618–#621 MMP 批次](2026-11-11-pr618-pr621-mmp-review.md) | 正则安全、Host 私有数据、来源排期与只读 Timeline | 独立全级别矩阵、真实组合验证与逐当前版本条件 rebase 收尾 |

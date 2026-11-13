@@ -79,6 +79,8 @@
 
 ## Decision Log
 
+- Decision：2026-11-13 用户直接要求按流程评审 PR #627；无 P0/P1 或仅 P2/P3 时由本会话修复、复评并 rebase merge。Rationale：这是本 PR 的具体条件合并授权，覆盖原计划保留未合并的边界；不改变 #599/R1 或 Planning Status。评审证据见 `docs/review/pr-627-mmp-review.md` 的本轮独立矩阵。Date/Author：2026-11-13 / 用户、主审。
+
 - Decision：增加闭合的旧版已确认PR历史收据变体，仅用于本次显式迁移；原fingerprint/body/marker/key/refs不改。Rationale：当前decoder不能读取这条合法历史，必须以独立history分支零写入保留，而不是伪造新选择或重发请求。副本current decoder及直接API零写入反证未通过前禁止切库。Date/Author：2026-11-12 / 主审、独立审计/设计者。
 
 - Decision：用户原话“创建 Issue，修复。然后帮我做库的迁移”明确授权创建同仓Issue、修复与当前个人库的显式迁移。Rationale：本次保留数据的授权覆盖此前仅能提供手动新库/旧版路径的边界；不授权自动启动迁移、删除用户数据、模型执行、规划Status或新PR合并。Date/Author：2026-11-12 / 用户、主审。
@@ -113,3 +115,5 @@ Superseded by Progress 的2026-11-12修复与候选验证记录。原计划创�
 2026-11-12：记录最终4045/110/54本地证据、私有库原路径切换与实际Harness读回；固定候选源码9cdfce67和tarball摘要由私有receipt保管，最终仅文档整理且产品对象逐一保持。归档计划，保留新PR的人类评审/合并门。
 
 2026-11-12：最终main并发升为generation5后新增Batch3，记录已审最新接合、第二次无行变换迁移、一次Host acquisition初始失败与最终复跑、实际安装/库和UI结果；原3→4记录作为历史保留。
+
+2026-11-13：记录本 PR 条件合并授权及三路独立复核，计划保持归档；当前产品树无新缺陷，最终远端门与合并结果按回读取得。
