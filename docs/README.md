@@ -49,6 +49,7 @@
 | [2026-11-07-pr-assignee-creation](exec-plan/completed/2026-11-07-pr-assignee-creation.md) | 创建 PR 预选原生负责人与原意图恢复（#557） |
 | [2026-11-07-pr-assignee-management](exec-plan/completed/2026-11-07-pr-assignee-management.md) | 已确认 PR 的原生负责人添加与只读恢复（#567，Refs #557） |
 | [2026-11-07-code-simplification](exec-plan/completed/2026-11-07-code-simplification.md) | 单一诊断实现、冗余测试与验收负担精简（#570） |
+| [2026-11-13-behavioral-policy-contracts](exec-plan/completed/2026-11-13-behavioral-policy-contracts.md) | 去除散文措辞锁，保留路径与真实写入行为守卫（#419） |
 | [2026-11-07-e1-record-retirement](exec-plan/completed/2026-11-07-e1-record-retirement.md) | E1 历史散文校验退役（#572） |
 | [2026-11-07-test-execution](exec-plan/completed/2026-11-07-test-execution.md) | 单次分层执行与已完成进度轨道退役（#573） |
 | [2026-11-07-client-push-only](exec-plan/completed/2026-11-07-client-push-only.md) | Client 单一推流帧接受点与旧 pull 生命周期退役（#575） |

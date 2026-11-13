@@ -188,17 +188,3 @@ test('§0 与归属表引用的仓库路径都真实存在', () => {
   }
   assert.deepEqual(offenders, [], `引用了不存在的路径：\n${offenders.join('\n')}`)
 })
-
-test('规则落在指令文件里，并指向唯一的详述', () => {
-  const section = agentsSource.split('\n## ').find((part) => part.startsWith('3.'))
-  assert.ok(section, 'AGENTS.md 必须有 §3')
-
-  // 只匹配文件名看不见"提了一句文件名但把规则撤了"。断言同一条目里既有指向详述的
-  // 链接，又有规则本身的落点（技法住 `.agents/skills/`）——两者在同一个列表项里。
-  const landed = section
-    .split('\n')
-    .filter((line) => line.startsWith('- '))
-    .filter((line) => line.includes('content-placement.md') && line.includes('.agents/skills/'))
-
-  assert.equal(landed.length, 1, '§3 必须恰好有一条把「技法住 .agents/skills/」与详述链接写在一起')
-})
