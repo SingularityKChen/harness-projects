@@ -109,6 +109,17 @@ export function storageExecutionSuite(adapter, register = test) {
     assert.deepEqual(await storage.listRelations('ws-other'), [])
   })
 
+  register(`${label}：LLM 来源不能写入候选或确认关系且不留行`, async () => {
+    const storage = makeStorage(); await seedExecutionPrereqs(storage)
+    for (const state of ['candidate', 'confirmed']) {
+      const relation = { from: 'entity-1', to: 'entity-2', type: 'depends_on', class: 'business_semantics', source: 'llm', state }
+      await assert.rejects(storage.putRelation(WORKSPACE, relation), `${state}：LLM 不进入关系语义`)
+      assert.deepEqual(await storage.listRelations(WORKSPACE), [], `${state}：拒绝后没有新增关系`)
+    }
+    await storage.putRelation(WORKSPACE, { from: 'entity-1', to: 'entity-2', type: 'depends_on', class: 'business_semantics', source: 'deterministic', state: 'candidate' })
+    assert.equal((await storage.listRelations(WORKSPACE)).length, 1, '合法确定性来源仍可写入')
+  })
+
   // #221：交付事实一个执行上下文一行；storage 只做整行往返与父行校验，不解释集合内容（父行的拒绝在下方「悬空父边」用例里）。
   const facts = (contextId, overrides = {}) => ({ workspaceId: WORKSPACE, contextId, attemptedAt: '2026-10-08T00:00:01.000Z', sets: [
     { kind: 'pipeline_run', anchorId: 'entity-1', confirmedAt: '2026-10-08T00:00:01.000Z', stale: false, nodes: [{ entityId: 'entity-2', externalId: 'run-1', label: undefined, fact: 'ci_passed' }] },
