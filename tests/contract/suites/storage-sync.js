@@ -5,12 +5,12 @@ import test from 'node:test'
 import * as cap from '@harness-projects/capabilities'
 import { ObservationState } from '@harness-projects/capabilities'
 import { ExternalIdentityKind, MembershipContentKind } from '@harness-projects/domain'
-import { binding, fieldValue, membership, observation, seedEntity, seedWorkspace, WORKSPACE, projection } from './storage-fixtures.js'
+import { binding, developmentBinding, fieldValue, membership, observation, seedEntity, seedWorkspace, WORKSPACE, projection } from './storage-fixtures.js'
 
 export function storageSyncSuite(adapter, register = test) {
   const { label, makeStorage, restart } = adapter
 
-  register(`${label}：重复或乱序观察返回 false，新版本应用且同版本整条替换`, async () => {
+  register(`${label}：重复或乱序观察返回 false，新版本追加到账本`, async () => {
     // 前置状态只走端口（第四轮评审）：观察与游标引用 ws-1 / binding-1，不再靠装配处直插绕过外键。
     const storage = makeStorage(); await seedWorkspace(storage, 'ws-other')
     await seedWorkspace(storage); await storage.putProviderBinding(binding('binding-1'))
@@ -105,6 +105,36 @@ export function storageSyncSuite(adapter, register = test) {
     assert.equal(await storage.recordObservation(at('k1', '2026-09-21T07:11:00Z')), false, '同版本重复投递必须被拒绝')
   })
 
+  register(`${label}：不同 externalId 或 binding 的主体各自推进版本门槛`, async () => {
+    for (const [dimension, bindingId, externalId] of [['externalId', 'binding-1', 'issue-2'], ['binding', 'binding-2', 'issue-1']]) {
+      const storage = makeStorage(); await seedWorkspace(storage)
+      await storage.putProviderBinding(binding('binding-1'))
+      await storage.putProviderBinding(developmentBinding('binding-2'))
+      const at = (key, owner, external, minute) => observation(key, ObservationState.Pending, {
+        bindingId: owner, subject: { bindingId: owner, objectKind: 'issue', externalId: external, url: undefined },
+        sourceVersion: `2026-09-21T07:${minute}:00.000000000Z`,
+      })
+      assert.equal(await storage.recordObservation(at('first-high', 'binding-1', 'issue-1', '12')), true)
+      assert.equal(await storage.recordObservation(at('second-low', bindingId, externalId, '10')), true, `${dimension}：另一个主体不受首主体高版本影响`)
+      assert.equal(await storage.recordObservation(at('second-older', bindingId, externalId, '09')), false, `${dimension}：自己的旧版本仍被拒绝`)
+      assert.equal(await storage.recordObservation(at('second-next', bindingId, externalId, '11')), true, `${dimension}：低于首主体但高于自身的版本被接受`)
+      assert.equal(await storage.recordObservation(at('first-older', 'binding-1', 'issue-1', '11')), false, `${dimension}：第二主体不降低首主体门槛`)
+    }
+  })
+
+  register(`${label}：全部成功入账的处理态均形成版本门槛`, async () => {
+    const storage = makeStorage(); await seedWorkspace(storage)
+    await storage.putProviderBinding(binding('binding-1'))
+    for (const state of Object.values(ObservationState)) {
+      const at = (key, version) => observation(key, state, {
+        subject: { bindingId: 'binding-1', objectKind: 'issue', externalId: `issue-${state}`, url: undefined },
+        sourceVersion: version,
+      })
+      assert.equal(await storage.recordObservation(at(`${state}-high`, '2026-09-21T07:12:00.000000000Z')), true, `${state}：合法高版本先入账`)
+      assert.equal(await storage.recordObservation(at(`${state}-older-fresh-key`, '2026-09-21T07:11:00.000000000Z')), false, `${state}：新去重键不能绕过已入账高版本`)
+    }
+  })
+
   register(`${label}：版本载体必须是规范载体：非 ASCII、未归一的时间戳与不定长编号在入口被拒绝且不留行（R4 / #203）`, async () => {
     const storage = makeStorage()
     await seedWorkspace(storage)
@@ -147,9 +177,9 @@ export function storageSyncSuite(adapter, register = test) {
       ], [true, true], `${name}：更新的版本必须被应用`)
       assert.equal(await storage.recordObservation(at(`${name}-older`, name, older)), false, `${name}：更旧的版本在已提交更新版本之后必须被拒绝`)
     }
-    // 同一时刻的不同写法归一后逐字相等：R4 ② 同版本整快照替换（换 dedupeKey 返回 true），不是乱序。
+    // 同一时刻的不同写法归一后逐字相等：换 dedupeKey 追加观察，不是乱序。
     assert.equal(await storage.recordObservation(at('same-1', 'same', '2026-09-21T07:11:54Z')), true)
-    assert.equal(await storage.recordObservation(at('same-2', 'same', '2026-09-21T07:11:54.000Z')), true, '同一时刻不同精度是同一版本，整快照替换')
+    assert.equal(await storage.recordObservation(at('same-2', 'same', '2026-09-21T07:11:54.000Z')), true, '同一时刻不同精度是同一版本，新观察仍可追加')
   })
 
   register(`${label}：换一个实例能读到同一份内容（模拟重启）`, async () => {

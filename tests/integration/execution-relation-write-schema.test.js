@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { RelationSource } from '@harness-projects/domain'
+import { ExecutionRunStatus, RelationClass, RelationSource } from '@harness-projects/domain'
 import { MIGRATIONS, migrate, openDatabase } from '@harness-projects/storage-sqlite'
 
 // 每张表期望出现在**它自己的**出处注释里的 token 集合（D8）。
@@ -48,7 +48,7 @@ function seed(db) {
     INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1','binding-1','planning',1,1);
     INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1','binding-2','development',1,1);
     INSERT INTO entity VALUES ('entity-1','work_item'); INSERT INTO entity VALUES ('entity-2','repository');
-    INSERT INTO external_identity VALUES ('identity-1','entity-2','binding-1','issue','repo-1','primary');
+    INSERT INTO external_identity VALUES ('identity-1','entity-2','binding-1','repository','repo-1','primary');
     INSERT INTO repository VALUES ('repo-1','ws-1','identity-1');
     INSERT INTO project_item_membership VALUES ('ws-1','project-1','item-1','issue','issue-1','x','x');
     INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-1','ws-1','entity-1','repo-1','ready',NULL,NULL,NULL);`)
@@ -83,10 +83,10 @@ test('D8：每张表的出处注释带该表期望的 token，且全文 token �
   assert.deepEqual(actual, Object.keys(TABLE_PROVENANCE).sort())
 }))
 
-test('R4：账本主体是端口主体（绑定 + 对象种类 + 对象 id），定序规则写入出处注释', () => withDatabase((db) => {
+test('R4：账本列集采用端口主体，同接收时刻追加且按绑定去重', () => withDatabase((db) => {
   migrate(db); seed(db)
   assert.deepEqual(columns(db, 'sync_observation'), ['binding_id','dedupe_key','object_external_id','object_kind','observed_at','snapshot_json','state','updated_at'])
-  const sql = readFileSync(MIGRATION_FILE, 'utf8'); assert.match(sql, /updated_at 更小者拒绝/); assert.match(sql, /相等时整快照替换/)
+  const sql = readFileSync(MIGRATION_FILE, 'utf8'); assert.match(sql, /updated_at 更小者拒绝/)
   db.exec("INSERT INTO sync_observation VALUES ('binding-1','issue','issue-1','t','k1','v2','{\"x\":2}','processed')")
   // 判别性（2026-09-24 评审）：同主体、同接收时刻的两条**不同**观察必须并存——旧主键（主体+接收时刻）会把后一条顶掉，
   // 账本永久丢一条，前一条再投递还会第二次返回 true，调用方据此重放副作用。
@@ -109,6 +109,29 @@ test('R4：观察可以先于成员关系落账，成员关系被改写也不动
   // 调用方据此重放副作用（这正是 003 去掉这条外键的判据）。
   db.exec("DELETE FROM project_item_membership WHERE workspace_id='ws-1' AND item_external_id='item-1'")
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sync_observation").get().n, 1, '成员关系消失后账本行仍在')
+}))
+
+test('R4：当前版本视图按三维主体取 MAX，原始观察仍全部保留', () => withDatabase((db) => {
+  migrate(db); seed(db)
+  const low = '2026-09-21T07:10:00.000000000Z', middle = '2026-09-21T07:11:00.000000000Z', high = '2026-09-21T07:12:00.000000000Z'
+  const rows = [
+    ['binding-1', 'issue', 'same', 'first', low, 'processed'],
+    ['binding-1', 'issue', 'same', 'second', high, 'failed'],
+    ['binding-1', 'issue', 'same', 'last', middle, 'pending'],
+    ['binding-1', 'draft', 'same', 'kind', low, 'ignored'],
+    ['binding-1', 'issue', 'other', 'external', middle, 'pending'],
+    ['binding-2', 'issue', 'same', 'binding', low, 'processed'],
+  ]
+  const insert = db.prepare('INSERT INTO sync_observation VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+  for (const [binding, kind, external, key, version, state] of rows) insert.run(binding, kind, external, key, key, version, JSON.stringify({ key }), state)
+  assert.deepEqual(db.prepare('SELECT binding_id, object_kind, object_external_id, updated_at FROM committed_observation_version ORDER BY binding_id, object_kind, object_external_id').all().map((row) => ({ ...row })), [
+    { binding_id: 'binding-1', object_kind: 'draft', object_external_id: 'same', updated_at: low },
+    { binding_id: 'binding-1', object_kind: 'issue', object_external_id: 'other', updated_at: middle },
+    { binding_id: 'binding-1', object_kind: 'issue', object_external_id: 'same', updated_at: high },
+    { binding_id: 'binding-2', object_kind: 'issue', object_external_id: 'same', updated_at: low },
+  ], '取最大值，与写入次序和处理态无关；主体每一维都独立')
+  assert.deepEqual(db.prepare('SELECT dedupe_key, snapshot_json FROM sync_observation ORDER BY dedupe_key').all().map((row) => ({ ...row })),
+    ['binding', 'external', 'first', 'kind', 'last', 'second'].map((key) => ({ dedupe_key: key, snapshot_json: JSON.stringify({ key }) })), '视图不替换或删除账本原始 payload')
 }))
 
 test('R5：对账游标列集合恰好声明集合且 workspace 唯一', () => withDatabase((db) => {
@@ -146,11 +169,75 @@ test('R8：写尝试一行一键，写入是幂等覆盖，id 在工作区内唯
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM mutation_attempt WHERE idempotency_key='content-1'").get().n, 2, '同一幂等键在两个工作区各有一行')
 }))
 
-test('不变量 5：两张关系表的 source 词表恰好是 domain 的 RelationSource（候选表去掉 explicit），LLM 进不了关系语义', () => withDatabase((db) => {
-  migrate(db)
-  const vocabulary = (table) => [...db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table).sql.match(/source TEXT NOT NULL CHECK \(source IN \(([^)]*)\)\)/)[1].matchAll(/'([^']+)'/g)].map((match) => match[1]).sort()
-  assert.deepEqual(vocabulary('relation'), Object.values(RelationSource).sort(), '多一个取值（例如 llm）必须变红')
-  assert.deepEqual(vocabulary('candidate_relation'), Object.values(RelationSource).filter((value) => value !== RelationSource.Explicit).sort(), '显式关系不进候选表')
+test('运行状态与关系类别、来源的 DDL 词表绑定完整 domain 枚举，LLM 不能落库', () => withDatabase((db) => {
+  migrate(db); seed(db)
+  const vocabulary = (table, column) => {
+    const check = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table).sql.match(new RegExp(`${column} TEXT NOT NULL CHECK \\(${column} IN \\(([^)]*)\\)\\)`))
+    assert.ok(check, `${table}.${column}：完整枚举 CHECK 必须存在`)
+    return [...check[1].matchAll(/'([^']+)'/g)].map((match) => match[1]).sort()
+  }
+  assert.deepEqual(vocabulary('execution_run', 'status'), Object.values(ExecutionRunStatus).sort(), '删除 CHECK 或扩大状态词表都必须失败')
+  assert.deepEqual(vocabulary('relation', 'source'), Object.values(RelationSource).sort(), '多一个取值（例如 llm）必须变红')
+  assert.deepEqual(vocabulary('candidate_relation', 'source'), Object.values(RelationSource).filter((value) => value !== RelationSource.Explicit).sort(), '显式关系不进候选表')
+  for (const [table, state] of [['relation', 'confirmed'], ['candidate_relation', 'candidate']]) {
+    assert.deepEqual(vocabulary(table, 'relation_class'), Object.values(RelationClass).sort(), `${table}：类别词表不扩值`)
+    rejects(db, `INSERT INTO ${table} VALUES ('ws-1','entity-1','entity-2','depends_on','business_semantics','llm','${state}')`, /CHECK constraint failed: source/)
+    assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, `${table}：只有 source 非法，拒绝后无新增行`)
+  }
+}))
+
+test('独立父边：其它父行均合法时，缺目标父行的裸 SQL 被拒绝且不留行', () => withDatabase((db) => {
+  migrate(db); seed(db)
+  const cases = [
+    ['repository.workspace', 'repository', "INSERT INTO repository VALUES ('repo-missing-ws','ws-none','identity-1')"],
+    ['repository.identity', 'repository', "INSERT INTO repository VALUES ('repo-missing-identity','ws-1','identity-none')"],
+    ['candidate.workspace', 'candidate_relation', "INSERT INTO candidate_relation VALUES ('ws-none','entity-1','entity-2','depends_on','business_semantics','deterministic','candidate')"],
+    ['candidate.from', 'candidate_relation', "INSERT INTO candidate_relation VALUES ('ws-1','entity-none','entity-2','depends_on','business_semantics','deterministic','candidate')"],
+    ['candidate.to', 'candidate_relation', "INSERT INTO candidate_relation VALUES ('ws-1','entity-1','entity-none','depends_on','business_semantics','deterministic','candidate')"],
+    ['reconcile.workspace', 'reconcile_cursor', "INSERT INTO reconcile_cursor VALUES ('ws-none','now')"],
+    ['webhook.workspace', 'webhook_subscription', "INSERT INTO webhook_subscription VALUES ('wh-missing-ws','ws-none','binding-1','scope-1','issues',1)"],
+    ['mutation.workspace', 'mutation_attempt', "INSERT INTO mutation_attempt (workspace_id,idempotency_key,id,binding_id,command_name,state,created_at,updated_at) VALUES ('ws-none','key-1','attempt-1','binding-1','addItem','pending','now','now')"],
+    ['revision.workspace', 'workspace_revision', "INSERT INTO workspace_revision VALUES ('ws-none',0)"],
+  ]
+  for (const [edge, table, sql] of cases) {
+    const before = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n
+    assert.throws(() => db.exec(sql), /FOREIGN KEY constraint failed/, edge)
+    assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, before, `${edge}：没有新增行`)
+  }
+  // execution_context.workspace 的直接边由合法 repository 的 workspace 父链和复合 FK 蕴含；不制造非法父状态来声称独立拒绝。
+}))
+
+test('必填值：写尝试 binding/command 与观察 version/snapshot 各自独立拒绝 NULL', () => withDatabase((db) => {
+  migrate(db); seed(db)
+  for (const [binding, command, column] of [[null, 'addItem', 'binding_id'], ['binding-1', null, 'command_name']]) {
+    assert.throws(() => db.prepare("INSERT INTO mutation_attempt (workspace_id,idempotency_key,id,binding_id,command_name,state,created_at,updated_at) VALUES ('ws-1','key-null','attempt-null',?,?,'pending','now','now')").run(binding, command),
+      new RegExp(`NOT NULL constraint failed: mutation_attempt\\.${column}`))
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM mutation_attempt').get().n, 0, `${column}：其它值合法且无半写行`)
+  }
+  for (const [version, snapshot, column] of [[null, '{}', 'updated_at'], ['', null, 'snapshot_json']]) {
+    assert.throws(() => db.prepare("INSERT INTO sync_observation VALUES ('binding-1','issue','issue-1','now','key-null',?,?,'pending')").run(version, snapshot),
+      new RegExp(`NOT NULL constraint failed: sync_observation\\.${column}`))
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_observation').get().n, 0, `${column}：其它值合法且无半写行`)
+  }
+  db.exec("INSERT INTO sync_observation VALUES ('binding-1','issue','issue-1','now','missing-version','','{}','pending')")
+  assert.equal(db.prepare('SELECT updated_at FROM sync_observation').get().updated_at, '', 'DDL 允许无版本的空串编码；端口禁止空载体另由共享契约覆盖')
+}))
+
+test('关系完整键包含 type：同端点不同类型并存，完整键重复被拒绝', () => withDatabase((db) => {
+  migrate(db); seed(db)
+  for (const [table, state] of [['relation', 'confirmed'], ['candidate_relation', 'candidate']]) {
+    const insert = db.prepare(`INSERT INTO ${table} VALUES ('ws-1','entity-1','entity-2',?,'business_semantics','deterministic','${state}')`)
+    insert.run('depends_on'); insert.run('relates_to')
+    assert.throws(() => insert.run('depends_on'), /UNIQUE constraint failed/)
+    assert.deepEqual(db.prepare(`SELECT relation_type FROM ${table} ORDER BY relation_type`).all().map((row) => row.relation_type), ['depends_on', 'relates_to'], `${table}：重复被拒且两种类型均保留`)
+  }
+}))
+
+test('仓库身份唯一键包含工作区：同工作区不重复登记，跨工作区可分别挂载', () => withDatabase((db) => {
+  migrate(db); seed(db)
+  rejects(db, "INSERT INTO repository VALUES ('repo-alias','ws-1','identity-1')", /UNIQUE constraint failed: repository\.workspace_id, repository\.external_identity_id/)
+  db.exec("INSERT INTO repository VALUES ('repo-alias','ws-2','identity-1')")
+  assert.deepEqual(db.prepare('SELECT workspace_id FROM repository ORDER BY workspace_id').all().map((row) => row.workspace_id), ['ws-1', 'ws-2'], '同身份在不同工作区可分别挂载')
 }))
 
 test('已钉住的约束变异：每条拒绝用例只因目标约束失败，且匹配该约束的错误文本（未钉住的见 #201）', () => withDatabase((db) => {
@@ -163,6 +250,7 @@ test('已钉住的约束变异：每条拒绝用例只因目标约束失败，�
   rejects(db, "INSERT INTO sync_observation VALUES ('binding-1','issue','issue-9','t9','k9','v9','{}','bogus')", /CHECK constraint failed: state IN \('pending','processed','ignored','failed'\)/)
   rejects(db, "INSERT INTO sync_cursor VALUES ('ws-1','binding-1','scope-9','c','bogus',NULL)", /CHECK constraint failed: state IN \('idle','syncing','healthy','degraded','failed'\)/)
   rejects(db, "INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-9','ws-1','entity-1','repo-1','bogus',NULL,NULL,NULL)", /CHECK constraint failed: status IN \('planned','provisioning','ready','closed','failed'\)/)
+  rejects(db, "INSERT INTO execution_run (id,workspace_id,context_id,status,updated_at) VALUES ('run-bogus','ws-1','context-1','bogus','now')", /CHECK constraint failed: status IN/)
   // 部分索引 execution_context_active 的 WHERE：active 状态被覆盖，closed 不被覆盖（去掉 WHERE 会让下面这条变红）
   rejects(db, "INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-2','ws-1','entity-1','repo-1','provisioning',NULL,NULL,NULL)", /UNIQUE constraint failed: execution_context\.workspace_id, execution_context\.work_item_id, execution_context\.repository_id/)
   db.exec("INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-3','ws-1','entity-1','repo-1','closed',NULL,NULL,NULL)")
@@ -176,7 +264,9 @@ test('已钉住的约束变异：每条拒绝用例只因目标约束失败，�
   db.exec("INSERT INTO sync_cursor VALUES ('ws-1','binding-1','scope-1','c','healthy',NULL)")
   rejects(db, "INSERT INTO sync_cursor VALUES ('ws-1','binding-1','scope-1','c','degraded','x')", /UNIQUE constraint failed: sync_cursor\.workspace_id, sync_cursor\.binding_id, sync_cursor\.scope_key/)
   db.exec("INSERT INTO sync_cursor VALUES ('ws-2','binding-1','scope-1','c','degraded','x')")
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sync_cursor").get().n, 2, '两个工作区各自一行')
+  db.exec("INSERT INTO sync_cursor VALUES ('ws-1','binding-1','scope-2','second','idle',NULL)")
+  assert.deepEqual(db.prepare("SELECT scope_key FROM sync_cursor WHERE workspace_id='ws-1' ORDER BY scope_key").all().map((row) => row.scope_key), ['scope-1', 'scope-2'], '同工作区和连接下两个 scope 各一行')
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sync_cursor").get().n, 3, '两个工作区与同工作区不同 scope 均可并存')
   // binding_id 外键：观察账本、同步游标、订阅都必须挂在存在的连接锚点上
   rejects(db, "INSERT INTO sync_observation VALUES ('binding-none','issue','issue-1','t1','k1','v1','{}','pending')", /FOREIGN KEY constraint failed/)
   rejects(db, "INSERT INTO sync_cursor VALUES ('ws-1','binding-none','scope-1','c','idle',NULL)", /FOREIGN KEY constraint failed/)
