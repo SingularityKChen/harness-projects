@@ -199,6 +199,53 @@ test('#27 验收 1：第二个启用的 planning 挂载被数据库拒绝，且 
   })
 })
 
+test('挂载布尔值与 disabled default 各自由自己的 CHECK 拒绝', () => {
+  withDatabase((db) => {
+    migrate(db); seed(db)
+    for (const [assignment, error] of [
+      ['enabled = 2, is_default = 0', /CHECK constraint failed: enabled IN/],
+      ['enabled = 1, is_default = 2', /CHECK constraint failed: is_default IN/],
+      ['enabled = 0, is_default = 1', /CHECK constraint failed: is_default = 0 OR enabled = 1/],
+    ]) {
+      assert.throws(() => db.exec(`UPDATE workspace_binding SET ${assignment} WHERE workspace_id = 'ws-1' AND binding_id = 'binding-1'`), error)
+      assert.deepEqual({ ...db.prepare("SELECT enabled, is_default FROM workspace_binding WHERE workspace_id = 'ws-1'").get() }, { enabled: 1, is_default: 1 })
+    }
+  })
+})
+
+test('挂载主键的 workspace、binding、domain 三个分量各自区分合法行', () => {
+  withDatabase((db) => {
+    migrate(db); seed(db)
+    db.exec("INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-2', 'fake')")
+    const insert = db.prepare('INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES (?, ?, ?, 0, 0)')
+    const keys = [['ws-1', 'binding-1', 'development'], ['ws-2', 'binding-1', 'development'], ['ws-1', 'binding-2', 'development'], ['ws-1', 'binding-1', 'delivery']]
+    for (const key of keys) insert.run(...key)
+    assert.throws(() => insert.run('ws-1', 'binding-1', 'development'), /UNIQUE constraint failed: workspace_binding.workspace_id, workspace_binding.binding_id, workspace_binding.domain/)
+    assert.deepEqual(db.prepare('SELECT workspace_id, binding_id, domain FROM workspace_binding WHERE enabled = 0 ORDER BY rowid').all().map((row) => Object.values(row)), keys)
+  })
+})
+
+test('投影工作区 FK 拒绝悬空父行，redacted 标题和 source number 分别由 CHECK 拒绝', () => {
+  withDatabase((db) => {
+    migrate(db); seed(db)
+    const before = db.prepare('SELECT * FROM workspace_projection ORDER BY rowid').all()
+    assert.throws(() => db.exec("UPDATE workspace_projection SET workspace_id = 'ws-none' WHERE entity_id = 'entity-1'"), /FOREIGN KEY constraint failed/)
+    assert.throws(() => db.exec("UPDATE workspace_projection SET content_kind = 'redacted' WHERE entity_id = 'entity-1'"), /CHECK constraint failed: content_kind <> 'redacted'/)
+    assert.throws(() => db.exec(`UPDATE workspace_projection SET content_kind = 'redacted', content_title = NULL, source_number_json = '{"sourceName":"GitHub","scopeIdentity":{"namespace":"github.com/graphql/Repository","id":"repo-1"},"scopeName":"example/repo","number":1}' WHERE entity_id = 'entity-1'`), /CHECK constraint failed: content_kind <> 'redacted'/)
+    assert.deepEqual(db.prepare('SELECT * FROM workspace_projection ORDER BY rowid').all(), before)
+    db.exec("UPDATE workspace_projection SET content_kind = 'redacted', content_title = NULL WHERE entity_id = 'entity-1'")
+    assert.deepEqual({ ...db.prepare('SELECT content_kind, content_title, source_number_json FROM workspace_projection').get() }, { content_kind: 'redacted', content_title: null, source_number_json: null })
+  })
+})
+
+test('字段值 NULL 由 NOT NULL 拒绝，原值保留', () => {
+  withDatabase((db) => {
+    migrate(db); seed(db)
+    assert.throws(() => db.exec("UPDATE planning_field_value SET value = NULL WHERE workspace_id = 'ws-1' AND item_external_id = 'item-1'"), /NOT NULL constraint failed: planning_field_value.value/)
+    assert.equal(db.prepare('SELECT value FROM planning_field_value').get().value, 'In Progress')
+  })
+})
+
 test('同一工作区里同一实体只有一行投影（storage 保证的那一条）', () => {
   withDatabase((db) => {
     migrate(db); seed(db)
@@ -207,7 +254,7 @@ test('同一工作区里同一实体只有一行投影（storage 保证的那一
     db.exec("INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1','entity-1','todo','work_item','更新标题','更新正文',NULL,NULL,NULL,NULL,NULL,2) ON CONFLICT (workspace_id, entity_id) DO UPDATE SET content_title = excluded.content_title, content_body = excluded.content_body, revision = excluded.revision")
     assert.equal(count(), 1, '同一 (workspace, entity) 的第二行必须是更新')
     assert.equal(db.prepare("SELECT content_title FROM workspace_projection WHERE workspace_id = 'ws-1' AND entity_id = 'entity-1'").get().content_title, '更新标题')
-    rejects(db, "INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1','entity-1','todo','change_request','另一个','正文',NULL,NULL,NULL,NULL,NULL,3)", '同一 (workspace, entity) 不得出现第二行')
+    rejects(db, "INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1','entity-1','todo','change_request','另一个','正文',NULL,NULL,NULL,NULL,NULL,3)", /UNIQUE constraint failed: workspace_projection.workspace_id, workspace_projection.entity_id/)
     db.exec("INSERT INTO entity VALUES ('entity-3','work_item')")
     db.exec("INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1','entity-3','todo','work_item','另一项','正文',NULL,NULL,NULL,NULL,NULL,1)")
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM workspace_projection WHERE workspace_id = 'ws-1'").get().n, 2, '不同实体各自保留一行')
@@ -313,4 +360,34 @@ test('#133：投影缺字段展示列的旧 002 库在 migrate 之前以可执�
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+
+test('SQLite scoped replacement SQL rejection preserves outer writes and the old collection', async () => {
+  const storage = createSqliteStorage(':memory:')
+  const workspace = { id: 'ws', name: 'before', statusPolicy: 'provider_authoritative' }
+  const projection = (id) => ({ workspaceId: 'ws', entityId: id, planningStatus: 'todo', revision: 1,
+    content: { contentKind: 'work_item', title: id, body: '' } })
+  try {
+    await storage.putWorkspace(workspace)
+    await storage.putProviderBinding({ id: 'binding', workspaceId: 'ws', domain: 'planning', implementationKey: 'fake', enabled: true, isDefault: true })
+    for (const id of ['old', 'valid', 'bad']) await storage.putEntity({ id, kind: 'work_item' })
+    await storage.putExternalIdentity({ id: 'identity-old', entityId: 'old', bindingId: 'binding', externalKind: 'issue', externalId: 'old', role: 'primary' })
+    await storage.putPlanningProjection('ws', projection('old'))
+    const rows = await storage.listPlanningProjections('ws')
+    const rejected = (tx) => assert.rejects(tx.replacePlanningProjections({ workspaceId: 'ws', bindingId: 'binding' },
+      [projection('valid'), { ...projection('bad'), revision: null }]), /NOT NULL constraint failed: workspace_projection.revision/)
+    const fence = storage.committedReadFence()
+    await storage.transaction(rejected)
+    assert.equal(storage.committedReadFence(), fence, 'a rolled-back operation alone does not advance the committed fence')
+    await storage.transaction(async (tx) => {
+      await tx.putWorkspace({ ...workspace, name: 'kept' })
+      await rejected(tx)
+      await tx.putWorkspace({ ...workspace, id: 'after' })
+    })
+    assert.deepEqual(await storage.listPlanningProjections('ws'), rows)
+    assert.equal((await storage.getWorkspace('ws')).name, 'kept')
+    assert.ok(await storage.getWorkspace('after'), 'the outer transaction remains usable after catching rejection')
+    assert.notEqual(storage.committedReadFence(), fence)
+  } finally { storage.close() }
 })

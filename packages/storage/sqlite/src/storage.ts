@@ -177,6 +177,9 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
     scope = structuredClone(scope)
     items = structuredClone(items)
     return this.atomic(() => {
+      if (!this.db.prepare('SELECT 1 FROM workspace WHERE id = ?').get(scope.workspaceId)) throw new Error('projection workspace does not exist')
+      const entityExists = this.db.prepare('SELECT 1 FROM entity WHERE id = ?')
+      for (const item of items) if (!entityExists.get(item.entityId)) throw new Error('projection entity does not exist')
       const incoming = items.map((item) => item.entityId)
       const keep = incoming.length === 0 ? '' : ` AND entity_id NOT IN (${incoming.map(() => '?').join(', ')})`
       this.db.prepare(`DELETE FROM workspace_projection WHERE workspace_id = ? AND entity_id IN (SELECT entity_id FROM external_identity WHERE binding_id = ?)${keep}`).run(scope.workspaceId, scope.bindingId, ...incoming)

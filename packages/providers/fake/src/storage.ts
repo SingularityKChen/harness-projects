@@ -382,10 +382,17 @@ export class MemoryStorage implements cap.Storage {
   async putPlanningProjection(workspaceId: domain.WorkspaceId, projection: domain.WorkspaceProjection): Promise<void> {
     projection = structuredClone(projection)
     return this.#mutate(() => {
-      if (!this.#data.workspaces.some((workspace) => workspace.id === workspaceId)) throw new Error('projection workspace does not exist')
-      if (!this.#data.entities.some((entity) => entity.id === projection.entityId)) throw new Error('projection entity does not exist')
-      upsert(this.#data.projections, projection, (p) => p.workspaceId === workspaceId && p.entityId === projection.entityId)
+      this.#assertProjections(workspaceId, [projection])
+      upsert(this.#data.projections, { ...projection, workspaceId }, (p) => p.workspaceId === workspaceId && p.entityId === projection.entityId)
     })
+  }
+
+  #assertProjections(workspaceId: domain.WorkspaceId, items: readonly domain.WorkspaceProjection[]): void {
+    if (!this.#data.workspaces.some((workspace) => workspace.id === workspaceId)) throw new Error('projection workspace does not exist')
+    for (const item of items) {
+      if (!this.#data.entities.some((entity) => entity.id === item.entityId)) throw new Error('projection entity does not exist')
+      if (item.content.contentKind !== 'redacted' && item.content.sourceNumber !== undefined) domain.sourceNumberSnapshot(item.content.sourceNumber)
+    }
   }
 
   /**
@@ -399,6 +406,7 @@ export class MemoryStorage implements cap.Storage {
     scope = structuredClone(scope)
     items = structuredClone(items)
     return this.#mutate(() => {
+      this.#assertProjections(scope.workspaceId, items)
       const incoming = new Set(items.map((item) => item.entityId))
       const scoped = new Set(this.#data.identities
         .filter((identity) => identity.bindingId === scope.bindingId)
@@ -408,7 +416,7 @@ export class MemoryStorage implements cap.Storage {
         .map((projection) => projection.entityId))
       this.#data.projections = this.#data.projections.filter((projection) => !(projection.workspaceId === scope.workspaceId && stale.has(projection.entityId)))
       for (const item of items) {
-        upsert(this.#data.projections, item, (p) => p.workspaceId === scope.workspaceId && p.entityId === item.entityId)
+        upsert(this.#data.projections, { ...item, workspaceId: scope.workspaceId }, (p) => p.workspaceId === scope.workspaceId && p.entityId === item.entityId)
       }
     })
   }

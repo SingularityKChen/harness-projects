@@ -116,6 +116,66 @@ export function storageIdentityFoundationSuite(adapter, register = test) {
       assert.deepEqual((await storage.listPlanningProjections(WORKSPACE)).map((p) => p.entityId), ['entity-1'], '工作区与实体都存在时同一写入必须成功')
     })
 
+    for (const [scenario, workspaceId, entities, error] of [
+      ['missing workspace', 'ws-none', ['entity-valid'], /projection workspace does not exist|FOREIGN KEY constraint failed/],
+      ['empty missing workspace', 'ws-none', [], /projection workspace does not exist/],
+      ['missing entity', WORKSPACE, ['entity-none'], /projection entity does not exist|FOREIGN KEY constraint failed/],
+      ['valid then missing entity', WORKSPACE, ['entity-valid', 'entity-none'], /projection entity does not exist|FOREIGN KEY constraint failed/],
+      ['valid then invalid source number', WORKSPACE, ['entity-valid', 'entity-bad'], /原生编号不合契约/],
+    ]) {
+      register(`${label}：projection replacement rejects ${scenario} without partial writes`, async () => {
+        const storage = makeStorage()
+        await seedWorkspace(storage)
+        await seedWorkspace(storage, 'ws-2')
+        await storage.putProviderBinding(binding('binding-1'))
+        await storage.putProviderBinding(developmentBinding('binding-outside'))
+        const identities = []
+        for (const id of ['old', 'valid', 'bad', 'outside']) {
+          await seedEntity(storage, `entity-${id}`)
+          const identity = { id: `identity-${id}`, entityId: `entity-${id}`, bindingId: id === 'outside' ? 'binding-outside' : 'binding-1',
+            externalKind: 'issue', externalId: `issue-${id}`, role: 'primary' }
+          identities.push(identity)
+          await storage.putExternalIdentity(identity)
+        }
+        const old = { ...projection, entityId: 'entity-old', revision: 7, planningStatus: 'in_progress' }
+        const outside = { ...projection, entityId: 'entity-outside', revision: 8 }
+        const otherWorkspace = { ...old, workspaceId: 'ws-2', revision: 9 }
+        await storage.putPlanningProjection(WORKSPACE, old)
+        await storage.putPlanningProjection(WORKSPACE, outside)
+        await storage.putPlanningProjection('ws-2', otherWorkspace)
+        const rejectReplacement = (target) => assert.rejects(target.replacePlanningProjections({ workspaceId, bindingId: 'binding-1' },
+          entities.map((entityId) => ({ ...projection, workspaceId, entityId, revision: 10,
+            content: entityId === 'entity-bad' ? { ...projection.content, sourceNumber: { sourceName: 'GitHub',
+              scopeIdentity: { namespace: 'github.com/graphql/Repository', id: 'repo' }, scopeName: 'example/repo', number: 0 } } : projection.content,
+          }))), error)
+        for (const mode of ['direct', 'caught transaction']) {
+          if (mode === 'direct') await rejectReplacement(storage)
+          else await storage.transaction((tx) => rejectReplacement(tx)) // 拒绝被捕获后，外层事务正常提交。
+          assert.deepEqual(await storage.listPlanningProjections(WORKSPACE), [old, outside], `${mode} 拒绝后完整旧集合不变，合法前项也不得留下`)
+          assert.deepEqual(await storage.listPlanningProjections('ws-2'), [otherWorkspace], '另一个工作区的完整集合不变')
+          assert.deepEqual(await storage.listPlanningProjections('ws-none'), [], '缺失工作区不得留下行')
+          for (const identity of identities) assert.deepEqual(await storage.listIdentitiesForEntity(identity.entityId), [identity])
+        }
+        // 读回后重用父实体，防止只保留悬空身份；不重新 putEntity。
+        await storage.replacePlanningProjections({ workspaceId: WORKSPACE, bindingId: 'binding-1' }, [old, { ...projection, entityId: 'entity-valid' }])
+        assert.deepEqual(await storage.listPlanningProjections(WORKSPACE), [old, outside, { ...projection, entityId: 'entity-valid' }])
+      })
+    }
+
+    register(`${label}：projection put and replacement use the parameter workspace`, async () => {
+      const storage = makeStorage()
+      await seedWorkspace(storage)
+      await seedWorkspace(storage, 'ws-2')
+      await seedEntity(storage, 'entity-1')
+      await storage.putProviderBinding(binding('binding-1'))
+      const mismatched = { ...projection, workspaceId: 'ws-2' }
+      await storage.putPlanningProjection(WORKSPACE, mismatched)
+      assert.deepEqual(await storage.listPlanningProjections(WORKSPACE), [projection])
+      await storage.replacePlanningProjections({ workspaceId: WORKSPACE, bindingId: 'binding-1' }, [{ ...mismatched, revision: 2 }])
+      assert.deepEqual(await storage.listPlanningProjections(WORKSPACE), [{ ...projection, revision: 2 }])
+      assert.deepEqual(await storage.listPlanningProjections('ws-2'), [])
+    })
+
     register(`${label}：引用完整性——指向不存在的父行必须被拒绝且不留行`, async () => {
       const storage = makeStorage()
       await seedWorkspace(storage)
@@ -236,6 +296,7 @@ export function storageIdentitySyncSuite(adapter, register = test) {
       await storage.putMembership(membership({ itemExternalId: 'item-2', contentExternalId: 'issue-2' }))
       await storage.putMembership(membership({ projectExternalId: 'project-2', itemExternalId: 'item-3', contentExternalId: 'issue-2' }))
       await storage.putMembership(membership({ workspaceId: 'ws-2', itemExternalId: 'item-4', contentExternalId: 'issue-2' }))
+      await storage.putFieldValue(fieldValue({ itemExternalId: 'item-1', value: 'retained' }))
       await storage.putFieldValue(fieldValue({ itemExternalId: 'item-2', value: 'stale' }))
       await storage.putFieldValue(fieldValue({ itemExternalId: 'item-3', value: 'other-project' }))
       await storage.putFieldValue(fieldValue({ workspaceId: 'ws-2', itemExternalId: 'item-4', value: 'other-workspace' }))
@@ -247,15 +308,27 @@ export function storageIdentitySyncSuite(adapter, register = test) {
 
       assert.deepEqual((await storage.listMemberships(WORKSPACE, 'project-1')).map((m) => m.itemExternalId), ['item-1'])
       assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-2'), [], '被移除成员的字段值必须一并删除')
+      assert.deepEqual(await storage.listFieldValues(WORKSPACE, 'item-1'), [fieldValue({ itemExternalId: 'item-1', value: 'retained' })], '拒绝前的目标字段必须是非空已保留值')
       assert.deepEqual((await storage.listMemberships(WORKSPACE, 'project-2')).map((m) => m.itemExternalId), ['item-3'], '另一个 project 不得被全局清理')
       assert.deepEqual((await storage.listMemberships('ws-2', 'project-1')).map((m) => m.itemExternalId), ['item-4'], '另一个 workspace 不得被清理')
       assert.equal((await storage.findExternalIdentity('binding-1', 'issue', 'issue-2'))?.entityId, 'entity-2', '成员移除不得删除 entity/external identity')
 
-      await assert.rejects(storage.transaction((tx) => tx.replacePlanningMemberships(
-        { workspaceId: WORKSPACE, projectExternalId: 'project-1' },
-        [membership({ workspaceId: 'ws-2', itemExternalId: 'item-4', contentExternalId: 'issue-2' })],
-      )), 'incoming 成员越过 scope 必须拒绝')
-      assert.deepEqual((await storage.listMemberships(WORKSPACE, 'project-1')).map((m) => m.itemExternalId), ['item-1'], 'scope 校验失败不得先删除原成员')
+      for (const [scope, incoming, error] of [
+        [{ workspaceId: WORKSPACE, projectExternalId: 'project-1' }, [membership({ membershipUpdatedAt: '2026-11-13T00:00:00Z' }), membership({ workspaceId: 'ws-2', itemExternalId: 'item-4' })], /membership does not belong to replacement scope/],
+        [{ workspaceId: WORKSPACE, projectExternalId: 'project-1' }, [membership({ membershipUpdatedAt: '2026-11-13T00:00:00Z' }), membership({ projectExternalId: 'project-2', itemExternalId: 'item-3' })], /membership does not belong to replacement scope/],
+        [{ workspaceId: 'ws-none', projectExternalId: 'project-1' }, [], /membership workspace does not exist/],
+        [{ workspaceId: 'ws-none', projectExternalId: 'project-1' }, [membership({ workspaceId: 'ws-none' })], /membership workspace does not exist/],
+      ]) {
+        const snapshot = async () => ({
+          members: await Promise.all([[WORKSPACE, 'project-1'], [WORKSPACE, 'project-2'], ['ws-2', 'project-1']].map(([ws, project]) => storage.listMemberships(ws, project))),
+          fields: await Promise.all([[WORKSPACE, 'item-1'], [WORKSPACE, 'item-2'], [WORKSPACE, 'item-3'], ['ws-2', 'item-4']].map(([ws, item]) => storage.listFieldValues(ws, item))),
+          identities: await Promise.all(['entity-1', 'entity-2'].map((entity) => storage.listIdentitiesForEntity(entity))),
+        })
+        const before = await snapshot()
+        await assert.rejects(storage.replacePlanningMemberships(scope, incoming), error)
+        assert.deepEqual(await snapshot(), before, '混合集合与缺工作区拒绝后，完整成员、字段值与身份不变')
+        assert.deepEqual(await storage.listMemberships('ws-none', 'project-1'), [])
+      }
 
       await storage.transaction((tx) => tx.replacePlanningMemberships(
         { workspaceId: WORKSPACE, projectExternalId: 'project-1' },

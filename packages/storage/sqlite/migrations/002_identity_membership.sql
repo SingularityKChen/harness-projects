@@ -55,6 +55,7 @@ CREATE TABLE workspace_binding (
   -- 不变量 5：同一条连接在同一工作区的同一 domain 只挂载一次。
   PRIMARY KEY (workspace_id, binding_id, domain)
 );
+-- 不变量 1：同一工作区至多一个启用的 planning 挂载。
 CREATE UNIQUE INDEX workspace_binding_planning_enabled ON workspace_binding (workspace_id) WHERE domain = 'planning' AND enabled = 1;
 -- 不变量 1 与 2：同一工作区同一 domain 至多一个启用的默认绑定。
 CREATE UNIQUE INDEX workspace_binding_default ON workspace_binding (workspace_id, domain) WHERE is_default = 1;

@@ -158,6 +158,7 @@
 | [2026-09-23-e1-uncertain-create](exec-plan/completed/2026-09-23-e1-uncertain-create.md) | 不确定外部创建的裁决证据 |
 | [2026-09-23-sqlite-v1-stack](exec-plan/completed/2026-09-23-sqlite-v1-stack.md) | SQLite v1 数据模型栈 |
 | [2026-09-23-storage-control-facts](exec-plan/completed/2026-09-23-storage-control-facts.md) | Storage 控制事实 |
+| [2026-11-13-storage-atomic-rejection](exec-plan/completed/2026-11-13-storage-atomic-rejection.md) | 身份／成员约束与拒绝替换保留完整状态（#424） |
 | [2026-09-23-storage-identity-membership](exec-plan/completed/2026-09-23-storage-identity-membership.md) | SQLite 身份与成员表（Batch L2） |
 | [2026-09-23-storage-sqlite-port](exec-plan/completed/2026-09-23-storage-sqlite-port.md) | Storage 端口落地（L4 地基面 + L5 同步面 + L6 执行面） |
 | [2026-10-28-storage-baseline-admission](exec-plan/completed/2026-10-28-storage-baseline-admission.md) | 当前世代准入、结构化备份重建拒绝与整体原子初始化（#414） |
