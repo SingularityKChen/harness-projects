@@ -76,3 +76,42 @@ Desktop恢复入口最初错误链接仅Web sandbox变量的备份流程（P2）
 2026-11-12：追加实装/迁移实际结果并保留固定候选身份；最终文档提交不改变已审/已装产品树。
 
 2026-11-12：记录最新main518接合、最终5迁移与真实产品结果，候选923718af产品对象在文档整合后保持。
+
+
+## 2026-11-13 独立 MMP 评审
+
+### 锁定事实与先验风险矩阵
+
+本轮在 `fix/actionable-setup-recovery` 的 `.worktrees/actionable-setup-recovery` 评审，起始 immutable head `f6e16c894be4a1ced47c0d90bb43a92e769167b3`、base `main@518cc6f7a9ff418b81f1020a60e5525b6f10d199`。开始时无 review 或 inline thread；PR Fast Gate 成功。已有记录是历史证据，本轮独立核验当前差异与产品链路。以下是逐文件审查前建立的风险矩阵，风险假设不等于发现。
+
+| 层 | P0 风险 | P1 风险 | P2 风险 | P3 风险 |
+|---|---|---|---|---|
+| 代码与反例 | 损坏既有库或泄漏凭据 | 历史重放/撤权后泄漏/事务竞态 | 恢复动作或错误反馈不准确 | 重复与命名 |
+| 产品闭环 | 虚报权威 Saved | 历史被当成当前可写请求/丢失数据 | 指引不可达/输入丢失/旧快照误导 | 术语与可读性 |
+| 架构边界 | 第二权威源/依赖倒置 | 绕过 Host 权限与当前创建合同 | 不必要的新协议或兼容支路 | 局部复杂度 |
+| 测试 | 安全与保全假绿 | 缺直接 API、撤权和失败路径反证 | 实装声称超出证据 | 冗余与组织 |
+| Issue与交付 | 无法独立回滚 | 验收缺项或迁移回滚不匹配 | 重复追踪/文档不可执行 | 标签与索引 |
+
+分工：历史合同与权限竞态、设置/恢复产品闭环、文档与 issue 验收分别独立只读审查；主审负责证据整合、反例裁决和一次性 GitHub review。用户在本会话直接授权本 PR 按既定条件修复、复评和 rebase merge；无 P0/P1 时由本会话收尾，有阻塞且原实现会话存在时交原 owner。
+
+### 当前树结论与证据
+
+三位 `gpt-6.1-sol-hc / high` 子评审按上述互斥范围完整审查；本轮没有新增可行动 P0/P1/P2/P3，结论为 APPROVE。原实现会话最近两轮已完成，当前未运行，本轮按用户直接授权负责最终回读和条件合并。下列命令在起始 head 的产品树上实际通过；收尾只改评审/计划文档，最终提交须逐一确认 `apps/`、`packages/`、`tests/` tree object 与该 head 相同。
+
+- `pnpm typecheck` 通过；主审 `pnpm test:file tests/integration/create-change-request.test.js tests/integration/change-request-operation.test.js tests/integration/create-change-request-link-recovery.test.js tests/integration/create-change-request-assignees.test.js tests/integration/harness-plugin-change-request-operation.test.js tests/integration/storage-baseline-admission.test.js tests/integration/harness-plugin-host-lifetime.test.js tests/integration/harness-plugin-artifact.test.js tests/integration/harness-plugin-demo-artifact.test.js tests/contract/package-boundaries.test.js`：400/400。
+- 恢复评审 `node --test tests/contract/ui-workspace-setup.test.js tests/contract/ui-create-change-request.test.js tests/integration/harness-plugin-connect-diagnostics.test.js tests/integration/storage-baseline-admission.test.js`：249/249；`node --test tests/browser/workspace-settings-presentation.test.js`：2/2；独立 source/scope 草稿隔离、纯读恢复、晚到历史及断连遮蔽反例4/4。
+- 历史评审：相关既有78项通过；事务返回窗口的 Planning/Development deny、deny/regrant、projection、binding、context、receipt 变化及现代新意图保留原历史的独立9项通过。历史查询及同 key create/resume/负责人入口零 Provider 调用、零收据改写；现代新 key 请求保持当前严格合同。
+- 交付评审：从 Markdown 原样提取 Desktop 备份模板；rowid/BLOB 与遗留 WAL 正控、打开者/悬空或目录 sidecar/hardlink/可写根/symlink 根/lsof 诊断错误共9组隔离反证。只读 SQLite 在 WAL 正控可更新 SHM 读标记；原主库、WAL 与备份逻辑保全，不承诺 SHM 字节不变。
+- `node scripts/workflow-check.mjs` 无发现；disclosure、size、diff-check 与链接检查须在最终文档提交后重跑。人工五类发布面已检查，无新私有数据。运行日志与反例仅留忽略目录，不纳入产品。
+
+最终产品树使用 `node scripts/review-mutate.mjs <spec.json>` 整表运行一次；三项均 KILLED、`killedBy` 归因吻合，前后基线通过且源码逐字恢复：
+
+| 变异 | 判别用例 | 结果 |
+|---|---|---|
+| 去除 history 返回前 epoch / committed fence | `history response commit window: planning-deny-regrant`；既有 `original history fences planning-regranted at its final lineage read` 同时变红 | KILLED |
+| original 错走现代操作分支 | `explicit original saved PR receipt survives reopen and every mutation entry remains inert` | KILLED |
+| 首次读取失败无条件声称保留输入 | `initial read recovery has no fictional draft and only rereads settings with static Host help` | KILLED |
+
+#626 六项工程验收与差异匹配，ExecPlan 已在 completed 且文档索引存在。#223/#595/#596 继续负责基线整理，#599 负责人类实装接受，#364 继续跟踪可选评审端点失败；没有新增重复 issue。现有同 head 的取消 Rule/Issue 运行均有成功后继；可选 `Create review session` 的 HTTP404 不冒充必需门通过。
+
+本轮验证的是恢复引导、历史只读及安全边界；没有重做个人库迁移或 Desktop 安装，没有重新判定真实 Provider 授权、#599 人类接受或 R1。旧记录中的迁移/实装结果保持为 2026-11-12 的历史事实。最终发布门使用 `gh pr view 627 -R SingularityKChen/harness-projects --json headRefOid,baseRefOid,commits,statusCheckRollup,closingIssuesReferences,reviews`、完整 threads 回读及 `gh pr checks 627 -R SingularityKChen/harness-projects --required`；只在当前 head 无 P0/P1、必需检查通过且 issue 关联正确时由开发账号执行 `merge_method=rebase`，随后核对合并 commit 与 #626 closure。
