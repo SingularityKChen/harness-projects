@@ -31,6 +31,7 @@ class HostPolicyAdmissionError extends Error {
 export interface HostCompositionOptions {
   readonly owner?: { readonly signal: AbortSignal; stop(error?: unknown): number }
   readonly dataPath: string
+  readonly rawProfile?: string
   readonly workspaceId: WorkspaceId
   readonly catalog: ProviderCatalog
   /** 句柄 → 凭据值；每次 provider 操作才调用，Host 不缓存。 */
@@ -187,7 +188,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   const intervalMs = options.planningIntervalMs ?? 60_000
   if (!Number.isFinite(intervalMs) || intervalMs < 60_000 || intervalMs > 2_147_483_647) throw new RangeError('Planning refresh interval is invalid')
   options.owner?.signal.throwIfAborted()
-  const prepared = await preparePrivateProjectData(options.dataPath, options.owner?.signal)
+  const prepared = await preparePrivateProjectData(options.dataPath, options.owner?.signal, options.rawProfile)
   const worktreesDir = path.join(prepared.directory, 'worktrees')
   const log = createDiagnosticLog(prepared.logFd)
   const diagnoseShutdown: HostComposition['diagnoseShutdown'] = (event, error) => log.write(event, error === undefined ? {} : describeError(error))
@@ -256,13 +257,23 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       if (!await drainUntil([...pending], deadline)) diagnoseShutdown('shutdownDeadlineExceeded')
       storage?.close()
     } catch (error) { diagnoseShutdown('shutdownFailed', error); throw error }
-    finally { options.owner?.signal.removeEventListener('abort', abortStartup); log.close() }
+    finally {
+      options.owner?.signal.removeEventListener('abort', abortStartup)
+      prepared.lease?.signal.removeEventListener('abort', abortLease)
+      try { log.close() } finally { await prepared.lease?.dispose(deadline) }
+    }
   })()
   const abortStartup = () => { void dispose().catch((error) => diagnoseShutdown('shutdownFailed', error)) }
+  const abortLease = () => {
+    if (options.owner) options.owner.stop(prepared.lease?.signal.reason)
+    else void dispose().catch((error) => diagnoseShutdown('shutdownFailed', error))
+  }
   options.owner?.signal.addEventListener('abort', abortStartup, { once: true })
+  prepared.lease?.signal.addEventListener('abort', abortLease, { once: true })
   const diagnostics = { syncRoundFailed: (error: unknown) => log.write('syncRoundFailed', describeError(error)) }
   try {
     options.owner?.signal.throwIfAborted()
+    prepared.lease?.signal.throwIfAborted()
     storage = createSqliteStorage(options.dataPath, hostStoragePolicy(options.catalog), options.migrationsDir === undefined ? {} : { migrationsDir: options.migrationsDir })
     const setup = createSetupCommands(createWorkspaceSetup(storage))
     const connection = createConnectionCommands(setup, {
@@ -298,7 +309,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
             catch (error) { log.write('credentialFailed', describeError(error)); throw error }
           },
           development: { cache: assembly.cache, resolveCredential, fetch },
-          worktreesDir, fetch,
+          worktreesDir, fetch, privateLease: prepared.lease,
         })
         for (const item of disabled) log.write('bindingDisabled', { bindingId: item.bindingId, domain: item.domain, implementationKey: item.implementationKey, code: item.error.code })
         const providers = { ...table,

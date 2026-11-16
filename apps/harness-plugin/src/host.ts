@@ -37,26 +37,37 @@ export async function apply(ctx: HostRemoteContext & RootDisposalContext & { eff
   const lifetime = createPlanningLifetime(), acquisitions: Promise<unknown>[] = []
   let composition: Awaited<ReturnType<typeof createHostComposition>> | undefined
   let remote: Awaited<ReturnType<typeof installHostRemote>> | undefined
-  let deadline: number | undefined, failure: unknown, disposal: Promise<void> | undefined
+  let deadline: number | undefined, failure: unknown, disposal: Promise<void> | undefined, starting = true
   const stop = (error?: unknown): number => {
     if (deadline === undefined) { deadline = Date.now() + 1000; failure = error; lifetime.stop(error); composition?.stop() }
     return deadline
   }
   const owner = { signal: lifetime.signal, stop }
-  const dispose = () => disposal ??= (async () => {
-    const end = stop(), withdrawing = remote?.dispose(end)
-    await drainUntil(acquisitions, end)
-    try { await withdrawing; await remote?.dispose(end) } finally { await composition?.dispose(end) }
-  })()
+  const dispose = (): Promise<void> => {
+    if (disposal) return disposal
+    let resolve!: () => void, reject!: (error: unknown) => void
+    disposal = new Promise<void>((yes, no) => { resolve = yes; reject = no })
+    void (async () => {
+      const end = stop(), withdrawing = remote?.dispose(end)
+      await drainUntil(acquisitions, end)
+      try { await withdrawing; await remote?.dispose(end) } finally { await composition?.dispose(end) }
+    })().then(resolve, reject)
+    return disposal
+  }
+  lifetime.signal.addEventListener('abort', () => {
+    const close = () => { void dispose().catch((error) => composition?.diagnoseShutdown('shutdownFailed', error)) }
+    // A synchronous acquisition failure must register its returned promise before the drain snapshots it.
+    if (starting) queueMicrotask(close); else close()
+  }, { once: true })
   // 获取资源前建立根 owner；迟到 acquisition 自行释放，绝不向已停止根发布端点。
   ctx.effect(() => dispose, 'harness-projects: host composition')
   observeRootDisposal(ctx, dispose)
   try {
     const resolving = profileDataPath(ctx, lifetime.signal)
     acquisitions.push(resolving)
-    const dataPath = await lifetime.wait(() => resolving, Infinity)
+    const location = await lifetime.wait(() => resolving, Infinity)
     const opening = createHostComposition({
-      owner, dataPath, workspaceId: WORKSPACE_ID, catalog: PROVIDER_CATALOG,
+      owner, ...location, workspaceId: WORKSPACE_ID, catalog: PROVIDER_CATALOG,
       sessionController: () => ctx.get?.('sessionController'),
       forceSessionStartFailure: process.env.HARNESS_PROJECTS_FORCE_SESSION_START_FAILURE === '1',
       resolveCredential: credentialResolverOf(ctx), migrationsDir: migrationsDir(),
@@ -68,6 +79,7 @@ export async function apply(ctx: HostRemoteContext & RootDisposalContext & { eff
     acquisitions.push(installing)
     await lifetime.wait(() => installing, Infinity)
     lifetime.assertActive()
+    starting = false
     console.info('[harness-projects] host ready')
   } catch (error) {
     if (!lifetime.signal.aborted) stop(error)
