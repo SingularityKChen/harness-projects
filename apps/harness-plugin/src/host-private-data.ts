@@ -1,10 +1,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { assertPrivateAcl } from './host-private-acl.ts'
+import { prepareWindowsProjectData } from './host-private-windows.ts'
 import { HostAuthorityError } from './remote.ts'
 
 const ACL_STARTUP_BUDGET_MS = 3000
 const unavailable = () => new HostAuthorityError('Host project data is unavailable')
+export interface PreparedPrivateData {
+  readonly directory: string
+  readonly logFd: number
+  readonly lease?: Awaited<ReturnType<typeof prepareWindowsProjectData>>
+}
 
 function uid(): number {
   if (!['darwin', 'linux'].includes(process.platform) || typeof process.getuid !== 'function'
@@ -33,7 +39,11 @@ async function privateDirectory(directory: string, owner: number, deadline: numb
 }
 
 /** 只准备 Host 指定的固定两层，不遍历或改变 Git 后代；调用方须已保护插件根。 */
-export async function preparePrivateWorktreeDirectories(worktreesDir: string, allowedRoot: string, signal?: AbortSignal): Promise<void> {
+export async function preparePrivateWorktreeDirectories(worktreesDir: string, allowedRoot: string, signal?: AbortSignal, lease?: PreparedPrivateData['lease']): Promise<void> {
+  if (process.platform === 'win32') {
+    if (!lease) throw unavailable()
+    return lease.assertDirectories([worktreesDir, allowedRoot], signal)
+  }
   const fds: number[] = []
   try {
     const owner = uid(), deadline = performance.now() + ACL_STARTUP_BUDGET_MS
@@ -77,7 +87,12 @@ export async function assertPrivateDataParent(directory: string, signal?: AbortS
 }
 
 /** 只管理受信 Host 选定的插件根和固定文件；隔离其它 OS uid，不隔离同 uid 进程。 */
-export async function preparePrivateProjectData(dataPath: string, signal?: AbortSignal): Promise<{ readonly directory: string; readonly logFd: number }> {
+export async function preparePrivateProjectData(dataPath: string, signal?: AbortSignal, rawProfile?: string): Promise<PreparedPrivateData> {
+  if (process.platform === 'win32') {
+    if (!rawProfile || dataPath !== rawProfile + path.sep + 'harness-projects' + path.sep + 'workspace.sqlite') throw unavailable()
+    const lease = await prepareWindowsProjectData(rawProfile, signal)
+    return { directory: lease.directory, logFd: lease.logFd, lease }
+  }
   let rootFd: number | undefined
   const files: number[] = []
   try {
