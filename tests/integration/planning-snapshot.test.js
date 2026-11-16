@@ -1,4 +1,5 @@
 import '../fixtures/resolution-preflight.mjs'
+import { seedIdentity } from '../contract/suites/storage-fixtures.js'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { composeCore, PLANNING_SYNC_SCOPE } from '@harness-projects/core'
@@ -15,11 +16,15 @@ for (const [name, open] of [['Fake', createFakeStorage], ['SQLite', () => create
     const writer = new Promise((resolve) => { signal = resolve }).then((rows) => storage.transaction(async (tx) => {
       for (const row of rows) {
         await tx.putPlanningProjection(id, { ...row, content: { contentKind: 'redacted', reason: 'permission_denied' } })
-        for (const identity of await tx.listIdentitiesForEntity(row.entityId)) await tx.putExternalIdentity({ ...identity, role: 'alias' })
+        for (const identity of await tx.listIdentitiesForEntity(row.entityId)) {
+          await tx.putExternalIdentity({ ...identity, role: 'alias' })
+          if (identity.role === 'primary') { const next = { ...identity, id: `next-${identity.id}`, externalId: `next-${identity.externalId}` }; await tx.putExternalIdentity(next); await tx.putEntity({ id: row.entityId, kind: identity.externalKind === 'change_request' ? 'change_request' : 'work_item', primaryIdentityId: next.id }) }
+        }
       }
       await tx.putWorkspace({ ...(await tx.getWorkspace(id)), name: 'new descriptor' })
       await tx.putExternalIdentity({ id: 'repo-identity', entityId: 'repo-entity', bindingId: providers.development.gate.bindingId, externalKind: 'repository', externalId: 'repo-old', role: 'alias' })
       await tx.putExternalIdentity({ id: 'repo-identity-new', entityId: 'repo-entity', bindingId: providers.development.gate.bindingId, externalKind: 'repository', externalId: 'repo-new', role: 'primary' })
+      await tx.putEntity({ id: 'repo-entity', kind: 'repository', primaryIdentityId: 'repo-identity-new' })
       await tx.putRepository({ id: 'repo-new', workspaceId: id, externalIdentityId: 'repo-identity-new' })
       await tx.putReconcileCursor({ workspaceId: id, lastReconciledAt: T(2) })
       await tx.putSyncCursor({ workspaceId: id, bindingId: providers.planning.bindingId, scopeKey: PLANNING_SYNC_SCOPE, state: 'degraded', lastErrorCode: 'unavailable', cursorValue: undefined })
@@ -44,8 +49,7 @@ for (const [name, open] of [['Fake', createFakeStorage], ['SQLite', () => create
       }
     } })
     const core = await composeCore({ workspace: { id, name }, providers, storage: wrap(storage), clock: () => T(1) })
-    await storage.putEntity({ id: 'repo-entity', kind: 'repository' })
-    await storage.putExternalIdentity({ id: 'repo-identity', entityId: 'repo-entity', bindingId: providers.development.gate.bindingId, externalKind: 'repository', externalId: 'repo-old', role: 'primary' })
+    await seedIdentity(storage, { id: 'repo-identity', entityId: 'repo-entity', bindingId: providers.development.gate.bindingId, externalKind: 'repository', externalId: 'repo-old', role: 'primary' }, 'repository')
     await storage.putRepository({ id: 'repo-old', workspaceId: id, externalIdentityId: 'repo-identity' })
     const before = await storage.currentRevision(id)
     const controller = createController(core, { workspaceRevision: () => storage.currentRevision(id) })
@@ -69,7 +73,7 @@ for (const [name, open] of [['Fake', createFakeStorage], ['SQLite', () => create
     assert.deepEqual(next.metadata.repositories.map((row) => row.id), ['repo-new', 'repo-old'])
     assert.equal(next.metadata.repositories.find((row) => row.id === 'repo-old').references[0].role, 'alias')
     assert.equal(next.revision, before + 1)
-    assert.deepEqual(next.views, [], 'writer removed primary identities')
+    assert.equal(next.views.length, expectedIds.length); assert.ok(next.views.every(view => view.content.contentKind === 'redacted'), 'writer publishes the new identity cohort with redacted projections')
     assert.equal(next.sync.reconciledAt, T(2))
   })
 }

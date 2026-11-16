@@ -1,6 +1,6 @@
-/** 实体与规划内容：`Entity` 只有 id 与种类，与工作区和外部 id 都无关；规划状态与内容属于工作区投影（`WorkspaceProjection`），因为一个工作空间同一时刻只有一个 Planning 事实源（AGENTS.md §1.1 不变量 1）。 */
+/** 实体与规划内容：Entity 是全局锚点并显式选择主身份；规划状态与内容属于工作区投影（AGENTS.md §1.1 不变量 1）。 */
 import { ContentKind, type EntityKind, type NormalizedStatus } from './enums.ts'
-import type { EntityId, WorkspaceId } from './ids.ts'
+import type { EntityId, ExternalIdentityId, WorkspaceId } from './ids.ts'
 import type { PlanningFieldsSnapshot } from './planning-fields.ts'
 
 /** 原生展示号：不参与实体身份或关系键；来源与仓库必须来自同一可见对象。 */
@@ -76,6 +76,8 @@ export function planningTitle(content: PlanningContent): string | undefined {
 export interface Entity {
   readonly id: EntityId
   readonly kind: EntityKind
+  /** 省略/undefined 保留已有选择；null 显式清除，仅无外部身份的内部锚点允许。 */
+  readonly primaryIdentityId?: ExternalIdentityId | null
 }
 
 /** 实体在某个工作区里的可消费视图：规划状态是权威值，内容可为三态之一。 */

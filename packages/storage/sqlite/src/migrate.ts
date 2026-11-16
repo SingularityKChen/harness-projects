@@ -14,7 +14,7 @@ export interface MigrateResult {
   readonly version: number
 }
 
-export const CURRENT_SCHEMA_GENERATION = 5
+export const CURRENT_SCHEMA_GENERATION = 6
 export type IncompatibleDatabaseReason = 'generation' | 'version_list' | 'schema_shape' | 'unknown_objects'
 export class IncompatibleDatabaseError extends Error {
   readonly code = 'incompatible_database'
@@ -84,7 +84,7 @@ export function migrate(db: WorkspaceDatabase, options: MigrateOptions = {}): Mi
     for (const object of expected) {
       identifiers.add(fold(object.name))
       if (object.type === 'table' || object.type === 'view') {
-        const columns = reference.prepare('SELECT name FROM pragma_table_info(?)').all(object.name) as { name: string }[]
+        const columns = reference.prepare('SELECT name FROM pragma_table_xinfo(?)').all(object.name) as { name: string }[]
         for (const column of columns) identifiers.add(fold(column.name))
       }
     }

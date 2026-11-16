@@ -4,6 +4,7 @@
  * 重复开始幂等、重启后仍可恢复（tests/README §2.3、§2.5）。
  */
 import '../fixtures/resolution-preflight.mjs';
+import { seedIdentity } from '../contract/suites/storage-fixtures.js'
 
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -216,8 +217,7 @@ const MISSING_ROUTE_ACTION = /Development 绑定 id 必须跨重启稳定；本�
 /** 登记一条 `bindingId` 连接下的仓库外部身份；`mount` 为真时工作区同时把仓库挂到它上面。#127 的绑定仓库命令之前，「仓库属于哪个连接」只能经 Storage 端口种入（旁证，TD-038）。 */
 async function bindRepository(storage, bindingId, repositoryId, { mount = true } = {}) {
   const entityId = `entity-${bindingId}-${repositoryId}`; const id = `identity-${bindingId}-${repositoryId}`
-  await storage.putEntity({ id: entityId, kind: 'repository' })
-  await storage.putExternalIdentity({ id, entityId, bindingId, externalKind: 'repository', externalId: repositoryId, role: 'primary' })
+  await seedIdentity(storage, { id, entityId, bindingId, externalKind: 'repository', externalId: repositoryId, role: 'primary' }, 'repository')
   if (mount) await storage.putRepository({ id: repositoryId, workspaceId: WORKSPACE.id, externalIdentityId: id })
 }
 

@@ -1,4 +1,5 @@
 import '../fixtures/resolution-preflight.mjs'
+import { replacePrimary } from '../contract/suites/storage-fixtures.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { world } from '../fixtures/change-request-world.mjs'
@@ -57,7 +58,7 @@ for (const defect of ['cross-repository', 'denied', 'draft', 'changed-after-save
     if (defect === 'changed-after-save' && reads > 1 || defect === 'stale-preview') ack.value.number = 546
     return ack
   }
-  if (defect === 'draft') { const id = (await w.storage.listIdentitiesForEntity(w.scope.workItemId)).find(i => i.role === 'primary'); await w.storage.putExternalIdentity({ ...id, role: 'historical' }); await w.storage.putExternalIdentity({ ...id, id: crypto.randomUUID(), externalKind: 'draft' }) }
+  if (defect === 'draft') { const id = (await w.storage.listIdentitiesForEntity(w.scope.workItemId)).find(i => i.role === 'primary'); await replacePrimary(w.storage, id, { ...id, id: crypto.randomUUID(), externalKind: 'draft' }) }
   if (defect === 'stale-preview') assert.equal(typeof preview.targetStamp, 'string')
   const result = await w.run({ issueRelation: 'reference', ...(defect === 'stale-preview' ? { issueTargetStamp: preview.targetStamp } : {}) })
   assert.ok(['failed', 'conflict'].includes(result.writeState), JSON.stringify(result)); assert.equal(w.f.mutations().length, 0)
@@ -110,7 +111,7 @@ for (const state of ['pending', 'saved']) for (const stamped of [false, true]) t
   const row = await w.storage.findMutationAttempt(w.workspace.id, 'create-1')
   if (state === 'pending') await w.storage.putMutationAttempt({ ...row, state: 'pending', externalIntent: { ...row.externalIntent, state: 'pending' } })
   const source = (await w.storage.listIdentitiesForEntity(w.scope.workItemId)).find(i => i.role === 'primary')
-  await w.storage.putExternalIdentity({ ...source, role: 'historical' }); await w.storage.putExternalIdentity({ ...source, id: crypto.randomUUID(), externalId: 'replacement' })
+  await replacePrimary(w.storage, source, { ...source, id: crypto.randomUUID(), externalId: 'replacement' })
   const member = (await w.storage.listMemberships(w.workspace.id, w.providers.planning.state.projects[0].ref.externalId)).find(m => m.contentExternalId === source.externalId)
   await w.storage.putMembership({ ...member, contentExternalId: 'replacement' })
   const options = await w.core.queries.getChangeRequestIssueOptions({ ...w.scope, base: 'main' }); assert.equal(options.target.source.issue.externalId, 'replacement')

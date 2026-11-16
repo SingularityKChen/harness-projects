@@ -1,3 +1,4 @@
+import { seedIdentity, seedEntity } from './storage-fixtures.js'
 /** 连接账号与工作区配置的共享 Storage 契约套件（#126）：Fake 与 SQLite 同形跑 7 条命名用例；判别性集中在账号自然键不可重绑、配置按真实 implementationKey 分派、重登记/卸载只改挂载。 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -57,8 +58,7 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     await assert.rejects(storage.setProviderBindingAccount('conn-0', 'account-2'), '已关联的锚点换账号必须拒绝')
     assert.equal(await attached(storage, 0), 'account-1', '拒绝不得改动原关联')
     await storage.setProviderBindingAccount('conn-1', 'account-1') // 无事实锚点首次关联成功
-    await storage.putEntity({ id: 'entity-1', kind: 'work_item' })
-    await storage.putExternalIdentity({ id: 'identity-1', entityId: 'entity-1', bindingId: 'conn-2', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
+    await seedIdentity(storage, { id: 'identity-1', entityId: 'entity-1', bindingId: 'conn-2', externalKind: 'issue', externalId: 'issue-1', role: 'primary' }, 'work_item')
     await assert.rejects(storage.setProviderBindingAccount('conn-2', 'account-1'), '已有外部身份事实的锚点不得补账号')
     await assert.rejects(storage.setProviderBindingAccount('conn-4', 'account-1'), '已有同步游标事实的锚点不得补账号')
     assert.equal(await attached(storage, 2), undefined, '被拒绝的初次关联不得留下关联')
@@ -194,8 +194,7 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     await storage.putProviderBinding(binding('conn-0', 'planning', { enabled: false, isDefault: false }))
     assert.deepEqual((await storage.getBindingConfiguration(mount(0))).configuration, { scope: 'workspace' }, '禁用只改 enabled/isDefault，不删除配置')
     assert.equal(await attached(storage, 0), 'account-1', '禁用不删除账号关联')
-    await storage.putEntity({ id: 'entity-1', kind: 'work_item' })
-    await storage.putExternalIdentity({ id: 'identity-1', entityId: 'entity-1', bindingId: 'conn-0', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
+    await seedIdentity(storage, { id: 'identity-1', entityId: 'entity-1', bindingId: 'conn-0', externalKind: 'issue', externalId: 'issue-1', role: 'primary' }, 'work_item')
     await storage.removeProviderBinding(mount(0))
     assert.equal(await storage.getBindingConfiguration(mount(0)), undefined, '卸载必须移除该挂载的配置')
     assert.equal(await attached(storage, 0), 'account-1', '账号关联在连接锚点上，卸载挂载不得删除')

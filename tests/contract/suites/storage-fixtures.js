@@ -20,4 +20,15 @@ export const fieldValue = (overrides = {}) => ({ workspaceId: WORKSPACE, itemExt
   observedAt: '2026-09-20T00:00:02Z', ...overrides })
 // 前置行：SQLite 实现打开 foreign_keys，成员关系/字段值/投影都以外键指向工作区、绑定与实体。
 export const seedWorkspace = (storage, id = WORKSPACE) => storage.putWorkspace(workspace(id))
-export const seedEntity = (storage, id) => storage.putEntity({ id, kind: 'work_item' })
+/** 源实体的合法测试种子；真实身份输入复用于 caller 的读回断言。 */
+export const seedIdentity = (storage, identity, kind = 'work_item') => storage.transaction(async (tx) => {
+  await tx.putEntity({ id: identity.entityId, kind, primaryIdentityId: identity.id }); await tx.putExternalIdentity(identity)
+})
+export const replacePrimary = (storage, previous, next, kind = 'work_item') => storage.transaction(async (tx) => {
+  await tx.putExternalIdentity({ ...previous, role: 'historical' }); await tx.putExternalIdentity(next)
+  await tx.putEntity({ id: previous.entityId, kind, primaryIdentityId: next.id })
+})
+export async function seedEntity(storage, id) {
+  await storage.putProviderBinding({ id: 'fixture-binding', workspaceId: WORKSPACE, domain: 'development', implementationKey: 'fake', enabled: false, isDefault: false })
+  await seedIdentity(storage, { id: `fixture-${id}`, entityId: id, bindingId: 'fixture-binding', externalKind: 'issue', externalId: id, role: 'primary' })
+}

@@ -182,9 +182,9 @@ test('remote withdrawal and noncooperative disposers share one deadline', async 
 for (const phase of ['create', 'checkpoint', 'checkpoint-deadline', 'prompt']) test(`SQLite ${phase} stop preserves uncertainty and blocks late prompt / repeat dispatch`, async (t) => {
   const fixture = await fixtureFor(t), dataPath = path.join(fixture.root, 'harness-projects', 'workspace.sqlite')
   await seed(dataPath, PROVIDER_CATALOG, async (storage) => {
-    await seedWorkspace(storage); await registerWorkItem(storage, WORKSPACE, 'wi-1')
+    await seedWorkspace(storage)
     const bound = await createWorkspaceSetup(storage).bindRepository({ workspaceId: WORKSPACE, repositoryId: 'repo-alpha', references: [{ domain: 'development', implementationKey: 'development.local-git', configuration: { repositoryExternalId: 'repo-alpha', repositoryPath: fixture.repositoryPath } }] })
-    await storage.putExternalIdentity({ id: 'wi-identity', entityId: 'wi-1', bindingId: bound.value.bindingIds[0], externalKind: 'issue', externalId: '1', role: 'primary' })
+    await registerWorkItem(storage, WORKSPACE, 'wi-1', undefined, { id: 'wi-identity', entityId: 'wi-1', bindingId: bound.value.bindingIds[0], externalKind: 'issue', externalId: '1', role: 'primary' })
   })
   const entered = gate(), release = gate(); let creates = 0, prompts = 0, checkpoints = 0, promptSignal
   const put = SqliteStorage.prototype.putExecutionRun

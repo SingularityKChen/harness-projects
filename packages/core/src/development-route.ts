@@ -144,7 +144,7 @@ export async function registerRepository(
         id: ids.externalIdentityId(), entityId: entityId ?? ids.entityId(), bindingId,
         externalKind: ExternalIdentityKind.Repository, externalId: repositoryId, role: entityId === undefined ? IdentityRole.Primary : IdentityRole.Alias,
       }
-      if (entityId === undefined) await tx.putEntity({ id: identity.entityId, kind: EntityKind.Repository })
+      if (entityId === undefined) await tx.putEntity({ id: identity.entityId, kind: EntityKind.Repository, primaryIdentityId: identity.id })
       await tx.putExternalIdentity(identity)
     }
     entityId = identity.entityId

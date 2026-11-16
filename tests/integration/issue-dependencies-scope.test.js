@@ -1,4 +1,5 @@
 import '../fixtures/resolution-preflight.mjs'
+import { replacePrimary } from '../contract/suites/storage-fixtures.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createContext } from '../../packages/core/src/context.ts'
@@ -55,7 +56,7 @@ test('primary, redaction, membership and policy gates send zero requests', async
     const h = await fixture(fault === 'policy' ? { [K.PlanningIssueDependenciesRead]: 'unavailable' } : undefined)
     if (fault === 'primary') {
       const i = (await h.p.storage.listIdentitiesForEntity(h.scope.workItemId)).find(i => i.role === 'primary');
-      await h.p.storage.putExternalIdentity({ ...i, role: 'historical' })
+      await replacePrimary(h.p.storage, i, { ...i, id: crypto.randomUUID(), externalKind: 'draft' })
     }
     if (fault === 'redaction') {
       const i = await h.p.storage.getPlanningProjection(h.workspaceId, h.scope.workItemId);
@@ -83,8 +84,8 @@ test('committed A→B→A, request ordinal and denial invalidate pending success
     await entered.promise
     if (fault === 'fence') {
       const i = (await h.p.storage.listIdentitiesForEntity(h.scope.workItemId)).find(i => i.role === 'primary');
-      await h.p.storage.putExternalIdentity({ ...i, role: 'historical' });
-      await h.p.storage.putExternalIdentity(i)
+      const alternate = { ...i, id: crypto.randomUUID(), externalKind: 'draft' };
+      await replacePrimary(h.p.storage, i, alternate); await replacePrimary(h.p.storage, alternate, i)
     }
     else if (fault === 'race') await h.refresh()
     else {

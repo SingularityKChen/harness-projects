@@ -61,10 +61,10 @@ const actor = { kind: 'user', id: 'execution-test' }, issuer = 'issuer-canary-52
 for (const scenario of ['completed', 'error', 'missing', 'forced', 'unknown', 'env-unset', 'env-0', 'env-true']) test(`正式 remote 安装→真实 Git ack→会话/备用→SQLite：${scenario}`, async (t) => {
   const fixture = await fixtureFor(t), dataPath = path.join(fixture.root, 'harness-projects', 'workspace.sqlite')
   await seed(dataPath, PROVIDER_CATALOG, async (storage) => {
-    await seedWorkspace(storage); await registerWorkItem(storage, WORKSPACE, 'wi-1')
+    await seedWorkspace(storage)
     const bound = await createWorkspaceSetup(storage).bindRepository({ workspaceId: WORKSPACE, repositoryId: 'repo-alpha', references: [{ domain: 'development', implementationKey: 'development.local-git', configuration: { repositoryExternalId: 'repo-alpha', repositoryPath: fixture.repositoryPath } }] })
     assert.equal(bound.ok, true)
-    await storage.putExternalIdentity({ id: 'wi-identity', entityId: 'wi-1', bindingId: bound.value.bindingIds[0], externalKind: 'issue', externalId: '1', role: 'primary' })
+    await registerWorkItem(storage, WORKSPACE, 'wi-1', undefined, { id: 'wi-identity', entityId: 'wi-1', bindingId: bound.value.bindingIds[0], externalKind: 'issue', externalId: '1', role: 'primary' })
   })
   const id = contextIdFor(WORKSPACE, 'wi-1', 'repo-alpha'), calls = [], secrets = []
   const observation = scenario === 'completed' ? 'O3.1' : undefined

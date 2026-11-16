@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-16-primary-identity-contract](exec-plan/completed/2026-11-16-primary-identity-contract.md) | 源实体恰好一个 primary、内部锚点与双适配器原子契约（#190） |
 | [2026-11-16-parked-watch-disposal](exec-plan/completed/2026-11-16-parked-watch-disposal.md) | 停拉迭代器主动关闭、一次结算与有界 Host 退出（#649） |
 | [2026-11-12-actionable-setup-recovery](exec-plan/completed/2026-11-12-actionable-setup-recovery.md) | 启动/设置恢复引导与明确授权的旧库迁移（#626） |
 | [2026-11-11-code-scanning-hardening](exec-plan/completed/2026-11-11-code-scanning-hardening.md) | 正则回溯修复、HTML 安全断言与告警用途核查（#617） |
