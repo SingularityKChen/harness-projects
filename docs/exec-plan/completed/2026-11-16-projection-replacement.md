@@ -1,6 +1,6 @@
 # 规划投影替换回归 ExecPlan
 
-> 状态：Active；创建：2026-11-16；Iteration 11：2026-11-16—22（Asia/Singapore）
+> 状态：Completed（本地工程验收）；创建：2026-11-16；Iteration 11：2026-11-16—22（Asia/Singapore）
 > 范围：#634 的共享 Storage put → replace 同键状态与内容覆盖；规范：根 `PLANS.md`。
 > 上游：#201、#634；不以本叶子关闭父项或接受 R1 发布。
 
@@ -60,7 +60,10 @@ V1 的完整 get/list 比较就是结果证据；两项故障注入的失败输�
 
 - [x] (2026-11-16 14:40 +08) 独立核对两份设计与实际 suite、adapter 入口，选定单用例闭环。
 - [x] (2026-11-16 14:40 +08) 在本分支初始基线执行 V1：278 通过、0 失败；尚无新用例。
-- [ ] (2026-11-16 14:40 +08) 完成 Task 1 / Batch 1 的判别回归、独立验收、发布回读及归档。
+- [x] (2026-11-16) 在 `tests/contract/suites/storage.js` 增加共享 put → replace 同键回归；Fake 与 SQLite 均完整读回新 status、revision、content，list 仅有一行。
+- [x] (2026-11-16) V1 恢复后 280 通过、0 失败；测试域临时变体分别保留旧 status 和旧 content，均在对应完整 get 深比较处 RED；V2 5 通过、0 失败。
+- [x] (2026-11-16) V3 disclosure、size、`git diff --check origin/main...HEAD` 通过；人工复核发布面五类目未发现命中。
+- [x] (2026-11-16 14:58 +08) 独立整分支验收确认 spec/quality 通过，无 P0–P3；完成工程计划归档和索引。PR Ready 继续受最终 head 远端回读规则约束。
 
 ## Surprises & Discoveries
 
@@ -80,12 +83,18 @@ V1–V3 可重复；测试继续使用既有临时库生命周期。故障注入
 
 ## Outcomes & Retrospective
 
-目前交付的是可执行计划和基线，尚未增加回归或取得实现 head 的验证。没有有意延期的本闭环技术债；若实施发现维护性妥协，先核对 `docs/exec-plan/tech-debt-tracker.md` 再由协调者登记，不复制父 Issue 历史。
+本批实现了共享 Storage 回归，Fake 与 SQLite 都验证了同键 replace 后的完整新记录和唯一行数。正常 V1 为 280/280；保留旧 status 与旧 content 的测试域变体分别在相应字段深比较处失败；V2 为 5/5。负控只在一次性 Node 进程包装 Fake adapter，未写入或保留变异代码。V3 的 disclosure 与 size 检查、提交范围 diff 检查通过，人工复核凭据、本机路径与身份、账号与个人信息、内部系统、保密字样五类均无命中。独立验收已确认 spec/quality 通过且无 P0–P3，工程计划归档与索引完成。PR #650 的实时 head、checks 与 Ready 以交付 owner 的最终回读为准，不由归档状态推断。没有有意延期的本闭环技术债。
 
 ## Artifacts and Notes
 
-最终只保留新用例、V1 摘要、status/content 错误变体的失败断言与恢复证明。计划完成时把实际结果写入 Outcomes，移入 completed 并更新索引；运行输出留在忽略的运行态目录，不写绝对本机路径。
+新用例与本计划共同保留可复现的 V1/V2 及两项错误变体判据：旧 status 为 todo、新 status 为 done；旧 content 为原标题/正文、新 content 为新标题/新正文；两种错误均触发完整 get 深比较。一次性进程结束后正常 V1 再次全绿。临时 stdout 不作为正式文档依赖。
 
 ## Bottom Change Note
 
 Change Note (2026-11-16 14:40 +08)：综合独立方案并核对真实实现后创建；将 test-only GREEN 与故障注入 RED、单 owner、独立交付边界写入同一份计划。
+
+Change Note (2026-11-16)：完成 Task 1 的共享回归和本地 V1/V2，记录两项可逆测试域 RED；保留独立验收与发布回读为未完成门禁。
+
+Change Note (2026-11-16)：在实现提交后执行 V3 和五类发布面人工复核并记录结果；远端回读及归档仍未执行。
+
+Change Note (2026-11-16 14:58 +08)：记录独立整分支验收并归档；保留最终 PR 当前版本回读规则，不把本地工程验收当成发布接受。
