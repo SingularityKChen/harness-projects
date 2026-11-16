@@ -105,17 +105,17 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 ## 4. 当前队列
 
-### PR #650 → #651；#652 阻塞项独立修复（2026-11-16）
+### PR #650 → #651 → #652（2026-11-16）
 
-本评审会话人类直接点名 #650–#652，条件授权无 P0/P1 的项由评审方收尾并 rebase 合并；有阻塞项交回原实现会话，修复及当前版本独立复评前不能合并。顺序只用于真实 main 接合，不新增规划依赖。
+本评审会话人类直接点名 #650–#652，条件授权无 P0/P1 的项由评审方修复、复评、归档和核对 issue 后 rebase 合并。三路首审均无 P0/P1；#652 三项 P2 一次提交于同一 APPROVE review，随后重开原计划做根因修复。顺序只用于真实 main 接合，不新增规划依赖。
 
 | 位置 | PR / issue | 接合与门禁 |
 |---|---|---|
-| 1 | #650 / #634 | 共享 Storage 回归；各自矩阵见 `docs/review/pr-650-mmp-review.md`。 |
-| 2 | #651 / #648 | 私有容器与 canonical 拒绝；等待独立全矩阵及当前版本门。 |
-| 本轮不合并 | #652 / #649 | 关闭重入与自然结束候选正在全矩阵核实；阻塞项未修复复评前不进入队列。 |
+| 已合入 1 | #650 / #634 | rebase merge `28aff71baf0cb056d842f66559b47304ea9a87a0`；#634 CLOSED，合并树逐字等于当前批准头。 |
+| 已合入 2 | #651 / #648 | rebase merge `b70401740fe5d353c864f74e1a44b352d8bff138`；#648 CLOSED，同上。 |
+| 3 | #652 / #649 | 接合前两条真实 main；三项 P2 修复须独立复评，当前版本批准、Fast Gate、全部线程与双向关联通过后以预期 head rebase 合并。 |
 
-每条合入后 fetch 真实 main，再检查下一条的 diff、head/base、产品/测试内容、Fast Gate、全部 threads 和双向 issue 关联；出现冲突则保留所有 Completed/Review 索引。共享历史更新先建立 `refs/backup/pr<N>-before-mmp-review-20261116`，推送用精确 old head lease。只以预期当前 head 执行 `merge_method=rebase` 并回读结果。规划 Status、父 #201/#338、Windows 和 R1 接受保持独立。
+各自矩阵与证据在 `docs/review/pr-<n>-mmp-review.md`。每条合入后 fetch 真实 main，下一条保留所有 Completed/Review 索引；共享历史更新前保留 `refs/backup/pr<N>-before-mmp-review-20261116`，推送用精确 old head lease。#651 的重放仅 review 索引冲突，保留两行且技术 blob 不变；实际完整回归结果见其记录。规划 Status、父 #201/#338、Windows 与 R1 接受保持独立。
 
 ### PR #623 → #625（2026-11-12）
 

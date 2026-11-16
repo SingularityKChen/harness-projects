@@ -185,7 +185,7 @@ export async function installHostRemote(
       // 首次 next 才登记调用；真实 source 先关，避免 pending next 把 outer.return 排在队尾。
       ? function (signal: AbortSignal) {
         const combined = AbortSignal.any([signal, lifetime.signal])
-        let frames: AsyncIterator<unknown> | undefined, closing = false
+        let frames: AsyncIterator<unknown> | undefined, closing = false, exhausted = false
         let sourceClose: Promise<void> | undefined, stopped: Promise<unknown> | undefined
         const closeSource = (): Promise<void> => {
           closing = true
@@ -217,11 +217,12 @@ export async function installHostRemote(
               let frame: IteratorResult<unknown>
               try { frame = await frames.next() }
               catch (error) { if (combined.aborted || closing) return; throw error }
-              if (combined.aborted || closing || frame.done) return
+              if (combined.aborted || closing) return
+              if (frame.done) { exhausted = true; return }
               yield toJson(frame.value)
             }
           } finally {
-            await closeSource()
+            if (!exhausted) await closeSource()
             combined.removeEventListener('abort', abort)
             streams.delete(stop)
             endCall()
@@ -240,8 +241,15 @@ export async function installHostRemote(
   }
   service.typertRemote = Object.freeze({ service, serviceKey: REMOTE_SERVICE, namespace: REMOTE_NAMESPACE })
 
-  const dispose = (deadline = owner?.stop() ?? Date.now() + 1000) => disposal ??= (async () => {
-      disposed = true
+  const dispose = (deadline?: number): Promise<void> => {
+    if (disposal) return disposal
+    let settle!: () => void
+    let fail!: (error: unknown) => void
+    // 先发布唯一任务，再执行可能同步重入的 owner、abort 和撤注册回调。
+    disposal = new Promise<void>((resolve, reject) => { settle = resolve; fail = reject })
+    disposed = true
+    void (async () => {
+      const until = deadline ?? owner?.stop() ?? Date.now() + 1000
       lifetime.abort()
       // 同步撤准入；撤注册、service 与流清理共用剩余预算，单个失败不阻断其它清理。
       const cleanup = [unregisterRemote, provideDispose, ...streams].map((dispose) => {
@@ -249,8 +257,10 @@ export async function installHostRemote(
         try { task = Promise.resolve(dispose?.()) } catch (error) { task = Promise.reject(error) }
         return task.catch((error) => report('shutdownFailed', error))
       })
-      if (!await drainUntil([...cleanup, ...(activeCalls > 0 ? [drained] : [])], deadline)) report('shutdownDeadlineExceeded')
-    })()
+      if (!await drainUntil([...cleanup, ...(activeCalls > 0 ? [drained] : [])], until)) report('shutdownDeadlineExceeded')
+    })().then(settle, fail)
+    return disposal
+  }
   try {
     owner?.signal.throwIfAborted()
     decorate(service)

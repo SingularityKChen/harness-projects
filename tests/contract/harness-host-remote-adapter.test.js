@@ -113,6 +113,43 @@ test('remote dispose releases a parked generator without another consumer action
   } finally { await frames.return(); await installed.dispose() }
 })
 
+test('source return synchronously reentering dispose shares one disposal and withdrawal', async () => {
+  const { ctx, events } = recordingContext(), diagnostics = []
+  let installed, reentered, returns = 0
+  installed = await installHostRemote(ctx, { call: async () => undefined, watch: () => ({ [Symbol.asyncIterator]: () => ({
+    next: async () => ({ value: 1, done: false }),
+    return: () => { returns++; reentered = installed.dispose(); return { done: true } },
+  }) }) }, undefined, undefined, undefined, (event) => diagnostics.push(event))
+  const frames = installed.service.watch(new AbortController().signal)
+  try {
+    await frames.next()
+    const disposal = installed.dispose(Date.now() + 80)
+    assert.equal(reentered, disposal, 'synchronous reentry must receive the first disposal promise')
+    assert.equal(installed.dispose(), disposal)
+    await disposal
+    assert.equal(returns, 1)
+    assert.deepEqual(events, ['remote-dispose', 'provide-dispose-start', 'provide-dispose-end'])
+    assert.deepEqual(diagnostics, [])
+  } finally { await frames.return(); await installed.dispose() }
+})
+
+test('naturally exhausted watch completes without waiting for source return', async () => {
+  const { ctx } = recordingContext(), diagnostics = []
+  let returns = 0, timer
+  const installed = await installHostRemote(ctx, { call: async () => undefined, watch: () => ({ [Symbol.asyncIterator]: () => ({
+    next: async () => ({ done: true }),
+    return: () => { returns++; return new Promise(() => {}) },
+  }) }) }, undefined, undefined, undefined, (event) => diagnostics.push(event))
+  try {
+    const completed = installed.service.watch(new AbortController().signal).next()
+    const result = await Promise.race([completed, new Promise((resolve) => { timer = setTimeout(resolve, 100, 'timeout') })])
+    assert.deepEqual(result, { value: undefined, done: true }, 'natural exhaustion must not wait on an unnecessary return')
+    assert.equal(returns, 0)
+    await installed.dispose(Date.now() + 80)
+    assert.deepEqual(diagnostics, [])
+  } finally { clearTimeout(timer); await installed.dispose(Date.now() + 80) }
+})
+
 test('host adapter strictly JSON-encodes watch frames, withdraws the service and aborts / drains the open watch', async () => {
   let aborted
   const composition = {
@@ -168,7 +205,7 @@ test('watch terminal paths settle once and an unstarted watch never opens a sour
   const deferred = installed.service.watch(new AbortController().signal)
   await installed.dispose(Date.now() + 80)
   await assert.rejects(deferred.next(), /卸载/)
-  assert.deepEqual([opens, returns, diagnostics], [3, 3, []])
+  assert.deepEqual([opens, returns, diagnostics], [3, 2, []])
 })
 
 for (const mode of ['sync', 'async', 'late']) test(`watch ${mode} return failure is consumed and diagnosed once`, async () => {
@@ -241,16 +278,16 @@ test('source return synchronously aborting its consumer still releases once', as
 })
 
 test('a source acquired during synchronous stop is still closed once', async () => {
-  let installed, returns = 0, disposal
+  let installed, returns = 0, reads = 0, disposal
   const { ctx } = recordingContext()
   installed = await installHostRemote(ctx, { call: async () => undefined, watch: () => {
     disposal = installed.dispose(Date.now() + 80)
-    return { [Symbol.asyncIterator]: () => ({ next: async () => { throw Error('late source must not be read') }, return: async () => { returns++; return { done: true } } }) }
+    return { [Symbol.asyncIterator]: () => ({ next: async () => { reads++; return { value: 1, done: false } }, return: async () => { returns++; return { done: true } } }) }
   } })
   const frames = installed.service.watch(new AbortController().signal)
   assert.equal((await frames.next()).done, true)
   await disposal
-  assert.equal(returns, 1)
+  assert.deepEqual([reads, returns], [0, 1], 'stop must close the acquired source without dispatching next')
 })
 
 test('optional Start Work branch survives descriptor-derived named JSON serialization and strict live Host decoding', async () => {
