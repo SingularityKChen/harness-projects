@@ -105,6 +105,18 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 
 ## 4. 当前队列
 
+### PR #650 → #651；#652 阻塞项独立修复（2026-11-16）
+
+本评审会话人类直接点名 #650–#652，条件授权无 P0/P1 的项由评审方收尾并 rebase 合并；有阻塞项交回原实现会话，修复及当前版本独立复评前不能合并。顺序只用于真实 main 接合，不新增规划依赖。
+
+| 位置 | PR / issue | 接合与门禁 |
+|---|---|---|
+| 1 | #650 / #634 | 共享 Storage 回归；各自矩阵见 `docs/review/pr-650-mmp-review.md`。 |
+| 2 | #651 / #648 | 私有容器与 canonical 拒绝；等待独立全矩阵及当前版本门。 |
+| 本轮不合并 | #652 / #649 | 关闭重入与自然结束候选正在全矩阵核实；阻塞项未修复复评前不进入队列。 |
+
+每条合入后 fetch 真实 main，再检查下一条的 diff、head/base、产品/测试内容、Fast Gate、全部 threads 和双向 issue 关联；出现冲突则保留所有 Completed/Review 索引。共享历史更新先建立 `refs/backup/pr<N>-before-mmp-review-20261116`，推送用精确 old head lease。只以预期当前 head 执行 `merge_method=rebase` 并回读结果。规划 Status、父 #201/#338、Windows 和 R1 接受保持独立。
+
 ### PR #623 → #625（2026-11-12）
 
 人类在本次评审会话逐个点名两 PR，直接条件授权非阻塞修复、独立复评、归档、核对 issue 后以 rebase 合并。风险矩阵见 [#623 记录](../review/pr-623-mmp-review.md)；#625 的记录随其独立 PR 进入 docs/review。两者没有技术依赖，顺序只用于真实 main 接合，不建立 Planning 关系。
