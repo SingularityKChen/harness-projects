@@ -26,9 +26,9 @@ Storage 是规划投影的持久化端口；投影是供读侧消费的工作区
 
 ## Global Constraints
 
-唯一测试写入为 `tests/contract/suites/storage.js`；文档写入为本计划（完成后同名移至 `docs/exec-plan/completed/`）及协调者维护的 `docs/README.md` 索引。单一 owner 完成此闭环，不能修改生产 adapter、schema、Core、公共 fixture 或装配文件。
+唯一测试写入为 `tests/contract/suites/storage.js`；文档写入为本计划（完成后同名移至 `docs/exec-plan/completed/`）、`docs/review/pr-650-mmp-review.md` 及协调者维护的 `docs/README.md`、`docs/review/README.md` 索引与 `docs/project-management/merge-queue.md` 队列。单一 owner 完成此闭环，不能修改生产 adapter、schema、Core、公共 fixture 或装配文件。
 
-技术 additions + deletions 目标 20–60、上限 80；每 PR 总技术行不得超过 800，文档不得超过 1300，不为凑预算扩写。无依赖、公共接口、数据迁移、旧数据兼容分支或修复脚本。只使用临时测试数据库，不碰运行数据；不得合并 PR、自动写 Planning Status 或 native blocking。
+技术 additions + deletions 目标 20–60、上限 80；每 PR 总技术行不得超过 800，文档不得超过 1300，不为凑预算扩写。无依赖、公共接口、数据迁移、旧数据兼容分支或修复脚本。只使用临时测试数据库，不碰运行数据；原交付阶段不得合并 PR；本轮评审后的直接条件授权见 Decision Log。不得自动写 Planning Status 或 native blocking。
 
 ## Plan of Work
 
@@ -71,6 +71,8 @@ V1 的完整 get/list 比较就是结果证据；两项故障注入的失败输�
 
 ## Decision Log
 
+2026-11-16 / 人类在本评审会话直接点名 PR #650–#652，要求“没有且无 P0 / P1，或只有 P2/P3 → 你负责后续”，并依次修复、复评、归档、整理提交、核对 issue 后以 `merge_method=rebase` 合并。本项独立全矩阵无 P0–P3，由本会话接管 #650 的文档与工程收尾；只在当前 head 门禁和批准通过后执行，不授权规划 Status、父 #201 或 R1 接受。
+
 2026-11-16 14:40 +08 / 独立 spec 评审：采用独立 foundation case，保留已有覆盖与装配。理由：精确关闭 #634，减少重复与实现耦合；正常 GREEN 加两个根因错误变体 RED，满足行为判别目的。
 
 ## Idempotence and Recovery
@@ -98,3 +100,5 @@ Change Note (2026-11-16)：完成 Task 1 的共享回归和本地 V1/V2，记录
 Change Note (2026-11-16)：在实现提交后执行 V3 和五类发布面人工复核并记录结果；远端回读及归档仍未执行。
 
 Change Note (2026-11-16 14:58 +08)：记录独立整分支验收并归档；保留最终 PR 当前版本回读规则，不把本地工程验收当成发布接受。
+
+Change Note (2026-11-16)：收录当前 PR 的独立 MMP 评审与人类直接条件授权；复用已完成工程归档，追加评审/队列索引，最终合并继续受当前版本门禁约束。
