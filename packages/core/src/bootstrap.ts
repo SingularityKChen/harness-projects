@@ -335,7 +335,7 @@ async function anchorOf(
     if (draft?.role === IdentityRole.Primary) {
       const primaries = (await tx.listIdentitiesForEntity(draft.entityId)).filter(identity => identity.role === IdentityRole.Primary)
       if (primaries.length === 1 && primaries[0]?.id === draft.id) {
-        const promotion = await promoteEntityIdentity(tx, draft.entityId, item.ref.externalId)
+        const promotion = await promoteEntityIdentity(tx, draft.entityId, item.ref.externalId, entityKindFor(item.content.kind, contentKind))
         if (!promotion.ok) throw new IdentityConflictError('Draft 提升目标身份已被占用')
         promotedId = promotion.entityId
       }

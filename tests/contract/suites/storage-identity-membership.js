@@ -4,6 +4,8 @@
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { EntityKind, entityKindRequiresPrimaryIdentity } from '@harness-projects/domain'
+import { seedEntity, seedIdentity } from './storage-fixtures.js'
 
 const WORKSPACE = 'ws-1'
 const workspace = (id = WORKSPACE, name = '工作区') => ({ id, name, statusPolicy: 'provider_authoritative' })
@@ -18,11 +20,75 @@ const membership = (overrides = {}) => ({ workspaceId: WORKSPACE, projectExterna
 const fieldValue = (overrides = {}) => ({ workspaceId: WORKSPACE, itemExternalId: 'item-1', projectFieldId: 'field-1', value: 'In Progress',
   observedAt: '2026-09-20T00:00:02Z', ...overrides })
 const seedWorkspace = (storage, id = WORKSPACE) => storage.putWorkspace(workspace(id))
-const seedEntity = (storage, id) => storage.putEntity({ id, kind: 'work_item' })
 
 /** 地基面：绑定、身份与投影。 */
 export function storageIdentityFoundationSuite(adapter, register = test) {
   const { label, makeStorage } = adapter
+
+    register(`${label}：source 实体与外部登记组在提交时必须恰好选择一个真实 primary`, async () => {
+      let storage = makeStorage(); await seedWorkspace(storage); await storage.putProviderBinding(binding('binding-1'))
+      const fence = storage.committedReadFence()
+      for (const kind of ['work_item', 'change_request', 'repository', 'branch']) {
+        await assert.rejects(storage.putEntity({ id: 'invalid', kind }), '零身份源实体不得提交')
+      }
+      for (const id of [null, undefined]) for (const kind of ['work_item', 'worktree']) {
+        await assert.rejects(storage.putEntity({ id, kind, ...(kind === 'work_item' ? { primaryIdentityId: 'missing' } : {}) }), '空实体键不能绕过复合外键')
+      }
+      await storage.transaction((tx) => assert.rejects(tx.putEntity({ id: 'invalid', kind: 'work_item' })))
+      assert.equal(storage.committedReadFence(), fence, '失败写入不得推进读围栏')
+      const primary = { id: 'selected', entityId: 'source', bindingId: 'binding-1', externalKind: 'issue', externalId: 'source', role: 'primary' }
+      await storage.transaction(async (tx) => { await tx.putEntity({ id: 'source', kind: 'work_item', primaryIdentityId: 'selected' }); await tx.putExternalIdentity(primary) })
+      await storage.putEntity({ id: 'source', kind: 'work_item' }) // generic artifact upsert 保留选择。
+      const committed = storage.committedReadFence()
+      for (const mutate of [
+        (tx) => tx.putEntity({ id: 'source', kind: 'work_item', primaryIdentityId: null }),
+        (tx) => tx.putEntity({ id: 'source', kind: 'work_item', primaryIdentityId: 'missing' }),
+        (tx) => tx.putExternalIdentity({ ...primary, role: 'historical' }),
+        async (tx) => { await tx.putExternalIdentity({ ...primary, id: 'alias', externalId: 'alias', role: 'alias' }); await tx.putEntity({ id: 'source', kind: 'work_item', primaryIdentityId: 'alias' }) },
+        async (tx) => { await tx.putEntity({ id: 'foreign', kind: 'worktree', primaryIdentityId: 'selected' }) },
+        async (tx) => { await tx.putEntity({ id: 'internal', kind: 'worktree' }); await tx.putExternalIdentity({ ...primary, id: 'internal-alias', entityId: 'internal', externalId: 'internal', role: 'alias' }) },
+      ]) {
+        await assert.rejects(storage.transaction(async (tx) => { await tx.putWorkspace(workspace('rolled-back')); await mutate(tx) }))
+        assert.equal(await storage.getWorkspace('rolled-back'), undefined)
+        assert.deepEqual(await storage.listIdentitiesForEntity('source'), [primary]); assert.equal(storage.committedReadFence(), committed)
+      }
+      await storage.transaction(async (tx) => {
+        await tx.putExternalIdentity({ ...primary, role: 'historical' })
+        await tx.putExternalIdentity({ ...primary, id: 'next', externalId: 'next' })
+        await tx.putEntity({ id: 'source', kind: 'work_item', primaryIdentityId: 'next' })
+      })
+      await storage.putEntity({ id: 'internal', kind: 'execution_context', primaryIdentityId: null })
+      storage = await adapter.restart(storage)
+      assert.deepEqual((await storage.listIdentitiesForEntity('source')).map(({ id, role }) => [id, role]), [['selected', 'historical'], ['next', 'primary']])
+      storage.close?.()
+    })
+
+    register(`${label}：实体种类的主身份责任与 domain 单一来源一致（全 kind 对等）`, async () => {
+      const storage = makeStorage(); await seedWorkspace(storage)
+      for (const kind of Object.values(EntityKind)) {
+        const fence = storage.committedReadFence(), id = `kind-${kind}`
+        if (entityKindRequiresPrimaryIdentity(kind)) {
+          await assert.rejects(storage.putEntity({ id, kind }), `${kind} 必须拒绝零主身份`)
+          assert.equal(storage.committedReadFence(), fence, '被拒绝的源实体不得推进读围栏')
+        } else {
+          await storage.putEntity({ id, kind })
+        }
+      }
+      storage.close?.()
+    })
+
+    register(`${label}：直接（非事务）身份写同样验证整组并原子回滚`, async () => {
+      const storage = makeStorage(); await seedWorkspace(storage); await storage.putProviderBinding(binding('binding-1'))
+      await storage.putEntity({ id: 'direct-internal', kind: 'worktree' })
+      const fence = storage.committedReadFence()
+      await assert.rejects(storage.putExternalIdentity({ id: 'direct-alias', entityId: 'direct-internal', bindingId: 'binding-1', externalKind: 'worktree', externalId: 'direct-alias', role: 'alias' }), 'NULL 指针内部实体上的 alias 不能直接提交')
+      assert.deepEqual(await storage.listIdentitiesForEntity('direct-internal'), [], '失败的直接身份写不得留下身份行')
+      await assert.rejects(storage.putEntity({ id: 'direct-source', kind: 'work_item', primaryIdentityId: 'missing' }), '悬挂指针不能直接提交')
+      await assert.rejects(storage.putEntity({ id: 'direct-null', kind: 'repository', primaryIdentityId: null }), '源种类显式 null 不能直接提交')
+      assert.deepEqual(await storage.listIdentitiesForEntity('direct-source'), [])
+      assert.equal(storage.committedReadFence(), fence, '失败的直接身份写不得推进读围栏')
+      storage.close?.()
+    })
 
     register(`${label}：绑定锚点跨工作区共享，挂载规则由工作区与域决定`, async () => {
       const storage = makeStorage()
@@ -58,11 +124,10 @@ export function storageIdentityFoundationSuite(adapter, register = test) {
       const storage = makeStorage()
       await seedWorkspace(storage)
       await storage.putProviderBinding(binding('binding-1'))
-      await seedEntity(storage, 'entity-1')
       await seedEntity(storage, 'entity-2')
       const identity = (overrides = {}) => ({ id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1',
         externalKind: 'issue', externalId: 'issue-1', role: 'primary', ...overrides })
-      await storage.putExternalIdentity(identity())
+      await seedIdentity(storage, identity())
       await storage.putExternalIdentity(identity())
       assert.deepEqual((await storage.listIdentitiesForEntity('entity-1')).map((i) => i.id), ['identity-1'], '同一对象键的幂等重写不得被自己的唯一性检查误伤')
       await assert.rejects(storage.putExternalIdentity(identity({ id: 'identity-2', externalId: 'issue-2' })), '同一实体第二个 primary 必须被拒绝')
@@ -71,11 +136,11 @@ export function storageIdentityFoundationSuite(adapter, register = test) {
       assert.deepEqual((await storage.listIdentitiesForEntity('entity-1')).map((i) => i.id).sort(), ['identity-1', 'identity-3'], 'alias / historical 不受 primary 唯一约束限制')
       await assert.rejects(storage.putExternalIdentity(identity({ entityId: 'entity-2', externalKind: 'issue', externalId: 'issue-9' })), '同一个身份 id 换对象键必须被拒绝')
       assert.equal(await storage.findExternalIdentity('binding-1', 'issue', 'issue-9'), undefined, '被拒绝的写入不得留下任何行')
-      await storage.putExternalIdentity(identity({ id: 'identity-99', entityId: 'entity-2', role: 'alias' }))
+      await storage.putExternalIdentity(identity({ id: 'identity-99', entityId: 'entity-2' }))
       const found = await storage.findExternalIdentity('binding-1', 'issue', 'issue-1')
       assert.equal(found?.id, 'identity-1', '同对象幂等覆盖保留已分配的 id')
       assert.equal(found?.entityId, 'entity-1', '同对象幂等覆盖保留已分配的 entityId')
-      assert.deepEqual(await storage.listIdentitiesForEntity('entity-2'), [], '覆盖不得把身份搬到另一个实体')
+      assert.deepEqual((await storage.listIdentitiesForEntity('entity-2')).map((row) => row.id), ['fixture-entity-2'], '覆盖不得把身份搬到另一个实体')
     })
 
     register(`${label}：identity id 与 natural key 双冲突必须拒绝且保留两个 owner`, async () => {
@@ -131,11 +196,10 @@ export function storageIdentityFoundationSuite(adapter, register = test) {
         await storage.putProviderBinding(developmentBinding('binding-outside'))
         const identities = []
         for (const id of ['old', 'valid', 'bad', 'outside']) {
-          await seedEntity(storage, `entity-${id}`)
           const identity = { id: `identity-${id}`, entityId: `entity-${id}`, bindingId: id === 'outside' ? 'binding-outside' : 'binding-1',
             externalKind: 'issue', externalId: `issue-${id}`, role: 'primary' }
           identities.push(identity)
-          await storage.putExternalIdentity(identity)
+          await seedIdentity(storage, identity)
         }
         const old = { ...projection, entityId: 'entity-old', revision: 7, planningStatus: 'in_progress' }
         const outside = { ...projection, entityId: 'entity-outside', revision: 8 }
@@ -196,9 +260,8 @@ export function storageIdentityFoundationSuite(adapter, register = test) {
       const storage = makeStorage()
       await seedWorkspace(storage)
       await storage.putProviderBinding(binding('binding-1'))
-      await storage.putEntity({ id: 'repo-entity-1', kind: 'repository' })
       const identity = { id: 'repo-identity-1', entityId: 'repo-entity-1', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-1', role: 'primary' }
-      await storage.putExternalIdentity(identity)
+      await seedIdentity(storage, identity, 'repository')
       await storage.putRepository({ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: identity.id })
       assert.deepEqual(await storage.findExternalIdentity('binding-1', 'repository', 'repo-1'), identity, '按 (连接, repository, 外部 id) 读回同一条身份：id 与 entityId 是稳定键')
       assert.equal(await storage.findExternalIdentity('binding-1', 'branch', 'repo-1'), undefined, '种类是自然键的分量：同名 branch 是另一个对象')
@@ -209,10 +272,10 @@ export function storageIdentityFoundationSuite(adapter, register = test) {
     // 替身会静默接受它们。正控与反例在两个独立的库里、记录只差 kind 这一处，否则反例可能死于 id / primary 冲突而不是死于种类
     // （两种死因在拒绝断言里分不出来）。
     register(`${label}：未知身份种类拒绝且不得登记成 issue`, async () => {
-      const seeded = async () => { const storage = makeStorage(); await seedWorkspace(storage); await storage.putProviderBinding(binding('binding-1')); await seedEntity(storage, 'entity-1'); return storage }
+      const seeded = async () => { const storage = makeStorage(); await seedWorkspace(storage); await storage.putProviderBinding(binding('binding-1')); await storage.putEntity({ id: 'entity-1', kind: 'worktree' }); return storage }
       const record = (externalKind) => ({ id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind, externalId: 'object-1', role: 'primary' })
       const control = await seeded()
-      await control.putExternalIdentity(record('issue'))
+      await seedIdentity(control, record('issue'), 'worktree')
       assert.equal((await control.findExternalIdentity('binding-1', 'issue', 'object-1'))?.id, 'identity-1', '同形状的合法写入必须成功并能按 issue 查回：否则「一律拒绝」的实现也能通过下面的断言')
       const storage = await seeded()
       for (const bogus of ['bogus', 'ProjectV2Item', undefined, null, 42]) {
@@ -235,9 +298,8 @@ export function storageIdentitySyncSuite(adapter, register = test) {
       await storage.putProviderBinding({ ...binding('binding-1'), workspaceId: 'ws-2' })
       assert.deepEqual((await storage.listProviderBindings(WORKSPACE)).map((b) => b.id), ['binding-1'], '连接锚点必须留在第一个工作区')
       assert.deepEqual((await storage.listProviderBindings('ws-2')).map((b) => b.id), ['binding-1'], '同一条连接必须能被第二个工作区挂载')
-      await seedEntity(storage, 'entity-1')
       const identity = { id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' }
-      await storage.putExternalIdentity(identity)
+      await seedIdentity(storage, identity)
       await storage.putExternalIdentity({ ...identity, id: 'identity-2' })
       assert.equal((await storage.findExternalIdentity('binding-1', 'issue', 'issue-1'))?.id, 'identity-1')
       assert.deepEqual((await storage.listIdentitiesForEntity('entity-1')).map((i) => i.id), ['identity-1'], '同一对象不得在两个工作区各登记一条身份')
@@ -288,10 +350,8 @@ export function storageIdentitySyncSuite(adapter, register = test) {
       await seedWorkspace(storage)
       await seedWorkspace(storage, 'ws-2')
       await storage.putProviderBinding(binding('binding-1'))
-      await seedEntity(storage, 'entity-1')
-      await seedEntity(storage, 'entity-2')
-      await storage.putExternalIdentity({ id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
-      await storage.putExternalIdentity({ id: 'identity-2', entityId: 'entity-2', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-2', role: 'primary' })
+      await seedIdentity(storage, { id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
+      await seedIdentity(storage, { id: 'identity-2', entityId: 'entity-2', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-2', role: 'primary' })
       await storage.putMembership(membership({ itemExternalId: 'item-1', contentExternalId: 'issue-1' }))
       await storage.putMembership(membership({ itemExternalId: 'item-2', contentExternalId: 'issue-2' }))
       await storage.putMembership(membership({ projectExternalId: 'project-2', itemExternalId: 'item-3', contentExternalId: 'issue-2' }))

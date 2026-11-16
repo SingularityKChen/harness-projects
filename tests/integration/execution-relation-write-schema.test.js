@@ -40,18 +40,18 @@ function withDatabase(run) {
   try { return run(db) } finally { db.close(); rmSync(dir, { recursive: true, force: true }) }
 }
 function seed(db) {
-  db.exec(`INSERT INTO workspace VALUES ('ws-1','工作区','provider_authoritative');
+  db.exec(`BEGIN; INSERT INTO workspace VALUES ('ws-1','工作区','provider_authoritative');
     INSERT INTO workspace VALUES ('ws-2','工作区 2','provider_authoritative');
     INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-1','fake');
     INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-2','fake');
     INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-3','fake');
     INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1','binding-1','planning',1,1);
     INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1','binding-2','development',1,1);
-    INSERT INTO entity VALUES ('entity-1','work_item'); INSERT INTO entity VALUES ('entity-2','repository');
+    INSERT INTO entity (id,kind,primary_identity_id) VALUES ('entity-1','work_item','work-identity'); INSERT INTO external_identity VALUES ('work-identity','entity-1','binding-1','issue','work-1','primary'); INSERT INTO entity (id,kind,primary_identity_id) VALUES ('entity-2','repository','identity-1');
     INSERT INTO external_identity VALUES ('identity-1','entity-2','binding-1','repository','repo-1','primary');
     INSERT INTO repository VALUES ('repo-1','ws-1','identity-1');
     INSERT INTO project_item_membership VALUES ('ws-1','project-1','item-1','issue','issue-1','x','x');
-    INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-1','ws-1','entity-1','repo-1','ready',NULL,NULL,NULL);`)
+    INSERT INTO execution_context (id,workspace_id,work_item_id,repository_id,status,branch_external_id,worktree_external_id,provisioning_started_at) VALUES ('context-1','ws-1','entity-1','repo-1','ready',NULL,NULL,NULL); COMMIT;`)
 }
 
 test('空库建出 L3 十一张表，二次运行是 no-op', () => withDatabase((db) => {

@@ -137,7 +137,13 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
       .get(parsed.workspaceId, parsed.bindingId, parsed.domain), (row) => ({ record: rowToBindingConfiguration(row), implementationKey: row.implementation_key as string })))
       .then((found) => (found === undefined ? undefined : parseBindingConfiguration(found.record, this.policy, found.implementationKey)))
   }
-  putEntity(record: Entity): Promise<void> { return this.write('INSERT INTO entity (id, kind) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET kind = excluded.kind', record.id, record.kind) }
+  putEntity(record: Entity): Promise<void> {
+    const { id, kind, primaryIdentityId } = record
+    return this.atomic(() => {
+      const selected = primaryIdentityId === undefined ? (this.db.prepare('SELECT primary_identity_id FROM entity WHERE id = ?').get(id) as { primary_identity_id: string | null } | undefined)?.primary_identity_id ?? null : primaryIdentityId
+      this.db.prepare('INSERT INTO entity (id, kind, primary_identity_id) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET kind = excluded.kind, primary_identity_id = excluded.primary_identity_id').run(id, kind, selected)
+    })
+  }
   /** 身份全局一份：重复登记保留已分配的 id 与 entityId（否则引用会断），只更新角色。种类先过 domain 的解析器：未知种类在任何写入之前以与替身相同的 RangeError（Promise 拒绝）失败，不依赖 002 的 CHECK 措辞；CHECK 是第二道防线。 */
   async putExternalIdentity(record: ExternalIdentity): Promise<void> {
     record = structuredClone(record)

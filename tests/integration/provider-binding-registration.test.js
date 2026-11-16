@@ -5,6 +5,7 @@
  * 写命令、链读与取消落到提供该能力的那个挂载，取消回到签发它的 Execution 挂载。
  */
 import '../fixtures/resolution-preflight.mjs';
+import { seedIdentity } from '../contract/suites/storage-fixtures.js'
 
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
@@ -87,10 +88,10 @@ const executionContext = (id, overrides) => ({
 async function seed(storage, contextId) {
   await storage.putWorkspace({ id: WS, name: '旧名', statusPolicy: 'provider_authoritative' })
   await storage.putProviderBinding({ id: SHARED, workspaceId: WS, domain: 'planning', implementationKey: KEY, enabled: true, isDefault: true })
-  for (const [id, kind] of [['wi-1', 'work_item'], ['repo-entity', 'repository']]) await storage.putEntity({ id, kind })
-  await storage.putExternalIdentity({
+  await seedIdentity(storage, { id: 'work-identity', entityId: 'wi-1', bindingId: SHARED, externalKind: 'issue', externalId: 'wi-1', role: 'primary' })
+  await seedIdentity(storage, {
     id: 'repo-identity', entityId: 'repo-entity', bindingId: SHARED, externalKind: ExternalIdentityKind.Repository, externalId: 'repo-alpha', role: 'primary',
-  })
+  }, 'repository')
   await storage.putRepository({ id: 'repo-1', workspaceId: WS, externalIdentityId: 'repo-identity' })
   await storage.putExecutionContext(executionContext(contextId))
 }

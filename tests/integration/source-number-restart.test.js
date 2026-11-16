@@ -77,7 +77,7 @@ test('production provider → SQLite reopen → controller/client → default li
     assert.equal(row.source_number_json,null)
     // Existing promotion command retains EntityId while the next native observation adds its number.
     const draft = before.find(v=>v.content.identity.externalId==='draft')
-    const promoted = await storage.transaction(tx=>promoteEntityIdentity(tx,draft.entityId,'promoted-issue'))
+    const promoted = await storage.transaction(tx=>promoteEntityIdentity(tx,draft.entityId,'promoted-issue','work_item'))
     assert.equal(promoted.ok,true)
     state.nodes[3] = {...node('promoted-issue','Issue','example/promoted',450),id:'membership-draft'}
     assert.equal((await bootstrapWorkspace(context)).ok,true)

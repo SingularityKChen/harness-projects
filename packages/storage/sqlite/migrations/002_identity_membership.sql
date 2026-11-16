@@ -62,9 +62,19 @@ CREATE UNIQUE INDEX workspace_binding_default ON workspace_binding (workspace_id
 
 -- entity：AGENTS.md §1.1 不变量 6 的内部锚点。
 CREATE TABLE entity (
-  id TEXT PRIMARY KEY,
+  -- issue #190：复合外键的实体键分量必须非 NULL，避免 SQLite 跳过整个关系检查。
+  id TEXT PRIMARY KEY NOT NULL,
   -- 取值集合来自 packages/domain 的 EntityKind；这一列是 core 的 entityKindFor 推导结果的落点（ADR-0005 把行为 2 的强制点放在 core）。
-  kind TEXT NOT NULL CHECK (kind IN ('work_item', 'change_request', 'repository', 'branch', 'worktree', 'commit', 'execution_context', 'execution_run', 'pipeline_run', 'check_run'))
+  kind TEXT NOT NULL CHECK (kind IN ('work_item', 'change_request', 'repository', 'branch', 'worktree', 'commit', 'execution_context', 'execution_run', 'pipeline_run', 'check_run')),
+  primary_identity_id TEXT,
+  registered INTEGER GENERATED ALWAYS AS (primary_identity_id IS NOT NULL) STORED,
+  primary_role TEXT GENERATED ALWAYS AS ('primary') STORED,
+  -- issue #190：源对象不得以零身份提交；内部锚点可以没有外部对象。
+  CHECK (primary_identity_id IS NOT NULL OR kind IN ('worktree', 'commit', 'execution_context', 'execution_run', 'pipeline_run', 'check_run')),
+  -- issue #190：反向登记外键的父键，generated 标志不能由 caller 伪造。
+  UNIQUE (id, registered),
+  -- issue #190：主身份必须同实体且真实为 primary，晋升只在提交时检查最终组。
+  FOREIGN KEY (primary_identity_id, id, primary_role) REFERENCES external_identity (id, entity_id, role) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- external_identity：R1 的键形状不变（ADR-0001）与 R7 的角色约束。
@@ -79,10 +89,15 @@ CREATE TABLE external_identity (
   external_id TEXT NOT NULL,
   -- R7：只有 primary external_id 可作为平台查询参数或同步游标。
   role TEXT NOT NULL CHECK (role IN ('primary', 'alias', 'historical')),
+  registered INTEGER GENERATED ALWAYS AS (1) STORED,
+  -- issue #190：任何外部登记都要求所属实体已经选择主身份，包括内部种类的 alias-only 反例。
+  FOREIGN KEY (entity_id, registered) REFERENCES entity (id, registered) DEFERRABLE INITIALLY DEFERRED,
+  -- issue #190：角色绑定外键的父键。
+  UNIQUE (id, entity_id, role),
   -- R1 的唯一自然键：同一条连接上的同一对象只有一条身份。
   UNIQUE (binding_id, external_kind, external_id)
 );
--- **订正 2026-09-24（评审）**：原文「不能声明式表达」不成立——DEFERRABLE INITIALLY DEFERRED 外键可以表达它，代价是端口语义（`putEntity` 须与 primary 身份同事务写入）与套件前置改写；收口条件＝代码预算允许时。issue #27 验收 3 的「至多一个」由本索引强制。
+-- issue #190：角色绑定 deferred 外键保证「至少一个」，本索引保留「至多一个」；两者共同保证恰好一个。
 CREATE UNIQUE INDEX external_identity_primary ON external_identity (entity_id) WHERE role = 'primary';
 
 -- project_item_membership：R1（工作区作用域的挂载点，不是内容身份）。

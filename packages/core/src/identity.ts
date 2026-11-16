@@ -2,7 +2,7 @@
  * 身份解析：外部对象 → 稳定内部实体（AGENTS.md §1.1 不变量 1/3，ExecPlan D2）。
  *
  * 幂等由 (binding, externalKind, externalId) 唯一键保证：同一外部对象两次观察解析到同一个实体 id，
- * 重复登记保留已分配的 id 与 entityId。Draft→Issue 提升复用 domain 的纯函数：只改外部身份，
+ * 重复登记保留已分配的 id 与 entityId。Draft→Issue 提升复用 domain 的纯函数并原子切换主身份选择，
  * 内部实体 id 原样保持（`promoteDraftToIssue`）。
  */
 import { createHash } from 'node:crypto'
@@ -80,14 +80,16 @@ export async function ensureEntity(
   }
   const entityId = desiredId ?? ids.entityId()
   const identities = await tx.listIdentitiesForEntity(entityId)
-  await tx.putEntity({ id: entityId, kind })
+  const primary = identities.find((identity) => identity.role === IdentityRole.Primary)
+  const identityId = ids.externalIdentityId()
+  await tx.putEntity({ id: entityId, kind, primaryIdentityId: primary?.id ?? identityId })
   await tx.putExternalIdentity({
-    id: ids.externalIdentityId(),
+    id: identityId,
     entityId,
     bindingId: input.bindingId,
     externalKind: input.externalKind,
     externalId: input.externalId,
-    role: identities.some((identity) => identity.role === IdentityRole.Primary) ? IdentityRole.Alias : IdentityRole.Primary,
+    role: primary === undefined ? IdentityRole.Primary : IdentityRole.Alias,
   })
   return entityId
 }
@@ -98,11 +100,12 @@ export interface PromotionOutcome {
   readonly reason: string | undefined
 }
 
-/** 提升只写身份：目标身份已被别的实体占用时返回冲突，不改任何一行。 */
+/** 晋升保持内部实体 id，同事务切换角色与主身份指针；目标被别的实体占用时不写任何行。 */
 export async function promoteEntityIdentity(
   tx: StorageTransaction,
   entityId: EntityId,
   issueExternalId: string,
+  kind: EntityKind,
 ): Promise<PromotionOutcome> {
   const identities = await tx.listIdentitiesForEntity(entityId)
   const draft = identities.find(identity => identity.role === IdentityRole.Primary && identity.externalKind === ExternalIdentityKind.Draft)
@@ -115,5 +118,7 @@ export async function promoteEntityIdentity(
   // Storage 不承诺身份列表顺序；先释放旧 primary，才能将既有 alias 或新身份升为 primary。
   for (const identity of result.identities.filter(identity => identity.role !== IdentityRole.Primary)) await tx.putExternalIdentity(identity)
   for (const identity of result.identities.filter(identity => identity.role === IdentityRole.Primary)) await tx.putExternalIdentity(identity)
+  const primary = result.identities.find(identity => identity.role === IdentityRole.Primary)!
+  await tx.putEntity({ id: entityId, kind, primaryIdentityId: primary.id })
   return { ok: true, entityId: result.entityId, reason: undefined }
 }

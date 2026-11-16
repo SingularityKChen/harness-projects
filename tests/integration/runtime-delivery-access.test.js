@@ -139,7 +139,7 @@ test('another Development binding cannot unlock a refused repository read', asyn
   other.state.repositories[0].ref = { ...other.state.repositories[0].ref, externalId: 'repo-beta' }
   other.state.branches[0].repository = other.state.repositories[0].ref
   const core = await composeCore({ workspace, providers: { ...h.providers, development: [h.providers.development, other] } })
-  await registerRepository(h.storage, defaultIdFactory, workspace.id, 'repo-beta', [other.gate.bindingId])
+  await h.storage.transaction(tx => registerRepository(tx, defaultIdFactory, workspace.id, 'repo-beta', [other.gate.bindingId]))
   const beta = { ...h.scope, repositoryId: 'repo-beta' }
   assert.equal((await core.commands.startWork({ task: 'Synthetic explicit task', ...beta, actor: { kind: 'user' }, idempotencyKey: 'other-binding', worktreePath: 'beta-binding' })).confirmed, true)
   await core.commands.refreshDeliveryFacts(beta)

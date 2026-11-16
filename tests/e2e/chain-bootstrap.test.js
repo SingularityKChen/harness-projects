@@ -147,7 +147,7 @@ test('身份：Draft→Issue 提升只换外部 id，内部实体 id 不变（�
   }
   const draft = (await core.queries.listPlanningItems()).find((view) => view.content.identity.externalKind === 'draft')
   assert.ok(draft, '三个条目里必须有一个 draft')
-  const outcome = await providers.storage.transaction((tx) => promoteEntityIdentity(tx, draft.entityId, 'issue-100'))
+  const outcome = await providers.storage.transaction((tx) => promoteEntityIdentity(tx, draft.entityId, 'issue-100', 'work_item'))
   assert.equal(outcome.ok, true)
   assert.equal(outcome.entityId, draft.entityId, '提升不得新建实体')
   const detail = await core.queries.getItemDetail(draft.entityId)

@@ -19,6 +19,7 @@ const SENTINEL = '__not_a_domain_value__'
 
 const CHECK_FAILURE = /CHECK constraint failed/
 
+const sourceEntity = (id, kind = 'work_item') => `INSERT INTO entity (id,kind,primary_identity_id) VALUES ('${id}','${kind}','identity-${id}'); INSERT INTO external_identity VALUES ('identity-${id}','${id}','binding-1','issue','${id}','primary')`
 const CONSTRAINED_COLUMNS = [
   {
     table: 'connector_account', column: 'identity_kind', values: Object.values(ConnectorIdentityKind),
@@ -30,7 +31,7 @@ const CONSTRAINED_COLUMNS = [
   },
   {
     table: 'entity', column: 'kind', values: Object.values(EntityKind),
-    insert: (value) => `INSERT INTO entity VALUES ('entity-check-${value}', '${value}')`,
+    insert: (value) => sourceEntity(`entity-check-${value}`, value),
   },
   {
     table: 'workspace', column: 'status_policy', values: Object.values(StatusPolicy),
@@ -47,7 +48,8 @@ const CONSTRAINED_COLUMNS = [
   },
   {
     table: 'external_identity', column: 'role', values: Object.values(IdentityRole),
-    insert: (value) => `INSERT INTO external_identity VALUES ('identity-role-${value}', 'entity-1', 'binding-1', 'issue', 'role-${value}', '${value}')`,
+    prepare: (value) => value === 'primary' ? "INSERT INTO entity (id,kind,primary_identity_id) VALUES ('role-primary','work_item','identity-role-primary')" : '',
+    insert: (value) => `INSERT INTO external_identity VALUES ('identity-role-${value}', '${value === 'primary' ? 'role-primary' : 'entity-1'}', 'binding-1', 'issue', 'role-${value}', '${value}')`,
   },
   {
     table: 'project_item_membership', column: 'content_external_kind', values: Object.values(MembershipContentKind),
@@ -55,12 +57,12 @@ const CONSTRAINED_COLUMNS = [
   },
   {
     table: 'workspace_projection', column: 'planning_status', values: Object.values(NormalizedStatus),
-    prepare: (value) => `INSERT INTO entity VALUES ('entity-status-${value}', 'work_item')`,
+    prepare: (value) => sourceEntity(`entity-status-${value}`),
     insert: (value) => `INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1', 'entity-status-${value}', '${value}', 'work_item', NULL, '正文', NULL, NULL, NULL, NULL, NULL, 1)`,
   },
   {
     table: 'workspace_projection', column: 'content_kind', values: Object.values(ContentKind),
-    prepare: (value) => `INSERT INTO entity VALUES ('entity-kind-${value}', 'work_item')`,
+    prepare: (value) => sourceEntity(`entity-kind-${value}`),
     insert: (value) => `INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1', 'entity-kind-${value}', 'todo', '${value}', NULL, '正文', NULL, NULL, NULL, NULL, NULL, 1)`,
   },
 ]
@@ -79,11 +81,11 @@ function withDatabase(run) {
 
 /** 满足全部外键的最小库。 */
 function seed(db) {
-  db.exec(`
+  db.exec(`BEGIN;
     INSERT INTO workspace VALUES ('ws-1', '工作区', 'provider_authoritative');
     INSERT INTO provider_binding (id, implementation_key) VALUES ('binding-1', 'fake');
     INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1', 'binding-1', 'planning', 1, 1);
-    INSERT INTO entity VALUES ('entity-1', 'work_item');
+    ${sourceEntity('entity-1')};
   `)
 }
 
@@ -109,5 +111,6 @@ test('DDL 的 CHECK 取值集合与包常量逐值绑定，且每个值都能插
       assert.throws(() => db.exec(insert(SENTINEL)), CHECK_FAILURE,
         `${table}.${column} 必须由 CHECK 拒绝枚举外的取值——被外键或唯一约束拒绝不算通过`)
     }
+    db.exec('COMMIT')
   })
 })

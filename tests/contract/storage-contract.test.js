@@ -1,5 +1,6 @@
 /** 内存 Storage 替身的契约套件装配，外加实现专属的判别性用例。`restart` 用导出/导入内部状态模拟重启——删掉导出实现后，套件里"换一个实例读同一份内容"必然失败。事务隔离（未提交的写入不得被事务外的读看到）与写者路径语义（重叠事务串行提交、在途事务不吞直接写入）对两个实现都成立，因此钉在共享地基组里（`suites/storage.js`），不在本文件重复。SQLite 专属的用例是 `close()`、"事务 work 里调外层实例"与结算令牌三条（都不是端口面）（内存替身没有 close，它的队列在 work 里调外层实例同样静默挂起——见本层计划遗留「跨实例自等的共享用例缺另一半」）。 */
 import '../fixtures/resolution-preflight.mjs';
+import { seedIdentity } from './suites/storage-fixtures.js'
 
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -59,6 +60,21 @@ const sqliteDivergence = { ...sqliteAdapter('SQLite Storage（分叉格）', 'st
   acceptsDanglingCoreParents: { repository: false }, rejection: /^rejected: FOREIGN KEY constraint failed/ }
 for (const adapter of [fakeDivergence, sqliteDivergence]) storageExecutionDivergenceSuite(adapter)
 
+test('Fake 导入种子同样拒绝零主身份、alias-only、外实体选择与第二 primary', async () => {
+  const storage = createFakeStorage(); await storage.putWorkspace(workspace('ws-1'))
+  await storage.putProviderBinding(bindingRecord('binding-1', 'ws-1'))
+  await seedIdentity(storage, { id: 'primary', entityId: 'entity', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue', role: 'primary' })
+  for (const corrupt of [
+    (data) => { data.entities[0].primaryIdentityId = null },
+    (data) => { data.entities[0] = { id: 'entity', kind: 'worktree' }; data.identities[0].role = 'alias' },
+    (data) => { data.entities.push({ id: 'foreign', kind: 'worktree', primaryIdentityId: 'primary' }) },
+    (data) => { data.identities.push({ ...data.identities[0], id: 'second', externalId: 'second' }) },
+  ]) {
+    const data = exportFakeStorageState(storage); corrupt(data); const before = structuredClone(data)
+    assert.throws(() => createFakeStorage(data)); assert.deepEqual(data, before)
+  }
+})
+
 // 终态不是 active：`startWork` 的 `claimContext` 靠这条语义接管一条失败的上下文（issue #184）。
 // 判据写在 `packages/capabilities/src/storage.ts` 的执行段；这里把它钉成可失败的断言。
 test('内存 Storage 替身：Failed 与 Closed 不是 active，findActive 不返回它们', async () => {
@@ -66,10 +82,9 @@ test('内存 Storage 替身：Failed 与 Closed 不是 active，findActive 不�
   await storage.putWorkspace(workspace('ws-terminal'))
   // 执行上下文的父行只走端口建：仓库挂在存在的身份上（SQLite 的复合外键本来就要求它先登记）。
   await storage.putProviderBinding({ id: 'binding-terminal', workspaceId: 'ws-terminal', domain: 'development', implementationKey: 'fake', enabled: true, isDefault: true })
-  await storage.putEntity({ id: 'repo-entity-terminal', kind: 'repository' })
-  await storage.putExternalIdentity({ id: 'repo-identity-terminal', entityId: 'repo-entity-terminal', bindingId: 'binding-terminal', externalKind: 'repository', externalId: 'repo-1', role: 'primary' })
+  await seedIdentity(storage, { id: 'repo-identity-terminal', entityId: 'repo-entity-terminal', bindingId: 'binding-terminal', externalKind: 'repository', externalId: 'repo-1', role: 'primary' }, 'repository')
   await storage.putRepository({ id: 'repo-1', workspaceId: 'ws-terminal', externalIdentityId: 'repo-identity-terminal' })
-  await storage.putEntity({ id: 'entity-terminal', kind: 'work_item' }) // 工作项父边（#196）：被引用的工作项必须已登记
+  await seedIdentity(storage, { id: 'work-identity-terminal', entityId: 'entity-terminal', bindingId: 'binding-terminal', externalKind: 'issue', externalId: 'work-terminal', role: 'primary' }) // 工作项父边（#196）：被引用的工作项必须已登记
   const context = (status) => ({
     id: 'ctx-terminal', workspaceId: 'ws-terminal', workItemId: 'entity-terminal', repositoryId: 'repo-1',
     status, branchExternalId: 'work/entity-terminal', worktreeExternalId: undefined, provisioningStartedAt: undefined,
@@ -104,7 +119,7 @@ test('内存 Storage 替身：同一观察记录两次后身份/实体/成员计
     await tx.putWorkspace({ id: 'ws-1', name: '工作区', statusPolicy: 'provider_authoritative' })
     await tx.putProviderBinding({ id: 'binding-1', workspaceId: 'ws-1', domain: 'planning', implementationKey: 'fake', enabled: true, isDefault: false })
     if (!(await tx.recordObservation(DUPLICATE_OBSERVATION))) return false
-    await tx.putEntity({ id: 'entity-1', kind: 'work_item' })
+    await tx.putEntity({ id: 'entity-1', kind: 'work_item', primaryIdentityId: identityId })
     await tx.putExternalIdentity({ id: identityId, entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
     return true
   })

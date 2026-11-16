@@ -3,6 +3,7 @@
 // #5 的重启判据只有在文件上才成立。每个用例一个临时目录，用例之间不共享状态。
 
 import '../fixtures/resolution-preflight.mjs';
+import { seedIdentity, seedEntity } from '../contract/suites/storage-fixtures.js'
 
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -44,17 +45,15 @@ const bareAttempt = { id: 'attempt-2', workspaceId: WORKSPACE, bindingId: 'bindi
 
 /** 仓库挂载必须引用 repository 种类的身份（TD-004）：仓库自己的实体与 primary 身份。 */
 async function seedRepositoryIdentity(storage) {
-  await storage.putEntity({ id: 'repo-entity-1', kind: 'repository' })
-  await storage.putExternalIdentity({ id: 'repo-identity-1', entityId: 'repo-entity-1', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-1', role: 'primary' })
+  await seedIdentity(storage, { id: 'repo-identity-1', entityId: 'repo-entity-1', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-1', role: 'primary' }, 'repository')
 }
 
 /** 执行面用例的公共前置行：执行上下文以外键指向工作区、实体与仓库，关系两端指向实体，写尝试指向工作区与绑定。 */
 async function seedExecutionFacts(storage) {
   await storage.putWorkspace(workspace)
   await storage.putProviderBinding(binding)
-  await storage.putEntity({ id: 'entity-1', kind: 'work_item' })
-  await storage.putEntity({ id: 'entity-2', kind: 'work_item' })
-  await storage.putExternalIdentity(identity)
+  await seedIdentity(storage, identity)
+  await seedEntity(storage, 'entity-2')
   await seedRepositoryIdentity(storage)
   await storage.putRepository({ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'repo-identity-1' })
 }
@@ -65,8 +64,7 @@ test('重启：端口写入的工作区/绑定/实体/身份/投影/仓库/修�
     const storage = createSqliteStorage(location)
     await storage.putWorkspace(workspace)
     await storage.putProviderBinding(binding)
-    await storage.putEntity({ id: 'entity-1', kind: 'work_item' })
-    await storage.putExternalIdentity(identity)
+    await seedIdentity(storage, identity)
     await storage.putPlanningProjection(WORKSPACE, projection)
     await seedRepositoryIdentity(storage)
     await storage.putRepository({ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'repo-identity-1' })
@@ -293,8 +291,7 @@ test('重启：replacePlanningProjections 因外键失败时原有投影一行�
     // 前置状态只走端口：工作区 / 绑定 / 实体 / 身份 / 投影。
     await storage.putWorkspace(workspace)
     await storage.putProviderBinding(binding)
-    await storage.putEntity({ id: 'entity-1', kind: 'work_item' })
-    await storage.putExternalIdentity(identity)
+    await seedIdentity(storage, identity)
     await storage.putPlanningProjection(WORKSPACE, projection)
     // items 指向一个不存在的实体：UPSERT 撞 `workspace_projection.entity_id` 的外键；收敛 DELETE 已经在同一次调用里跑过。
     await assert.rejects(storage.replacePlanningProjections({ workspaceId: WORKSPACE, bindingId: 'binding-1' },
@@ -323,8 +320,7 @@ test('重启：putExecutionContext 因外键失败时旧 active 上下文不得�
     await storage.putExecutionContext({ ...context, id: 'context-1', status: 'provisioning' })
     // 另一个工作区里的同 id 上下文挂着一个运行：把它挪进 ws-1 会让运行的复合外键 (workspace_id, context_id) 悬空。
     await storage.putWorkspace({ id: 'ws-other', name: '另一个工作区', statusPolicy: 'provider_authoritative' })
-    await storage.putEntity({ id: 'repo-entity-other', kind: 'repository' })
-    await storage.putExternalIdentity({ id: 'repo-identity-other', entityId: 'repo-entity-other', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-other', role: 'primary' })
+    await seedIdentity(storage, { id: 'repo-identity-other', entityId: 'repo-entity-other', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-other', role: 'primary' }, 'repository')
     await storage.putRepository({ id: 'repo-other', workspaceId: 'ws-other', externalIdentityId: 'repo-identity-other' })
     await storage.putExecutionContext({ ...context, id: 'ctx-shared', workspaceId: 'ws-other', repositoryId: 'repo-other' })
     await storage.putExecutionRun({ id: 'run-o', workspaceId: 'ws-other', contextId: 'ctx-shared', status: 'running', updatedAt: '2026-09-20T00:00:02Z' })

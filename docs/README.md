@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-16-primary-identity-contract](exec-plan/completed/2026-11-16-primary-identity-contract.md) | 源实体恰好一个 primary、内部锚点与双适配器原子契约（#190） |
 | [2026-11-16-windows-root-admission](exec-plan/completed/2026-11-16-windows-root-admission.md) | 已安全预置 Windows 私有根的原生准入、目录租约与 Host 生命周期（#643） |
 | [2026-11-16-windows-git-paths](exec-plan/completed/2026-11-16-windows-git-paths.md) | 原生 Windows LocalGit 路径、身份复用与持久恢复（#645） |
 | [2026-11-16-parked-watch-disposal](exec-plan/completed/2026-11-16-parked-watch-disposal.md) | 停拉迭代器主动关闭、一次结算与有界 Host 退出（#649） |
