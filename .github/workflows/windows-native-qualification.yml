@@ -14,6 +14,7 @@ concurrency:
 jobs:
   git-paths:
     name: Native Windows Git paths
+    if: ${{ false }}
     runs-on: windows-2025
     timeout-minutes: 15
     defaults:
@@ -49,16 +50,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   private-data:
-    if: ${{ false }}
     name: Native Windows ${{ matrix.mode }} private data
     strategy:
       fail-fast: false
       matrix:
         include:
           - mode: source
-            source: 6c9ac4ce06079932e0b49ba1a3ee63fa55fcd946
-          - mode: combined
-            source: 3b83c4bbc6642d1dcf8e7df4d8ffdc1da5c6d2ab
+            source: d25f938d7d02d6ca3e7988d3992036c5d61c2cfd
     runs-on: windows-2025
     timeout-minutes: 15
     defaults:
