@@ -8,6 +8,6 @@
 export const packageId = '@harness-projects/provider-development-local-git' as const
 
 export * from './branch-names.ts'
-export * from './git-runner.ts'
-export * from './paths.ts'
+export { defaultGitRunner, type GitInvocation, type GitRunner } from './git-runner.ts'
+export { localGitPathProblem, resolveWorktreePath, type WorktreePathInput, type WorktreePathRejection, type WorktreePathResolution } from './paths.ts'
 export * from './provider.ts'
