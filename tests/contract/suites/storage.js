@@ -169,6 +169,29 @@ export function storageFoundationSuite(adapter, register = test) {
     assert.deepEqual(await storage.listPlanningProjections(WORKSPACE), [{ ...projection, entityId: 'entity-2' }])
   })
 
+  register(`${label}：replace 同键投影完整覆盖状态与内容且仅保留一行`, async () => {
+    const storage = makeStorage()
+    await seedWorkspace(storage)
+    await seedEntity(storage, 'entity-1')
+    await storage.putProviderBinding(binding('binding-1'))
+    await storage.putExternalIdentity({
+      id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1',
+      externalKind: 'issue', externalId: 'issue-1', role: 'primary',
+    })
+    const replacement = {
+      ...projection,
+      planningStatus: 'done',
+      revision: projection.revision + 1,
+      content: { ...projection.content, title: '新标题', body: '新正文' },
+    }
+    await storage.putPlanningProjection(WORKSPACE, projection)
+    await storage.replacePlanningProjections(
+      { workspaceId: WORKSPACE, bindingId: 'binding-1' }, [replacement],
+    )
+    assert.deepEqual(await storage.getPlanningProjection(WORKSPACE, 'entity-1'), replacement, 'replace 必须完整覆盖同键旧投影')
+    assert.deepEqual(await storage.listPlanningProjections(WORKSPACE), [replacement], 'replace 后同键必须恰好一行')
+  })
+
   // 「移出 → 移回」：旧替身在这里删掉实体却留下身份，重新加入时撞上"实体不存在"，此后每次同步都失败。
   // 实体仍有身份时不得删除——与 SQLite 的外键同语义。
   register(`${label}：投影被收敛移除后实体与身份保留，条目可以重新加入`, async () => {
