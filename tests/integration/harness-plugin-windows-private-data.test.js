@@ -121,6 +121,32 @@ test('synthetic helper death withdraws actual Host services and remote registrat
   } finally { await host?.dispose(); child?.kill() }
 })
 
+test('native empty-directory lease requires LIST access for deny-delete sharing to block rename', { skip: process.platform !== 'win32' }, async (t) => {
+  const f = await windowsFixture(t), empty = path.join(f.root, 'empty-probe')
+  await mkdir(empty); setAcl(empty)
+  const result = JSON.parse(ps(String.raw`
+$ErrorActionPreference='Stop'; $p=[Console]::ReadLine()|ConvertFrom-Json
+$assembly=[AppDomain]::CurrentDomain.DefineDynamicAssembly([Reflection.AssemblyName]::new('ShareProof'),[Reflection.Emit.AssemblyBuilderAccess]::Run)
+$builder=$assembly.DefineDynamicModule('Native').DefineType('ShareProof','Public, Abstract, Sealed')
+$create=$builder.DefinePInvokeMethod('CreateFileW','kernel32.dll','Public, Static, PinvokeImpl','Standard',[IntPtr],[type[]]@([string],[uint32],[uint32],[IntPtr],[uint32],[uint32],[IntPtr]),'Winapi','Unicode')
+$close=$builder.DefinePInvokeMethod('CloseHandle','kernel32.dll','Public, Static, PinvokeImpl','Standard',[int],[type[]]@([IntPtr]),'Winapi','Unicode')
+$create.SetImplementationFlags('PreserveSig'); $close.SetImplementationFlags('PreserveSig'); $native=$builder.CreateType(); $proof=@{}
+foreach($access in @(131200,131201)) {
+  $handle=$native::CreateFileW($p.path,$access,3,[IntPtr]::Zero,3,35651584,[IntPtr]::Zero)
+  if($handle -eq [IntPtr]::new(-1)){throw 'probe_open_failed'}
+  $moved=$false
+  try {
+    try {[IO.Directory]::Move($p.path,$p.path+'-moved'); $moved=$true} catch [IO.IOException] {}
+  } finally {$null=$native::CloseHandle($handle)}
+  $proof[[string]$access]=$moved
+  if($moved){[IO.Directory]::Move($p.path+'-moved',$p.path)}
+}
+$proof|ConvertTo-Json -Compress
+`, { path: empty }))
+  t.diagnostic(JSON.stringify({ nativeEmptyDirectoryShare: result }))
+  assert.deepEqual(result, { 131200: true, 131201: false })
+})
+
 test('native worktree admission keeps existing private layers in the owning lease and refuses missing layers', { skip: process.platform !== 'win32' }, async (t) => {
   const f = await windowsFixture(t), container = path.join(f.root, 'worktrees'), digest = path.join(container, 'digest')
   const lease = await prepareWindowsProjectData(f.profile)
@@ -131,6 +157,7 @@ test('native worktree admission keeps existing private layers in the owning leas
   const admitted = await prepareWindowsProjectData(f.profile)
   try {
     await preparePrivateWorktreeDirectories(container, digest, undefined, admitted)
+    await assert.rejects(() => rename(container, container + '-moved'))
     await assert.rejects(() => rename(digest, digest + '-moved'))
   } finally { fs.closeSync(admitted.logFd); await admitted.dispose() }
   await rename(digest, digest + '-released')

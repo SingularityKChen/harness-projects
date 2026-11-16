@@ -38,13 +38,13 @@ try {
   Bind LocalFree kernel32.dll $ptr ([type[]]@($ptr))
   Bind CloseHandle kernel32.dll ([int]) ([type[]]@($ptr))
   # No PowerShell reflection/binding may intervene between the P/Invoke and cached error capture.
-  $wrapper=$builder.DefineMethod('OpenChecked','Public, Static',$ptr,[type[]]@($s,[int].MakeByRefType()))
+  $wrapper=$builder.DefineMethod('OpenChecked','Public, Static',$ptr,[type[]]@($s,$u,[int].MakeByRefType()))
   $il=$wrapper.GetILGenerator(); $saved=$il.DeclareLocal($ptr); $op=[Reflection.Emit.OpCodes]
-  $il.Emit($op::Ldarg_0); $il.Emit($op::Ldc_I4,131200); $il.Emit($op::Ldc_I4_3)
+  $il.Emit($op::Ldarg_0); $il.Emit($op::Ldarg_1); $il.Emit($op::Ldc_I4_3)
   $il.Emit($op::Ldsfld,[IntPtr].GetField('Zero')); $il.Emit($op::Ldc_I4_3)
   $il.Emit($op::Ldc_I4,35651584); $il.Emit($op::Ldsfld,[IntPtr].GetField('Zero'))
   $il.Emit($op::Call,$script:createFile); $il.Emit($op::Stloc,$saved)
-  $il.Emit($op::Ldarg_1); $il.Emit($op::Call,[Runtime.InteropServices.Marshal].GetMethod('GetLastWin32Error'))
+  $il.Emit($op::Ldarg_2); $il.Emit($op::Call,[Runtime.InteropServices.Marshal].GetMethod('GetLastWin32Error'))
   $il.Emit($op::Stind_I4); $il.Emit($op::Ldloc,$saved); $il.Emit($op::Ret)
   $N=$builder.CreateType(); $M=[Runtime.InteropServices.Marshal]
   $imports=@($N.GetMethod('CreateFileW').GetCustomAttributes([Runtime.InteropServices.DllImportAttribute],$false))
@@ -103,7 +103,9 @@ try {
     $script:phase=$phaseName
     if($directory -and $opened.Contains($p)){return}
     if($directory -and $handles.Count -ge 64){throw 'handles'}
-    $errorCode=0; $h=$N::OpenChecked($p,[ref]$errorCode)
+    # Attribute-only opens bypass I/O sharing checks; directory LIST makes deny-delete effective.
+    $access=if($directory){131201}else{131200}
+    $errorCode=0; $h=$N::OpenChecked($p,$access,[ref]$errorCode)
     if($h -eq [IntPtr]::new(-1)){
       $script:win32=$errorCode
       if($optional -and $errorCode -eq 2){return}

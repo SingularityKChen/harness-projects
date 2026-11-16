@@ -20,7 +20,7 @@
 
 采用 App 私有 Windows adapter，保留 POSIX 实现原地，不新建公共 filesystem framework。系统 Windows PowerShell 的固定绝对 executable 经 argv、shell:false 启动固定程序；系统位置只取受信 Host 启动环境并校验本地绝对系统路径，不能由 Project/config/PATH 指定。路径只走有界 stdin JSON，不插入脚本。用 .NET Framework Reflection.Emit DefineMethod + 单次 DllImport 伪属性绑定 Win32，CreateType 后回读实际 ImplMap 的 SetLastError、EntryPoint、Unicode、Winapi、PreserveSig 与 DLL；OpenChecked managed IL 在 CreateFileW 后原子捕获 Marshal 缓存错误。RawSecurityDescriptor/SecurityIdentifier 解析 typed descriptor。禁止 Add-Type/CodeDom/动态编译和 helper 启动其它应用进程；仅允许经原生证实的一个系统 Windows\System32\conhost.exe，所有捕获子进程须随 helper 在 1s 内退出。该进程是 Windows console host（[Microsoft 定义](https://learn.microsoft.com/en-us/windows/console/definitions)），不据名称放行其它来源。FullLanguage/绑定不可用则 fail closed。
 
-原始 profileContext.dir 在任何 realpath/路径归一化前进入 Windows 准入，先拒绝含糊词法。只支持本机固定 NTFS 卷、完整 drive-rooted 路径，拒绝 UNC/network/device namespace、ADS、drive/root-relative、`.`/`..`、不支持的别名和无法取得稳定身份/安全信息的对象。helper 从卷根向下逐段 CreateFileW，OPEN_EXISTING + OPEN_REPARSE_POINT + BACKUP_SEMANTICS，share 只 READ/WRITE，绝不 SHARE_DELETE。每段验证后保留原生目录 HANDLE，才开下一段，所有原始祖先/profile/plugin root 的句柄归同一 lease，直到 Storage/log 关闭以后释放。上限 64 个目录句柄、路径 8192 UTF-16 code units、输入 64KiB、每份 descriptor 64KiB、每份 DACL 128 ACE、每次 probe 的 stdout/stderr 合计 4KiB；静态启动 argv 须低于 24K UTF-16 code units，超限拒绝。
+原始 profileContext.dir 在任何 realpath/路径归一化前进入 Windows 准入，先拒绝含糊词法。只支持本机固定 NTFS 卷、完整 drive-rooted 路径，拒绝 UNC/network/device namespace、ADS、drive/root-relative、`.`/`..`、不支持的别名和无法取得稳定身份/安全信息的对象。helper 从卷根向下逐段 CreateFileW，OPEN_EXISTING + OPEN_REPARSE_POINT + BACKUP_SEMANTICS，share 只 READ/WRITE，绝不 SHARE_DELETE。目录 desired access 是 READ_CONTROL | FILE_READ_ATTRIBUTES | FILE_LIST_DIRECTORY（0x20081），固定文件 probe 是 metadata-only 0x20080；LIST 仅让目录 HANDLE 参与 I/O share 检查，不枚举或读取私有文件内容。每段验证后保留原生目录 HANDLE，才开下一段，所有原始祖先/profile/plugin root 的句柄归同一 lease，直到 Storage/log 关闭以后释放。上限 64 个目录句柄、路径 8192 UTF-16 code units、输入 64KiB、每份 descriptor 64KiB、每份 DACL 128 ACE、每次 probe 的 stdout/stderr 合计 4KiB；静态启动 argv 须低于 24K UTF-16 code units，超限拒绝。
 
 用 .NET DriveInfo.DriveType 确认固定盘，并以 GetFinalPathNameByHandleW 的 volume-GUID 路径确认盘符根确为卷根，拒绝 subst 等隐藏实际祖先的映射；此用途不取代原始逐段检查。对刚打开的 HANDLE 用 GetFileType、GetVolumeInformationByHandleW、GetFileInformationByHandle 和 GetSecurityInfo 读取 disk/NTFS、reparse 属性、volume/file ID、link count、owner SID 与 DACL。descriptor 有界复制后 LocalFree，最终 CloseHandle；不按路径 Get-Acl、不解析账户名/icacls 文本。profile、plugin root 和固定文件 owner 必须当前 token User SID；祖先允许当前 SID、SYSTEM `S-1-5-18`、Administrators `S-1-5-32-544`，必要系统祖先可接受固定 TrustedInstaller SID `S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464`。这些 OS 管理主体是明确例外，不是隔离对象；不能扩成任意服务或管理员名称。
 
@@ -91,7 +91,9 @@ GitHub hosted runner 默认管理员且 UAC disabled，协调者必须预置标�
 
 2026-11-16：run 43854637182 原生 metadata 对照实测 declared=true / legacy=false；机制启动 701ms，目录 rename 拒绝及 SQLite journal/WAL/SHM 已越过。剩余 child-count=1 的真实进程尚未识别，不据猜测放行。探针增加有界 Name、系统 conhost 来源布尔值与捕获子进程退出观察，将旧零 child 断言移至 helper death/目录释放之后，允许同一原生运行取得身份与回收证据；产品仍未接线。
 
-2026-11-16：run 43855864802 证实唯一 child 为 conhost.exe 且真实系统来源匹配；570ms 启动后，helper.kill→失效→dispose→root rename→捕获 child 1s 内退出均越过，最后仅旧 zero-child 断言失败。该断言按证据改为仅接受最多一个确切系统 conhost，编译器/其它进程仍拒绝。产品接线后，新 synthetic RED→GREEN 覆盖 pending dispose 结算、正常 owner stop 不提前释放、每次 15s timeout 与 200 次独立响应预算；实际 Host 失效撤服务/注册的反向 mutation 从 [1,1] 残留变 [0,0]。同步 register 失败回归暴露 acquisition 快照过早，现仅启动期延至 microtask 登记当前 Promise，运行期仍同步撤端点。旧 metadata 对照调查代码在事实锁定后移除；产品实际 metadata fail-closed 与 native 正例保留行为反证。
+2026-11-16：Superseded（后续空 digest 反例限制目录分享结论）：run 43855864802 证实唯一 child 为 conhost.exe 且真实系统来源匹配；570ms 启动后，helper.kill→失效→dispose→root rename→捕获 child 1s 内退出均越过，最后仅旧 zero-child 断言失败。该断言按证据改为仅接受最多一个确切系统 conhost，编译器/其它进程仍拒绝。产品接线后，新 synthetic RED→GREEN 覆盖 pending dispose 结算、正常 owner stop 不提前释放、每次 15s timeout 与 200 次独立响应预算；实际 Host 失效撤服务/注册的反向 mutation 从 [1,1] 残留变 [0,0]。同步 register 失败回归暴露 acquisition 快照过早，现仅启动期延至 microtask 登记当前 Promise，运行期仍同步撤端点。旧 metadata 对照调查代码在事实锁定后移除；产品实际 metadata fail-closed 与 native 正例保留行为反证。
+
+2026-11-16：产品 run 43859918857 在标准账户下 64 pass / 1 fail / 1 skip（仅 POSIX 首次创建 artifact skip）；actual source/packaged Host reopen、持久写/日志、关闭顺序和 helper death 撤端点均通过，唯一失败是空 digest 在动态准入 ready 后可 rename。之前 profile/root 的 rename 拒绝不能单独证明纯 metadata 目录 HANDLE 的分享保护，可能受已打开后代影响（先前结论以此条为准）。Microsoft CreateFile/IoCheckLinkShareAccess 文档明确纯 attributes 权限不参与通常 I/O sharing；因此目录加 FILE_LIST_DIRECTORY，fixed-file 仍 metadata-only。新增原生同一空目录 0x20080 vs 0x20081 对照和 container+digest 双 rename 反证，实际因果以新 head 原生运行决定；绝不删除 digest 拒绝断言或接受未知分享行为。
 
 ## Decision Log
 
@@ -130,3 +132,5 @@ Change Note (2026-11-16)：锁定已通过的 ACL fixture，改为一次性建�
 Change Note (2026-11-16)：记录 native metadata/701ms/SQLite 正向证据，新增有限子进程身份与终止观察；console child 未实证前保持零 child 拒绝。
 
 Change Note (2026-11-16)：将 Design 就地更新为当前单次 ImplMap、系统 conhost 例外和逐 request 预算；接实际 Host/rawProfile/worktree lease、完整根清理与 source/pack 共享闭环，保留本 head 原生验收待办。
+
+Change Note (2026-11-16)：记录产品原生唯一空 digest lease 反例，并就地限制此前 profile/root 分享结论；目录显式 LIST 参与分享检查，附同一空目录最窄原生对照，最终 native 仍待重跑。
