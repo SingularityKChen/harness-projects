@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-16-parked-watch-disposal](exec-plan/completed/2026-11-16-parked-watch-disposal.md) | 停拉迭代器主动关闭、一次结算与有界 Host 退出（#649） |
 | [2026-11-12-actionable-setup-recovery](exec-plan/completed/2026-11-12-actionable-setup-recovery.md) | 启动/设置恢复引导与明确授权的旧库迁移（#626） |
 | [2026-11-11-code-scanning-hardening](exec-plan/completed/2026-11-11-code-scanning-hardening.md) | 正则回溯修复、HTML 安全断言与告警用途核查（#617） |
 | [2026-11-11-private-host-data](exec-plan/completed/2026-11-11-private-host-data.md) | 私有 Host 数据目录、文件与有界诊断描述符（#597） |
@@ -45,7 +46,6 @@
 | [2026-11-09-ci-read-probes](exec-plan/completed/2026-11-09-ci-read-probes.md) | 独立 CI 读取观察、Host 生命周期接合与表单重验（#435） |
 | [2026-11-09-draft-promotion](exec-plan/completed/2026-11-09-draft-promotion.md) | Draft 转 Issue 保留工作项与执行谱系，含已知身份遮罩恢复（#283） |
 | [2026-11-09-host-lifetime](exec-plan/completed/2026-11-09-host-lifetime.md) | Host 失败 remote 撤回、有界卸载及安全清理诊断（#422） |
-| [2026-11-16-parked-watch-disposal](exec-plan/completed/2026-11-16-parked-watch-disposal.md) | 停拉迭代器主动关闭、一次结算与有界 Host 退出（#649） |
 | [2026-11-09-configuration-own-properties](exec-plan/completed/2026-11-09-configuration-own-properties.md) | 声明配置自有属性保真、双适配器重开与判别验收（#309） |
 | [2026-11-09-pr568-pr581-review-followup](exec-plan/completed/2026-11-09-pr568-pr581-review-followup.md) | 三项 MMP 交付独立评审、P2 修复复评与条件 rebase 整合 |
 | [2026-11-07-pr-assignee-creation](exec-plan/completed/2026-11-07-pr-assignee-creation.md) | 创建 PR 预选原生负责人与原意图恢复（#557） |
