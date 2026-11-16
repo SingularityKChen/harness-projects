@@ -189,6 +189,36 @@ test('host watch：来源降级时抽屉显示最后已知值与原确认时刻�
   assert.deepEqual([h.workspace.getSnapshot().connection.connected, drawer.includes(NOTICE), h.timers.length], [true, false, 0], '传输在线：没有重连说明，也没有重开')
 })
 
+for (const owner of ['composition', 'remote']) test(`parked ${owner} dispose completes the real owned generator without consumer pulls`, async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'host-parked-'))
+  const dataPath = path.join(root, 'harness-projects', 'workspace.sqlite')
+  const host = await createHostComposition({ dataPath, workspaceId: WORKSPACE, catalog: catalogOf([]), resolveCredential: async () => undefined, watchIntervalMs: 5 })
+  const installed = await installHostRemote({ provide: () => () => {}, typert: { register: () => () => {} } }, host)
+  const generatorPrototype = Object.getPrototypeOf(Object.getPrototypeOf((async function* () {})()))
+  const originalReturn = generatorPrototype.return, completed = []
+  t.mock.method(generatorPrototype, 'return', async function (...args) {
+    const result = await originalReturn.apply(this, args)
+    completed.push(this)
+    return result
+  })
+  const reads = t.mock.method(host.controller, 'baseline')
+  const dormant = host.watch(new AbortController().signal)[Symbol.asyncIterator]()
+  const frames = owner === 'composition' ? host.watch(new AbortController().signal)[Symbol.asyncIterator]() : installed.service.watch(new AbortController().signal)
+  try {
+    assert.equal((await frames.next()).value.kind, 'baseline')
+    const before = reads.mock.callCount()
+    await (owner === 'composition' ? host.dispose() : installed.dispose())
+    assert.equal(completed.length, owner === 'composition' ? 1 : 2, 'controller source and active remote wrapper must finish before any consumer action')
+    assert.equal(new Set(completed).size, completed.length, 'each owned generator receives return once')
+    await host.dispose(); await installed.dispose()
+    assert.equal((await dormant.next()).done, true, 'stop fences first next of a previously created iterator')
+    await sleep(25)
+    assert.equal(reads.mock.callCount(), before)
+    const log = await readFile(path.join(root, 'harness-projects', 'diagnostics.log'), 'utf8')
+    assert.doesNotMatch(log, /shutdownDeadlineExceeded|shutdownFailed/)
+  } finally { await frames.return(); await installed.dispose(); await host.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
 test('host watch：消费者提前 return 会结束内层一代，不再等下一次轮询', async (t) => {
   const h = await open(t)
   const live = new AbortController()

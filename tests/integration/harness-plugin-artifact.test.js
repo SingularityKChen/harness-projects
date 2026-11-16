@@ -298,6 +298,7 @@ describe('Harness 插件安装件契约', () => {
         typert: { register() { return async () => {} } },
         get(name) { return name === 'profileContext' ? { dir: process.env.DSH_HOME } : undefined }, // 宿主没有 credentials 服务：Host 照常加载
       }
+      hostCleanup = async () => { for (const dispose of effects.reverse()) await dispose() }
       try {
         await hostModule.apply(context)
         const service = services.get('harnessProjects')
@@ -309,7 +310,20 @@ describe('Harness 插件安装件契约', () => {
         const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version)
         db.close()
         assert.deepEqual(versions, [1, 2, 3, 4, 5, 6, 7], '包内 migrations 完成迁移 1–7')
+        const generatorPrototype = Object.getPrototypeOf(Object.getPrototypeOf((async function* () {})()))
+        const originalReturn = generatorPrototype.return, completed = []
+        t.mock.method(generatorPrototype, 'return', async function (...args) {
+          const result = await originalReturn.apply(this, args)
+          completed.push(this)
+          return result
+        })
+        const parked = service.watch(new AbortController().signal)
+        assert.equal((await parked.next()).value.kind, 'baseline')
         await effects.at(-1)(); await effects.at(-1)()
+        assert.equal(completed.length, 2, 'packed Host unload completes controller source and remote wrapper before consumer resumes')
+        assert.equal(new Set(completed).size, 2, 'neither owned generator is returned twice')
+        const diagnostics = await readFile(path.join(process.env.DSH_HOME, 'harness-projects', 'diagnostics.log'), 'utf8')
+        assert.doesNotMatch(diagnostics, /shutdownDeadlineExceeded|shutdownFailed/)
         assert.equal(services.size, 0)
         await assert.rejects(service.baseline(), /卸载/)
         await hostModule.apply(context)
@@ -318,7 +332,6 @@ describe('Harness 插件安装件契约', () => {
         if (previousHome === undefined) delete process.env.DSH_HOME
         else process.env.DSH_HOME = previousHome
       }
-      hostCleanup = async () => { for (const dispose of effects.reverse()) await dispose() }
       const lines = info.mock.calls.map((call) => call.arguments.join(' '))
       assert.ok(lines.includes(HOST_READY_LINE), `没有打出 ${HOST_READY_LINE}，实际：${JSON.stringify(lines)}`)
     })
