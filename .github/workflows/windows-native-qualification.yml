@@ -1,0 +1,47 @@
+name: Windows Native Qualification
+
+on:
+  push:
+    branches: [test/windows-native-qualification]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-native-qualification
+  cancel-in-progress: true
+
+jobs:
+  git-paths:
+    name: Native Windows Git paths
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: db91c1cd2f6d132cc020d22e827113acabb3d277
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .nvmrc
+      - run: pnpm install --frozen-lockfile
+      - name: Record exact source and native toolchain
+        run: |
+          git rev-parse HEAD
+          Write-Output "ImageOS=$env:ImageOS ImageVersion=$env:ImageVersion Architecture=$env:PROCESSOR_ARCHITECTURE"
+          node --version
+          git --version
+      - name: Run source-native discriminating tests
+        run: |
+          pnpm test:file tests/integration/development-local-git-windows.test.js tests/integration/local-git-start-work-resume.test.js 2>&1 | ForEach-Object {
+            $line = $_.ToString()
+            foreach ($root in @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:USERPROFILE, [IO.Path]::GetTempPath().TrimEnd('\'))) {
+              if ($root) { $line = $line.Replace($root, '<fixture>') }
+            }
+            Write-Output $line
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
