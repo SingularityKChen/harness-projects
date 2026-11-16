@@ -34,9 +34,9 @@
 
 本闭环 owner 独占 `apps/harness-plugin/src/host-private-data.ts`、`apps/harness-plugin/src/host-providers.ts`、`tests/integration/harness-plugin-private-data.test.js`、`tests/integration/harness-plugin-host-providers.test.js`、`tests/integration/harness-plugin-repository-binding.test.js`。最后一个测试仅在既有绑定夹具补只读预检反证；优先合并到现有用例，不复制种子。
 
-文档只含本计划（完成后同名移入 completed）与协调者维护的 `docs/README.md` 索引。`host-composition.ts`、LocalGit Provider、ACL 原生实现和 artifact 测试不修改；若事实要求越界，先由协调者修订 owner，避免与 #649 共享写入。
+文档只含本计划（完成后同名移入 completed）、`docs/review/pr-651-mmp-review.md` 及协调者维护的 `docs/README.md`、`docs/review/README.md` 索引。`host-composition.ts`、LocalGit Provider、ACL 原生实现和 artifact 测试不修改；若事实要求越界，先由协调者修订 owner，避免与 #649 共享写入。
 
-技术 additions + deletions 目标 280–460，上限500，包含测试/配置/fixtures/替换删除；每 PR 技术≤800、文档≤1300。不能为预算删安全反例或机械拆连续逻辑。只用临时根/仓库/SQLite，不改用户项目或外部平台；不合并、不写 Planning Status/native blocking。
+技术 additions + deletions 目标 280–460，上限500，包含测试/配置/fixtures/替换删除；每 PR 技术≤800、文档≤1300。不能为预算删安全反例或机械拆连续逻辑。只用临时根/仓库/SQLite，不改用户项目或外部平台；原交付阶段不合并；本轮条件合并授权见 Decision Log。不写 Planning Status/native blocking。
 
 ## Plan of Work
 
@@ -88,6 +88,8 @@ V1 证明实际权限边界、重开不损坏内容、拒绝先于副作用及�
 
 ## Decision Log
 
+2026-11-16 / 本评审会话人类直接点名 PR #650–#652，要求无 P0/P1 的项由评审方完成修复、独立复评、归档、提交整理与 issue 核对后，以 `merge_method=rebase` 合并。本项独立全矩阵无 P0–P3，接管 #651 的文档与工程收尾；当前 head 的批准、门禁及真实 main 接合回读仍为前提，不授予父 #338、Windows、规划 Status 或 R1 接受。
+
 2026-11-16 14:46 +08 / 独立spec评审、协调者确认：保留模块内唯一输出根helper，将目录准备归restoreProviders实际激活，catalog只读。理由：避免伪probe目录、第二路径owner与公共Provider钩子，同时使安全检查先于目录/Git写。
 
 2026-11-16 14:46 +08 / 独立spec评审：本批只承诺现有POSIX边界，win32继续fail closed。理由：0700不能替代真实DACL/对象绑定；#644已有原生生命周期owner，不建立假兼容路径。
@@ -123,3 +125,5 @@ Change Note (2026-11-16)：完成两层fd私有准备、唯一根helper与实际
 Change Note (2026-11-16)：记录窄V1遗漏的真实组合回归与被推翻的key假设；默认entry identity限定生产目录政策，扩展既有消费链验证且不改composed夹具。
 
 Change Note (2026-11-16 15:20 +08)：记录独立P1修复复评和最终本地工程验收，归档并更新索引；当前PR门禁仍以远端回读为准。
+
+Change Note (2026-11-16)：收录当前 PR 的独立 MMP 全矩阵和直接条件授权，补评审索引；保持已完成工程归档，并以最终版本回读控制合并。
