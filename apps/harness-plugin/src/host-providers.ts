@@ -1,4 +1,5 @@
 export { AccessLevel } from '@harness-projects/capabilities'
+export { localGitPathProblem, resolveWorktreePath } from '@harness-projects/provider-development-local-git'
 export type { DevelopmentProvider, DeliveryProvider, ProviderResult, ProviderPage, Storage } from '@harness-projects/capabilities'
 /**
  * Host 的 provider 组合（ADR-0014）：编译期封闭目录（实现键 → 配置 schema + 构造函数）与按已存挂载恢复。
@@ -258,7 +259,7 @@ async function localGitRoot({ binding, configuration, worktreesDir }: Pick<Provi
 const LOCAL_GIT_ENTRY: CatalogEntry = {
   definition: LOCAL_GIT_PROVIDER_DEFINITION,
   configuration: {
-    repositoryPath: { kind: 'string', required: true, pattern: '/[^\\n\\r]*', maxLength: 1024 },
+    repositoryPath: { kind: 'string', required: true, pattern: '(?:/|[A-Za-z]:[/\\\\])[^\\n\\r]*', maxLength: 1024 },
     repositoryExternalId: { kind: 'string', required: true, pattern: '[^\\s]+', maxLength: 200 },
   },
   async create({ binding, configuration, worktreesDir }) {

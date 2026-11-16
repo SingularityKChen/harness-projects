@@ -1,12 +1,11 @@
 /** 绑定前只读验证；Core 仍是挂载、仓库与 identity 的唯一事务写者。 */
 import { execFile } from 'node:child_process'
 import { realpath } from 'node:fs/promises'
-import path from 'node:path'
 import { promisify } from 'node:util'
 import { AccessLevel, type DeliveryProvider, type ProviderResult, type ProviderPage, type DevelopmentProvider, type Storage } from './host-providers.ts'
 import type { BindRepositoryInput, CommandResult } from './host-composition.ts'
 import { ProjectErrorCode, projectError, type ConnectorAccountId, type ProviderBindingId } from '@harness-projects/domain'
-import { BindingRefused, ciAccountStamp, type CiReadObservation, type ProviderBuildInput, type ProviderCatalog } from './host-providers.ts'
+import { BindingRefused, ciAccountStamp, localGitPathProblem, resolveWorktreePath, type CiReadObservation, type ProviderBuildInput, type ProviderCatalog } from './host-providers.ts'
 const execute = promisify(execFile)
 const invalid = () => new BindingRefused(ProjectErrorCode.InvalidInput, '仓库选择不一致或本地检出不可读')
 export const repositoryHead = async (repositoryPath: string): Promise<string | undefined> => {
@@ -24,7 +23,8 @@ export async function preflightRepositoryBinding(input: BindRepositoryInput, sto
     const account = await storage.getConnectorAccount(github.accountId as ConnectorAccountId)
     if (account?.platformOrigin !== 'https://github.com' || account.platformFamily !== 'github' || account.secretHandle === undefined) throw invalid()
     const raw = local.configuration?.repositoryPath
-    if (typeof raw !== 'string' || !path.isAbsolute(raw) || raw !== raw.trim() || /[\u0000-\u001f\u007f]/.test(raw) || raw.split(/[/\\]+/).includes('..')) throw invalid()
+    if (typeof raw !== 'string' || localGitPathProblem(raw, true) !== undefined) throw invalid()
+    if (process.platform === 'win32' && !(await resolveWorktreePath(raw, { repositoryPath: raw, allowedRoot: raw })).ok) throw invalid()
     const repositoryPath = await realpath(raw).catch(() => { throw invalid() })
     const normalized = { ...input, references: refs.map((r) => r === local ? { ...r, configuration: { ...r.configuration, repositoryPath } } : r) }
     // catalog 与正式装配使用同一输出根守卫；probe id 不落库，也不承担实体身份。

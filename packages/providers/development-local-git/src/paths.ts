@@ -9,6 +9,7 @@
  * 允许根由宿主负责。 */
 import { lstat, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
+import { windowsPathsArePlain } from './git-runner.ts'
 
 export type WorktreePathRejection = 'empty' | 'parent_segment' | 'outside_root' | 'symlinked_root' | 'unresolvable'
 
@@ -21,6 +22,49 @@ export interface WorktreePathInput {
 }
 
 const reject = (reason: WorktreePathRejection, message: string): WorktreePathResolution => ({ ok: false, reason, message })
+
+/** Windows 仅接受明确盘符路径，或在明确仓库下解析的相对工作树；先判写法再做任何 resolve。 */
+export function localGitPathProblem(raw: string, absolute = false): string | undefined {
+  if (raw.trim() === '' || raw !== raw.trim() || /[\u0000-\u001f\u007f]/.test(raw) || raw.split(/[/\\]+/).includes('..')) return '路径为空、含控制字符、首尾空白或 .. 分量'
+  if (process.platform !== 'win32') return absolute && !path.isAbsolute(raw) ? '路径必须是绝对路径' : undefined
+  const full = /^[a-z]:[/\\]/i.test(raw)
+  if ((!full && (absolute || /^[/\\]|^[a-z]:/i.test(raw))) || raw.length > 32767) return 'Windows 路径必须使用完整盘符，拒绝网络或设备 namespace'
+  const parts = (full ? raw.slice(3) : raw).split(/[/\\]+/).filter(Boolean)
+  if (parts.some((part) => /[:<>"|?*]|[. ]$/.test(part) || /^(con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(part))) return 'Windows 路径包含 ADS、保留名或歧义分量'
+  return undefined
+}
+
+/** 已存在对象由不丢精度的卷/文件身份判同；缺席对象只接受精确规范写法，不推断大小写别名。 */
+export async function sameFilesystemPath(left: string, right: string): Promise<boolean> {
+  const [a, b] = await Promise.all([left, right].map((entry) => stat(entry, { bigint: true }).catch(() => undefined)))
+  if (a !== undefined && b !== undefined && a.ino !== 0n && b.ino !== 0n) return a.dev === b.dev && a.ino === b.ino
+  const canonical = (value: string) => realpath(value).catch(() => path.normalize(value))
+  return (await canonical(left)) === (await canonical(right))
+}
+
+/** 不用 Windows path.relative 的大小写折叠作安全证明；现有根必须在目标现有祖先链上。
+ * 根尚未存在时，两个最近存在祖先须是同一对象，且未存在的尾部分量精确包含。 */
+async function windowsInsideRoot(root: string, target: string): Promise<boolean> {
+  // 容错口径：暂态 stat/realpath 错误（EACCES/EBUSY/ELOOP 等）不得抛裸异常穿过 Provider 契约，一律 fail closed。
+  try {
+    return await windowsInsideRootChecked(root, target)
+  } catch { return false }
+}
+
+async function windowsInsideRootChecked(root: string, target: string): Promise<boolean> {
+  const [rootAncestor, targetAncestor] = await Promise.all([deepestExisting(root), deepestExisting(target)])
+  if (rootAncestor === undefined || targetAncestor === undefined) return false
+  if (rootAncestor !== root) {
+    if (!(await sameFilesystemPath(rootAncestor, targetAncestor))) return false
+    const suffix = (ancestor: string, value: string) => value.slice(ancestor.length).split(path.sep).filter(Boolean)
+    const expected = suffix(rootAncestor, root), actual = suffix(targetAncestor, target)
+    return expected.every((part, index) => actual[index] === part)
+  }
+  for (let current = targetAncestor; ; current = path.dirname(current)) {
+    if (await sameFilesystemPath(root, current)) return true
+    if (path.dirname(current) === current) return false
+  }
+}
 
 /** `path.relative` 以 `..` 分量开头或是绝对路径都算逃出允许根；空相对路径（目标就是根本身）算落在根内。
  *  必须比 `..` **分量**而不是字符串前缀：`..wi` 是根内的合法名字，把它判成逃逸只是诊断信息错。 */
@@ -89,11 +133,18 @@ export async function resolveWorktreePath(rawPath: string, input: WorktreePathIn
   // `..` 分量一律拒绝，哪怕它规范化后仍落在允许根内——拒绝的是写法本身，避免"看起来越界其实没事"的判定。
   if (raw.split(/[/\\]+/).includes('..')) return reject('parent_segment', '工作树路径不得包含 .. 分量')
 
+  for (const [value, absolute] of [[raw, false], [input.repositoryPath, true], [input.allowedRoot, true]] as const) {
+    const problem = localGitPathProblem(value, absolute)
+    if (problem !== undefined) return reject('unresolvable', problem)
+  }
+
   const joined = path.isAbsolute(raw) ? raw : path.resolve(input.repositoryPath, raw)
   // 从尾部单次扫描；未锚定起点的分隔符正则会在长输入不匹配时反复重试。
   let end = joined.length
-  while (end > 0 && (joined[end - 1] === '/' || joined[end - 1] === '\\')) end -= 1
+  const rootLength = path.parse(joined).root.length
+  while (end > rootLength && (joined[end - 1] === '/' || joined[end - 1] === '\\')) end -= 1
   const candidate = joined.slice(0, end) || joined
+  if (process.platform === 'win32' && !(await windowsPathsArePlain([input.repositoryPath, input.allowedRoot, candidate]))) return reject('symlinked_root', 'Windows 路径必须位于本机固定 NTFS 且所有现有分量无 reparse 属性')
   const target = await canonicalize(candidate)
   const root = await canonicalize(path.resolve(input.allowedRoot))
   if (target === undefined) return reject('unresolvable', `目标不可访问或找不到可规范化的祖先目录：${candidate}`)
@@ -105,6 +156,7 @@ export async function resolveWorktreePath(rawPath: string, input: WorktreePathIn
     const link = await firstLink(target.ancestor, candidate)
     if (link !== undefined) return reject('unresolvable', `路径分量是悬空符号链接：${link}`)
   }
-  if (!insideRoot(root.path, target.path)) return reject('outside_root', `规范化后逃出允许根：${target.path}`)
+  const inside = process.platform === 'win32' ? await windowsInsideRoot(root.path, target.path) : insideRoot(root.path, target.path)
+  if (!inside) return reject('outside_root', `规范化后逃出允许根：${target.path}`)
   return { ok: true, path: target.path }
 }
