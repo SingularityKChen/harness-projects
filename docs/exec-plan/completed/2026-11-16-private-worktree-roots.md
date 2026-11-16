@@ -1,6 +1,6 @@
 # 私有工作树容器 ExecPlan
 
-> 状态：Active；创建：2026-11-16；Iteration 11：2026-11-16—22（Asia/Singapore）
+> 状态：Completed（本地工程验收）；创建：2026-11-16；Iteration 11：2026-11-16—22（Asia/Singapore）
 > 范围：#648 的 POSIX 插件自有容器与 canonical-root 第五布局；规范：根 `PLANS.md`。
 > 上游：#338、#648；Windows 原生私有创建由 #644 承接，本项不接受 Windows 或 R1 发布。
 
@@ -20,7 +20,7 @@
 
 选择在既有 Host 私有数据模块增加两层插件自有目录准备，沿用 uid、nofollow/fstat、ACL 检查、fd chmod 与所有权语义。在 `host-providers.ts` 将现有 digest 派生和 canonical/outside-checkout 判断提取为一个模块内 helper，由 catalog.create 的只读准入与 restoreProviders 的实际资源准备复用；不创建第二份 digest 或 canonical 算法。
 
-实际 LocalGit 挂载恢复顺序固定为同一 helper 验证输出根 → 准备 worktrees/digest → 构造并路由 Provider。只读 catalog probe 仍只验证和构造无写入 Provider，不准备目录；对 probe 增加无新容器/无伪摘要的反证。实际构造再次验证同一根可保留，避免去掉安全守卫。目录准备失败沿用 disabled binding 的结构化失败，不发布可写的该挂载。
+仅实际默认生产 LocalGit entry 的挂载恢复顺序固定为同一 helper 验证输出根 → 准备 worktrees/digest → 构造并路由 Provider。只读 catalog probe 仍只验证和构造无写入 Provider，不准备目录；对 probe 增加无新容器/无伪摘要的反证。实际构造再次验证同一根可保留，避免去掉安全守卫。目录准备失败沿用 disabled binding 的结构化失败，不发布可写的该挂载。初版“相同implementationKey即拥有相同配置和目录政策”的假设已被真实组合消费者推翻：注入catalog entry可以使用相同键并拥有独立配置与allowedRoot；生产准备以默认entry对象身份限定，不能按键接管其它entry。
 
 准备函数只接受 Host 明确选定的两层固定路径：逐层 mkdir(mode0700)，EEXIST 后以 O_DIRECTORY/O_NOFOLLOW 打开、fstat 确认真实目录与当前 uid、验证 ACL，再以 fd 收紧并回读0700。插件根必须已受保护，验证对象和修改对象相同；所有 fd 与 helper 子进程在成功、拒绝、超时均释放，共享既有有界 ACL 预算。foreign owner、link、非目录、不可验证 ACL 一律拒绝，不夺取 ownership。
 
@@ -56,7 +56,8 @@
 
 在检出 `fix/private-worktree-roots` 的工作树 `.worktrees/private-worktree-roots` 根目录运行；依赖沿用冻结锁文件。命令只在本节定义。
 
-- V1：`pnpm test:file tests/integration/harness-plugin-private-data.test.js tests/integration/harness-plugin-host-providers.test.js tests/integration/harness-plugin-repository-binding.test.js tests/integration/development-local-git.test.js`；期望 fresh/reopen 两级0700，link拒绝无写、preflight无目录副作用，原POSIX及LocalGit控制全部通过。
+- V1：`pnpm test:file tests/integration/harness-plugin-private-data.test.js tests/integration/harness-plugin-host-providers.test.js tests/integration/harness-plugin-repository-binding.test.js tests/integration/development-local-git.test.js tests/integration/harness-plugin-change-request-operation.test.js`；期望 fresh/reopen 两级0700，link拒绝无写、preflight无目录副作用，原POSIX及LocalGit控制和注入catalog的真实PR消费链全部通过。
+- V1b：`pnpm test:file tests/browser/workspace-execution.test.js`；期望真实组合浏览器消费链的Start Work、fallback、PR及分配恢复全部通过，无业务网络和模型调用。
 - V2：`pnpm typecheck` 与 `pnpm test:file tests/integration/harness-plugin-artifact.test.js`；期望类型及实际打包Host回归通过。包依赖无变化，不另扩边界测试；出现新边界风险再扩大。
 - V3：`pnpm test:file tests/contract/content-placement.test.js`；期望文档位置及引用通过。
 - V4：`node scripts/rule-checks.mjs disclosure origin/main`、`node scripts/rule-checks.mjs size origin/main`、`git diff --check origin/main...HEAD`；期望退出0；人工检查凭据、本机身份、账号个人信息、内部系统、保密字样及实际A+D。
@@ -73,11 +74,17 @@ V1 证明实际权限边界、重开不损坏内容、拒绝先于副作用及�
 
 - [x] (2026-11-16 14:46 +08) 比较两份独立方案，核对真实catalog、preflight与私有数据路径，裁决只读/激活边界。
 - [x] (2026-11-16 14:46 +08) 本分支初始基线 V1中的host-providers文件14通过、0失败；未新增权限回归。
-- [ ] (2026-11-16 14:46 +08) 完成Task 1 / Batch 1、独立安全验收及当前head交付回读。
+- [x] (2026-11-16 +08) Task 1 / Batch 1 本地实现：生产 Host + Git 的 fresh RED 为两层0755，GREEN 为0700；重开保留用户文件、身份与执行关系；第五布局和只读 probe 通过。V1 162通过，V2 typecheck退出0、真实安装件29通过；V3–V4证据见 Outcomes。
+- [x] (2026-11-16 +08) 修复协调者全量组合发现的entry归属回归：原有失败单测RED→GREEN，扩展V1 184通过、V1b浏览器21通过，typecheck退出0、安装件29通过；自定义catalog夹具与原失败用例未修改。
+- [x] (2026-11-16 15:20 +08) 独立修复复评通过，当前无未解决P0–P3；本地工程归档与索引完成，最终Ready继续受当前head回读规则控制。
 
 ## Surprises & Discoveries
 
 2026-11-16 @ 初始基线 `8ace55af`：第五布局已经由canonical守卫拒绝；测试文件“四种形状”注释不能证明当前绕过。独立设计者真实Host+Git探针得到root0700、worktrees/digest0755；外层已有隔离，因此修复是既定显式模式合同，不是新证实泄漏。独立代码审读发现catalog.create也用于preflight，直接加mkdir会推翻只读约定。
+
+2026-11-16 @ `fix/private-worktree-roots`、`.worktrees/private-worktree-roots`：实际绑定现在会在激活时创建空摘要目录，原恢复测试需先移除该测试自建的空摘要再注入链接；这不是产品修复逻辑。catalog probe 在首次绑定前没有容器，重验证时也不新增摘要。
+
+2026-11-16 @ 首版本地实现：协调者组合 `pnpm verify` 揭示窄V1遗漏的真实消费链回归；本owner独立复现既有 `Host final assignment denial` 用例在PR结果处actual failed、expected confirmed。`composed-execution-platform.mjs` 的LocalGit entry配置为 `{}`、构造返回已配置port，初版restore按键强制读取repositoryPath而禁用挂载，Start Work失败向后传播。协调者提供main对照通过；本owner既有失败用例先RED、限定entry identity后GREEN。
 
 ## Decision Log
 
@@ -85,22 +92,34 @@ V1 证明实际权限边界、重开不损坏内容、拒绝先于副作用及�
 
 2026-11-16 14:46 +08 / 独立spec评审：本批只承诺现有POSIX边界，win32继续fail closed。理由：0700不能替代真实DACL/对象绑定；#644已有原生生命周期owner，不建立假兼容路径。
 
+2026-11-16 / 集成回归修正、协调者确认：生产目录政策仅在 `entry === LOCAL_GIT_ENTRY` 时执行。同键注入entry拥有自己的配置与allowedRoot；不新增activation协议或通用生命周期框架。既有preflight测试直接用t.mock.method观测真实默认entry，保留actual prepare与只读断言，不用wrapper替换该owner；原composed夹具与回归用例保持不变。
+
 ## Idempotence and Recovery
 
 准备可重复；合法既存目录只收紧自身mode并保内容，部分成功后不递归删除或回滚成宽权限。遇foreign/link/异常对象立即拒绝并关闭本次fd，保持外部sentinel；Git未调用时不需要补偿写。所有测试自行清理仅本次创建的临时根。代码回滚保留已有安全mode；需要修复未知数据/所有权时停止，不能偷改祖先或接管对象。
 
 ## Interfaces and Dependencies
 
-仅使用Node POSIX fs fd能力、既有ACL验证、Git argv及Storage/Host现有契约，无新包和凭据。受保护父目录与current uid是前提。`restoreProviders`拥有实际激活，catalog/helper拥有路径派生，私有数据模块拥有对象验证和mode；LocalGit只消费允许根。后续#643/#644需在本闭环后串行接入同一安全owner。
+仅使用Node POSIX fs fd能力、既有ACL验证、Git argv及Storage/Host现有契约，无新包和凭据。受保护父目录与current uid是前提。`restoreProviders`拥有实际激活，catalog/helper拥有路径派生，私有数据模块拥有对象验证和mode；LocalGit只消费允许根。后续#643/#644需在本闭环后串行接入同一安全owner。依据 [Node fs.chmod 官方文档](https://nodejs.org/api/fs.html#fschmodpath-mode-callback)，Windows只能调整写权限，未实现owner/group/others权限区分；本项0700证据只覆盖当前支持的POSIX平台，不能替代#643/#644的Windows原生机制。
 
 ## Outcomes & Retrospective
 
-当前是计划与独立基线，尚未实现或证明新权限回归。无有意延期的本闭环技术债；Windows原生资格是已有独立需求，不新建重复债务。实施若引入临时妥协，协调者在 `docs/exec-plan/tech-debt-tracker.md` 先查重再登记。
+本批在 `fix/private-worktree-roots` 的工作树完成两层0700、fresh/reopen内容与身份保留、canonical第五家族拒绝及preflight只读。原V1在加入真实PR消费链后扩为184通过；工作台浏览器消费链21通过、typecheck退出0、实际打包Host29通过、文档位置5通过。最初的0755反例先RED、修后GREEN。
+
+组合验证暴露按implementationKey强加默认配置的P1；默认entry身份限定修复后，原PR确认用例恢复GREEN，原composed夹具及失败用例不变。独立修复复评确认真实默认prepare未绕过、自定义catalog保留配置/输出根、拒绝无路由且fd释放；当前无未解决P0–P3，无必要重构。实际系统证据为Darwin；win32继续fail closed，Linux/Windows原生资格不由本批测试推断。SSR渲染警告未改变该责任面。
+
+本地工程验收、归档和索引已完成；PR #651 的当前head/checks/Ready由Concrete Steps的最终回读规则控制，不能从归档推断发布接受。没有新增技术债；原生Windows工作仍由既有责任项承担。
 
 ## Artifacts and Notes
 
-保留fresh RED/GREEN、reopen与只读/拒绝摘要，以及V2的真实打包结果；证据写执行分支、相对路径与观察时刻。完成时更新Outcomes，移至completed并由协调者更新索引；运行输出不进正式文档。
+本计划与持久回归共同保留RED/GREEN、真实Host与打包入口、失败恢复及独立复评的最小证据；临时输出不构成正式文档依赖。计划已归档，PR当前状态由交付回读确认。
 
 ## Bottom Change Note
 
 Change Note (2026-11-16 14:46 +08)：综合两份方案后创建；修订catalog副作用位置，明确只读预检、两层安全owner、POSIX范围和独立回滚。
+
+Change Note (2026-11-16)：完成两层fd私有准备、唯一根helper与实际激活接线；记录fresh RED/GREEN及本地V1–V2证据，独立验收与远端交付保持未勾选。
+
+Change Note (2026-11-16)：记录窄V1遗漏的真实组合回归与被推翻的key假设；默认entry identity限定生产目录政策，扩展既有消费链验证且不改composed夹具。
+
+Change Note (2026-11-16 15:20 +08)：记录独立P1修复复评和最终本地工程验收，归档并更新索引；当前PR门禁仍以远端回读为准。

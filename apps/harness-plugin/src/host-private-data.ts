@@ -16,6 +16,39 @@ function owned(entry: fs.Stats, owner: number, directory: boolean): void {
   if (entry.uid !== owner || (directory ? !entry.isDirectory() : !entry.isFile() || entry.nlink !== 1)) throw unavailable()
 }
 
+/** 创建或收紧同一个已验证对象；失败路径也关闭本次获得的 fd。 */
+async function privateDirectory(directory: string, owner: number, deadline: number, signal?: AbortSignal): Promise<number> {
+  let fd: number | undefined
+  try {
+    signal?.throwIfAborted()
+    try { fs.mkdirSync(directory, { mode: 0o700 }) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+    fd = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW)
+    owned(fs.fstatSync(fd), owner, true)
+    await assertPrivateAcl([fd], deadline, signal)
+    fs.fchmodSync(fd, 0o700)
+    if ((fs.fstatSync(fd).mode & 0o777) !== 0o700) throw unavailable()
+    return fd
+  } catch (error) { if (fd !== undefined) fs.closeSync(fd); throw error }
+}
+
+/** 只准备 Host 指定的固定两层，不遍历或改变 Git 后代；调用方须已保护插件根。 */
+export async function preparePrivateWorktreeDirectories(worktreesDir: string, allowedRoot: string, signal?: AbortSignal): Promise<void> {
+  const fds: number[] = []
+  try {
+    const owner = uid(), deadline = performance.now() + ACL_STARTUP_BUDGET_MS
+    if (path.basename(worktreesDir) !== 'worktrees' || path.dirname(allowedRoot) !== worktreesDir) throw unavailable()
+    const root = fs.openSync(path.dirname(worktreesDir), fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW)
+    fds.push(root)
+    const entry = fs.fstatSync(root)
+    owned(entry, owner, true)
+    if ((entry.mode & 0o777) !== 0o700) throw unavailable()
+    await assertPrivateAcl([root], deadline, signal)
+    for (const directory of [worktreesDir, allowedRoot]) fds.push(await privateDirectory(directory, owner, deadline, signal))
+  } catch { throw unavailable() }
+  finally { for (const fd of fds) fs.closeSync(fd) }
+}
+
 /** profileContext 已由 Host canonicalize；逐级只验证，不改 profile 或祖先权限。 */
 export async function assertPrivateDataParent(directory: string, signal?: AbortSignal): Promise<void> {
   const fds: number[] = []
@@ -49,13 +82,7 @@ export async function preparePrivateProjectData(dataPath: string, signal?: Abort
   const files: number[] = []
   try {
     const owner = uid(), directory = path.dirname(dataPath), deadline = performance.now() + ACL_STARTUP_BUDGET_MS
-    try { fs.mkdirSync(directory, { mode: 0o700 }) }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
-    rootFd = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW)
-    owned(fs.fstatSync(rootFd), owner, true)
-    await assertPrivateAcl([rootFd], deadline, signal)
-    fs.fchmodSync(rootFd, 0o700)
-    if ((fs.fstatSync(rootFd).mode & 0o777) !== 0o700) throw unavailable()
+    rootFd = await privateDirectory(directory, owner, deadline, signal)
     const file = (location: string, create: boolean, append = false): number | undefined => {
       // 不打开已知 device/FIFO；nofollow + fstat 仍是最终判定，O_NONBLOCK 防止替换为 FIFO 后挂起。
       try { owned(fs.lstatSync(location), owner, false) }

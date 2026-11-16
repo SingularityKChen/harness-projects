@@ -6,8 +6,9 @@
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -213,45 +214,68 @@ const seedStartable = (repositoryPath) => (storage) => seedWorkspace(storage)
 const startWork = (host) => host.controller.commands.startWork({ task: 'Synthetic explicit task', workItemId: 'wi-1', repositoryId: REPOSITORY_ID, actorRef: { kind: 'agent' }, idempotencyKey: 'k-1' })
 const contextOf = (host) => host.controller.queries.getExecutionContext({ workItemId: 'wi-1', repositoryId: REPOSITORY_ID })
 
-test('AC5 AC6 新进程重启恢复执行上下文与谱系，工作树在检出之外', async (t) => {
+const mode = async (file) => (await stat(file)).mode & 0o777
+
+test('AC5 AC6 umask022 创建和重开私有工作树容器，保留上下文、谱系与用户文件', async (t) => {
   const fixture = await fixtureFor(t)
   const { dataDir, dataPath } = await dataRoot()
   await seed(dataPath, PROVIDER_CATALOG, seedStartable(fixture.repositoryPath))
-  const host = await createHostComposition(options(dataPath))
-  let first
+  const oldMask = process.umask(0o022)
+  let host, first, containers
   try {
+    host = await createHostComposition(options(dataPath))
     await startWork(host)
     first = await contextOf(host)
-  } finally { await host.dispose() }
-  assert.equal(first?.status, 'ready')
+    assert.equal(first?.status, 'ready')
+    containers = [path.join(dataDir, 'worktrees'), path.dirname(first.worktreeExternalId)]
+    assert.deepEqual(await Promise.all(containers.map(mode)), [0o700, 0o700], 'Host 激活准备两层0700，不能依赖 Git 的默认 umask')
+  } finally { process.umask(oldMask); await host?.dispose() }
   assert.ok((await realpath(first.worktreeExternalId)).startsWith(path.join(await realpath(dataDir), 'worktrees') + path.sep), '工作树在宿主数据根的 worktrees 之下，即仓库检出之外')
   assert.equal(await fixture.run(['status', '--porcelain']), '', '仓库检出里没有任何新文件')
 
+  const userFile = path.join(first.worktreeExternalId, 'user-owned.txt'), sentinel = path.join(fixture.root, 'unrelated.txt')
+  await writeFile(userFile, 'uncommitted worktree bytes'); await chmod(userFile, 0o640)
+  await writeFile(sentinel, 'unrelated bytes'); await chmod(sentinel, 0o644)
+  const preserved = [userFile, sentinel, path.join(fixture.repositoryPath, 'README.md')]
+  const bytes = await Promise.all(preserved.map(file => readFile(file))), modes = await Promise.all(preserved.map(mode))
+  await Promise.all(containers.map(file => chmod(file, 0o755)))
   const before = dump(dataPath)
-  const tables = ['entity', 'external_identity', 'repository', 'execution_context', 'relation']
-  assert.ok(tables.every((table) => rowsOf(before, table).length > 0), '夹具自检：五张表都有行，逐字节比较不是空转')
+  const tables = ['workspace', 'provider_binding', 'workspace_binding', 'entity', 'external_identity', 'repository', 'execution_context', 'relation']
+  assert.ok(tables.every((table) => rowsOf(before, table).length > 0), '夹具自检：身份与执行关系表都有行，逐字节比较不是空转')
   const child = spawnSync(process.execPath, [RESTART_CHILD, dataPath, WORKSPACE, 'wi-1', REPOSITORY_ID], { encoding: 'utf8', timeout: 60_000 })
   assert.equal(child.status, 0, child.stderr)
   assert.deepEqual(JSON.parse(child.stdout), JSON.parse(JSON.stringify(first)), '新进程读回的执行上下文视图与重启前一致')
+  assert.deepEqual(await Promise.all(containers.map(mode)), [0o700, 0o700], '重开收紧既存容器')
+  assert.deepEqual(await Promise.all(preserved.map(file => readFile(file))), bytes)
+  assert.deepEqual(await Promise.all(preserved.map(mode)), modes, '只收紧两层容器，不递归改工作树或其它用户文件')
   const after = dump(dataPath)
   assert.deepEqual(tables.map((table) => after[table]), tables.map((table) => before[table]), '新进程重启不改写实体、身份、仓库、执行上下文与谱系关系')
 })
 
 // 数据根落在仓库检出之内时，允许根随之落进检出，挂载必须被禁用：守卫比的是检出根（repositoryPath 可以是检出的子目录）。数据根本身为符号链接时，Host 在开库前拒绝；仓库路径链接仍受挂载守卫约束。
-// 只覆盖这四种形状：数据根下的 worktrees 或摘要分量本身是符号链接时守卫看不到，承接 #338（#132 计划 D35）。
+// 第五家族覆盖 worktrees 与摘要分量链接进 checkout；canonical 守卫须先于目录准备与 Git 写。
 const link = async (target, at) => { await mkdir(target, { recursive: true }); await symlink(target, at); return at }
 for (const [shape, layout] of [
   ['repositoryPath 是检出根', async ({ repositoryPath: repo }) => [path.join(repo, 'host-data'), repo]],
   ['repositoryPath 是检出的子目录', async ({ repositoryPath: repo }) => [path.join(repo, 'host-data'), path.join(repo, 'sub')]],
   ['数据根经符号链接给出', async ({ root, repositoryPath: repo }) => [await link(path.join(repo, 'host-data'), path.join(root, 'data-link')), repo]],
   ['repositoryPath 经符号链接给出', async ({ root, repositoryPath: repo }) => [path.join(repo, 'host-data'), await link(repo, path.join(root, 'repo-link'))]],
+  ...['worktrees', 'digest'].map((part) => [`${part} 链接进检出`, async ({ root, repositoryPath: repo }) => [path.join(root, 'host-data'), repo, async (dataDir) => {
+    const container = path.join(dataDir, 'worktrees')
+    if (part === 'digest') await mkdir(container)
+    await symlink(repo, part === 'worktrees' ? container : path.join(container, createHash('sha256').update(LOCAL).digest('hex').slice(0, 16)))
+  }]]),
 ]) {
   test(`AC6 允许根落进仓库检出时禁用该挂载（${shape}）`, async (t) => {
     const fixture = await fixtureFor(t)
-    const [dataDir, repositoryPath] = await layout(fixture)
+    const [dataDir, repositoryPath, setup] = await layout(fixture)
     await mkdir(repositoryPath, { recursive: true })
     const dataPath = path.join(dataDir, 'workspace.sqlite')
     await seed(dataPath, PROVIDER_CATALOG, seedStartable(repositoryPath))
+    await setup?.(dataDir)
+    const sentinel = path.join(fixture.repositoryPath, 'README.md')
+    const bytes = await readFile(sentinel), sentinelMode = await mode(sentinel), checkoutMode = await mode(fixture.repositoryPath)
+    const before = [await fixture.run(['show-ref']), await fixture.run(['status', '--porcelain']), await worktreePaths(fixture), await readdir(fixture.repositoryPath)]
     if (shape === '数据根经符号链接给出') {
       const bytes = await readFile(dataPath), before = dump(dataPath)
       await assert.rejects(() => createHostComposition(options(dataPath)), { name: 'HostAuthorityError', message: 'Host project data is unavailable' })
@@ -264,7 +288,8 @@ for (const [shape, layout] of [
       assert.deepEqual(host.disabled.map((item) => [item.bindingId, item.error.code]), [[LOCAL, 'invalid_input']], '数据根在检出之内：允许根随之落进检出，挂载被禁用')
       assert.notEqual((await startWork(host)).value?.status, 'ready', '没有可路由的开发挂载：Start Work 不得就绪')
       assert.equal(await contextOf(host), undefined)
-      assert.equal((await worktreePaths(fixture)).length, 1, '检出内没有建出任何链接工作树')
+      assert.deepEqual([await fixture.run(['show-ref']), await fixture.run(['status', '--porcelain']), await worktreePaths(fixture), await readdir(fixture.repositoryPath)], before, '拒绝先于 Git 分支、linked worktree 或 checkout 文件写入')
+      assert.deepEqual([await readFile(sentinel), await mode(sentinel), await mode(fixture.repositoryPath)], [bytes, sentinelMode, checkoutMode], '拒绝不能跟随链接 chmod checkout 或改用户内容')
     } finally { await host.dispose() }
   })
 }
