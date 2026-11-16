@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: db91c1cd2f6d132cc020d22e827113acabb3d277
+          ref: 9cf1875dcf9deb6ac9aee1fa253d0a88e4bc79a3
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -40,8 +40,103 @@ jobs:
           pnpm test:file tests/integration/development-local-git-windows.test.js tests/integration/local-git-start-work-resume.test.js 2>&1 | ForEach-Object {
             $line = $_.ToString()
             foreach ($root in @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:USERPROFILE, [IO.Path]::GetTempPath().TrimEnd('\'))) {
-              if ($root) { $line = $line.Replace($root, '<fixture>') }
+              if ($root) {
+                $line = $line.Replace($root, '<fixture>').Replace($root.Replace('\', '\\'), '<fixture>').Replace($root.Replace('\', '/'), '<fixture>')
+              }
             }
             Write-Output $line
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  private-data:
+    name: Native Windows ordinary-user private data
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: 0ddf2810b2b5d9a6d04c342cd65110118e480b5a
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .nvmrc
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @harness-projects/app-harness-plugin build
+      - name: Qualify exact source as a separate standard user
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git rev-parse HEAD
+          Write-Output "ImageOS=$env:ImageOS ImageVersion=$env:ImageVersion Architecture=$env:PROCESSOR_ARCHITECTURE"
+          node --version
+          $stage = 'account'
+          $profile = $null
+          $sid = $null
+          $nativeExit = 1
+          $name = 'hp' + [Guid]::NewGuid().ToString('N').Substring(0, 10)
+          function Show-NativeOutput($file) {
+            if (Test-Path -LiteralPath $file) {
+              Get-Content -LiteralPath $file | ForEach-Object {
+                $line = $_.ToString()
+                foreach ($root in @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:USERPROFILE, $profile)) {
+                  if ($root) { $line = $line.Replace($root, '<fixture>').Replace($root.Replace('\', '\\'), '<fixture>').Replace($root.Replace('\', '/'), '<fixture>') }
+                }
+                Write-Output $line
+              }
+            }
+          }
+          try {
+            $password = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(30)) + 'aA1!'
+            $secure = ConvertTo-SecureString $password -AsPlainText -Force
+            New-LocalUser -Name $name -Password $secure -AccountNeverExpires -UserMayNotChangePassword | Out-Null
+            $sid = (Get-LocalUser -Name $name).SID.Value
+            Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $name
+            $credential = [Management.Automation.PSCredential]::new("$env:COMPUTERNAME\$name", $secure)
+            $node = (Get-Command node.exe).Source
+            $stage = 'profile'
+            $init = Start-Process -FilePath $node -ArgumentList @('-e', 'process.exit(0)') -Credential $credential -LoadUserProfile -WorkingDirectory $env:GITHUB_WORKSPACE -Wait -PassThru
+            if ($init.ExitCode -ne 0) { throw 'profile initialization failed' }
+            $profile = (Get-CimInstance Win32_UserProfile -Filter "SID='$sid'").LocalPath
+            if (!$profile) { throw 'profile missing' }
+            $stage = 'foreign-fixture'
+            $foreign = Join-Path $profile 'harness-foreign-profile'
+            $env:HARNESS_NATIVE_FIXTURE_PROFILE = $foreign
+            $env:HARNESS_NATIVE_FIXTURE_SID = $sid
+            node --input-type=module -e "import {provisionForeignFixture} from './tests/integration/harness-plugin-windows-fixture.js'; await provisionForeignFixture(process.env.HARNESS_NATIVE_FIXTURE_PROFILE,process.env.HARNESS_NATIVE_FIXTURE_SID)"
+            if ($LASTEXITCODE -ne 0) { throw 'foreign fixture failed' }
+            $request = @{ workspace = $env:GITHUB_WORKSPACE; profile = $profile; foreign = $foreign } | ConvertTo-Json -Compress
+            $worker = "const request = $request;`n" + @'
+          import { spawnSync } from 'node:child_process';
+          import { mkdirSync } from 'node:fs';
+          import path from 'node:path';
+          process.chdir(request.workspace);
+          process.env.USERPROFILE = request.profile;
+          process.env.TEMP = process.env.TMP = path.join(request.profile, 'AppData', 'Local', 'Temp');
+          mkdirSync(process.env.TEMP, { recursive: true });
+          process.env.HARNESS_WINDOWS_FOREIGN_PROFILE = request.foreign;
+          const preflight = spawnSync(process.execPath, ['scripts/resolution-check.mjs'], { stdio: 'inherit' });
+          if (preflight.status !== 0) process.exit(preflight.status ?? 1);
+          const result = spawnSync(process.execPath, ['--test', '--test-timeout=120000', 'tests/integration/harness-plugin-windows-private-data.test.js', 'tests/integration/harness-plugin-windows-artifact.test.js'], { stdio: 'inherit' });
+          process.exit(result.status ?? 1);
+          '@
+            $workerPath = Join-Path $profile 'harness-native-worker.mjs'
+            [IO.File]::WriteAllText($workerPath, $worker)
+            $stdout = Join-Path $profile 'native.stdout'
+            $stderr = Join-Path $profile 'native.stderr'
+            $stage = 'standard-user-tests'
+            $process = Start-Process -FilePath $node -ArgumentList @(('"' + $workerPath + '"')) -Credential $credential -LoadUserProfile -WorkingDirectory $env:GITHUB_WORKSPACE -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Wait -PassThru
+            $nativeExit = $process.ExitCode
+            Show-NativeOutput $stdout
+            Show-NativeOutput $stderr
+            Write-Output "standard-user exit=$nativeExit"
+          } catch {
+            Write-Output "native-account-harness-failure stage=$stage type=$($_.Exception.GetType().Name) hresult=$($_.Exception.HResult)"
+            $nativeExit = 1
+          } finally {
+            if ($sid) { Get-CimInstance Win32_UserProfile -Filter "SID='$sid'" -ErrorAction SilentlyContinue | Remove-CimInstance -ErrorAction SilentlyContinue }
+            Remove-LocalUser -Name $name -ErrorAction SilentlyContinue
+          }
+          exit $nativeExit
