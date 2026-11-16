@@ -25,6 +25,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-16-windows-git-paths](exec-plan/active/2026-11-16-windows-git-paths.md) | 原生 Windows LocalGit 路径、身份复用与持久恢复（#645） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed

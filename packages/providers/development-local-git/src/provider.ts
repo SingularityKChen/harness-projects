@@ -9,8 +9,8 @@ import * as cap from '@harness-projects/capabilities'
 import { ProviderErrorCode, newProviderBindingId, type ProviderBindingId } from '@harness-projects/domain'
 
 import { branchNameProblem } from './branch-names.ts'
-import { defaultGitRunner, type GitInvocation, type GitRunner } from './git-runner.ts'
-import { resolveWorktreePath } from './paths.ts'
+import { defaultGitRunner, windowsPathsArePlain, type GitInvocation, type GitRunner } from './git-runner.ts'
+import { localGitPathProblem, resolveWorktreePath, sameFilesystemPath as samePath } from './paths.ts'
 
 export interface LocalGitRepositoryConfig {
   readonly externalId: string; readonly path: string; readonly name?: string; readonly defaultBranch?: string
@@ -45,8 +45,6 @@ const CONVENTIONAL_BASES: readonly string[] = ['main', 'master', 'develop', 'tru
 async function occupied(target: string): Promise<boolean> {
   return stat(target).then(() => true, () => false)
 }
-const samePath = async (left: string, right: string): Promise<boolean> =>
-  (await realpath(left).catch(() => left)) === (await realpath(right).catch(() => right))
 type TargetResolution = { readonly ok: true; readonly path: string } | { readonly ok: false; readonly code: ProviderErrorCode; readonly message: string }
 const statOf = (target: string) => stat(target).catch(() => undefined)
 /** 与 `is_git_directory` 同口径的 Git 目录判定：`HEAD` 文件 + `objects/` + `refs/`。 */
@@ -120,6 +118,8 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
   }
   async getRepository(ref: cap.ExternalObjectRef): Promise<cap.ProviderResult<cap.ProviderRepository>> {
     if (!this.ownsRepository(ref)) return this.notFound('仓库')
+    const rejected = await this.repositoryError()
+    if (rejected !== undefined) return cap.providerErr(rejected)
     const probe = await this.git(['rev-parse', '--git-dir'])
     if (probe.code !== 0) return cap.providerErr(this.failureOf(probe, false))
     const branch = this.repository.defaultBranch === undefined ? await this.baseBranch() : { value: this.repository.defaultBranch, error: undefined }
@@ -145,6 +145,8 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
   }
   async listBranches(input: cap.ProviderListBranchesInput): Promise<cap.ProviderResult<cap.ProviderPage<cap.ProviderBranch>>> {
     if (!this.ownsRepository(input.repository)) return this.notFound('仓库')
+    const rejected = await this.repositoryError()
+    if (rejected !== undefined) return cap.providerErr(rejected)
     const listed = await this.branchRecords()
     if (listed.error !== undefined) return cap.providerErr(listed.error)
     const rows = listed.records
@@ -158,6 +160,8 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
   async getCommit(ref: cap.ExternalObjectRef): Promise<cap.ProviderResult<cap.ProviderCommit>> {
     if (ref.bindingId !== this.bindingId || ref.objectKind !== 'commit') return this.notFound('提交')
     if (!/^[0-9a-f]{7,64}$/i.test(ref.externalId)) return this.invalidInput(`提交引用必须是对象名：${ref.externalId}`)
+    const rejected = await this.repositoryError()
+    if (rejected !== undefined) return cap.providerErr(rejected)
     const resolved = await this.probeRef(ref.externalId)
     if (resolved.error !== undefined) return cap.providerErr(resolved.error)
     if (!resolved.found || resolved.sha === undefined || !resolved.sha.toLowerCase().startsWith(ref.externalId.toLowerCase())) return this.notFound('提交')
@@ -180,6 +184,8 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     if (!this.ownsRepository(input.repository)) return this.notFound('仓库')
     const problem = branchNameProblem(input.name)
     if (problem !== undefined) return this.invalidInput(problem)
+    const rejected = await this.repositoryError()
+    if (rejected !== undefined) return cap.providerErr(rejected)
     const start = await this.probeRef(input.fromRef)
     if (start.error !== undefined) return cap.providerErr(start.error)
     if (!start.found || start.sha === undefined) return this.notFound(`起点 ${input.fromRef}`)
@@ -236,9 +242,10 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     const registered = await this.listWorktrees()
     if (registered.error !== undefined) return cap.providerErr(registered.error)
     // 分支已被别处检出时没有可复用对象；core 把任意 Conflict 当"已创建 → 复用成功"，这一支必须硬失败。
-    const holder = registered.records.find((r) => r.path !== target && r.branch === `refs/heads/${input.branch}`)
+    const matches = await Promise.all(registered.records.map((record) => samePath(record.path, target)))
+    const holder = registered.records.find((r, index) => !matches[index] && r.branch === `refs/heads/${input.branch}`)
     if (holder !== undefined) return this.invalidInput(`分支 ${input.branch} 已被另一份工作树检出：${holder.path}；请更换分支名或先移除那处登记`)
-    const entry = registered.records.find((record) => record.path === target)
+    const entry = registered.records.find((_record, index) => matches[index])
     if (entry !== undefined) {
       if (entry.prunable || !(await occupied(target))) {
         return this.invalidInput(`工作树登记仍在但目录不可复用：${target}；请先执行 git worktree prune`)
@@ -271,9 +278,10 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     if (!resolved.ok) return this.fail(resolved.code, resolved.message)
     const listed = await this.listWorktrees()
     if (listed.error !== undefined) return cap.providerErr(listed.error)
-    const target = listed.records.find((record) => record.path === resolved.path || record.path === input.worktree.externalId)
+    const matches = await Promise.all(listed.records.map((record) => samePath(record.path, resolved.path)))
+    const target = listed.records.find((_record, index) => matches[index])
     if (target === undefined || target.prunable || !(await occupied(target.path)) || target.branch === undefined) return this.notFound('工作树')
-    return cap.providerOk({ ref: input.worktree, path: target.path, branch: target.branch.replace(/^refs\/heads\//, '') })
+    return cap.providerOk({ ref: this.refOf('worktree', target.path), path: target.path, branch: target.branch.replace(/^refs\/heads\//, '') })
   }
 
   private async git(args: readonly string[]): Promise<GitInvocation> {
@@ -281,6 +289,8 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
   }
 
   private failureOf(result: GitInvocation, write: boolean): cap.ProviderError {
+    if (result.interrupted) return cap.providerError(write ? ProviderErrorCode.AmbiguousResult : ProviderErrorCode.Unavailable,
+      write ? 'Git 写进程被终止或输出超限，结果不确定；请先 reconcile' : 'Git 读进程被终止或输出超限，暂时不可用')
     const text = `${result.stderr}\n${result.stdout}`
     const lines = (result.stderr === '' ? result.stdout : result.stderr).split('\n').map((line) => line.trim()).filter((line) => line !== '')
     // `worktree add` 的第一行是 `Preparing worktree (…)`，真正的原因在后面的 `fatal:` / `error:` 行。
@@ -316,7 +326,7 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
       // prunable 字段总是带原因（`prunable gitdir file points to non-existent location`），只能按前缀判。
       return [{ path: worktree.slice('worktree '.length), branch: fieldOf('branch '), prunable: fields.some((line) => line.startsWith('prunable')) }]
     })
-    return { records, error: undefined }
+    return { records: await Promise.all(records.map(async (record) => ({ ...record, path: await realpath(record.path).catch(() => path.normalize(record.path)) }))), error: undefined }
   }
 
   /** 分支身份的唯一权威：一次枚举 `refs/heads` 的全部记录，`listBranches`、精确查找、大小写变体判定与
@@ -360,12 +370,22 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     return head === `refs/heads/${branch}` ? undefined : `目录检出的分支不是 ${branch}`
   }
 
-  /** 默认根每次重新判定、不缓存：标记会随 `git init`、submodule 初始化出现或消失，缓存会把首次调用的结论固化。 */
+  /** 非工作树的读/分支入口同样逐次准入，不借用绑定时的旧元数据快照。 */
+  private async repositoryError(): Promise<cap.ProviderError | undefined> {
+    const problem = localGitPathProblem(this.repository.path, true)
+    if (problem !== undefined) return cap.providerError(ProviderErrorCode.InvalidInput, problem)
+    if (process.platform === 'win32' && !(await windowsPathsArePlain([this.repository.path]))) return cap.providerError(ProviderErrorCode.InvalidInput, '仓库路径必须位于本机固定 NTFS 且所有现有分量无 reparse 属性')
+    return undefined
+  }
+
+  /** 默认根每次重新判定、不缓存：标记会随 git init 或 submodule 初始化变化。 */
   private async allowedRootForUse(): Promise<TargetResolution> {
     return this.allowedRoot === undefined ? deriveDefaultRoot(this.repository.path) : { ok: true, path: this.allowedRoot }
   }
 
   private async resolveTarget(rawPath: string | undefined, worktreeKey = ''): Promise<TargetResolution> {
+    const problem = localGitPathProblem(this.repository.path, true) ?? (this.allowedRoot === undefined ? undefined : localGitPathProblem(this.allowedRoot, true))
+    if (problem !== undefined) return { ok: false, code: ProviderErrorCode.InvalidInput, message: problem }
     // 允许根是否落在检出内由 paths.ts 判定：检出内的分量不得是符号链接（仓库内容不可信），注入检出外由宿主负责。
     const root = await this.allowedRootForUse()
     if (!root.ok) return root
