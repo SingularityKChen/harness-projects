@@ -9,6 +9,7 @@ import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { CURRENT_SCHEMA_GENERATION } from '@harness-projects/storage-sqlite'
 import { createHostComposition } from '../../apps/harness-plugin/src/host-composition.ts'
+import { preparePrivateWorktreeDirectories } from '../../apps/harness-plugin/src/host-private-data.ts'
 import { apply as applyHost } from '../../apps/harness-plugin/src/host.ts'
 import { WORKSPACE, seed } from './fixtures/host-seed.js'
 
@@ -54,6 +55,41 @@ test('new and reopened Host data stays private under umask 022 and preserves row
     assert.equal((await host.call('getWorkspaceSetup', {})).workspace.name, 'Private workspace')
     assert.ok((await readFile(f.log, 'utf8')).startsWith('existing diagnostic bytes\n'))
   } finally { process.umask(oldMask); await host?.dispose() }
+})
+
+// Catches path-based chmod, trusting EEXIST, foreign ownership and leaked fds in either fixed layer.
+test('private worktree layers refuse unsafe objects without changing outside data and release descriptors', async (t) => {
+  for (const layer of ['worktrees', 'digest']) for (const kind of ['symlink', 'file', 'owner', 'chmod', 'abort', ...(process.platform === 'darwin' ? ['acl'] : [])]) await t.test(`${layer} ${kind}`, async (t) => {
+    const f = await fixture(t), host = await createHostComposition(f.options); await host.dispose()
+    const container = path.join(f.root, 'worktrees'), digest = path.join(container, 'fixture-digest')
+    const target = layer === 'worktrees' ? container : digest, outside = path.join(f.profile, 'outside'), sentinel = path.join(outside, 'sentinel')
+    await mkdir(outside, { mode: 0o755 }); await chmod(outside, 0o755); await writeFile(sentinel, 'outside bytes'); await chmod(sentinel, 0o644)
+    if (layer === 'digest') await mkdir(container, { mode: 0o755 })
+    if (kind === 'symlink') await symlink(outside, target)
+    else if (kind === 'file') await writeFile(target, 'not a directory')
+    else { await mkdir(target); await chmod(target, 0o755) }
+    if (kind === 'acl') execFileSync('/bin/chmod', ['+a', 'everyone allow search,add_file', target])
+    const controller = new AbortController(), acquired = [], open = fs.openSync, inspect = fs.fstatSync, change = fs.fchmodSync
+    let selected
+    t.mock.method(fs, 'openSync', function (file, ...args) {
+      const fd = open.call(this, file, ...args); acquired.push(fd)
+      if (file === target) { selected = fd; if (kind === 'abort') controller.abort() }
+      return fd
+    })
+    if (kind === 'owner') t.mock.method(fs, 'fstatSync', function (fd, ...args) {
+      const entry = inspect.call(this, fd, ...args)
+      return fd === selected ? Object.assign(Object.create(entry), { uid: process.getuid() + 1 }) : entry
+    })
+    if (kind === 'chmod') t.mock.method(fs, 'fchmodSync', function (fd, ...args) { if (fd === selected) throw Error('injected chmod failure'); return change.call(this, fd, ...args) })
+    try {
+      await assert.rejects(() => preparePrivateWorktreeDirectories(container, digest, controller.signal), denied)
+      assert.equal(await readFile(sentinel, 'utf8'), 'outside bytes')
+      assert.deepEqual(await Promise.all([mode(outside), mode(sentinel)]), [0o755, 0o644])
+      if (!['symlink', 'file'].includes(kind)) assert.equal(await mode(target), 0o755, '拒绝对象没有被收紧或接管')
+      if (kind === 'symlink' || kind === 'file') assert.equal(fs.existsSync(path.join(target, 'fixture-digest')), false)
+      for (const fd of acquired) assert.throws(() => inspect(fd), { code: 'EBADF' })
+    } finally { if (kind === 'acl') execFileSync('/bin/chmod', ['-N', target]) }
+  })
 })
 
 // Catches following a link or accepting nonregular/multiply-linked data before opening SQLite.

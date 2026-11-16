@@ -1,7 +1,7 @@
 import '../fixtures/resolution-preflight.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, mkdir, readFile, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rmdir, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -101,13 +101,24 @@ test('second and third reference SQL failures roll back every binding row', asyn
     try { const before = identity(f.dataPath); await assert.rejects(() => f.host.call('bindRepository', request(f.repo)), /操作失败/); assert.deepEqual(identity(f.dataPath), before) } finally { await f.host.dispose() }
   }
 })
-test('Local catalog preflight issues only read argv while real Git state remains unchanged', async () => {
+test('Local catalog preflight issues only read argv while real Git state remains unchanged', async (t) => {
   const f = await fixture(); await f.host.dispose()
-  const catalog = new Map(PROVIDER_CATALOG), entry = catalog.get('development.local-git'), calls = []
-  catalog.set('development.local-git', { ...entry, create: async (input) => { const port = await entry.create(input), run = port.runGit; port.runGit = (args) => { calls.push(args); return run(args) }; return port } })
+  const catalog = new Map(PROVIDER_CATALOG), entry = catalog.get('development.local-git'), calls = [], probes = []
+  const output = path.join(path.dirname(f.dataPath), 'worktrees')
+  const entries = () => readdir(output).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+  const create = entry.create
+  t.mock.method(entry, 'create', async (input) => {
+    const before = await entries(), port = await create(input), run = port.runGit
+    if (input.binding.id === 'repository-binding-probe') { probes.push(before); assert.deepEqual(await entries(), before, 'catalog probe 不创建容器或伪摘要目录') }
+    port.runGit = (args) => { calls.push(args); return run(args) }; return port
+  })
   const host = await createHostComposition({ dataPath: f.dataPath, workspaceId: WORKSPACE, catalog, resolveCredential: async () => 'fixture-secret', fetch: repositoryFetch(f.github) })
   try {
     const before = await repoState(f.repo); assert.equal((await host.call('bindRepository', request(f.repo))).writeState, 'local_only')
+    const active = await entries(); assert.equal(active.length, 1, '只有实际绑定摘要')
+    assert.equal((await host.call('bindRepository', request(f.repo, { idempotencyKey: 'bind-again' }))).writeState, 'local_only')
+    assert.deepEqual(probes, [null, active], '首次probe没有容器，重验证probe没有新增伪摘要')
+    assert.deepEqual(await entries(), active)
     assert.ok(calls.length > 0); assert.ok(calls.every((args) => args[0] === '-C' && (['rev-parse', 'symbolic-ref', 'for-each-ref'].includes(args[2]) || (args[2] === 'config' && args[3] === '--get'))))
     assert.deepEqual(await repoState(f.repo), before)
   } finally { await host.dispose() }
@@ -118,7 +129,7 @@ test('disabled Local Git recovers after output repair and explicit same-binding 
   const f = await fixture(), before = await repoState(f.repo)
   const first = await f.host.call('bindRepository', request(f.repo)); await f.host.dispose()
   const output = path.join(path.dirname(f.dataPath), 'worktrees'), localId = first.value.bindingIds[0]
-  await mkdir(output); const link = path.join(output, createHash('sha256').update(localId).digest('hex').slice(0, 16)); await symlink(f.repo, link)
+  const link = path.join(output, createHash('sha256').update(localId).digest('hex').slice(0, 16)); await rmdir(link); await symlink(f.repo, link)
   const options = { dataPath: f.dataPath, workspaceId: WORKSPACE, catalog: PROVIDER_CATALOG, resolveCredential: async () => 'fixture-secret', fetch: repositoryFetch(f.github) }
   let host = await createHostComposition(options)
   const source = createRepositoryBindingSource({ connectAccount: async () => ({ writeState: 'local_only', saving: false, authoritative: false, value: { accountId: ACCOUNT } }), bindRepository: (actorRef, idempotencyKey, repositoryId, references) => host.call('bindRepository', { actorRef, idempotencyKey, repositoryId, references }), baseline: () => host.call('baseline', {}) }, { actorRef })

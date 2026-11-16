@@ -13,6 +13,7 @@ import {
 } from '@harness-projects/capabilities'
 import { createHarnessExecutionProvider, HARNESS_EXECUTION_PROVIDER_DEFINITION, type SessionPort } from '@harness-projects/provider-execution-harness'
 import { HUMAN_EXECUTION_PROVIDER_DEFINITION } from '@harness-projects/provider-execution-human'
+import { preparePrivateWorktreeDirectories } from './host-private-data.ts'
 import { createHostHumanExecution, MANUAL_ISSUER_HANDLE } from './host-execution.ts'
 import { createHostSessionPort } from './host-session-adapter.ts'
 import type { createPlanningLifetime } from './host-planning-lifetime.ts'
@@ -243,6 +244,17 @@ const GITHUB_PROJECTS_ENTRY: CatalogEntry = {
   },
 }
 
+/** catalog 只读准入和实际激活共用唯一摘要派生与 canonical/outside-checkout 政策。 */
+async function localGitRoot({ binding, configuration, worktreesDir }: Pick<ProviderBuildInput, 'binding' | 'configuration' | 'worktreesDir'>): Promise<string> {
+  const repositoryPath = text(configuration, 'repositoryPath')
+  const allowedRoot = path.join(worktreesDir, createHash('sha256').update(binding.id).digest('hex').slice(0, 16))
+  const resolved = await resolveWorktreePath(allowedRoot, { repositoryPath, allowedRoot })
+  if (!resolved.ok) throw new BindingRefused(ProjectErrorCode.InvalidInput, '工作树输出根不可用')
+  const relative = path.relative(await checkoutRootOf(repositoryPath), resolved.path)
+  if (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) throw new BindingRefused(ProjectErrorCode.InvalidInput, '工作树允许根落在仓库检出之内')
+  return allowedRoot
+}
+
 const LOCAL_GIT_ENTRY: CatalogEntry = {
   definition: LOCAL_GIT_PROVIDER_DEFINITION,
   configuration: {
@@ -251,12 +263,7 @@ const LOCAL_GIT_ENTRY: CatalogEntry = {
   },
   async create({ binding, configuration, worktreesDir }) {
     const repositoryPath = text(configuration, 'repositoryPath')
-    // 允许根是数据根与 binding id 的纯函数（I5）：数据根被放进仓库检出（含 repositoryPath 是检出子目录、数据根或仓库路径经符号链接给出）时，允许根随之落进检出，禁用该挂载；worktrees 或摘要分量经既有路径守卫规范化后仍须留在检出之外。
-    const allowedRoot = path.join(worktreesDir, createHash('sha256').update(binding.id).digest('hex').slice(0, 16))
-    const resolved = await resolveWorktreePath(allowedRoot, { repositoryPath, allowedRoot })
-    if (!resolved.ok) throw new BindingRefused(ProjectErrorCode.InvalidInput, '工作树输出根不可用')
-    const relative = path.relative(await checkoutRootOf(repositoryPath), resolved.path)
-    if (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) throw new BindingRefused(ProjectErrorCode.InvalidInput, '工作树允许根落在仓库检出之内')
+    const allowedRoot = await localGitRoot({ binding, configuration, worktreesDir })
     return createLocalGitDevelopmentProvider({ bindingId: binding.id, repository: { externalId: text(configuration, 'repositoryExternalId'), path: repositoryPath }, allowedRoot })
   },
 }
@@ -336,6 +343,11 @@ export async function restoreProviders(
     const handle = account?.secretHandle
     let port: object
     try {
+      // 目录政策属于默认生产entry；同实现键的注入entry拥有自己的配置与输出根。
+      if (entry === LOCAL_GIT_ENTRY) {
+        const allowedRoot = await localGitRoot({ binding, configuration, worktreesDir: env.worktreesDir })
+        await preparePrivateWorktreeDirectories(env.worktreesDir, allowedRoot, env.lifetime?.signal)
+      }
       const cache = binding.implementationKey === 'development.github' ? env.development : undefined
       const key = JSON.stringify([binding.id, binding.implementationKey, Object.entries(configuration).sort(([a], [b]) => a.localeCompare(b)), account?.id, account?.platformFamily, account?.platformOrigin, account?.identityKind, account?.externalId, handle])
       port = cache?.cache.get(key) ?? await entry.create({
