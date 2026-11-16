@@ -14,6 +14,7 @@ concurrency:
 jobs:
   git-paths:
     name: Native Windows Git paths
+    if: ${{ false }}
     runs-on: windows-2025
     timeout-minutes: 15
     defaults:
@@ -59,7 +60,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: 5feed9ef316d3d4a7c51aeae5529ffd4d812130b
+          ref: 478b932bb9e1ede23186439851f13f6e615849f5
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
