@@ -8,13 +8,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-native-qualification
-  cancel-in-progress: true
+  group: windows-native-qualification-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   git-paths:
     name: Native Windows Git paths
-    if: ${{ false }}
     runs-on: windows-2025
     timeout-minutes: 15
     defaults:
@@ -24,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: 9cf1875dcf9deb6ac9aee1fa253d0a88e4bc79a3
+          ref: fa4a3784dc2d712f81d7e169de5109893a01cc93
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -51,6 +50,7 @@ jobs:
 
   private-data:
     name: Native Windows ordinary-user private data
+    if: ${{ false }}
     runs-on: windows-2025
     timeout-minutes: 15
     defaults:
