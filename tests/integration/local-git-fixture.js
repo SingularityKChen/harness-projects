@@ -148,7 +148,11 @@ export const worktreePaths = async (fixture) => (await git(['worktree', 'list', 
 /** 显式登记一个可操作的工作项：实体 + 当前工作区里 work_item 内容的规划投影（与 ui-model 的最终详情同口径：只有 work_item 内容可以开始工作）。
  *  裸 ID 的 Start Work 用例先经它登记，不依赖替身对悬空工作项的宽容（SQLite 的 `execution_context.work_item_id` 外键本来就拒绝）。
  *  和 `coreContextFor` 返回的 `storage` / `workspaceId` 配用。 */
-export async function registerWorkItem(storage, workspaceId, workItemId, content = { contentKind: 'work_item', title: workItemId, body: '' }) {
-  await storage.putEntity({ id: workItemId, kind: 'work_item' })
+export async function registerWorkItem(storage, workspaceId, workItemId, content = { contentKind: 'work_item', title: workItemId, body: '' }, identity = { id: `fixture-${workItemId}`, entityId: workItemId, bindingId: 'fixture-work-items', externalKind: 'issue', externalId: workItemId, role: 'primary' }) {
+  await storage.transaction(async (tx) => {
+    if (identity.bindingId === 'fixture-work-items') await tx.putProviderBinding({ id: 'fixture-work-items', workspaceId, domain: 'planning', implementationKey: 'fake', enabled: false, isDefault: false })
+    await tx.putEntity({ id: workItemId, kind: 'work_item', primaryIdentityId: identity.id })
+    await tx.putExternalIdentity(identity)
+  })
   await storage.putPlanningProjection(workspaceId, { workspaceId, entityId: workItemId, planningStatus: 'todo', revision: 1, content })
 }

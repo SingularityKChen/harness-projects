@@ -1,4 +1,5 @@
 import '../fixtures/resolution-preflight.mjs';
+import { seedIdentity } from '../contract/suites/storage-fixtures.js'
 
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -45,17 +46,17 @@ const rejects = (db, sql, message) => assert.throws(() => db.exec(sql), message)
 
 /** 满足全部外键的最小库。列清单显式写出：#126 给 provider_binding / workspace_binding 加了列，位置插入会静默错位。 */
 function seed(db) {
-  db.exec(`
+  db.exec(`BEGIN;
     INSERT INTO workspace VALUES ('ws-1', '工作区', 'provider_authoritative'); INSERT INTO workspace VALUES ('ws-2', '工作区 2', 'provider_authoritative');
     INSERT INTO connector_account (id, platform_family, platform_origin, identity_kind, external_id, display_name, secret_handle, connection_state)
       VALUES ('account-1', 'github', 'https://github.com', 'account', 'octo-1', '账号', NULL, 'connected');
     INSERT INTO provider_binding (id, implementation_key, connector_account_id) VALUES ('binding-1', 'fake', 'account-1');
     INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-1', 'binding-1', 'planning', 1, 1);
-    INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-2', 'binding-1', 'planning', 1, 1); INSERT INTO entity VALUES ('entity-1', 'work_item');
-    INSERT INTO entity VALUES ('entity-2', 'change_request'); INSERT INTO external_identity VALUES ('identity-1', 'entity-1', 'binding-1', 'issue', 'issue-1', 'primary');
+    INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-2', 'binding-1', 'planning', 1, 1); INSERT INTO entity (id,kind,primary_identity_id) VALUES ('entity-1', 'work_item','identity-1');
+    INSERT INTO entity (id,kind,primary_identity_id) VALUES ('entity-2', 'change_request','identity-cr'); INSERT INTO external_identity VALUES ('identity-cr','entity-2','binding-1','change_request','cr-2','primary'); INSERT INTO external_identity VALUES ('identity-1', 'entity-1', 'binding-1', 'issue', 'issue-1', 'primary');
     INSERT INTO project_item_membership VALUES ('ws-1', 'project-1', 'item-1', 'issue', 'issue-1', '2026-09-20T00:00:00Z', '2026-09-20T00:00:00Z');
     INSERT INTO planning_field_value VALUES ('ws-1', 'item-1', 'field-1', 'In Progress', '2026-09-20T00:00:02Z'); INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1', 'entity-1', 'in_progress', 'work_item', '标题', '正文', NULL, NULL, NULL, NULL, NULL, 1);
-  `)
+  COMMIT;`)
 }
 
 test('空库建出九张表，二次运行是 no-op', () => {
@@ -145,8 +146,7 @@ test('R2 / R3：字段值的列集合恰好等于声明的五个，定位键不�
 test('R7：external_identity.role 只有三个取值，且 ProjectV2Item 不是身份种类', () => {
   withDatabase((db) => {
     migrate(db); seed(db)
-    db.exec("UPDATE external_identity SET role = 'historical' WHERE id = 'identity-1'")
-    db.exec("UPDATE external_identity SET role = 'primary' WHERE id = 'identity-1'")
+    db.exec("BEGIN; UPDATE external_identity SET role = 'historical' WHERE id = 'identity-1'; UPDATE external_identity SET role = 'primary' WHERE id = 'identity-1'; COMMIT")
     rejects(db, "UPDATE external_identity SET role = 'owner' WHERE id = 'identity-1'", 'role 取值集合受 CHECK 约束（R7）')
     rejects(db, "INSERT INTO external_identity VALUES ('identity-9','entity-1','binding-1','project_item','PVTI_1','alias')", 'R1：ProjectV2Item 不得成为外部身份种类')
   })
@@ -157,8 +157,8 @@ test('R7：external_identity.role 只有三个取值，且 ProjectV2Item 不是�
 test('#195：repository 是 002 的合法身份种类，枚举外的种类（含 ProjectV2Item）仍由 CHECK 拒绝', () => {
   withDatabase((db) => {
     migrate(db); seed(db)
-    db.exec("INSERT INTO entity VALUES ('entity-repo', 'repository')")
-    db.exec("INSERT INTO external_identity VALUES ('identity-repo', 'entity-repo', 'binding-1', 'repository', 'repo-1', 'primary')")
+    db.exec("BEGIN; INSERT INTO entity (id,kind,primary_identity_id) VALUES ('entity-repo', 'repository','identity-repo')")
+    db.exec("INSERT INTO external_identity VALUES ('identity-repo', 'entity-repo', 'binding-1', 'repository', 'repo-1', 'primary'); COMMIT")
     assert.equal(db.prepare("SELECT external_kind AS kind FROM external_identity WHERE id = 'identity-repo'").get().kind, 'repository', 'repository 种类必须原样落库，不得被归一成别的种类')
     for (const kind of ['ProjectV2Item', 'Repository']) {
       assert.throws(() => db.exec(`INSERT INTO external_identity VALUES ('identity-bad', 'entity-1', 'binding-1', '${kind}', 'x', 'alias')`), /CHECK constraint failed/, `${kind} 必须由 external_kind 的 CHECK 拒绝（外键或唯一约束拒绝不算）`)
@@ -166,17 +166,30 @@ test('#195：repository 是 002 的合法身份种类，枚举外的种类（含
   })
 })
 
-test('每个实体至多一个 primary 身份（库层面）；恰好一个由写入生命周期保证', () => {
+test('直接 SQL 在提交时强制真实 primary，拒绝半组且允许晋升与完整清组', () => {
   withDatabase((db) => {
     migrate(db); seed(db)
     db.exec("INSERT INTO external_identity VALUES ('identity-2','entity-1','binding-1','draft','draft-1','alias')")
     rejects(db, "INSERT INTO external_identity VALUES ('identity-3','entity-1','binding-1','issue','issue-3','primary')", '同一实体至多一个 primary（identity.ts 的 activePrimary）')
-    db.exec("UPDATE external_identity SET role = 'historical' WHERE id = 'identity-1'")
-    db.exec("INSERT INTO external_identity VALUES ('identity-3','entity-1','binding-1','issue','issue-3','primary')")
-    assert.deepEqual(db.prepare("SELECT id FROM external_identity WHERE entity_id = 'entity-1' AND role = 'primary'").all().map((row) => row.id), ['identity-3'])
-    db.exec("UPDATE external_identity SET role = 'alias' WHERE id = 'identity-3'")
-    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM external_identity WHERE entity_id = 'entity-1' AND role = 'primary'").get().n, 0,
-      '库层面只保证至多一个：零个 primary 可插入，这正是「恰好一个」必须由生命周期保证的原因')
+    const snapshot = () => JSON.stringify([db.prepare('SELECT * FROM entity').all(), db.prepare('SELECT * FROM external_identity').all()])
+    for (const sql of [
+      "INSERT INTO entity (id,kind,primary_identity_id) VALUES (NULL,'work_item','missing')",
+      "INSERT INTO entity (kind,primary_identity_id) VALUES ('work_item','missing')",
+      "INSERT INTO entity (id,kind) VALUES ('zero','work_item')",
+      "UPDATE entity SET primary_identity_id = 'identity-2' WHERE id = 'entity-1'",
+      "UPDATE entity SET primary_identity_id = 'identity-1' WHERE id = 'entity-2'",
+      "UPDATE external_identity SET role = 'historical' WHERE id = 'identity-1'",
+      "DELETE FROM external_identity WHERE id = 'identity-1'",
+      "INSERT INTO entity (id,kind) VALUES ('internal','worktree'); INSERT INTO external_identity VALUES ('only-alias','internal','binding-1','worktree','internal','alias')",
+    ]) {
+      const before = snapshot(); db.exec('BEGIN')
+      assert.throws(() => db.exec(`${sql}; COMMIT`), /constraint failed/); db.exec('ROLLBACK')
+      assert.equal(snapshot(), before)
+    }
+    db.exec("BEGIN; UPDATE external_identity SET role='historical' WHERE id='identity-1'; UPDATE external_identity SET role='primary' WHERE id='identity-2'; UPDATE entity SET primary_identity_id='identity-2' WHERE id='entity-1'; COMMIT")
+    db.exec("BEGIN; INSERT INTO entity (id,kind,primary_identity_id) VALUES ('cleared','worktree','cleared-primary'); INSERT INTO external_identity VALUES ('cleared-primary','cleared','binding-1','worktree','cleared','primary'); COMMIT")
+    db.exec("BEGIN; DELETE FROM external_identity WHERE entity_id='cleared'; UPDATE entity SET primary_identity_id=NULL WHERE id='cleared'; COMMIT")
+    assert.equal(db.prepare("SELECT primary_identity_id FROM entity WHERE id='cleared'").get().primary_identity_id, null)
   })
 })
 
@@ -255,7 +268,7 @@ test('同一工作区里同一实体只有一行投影（storage 保证的那一
     assert.equal(count(), 1, '同一 (workspace, entity) 的第二行必须是更新')
     assert.equal(db.prepare("SELECT content_title FROM workspace_projection WHERE workspace_id = 'ws-1' AND entity_id = 'entity-1'").get().content_title, '更新标题')
     rejects(db, "INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1','entity-1','todo','change_request','另一个','正文',NULL,NULL,NULL,NULL,NULL,3)", /UNIQUE constraint failed: workspace_projection.workspace_id, workspace_projection.entity_id/)
-    db.exec("INSERT INTO entity VALUES ('entity-3','work_item')")
+    db.exec("BEGIN; INSERT INTO entity (id,kind,primary_identity_id) VALUES ('entity-3','work_item','identity-3'); INSERT INTO external_identity VALUES ('identity-3','entity-3','binding-1','issue','issue-3','primary'); COMMIT")
     db.exec("INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1','entity-3','todo','work_item','另一项','正文',NULL,NULL,NULL,NULL,NULL,1)")
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM workspace_projection WHERE workspace_id = 'ws-1'").get().n, 2, '不同实体各自保留一行')
   })
@@ -276,7 +289,7 @@ test('#27 验收 5：显式 schema 审查——没有列能存 token / key / pas
       'workspace_binding.workspace_id': '标识', 'workspace_binding.binding_id': '标识',
       'workspace_binding.domain': '枚举：能力域', 'workspace_binding.enabled': '标志', 'workspace_binding.is_default': '标志',
       'workspace_binding.configuration_json': '工作区挂载配置（闭集字段，值不是凭据材料）',
-      'entity.id': '标识', 'entity.kind': '枚举：实体种类',
+      'entity.id': '标识', 'entity.kind': '枚举：实体种类', 'entity.primary_identity_id': '标识：实体选中的外部主身份',
       'external_identity.id': '标识', 'external_identity.entity_id': '标识', 'external_identity.binding_id': '标识',
       'external_identity.external_kind': '枚举：身份种类', 'external_identity.external_id': '平台原样值', 'external_identity.role': '枚举：身份角色',
       'project_item_membership.workspace_id': '标识', 'project_item_membership.project_external_id': '平台原样值',
@@ -354,7 +367,7 @@ test('#133：投影缺字段展示列的旧 002 库在 migrate 之前以可执�
     const storage = createSqliteStorage(upper) // 列名按 SQLite 语义大小写不敏感：大写声明的合法库不得被误拒，三列事实照常往返
     const projection = { workspaceId: 'ws-u', entityId: 'e-u', planningStatus: 'todo', revision: 1, content: { contentKind: 'work_item', title: 'T', body: 'B' }, planningFields: { statusName: 'Todo', iterationTitle: 'S1', targetDate: '2026-10-01' } }
     try {
-      await storage.putWorkspace({ id: 'ws-u', name: 'U', statusPolicy: 'provider_authoritative' }); await storage.putEntity({ id: 'e-u', kind: 'work_item' }); await storage.putPlanningProjection('ws-u', projection)
+      await storage.putWorkspace({ id: 'ws-u', name: 'U', statusPolicy: 'provider_authoritative' }); await storage.putProviderBinding({ id: 'u', workspaceId: 'ws-u', domain: 'planning', implementationKey: 'fake', enabled: true, isDefault: true }); await seedIdentity(storage, { id: 'i-u', entityId: 'e-u', bindingId: 'u', externalKind: 'issue', externalId: 'e-u', role: 'primary' }); await storage.putPlanningProjection('ws-u', projection)
       assert.deepEqual([await storage.getPlanningProjection('ws-u', 'e-u'), await storage.listPlanningProjections('ws-u')], [projection, [projection]])
     } finally { storage.close() }
   } finally {
@@ -371,8 +384,7 @@ test('SQLite scoped replacement SQL rejection preserves outer writes and the old
   try {
     await storage.putWorkspace(workspace)
     await storage.putProviderBinding({ id: 'binding', workspaceId: 'ws', domain: 'planning', implementationKey: 'fake', enabled: true, isDefault: true })
-    for (const id of ['old', 'valid', 'bad']) await storage.putEntity({ id, kind: 'work_item' })
-    await storage.putExternalIdentity({ id: 'identity-old', entityId: 'old', bindingId: 'binding', externalKind: 'issue', externalId: 'old', role: 'primary' })
+    for (const id of ['old', 'valid', 'bad']) await seedIdentity(storage, { id: `identity-${id}`, entityId: id, bindingId: 'binding', externalKind: 'issue', externalId: id, role: 'primary' })
     await storage.putPlanningProjection('ws', projection('old'))
     const rows = await storage.listPlanningProjections('ws')
     const rejected = (tx) => assert.rejects(tx.replacePlanningProjections({ workspaceId: 'ws', bindingId: 'binding' },

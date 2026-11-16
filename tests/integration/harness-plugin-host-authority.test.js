@@ -53,10 +53,9 @@ function attempts(file) {
 async function executionSeed(file, fixture) {
   await seed(file, PROVIDER_CATALOG, async (storage) => {
     await seedWorkspace(storage)
-    for (const id of ['wi-1', 'wi-2']) await registerWorkItem(storage, WORKSPACE, id)
     const bound = await createWorkspaceSetup(storage).bindRepository({ workspaceId: WORKSPACE, repositoryId: 'repo-alpha', references: [{ domain: 'development', implementationKey: 'development.local-git', configuration: { repositoryExternalId: 'repo-alpha', repositoryPath: fixture.repositoryPath } }] })
     assert.equal(bound.ok, true)
-    for (const id of ['wi-1', 'wi-2']) await storage.putExternalIdentity({ id: `${id}-identity`, entityId: id, bindingId: bound.value.bindingIds[0], externalKind: 'issue', externalId: id, role: 'primary' })
+    for (const id of ['wi-1', 'wi-2']) await registerWorkItem(storage, WORKSPACE, id, undefined, { id: `${id}-identity`, entityId: id, bindingId: bound.value.bindingIds[0], externalKind: 'issue', externalId: id, role: 'primary' })
   })
 }
 const start = (key, item = 'wi-1', actorRef = forged) => ({ task: 'Synthetic explicit task', actorRef, idempotencyKey: key, workItemId: item, repositoryId: 'repo-alpha' })

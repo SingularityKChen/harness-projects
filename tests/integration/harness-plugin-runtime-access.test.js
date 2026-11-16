@@ -35,7 +35,7 @@ async function open(t, watchIntervalMs = 5) {
     await storage.putBindingConfiguration({ ref: { workspaceId: WORKSPACE, bindingId: '00000000-0000-4000-8000-0000000000b1', domain: 'planning' }, configuration: { projectNodeId: fixtureProjectRef('00000000-0000-4000-8000-0000000000b1').externalId } })
     await storage.putProviderBinding(mount(development.gate.bindingId, 'development', 'harness.fake'))
     await storage.putProviderBinding(mount(delivery.gate.bindingId, 'delivery', 'harness.fake'))
-    await registerRepository(storage, defaultIdFactory, WORKSPACE, 'repo-alpha', [development.gate.bindingId])
+    await storage.transaction(tx => registerRepository(tx, defaultIdFactory, WORKSPACE, 'repo-alpha', [development.gate.bindingId]))
   })
   const host = await createHostComposition({ dataPath, workspaceId: WORKSPACE, catalog, resolveCredential: async () => undefined, watchIntervalMs })
   const installed = await installHostRemote({ invocation: { peer: { id: 'runtime-peer' } }, provide: () => () => {}, typert: { register: () => () => {} } }, host)

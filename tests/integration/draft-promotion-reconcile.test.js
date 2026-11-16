@@ -207,7 +207,7 @@ for (const adapter of ['Fake Storage', 'SQLite']) {
   test(`${adapter}: persisted issue alias before draft primary promotes without depending on row order`, async t => {
     const w = await setup(t, adapter), entityId = 'alias-first-entity', bindingId = w.providers.planning.bindingId
     await w.storage.transaction(async tx => {
-      await tx.putEntity({ id: entityId, kind: 'work_item' })
+      await tx.putEntity({ id: entityId, kind: 'work_item', primaryIdentityId: 'later-draft-primary' })
       await tx.putExternalIdentity({ id: 'earlier-issue-alias', entityId, bindingId, externalKind: 'issue', externalId: 'issue-promoted', role: 'alias' })
       await tx.putExternalIdentity({ id: 'later-draft-primary', entityId, bindingId, externalKind: 'draft', externalId: 'draft-alias-first', role: 'primary' })
       const membership = await tx.getMembership(workspace.id, w.draft.membership.externalId)
@@ -247,7 +247,11 @@ for (const adapter of ['Fake Storage', 'SQLite']) {
         item.content = { kind: 'redacted', reason: 'permission_denied' }
       }
       if (control.endsWith('draft')) {
-        await w.storage.putExternalIdentity({ ...w.original, role: control.startsWith('historical') ? 'historical' : 'alias' })
+        await w.storage.transaction(async (tx) => {
+          await tx.putExternalIdentity({ ...w.original, role: control.startsWith('historical') ? 'historical' : 'alias' })
+          await tx.putExternalIdentity({ ...w.original, id: 'other-primary', externalKind: 'issue', externalId: 'other-issue', role: 'primary' })
+          await tx.putEntity({ id: w.original.entityId, kind: 'work_item', primaryIdentityId: 'other-primary' })
+        })
       }
       assert.equal((await w.core.commands.refreshPlanning()).ok, true)
       const binding = control === 'different binding' ? 'planning-other' : w.providers.planning.bindingId

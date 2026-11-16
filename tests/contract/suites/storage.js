@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { storageExecutionSuite } from './storage-execution.js'
-import { binding, developmentBinding, projection, seedEntity, seedWorkspace, WORKSPACE, workspace } from './storage-fixtures.js'
+import { binding, developmentBinding, projection, seedEntity, seedIdentity, seedWorkspace, WORKSPACE, workspace } from './storage-fixtures.js'
 import { storageSyncSuite } from './storage-sync.js'
 
 export { storageExecutionSuite, storageSyncSuite }
@@ -119,16 +119,15 @@ export function storageFoundationSuite(adapter, register = test) {
     const storage = makeStorage()
     await seedWorkspace(storage)
     await storage.putProviderBinding(binding('binding-1'))
-    await storage.putEntity({ id: 'entity-1', kind: 'work_item' })
     await seedEntity(storage, 'entity-9')
     const identity = { id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' }
-    await storage.putExternalIdentity(identity)
+    await seedIdentity(storage, identity)
     await storage.putExternalIdentity({ ...identity, id: 'identity-2', entityId: 'entity-9' })
     const found = await storage.findExternalIdentity('binding-1', 'issue', 'issue-1')
     assert.equal(found?.id, 'identity-1')
     assert.equal(found?.entityId, 'entity-1')
     assert.equal((await storage.listIdentitiesForEntity('entity-1')).length, 1)
-    assert.deepEqual(await storage.listIdentitiesForEntity('entity-9'), [])
+    assert.deepEqual((await storage.listIdentitiesForEntity('entity-9')).map((row) => row.id), ['fixture-entity-9'])
   })
 
   register(`${label}：规划投影与仓库按工作区隔离可读回`, async () => {
@@ -140,8 +139,7 @@ export function storageFoundationSuite(adapter, register = test) {
     assert.deepEqual((await storage.listPlanningProjections(WORKSPACE)).map((p) => p.entityId), ['entity-1'])
     assert.deepEqual(await storage.listPlanningProjections('ws-other'), [])
     await storage.putProviderBinding(binding('binding-1'))
-    await seedEntity(storage, 'entity-9')
-    await storage.putExternalIdentity({ id: 'identity-9', entityId: 'entity-9', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-1', role: 'primary' })
+    await seedIdentity(storage, { id: 'identity-9', entityId: 'entity-9', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-1', role: 'primary' })
     await storage.putRepository({ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'identity-9' })
     assert.deepEqual((await storage.listRepositories(WORKSPACE)).map((r) => r.id), ['repo-1'])
   })
@@ -159,10 +157,8 @@ export function storageFoundationSuite(adapter, register = test) {
     await storage.putProviderBinding(binding('binding-1'))
     // 同工作区第二个启用的 planning 挂载会被拒绝（不变量 1），第二条连接挂在 development 域。
     await storage.putProviderBinding(developmentBinding('binding-2'))
-    await storage.putEntity({ id: 'entity-1', kind: 'work_item' })
-    await storage.putEntity({ id: 'entity-2', kind: 'work_item' })
-    await storage.putExternalIdentity({ id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
-    await storage.putExternalIdentity({ id: 'identity-2', entityId: 'entity-2', bindingId: 'binding-2', externalKind: 'issue', externalId: 'issue-2', role: 'primary' })
+    await seedIdentity(storage, { id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
+    await seedIdentity(storage, { id: 'identity-2', entityId: 'entity-2', bindingId: 'binding-2', externalKind: 'issue', externalId: 'issue-2', role: 'primary' })
     await storage.putPlanningProjection(WORKSPACE, projection)
     await storage.putPlanningProjection(WORKSPACE, { ...projection, entityId: 'entity-2' })
     await storage.replacePlanningProjections({ workspaceId: WORKSPACE, bindingId: 'binding-1' }, [])
@@ -172,9 +168,8 @@ export function storageFoundationSuite(adapter, register = test) {
   register(`${label}：replace 同键投影完整覆盖状态与内容且仅保留一行`, async () => {
     const storage = makeStorage()
     await seedWorkspace(storage)
-    await seedEntity(storage, 'entity-1')
     await storage.putProviderBinding(binding('binding-1'))
-    await storage.putExternalIdentity({
+    await seedIdentity(storage, {
       id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1',
       externalKind: 'issue', externalId: 'issue-1', role: 'primary',
     })
@@ -198,8 +193,7 @@ export function storageFoundationSuite(adapter, register = test) {
     const storage = makeStorage()
     await seedWorkspace(storage)
     await storage.putProviderBinding(binding('binding-1'))
-    await seedEntity(storage, 'entity-1')
-    await storage.putExternalIdentity({ id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
+    await seedIdentity(storage, { id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
     await storage.putPlanningProjection(WORKSPACE, projection)
     await storage.replacePlanningProjections({ workspaceId: WORKSPACE, bindingId: 'binding-1' }, [])
     assert.deepEqual(await storage.listPlanningProjections(WORKSPACE), [], '收敛把作用域内的投影移除')

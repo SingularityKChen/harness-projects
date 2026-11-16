@@ -200,9 +200,10 @@ for (const label of STORAGES) {
       if (decoy !== 'missing') {
         const anchor = await w.store.storage.findExternalIdentity(w.local.bindingId, 'repository', REPOSITORY)
         const entityId = decoy === 'historical' ? anchor.entityId : newEntityId()
+        const identityId = newExternalIdentityId()
         await w.store.storage.transaction(async (tx) => {
-          if (decoy === 'other-entity') await tx.putEntity({ id: entityId, kind: 'repository' })
-          await tx.putExternalIdentity({ id: newExternalIdentityId(), entityId, bindingId: strangers[0].bindingId,
+          if (decoy === 'other-entity') await tx.putEntity({ id: entityId, kind: 'repository', primaryIdentityId: identityId })
+          await tx.putExternalIdentity({ id: identityId, entityId, bindingId: strangers[0].bindingId,
             externalKind: 'repository', externalId: REPOSITORY, role: decoy === 'historical' ? 'historical' : 'primary' })
         })
       }

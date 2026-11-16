@@ -1,4 +1,5 @@
 import '../fixtures/resolution-preflight.mjs'
+import { replacePrimary } from '../contract/suites/storage-fixtures.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { composeCore, issueAuthorityReadAccess, observeIssueAuthority, issueSourceReadAccess } from '@harness-projects/core'
@@ -57,7 +58,7 @@ test('latest started wins and primary/membership/repository A→B→A changes fe
     h.page(async input => { const id = ++round === 1 ? 'old' : 'new'; if (id === 'old') { entered.resolve(); await release.promise } return providerOk({ source: { ...input, repository: repo('alpha') }, items: [h.link(id)], nextCursor: undefined }) })
     const old = h.refresh(); await entered.promise
     if (mutation === 'race') await h.refresh()
-    else if (mutation === 'primary') { const identity = (await h.p.storage.listIdentitiesForEntity(h.scope.workItemId)).find(i => i.role === 'primary'); await h.p.storage.putExternalIdentity({ ...identity, role: 'historical' }); await h.p.storage.putExternalIdentity(identity) }
+    else if (mutation === 'primary') { const identity = (await h.p.storage.listIdentitiesForEntity(h.scope.workItemId)).find(i => i.role === 'primary'); const alternate = { ...identity, id: crypto.randomUUID(), externalKind: 'draft' }; await replacePrimary(h.p.storage, identity, alternate); await replacePrimary(h.p.storage, alternate, identity) }
     else if (mutation === 'membership') { const m = (await h.p.storage.listMemberships(h.workspaceId, h.p.planning.state.projects[0].ref.externalId))[0]; await h.p.storage.putMembership({ ...m, contentExternalId: 'other' }); await h.p.storage.putMembership(m) }
     else { const projection = await h.p.storage.getPlanningProjection(h.workspaceId, h.scope.workItemId); await h.p.storage.putPlanningProjection(h.workspaceId, { ...projection, content: { contentKind: 'redacted', reason: 'permission_denied' } }); await h.p.storage.putPlanningProjection(h.workspaceId, projection) }
     release.resolve(); const value = await old; assert.equal(value.links.some(l => l.title === 'actual old'), false)
@@ -67,10 +68,9 @@ test('latest started wins and primary/membership/repository A→B→A changes fe
 test('dispatch rejects wrong primary, membership, redaction and policy before any target read', async () => {
   for (const fault of ['historical', 'binding', 'draft', 'membership', 'redacted', 'policy']) {
     const h = await fixture(), ids = await h.p.storage.listIdentitiesForEntity(h.scope.workItemId), primary = ids.find(i => i.role === 'primary')
-    if (fault === 'historical') await h.p.storage.putExternalIdentity({ ...primary, role: 'historical' })
+    if (fault === 'historical') await replacePrimary(h.p.storage, primary, { ...primary, id: crypto.randomUUID(), externalKind: 'draft' })
     if (fault === 'binding' || fault === 'draft') {
-      await h.p.storage.putExternalIdentity({ ...primary, role: 'historical' })
-      await h.p.storage.putExternalIdentity({ ...primary, id: crypto.randomUUID(), externalKind: fault === 'draft' ? 'draft' : 'issue', bindingId: fault === 'binding' ? h.p.development.gate.bindingId : primary.bindingId })
+      await replacePrimary(h.p.storage, primary, { ...primary, id: crypto.randomUUID(), externalKind: fault === 'draft' ? 'draft' : 'issue', bindingId: fault === 'binding' ? h.p.development.gate.bindingId : primary.bindingId })
     }
     if (fault === 'membership') { const m = (await h.p.storage.listMemberships(h.workspaceId, h.p.planning.state.projects[0].ref.externalId)).find(m => m.contentExternalId === primary.externalId); await h.p.storage.putMembership({ ...m, contentExternalId: 'other' }) }
     if (fault === 'redacted') { const projection = await h.p.storage.getPlanningProjection(h.workspaceId, h.scope.workItemId); await h.p.storage.putPlanningProjection(h.workspaceId, { ...projection, content: { contentKind: 'redacted', reason: 'permission_denied' } }) }
@@ -100,7 +100,7 @@ test('all page boundaries refuse confirmed zero and registered repository revoca
   const h = await fixture(), entered = gate(), release = gate(), actual = h.p.development.getChangeRequestByNativeIdentity
   h.p.development.getChangeRequestByNativeIdentity = async input => { const value = await actual(input); entered.resolve(); await release.promise; return value }
   const pending = h.refresh(); await entered.promise
-  const ref = await h.p.storage.findExternalIdentity(h.p.development.gate.bindingId, 'repository', 'repo-alpha'); await h.p.storage.putExternalIdentity({ ...ref, role: 'historical' })
+  const ref = await h.p.storage.findExternalIdentity(h.p.development.gate.bindingId, 'repository', 'repo-alpha'); await replacePrimary(h.p.storage, ref, { ...ref, id: crypto.randomUUID(), externalId: 'other-repository' }, 'repository')
   release.resolve(); assert.deepEqual((await pending).links, []); assert.deepEqual((await h.read()).links, [])
 })
 test('delivery denial invalidates native receipt; native recovery does not clear persisted delivery health', async () => {
@@ -220,7 +220,7 @@ for (const changed of ['primary', 'membership', 'projection']) test('a committed
     return providerErr(providerError('permission_denied', 'late source denial'))
   }
   const pending = h.refresh(); await entered.promise
-  if (changed === 'primary') { const identity = (await h.p.storage.listIdentitiesForEntity(h.scope.workItemId)).find(i => i.role === 'primary'); await h.p.storage.putExternalIdentity({ ...identity, role: 'historical' }); await h.p.storage.putExternalIdentity(identity) }
+  if (changed === 'primary') { const identity = (await h.p.storage.listIdentitiesForEntity(h.scope.workItemId)).find(i => i.role === 'primary'); const alternate = { ...identity, id: crypto.randomUUID(), externalKind: 'draft' }; await replacePrimary(h.p.storage, identity, alternate); await replacePrimary(h.p.storage, alternate, identity) }
   if (changed === 'membership') { const member = (await h.p.storage.listMemberships(h.workspaceId, h.p.planning.state.projects[0].ref.externalId))[0]; await h.p.storage.putMembership({ ...member, contentExternalId: 'other' }); await h.p.storage.putMembership(member) }
   if (changed === 'projection') { const projection = await h.p.storage.getPlanningProjection(h.workspaceId, h.scope.workItemId); await h.p.storage.putPlanningProjection(h.workspaceId, projection) }
   release.resolve(); assert.deepEqual((await pending).links, [])

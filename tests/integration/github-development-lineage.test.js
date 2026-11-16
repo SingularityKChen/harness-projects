@@ -160,7 +160,7 @@ const assertPlanningUnchanged = async (w, before) => {
   assert.deepEqual(identities.filter((row) => ids.has(row.id)), before.identities)
   const added = identities.filter((row) => !ids.has(row.id))
   assert.equal(added.length, 1, '只新增本次确认 PR 的 Development 身份')
-  const { id, ...row } = added[0]
+  const { id, registered, ...row } = added[0]
   const entityId = (await w.snapshot()).sets.find((set) => set.kind === 'change_request').nodes.find((node) => node.externalId === RECORDED_PR.id).entityId
   assert.ok(id)
   assert.deepEqual(row, { entity_id: entityId, binding_id: w.repositoryRef.bindingId, external_kind: 'change_request', external_id: RECORDED_PR.id,

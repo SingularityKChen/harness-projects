@@ -5,6 +5,7 @@
  * 失败注入走测试侧的 Storage 包装，每个注入点都有命中计数与无故障正控；不用 SQLite TRIGGER（`RAISE(ABORT)` 的回滚会把触发器自己写的命中记录一并回滚）。
  */
 import '../fixtures/resolution-preflight.mjs';
+import { seedIdentity } from '../contract/suites/storage-fixtures.js'
 
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -162,7 +163,9 @@ for (const [label, makeStorage] of ADAPTERS) {
   test(`${label}：Core 的目标预检只读投影，不依赖展示 identity、不调 Provider 或推进修订`, async () => {
     const w = await setup(makeStorage); const id = 'visible-without-identity'; const contextId = contextIdFor(w.workspaceId, id, REQUEST.repositoryId)
     await registerWorkItem(w.storage, w.workspaceId, id)
-    assert.equal(await w.core.queries.getItemDetail(id), undefined, '展示查询要求 primary identity，不能用它代替准入预检')
+    const identities = w.storage.listIdentitiesForEntity.bind(w.storage)
+    w.storage.listIdentitiesForEntity = async (entityId) => { if (entityId === id) throw new Error('display identity unavailable'); return identities(entityId) }
+    await assert.rejects(w.core.queries.getItemDetail(id), /display identity unavailable/, '展示身份读失败不能替代投影准入预检')
     const before = await world(w.providers, w.storage, w.workspaceId, contextId)
     let calls = 0; const undo = []
     for (const provider of [w.providers.planning, w.providers.development, w.providers.delivery, w.providers.execution]) {
@@ -370,8 +373,7 @@ for (const [label, makeStorage] of ADAPTERS) {
   test(`${label}：挂载冲突预检——同工作区同 id 已挂在别的外部身份上，结构化 conflict、原挂载不变、零外部写入`, async () => {
     const { providers, storage, core, workspaceId, pick } = await setup(makeStorage)
     await storage.putProviderBinding({ id: 'binding-other', workspaceId, domain: 'development', implementationKey: 'other', enabled: false, isDefault: false })
-    await storage.putEntity({ id: 'repo-entity-x', kind: 'repository' })
-    await storage.putExternalIdentity({ id: 'repo-identity-x', entityId: 'repo-entity-x', bindingId: 'binding-other', externalKind: 'repository', externalId: REQUEST.repositoryId, role: 'primary' })
+    await seedIdentity(storage, { id: 'repo-identity-x', entityId: 'repo-entity-x', bindingId: 'binding-other', externalKind: 'repository', externalId: REQUEST.repositoryId, role: 'primary' }, 'repository')
     const mount = { id: REQUEST.repositoryId, workspaceId, externalIdentityId: 'repo-identity-x' }
     await storage.putRepository(mount)
     const workItemId = pick('work_item'); const contextId = contextIdFor(workspaceId, workItemId, REQUEST.repositoryId); const before = await world(providers, storage, workspaceId, contextId)

@@ -92,6 +92,10 @@ const RELATION_SOURCES: readonly string[] = Object.values(domain.RelationSource)
 const isActiveContext = (status: domain.ExecutionContextStatus): boolean =>
   status !== domain.ExecutionContextStatus.Closed && status !== domain.ExecutionContextStatus.Failed
 type MemoryTransactionToken = { owner: MemoryStorage; active: boolean; parent?: MemoryTransactionToken | undefined }
+function assertEntitySelection(record: domain.Entity): void {
+  if (record.id == null) throw new Error('entity id must not be null')
+  if (!Object.values(domain.EntityKind).includes(record.kind) || (record.primaryIdentityId == null && domain.entityKindRequiresPrimaryIdentity(record.kind))) throw new Error('entity kind requires a primary external identity')
+}
 const TRANSACTION_SCOPE = new AsyncLocalStorage<MemoryTransactionToken>()
 function activeTransaction(owner: MemoryStorage): boolean {
   for (let token = TRANSACTION_SCOPE.getStore(); token; token = token.parent) if (token.owner === owner && token.active) return true
@@ -143,6 +147,19 @@ export class MemoryStorage implements cap.Storage {
       if (!this.#data.accounts.some((candidate) => candidate.id === link.accountId)) throw new RangeError('connector account does not exist')
     }
     this.#data = structuredClone(this.#data)
+    this.#assertIdentityGroups()
+  }
+  #assertIdentityGroups(): void {
+    for (const entity of this.#data.entities) {
+      assertEntitySelection(entity)
+      const selected = entity.primaryIdentityId
+      const identities = this.#data.identities.filter((identity) => identity.entityId === entity.id)
+      if (selected != null && !identities.some((identity) => identity.id === selected && identity.role === domain.IdentityRole.Primary)) throw new Error('selected primary external identity does not exist')
+      if (identities.filter((identity) => identity.role === domain.IdentityRole.Primary).length > 1) throw new Error('entity already has a primary external identity')
+    }
+    for (const identity of this.#data.identities) {
+      if (this.#data.entities.find((entity) => entity.id === identity.entityId)?.primaryIdentityId == null) throw new Error('external identity entity has no selected primary')
+    }
   }
   #assertActive(): void {
     if (this.#transactionScope && !this.#token?.active) throw new Error('事务作用域已结算：tx.* 只能在所属事务的 work 内使用（常见成因是漏写 await）')
@@ -151,15 +168,24 @@ export class MemoryStorage implements cap.Storage {
     this.#assertActive()
     return this.#transactionScope ? this.#mutate(() => structuredClone(fn()), false) : structuredClone(fn())
   }
-  #mutate<T>(fn: () => T | PromiseLike<T>, write = true): Promise<T> {
+  #mutate<T>(fn: () => T | PromiseLike<T>, write = true, identityWrite = false): Promise<T> {
     this.#assertActive()
     const run = this.#queue.then(async () => {
       this.#assertActive()
+      const dirty = this.#state.dirty
       if (this.#transactionScope && write) this.#state.dirty = true
-      const result = fn()
-      const value = result && typeof (result as PromiseLike<T>).then === 'function' ? await result : result
-      if (!this.#transactionScope && write) this.#state.commits++
-      return value as T
+      const before = !this.#transactionScope && identityWrite ? structuredClone({ entities: this.#data.entities, identities: this.#data.identities }) : undefined
+      try {
+        const result = fn()
+        const value = result && typeof (result as PromiseLike<T>).then === 'function' ? await result : result
+        if (before !== undefined) this.#assertIdentityGroups()
+        if (!this.#transactionScope && write) this.#state.commits++
+        return value as T
+      } catch (error) {
+        if (before !== undefined) Object.assign(this.#data, before)
+        if (identityWrite) this.#state.dirty = dirty
+        throw error
+      }
     })
     this.#queue = run.then(() => undefined, () => undefined); return run
   }
@@ -171,7 +197,7 @@ export class MemoryStorage implements cap.Storage {
       const token: MemoryTransactionToken = { owner: this, active: true, parent: TRANSACTION_SCOPE.getStore() }
       const staged = new MemoryStorage(this.#data, true, this.#policy, token)
       let result
-      try { result = await TRANSACTION_SCOPE.run(token, () => work(staged)) }
+      try { result = await TRANSACTION_SCOPE.run(token, () => work(staged)); staged.#assertIdentityGroups() }
       finally { token.active = false }
       this.#data = staged.#data
       if (staged.#state.dirty) this.#state.commits++
@@ -296,7 +322,12 @@ export class MemoryStorage implements cap.Storage {
   }) }
   async putEntity(record: domain.Entity): Promise<void> {
     record = structuredClone(record)
-    return this.#mutate(() => upsert(this.#data.entities, record, (e) => e.id === record.id))
+    return this.#mutate(() => {
+      const selected = record.primaryIdentityId === undefined ? this.#data.entities.find((entity) => entity.id === record.id)?.primaryIdentityId : record.primaryIdentityId
+      const entity = { id: record.id, kind: record.kind, primaryIdentityId: selected ?? null }
+      assertEntitySelection(entity)
+      upsert(this.#data.entities, entity, (e) => e.id === record.id)
+    }, true, true)
   }
   async putExternalIdentity(record: domain.ExternalIdentity): Promise<void> {
     record = structuredClone(record)
@@ -315,7 +346,7 @@ export class MemoryStorage implements cap.Storage {
       if (record.role === domain.IdentityRole.Primary && primaryTaken) throw new Error('entity already has a primary external identity')
       if (existing === undefined) this.#data.identities.push(record)
       else this.#data.identities[index] = { ...record, id: existing.id, entityId: existing.entityId }
-    })
+    }, true, true)
   }
   async findExternalIdentity(bindingId: domain.ProviderBindingId, externalKind: domain.ExternalIdentityKind, externalId: string): Promise<domain.ExternalIdentity | undefined> { return this.#read(() => {
     return this.#data.identities.find((i) => i.bindingId === bindingId && i.externalKind === externalKind && i.externalId === externalId)

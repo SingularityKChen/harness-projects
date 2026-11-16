@@ -1,3 +1,4 @@
+import { seedEntity, seedIdentity } from './storage-fixtures.js'
 /**
  * 执行组：执行上下文与运行、关系、写尝试。两个实现（内存替身与 SQLite）都跑本组——SQLite 侧由
  * `tests/contract/storage-contract.test.js` 的装配注册（L6 起；身份面另有两组）。
@@ -28,10 +29,9 @@ export async function seedExecutionPrereqs(storage) {
   await storage.putWorkspace({ id: WORKSPACE, name: '工作区', statusPolicy: 'provider_authoritative' })
   await storage.putWorkspace({ id: 'ws-other', name: '另一个工作区', statusPolicy: 'provider_authoritative' })
   await storage.putProviderBinding({ id: 'binding-1', workspaceId: WORKSPACE, domain: 'planning', implementationKey: 'fake', enabled: true, isDefault: false })
-  await storage.putEntity({ id: 'entity-1', kind: 'work_item' })
-  await storage.putEntity({ id: 'entity-2', kind: 'work_item' })
-  await storage.putEntity({ id: 'repo-entity-1', kind: 'repository' })
-  await storage.putExternalIdentity({ id: 'repo-identity-1', entityId: 'repo-entity-1', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-1', role: 'primary' })
+  await seedIdentity(storage, { id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
+  await seedEntity(storage, 'entity-2')
+  await seedIdentity(storage, { id: 'repo-identity-1', entityId: 'repo-entity-1', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-1', role: 'primary' }, 'repository')
   await storage.putRepository({ id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'repo-identity-1' })
 }
 
@@ -307,8 +307,7 @@ export function storageExecutionSuite(adapter, register = test) {
     const storage = makeStorage()
     await seedExecutionPrereqs(storage)
     for (const n of [2, 3]) {
-      await storage.putEntity({ id: `repo-entity-${n}`, kind: 'repository' })
-      await storage.putExternalIdentity({ id: `repo-identity-${n}`, entityId: `repo-entity-${n}`, bindingId: 'binding-1', externalKind: 'repository', externalId: `repo-${n}`, role: 'primary' })
+      await seedIdentity(storage, { id: `repo-identity-${n}`, entityId: `repo-entity-${n}`, bindingId: 'binding-1', externalKind: 'repository', externalId: `repo-${n}`, role: 'primary' }, 'repository')
     }
     const mount = { id: 'repo-1', workspaceId: WORKSPACE, externalIdentityId: 'repo-identity-1' }
     const second = { id: 'repo-2', workspaceId: WORKSPACE, externalIdentityId: 'repo-identity-2' }
@@ -316,7 +315,7 @@ export function storageExecutionSuite(adapter, register = test) {
     await storage.putRepository(second)
     await assert.rejects(storage.putRepository({ ...mount, externalIdentityId: 'repo-identity-3' }), '同 (工作区, id) 换外部身份必须被拒绝')
     await assert.rejects(storage.putRepository({ ...mount, id: 'repo-9' }), '同工作区同外部身份换 id 必须被拒绝')
-    await storage.putExternalIdentity({ id: 'branch-identity-4', entityId: 'entity-2', bindingId: 'binding-1', externalKind: 'branch', externalId: 'repo-4', role: 'primary' })
+    await storage.putExternalIdentity({ id: 'branch-identity-4', entityId: 'entity-2', bindingId: 'binding-1', externalKind: 'branch', externalId: 'repo-4', role: 'alias' })
     await assert.rejects(storage.putRepository({ id: 'repo-4', workspaceId: WORKSPACE, externalIdentityId: 'branch-identity-4' }), /not a repository identity/, '挂载必须引用 repository 种类的身份（TD-004）')
     assert.deepEqual(await storage.listRepositories(WORKSPACE), [mount, second], '被拒绝的写入不得覆盖或追加挂载，同值重复登记不得产生第二行')
   })
@@ -325,8 +324,7 @@ export function storageExecutionSuite(adapter, register = test) {
     const storage = makeStorage()
     await seedExecutionPrereqs(storage)
     await storage.putExecutionContext({ id: 'context-1', workspaceId: WORKSPACE, workItemId: 'entity-1', repositoryId: 'repo-1', status: 'ready', branchExternalId: undefined, worktreeExternalId: undefined, provisioningStartedAt: undefined })
-    await storage.putEntity({ id: 'repo-entity-9', kind: 'repository' })
-    await storage.putExternalIdentity({ id: 'repo-identity-9', entityId: 'repo-entity-9', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-9', role: 'primary' })
+    await seedIdentity(storage, { id: 'repo-identity-9', entityId: 'repo-entity-9', bindingId: 'binding-1', externalKind: 'repository', externalId: 'repo-9', role: 'primary' }, 'repository')
     await storage.putRepository({ id: 'repo-1', workspaceId: 'ws-other', externalIdentityId: 'repo-identity-9' })
     assert.deepEqual((await storage.listRepositories(WORKSPACE)).map((r) => [r.id, r.workspaceId]), [['repo-1', WORKSPACE]], '第二个工作区的挂载不得搬走第一个')
     assert.deepEqual((await storage.listRepositories('ws-other')).map((r) => [r.id, r.workspaceId]), [['repo-1', 'ws-other']])

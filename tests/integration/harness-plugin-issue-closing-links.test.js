@@ -22,7 +22,7 @@ async function open(t) {
   const flags = { deny: undefined, offline: false, pages: false, hold: undefined }
   await seed(dataPath, PROVIDER_CATALOG, async storage => {
     await seedWorkspace(storage); await seedPlanning(storage); await seedRepositoryMount(storage, 'development-native', 'development.github')
-    await registerRepository(storage, { entityId: randomUUID, externalIdentityId: randomUUID }, WORKSPACE, REPOSITORY_MOUNTS['development.github'][1].repositoryExternalId, ['development-native'])
+    await storage.transaction(tx => registerRepository(tx, { entityId: randomUUID, externalIdentityId: randomUUID }, WORKSPACE, REPOSITORY_MOUNTS['development.github'][1].repositoryExternalId, ['development-native']))
   })
   const fetch = async (url, init) => {
     const request = JSON.parse(init.body), { operationName: op, variables: v } = request; requests.push(request)

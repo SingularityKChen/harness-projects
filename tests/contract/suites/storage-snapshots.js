@@ -72,11 +72,13 @@ export function storageSnapshotSuite({ label, makeStorage }, register = test) {
   }
   register(`${label}：观察与实体在入队前捕获，已提交入参不留别名`, async (t) => {
     const storage = makeStorage(policy()); t.after(() => storage.close?.()); await seed(storage)
-    const entity = { id: 'captured-entity', kind: 'work_item' }, event = observation('captured-observation')
-    const entityWrite = storage.putEntity(entity), eventWrite = storage.recordObservation(event)
-    entity.id = 'changed'; event.observation.dedupeKey = 'changed'; event.observation.subject.externalId = 'changed'
+    const entity = { id: 'captured-entity', kind: 'work_item', primaryIdentityId: 'captured-identity' }, event = observation('captured-observation')
+    const entityWrite = storage.transaction(async (tx) => {
+      const pending = tx.putEntity(entity); entity.id = 'changed'; await pending
+      await tx.putExternalIdentity({ ...identity, id: 'captured-identity', externalId: 'captured-issue', entityId: 'captured-entity' })
+    }), eventWrite = storage.recordObservation(event)
+    event.observation.dedupeKey = 'changed'; event.observation.subject.externalId = 'changed'
     await entityWrite; assert.equal(await eventWrite, true)
-    await storage.putExternalIdentity({ ...identity, id: 'captured-identity', externalId: 'captured-issue', entityId: 'captured-entity' })
     assert.equal((await storage.findExternalIdentity('binding-1', 'issue', 'captured-issue')).entityId, 'captured-entity')
     assert.equal(await storage.recordObservation(observation('captured-observation')), false, '观察的去重键捕获时点与持久事实一致')
     event.observation.sourceVersion = '2026-09-19T00:00:00.000000000Z'

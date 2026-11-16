@@ -353,7 +353,7 @@ for (const label of ['Fake', 'SQLite']) {
       return value
     }
     const inject = () => w.storage.transaction(async (tx) => {
-      await tx.putEntity({ id: 'concurrent-pr', kind: 'change_request' })
+      await tx.putEntity({ id: 'concurrent-pr', kind: 'change_request', primaryIdentityId: 'concurrent-identity' })
       await tx.putExternalIdentity({ id: 'concurrent-identity', entityId: 'concurrent-pr', bindingId: w.providers.development.gate.bindingId,
         externalKind: 'change_request', externalId: 'pr-7', role: 'primary' })
     })

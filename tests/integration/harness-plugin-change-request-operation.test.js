@@ -1,4 +1,5 @@
 import '../fixtures/resolution-preflight.mjs'
+import { replacePrimary } from '../contract/suites/storage-fixtures.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { world } from '../fixtures/change-request-world.mjs'
@@ -62,7 +63,7 @@ for (const change of ['target', 'authorization', 'projection', 'repository']) te
     hit = true
     if (change === 'target') await w.storage.putExecutionContext({ ...w.record, provisioningGeneration: 2, branchExternalId: 'feature/decoy' })
     else if (change === 'projection') { const projection = (await w.storage.listPlanningProjections(w.workspace.id)).find((row) => row.entityId === w.scope.workItemId); await w.storage.putPlanningProjection(w.workspace.id, { ...projection, content: { contentKind: 'redacted', bindingId: projection.content.bindingId } }) }
-    else if (change === 'repository') { const identity = await w.storage.findExternalIdentity('binding-github-create', 'repository', w.scope.repositoryId); await w.storage.putExternalIdentity({ ...identity, role: 'historical' }) }
+    else if (change === 'repository') { const identity = await w.storage.findExternalIdentity('binding-github-create', 'repository', w.scope.repositoryId); await replacePrimary(w.storage, identity, { ...identity, id: crypto.randomUUID(), externalId: 'other-repository' }, 'repository') }
     else { const bindings = await w.storage.listProviderBindings(w.workspace.id); await w.storage.putProviderBinding({ ...bindings.find((row) => row.id === 'binding-github-create'), enabled: false, isDefault: false }) }
     return query(scope)
   }
