@@ -56,9 +56,9 @@ jobs:
       matrix:
         include:
           - mode: source
-            source: 72c9206c1c52a9156cf4e469dc46bf156d00dff6
+            source: 6c9ac4ce06079932e0b49ba1a3ee63fa55fcd946
           - mode: combined
-            source: de5eebce8696d142407d7db7fae62ac07e05ec8d
+            source: 3b83c4bbc6642d1dcf8e7df4d8ffdc1da5c6d2ab
     runs-on: windows-2025
     timeout-minutes: 15
     defaults:
