@@ -14,7 +14,6 @@ concurrency:
 jobs:
   git-paths:
     name: Native Windows Git paths
-    if: ${{ false }}
     runs-on: windows-2025
     timeout-minutes: 15
     defaults:
@@ -24,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: 3091d4ab16d36ddba2a74a8881f2a3f4da0c1997
+          ref: 84892bfd0667427989fd57f26c7921cd1909c9cf
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -50,6 +49,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   private-data:
+    if: ${{ false }}
     name: Native Windows ${{ matrix.mode }} private data
     strategy:
       fail-fast: false
