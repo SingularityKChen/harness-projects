@@ -321,7 +321,7 @@ export function hostStoragePolicy(catalog: ProviderCatalog): StorageValidationPo
  */
 export async function restoreProviders(
   storage: Storage, workspaceId: WorkspaceId, catalog: ProviderCatalog,
-  env: Pick<ProviderBuildInput, 'worktreesDir' | 'fetch'> & { readonly lifetime?: ReturnType<typeof createPlanningLifetime>; readonly ci?: { readonly observation: CiReadObservation; readonly bindingId: ProviderBindingRecord['id'] }; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly sessionController?: () => unknown; readonly forceSessionStartFailure?: boolean | undefined; readonly development?: { readonly cache: Map<string, object>; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly fetch: HostFetch } },
+  env: Pick<ProviderBuildInput, 'worktreesDir' | 'fetch'> & { readonly lifetime?: ReturnType<typeof createPlanningLifetime>; readonly privateLease?: import('./host-private-data.ts').PreparedPrivateData['lease']; readonly ci?: { readonly observation: CiReadObservation; readonly bindingId: ProviderBindingRecord['id'] }; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly sessionController?: () => unknown; readonly forceSessionStartFailure?: boolean | undefined; readonly development?: { readonly cache: Map<string, object>; readonly resolveCredential: (handle: string) => Promise<string | undefined>; readonly fetch: HostFetch } },
 ): Promise<{ table: CoreProviderTable; disabled: readonly DisabledBinding[] }> {
   const slots: Record<string, unknown> = {}
   const disabled: DisabledBinding[] = []
@@ -347,7 +347,7 @@ export async function restoreProviders(
       // 目录政策属于默认生产entry；同实现键的注入entry拥有自己的配置与输出根。
       if (entry === LOCAL_GIT_ENTRY) {
         const allowedRoot = await localGitRoot({ binding, configuration, worktreesDir: env.worktreesDir })
-        await preparePrivateWorktreeDirectories(env.worktreesDir, allowedRoot, env.lifetime?.signal)
+        await preparePrivateWorktreeDirectories(env.worktreesDir, allowedRoot, env.lifetime?.signal, env.privateLease)
       }
       const cache = binding.implementationKey === 'development.github' ? env.development : undefined
       const key = JSON.stringify([binding.id, binding.implementationKey, Object.entries(configuration).sort(([a], [b]) => a.localeCompare(b)), account?.id, account?.platformFamily, account?.platformOrigin, account?.identityKind, account?.externalId, handle])

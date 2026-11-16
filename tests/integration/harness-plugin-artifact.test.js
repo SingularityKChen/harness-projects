@@ -265,7 +265,7 @@ describe('Harness 插件安装件契约', () => {
       await mkdir(path.dirname(installedRoot), { recursive: true })
       await cp(packageDir, installedRoot, { recursive: true })
       hostText = await readFile(path.join(packageDir, 'lib/index.js'), 'utf8')
-      await symlink(path.dirname(path.dirname(fileURLToPath(import.meta.resolve('@deepseek-ai/cordis/package.json')))), path.join(tmpRoot, 'host', 'node_modules', '@deepseek-ai'))
+      await symlink(path.dirname(path.dirname(fileURLToPath(import.meta.resolve('@deepseek-ai/cordis/package.json')))), path.join(tmpRoot, 'host', 'node_modules', '@deepseek-ai'), process.platform === 'win32' ? 'junction' : 'dir')
     })
 
     it('装进 node_modules 后，包名、/package.json、/client 三个说明符都能解析', () => {
@@ -278,7 +278,7 @@ describe('Harness 插件安装件契约', () => {
       assert.ok(clientPath.endsWith(path.join('lib', 'client.js')))
     })
 
-    it('import() 包名得到的 apply 是函数，inject 只要 typert，没有凭据服务时也在干净数据根上打出宿主就绪行并经包内 migrations 建库迁移、零工作区', async (t) => {
+    it('import() 包名得到的 apply 是函数，inject 只要 typert，没有凭据服务时也在干净数据根上打出宿主就绪行并经包内 migrations 建库迁移、零工作区', { skip: process.platform === 'win32' }, async (t) => {
       const require = createRequire(path.join(tmpRoot, 'host', 'entry.cjs'))
       const hostModule = await import(pathToFileURL(require.resolve(sourceManifest.name)).href)
       assert.equal(typeof hostModule.apply, 'function')

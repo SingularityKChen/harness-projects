@@ -26,6 +26,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-11-16-windows-git-paths](exec-plan/active/2026-11-16-windows-git-paths.md) | 原生 Windows LocalGit 路径、身份复用与持久恢复（#645） |
+| [2026-11-16-windows-root-admission](exec-plan/active/2026-11-16-windows-root-admission.md) | 已安全预置 Windows 私有根的原生准入与 Host 生命周期（#643） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed

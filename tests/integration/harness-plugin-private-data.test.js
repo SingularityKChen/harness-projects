@@ -6,13 +6,14 @@ import childProcess, { execFileSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import test from 'node:test'
+import test, { describe } from 'node:test'
 import { CURRENT_SCHEMA_GENERATION } from '@harness-projects/storage-sqlite'
 import { createHostComposition } from '../../apps/harness-plugin/src/host-composition.ts'
 import { preparePrivateWorktreeDirectories } from '../../apps/harness-plugin/src/host-private-data.ts'
 import { apply as applyHost } from '../../apps/harness-plugin/src/host.ts'
 import { WORKSPACE, seed } from './fixtures/host-seed.js'
 
+describe('POSIX private data (native Windows admission has its own secured-root fixture)', { skip: !['darwin', 'linux'].includes(process.platform) }, () => {
 const actorRef = { kind: 'user' }
 const denied = { name: 'HostAuthorityError', message: 'Host project data is unavailable' }
 async function fixture(t, parent = os.tmpdir()) {
@@ -347,4 +348,6 @@ test('Darwin owner abort kills in-flight ACL queries and drains each acquisition
     assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
     assert.throws(() => fs.fstatSync(fd), { code: 'EBADF' })
   })
+})
+
 })
