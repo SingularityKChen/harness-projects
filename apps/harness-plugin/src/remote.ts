@@ -165,7 +165,8 @@ export async function installHostRemote(
   let disposed = false
   let disposal: Promise<void> | undefined
   let activeCalls = 0
-  const lifetime = new AbortController() // 卸载时先中止所有打开的流，再等它们的 finally 把在途计数归零
+  const lifetime = new AbortController()
+  const streams = new Set<() => Promise<unknown>>()
   let drainResolve: (() => void) | undefined
   const drained = new Promise<void>((resolve) => { drainResolve = resolve })
   const report = (event: 'shutdownDeadlineExceeded' | 'shutdownFailed', error?: unknown): void => { try { diagnostic?.(event, error) } catch { /* 诊断不得中断其它清理 */ } }
@@ -181,13 +182,52 @@ export async function installHostRemote(
   const service: Record<string, unknown> = { ctx, typertRemote: undefined }
   for (const operation of Object.values(remote.operations)) {
     service[operation.name] = operation.mode === 'stream'
-      // beginCall 在生成器体内：网关在第一次 next() 之前取消时计数不会泄漏。toJson 是流上唯一的严格编码点（网关不编码流项）。
-      ? async function* (signal: AbortSignal) {
-        beginCall()
-        try {
-          const frames = composition[operation.name as StreamName<typeof OPERATIONS>](AbortSignal.any([signal, lifetime.signal]))
-          for await (const frame of frames) yield toJson(frame)
-        } finally { endCall() }
+      // 首次 next 才登记调用；真实 source 先关，避免 pending next 把 outer.return 排在队尾。
+      ? function (signal: AbortSignal) {
+        const combined = AbortSignal.any([signal, lifetime.signal])
+        let frames: AsyncIterator<unknown> | undefined, closing = false
+        let sourceClose: Promise<void> | undefined, stopped: Promise<unknown> | undefined
+        const closeSource = (): Promise<void> => {
+          closing = true
+          if (!frames) return Promise.resolve()
+          if (!sourceClose) {
+            let settle!: (value: unknown) => void
+            let fail!: (error: unknown) => void
+            // 先发布唯一任务；return 可同步 abort 重入，但真实关闭仍在当前调用栈发起。
+            sourceClose = new Promise<unknown>((resolve, reject) => { settle = resolve; fail = reject })
+              .then(() => undefined, (error) => report('shutdownFailed', error))
+            try { settle(frames.return?.()) } catch (error) { fail(error) }
+          }
+          return sourceClose
+        }
+        const stop = (): Promise<unknown> => {
+          closeSource()
+          return stopped ??= outer.return(undefined).catch((error) => report('shutdownFailed', error))
+        }
+        const abort = (): void => { void stop() }
+        const outer = (async function* () {
+          beginCall()
+          streams.add(stop)
+          combined.addEventListener('abort', abort, { once: true })
+          try {
+            if (combined.aborted) return
+            frames = composition[operation.name as StreamName<typeof OPERATIONS>](combined)[Symbol.asyncIterator]()
+            if (combined.aborted || closing) return
+            for (;;) {
+              let frame: IteratorResult<unknown>
+              try { frame = await frames.next() }
+              catch (error) { if (combined.aborted || closing) return; throw error }
+              if (combined.aborted || closing || frame.done) return
+              yield toJson(frame.value)
+            }
+          } finally {
+            await closeSource()
+            combined.removeEventListener('abort', abort)
+            streams.delete(stop)
+            endCall()
+          }
+        })()
+        return outer
       }
       : async function (this: { ctx: HostRemoteContext }, ...args: unknown[]) {
         beginCall()
@@ -203,8 +243,8 @@ export async function installHostRemote(
   const dispose = (deadline = owner?.stop() ?? Date.now() + 1000) => disposal ??= (async () => {
       disposed = true
       lifetime.abort()
-      // 先同步撤准入；两个 disposer 同时开始，共用剩余预算，单个抛错也不阻断另一清理。
-      const cleanup = [unregisterRemote, provideDispose].map((dispose) => {
+      // 同步撤准入；撤注册、service 与流清理共用剩余预算，单个失败不阻断其它清理。
+      const cleanup = [unregisterRemote, provideDispose, ...streams].map((dispose) => {
         let task: Promise<unknown>
         try { task = Promise.resolve(dispose?.()) } catch (error) { task = Promise.reject(error) }
         return task.catch((error) => report('shutdownFailed', error))

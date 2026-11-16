@@ -98,6 +98,21 @@ test('host adapter withdraws immediately and keeps disposal pending until the ac
   assert.deepEqual([disposed, events], [true, ['remote-dispose', 'provide-dispose-start', 'provide-dispose-end']])
 })
 
+test('remote dispose releases a parked generator without another consumer action', async () => {
+  let released = 0
+  const diagnostics = [], { ctx, services } = recordingContext()
+  const source = (async function* () { try { yield { n: 1 } } finally { released++ } })()
+  const installed = await installHostRemote(ctx, { call: async () => undefined, watch: () => source }, undefined, undefined, undefined, (event) => diagnostics.push(event))
+  const frames = installed.service.watch(new AbortController().signal)
+  try {
+    assert.equal((await frames.next()).value.n, 1)
+    await installed.dispose(Date.now() + 80)
+    assert.equal(released, 1, 'dispose must resume the owned parked generator finally')
+    assert.equal(services.size, 0)
+    assert.deepEqual(diagnostics, [], 'cooperative parked streams drain without deadline diagnostics')
+  } finally { await frames.return(); await installed.dispose() }
+})
+
 test('host adapter strictly JSON-encodes watch frames, withdraws the service and aborts / drains the open watch', async () => {
   let aborted
   const composition = {
@@ -106,7 +121,7 @@ test('host adapter strictly JSON-encodes watch frames, withdraws the service and
       yield { kind: 'delta', delta: { skipped: undefined, n: 1 } }
       if (!signal.aborted) await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
       aborted = signal.aborted
-      yield { kind: 'delta', delta: { n: Number.NaN } } // 卸载中途的坏帧：仍在边界报错，出错路径也把在途计数归零
+      yield { kind: 'delta', delta: { n: Number.NaN } } // 停止后的坏帧也不得编码或交付
     },
   }
   const { ctx, events } = recordingContext()
@@ -117,10 +132,125 @@ test('host adapter strictly JSON-encodes watch frames, withdraws the service and
   const pulling = frames.next()
   const timeout = new Promise((resolve) => setTimeout(resolve, 1000, 'timeout').unref())
   assert.notEqual(await Promise.race([installed.dispose().then(() => 'disposed'), timeout]), 'timeout', '卸载必须先中止打开的流再排空')
-  await assert.rejects(pulling, /可传输/)
+  assert.equal((await pulling).done, true)
   assert.equal(aborted, true, '组合收到的是被中止的 signal')
   assert.deepEqual(events, ['remote-dispose', 'provide-dispose-start', 'provide-dispose-end'])
   await assert.rejects(() => installed.service.watch(new AbortController().signal).next(), /已卸载/)
+})
+
+for (const failure of ['frame', 'next']) test(`running watch rejects invalid ${failure} and closes its source once`, async () => {
+  let returns = 0
+  const { ctx } = recordingContext()
+  const installed = await installHostRemote(ctx, { call: async () => undefined, watch: () => ({ [Symbol.asyncIterator]: () => ({ next: async () => { if (failure === 'next') throw Error('running next failure'); return { value: NaN, done: false } }, return: async () => { returns++; return { done: true } } }) }) })
+  try {
+    await assert.rejects(installed.service.watch(new AbortController().signal).next(), failure === 'next' ? /running next failure/ : /可传输/)
+    assert.equal(returns, 1)
+  } finally { await installed.dispose() }
+})
+
+test('watch terminal paths settle once and an unstarted watch never opens a source', async () => {
+  const { ctx } = recordingContext(), diagnostics = []
+  let opens = 0, returns = 0
+  const installed = await installHostRemote(ctx, { call: async () => undefined, watch: () => {
+    opens++
+    return { [Symbol.asyncIterator]: () => ({ next: async () => ({ value: 1, done: opens === 1 }), return: async () => { returns++; return { done: true } } }) }
+  } }, undefined, undefined, undefined, (event) => diagnostics.push(event))
+  const unstarted = installed.service.watch(new AbortController().signal)
+  await unstarted.return()
+  assert.equal(opens, 0)
+  const completed = installed.service.watch(new AbortController().signal)
+  assert.equal((await completed.next()).done, true)
+  await completed.return()
+  const early = installed.service.watch(new AbortController().signal)
+  await early.next(); await early.return(); await early.return()
+  const thrown = installed.service.watch(new AbortController().signal)
+  await thrown.next(); await assert.rejects(thrown.throw(Error('consumer stopped')), /consumer stopped/)
+  const deferred = installed.service.watch(new AbortController().signal)
+  await installed.dispose(Date.now() + 80)
+  await assert.rejects(deferred.next(), /卸载/)
+  assert.deepEqual([opens, returns, diagnostics], [3, 3, []])
+})
+
+for (const mode of ['sync', 'async', 'late']) test(`watch ${mode} return failure is consumed and diagnosed once`, async () => {
+  let returns = 0, reject
+  const diagnostics = [], { ctx } = recordingContext()
+  const installed = await installHostRemote(ctx, { call: async () => undefined, watch: () => ({ [Symbol.asyncIterator]: () => ({
+    next: async () => ({ value: 1, done: false }),
+    return: () => {
+      returns++
+      const error = Error('synthetic cleanup failure')
+      if (mode === 'sync') throw error
+      return mode === 'async' ? Promise.reject(error) : new Promise((_, fail) => { reject = fail })
+    },
+  }) }) }, undefined, undefined, undefined, (event) => diagnostics.push(event))
+  const frames = installed.service.watch(new AbortController().signal)
+  try {
+    await frames.next()
+    await installed.dispose(Date.now() + 40)
+    assert.deepEqual(diagnostics, [mode === 'late' ? 'shutdownDeadlineExceeded' : 'shutdownFailed'])
+    if (reject) { reject(Error('late cleanup rejection')); await new Promise((resolve) => setImmediate(resolve)) }
+    await frames.return()
+    assert.equal(returns, 1)
+    assert.equal(diagnostics.filter((event) => event === 'shutdownFailed').length, 1)
+  } finally { reject?.(Error('fixture cleanup')); await installed.dispose() }
+})
+
+for (const late of ['value', 'reject', 'never-return']) test(`pending watch ${late} closes the real source immediately within one deadline`, async () => {
+  let release, fail, finishReturn, returned = 0, reads = 0
+  const diagnostics = [], { ctx, services } = recordingContext()
+  const installed = await installHostRemote(ctx, { call: async () => undefined, watch: () => ({ [Symbol.asyncIterator]: () => ({
+    next: () => { reads++; return new Promise((resolve, reject) => { release = resolve; fail = reject }) },
+    return: () => { returned++; return late === 'never-return' ? new Promise((resolve) => { finishReturn = resolve }) : Promise.resolve({ done: true }) },
+  }) }) }, undefined, undefined, undefined, (event) => diagnostics.push(event))
+  const frames = installed.service.watch(new AbortController().signal), next = frames.next()
+  void next.catch(() => undefined)
+  const start = Date.now(), disposal = installed.dispose(start + 60)
+  try {
+    assert.equal(returned, 1, 'owned return must start while next is still pending')
+    assert.equal(services.size, 0)
+    assert.equal(disposal, installed.dispose())
+    await disposal
+    assert.ok(Date.now() - start < 160)
+    assert.deepEqual(diagnostics, ['shutdownDeadlineExceeded'])
+    if (late === 'reject') fail(Error('late source rejection'))
+    else release({ value: late === 'value' ? 2 : NaN, done: false })
+    if (late !== 'never-return') assert.equal((await next).done, true)
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual([returned, reads], [1, 1])
+  } finally { release({ done: true }); finishReturn?.({ done: true }); await next; await installed.dispose() }
+})
+
+test('source return synchronously aborting its consumer still releases once', async () => {
+  const consumer = new AbortController(), diagnostics = [], { ctx } = recordingContext()
+  let returns = 0
+  const installed = await installHostRemote(ctx, { call: async () => undefined, watch: () => ({ [Symbol.asyncIterator]: () => ({
+    next: async () => ({ value: 1, done: false }),
+    return: () => {
+      returns++
+      if (returns > 1) throw Error('double release')
+      consumer.abort()
+      return { done: true }
+    },
+  }) }) }, undefined, undefined, undefined, (event) => diagnostics.push(event))
+  const frames = installed.service.watch(consumer.signal)
+  try {
+    await frames.next(); await frames.return(); await installed.dispose(Date.now() + 80)
+    assert.equal(returns, 1, 'abort reentry must share the already published close task')
+    assert.deepEqual(diagnostics, [])
+  } finally { await frames.return(); await installed.dispose() }
+})
+
+test('a source acquired during synchronous stop is still closed once', async () => {
+  let installed, returns = 0, disposal
+  const { ctx } = recordingContext()
+  installed = await installHostRemote(ctx, { call: async () => undefined, watch: () => {
+    disposal = installed.dispose(Date.now() + 80)
+    return { [Symbol.asyncIterator]: () => ({ next: async () => { throw Error('late source must not be read') }, return: async () => { returns++; return { done: true } } }) }
+  } })
+  const frames = installed.service.watch(new AbortController().signal)
+  assert.equal((await frames.next()).done, true)
+  await disposal
+  assert.equal(returns, 1)
 })
 
 test('optional Start Work branch survives descriptor-derived named JSON serialization and strict live Host decoding', async () => {

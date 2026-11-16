@@ -218,6 +218,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   let barrier: Promise<void> | undefined, epoch = 0, tail: Promise<unknown> = Promise.resolve(), activeFingerprint = ''
   let activationError: ProjectError | undefined, repositoryValidation = 0
   const watches = new AbortController()
+  const streams = new Set<() => Promise<unknown>>()
   let disposal: Promise<void> | undefined
   let stopDeadline: number | undefined
   const pending = new Set<Promise<unknown>>()
@@ -227,7 +228,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     return task
   }
   const retire = (assembly: Assembly): void => { if (assembly.retired) return; assembly.retired = true; assemblies.delete(assembly); assembly.lifetime.stop(); assembly.reconciler?.dispose() }
-  const stop = (): void => { stopDeadline ??= options.owner?.stop() ?? Date.now() + 1000; closed = true; watches.abort(); io?.stop(); for (const assembly of assemblies) retire(assembly) }
+  const stop = (): void => { stopDeadline ??= options.owner?.stop() ?? Date.now() + 1000; closed = true; watches.abort(); for (const close of streams) void close(); io?.stop(); for (const assembly of assemblies) retire(assembly) }
   const lease = <T>(assembly: Assembly, work: () => Promise<T>): Promise<T> => {
     const task = Promise.resolve().then(work); assembly.leases.add(task)
     void task.finally(() => assembly.leases.delete(task)).catch(() => undefined)
@@ -438,8 +439,42 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       },
       watch: (signal) => {
         if (closed) throw new Error('host 已关闭')
-        const frames = streamWorkspace(source, { signal: AbortSignal.any([signal, watches.signal]), intervalMs: options.watchIntervalMs ?? 1000 })
-        return { [Symbol.asyncIterator]: () => ({ next: () => guarded(() => frames.next()), return: () => frames.return() }) }
+        return { [Symbol.asyncIterator]: () => {
+          const combined = AbortSignal.any([signal, watches.signal])
+          let frames: ReturnType<typeof streamWorkspace> | undefined, closing = false
+          let cleanup: Promise<void> | undefined
+          const close = (): Promise<void> => {
+            closing = true
+            if (!cleanup) {
+              let task: Promise<unknown>
+              try { task = Promise.resolve(frames?.return()) } catch (error) { task = Promise.reject(error) }
+              cleanup = track(task.catch((error) => diagnoseShutdown('shutdownFailed', error)).then(() => {
+                streams.delete(close)
+                combined.removeEventListener('abort', abort)
+              }))
+            }
+            return cleanup
+          }
+          const abort = (): void => { void close() }
+          return {
+            next: async () => {
+              if (closed || combined.aborted || closing) return { done: true as const, value: undefined }
+              if (!frames) {
+                frames = streamWorkspace(source, { signal: combined, intervalMs: options.watchIntervalMs ?? 1000 })
+                streams.add(close)
+                combined.addEventListener('abort', abort, { once: true })
+              }
+              try {
+                const result = await track(guarded(() => frames!.next()))
+                if (closed || combined.aborted || closing) return { done: true as const, value: undefined }
+                if (result.done) await close()
+                return result
+              } catch (error) { await close(); throw error }
+            },
+            return: async () => { await close(); return { done: true as const, value: undefined } },
+            throw: async (error: unknown) => { await close(); throw error },
+          }
+        } }
       },
       stop, dispose, diagnoseShutdown,
     }

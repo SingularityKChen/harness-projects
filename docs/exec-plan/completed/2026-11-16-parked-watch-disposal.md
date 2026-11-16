@@ -1,6 +1,6 @@
 # 暂停订阅流清理 ExecPlan
 
-> 状态：Active；创建：2026-11-16；Iteration 11：2026-11-16—22（Asia/Singapore）
+> 状态：Completed（本地工程验收）；创建：2026-11-16；Iteration 11：2026-11-16—22（Asia/Singapore）
 > 范围：#649 的 owned watch iterator 与有界 Host 卸载；规范：根 `PLANS.md`。
 > 上游：#338、#422、#649；不以本叶子接受父项、Windows 安装或 R1 发布。
 
@@ -10,9 +10,9 @@
 
 ## Context and Orientation
 
-`apps/harness-plugin/src/remote.ts` 的 `installHostRemote` 用外层 async generator 包装 composition.watch，严格编码帧并以 beginCall/endCall 计数；dispose 目前仅 abort、撤注册和等待在途计数。parked 指 generator 停在一次 yield 后等待下一次消费者请求，AbortSignal 不会自行让该作用域进入 finally。
+`apps/harness-plugin/src/remote.ts` 的 `installHostRemote` 用外层 async generator 包装 composition.watch，严格编码帧并以 beginCall/endCall 计数；初始基线的 dispose 仅 abort、撤注册和等待在途计数。parked 指 generator 停在一次 yield 后等待下一次消费者请求，AbortSignal 不会自行让该作用域进入 finally。
 
-`apps/harness-plugin/src/host-composition.ts` 拥有真实 `streamWorkspace` iterator；stop 只中止 watches，返回的 wrapper 只有消费者 return 才转发内层 return。`packages/controller/src/watch.ts` 的 streamWorkspace 在首帧 baseline yield 后才创建 poll watch，当前不能把该暂停场景夸成持续CPU轮询泄漏。确切缺口是作用域、资源所有权和 active-call 结算。
+`apps/harness-plugin/src/host-composition.ts` 拥有真实 `streamWorkspace` iterator；初始基线的 stop 只中止 watches，返回的 wrapper 只有消费者 return 才转发内层 return。`packages/controller/src/watch.ts` 的 streamWorkspace 在首帧 baseline yield 后才创建 poll watch，当前不能把该暂停场景夸成持续CPU轮询泄漏。确切缺口是作用域、资源所有权和 active-call 结算。
 
 现有 `tests/contract/harness-host-remote-adapter.test.js` 首帧后主动发第二次 next，覆盖在途读取而不是 parked。既有 lifetime 与 artifact 测试已有绝对deadline、迟到获取、拒绝诊断、重复dispose等证据，优先复用。
 
@@ -79,17 +79,26 @@ V2在实际打包入口复验退出与无晚endpoint，V3–V4保护文档/公�
 
 - [x] (2026-11-16 14:50 +08) 完成独立源码审读与两方案比较，确定两层owner、一次结算与停止后晚帧规则。
 - [x] (2026-11-16 14:50 +08) 在本分支初始基线执行V1：32通过、0失败；现有证据尚不覆盖parked。
-- [ ] (2026-11-16 14:50 +08) 完成Task 1 / Batch 1的RED/GREEN、独立对抗审查及当前head交付回读。
+- [x] (2026-11-16 14:59 +08) 完成Task 1 / Batch 1实现与本地V1–V3；synthetic parked先RED为释放计数0，修复后GREEN；真实composition及新打包Host的return完成均在消费者再次动作前断言。
+- [x] (2026-11-16 15:20 +08) 独立修复复评通过，当前无未解决P0–P3；本地工程归档与索引完成，最终Ready继续受当前head回读规则控制。
 
 ## Surprises & Discoveries
 
 2026-11-16 @ 初始基线 `8ace55af`：首帧parked时controller尚未创建poll watcher，真实问题不等于已证实活跃轮询泄漏；不能以“无poller”否定生成器scope未释放。remote测试主动第二次next掩盖parked，且其shutdown坏帧预期与新late-frame围栏冲突；运行中strict负控必须保留。
+
+2026-11-16 @ 本批未提交实现：source获取函数能同步触发dispose；此时尚未赋值的frames不能缓存成“已关闭”。remote在拿到真实iterator后再复用close任务，已有同步获取中止控制证明不派发next且只return一次。
+
+2026-11-16 15:12 +08 @ 独立审查head `21665ea3`：source.return同步abort会在sourceClose赋值前重入，新增精确反例先RED为return计数2。根因是执行可重入代码先于发布唯一任务，而不是abort或drain策略；原先“一次关闭”的本地结论由本段反例修正。
 
 ## Decision Log
 
 2026-11-16 14:50 +08 / 独立spec评审、协调者确认：同时关注实际owned iterator关闭与active wrapper结算，归各自现有owner，使用幂等close入口与原drain。理由：outer-only在pending-next排队，inner-only不能保证parked外层endCall，单独composition.dispose也必须有所有权。
 
 2026-11-16 14:50 +08 / 独立spec评审、协调者确认：停止后拒绝晚帧，strict NaN编码负控移至运行中。理由：dispose后的原错误帧不应再编码/交付；编码严格性仍须独立证明。只有不合作source允许有界超时，不能把合作资源泄漏当成功退出。
+
+2026-11-16 14:59 +08 / 实现owner：在原模块内保存两个私有close闭包，移除remote的for-await隐式关闭，继续复用composition.pending与remote.drained，不提取通用helper。真实generator原型return的薄观察只包装原生调用并记录完成；synthetic资源另用finally释放计数。技术差异低于目标区间，不为行数目标添加框架或重复测试。停止后迟到next拒绝与迟到帧一样正常收束；运行中读取拒绝与strict坏帧仍各自保留负控。
+
+2026-11-16 15:12 +08 / P1修复：先构造并发布带拒绝接收者的唯一sourceClose Promise，再在当前调用栈同步调用真实return，把同步结果或异常结算到该Promise。同步abort重入共享它，不延后pending-next的owned return；未取得source时仍不缓存空关闭。只增一个持久重入case，已有sync/async/late拒绝控制复用；额外一次性控制证明abort后原return再throw仍只关闭一次并诊断一次。composition实际拥有的streamWorkspace是原生generator，关闭路径没有会同步abort的用户finally回调，不据合成替身推导其新缺陷，本轮不改。
 
 ## Idempotence and Recovery
 
@@ -101,12 +110,22 @@ V2在实际打包入口复验退出与无晚endpoint，V3–V4保护文档/公�
 
 ## Outcomes & Retrospective
 
-当前交付为计划与基线，未修复或证明实现head。无有意延期的本闭环技术债；不合作provider无法强迫finally是明确有界合同，不新建重复债务。若实施为过渡接受额外维护风险，协调者在 `docs/exec-plan/tech-debt-tracker.md` 先查重后记录。
+本批在 `fix/parked-watch-disposal` 的工作树完成合作parked资源主动关闭、实际source及时return与active wrapper一次结算；真实composition独立退出和实际打包Host均在消费者再次动作前证明资源完成。最终V1 46通过、typecheck退出0、实际打包Host29通过、文档位置5通过。运行中strict错误与停止后晚帧各自有判别证据，不合作source仍只占共享绝对期限。
+
+独立审查发现同步return触发abort重入的P1；新增精确用例先RED为两次return，修复后唯一任务先发布、真实return仍在当前调用栈发起。原评审者复评确认一次return、重入后throw仅诊断一次、pending-next立即关闭和晚NaN围栏，当前无未解决P0–P3，无必要额外重构。
+
+本地工程验收、归档和索引已完成；PR #652 的当前head/checks/Ready由Concrete Steps的最终回读规则控制，不能从归档推断发布接受。无有意延期技术债；无法强迫不合作provider从任意await进入finally属于已声明的有界合同。Windows及父#338/R1接受独立。
 
 ## Artifacts and Notes
 
-只记录parked RED/GREEN、真实composition主动return/无晚读、运行中坏帧与停止晚帧的必要断言，以及packed Host退出摘要；不生成固定测试条数或全组合台账。完成后更新Outcomes、移入completed，由协调者维护索引；运行态输出不进正式文档。
+本计划与持久回归共同保留RED/GREEN、真实Host与打包入口、失败恢复及独立复评的最小证据；临时输出不构成正式文档依赖。计划已归档，PR当前状态由交付回读确认。
 
 ## Bottom Change Note
 
 Change Note (2026-11-16 14:50 +08)：综合两份独立方案后创建；修订outer-only关闭的pending-next及composition独立stop缺口，明确late-frame/strict负控、幂等owner和同一有界期限。
+
+Change Note (2026-11-16 14:59 +08)：记录实际RED/GREEN、真实owned iterator与packed Host证据、获取中同步stop边界及更小的两模块实现；保留独立审查与远端交付门未完成。
+
+Change Note (2026-11-16 15:12 +08)：记录独立审查P1的有效反例、唯一close Promise先发布的根因修复与当前V1/V2结果；保留复评与交付门未完成。
+
+Change Note (2026-11-16 15:20 +08)：记录独立P1修复复评和最终本地工程验收，归档并更新索引；当前PR门禁仍以远端回读为准。
