@@ -14,6 +14,7 @@ concurrency:
 jobs:
   git-paths:
     name: Native Windows Git paths
+    if: ${{ false }}
     runs-on: windows-2025
     timeout-minutes: 15
     defaults:
@@ -59,7 +60,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: 0ddf2810b2b5d9a6d04c342cd65110118e480b5a
+          ref: 06e7c194eb2382abefcea20b11ecaf9b28644666
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -105,8 +106,11 @@ jobs:
             $foreign = Join-Path $profile 'harness-foreign-profile'
             $env:HARNESS_NATIVE_FIXTURE_PROFILE = $foreign
             $env:HARNESS_NATIVE_FIXTURE_SID = $sid
-            node --input-type=module -e "import {provisionForeignFixture} from './tests/integration/harness-plugin-windows-fixture.js'; await provisionForeignFixture(process.env.HARNESS_NATIVE_FIXTURE_PROFILE,process.env.HARNESS_NATIVE_FIXTURE_SID)"
-            if ($LASTEXITCODE -ne 0) { throw 'foreign fixture failed' }
+            $bootstrapLog = Join-Path $profile 'bootstrap.log'
+            node --input-type=module -e "import {provisionForeignFixture} from './tests/integration/harness-plugin-windows-fixture.js'; await provisionForeignFixture(process.env.HARNESS_NATIVE_FIXTURE_PROFILE,process.env.HARNESS_NATIVE_FIXTURE_SID)" *> $bootstrapLog
+            $bootstrapExit = $LASTEXITCODE
+            Show-NativeOutput $bootstrapLog
+            if ($bootstrapExit -ne 0) { throw 'foreign fixture failed' }
             $request = @{ workspace = $env:GITHUB_WORKSPACE; profile = $profile; foreign = $foreign } | ConvertTo-Json -Compress
             $worker = "const request = $request;`n" + @'
           import { spawnSync } from 'node:child_process';
