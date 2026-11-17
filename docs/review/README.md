@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [PR #657 MMP 评审](pr-657-mmp-review.md) | Windows 首次私有化 provisioning 与既有根重开 | 首审 1 P2/5 P3，无 P0/P1；原生 ACL/拒绝矩阵与三个变异；#647 人验/R1 独立 |
 | [PR #656 MMP 评审](pr-656-mmp-review.md) | Windows 原生 CI lane 与 PR Fast Gate 聚合 | 首审 1 P2/7 P3，无 P0/P1；hosted 证据、负控与聚合回归；#647 人验/R1 独立 |
 | [PR #652 MMP 评审](pr-652-mmp-review.md) | 停拉流关闭、重入卸载与自然结束 | 首审三项 P2，一次 review 后根因修复与独立复评；父项/R1 独立 |
 | [PR #651 MMP 评审](pr-651-mmp-review.md) | POSIX 两层私有容器与 canonical 拒绝 | 独立全矩阵无 P0–P3；真实 Host/Git/重开与同 fd 反例，Windows/R1 独立 |
