@@ -1,4 +1,4 @@
-// #414：准入拒绝不能改动任何既有 schema、行、账本或世代。
+// #414/#595：准入拒绝不能改动任何既有 schema、行、账本或世代。
 import '../fixtures/resolution-preflight.mjs'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
@@ -8,12 +8,18 @@ import { join } from 'node:path'
 import test from 'node:test'
 import * as sqlite from '@harness-projects/storage-sqlite'
 
-const versions = [1, 2, 3, 4, 5, 6, 7]
+const MIGRATION_COUNT = sqlite.MIGRATIONS.length
 const quote = (name) => `"${name.replaceAll('"', '""')}"`
-const fixture = (db, count = versions.length, transform = (sql) => sql) => {
-  for (const entry of sqlite.MIGRATIONS.slice(0, count)) {
-    db.exec(transform(sqlite.readMigrationSql(entry)))
-    db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(entry.version, `fixed-${entry.version}`)
+/** 当前布局夹具：按顺序应用前 `count` 份资产，账本只写一行基线（#595 之后新库的形状）。 */
+const fixture = (db, count = MIGRATION_COUNT, transform = (sql) => sql) => {
+  for (const file of sqlite.MIGRATIONS.slice(0, count)) db.exec(transform(sqlite.readMigrationSql(file)))
+  db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(sqlite.BASELINE_VERSION, 'fixed-baseline')
+}
+/** 旧 main 布局夹具：按顺序应用前 `count` 份资产，账本逐条写 1..count 行（#595 之前 main 接受的库）。 */
+const legacyFixture = (db, count = MIGRATION_COUNT, transform = (sql) => sql) => {
+  for (const [index, file] of sqlite.MIGRATIONS.slice(0, count).entries()) {
+    db.exec(transform(sqlite.readMigrationSql(file)))
+    db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(index + 1, `fixed-${index + 1}`)
   }
 }
 const snapshot = (db) => {
@@ -50,34 +56,40 @@ WHERE NOT EXISTS (
 );`
 const cases = [
   ...[4, sqlite.CURRENT_SCHEMA_GENERATION].map((generation) => [`old-snapshot-view-${generation}`, (db) => {
-    fixture(db, versions.length, (sql) => sql.replace(/CREATE VIEW committed_observation_version AS[\s\S]*?;/, oldSnapshotView))
+    fixture(db, MIGRATION_COUNT, (sql) => sql.replace(/CREATE VIEW committed_observation_version AS[\s\S]*?;/, oldSnapshotView))
     db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`)
   }, generation === 4 ? 'generation' : 'unknown_objects']),
-  ['prior-start-work-only-intent-check', (db) => fixture(db, versions.length, (sql) => sql.replace(/external_intent_json TEXT CHECK[^\n]+/, "external_intent_json TEXT CHECK (external_intent_json IS NULL OR (command_name = 'startWork' AND json_valid(external_intent_json) AND json_type(external_intent_json) = 'object')),")), 'schema_shape'],
-  ['old-generation-two', (db) => { fixture(db, versions.length, withoutIntent); db.exec("INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=2") }, 'generation'],
-  ...[0, sqlite.CURRENT_SCHEMA_GENERATION].map((generation) => [`masked-old-intent-shape-${generation}`, (db) => { fixture(db, versions.length, withoutIntent); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
-  ['old-generation-one', (db) => { fixture(db, versions.length, withoutOwner); db.exec("INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=1") }, 'generation'],
-  ...[0, sqlite.CURRENT_SCHEMA_GENERATION].map((generation) => [`masked-old-owner-shape-${generation}`, (db) => { fixture(db, versions.length, withoutOwner); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
-  ['prefix1', (db) => fixture(db, 1), 'version_list'],
-  ['prefix2', (db) => fixture(db, 2), 'version_list'],
-  ['prefix4', (db) => fixture(db, 4), 'version_list'],
-  ['gap', (db) => { fixture(db); db.exec('DELETE FROM schema_migrations WHERE version=4') }, 'version_list'],
-  ['future', (db) => { fixture(db); db.exec("INSERT INTO schema_migrations VALUES (8,'future')") }, 'version_list'],
-  ['int64-max-version', (db) => { fixture(db); db.exec('UPDATE schema_migrations SET version=9223372036854775807 WHERE version=7') }, 'version_list'],
-  ['int64-min-version', (db) => { fixture(db); db.exec('UPDATE schema_migrations SET version=-9223372036854775808 WHERE version=7') }, 'version_list'],
-  ['quoted-workspace-primary-key', (db) => { fixture(db, versions.length, (sql) => sql.replace('CREATE TABLE workspace (\n  id TEXT PRIMARY KEY', 'CREATE TABLE workspace (\n  id TEXT "PRIMARY" "KEY"')); assert.equal(db.prepare('PRAGMA table_info(workspace)').all().find((row) => row.name === 'id').pk, 0) }, 'schema_shape'],
-  ['quoted-ledger-primary-key', (db) => { fixture(db, versions.length, (sql) => sql.replace('version INTEGER PRIMARY KEY', 'version INTEGER "PRIMARY" "KEY"')); assert.equal(db.prepare('PRAGMA table_info(schema_migrations)').all().find((row) => row.name === 'version').pk, 0) }, 'schema_shape'],
-  ['quoted-ledger-not-null', (db) => { fixture(db, versions.length, (sql) => sql.replace('applied_at TEXT NOT NULL', 'applied_at TEXT "NOT" "NULL"')); assert.equal(db.prepare('PRAGMA table_info(schema_migrations)').all().find((row) => row.name === 'applied_at').notnull, 0) }, 'schema_shape'],
+  ['prior-start-work-only-intent-check', (db) => fixture(db, MIGRATION_COUNT, (sql) => sql.replace(/external_intent_json TEXT CHECK[^\n]+/, "external_intent_json TEXT CHECK (external_intent_json IS NULL OR (command_name = 'startWork' AND json_valid(external_intent_json) AND json_type(external_intent_json) = 'object')),")), 'schema_shape'],
+  ['old-generation-two', (db) => { fixture(db, MIGRATION_COUNT, withoutIntent); db.exec("INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=2") }, 'generation'],
+  ...[0, sqlite.CURRENT_SCHEMA_GENERATION].map((generation) => [`masked-old-intent-shape-${generation}`, (db) => { fixture(db, MIGRATION_COUNT, withoutIntent); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
+  ['old-generation-one', (db) => { fixture(db, MIGRATION_COUNT, withoutOwner); db.exec("INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=1") }, 'generation'],
+  ...[0, sqlite.CURRENT_SCHEMA_GENERATION].map((generation) => [`masked-old-owner-shape-${generation}`, (db) => { fixture(db, MIGRATION_COUNT, withoutOwner); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
+  // #595 关键判别：旧 main 的「完整当前 shape + 1..7 行账本 + 当前世代」库必须仍以 version_list 拒绝且零写入。
+  ['legacy-ledger-7', (db) => legacyFixture(db), 'version_list'],
+  ['legacy-ledger-4', (db) => legacyFixture(db, 4), 'version_list'],
+  ['legacy-ledger-2', (db) => legacyFixture(db, 2), 'version_list'],
+  // 旧 main 只应用首步的库：账本恰好是 [1]，与单基线账本无法区分；由完整 shape 准入拒绝（I4）。
+  ['legacy-ledger-1', (db) => legacyFixture(db, 1), 'schema_shape'],
+  ['gap-in-legacy-ledger', (db) => { legacyFixture(db); db.exec('DELETE FROM schema_migrations WHERE version=4') }, 'version_list'],
+  ['extra-ledger-row', (db) => { fixture(db); db.exec("INSERT INTO schema_migrations VALUES (2,'future')") }, 'version_list'],
+  ['empty-ledger', (db) => { fixture(db); db.exec('DELETE FROM schema_migrations') }, 'version_list'],
+  ['wrong-baseline-7', (db) => { fixture(db); db.exec('UPDATE schema_migrations SET version=7') }, 'version_list'],
+  ['wrong-baseline-0', (db) => { fixture(db); db.exec('UPDATE schema_migrations SET version=0') }, 'version_list'],
+  ['int64-max-version', (db) => { fixture(db); db.exec('UPDATE schema_migrations SET version=9223372036854775807') }, 'version_list'],
+  ['int64-min-version', (db) => { fixture(db); db.exec('UPDATE schema_migrations SET version=-9223372036854775808') }, 'version_list'],
+  ['partial-initialization-marked-current', (db) => { fixture(db, 1); db.exec(`PRAGMA user_version=${sqlite.CURRENT_SCHEMA_GENERATION}`) }, 'schema_shape'],
+  ['quoted-workspace-primary-key', (db) => { fixture(db, MIGRATION_COUNT, (sql) => sql.replace('CREATE TABLE workspace (\n  id TEXT PRIMARY KEY', 'CREATE TABLE workspace (\n  id TEXT "PRIMARY" "KEY"')); assert.equal(db.prepare('PRAGMA table_info(workspace)').all().find((row) => row.name === 'id').pk, 0) }, 'schema_shape'],
+  ['quoted-ledger-primary-key', (db) => { fixture(db, MIGRATION_COUNT, (sql) => sql.replace('version INTEGER PRIMARY KEY', 'version INTEGER "PRIMARY" "KEY"')); assert.equal(db.prepare('PRAGMA table_info(schema_migrations)').all().find((row) => row.name === 'version').pk, 0) }, 'schema_shape'],
+  ['quoted-ledger-not-null', (db) => { fixture(db, MIGRATION_COUNT, (sql) => sql.replace('applied_at TEXT NOT NULL', 'applied_at TEXT "NOT" "NULL"')); assert.equal(db.prepare('PRAGMA table_info(schema_migrations)').all().find((row) => row.name === 'applied_at').notnull, 0) }, 'schema_shape'],
   ['previous-primary-generation', (db) => { fixture(db); db.exec("INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=5") }, 'generation'],
   ['generation', (db) => db.exec('PRAGMA user_version=99'), 'generation'],
-  ['marked-wrong', (db) => { fixture(db, 1); db.exec(`PRAGMA user_version=${sqlite.CURRENT_SCHEMA_GENERATION}`) }, 'version_list'],
   ['unknown', (db) => { fixture(db); db.exec('CREATE TABLE sqliteX_extra(value TEXT); INSERT INTO sqliteX_extra VALUES (\'keep\')') }, 'unknown_objects'],
-  ['unicode-identifier', (db) => fixture(db, versions.length, (sql) => sql.replaceAll('workspace', 'worKspace')), 'unknown_objects'],
+  ['unicode-identifier', (db) => fixture(db, MIGRATION_COUNT, (sql) => sql.replaceAll('workspace', 'worKspace')), 'unknown_objects'],
   ['malformed-ledger', (db) => db.exec('CREATE TABLE schema_migrations (garbage TEXT); INSERT INTO schema_migrations VALUES (\'keep\')'), 'schema_shape'],
   ['missing-column', (db) => { fixture(db); db.exec('ALTER TABLE workspace DROP COLUMN name') }, 'schema_shape'],
-  ['check-literal', (db) => fixture(db, versions.length, (sql) => sql.replaceAll("'pending'", "'PENDING'")), 'schema_shape'],
-  ['primary-key', (db) => fixture(db, versions.length, (sql) => sql.replace('version INTEGER PRIMARY KEY', 'version INTEGER UNIQUE')), 'schema_shape'],
-  ['index-condition', (db) => fixture(db, versions.length, (sql) => sql.replace('WHERE is_default = 1', 'WHERE is_default = 0')), 'schema_shape'],
+  ['check-literal', (db) => fixture(db, MIGRATION_COUNT, (sql) => sql.replaceAll("'pending'", "'PENDING'")), 'schema_shape'],
+  ['primary-key', (db) => fixture(db, MIGRATION_COUNT, (sql) => sql.replace('version INTEGER PRIMARY KEY', 'version INTEGER UNIQUE')), 'schema_shape'],
+  ['index-condition', (db) => fixture(db, MIGRATION_COUNT, (sql) => sql.replace('WHERE is_default = 1', 'WHERE is_default = 0')), 'schema_shape'],
   ['missing-index', (db) => { fixture(db); const row = db.prepare("SELECT name FROM sqlite_schema WHERE type='index' AND sql IS NOT NULL LIMIT 1").get(); db.exec(`DROP INDEX ${quote(row.name)}`) }, 'schema_shape'],
 ]
 for (const [name, build, reason] of cases) test(`拒绝 ${name}：两入口均结构化拒绝且全库不变`, () => {
@@ -103,7 +115,7 @@ for (const cp of unicodeSpaces) for (const shape of ['column', 'not-null', 'prim
       const original = shape === 'primary-key' ? 'version INTEGER PRIMARY KEY' : '  name TEXT NOT NULL,'
       const changed = shape === 'primary-key' ? `version INTEGER${space}PRIMARY KEY`
         : shape === 'column' ? `  name${space}TEXT NOT NULL,` : `  name TEXT${space}NOT NULL,`
-      fixture(db, versions.length, (sql) => sql.replace(original, changed))
+      fixture(db, MIGRATION_COUNT, (sql) => sql.replace(original, changed))
       const columns = db.prepare('PRAGMA table_info(workspace)').all()
       if (shape === 'column') {
         assert.ok(!columns.some((column) => column.name === 'name'))
@@ -129,27 +141,27 @@ for (const cp of unicodeSpaces) for (const shape of ['column', 'not-null', 'prim
 for (const whitespace of [' ', '\t', '\n', '\f', '\r']) test(`SQLite ASCII 空白 ${JSON.stringify(whitespace)} 与合法引号：两入口仍接纳`, () => {
   const dir = mkdtempSync(join(tmpdir(), 'baseline-ascii-')), file = join(dir, 'workspace.sqlite'), db = sqlite.openDatabase(file)
   try {
-    fixture(db, versions.length, (sql) => sql.replace('  name TEXT NOT NULL,', `  "name"${whitespace}TEXT${whitespace}NOT${whitespace}NULL,`)
+    fixture(db, MIGRATION_COUNT, (sql) => sql.replace('  name TEXT NOT NULL,', `  "name"${whitespace}TEXT${whitespace}NOT${whitespace}NULL,`)
       .replace('version INTEGER PRIMARY KEY', `"version"${whitespace}INTEGER${whitespace}PRIMARY${whitespace}KEY`))
     db.exec("INSERT INTO workspace(id,name,status_policy) VALUES ('kept','kept','provider_authoritative')")
     const before = snapshot(db)
-    assert.deepEqual(sqlite.migrate(db), { applied: [], version: 7 })
+    assert.deepEqual(sqlite.migrate(db), { applied: [], version: sqlite.BASELINE_VERSION })
     sqlite.createSqliteStorage(file).close()
     assert.deepEqual(snapshot(db), { ...before, generation: sqlite.CURRENT_SCHEMA_GENERATION })
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }) }
 })
 
-for (const quoted of [false, true]) test(`实际完整当前链有数据（引号标识符 ${quoted}）：只认可世代，随后重开不改任何行`, () => {
+for (const quoted of [false, true]) test(`实际完整当前链有数据（引号标识符 ${quoted}）：只认可单行基线账本，随后重开不改任何行`, () => {
   const dir = mkdtempSync(join(tmpdir(), 'baseline-current-')); const file = join(dir, 'workspace.sqlite')
   const db = sqlite.openDatabase(file)
   try {
-    fixture(db, versions.length, (sql) => quoted ? sql.replace(/\b(id|registered|primary_role)\b/g, name => quote(name.toUpperCase())) : sql); db.exec("INSERT INTO workspace(id,name,status_policy) VALUES ('kept','kept','provider_authoritative')")
+    fixture(db, MIGRATION_COUNT, (sql) => quoted ? sql.replace(/\b(id|registered|primary_role)\b/g, name => quote(name.toUpperCase())) : sql); db.exec("INSERT INTO workspace(id,name,status_policy) VALUES ('kept','kept','provider_authoritative')")
     const before = snapshot(db)
-    assert.deepEqual(sqlite.migrate(db), { applied: [], version: 7 })
+    assert.deepEqual(sqlite.migrate(db), { applied: [], version: sqlite.BASELINE_VERSION })
     assert.deepEqual(snapshot(db), { ...before, generation: sqlite.CURRENT_SCHEMA_GENERATION })
     const stamped = snapshot(db)
     sqlite.createSqliteStorage(file).close()
-    for (let i = 0; i < 2; i++) assert.deepEqual(sqlite.migrate(db), { applied: [], version: 7 })
+    for (let i = 0; i < 2; i++) assert.deepEqual(sqlite.migrate(db), { applied: [], version: sqlite.BASELINE_VERSION })
     assert.deepEqual(snapshot(db), stamped)
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }) }
 })
@@ -159,7 +171,7 @@ for (const phase of ['late-ddl', 'ledger', 'marker', 'commit']) test(`空库 ${p
   const wrapped = { close: db.close.bind(db), prepare(sql) {
     const statement = db.prepare(sql)
     if (phase !== 'ledger' || !sql.startsWith('INSERT INTO schema_migrations')) return statement
-    return { run(...args) { const result = statement.run(...args); if (args[0] === 7) throw failure; return result } }
+    return { run(...args) { const result = statement.run(...args); if (args[0] === sqlite.BASELINE_VERSION) throw failure; return result } }
   }, exec(sql) {
     if (phase === 'commit' && sql === 'COMMIT') throw failure
     const result = db.exec(sql)
@@ -169,18 +181,9 @@ for (const phase of ['late-ddl', 'ledger', 'marker', 'commit']) test(`空库 ${p
   try {
     assert.throws(() => sqlite.migrate(wrapped), (error) => error === failure)
     assert.deepEqual(snapshot(db), before)
-    assert.deepEqual(sqlite.migrate(db).applied, versions)
+    assert.deepEqual(sqlite.migrate(db).applied, [sqlite.BASELINE_VERSION])
     assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok')
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
-  } finally { db.close() }
-})
-
-test('清单选项不能提供不完整当前清单绕过准入', () => {
-  const db = sqlite.openDatabase(':memory:')
-  try {
-    const before = snapshot(db)
-    assert.throws(() => sqlite.migrate(db, { entries: sqlite.MIGRATIONS.slice(0, 1) }), /完整当前清单/)
-    assert.deepEqual(snapshot(db), before)
   } finally { db.close() }
 })
 
@@ -211,7 +214,7 @@ for (const generation of [0, 3, 5, sqlite.CURRENT_SCHEMA_GENERATION]) test(`旧�
   const db = sqlite.openDatabase(file)
   let closed = false
   try {
-    fixture(db, versions.length, sql => sql.replace(/^.*field_iteration_(?:start_date|duration_days).*\n/gm, ''))
+    fixture(db, MIGRATION_COUNT, sql => sql.replace(/^.*field_iteration_(?:start_date|duration_days).*\n/gm, ''))
     db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`)
     const before = snapshot(db)
     db.close(); closed = true

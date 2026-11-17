@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { MIGRATIONS, createSqliteStorage, migrate, openDatabase } from '@harness-projects/storage-sqlite'
+import { BASELINE_VERSION, createSqliteStorage, migrate, openDatabase } from '@harness-projects/storage-sqlite'
 
 /** 每个用例一个临时目录，结束时删除。必须 await 用例体：直接 `return run(dir)` 会在异步体跑完之前就删掉目录。 */
 async function withTempDir(run) {
@@ -243,7 +243,7 @@ test('重启：对同一个已迁移的文件再跑迁移是 no-op', async () =>
     try {
       const result = migrate(db)
       assert.deepEqual(result.applied, [], '已应用过的版本不得重放')
-      assert.equal(result.version, MIGRATIONS.at(-1)?.version, '版本停在清单最后一个迁移上')
+      assert.equal(result.version, BASELINE_VERSION, '版本停在单一基线版本上')
     } finally {
       db.close()
     }
@@ -265,7 +265,7 @@ test('重启：对端口写过的库再跑迁移是 no-op，既有行不被触�
     try {
       const result = migrate(db)
       assert.deepEqual(result.applied, [], '库里有端口写入的行时，迁移仍不得重放任何版本')
-      assert.equal(result.version, MIGRATIONS.at(-1)?.version, '版本停在清单最后一个迁移上')
+      assert.equal(result.version, BASELINE_VERSION, '版本停在单一基线版本上')
     } finally {
       db.close()
     }

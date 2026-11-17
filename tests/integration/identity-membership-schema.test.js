@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { MIGRATIONS, createSqliteStorage, migrate, openDatabase } from '@harness-projects/storage-sqlite'
+import { BASELINE_VERSION, createSqliteStorage, migrate, openDatabase } from '@harness-projects/storage-sqlite'
 
 /** 表 → 出处：与实际表集合互相覆盖（D8）。 */
 const TABLE_PROVENANCE = {
@@ -62,7 +62,7 @@ function seed(db) {
 test('空库建出九张表，二次运行是 no-op', () => {
   withDatabase((db) => {
     const first = migrate(db)
-    assert.deepEqual(first.applied, MIGRATIONS.map((entry) => entry.version), '空库必须应用清单里的全部迁移')
+    assert.deepEqual(first.applied, [BASELINE_VERSION], '空库只记单一基线版本')
     assert.deepEqual(tables(db).filter((name) => L2_TABLES.includes(name)), L2_TABLES)
     const snapshot = () => JSON.stringify(db.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all())
     const before = snapshot()
@@ -352,7 +352,7 @@ test('#133：投影缺字段展示列的旧 002 库在 migrate 之前以可执�
   } finally { db.close() } }
   const drop = (columns) => columns.map((column) => `ALTER TABLE workspace_projection DROP COLUMN ${column};`).join('')
   const cases = [['缺全部三列', drop(FIELDS)], ...FIELDS.map((column) => [`只缺 ${column}`, drop([column])]),
-    ['缺列且停在较低版本（删最高版本行，migrate 不再是空操作）', `${drop(['field_target_date'])}DELETE FROM schema_migrations WHERE version = ${MIGRATIONS.at(-1).version};`]]
+    ['缺列且账本为空（migrate 不再是空操作）', `${drop(['field_target_date'])}DELETE FROM schema_migrations;`]]
   try {
     for (const [index, [name, sql]] of cases.entries()) {
       const path = join(dir, `legacy-${index}.sqlite`)

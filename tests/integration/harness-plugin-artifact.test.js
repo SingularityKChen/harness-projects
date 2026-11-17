@@ -29,6 +29,7 @@ import { parse as parseYaml } from 'yaml'
 import { Context } from '@deepseek-ai/cordis'
 
 import { build } from '../../apps/harness-plugin/scripts/build.mjs'
+import { BASELINE_VERSION } from '@harness-projects/storage-sqlite'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -309,7 +310,7 @@ describe('Harness 插件安装件契约', () => {
         const db = new DatabaseSync(path.join(process.env.DSH_HOME, 'harness-projects', 'workspace.sqlite'), { readOnly: true })
         const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version)
         db.close()
-        assert.deepEqual(versions, [1, 2, 3, 4, 5, 6, 7], '包内 migrations 完成迁移 1–7')
+        assert.deepEqual(versions, [BASELINE_VERSION], '包内 migrations 完成单一基线记账')
         const generatorPrototype = Object.getPrototypeOf(Object.getPrototypeOf((async function* () {})()))
         const originalReturn = generatorPrototype.return, completed = []
         t.mock.method(generatorPrototype, 'return', async function (...args) {
