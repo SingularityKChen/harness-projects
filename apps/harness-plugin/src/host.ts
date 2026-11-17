@@ -1,6 +1,3 @@
-import { existsSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { createHostComposition } from './host-composition.ts'
 import { PROVIDER_CATALOG } from './host-providers.ts'
 import { createPlanningLifetime, drainUntil } from './host-planning-lifetime.ts'
@@ -14,12 +11,6 @@ export const inject = ['typert']
 export interface HostCredentialService { resolve(reference: string): Promise<{ value: string; source: string } | undefined> }
 
 const WORKSPACE_ID = '00000000-0000-4000-8000-000000000228' as never
-
-function migrationsDir(): string {
-  const packaged = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'migrations')
-  if (existsSync(path.join(packaged, '001_init.sql'))) return packaged
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'packages', 'storage', 'sqlite', 'migrations')
-}
 
 /** 凭据适配器：每次解析都经 `ctx.get` 取当前活跃的服务，服务与值都不缓存；服务缺席时该次解析以 `CredentialServiceUnavailable` 拒绝。 */
 function credentialResolverOf(ctx: { get?: (name: string) => unknown }): (reference: string) => Promise<string | undefined> {
@@ -70,7 +61,7 @@ export async function apply(ctx: HostRemoteContext & RootDisposalContext & { eff
       owner, ...location, workspaceId: WORKSPACE_ID, catalog: PROVIDER_CATALOG,
       sessionController: () => ctx.get?.('sessionController'),
       forceSessionStartFailure: process.env.HARNESS_PROJECTS_FORCE_SESSION_START_FAILURE === '1',
-      resolveCredential: credentialResolverOf(ctx), migrationsDir: migrationsDir(),
+      resolveCredential: credentialResolverOf(ctx),
     }).then(async (value) => { composition = value; if (lifetime.signal.aborted) await value.dispose(stop()); return value })
     acquisitions.push(opening)
     composition = await lifetime.wait(() => opening, Infinity)
