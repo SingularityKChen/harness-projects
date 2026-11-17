@@ -26,12 +26,12 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
-| [2026-11-17-windows-native-lane](exec-plan/active/2026-11-17-windows-native-lane.md) | GitHub-hosted Windows 原生安全与平台契约 lane（#646） |
 
 ### Completed
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-17-windows-native-lane](exec-plan/completed/2026-11-17-windows-native-lane.md) | GitHub-hosted Windows 原生安全与平台契约 lane（#646） |
 | [2026-11-16-primary-identity-contract](exec-plan/completed/2026-11-16-primary-identity-contract.md) | 源实体恰好一个 primary、内部锚点与双适配器原子契约（#190） |
 | [2026-11-16-windows-root-admission](exec-plan/completed/2026-11-16-windows-root-admission.md) | 已安全预置 Windows 私有根的原生准入、目录租约与 Host 生命周期（#643） |
 | [2026-11-16-windows-git-paths](exec-plan/completed/2026-11-16-windows-git-paths.md) | 原生 Windows LocalGit 路径、身份复用与持久恢复（#645） |
