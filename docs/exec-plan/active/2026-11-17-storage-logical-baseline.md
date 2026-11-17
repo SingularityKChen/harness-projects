@@ -1,6 +1,6 @@
 # Storage 逻辑单基线（#595）ExecPlan
 
-> 状态：Active（2026-11-17 实现中；全部验收后移入 `docs/exec-plan/completed/`，文件名不变）
+> 状态：Active（2026-11-17 实现完成、独立验收通过，待人类评审；合并/归档后移入 `docs/exec-plan/completed/`，文件名不变）
 > 创建：2026-11-17
 > 范围：空库初始化只记录一个 baseline 版本，且运行时、插件构建、packed artifact 检查共用唯一 SQL inventory；不合并/删除 SQL 文件（物理单资产归 #596）。
 > 上游输入：issue #595（验收与 replan-20261116 预测）、issue #417（父项，CodeBudget0）、issue #596（物理叶子）、issue #304（阻断与证据）、`docs/architecture/release-gates.md` §2 第 2 条、`docs/exec-plan/completed/2026-10-28-storage-baseline-admission.md`、`docs/adr/ADR-0016-start-work-owner-generation.md`。
@@ -24,7 +24,7 @@
 
 - 初始化已经满足「单事务 / 单 initializer / 重开零初始化写」：`migrate.ts:93-105` 用 `BEGIN IMMEDIATE` 包住空库建库与准入，`storage.ts:222-233` 的 `createSqliteStorage` 是唯一生产 opener，非空库只做 `assertCurrent` 不写行。
 - 尚未满足本任务两件事：空库逐条写 7 行账本（`migrate.ts:99-102`，`assertCurrent` 逐项比对 7 个版本）；SQL 文件名清单存在 4 份硬编码 + 1 处哨兵：`packages/storage/sqlite/src/migrations.ts:17-25`（权威）、`apps/harness-plugin/scripts/build.mjs:74-78`、`apps/harness-plugin/src/host.ts:18-22` 的 `001_init.sql` 哨兵、`tests/integration/harness-plugin-migrations.test.js:18-21`、`tests/integration/harness-plugin-demo-artifact.test.js:16-19`。
-- 当前 SQL 资产 7 份、合计 363 行；`005_source_version_carrier.sql` 为纯注释占位。`MIGRATIONS` 形状为 `readonly { version: number; file: string }[]`，版本 1–7 严格递增；`migrate()` 的 `entries` 选项是仅测试可用的第二清单入口，并带「必须使用完整当前清单」守卫。
+- 当前 SQL 资产 7 份、合计 378 行（`git show main:<path> | wc -l` 实读；issue #595 的 363 为 #190 合入前口径）；`005_source_version_carrier.sql` 为纯注释占位。`MIGRATIONS` 形状为 `readonly { version: number; file: string }[]`，版本 1–7 严格递增；`migrate()` 的 `entries` 选项是仅测试可用的第二清单入口，并带「必须使用完整当前清单」守卫。
 - `CURRENT_SCHEMA_GENERATION = 6`（#190 已合并）；`#643`/`#645` 已合并，与本叶无文件交集。`#596` 被 `#595` 阻塞；`#595` 的原生 `blockedBy` 当前为 `{304, 416, 415, 190}`、`blocking` 为 `{596}`；用户 2026-11-17 已批准**仅移除 `#595 ← #304` 这一条**，`#304` 保持 OPEN（证据与批准记录见 Decision Log D1）。
 - 分支/worktree：`refactor/storage-logical-baseline`，检出在 `.worktrees/storage-logical-baseline`，base = 上述 main，依赖已安装。验证命令均在该工作树根目录运行。
 - 本叶的验收原文（issue #595）：(1) 最终 identity/claim schema 就绪后，空库一事务建全 schema 并记录单一 baseline version，重开零初始化写；(2) 一个 runtime initializer + 一份权威 SQL asset inventory，且被 plugin build 与 artifact checks 消费，物理 fragment 可暂留为输入资产；(3) 精确 generation/schema/ledger 准入保持 fail closed，旧/未知布局原样拒绝并保留备份/重建路线，保留原子初始化、失败/提交回滚与 content/integrity/FK 检查；(4) 删除被取代的逐步 data hook/version loop，保留两个 adapter 契约、真实 packed Host 重开与 missing/extra/schema-drift 负控。
@@ -42,7 +42,7 @@
 - **设计 3（产品/交付）**：正确给出「删除 `host.ts` 的 `migrationsDir()`、让 `MIGRATIONS_DIR` 按模块位置解析」的方向与「单 PR + 3 批次 + 尺寸下调」的交付形态。其「build 直接 import TS 在 Node 26 可用」已由本计划实测确认。本计划采纳该方向，但用现有 packed Host 用例而非新增探针作为证据，并把 ExecPlan 归档列在收口而不是独立批次。
 - **三路共识（采纳）**：`BASELINE_VERSION = 1`；generation 保持 6；不合并 SQL；单 PR；`build.mjs`/artifact 测试消费同一 inventory。
 - **三路分歧（已裁决）**：`MIGRATIONS` 形状改为 `string[]` 并删除 `Migration` 接口（D4）；不做目录扫描等式（D5）；删除而非改写 `host.ts` 哨兵（D6）；packed/artifact 测试在 #595 内适配（D10）。
-- **事实核对**：三路对 main 现状（单事务初始化、单 initializer、重开零写、generation=6、SQL 363 行）的判断一致，经本计划复核均成立；没有推翻 main 事实的硬错误。偏差集中在三处：设计 2 保留 `{version,file}`（单基线后是死数据）并新增目录扫描（过度）；设计 1 的 `host.ts` 只换哨兵字面量（收敛不足）；设计 3 的「删哨兵后改传 `MIGRATIONS_DIR`」与「让 storage 默认解析」等价但未区分（本计划取后者，D6）。
+- **事实核对**：三路对 main 现状（单事务初始化、单 initializer、重开零写、generation=6、SQL 378 行）的判断一致，经本计划复核均成立；没有推翻 main 事实的硬错误。偏差集中在三处：设计 2 保留 `{version,file}`（单基线后是死数据）并新增目录扫描（过度）；设计 1 的 `host.ts` 只换哨兵字面量（收敛不足）；设计 3 的「删哨兵后改传 `MIGRATIONS_DIR`」与「让 storage 默认解析」等价但未区分（本计划取后者，D6）。
 
 ### 状态所有权
 
@@ -290,8 +290,9 @@ git diff --stat main...HEAD -- .github/workflows scripts/workflow-check.mjs
 - [x] 2026-11-17：Batch 1 运行时单基线（RED→GREEN；9 个测试文件 268 pass/0 fail；`pnpm typecheck`、`boundaries` 通过）— `c18a912f`
 - [x] 2026-11-17：Batch 2 唯一 SQL inventory（build.mjs/host.ts + 4 个 packed/artifact 测试 61 pass/0 fail；静态守卫与 `git grep` 无 `.sql` 字面量）— `9558d4d7`
 - [x] 2026-11-17：Batch 3 文档与门禁（ExecPlan 回填、README 索引保持、prelaunch 就地订正、`pnpm verify`/size/disclosure/diff 全绿）
-- [x] 2026-11-17：交付（3 个可独立审阅的提交、draft PR #658、最终 head/base/checks 回读；#595←#304 单边移除与 `gh pr ready` 不在本实现 owner 的写入范围，由交付负责人/人类伙伴执行）
+- [x] 2026-11-17：交付（交付 head 的 4 个可独立审阅提交 `7a4cf5db`/`c18a912f`/`9558d4d7`/`ee384266`、draft PR #658、最终 head/base/checks 回读；`#595←#304` 单边移除已由交付负责人执行，回读 `blockedBy={416,415,190}`、`blocking={596}`、`#304` 仍 OPEN；`gh pr ready` 由交付负责人/人类伙伴决定）
 - [x] 2026-11-17：PR #658 body 写入真实验证命令、计数、风险/回滚与 #596 交接（只改 SQL 资产与派生常量/路径）；评审与合并由人类伙伴决定
+- [x] 2026-11-17：独立对抗验收（检出 `.worktrees/storage-logical-baseline`@`ee384266`，验收者执行）：`pnpm verify` 退出码 0（contract 1603、integration 2294 pass/17 skipped/0 fail、e2e 226）；`pnpm run boundaries` 9/9；`size main` 代码 342/文档 367；disclosure、`git diff --check` 退出码 0。独立 probe 确认空库恰一行 `version=1`、`user_version=6`、重开 `applied=[]` 且 schema/文件字节不变；旧「完整 shape + 1..7 行账本 + 世代 6」库经 `migrate` 与 `createSqliteStorage` 均 `version_list` 拒绝且文件 SHA-256 不变。变异实验 M1（准入改回接受 7 行账本）117 红、M2（`BASELINE_VERSION=7`）2 红、M3（清单少 `007`）7 红、M4/M5（重加 `.sql` 字面量）静态守卫红；M5 暴露模板字面量漏报，已补测试（D15）。PR checks 在 `ee384266` 上全 pass。结论：达到请求人类评审的 ready 条件；ready/合并由 lead 与人类伙伴决定。
 
 ## Surprises & Discoveries
 
@@ -305,6 +306,7 @@ git diff --stat main...HEAD -- .github/workflows scripts/workflow-check.mjs
 8. **D12 的「非空清单」在实现中扩成三条显式检查。** 除空清单外，空字符串文件名也会让 `join(dir, '')` 命中目录、`existsSync` 通过；`assertManifestIntegrity` 因此额外拒绝空字符串元素（D12 的实现细节，不新增抽象）。
 9. **`build.mjs` 裸包名导入会连带加载 storage 包 index。** 该 index 含 `storage.ts` 与 `node:sqlite`；实测 Node 26.13.1 从 `apps/harness-plugin` 解析并调用 `readMigrationSql` 成功，构建不需要额外 flag 或 loader（复核 D7）。
 10. **9 件 Batch 1 测试总数从 264 变为 268。** 新增「旧 7 行账本」「单行错值/空账本/多余行」「清单空/空元素」等判别用例，同时删除 `entries` 绕过用例与版本单调用例；净 +4。
+11. **构建脚本的 Node 版本下限被 inventory 导入抬高（独立验收发现）。** `build.mjs` 以裸包名导入 `@harness-projects/storage-sqlite` 后，构建路径实际依赖 Node type stripping 与 `node:sqlite`（`.nvmrc`=26 已实测）；根 `package.json` 的 `engines.node` 仍写 `>=22.0.0`，本 PR 按验收 4 不改 package.json/lockfile，故 Node 22.0–22.4（无 `node:sqlite`）不在本 PR 的构建保证内；记为残余风险并在 PR body 写明。
 
 ## Decision Log
 
@@ -323,6 +325,7 @@ git diff --stat main...HEAD -- .github/workflows scripts/workflow-check.mjs
 
 - **D13（2026-11-17，实现中裁决）**：单基线 admission 的拒绝用例族按「账本行数/值」重排：`legacy-ledger-{2,4,7}` 与「多余行/空账本/错值/int64 边界」归 `version_list`；`legacy-ledger-1` 归 `schema_shape`。Rationale：旧 main 只应用首步的库账本恰好是 `[1]`，与单基线账本值相同，账本检查无法也不应区分两者——形状由完整 `schema_shape` 准入拒绝，这正是 I4 的预测。把该用例写成 `version_list` 会断言一个实现上不可能的错误原因。
 - **D14（2026-11-17，实现中裁决）**：`assertManifestIntegrity` 在 D12 之外显式拒绝空字符串文件名。Rationale：`join(dir, '')` 得到目录本身，`existsSync` 会通过；不显式拒绝会让「空元素」成为静默通过的清单错误。两行代码纳入同一个自检，不新增抽象。
+- **D15（2026-11-17，独立验收裁决）**：验收者独立复跑与变异复核后不改变实现与验收结果。唯一代码侧修复是测试判别力：D8 静态守卫正则原先只匹配单/双引号，模板字面量 `.sql` 可漏报（M5 实测 2/2 绿），现覆盖三种 JS 字符串引号（`f92c413c`；M5b/M5c 在 `build.mjs`、`host.ts` 各 1 红，正常树 2/2 绿）。同时订正文档事实：SQL 资产实测 378 行（原文 363 为 issue #595 的 #190 前口径）、交付提交实为 4 个、Bottom Change Note 去掉占位符。Rationale：`BASELINE_VERSION` 值变异的判别由 `legacy-ledger-1`/`wrong-baseline-7` 相对用例承担（M2 实测 2 红），不另加实现常量镜像断言；`gh pr ready` 与合并仍由人类伙伴/lead 决定。
 
 **需要人类裁决的点：0 条。** 唯一前置人类批准（#595←#304 单边移除）已于 2026-11-17 取得并见 D1；其余由本计划自行裁决并记录。合并与否仍由人类伙伴决定。
 
@@ -349,7 +352,7 @@ git diff --stat main...HEAD -- .github/workflows scripts/workflow-check.mjs
 
 实现回填（2026-11-17，检出 `.worktrees/storage-logical-baseline`）：
 
-- 规模实测（`node scripts/rule-checks.mjs size main`）：**代码 342 行**（预测 300–450，中心 350）、**文档 367 行**（预测 250–280）；仓库 1000/1500 与本批 800/1300 上限均未触发。
+- 规模实测（`node scripts/rule-checks.mjs size main`）：**代码 343 行**（预测 300–450，中心 350）、**文档 371 行**（预测 250–280；交付 head `ee384266` 时为 342/367，独立验收回填 +1 测试行与 +4 文档行）；仓库 1000/1500 与本批 800/1300 上限均未触发。
 - 判别性 RED→GREEN 四组：空库 7 行账本 → 单行基线；空清单静默 → 显式失败；旧完整 7 行账本被接受 → `version_list` 拒绝且文件 hash 不变；`build.mjs`/`host.ts` 的 `.sql` 字面量 → 静态守卫红 → 删除后绿。
 - 预期外失败：无阻塞性失败；唯一语义偏差是旧 1 行账本的拒绝原因落在 `schema_shape`（Surprises 7），已按实际语义写进用例族（D13）。
 - 与 D9 预测的偏差：代码落在预测区间内；文档比预测多出实现记录（RED/GREEN 证据、实际计数、D13/D14），按 PLANS.md「Progress / Surprises / Decision Log 必须可执行地记录」处理。
@@ -361,4 +364,5 @@ git diff --stat main...HEAD -- .github/workflows scripts/workflow-check.mjs
 - 2026-11-17（lead 裁决）：批准 D1–D12；`#595←#304` 单边移除已获用户点名批准，执行前本计划保持 Active；本 PR 以 `Closes #595` 交付、base 为 `main`。
 - 2026-11-17（Batch 1，`c18a912f`）：运行时单基线落地；9 件测试 268 pass/0 fail；SQL 资产零改动，`CURRENT_SCHEMA_GENERATION` 保持 6，旧 7 行账本仍 `version_list`。
 - 2026-11-17（Batch 2，`9558d4d7`）：`build.mjs`/`host.ts` 删除第二份 SQL 清单与目录判定；4 件插件/packed 测试 61 pass/0 fail；静态守卫证明 `.sql` 字面量只剩 `migrations.ts`。
-- 2026-11-17（Batch 3，`本次文档提交`）：ExecPlan 回填（Progress/Surprises/D13–D14/Outcomes/Bottom Change Note）、README 索引保持、prelaunch 就地 `Superseded by`；门禁见 Batch 3 实际记录。
+- 2026-11-17（Batch 3，`ee384266`）：ExecPlan 回填（Progress/Surprises/D13–D14/Outcomes/Bottom Change Note）、README 索引保持、prelaunch 就地 `Superseded by`；门禁见 Batch 3 实际记录。
+- 2026-11-17（独立验收，本提交）：独立复跑、probe 与变异实验通过；补 D8 静态守卫的模板字面量覆盖（唯一测试改动 `f92c413c`，D15）；订正 SQL 行数 378、交付提交计数 4、Bottom Change Note 占位符、状态行与 D1/#595 关系回读；记录构建脚本 Node 版本下限残余风险（Surprises 11）。结论：达到请求人类评审的 ready 条件；ready 与合并由 lead/人类伙伴决定。
