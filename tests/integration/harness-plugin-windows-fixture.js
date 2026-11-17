@@ -104,7 +104,6 @@ export async function hostFixture(apply, f) {
   catch (error) { await dispose(); assert.equal(services.size, 0); assert.equal(live.size, 0); throw error }
 }
 export async function corrupt(f, kind) {
-  if (kind.startsWith('missing-')) return rm(kind === 'missing-root' ? f.root : kind === 'missing-db' ? f.dataPath : f.log, { recursive: true })
   if (kind === 'ancestor') return setAcl(f.ancestor, { broad: true, flags: '', rights: '0x40' })
   if (kind === 'direct-only') return setAcl(f.root, { direct: true })
   if (kind === 'null' || kind === 'callback') return setAcl(f.root, { [kind]: true })

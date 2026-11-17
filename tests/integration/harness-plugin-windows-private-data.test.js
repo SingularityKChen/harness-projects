@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import childProcess from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
+import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { apply } from '../../apps/harness-plugin/src/host.ts'
 import { prepareWindowsProjectData } from '../../apps/harness-plugin/src/host-private-windows.ts'
@@ -38,6 +39,81 @@ test('native launcher-shaped plain-mkdir profile chain is admitted by the secure
   t.diagnostic(JSON.stringify({ launcherProfile: inspectAcl(f.profile), launcherAncestor: inspectAcl(f.ancestor) }))
   const lease = await prepareWindowsProjectData(f.profile)
   try { assert.equal(lease.signal.aborted, false) } finally { fs.closeSync(lease.logFd); await lease.dispose() }
+})
+
+// Batch 1：fresh 创建必须在创建调用内得到目标描述符，之后才由 Open 复核；无「先宽后 chmod」窗口。
+test('native fresh profile creates the private data boundary inside the creating call', { skip: process.platform !== 'win32' }, async (t) => {
+  const f = await windowsFixture(t, { launcherProfile: true, provisioned: false })
+  const lease = await prepareWindowsProjectData(f.profile)
+  try {
+    assert.equal(lease.signal.aborted, false)
+    assert.deepEqual([fs.existsSync(f.root), fs.existsSync(f.dataPath), fs.existsSync(f.log)], [true, true, true], 'fresh prepare 必须建立 root/db/log')
+    for (const location of [f.root, f.dataPath, f.log]) {
+      const entry = trustedAcl(inspectAcl(location), f.token.sid)
+      assert.deepEqual([entry.ownerSid, entry.protected, entry.aces.every(({ inherited }) => !inherited)], [f.token.sid, true, true], `${location} 必须在创建调用内即为 owner=self、protected、无继承 ACE`)
+    }
+    const self = (entry) => entry.aces.find(({ sid }) => sid === f.token.sid)
+    assert.deepEqual([self(inspectAcl(f.root)).flags, self(inspectAcl(f.root)).rights], [3, 2032127], 'root 必须给当前 SID OI/CI full 继承')
+    assert.deepEqual([self(inspectAcl(f.dataPath)).flags, self(inspectAcl(f.dataPath)).rights], [0, 2032127], '固定文件只给当前 SID full，不带继承标记')
+    assert.deepEqual([fs.statSync(f.dataPath).size, fs.statSync(f.log).size], [0, 0], '边界先于内容：helper 不写任何字节')
+  } finally { fs.closeSync(lease.logFd); await lease.dispose() }
+})
+
+// Batch 1：完全 canonical 的既有对象只被 adopt；SDDL 与字节逐字不变，重开仍接纳。
+test('native Windows adoption leaves the canonical data shape untouched across leases', { skip: process.platform !== 'win32' }, async (t) => {
+  const f = await windowsFixture(t, { launcherProfile: true, provisioned: false })
+  const record = async () => ({ root: inspectAcl(f.root), db: inspectAcl(f.dataPath), log: inspectAcl(f.log), bytes: [await readFile(f.dataPath), await readFile(f.log)] })
+  let lease = await prepareWindowsProjectData(f.profile)
+  const before = await record()
+  fs.closeSync(lease.logFd); await lease.dispose()
+  lease = await prepareWindowsProjectData(f.profile)
+  try {
+    const after = await record()
+    for (const key of ['root', 'db', 'log']) assert.equal(after[key].sddl, before[key].sddl, `${key} 的 DACL 不能被 adopt 路径改写`)
+    assert.deepEqual([after.bytes[0].equals(before.bytes[0]), after.bytes[1].equals(before.bytes[1])], [true, true], 'adopt 不能截断/改写既有内容')
+  } finally { fs.closeSync(lease.logFd); await lease.dispose() }
+  const reopened = await prepareWindowsProjectData(f.profile)
+  try { assert.equal(reopened.signal.aborted, false) } finally { fs.closeSync(reopened.logFd); await reopened.dispose() }
+})
+
+// Batch 1：真实 Host 在空 profile 上首启（建库迁移、零工作区），退出后追加日志再重开。
+test('native fresh Windows Host creates, migrates and reopens its private data root', { skip: process.platform !== 'win32' }, async (t) => {
+  const f = await windowsFixture(t, { launcherProfile: true, provisioned: false })
+  let host = await hostFixture(apply, f)
+  try {
+    const service = host.services.get('harnessProjects')
+    assert.equal((await service.getWorkspaceSetup()).workspace, null, '干净数据根：零工作区')
+    assert.equal((await service.baseline()).workspace, undefined, '干净数据根：baseline 无工作区')
+    const db = new DatabaseSync(f.dataPath, { readOnly: true })
+    try { assert.deepEqual(db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2, 3, 4, 5, 6, 7], '首启必须完成迁移 1–7') } finally { db.close() }
+    for (const location of [f.root, f.dataPath, f.log]) {
+      const entry = trustedAcl(inspectAcl(location), f.token.sid)
+      assert.deepEqual([entry.ownerSid, entry.protected], [f.token.sid, true], `${location} 在 Host 首启后仍是私有边界`)
+    }
+  } finally { await host.dispose(); host = undefined }
+  fs.appendFileSync(f.log, 'fresh host resume sentinel\n')
+  host = await hostFixture(apply, f)
+  try {
+    assert.equal((await host.services.get('harnessProjects').baseline()).workspace, undefined, '重开同一空库仍零工作区')
+    assert.ok((await readFile(f.log, 'utf8')).startsWith('fresh host resume sentinel\n'), '重开必须保留既有日志字节')
+    const reopened = new DatabaseSync(f.dataPath, { readOnly: true })
+    try { assert.equal(reopened.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n, 7, '重开不能重放/截断迁移') } finally { reopened.close() }
+  } finally { await host.dispose() }
+})
+
+// Batch 1：部分状态（root canonical、db 或 log 缺失）只补建缺失对象，存活对象字节不变。
+test('native partial private data resumes by creating only the missing objects', { skip: process.platform !== 'win32' }, async (t) => {
+  for (const kind of ['missing-db', 'missing-log']) await t.test(kind, async (t) => {
+    const f = await windowsFixture(t, { launcherProfile: true, provisioned: true })
+    const database = await readFile(f.dataPath), log = await readFile(f.log)
+    await rm(kind === 'missing-db' ? f.dataPath : f.log)
+    const lease = await prepareWindowsProjectData(f.profile)
+    try {
+      assert.deepEqual([fs.existsSync(f.dataPath), fs.existsSync(f.log)], [true, true], '缺失对象必须被补建')
+      if (kind === 'missing-db') { assert.equal(fs.statSync(f.dataPath).size, 0, '补建的库在 SQLite 初始化前是空文件'); assert.deepEqual(await readFile(f.log), log, '存活的日志字节不变') }
+      else { assert.deepEqual(await readFile(f.dataPath), database, '存活的数据库字节不变'); assert.equal(fs.statSync(f.log).size, 0, '补建的日志在 Host 写入前是空文件') }
+    } finally { fs.closeSync(lease.logFd); await lease.dispose() }
+  })
 })
 
 // Synthetic protocol/lifetime evidence only; native timing and ACL evidence are separate below.
@@ -254,7 +330,7 @@ test('native Windows admission refuses a foreign-owned database even with otherw
 
 // Omitting each corresponding object, DACL, inheritance or hardlink check must publish no authority.
 test('native Windows admission refuses unsafe objects without disclosing paths or mutating sentinels', { skip: process.platform !== 'win32' }, async (t) => {
-  for (const kind of ['missing-root', 'missing-db', 'missing-log', 'ancestor', 'direct-only', 'null', 'callback', 'inherit-only',
+  for (const kind of ['ancestor', 'direct-only', 'null', 'callback', 'inherit-only',
     'broad-profile', 'broad-root', 'broad-workspace.sqlite', 'broad-diagnostics.log', 'broad-workspace.sqlite-wal',
     'broad-workspace.sqlite-shm', 'broad-workspace.sqlite-journal', 'junction-profile', 'junction-root', 'wrong-type', 'hardlink-db', 'hardlink-log', 'hardlink-sidecar']) {
     await t.test(kind, async (t) => {
@@ -265,7 +341,7 @@ test('native Windows admission refuses unsafe objects without disclosing paths o
         assert.equal(error.name, denied.name); assert.doesNotMatch(error.message, /harness-admission-|[A-Z]:\\/i)
         return true
       })
-      if (!['missing-root', 'missing-log', 'junction-profile', 'junction-root'].includes(kind)) assert.deepEqual(await readFile(f.log), original)
+      if (!['junction-profile', 'junction-root'].includes(kind)) assert.deepEqual(await readFile(f.log), original)
     })
   }
 })
