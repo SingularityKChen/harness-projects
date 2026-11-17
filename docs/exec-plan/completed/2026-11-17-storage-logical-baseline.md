@@ -1,6 +1,6 @@
 # Storage 逻辑单基线（#595）ExecPlan
 
-> 状态：Active（2026-11-17 实现完成、独立验收通过，待人类评审；合并/归档后移入 `docs/exec-plan/completed/`，文件名不变）
+> 状态：Completed（2026-11-17 实现完成、独立验收归档；评审记录 `docs/review/pr-658-mmp-review.md`；#659 以本 PR 为 base stack，合并后由其 retarget/rebase）
 > 创建：2026-11-17
 > 范围：空库初始化只记录一个 baseline 版本，且运行时、插件构建、packed artifact 检查共用唯一 SQL inventory；不合并/删除 SQL 文件（物理单资产归 #596）。
 > 上游输入：issue #595（验收与 replan-20261116 预测）、issue #417（父项，CodeBudget0）、issue #596（物理叶子）、issue #304（阻断与证据）、`docs/architecture/release-gates.md` §2 第 2 条、`docs/exec-plan/completed/2026-10-28-storage-baseline-admission.md`、`docs/adr/ADR-0016-start-work-owner-generation.md`。
@@ -268,7 +268,7 @@ git diff --stat main...HEAD -- .github/workflows scripts/workflow-check.mjs
 
 ### 交付（非批次）
 
-1. 本地整理为 3 个可独立审阅的提交（Batch 1 / Batch 2 / Batch 3），无临时提交/调试痕迹；提交标题按仓库格式，正文说明为什么并 `Closes #595` / `Refs #417 #596`。
+1. 本地整理为 4 个可独立审阅的提交（计划 + Batch 1 / Batch 2 / Batch 3），无临时提交/调试痕迹；提交标题按仓库格式，正文说明为什么并 `Closes #595` / `Refs #417 #596`。
 2. 推送分支后开 **draft** PR（base `main`；正文英文：闭环、ExecPlan + Batch、`Closes #595`、真实验证证据、风险与回滚）。
 3. 执行已批准的 #595←#304 单边移除（精确目标：仅 `blockedBy: #304`；`#304` 保持 OPEN，`blocking: #596` 与其余边、`Status` 不变），并用下列只读查询回读（期望 `blockedBy` 不含 304，其余节点按操作前快照不变）：
    `gh api graphql -f query='query{repository(owner:"SingularityKChen",name:"harness-projects"){issue(number:595){number blockedBy(first:20){nodes{number}} blocking(first:20){nodes{number}}}}}'`
@@ -366,3 +366,4 @@ git diff --stat main...HEAD -- .github/workflows scripts/workflow-check.mjs
 - 2026-11-17（Batch 2，`9558d4d7`）：`build.mjs`/`host.ts` 删除第二份 SQL 清单与目录判定；4 件插件/packed 测试 61 pass/0 fail；静态守卫证明 `.sql` 字面量只剩 `migrations.ts`。
 - 2026-11-17（Batch 3，`ee384266`）：ExecPlan 回填（Progress/Surprises/D13–D14/Outcomes/Bottom Change Note）、README 索引保持、prelaunch 就地 `Superseded by`；门禁见 Batch 3 实际记录。
 - 2026-11-17（独立验收，本提交）：独立复跑、probe 与变异实验通过；补 D8 静态守卫的模板字面量覆盖（唯一测试改动 `f92c413c`，D15）；订正 SQL 行数 378、交付提交计数 4、Bottom Change Note 占位符、状态行与 D1/#595 关系回读；记录构建脚本 Node 版本下限残余风险（Surprises 11）。结论：达到请求人类评审的 ready 条件；ready 与合并由 lead/人类伙伴决定。
+- 2026-11-17（归档）：独立验收记录 `docs/review/pr-658-mmp-review.md`；计划移入 `docs/exec-plan/completed/` 并更新 `docs/README.md`、`docs/review/README.md` 索引；订正「3 个提交」为实际 4 个。评审 P3 处置：`005_source_version_carrier.sql:4` 的「版本 5」过期注释登记为 #596 物理折叠时的必办事项（本 PR 守 SQL 目录零 diff 不变量）；`build.mjs` Node 下限与 `engines` 不一致、`tests/contract/package-boundaries.test.js` 不覆盖 `apps/*/scripts/*.mjs` 记为后续运行时/边界契约项；PR 正文的 Draft/all-pass 表述在合并前更新。产品/测试字节不变。
