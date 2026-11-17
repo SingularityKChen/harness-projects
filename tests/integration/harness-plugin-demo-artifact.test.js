@@ -11,10 +11,10 @@ import { before, after, it } from 'node:test'
 import { parse } from 'yaml'
 import ts from 'typescript'
 import { build, isNodeBuiltin } from '../../apps/harness-plugin/scripts/build.mjs'
+import { MIGRATIONS, readMigrationSql } from '@harness-projects/storage-sqlite'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const migrations = ['001_init.sql', '002_identity_membership.sql', '003_control_facts.sql',
-  '004_execution_run_identity.sql', '005_source_version_carrier.sql', '006_delivery_facts.sql', '007_planning_sync_round.sql']
+const migrations = [...MIGRATIONS]
 const expected = ['LICENSE', 'package.json', 'cordis.patch.yml', 'lib/index.js', 'lib/client.js',
   ...migrations.map(name => `migrations/${name}`)].sort()
 let scratch, tarball
@@ -88,8 +88,9 @@ async function audit(file) {
   assert.deepEqual(bytes['cordis.patch.yml'], await readFile(path.join(root, 'apps/harness-plugin/cordis.patch.yml')))
   assert.ok(parse(bytes['cordis.patch.yml'].toString()))
   assert.deepEqual(bytes.LICENSE, await readFile(path.join(root, 'LICENSE')))
+  assert.ok(migrations.length > 0, 'inventory 不得为空：否则逐字节断言会空转')
   for (const name of migrations) assert.deepEqual(bytes[`migrations/${name}`],
-    await readFile(path.join(root, 'packages/storage/sqlite/migrations', name)), 'migration bytes differ')
+    Buffer.from(readMigrationSql(name)), 'migration bytes differ')
   assert.match(bytes['lib/index.js'].toString(), /["']node:sqlite["']/)
   assert.match(bytes['lib/client.js'].toString(), /window\.__ModuleLoader__\.load/)
   return { dest, bytes, sha256: digest(await readFile(file)) }
@@ -119,7 +120,7 @@ it('actual tarball mutations are rejected without disclosing injected values', a
   for (const [name, reason, mutate] of [
     ['path', /identity path/, async dir => writeFile(path.join(dir, 'lib/index.js'), '\n// /' + 'Users/' + 'artifact-canary/private\n', { flag: 'a' })],
     ['credential', /credential/, async dir => writeFile(path.join(dir, 'lib/index.js'), '\n// ghp_' + 'z'.repeat(36), { flag: 'a' })],
-    ['migration', /inventory/, async dir => rm(path.join(dir, 'migrations/007_planning_sync_round.sql'))],
+    ['migration', /inventory/, async dir => rm(path.join(dir, `migrations/${MIGRATIONS.at(-1)}`))],
     ['source-export', /deep-equal/, async dir => {
       const file = path.join(dir, 'package.json'), manifest = JSON.parse(await readFile(file, 'utf8'))
       manifest.exports['.'] = './src/index.ts'
@@ -130,7 +131,7 @@ it('actual tarball mutations are rejected without disclosing injected values', a
     run('tar', ['-xzf', tarball, '-C', dest])
     await mutate(path.join(dest, 'package'))
     const candidate = path.join(scratch, `${name}.tgz`)
-    run('tar', ['-czf', candidate, '-C', dest, ...expected.filter(entry => name !== 'migration' || entry !== 'migrations/007_planning_sync_round.sql').map(entry => `package/${entry}`)])
+    run('tar', ['-czf', candidate, '-C', dest, ...expected.filter(entry => name !== 'migration' || entry !== `migrations/${MIGRATIONS.at(-1)}`).map(entry => `package/${entry}`)])
     await assert.rejects(() => audit(candidate), error => {
       assert.match(error.message, reason)
       assert.ok(!String(error.message).includes('artifact-canary'))
