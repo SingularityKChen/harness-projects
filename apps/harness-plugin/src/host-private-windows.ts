@@ -13,8 +13,12 @@ $handles=New-Object 'Collections.Generic.List[IntPtr]'
 $opened=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
 $script:phase='binding'
 $script:win32=-1
+$script:fileSd=[IntPtr]::Zero; $script:directorySd=[IntPtr]::Zero
+$script:fileSa=[IntPtr]::Zero; $script:directorySa=[IntPtr]::Zero
 try {
   if($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage'){throw 'language'}
+  # SECURITY_ATTRIBUTES and pointer-bearing descriptors below are only correct for the x64 Win32 ABI.
+  if([IntPtr]::Size -ne 8){throw 'platform'}
   $assembly=[AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object Reflection.AssemblyName('PrivateRoot')), [Reflection.Emit.AssemblyBuilderAccess]::Run)
   $builder=$assembly.DefineDynamicModule('Native').DefineType('Native','Public, Abstract, Sealed')
   function Bind($name,$dll,$return,$parameters) {
@@ -26,9 +30,12 @@ try {
     $method.SetCustomAttribute((New-Object Reflection.Emit.CustomAttributeBuilder($attribute.GetConstructor([type[]]@([string])),[object[]]@($dll),$fields,$values)))
     $method.SetImplementationFlags('PreserveSig')
     if($name -ceq 'CreateFileW'){$script:createFile=$method}
+    if($name -ceq 'CreateDirectoryW'){$script:createDirectory=$method}
   }
   $ptr=[IntPtr]; $ref=$ptr.MakeByRefType(); $u=[uint32]; $s=[string]; $sb=[Text.StringBuilder]
   Bind CreateFileW kernel32.dll $ptr ([type[]]@($s,$u,$u,$ptr,$u,$u,$ptr))
+  Bind CreateDirectoryW kernel32.dll ([int]) ([type[]]@($s,$ptr))
+  Bind ConvertStringSecurityDescriptorToSecurityDescriptorW advapi32.dll ([int]) ([type[]]@($s,$u,$ref,$ptr))
   Bind GetFileType kernel32.dll $u ([type[]]@($ptr))
   Bind GetFileInformationByHandle kernel32.dll ([int]) ([type[]]@($ptr,$ptr))
   Bind GetVolumeInformationByHandleW kernel32.dll ([int]) ([type[]]@($ptr,$sb,$u,$ptr,$ptr,$ptr,$sb,$u))
@@ -48,6 +55,22 @@ try {
   $il.Emit($op::Call,$script:createFile); $il.Emit($op::Stloc,$saved)
   $il.Emit($op::Ldarg_2); $il.Emit($op::Call,[Runtime.InteropServices.Marshal].GetMethod('GetLastWin32Error'))
   $il.Emit($op::Stind_I4); $il.Emit($op::Ldloc,$saved); $il.Emit($op::Ret)
+  # CreateChecked(path, sa, out win32Error): attribute-only desiredAccess=0, share 3 = READ|WRITE,
+  # CREATE_NEW=1, FILE_ATTRIBUTE_NORMAL=0x80; the error is captured in IL before any managed call can clobber it.
+  $wrapper=$builder.DefineMethod('CreateChecked','Public, Static',$ptr,[type[]]@($s,$ptr,[int].MakeByRefType()))
+  $il=$wrapper.GetILGenerator(); $saved=$il.DeclareLocal($ptr)
+  $il.Emit($op::Ldarg_0); $il.Emit($op::Ldc_I4_0)
+  $il.Emit($op::Ldc_I4_3); $il.Emit($op::Ldarg_1)
+  $il.Emit($op::Ldc_I4_1); $il.Emit($op::Ldc_I4,128); $il.Emit($op::Ldsfld,[IntPtr].GetField('Zero'))
+  $il.Emit($op::Call,$script:createFile); $il.Emit($op::Stloc,$saved)
+  $il.Emit($op::Ldarg_2); $il.Emit($op::Call,[Runtime.InteropServices.Marshal].GetMethod('GetLastWin32Error'))
+  $il.Emit($op::Stind_I4); $il.Emit($op::Ldloc,$saved); $il.Emit($op::Ret)
+  # CreateDirectoryChecked(path, sa, out win32Error): BOOL result with the same atomic error capture.
+  $wrapper=$builder.DefineMethod('CreateDirectoryChecked','Public, Static',[int],[type[]]@($s,$ptr,[int].MakeByRefType()))
+  $il=$wrapper.GetILGenerator(); $created=$il.DeclareLocal([int])
+  $il.Emit($op::Ldarg_0); $il.Emit($op::Ldarg_1); $il.Emit($op::Call,$script:createDirectory); $il.Emit($op::Stloc,$created)
+  $il.Emit($op::Ldarg_2); $il.Emit($op::Call,[Runtime.InteropServices.Marshal].GetMethod('GetLastWin32Error'))
+  $il.Emit($op::Stind_I4); $il.Emit($op::Ldloc,$created); $il.Emit($op::Ret)
   $N=$builder.CreateType(); $M=[Runtime.InteropServices.Marshal]
   $imports=@($N.GetMethod('CreateFileW').GetCustomAttributes([Runtime.InteropServices.DllImportAttribute],$false))
   if($imports.Count -ne 1){throw 'metadata'}
@@ -56,6 +79,22 @@ try {
     $import.CallingConvention -ne 'Winapi' -or $import.EntryPoint -cne 'CreateFileW' -or $import.Value -cne 'kernel32.dll'){throw 'metadata'}
   $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   $trusted=@($sid,'S-1-5-18','S-1-5-32-544','S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+  # 创建调用内带目标 SD：显式 owner=token 用户、D:P、目录 OI/CI full，文件去掉继承位；与 #643 的 canonical 形状一致。
+  function New-Descriptor([string]$sddl) {
+    $descriptor=[IntPtr]::Zero
+    if(!$N::ConvertStringSecurityDescriptorToSecurityDescriptorW($sddl,1,[ref]$descriptor,[IntPtr]::Zero) -or $descriptor -eq [IntPtr]::Zero){throw 'security'}
+    return $descriptor
+  }
+  function New-Attributes([IntPtr]$descriptor) {
+    $attributes=$M::AllocHGlobal(24)
+    if($attributes -eq [IntPtr]::Zero){throw 'security'}
+    $M::WriteInt32($attributes,0,24); $M::WriteIntPtr($attributes,8,$descriptor); $M::WriteInt32($attributes,16,0)
+    return $attributes
+  }
+  $script:fileSd=New-Descriptor ('O:'+$sid+'D:P(A;;FA;;;'+$sid+')(A;;FA;;;SY)(A;;FA;;;BA)')
+  $script:directorySd=New-Descriptor ('O:'+$sid+'D:P(A;OICI;FA;;;'+$sid+')(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)')
+  $script:fileSa=New-Attributes $script:fileSd
+  $script:directorySa=New-Attributes $script:directorySd
   function ReadInput {
     $line=[Console]::ReadLine()
     if($null -eq $line -or $line.Length -gt 32768){throw 'input'}
@@ -134,6 +173,24 @@ try {
       if($directory){$handles.Add($h); $null=$opened.Add($p); $h=[IntPtr]::Zero}
     } finally {if($h -ne [IntPtr]::Zero){$null=$N::CloseHandle($h)}}
   }
+  # Create-or-admit: EXISTS(183 目录 / 80 文件) 表示并发或重开，交给既有 Open 复核；其它创建错误有界拒绝，绝不先建后改。
+  function Ensure([string]$p,[bool]$directory,[string]$phaseName) {
+    $script:phase=$phaseName
+    $errorCode=0; $created=0
+    if($directory){
+      $created=$N::CreateDirectoryChecked($p,$script:directorySa,[ref]$errorCode)
+      if($created -ne 0){$errorCode=0}
+    } else {
+      $created=$N::CreateChecked($p,$script:fileSa,[ref]$errorCode)
+      if($created -ne [IntPtr]::new(-1)){$null=$N::CloseHandle($created); $errorCode=0}
+    }
+    if($errorCode -ne 0 -and $errorCode -ne 183 -and $errorCode -ne 80){
+      $script:win32=$errorCode
+      $reason=switch($errorCode){2{'notfound'}3{'path'}5{'access'}32{'sharing'}default{'other'}}
+      throw ('create-'+$reason)
+    }
+    Open $p $directory $true ([bool]$directory) $false $false $phaseName
+  }
   $request=ReadInput
   if(@($request.PSObject.Properties.Name).Count -ne 1 -or $request.profile -isnot [string]){throw 'schema'}
   $profilePath=$request.profile; Lexical $profilePath
@@ -145,10 +202,10 @@ try {
     $location=[IO.Path]::Combine($location,$parts[$i])
     Open $location $true ($i -eq $parts.Count-1) $false $false $false $(if($i -eq $parts.Count-1){'profile'}else{'ancestor'})
   }
-  $root=[IO.Path]::Combine($profilePath,'harness-projects'); Open $root $true $true $true $false $false 'plugin'
+  $root=[IO.Path]::Combine($profilePath,'harness-projects'); Ensure $root $true 'plugin'
   $database=[IO.Path]::Combine($root,'workspace.sqlite')
-  Open $database $false $true $false $false $false 'database'
-  Open ([IO.Path]::Combine($root,'diagnostics.log')) $false $true $false $false $false 'log'
+  Ensure $database $false 'database'
+  Ensure ([IO.Path]::Combine($root,'diagnostics.log')) $false 'log'
   foreach($suffix in @('-wal','-shm','-journal')){Open ($database+$suffix) $false $true $false $true $false 'sidecar'}
   [Console]::WriteLine('private-windows-v1')
   while($null -ne ($line=[Console]::ReadLine())) {
@@ -158,17 +215,23 @@ try {
     if(@($request.PSObject.Properties.Name).Count -ne 1 -or $request.directories.Count -ne 2){throw 'schema'}
     $worktrees=[IO.Path]::Combine($root,'worktrees')
     if($request.directories[0] -cne $worktrees -or [IO.Path]::GetDirectoryName($request.directories[1]) -cne $worktrees){throw 'worktrees'}
-    foreach($directory in $request.directories){Lexical $directory; Open $directory $true $true $true $false $false 'worktrees'}
+    foreach($directory in $request.directories){Lexical $directory; Ensure $directory $true 'worktrees'}
     [Console]::WriteLine('private-windows-added-v1')
   }
 } catch {
   $code=$_.Exception.Message
-  if($code -notin @('language','metadata','input','path','alias','security','descriptor','owner','dacl','ace','grant','ancestor',
-    'inheritance','handles','open-notfound','open-path','open-access','open-sharing','open-other','disk','identity','type','links','filesystem','volume','schema','drive','worktrees')){$code='native'}
-  if($code.StartsWith('open-') -and $script:win32 -ge 0 -and $script:win32 -le 65535){$code+='-'+$script:win32}
+  if($code -notin @('language','platform','metadata','input','path','alias','security','descriptor','owner','dacl','ace','grant','ancestor',
+    'inheritance','handles','open-notfound','open-path','open-access','open-sharing','open-other',
+    'create-notfound','create-path','create-access','create-sharing','create-other',
+    'disk','identity','type','links','filesystem','volume','schema','drive','worktrees')){$code='native'}
+  if(($code.StartsWith('open-') -or $code.StartsWith('create-')) -and $script:win32 -ge 0 -and $script:win32 -le 65535){$code+='-'+$script:win32}
   [Console]::WriteLine('private-windows-error-'+$script:phase+'-'+$code); exit 1
 }
-finally {foreach($handle in $handles){$null=$N::CloseHandle($handle)}}
+finally {
+  foreach($handle in $handles){$null=$N::CloseHandle($handle)}
+  foreach($descriptor in @($script:fileSd,$script:directorySd)){if($descriptor -ne [IntPtr]::Zero){$null=$N::LocalFree($descriptor)}}
+  foreach($attributes in @($script:fileSa,$script:directorySa)){if($attributes -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::FreeHGlobal($attributes)}}
+}
 `
 
 const unavailable = () => new HostAuthorityError('Host project data is unavailable')
