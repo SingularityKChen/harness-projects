@@ -154,6 +154,7 @@ Git 套件唯一原生证据是 admin（`3091d4ab` 16/16），private-data 套�
 代码（`docs/` 以外，增删合计目标 ≤800）：
 
 - `.github/workflows/ci.yml`：新增 `windows-native` job（约 +100），`fast-gate.needs` 加一项（约 −1/+1）。
+- `tests/integration/local-git-fixture.js`：临时仓库清理增加有界重试（+2；D18 的 Windows EBUSY flake 最小根因修复，不改断言、不加 skip、不删用例）。
 - `scripts/windows-native-checks.mjs`：新增，`SETS` + CLI + 反空心判定（约 +150）。
 - `tests/contract/windows-native-checks.test.js`：新增，runner 纯函数与 CLI 契约（约 +95）。
 - `tests/contract/ci-windows-workflow.test.js`：新增，lane 接线契约（约 +95）。
@@ -306,7 +307,7 @@ gh pr view <编号> -R SingularityKChen/harness-projects \
 - [x] 2026-11-17 Batch 1：ExecPlan 落库、`docs/README.md` 索引、draft PR #656 创建并回读（`isDraft=true`、base `main`、`closingIssuesReferences` 含 #646）。提交 `ede5d435`。
 - [x] 2026-11-17 Batch 2：`tests/contract/windows-native-checks.test.js` 先红（模块不存在：`ERR_MODULE_NOT_FOUND`，ℹ tests 1 / fail 1），实现 `scripts/windows-native-checks.mjs` 后 8/8 绿；CLI 对 `--set nope` 与非 win32 平台均 exit 1 且打印 `::error::`；`tests/contract/run-test-layer.test.js` 13/13 复跑通过。提交 `50c326b7`。
 - [x] 2026-11-17 Batch 3：`ci-browser-workflow.test.js` 与新增的 `ci-windows-workflow.test.js` 先红（ℹ tests 9 / fail 6），接线 `ci.yml` 与 `docs/development/ci.md` 后 9/9 绿；`node scripts/workflow-check.mjs` → `no findings（已检查 7 个文件）`；`pnpm verify` exit 0（contract 1615、integration 执行 2289 / tests 2306 / skipped 17、e2e 226）。提交 `8ce44759`。
-- [x] 2026-11-17 Batch 4：首次 hosted 运行即绿（D11 分诊未触发）。PR `pull_request` run `44016355484`（head `8ce44759`）四 job 全 success；负控 A run `44017206193`（head `7634959a`）Windows Native 与 PR Fast Gate failure、Verify/Browser success；负控 B run `44017210116`（head `591aca9e`）Windows Native 与 PR Fast Gate failure 且日志含 skip 预算 `::error::`（Verify 同时被 POSIX 预算契约判红，见 D16）；两个 scratch ref 已删除（`git ls-remote --heads origin 'scratch/windows-native-lane-*'` 在 2026-11-17T04:32Z 无输出）。精确 head `8ce44759` 的两次 `workflow_dispatch`：`44017250515`、`44017258107` 均 success。
+- [x] 2026-11-17 Batch 4：首次 hosted 运行即绿（D11 分诊未触发）。PR `pull_request` run `44016355484`（head `8ce44759`）四 job 全 success；负控 A run `44017206193`（head `7634959a`）Windows Native 与 PR Fast Gate failure、Verify/Browser success；负控 B run `44017210116`（head `591aca9e`）Windows Native 与 PR Fast Gate failure 且日志含 skip 预算 `::error::`（Verify 同时被 POSIX 预算契约判红，见 D16）；两个 scratch ref 已删除（`git ls-remote --heads origin 'scratch/windows-native-lane-*'` 在 2026-11-17T04:32Z 无输出）。精确 head `8ce44759` 的两次 `workflow_dispatch`：`44017250515`、`44017258107` 均 success。证据提交 head `1f28dd42` 的 PR run `44018273353` success，但同 head 的第一次 dispatch run `44018277107` 因 Windows 临时仓库清理 `EBUSY` flake 红（见 Surprises 13）；按 D18 给夹具清理加有界重试后，在新 head 重新取两次精确 head 绿证。
 - [x] 2026-11-17 Batch 5：证据写入本文件与 PR #656 body；`node scripts/rule-checks.mjs size main`（期望 code ≤800 / docs ≤1300，仓库硬帽 1000/1500）、`disclosure main`（exit 0）、`git diff --check main...HEAD`、`node scripts/workflow-check.mjs`（no findings，7 文件）、三份契约测试 17/17 与 `pnpm verify`（exit 0）复跑通过；未执行 `gh pr ready`，合并由人类伙伴决定。
 
 ## Surprises & Discoveries
@@ -324,6 +325,7 @@ gh pr view <编号> -R SingularityKChen/harness-projects \
 10. 2026-11-17：per-file 摘要与静态计数完全吻合——`harness-plugin-windows-private-data.test.js` 39、`-windows-artifact` 1、`artifact` 29（其中 1 skip），合计 69/68/1；`development-local-git-windows` 15 + `local-git-start-work-resume` 3 = 18。计划里的下界不再是静态推测，而是 hosted 回读值。
 11. 2026-11-17：负控 B（把 `private-data.allowedSkips` 改成 0）同时让 POSIX `verify` 判红，因为新增的第 8 条契约测试把「预算」与「清单文件里 win32-active 的 `skip:` 标记数」钉在一起；hosted 拒绝来自 runner 的 `::error::windows-native-checks:`（D16）。计划原先只预期 windows-native 红。
 12. 2026-11-17：`ci-browser-workflow.test.js` 的 64 种 needs 组合不再启动 `/bin/sh -c`，改为解释聚合步骤允许的两种行（`echo` 与 `exit <n>`）；聚合仍然「只允许输出 needs 结果」，但契约测试因此在任何平台可跑。
+13. 2026-11-17（证据 head 的 dispatch flake）：run `44018277107`（head `1f28dd42`，`workflow_dispatch`）在 `native-git` 阶段红：`real Git timeout after a landed checkout stays ambiguous…` 的 teardown 命中 `EBUSY: resource busy or locked, rmdir 'C:\Users\runneradmin\AppData\Local\Temp\local-git-provider-y6lYbV\repo'`；同一测试在同一 head 的 Linux Verify（32.1s）与 PR run `44018273353` 中均通过。根因是 Windows 在受控 hook/git 子进程退出后短暂保留目录句柄，而 `fs.rm` 默认不重试 EBUSY。按 D18 加有界重试修复，未加 skip、未删用例、未改产品代码。
 
 ## Decision Log
 
@@ -344,6 +346,7 @@ gh pr view <编号> -R SingularityKChen/harness-projects \
 - **D15（2026-11-17，实现期）**：`ci-browser-workflow.test.js` 的 64 种 needs 组合用最小 JS 解释器执行聚合步骤，替代 `/bin/sh -c`。Rationale：契约测试不应把宿主是否有 `/bin/sh` 变成聚合语义的一部分；解释器仍只接受聚合允许的 `echo "…"` 与 `exit 1` 两种行，`${{ join(...) }}` 仍被替换后求值，判据强度不变（见 Surprises 12）。
 - **D16（2026-11-17，负控）**：负控 B 的预期修正为「windows-native 与 PR Fast Gate 必红；Verify 是否红取决于 POSIX 预算契约」。实际两者都红：skip 预算改动被 POSIX 契约测试（预算 ↔ win32-active skip 标记）和 hosted runner 各拒绝一次。Rationale：负控要证明的是 runner 的拒绝而不是别的件；保留 Verify 红作为第二道守卫，不为了单变量演示而临时移除契约断言。
 - **D17（2026-11-17，首绿冻结）**：首次 hosted 运行即绿后，把清单下界 15/3、39/1/29 与 skip 预算 0/1 冻结为当前值；后续任何调整必须同 PR 改 `SETS` 并在此记录理由。第 8 条契约测试（预算 ↔ win32-active skip 标记）是首绿后新增的防守，保证预算漂移在 POSIX 层就能被发现。
+- **D18（2026-11-17，flake 修复）**：`tests/integration/local-git-fixture.js` 的临时仓库清理改为 `rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })`。Rationale：run `44018277107` 证明 Windows 在受控 checkout hook 退出后短暂保留目录句柄，默认 0 重试把 teardown 变成约 20% 级 flake；这是 Node 对 EBUSY/EPERM/ENOTEMPTY 的显式重试语义，不改断言、不加 skip、不删用例，POSIX 路径不会触发重试。范围只限该共享夹具；若 `harness-plugin-windows-fixture.js` 将来出现同类红，用同一修法。
 
 **Lead 裁决（2026-11-17）**
 
@@ -408,7 +411,7 @@ gh pr view <编号> -R SingularityKChen/harness-projects \
 - 负控（不进入 PR head；scratch ref 已删除）：
   - A（失败传播）run `44017206193` @ `7634959a`：Windows Native=failure、PR Fast Gate=failure、Verify=success、Browser=success；日志含 `##[error]windows-native-checks: tests/integration/harness-plugin-windows-private-data.test.js: 测试进程失败（退出码 1）`、`AssertionError [ERR_ASSERTION]: windows-native-lane negative control`、`standard-user exit=1`。
   - B（skip 预算）run `44017210116` @ `591aca9e`：Windows Native=failure、PR Fast Gate=failure、Browser=success；日志含 `##[error]windows-native-checks: set private-data 的 skip 数与预算不符：期望 0，实际 1`；Verify 同时被 POSIX 预算契约判红（D16）。
-- 证据提交之后的新 head 以 `gh pr checks 656 -R SingularityKChen/harness-projects` 与 PR 的 `pull_request` 运行回读为准（易失值不写死；期望全部 pass）。
+- 证据提交之后的新 head（含 D18 夹具修复）以 `gh pr checks 656 -R SingularityKChen/harness-projects` 与 PR 的 `pull_request` 运行回读为准（易失值不写死；期望全部 pass）。修复 head 的两次 `workflow_dispatch` 以 `gh run list -R SingularityKChen/harness-projects --workflow CI --branch test/windows-native-lane --json databaseId,event,headSha,conclusion` 回读，期望连续两次 success。
 
 ### 与计划的偏差
 
@@ -416,6 +419,7 @@ gh pr view <编号> -R SingularityKChen/harness-projects \
 2. 计划预期负控 B 时 Verify 保持绿；实际 Verify 因新增的预算契约同红（D16），负控结论不变。
 3. 第 8 条契约测试（预算 ↔ win32-active skip 标记）是首绿后新增的防守，不在原 Batch 2 清单内（D17）。
 4. 负控 A 的 `assert.fail` 放在 private-data 的 native Host 用例里，因此 POSIX `verify` 仍绿，负控精确指向 windows-native 与聚合（符合预期分支：Verify/Browser success）。
+5. 证据提交 head `1f28dd42` 的第一次 `workflow_dispatch`（run `44018277107`）暴露了 Windows 临时仓库清理 `EBUSY` flake（同 head 的 PR run 与 Linux Verify 均绿，见 Surprises 13）；按 D18 对共享夹具加有界重试后重新取证。这是首绿之后、证据提交之后发现的唯一环境类失败；未用重跑掩盖，也没有删除/跳过用例。
 5. 最终 head 的绿证以 PR checks 回读表达，而不是把新 head 的 run id 写进本文件后再次改 head（避免证据提交自己制造新的未验证 head）。
 
 ### 本机验证（证据提交前，在检出 `test/windows-native-lane` 的工作树根运行）
@@ -440,4 +444,5 @@ gh pr view <编号> -R SingularityKChen/harness-projects \
 
 - 2026-11-17（lead 裁决落库）：关闭 OQ1–OQ3；确认本 PR 以 `Closes #646` 交付 lane 主闭环，未覆盖的 review-surfaced 原生卷反例写入 PR 正文与 Outcomes 作为后续项。
 - 2026-11-17（Batch 4/5 证据落库）：首次 hosted 运行即绿（PR run `44016355484`，head `8ce44759`），负控 A/B 与两次精确 head dispatch 完成；按 D16 修正负控 B 的 Verify 预期，按 D17 冻结首绿清单；未执行 `gh pr ready`。
+- 2026-11-17（flake 修复）：证据 head 的 dispatch `44018277107` 命中 Windows 临时仓库清理 EBUSY flake，按 D18 给 `tests/integration/local-git-fixture.js` 加有界重试并纳入 Global Constraints 文件集；在新 head 重新取两次精确 head 绿证。
 - 2026-11-17：创建草案。基于 main `ddb94c9440815626a3932dcaf050653f70eedb18` 重新核对事实（#643/#645/#190 已合并；原生套件与 Host 接线在 main；run `43871692717` = 68 pass/0 fail/1 skip；Git 套件 main 上 18 条从未整体原生运行），对三路设计做对抗评审（指出设计 1 的单身份阶段、设计 2 的 `5dd6456d` 事实错误与缺下界、设计 3 的 storage-restart/双 job 判断问题），选定「单 job + 两阶段身份 + `SETS` 脚本 + 精确 skip 预算 + 临时 ref 负控」，并给出 5 个批次、文件集、验收与回滚。本副本位于 `.superpowers/iteration11-delivery-20261117/specs/windows-native-lane-execplan.md`，Batch 1 落库到 `docs/exec-plan/active/2026-11-17-windows-native-lane.md`。
