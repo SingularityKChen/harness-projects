@@ -26,12 +26,12 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
-| [2026-11-17-storage-logical-baseline](exec-plan/active/2026-11-17-storage-logical-baseline.md) | 单 baseline 版本、唯一 SQL inventory 与迁移准入收敛（#595） |
 
 ### Completed
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-17-storage-logical-baseline](exec-plan/completed/2026-11-17-storage-logical-baseline.md) | 单 baseline 版本、唯一 SQL inventory 与迁移准入收敛（#595） |
 | [2026-11-17-windows-private-provision](exec-plan/completed/2026-11-17-windows-private-provision.md) | Windows 首次私有 plugin 数据创建、重开与拒绝策略（#644） |
 | [2026-11-17-windows-native-lane](exec-plan/completed/2026-11-17-windows-native-lane.md) | GitHub-hosted Windows 原生安全与平台契约 lane（#646） |
 | [2026-11-16-primary-identity-contract](exec-plan/completed/2026-11-16-primary-identity-contract.md) | 源实体恰好一个 primary、内部锚点与双适配器原子契约（#190） |
