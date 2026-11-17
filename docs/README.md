@@ -26,12 +26,12 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
-| [2026-11-17-storage-single-asset](exec-plan/active/2026-11-17-storage-single-asset.md) | 单一自包含 SQL 基线资产与安装件字节一致性（#596） |
 
 ### Completed
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-17-storage-single-asset](exec-plan/completed/2026-11-17-storage-single-asset.md) | 单一自包含 SQL 基线资产与安装件字节一致性（#596） |
 | [2026-11-17-storage-logical-baseline](exec-plan/completed/2026-11-17-storage-logical-baseline.md) | 单 baseline 版本、唯一 SQL inventory 与迁移准入收敛（#595） |
 | [2026-11-17-windows-private-provision](exec-plan/completed/2026-11-17-windows-private-provision.md) | Windows 首次私有 plugin 数据创建、重开与拒绝策略（#644） |
 | [2026-11-17-windows-native-lane](exec-plan/completed/2026-11-17-windows-native-lane.md) | GitHub-hosted Windows 原生安全与平台契约 lane（#646） |
