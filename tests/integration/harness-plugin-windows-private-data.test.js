@@ -85,7 +85,7 @@ test('native fresh Windows Host creates, migrates and reopens its private data r
     assert.equal((await service.getWorkspaceSetup()).workspace, null, '干净数据根：零工作区')
     assert.equal((await service.baseline()).workspace, undefined, '干净数据根：baseline 无工作区')
     const db = new DatabaseSync(f.dataPath, { readOnly: true })
-    try { assert.deepEqual(db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2, 3, 4, 5, 6, 7], '首启必须完成迁移 1–7') } finally { db.close() }
+    try { assert.deepEqual(db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1], '首启必须只记录单一 baseline 版本 1') } finally { db.close() }
     for (const location of [f.root, f.dataPath, f.log]) {
       const entry = trustedAcl(inspectAcl(location), f.token.sid)
       assert.deepEqual([entry.ownerSid, entry.protected], [f.token.sid, true], `${location} 在 Host 首启后仍是私有边界`)
@@ -97,7 +97,7 @@ test('native fresh Windows Host creates, migrates and reopens its private data r
     assert.equal((await host.services.get('harnessProjects').baseline()).workspace, undefined, '重开同一空库仍零工作区')
     assert.ok((await readFile(f.log, 'utf8')).startsWith('fresh host resume sentinel\n'), '重开必须保留既有日志字节')
     const reopened = new DatabaseSync(f.dataPath, { readOnly: true })
-    try { assert.equal(reopened.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n, 7, '重开不能重放/截断迁移') } finally { reopened.close() }
+    try { assert.equal(reopened.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n, 1, '重开不能重放/截断单一 baseline 账本') } finally { reopened.close() }
   } finally { await host.dispose() }
 })
 
