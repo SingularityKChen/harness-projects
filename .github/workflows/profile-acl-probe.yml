@@ -1,0 +1,93 @@
+name: Windows Profile ACL Probe
+
+on:
+  push:
+    branches: [test/windows-profile-acl-probe]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-profile-acl-probe-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Probe default user-profile ACL on hosted Windows
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record runner identity and default profile ACLs
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Output "ImageOS=$env:ImageOS ImageVersion=$env:ImageVersion Architecture=$env:PROCESSOR_ARCHITECTURE"
+          Write-Output "runner user: $env:USERNAME profile=$env:USERPROFILE"
+          Write-Output '--- icacls C:\Users ---'
+          icacls C:\Users
+          Write-Output '--- sddl C:\Users ---'
+          (Get-Acl 'C:\Users').Sddl
+          Write-Output '--- icacls runner profile ---'
+          icacls $env:USERPROFILE
+          Write-Output '--- sddl runner profile ---'
+          (Get-Acl $env:USERPROFILE).Sddl
+
+      - name: Create fresh standard local user and inspect its profile
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $name = 'hpprobe' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+          $sid = $null
+          try {
+            $password = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(30)) + 'aA1!'
+            $secure = ConvertTo-SecureString $password -AsPlainText -Force
+            New-LocalUser -Name $name -Password $secure -AccountNeverExpires -UserMayNotChangePassword | Out-Null
+            $sid = (Get-LocalUser -Name $name).SID.Value
+            $credential = [Management.Automation.PSCredential]::new("$env:COMPUTERNAME\$name", $secure)
+            $node = (Get-Command node.exe).Source
+            $init = Start-Process -FilePath $node -ArgumentList @('-e', 'process.exit(0)') -Credential $credential -LoadUserProfile -WorkingDirectory $env:GITHUB_WORKSPACE -Wait -PassThru
+            Write-Output "profile initialization exit=$($init.ExitCode)"
+            $profile = (Get-CimInstance Win32_UserProfile -Filter "SID='$sid'").LocalPath
+            Write-Output "fresh user SID=$sid profile=$profile"
+            Write-Output '--- icacls fresh profile ---'
+            icacls $profile
+            Write-Output '--- sddl fresh profile ---'
+            (Get-Acl $profile).Sddl
+            Write-Output '--- sddl fresh profile raw binary length ---'
+            $acl = Get-Acl $profile
+            Write-Output ("Owner=" + $acl.Owner + " AreAccessRulesProtected=" + $acl.AreAccessRulesProtected + " Group=" + $acl.Group)
+            foreach ($ace in $acl.Access) {
+              Write-Output ("ACE: " + $ace.IdentityReference + " | " + $ace.AccessControlType + " | " + $ace.FileSystemRights + " | inherited=" + $ace.IsInherited + " | propagation=" + $ace.PropagationFlags + " | inheritance=" + $ace.InheritanceFlags)
+            }
+            Write-Output '--- fresh user behavior as standard user ---'
+            $worker = @'
+          import { writeFileSync, mkdirSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          import os from 'node:os';
+          import path from 'node:path';
+          const home = os.homedir();
+          const probe = path.join(home, 'harness-acl-probe');
+          mkdirSync(probe);
+          writeFileSync(path.join(probe, 'file.txt'), 'probe');
+          const out = (cmd, args) => { try { return execFileSync(cmd, args, { encoding: 'utf8' }) } catch (e) { return 'ERR ' + e.message } };
+          console.log(JSON.stringify({ home, user: process.env.USERNAME, uid: typeof process.getuid, sddlDir: out('powershell.exe', ['-NoProfile','-NonInteractive','-Command',"(Get-Acl '"+probe+"').Sddl"]).trim(), sddlFile: out('powershell.exe', ['-NoProfile','-NonInteractive','-Command',"(Get-Acl '"+path.join(probe,'file.txt')+"').Sddl"]).trim() }));
+          '@
+            $workerPath = Join-Path $profile 'acl-probe-worker.mjs'
+            # The fresh profile is not writable from the admin runner context; place worker in workspace instead.
+            $workerPath = Join-Path $env:GITHUB_WORKSPACE 'acl-probe-worker.mjs'
+            [IO.File]::WriteAllText($workerPath, $worker)
+            $stdout = Join-Path $env:RUNNER_TEMP 'acl-probe.stdout'
+            $stderr = Join-Path $env:RUNNER_TEMP 'acl-probe.stderr'
+            $p = Start-Process -FilePath $node -ArgumentList @(('"' + $workerPath + '"')) -Credential $credential -LoadUserProfile -WorkingDirectory $env:GITHUB_WORKSPACE -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Wait -PassThru
+            Write-Output "standard-user probe exit=$($p.ExitCode)"
+            if (Test-Path $stdout) { Get-Content $stdout }
+            if (Test-Path $stderr) { Get-Content $stderr }
+          } finally {
+            if ($sid) { Get-CimInstance Win32_UserProfile -Filter "SID='$sid'" -ErrorAction SilentlyContinue | Remove-CimInstance -ErrorAction SilentlyContinue }
+            Remove-LocalUser -Name $name -ErrorAction SilentlyContinue
+          }
