@@ -1,6 +1,6 @@
 # Windows 首次私有化 Provisioning ExecPlan
 
-> 状态：Active（2026-11-17 实现完成，精确 head 原生证据已取得；PR base = `test/windows-native-lane`，等待 #646 合并后 retarget 与最终验收）
+> 状态：Completed（2026-11-17 实现完成、独立验收归档；评审记录 `docs/review/pr-657-mmp-review.md`；stacked PR 的 retarget/rebase 由 lead 在 #646 合并后执行）
 > 创建：2026-11-17
 > 范围：#644：Windows 标准用户首次启动时，由同一 native helper 在创建调用内以目标安全描述符建立并接纳私有 plugin root、`workspace.sqlite`、`diagnostics.log`，按需建立 `worktrees`/digest；profile 与祖先只接纳不改写；无旧数据修复/迁移；不改 Host ABI。
 > 上游输入：issue #644 正文与 2026-11-16 comment；`docs/exec-plan/completed/2026-11-16-windows-root-admission.md`；原生探针 run `44010858246`；`test/windows-native-qualification` 工作流原型；#646 lane 设计（`windows-native` job 与 `SETS` 清单契约）。
@@ -377,15 +377,16 @@ issue 2026-11-16 comment 提出两条由 #643 评审暴露的接口事实：
 
 ### 交付结果（2026-11-17）
 
-**产品/测试面最终 head**：`1a681c350d6a77776db122219e9fc47aa4b6f603`；**文档面最终 head**：`81ebfd994617b854559982bb2a6745e3f7e8ef4f`（两者 base 均为 `test/windows-native-lane@8ce447594981`）。提交序列（rebase 后）：
+**最终 head**：`48de1e7f8bcf6ec91f25bab0f012de78bb65c8e1`（docs-only 提交，覆盖产品/测试 head `1a681c350d6a77776db122219e9fc47aa4b6f603` 与文档 head `81ebfd994617b854559982bb2a6745e3f7e8ef4f`）；评审 run `44021972016` 的平台合并父提交是 `b9629891`（运行时 lane base tip），PR `baseRefOid` 记录的是 `8ce44759`；此后 lane tip 前进到 `f10fbace`（仅 lane 计划文档，与本 PR 文件集无交集）。提交序列（rebase 后，6 个）：
 
 1. `32b033bd docs(exec-plan): 起草 Windows 首次私有化 provisioning 计划`（计划落库）
 2. `e99b9414 test(apps): 加入 launcher 形状 profile 链的原生接纳事实门`（Batch 0）
 3. `56120b1b feat(apps): 在 Windows 私有根首次使用时原子创建并接纳数据边界`（Batch 1）
 4. `1a681c35 test(apps): 补齐并发、sidecar、worktrees 与不修复的原生策略矩阵`（Batch 2 + lane skip 交接）
 5. `81ebfd99 docs(exec-plan): 收口 Windows 私有化 provisioning 的原生证据`（Batch 3）
+6. `48de1e7f docs(exec-plan): 校正最终 head 证据绑定并补独立验收记录`（独立验收订正）
 
-**原生证据（V2，唯一资格证据；两个 head 使用同一 lane 定义）**：`CI` run `44016639839`（`pull_request`，head `1a681c35`，job id `133816042841`，`4m11s`）与 `CI` run `44018167753`（`pull_request`，head `81ebfd99`，job id `133820996188`，`3m54s`）：
+**原生证据（V2，唯一资格证据；三个 head 使用同一 lane 定义）**：最终 head `48de1e7f` 的 `pull_request` run `44021972016`（Windows job `133833319830`，`4m32s`，四 job 全 success）；产品/测试 head `1a681c35` 的 `CI` run `44016639839`（job `133816042841`，`4m11s`）与文档 head `81ebfd99` 的 `CI` run `44018167753`（job `133820996188`，`3m54s`）：
 
 - `ImageOS=win25-vs2026`、`ImageVersion=20261103.298.1`、`Architecture=AMD64`、node `v26.13.1`、git `2.56.0.windows.4`。
 - 阶段 1（runner 管理员）：`windows-native-checks: set=native-git files=2 tests=18 skipped=0 todo=0`。
@@ -401,9 +402,9 @@ issue 2026-11-16 comment 提出两条由 #643 评审暴露的接口事实：
 - `pnpm test:file tests/integration/harness-plugin-artifact.test.js`：`tests 29 / pass 29 / skip 0`。
 - `pnpm run boundaries` 9 pass；`node scripts/workflow-check.mjs` no findings；`node scripts/rule-checks.mjs size test/windows-native-lane` 代码 317/1000、文档（含本计划）419/1500；`node scripts/rule-checks.mjs disclosure test/windows-native-lane` 通过；`git diff --check test/windows-native-lane...HEAD` 无输出。
 
-**与计划的偏差**：Batch 0 无需放宽 profile 契约（符合 D1 期望）；PowerShell 语法/绑定修正轮次 0（预留 1–2 轮未用）；原生 RED 未单独观测（D11，外部依赖 lane 未落地时先完成实现）；lane 计数口径见 Surprises #13；`docs/README.md` 索引行在 docs 提交时已落地，Batch 3 无需新增；文档提交产生新 head 后按同一 lane 重新取证（run `44018167753`），未把 `1a681c35` 的旧 run 当作最终 head 证据。
+**与计划的偏差**：Batch 0 无需放宽 profile 契约（符合 D1 期望）；PowerShell 语法/绑定修正轮次 0（预留 1–2 轮未用）；原生 RED 未单独观测（D11，外部依赖 lane 未落地时先完成实现）；lane 计数口径见 Surprises #13；`docs/README.md` 索引行在 docs 提交时已落地，Batch 3 无需新增；文档提交产生新 head 后按同一 lane 重新取证（run `44018167753`），最终 head `48de1e7f` 又以 run `44021972016` 重新取证，未把旧 run 当作最终 head 证据。
 
-**仍未覆盖**：Win11 x64 Desktop 人类验收与发布接受（#647、R1）；受管设备/企业 profile 策略、launcher 提权创建变体；helper 与 `CreateDirectoryW/CreateFileW` 之外的 Windows 版本差异；并发首启只覆盖「双方成功」的收敛，「一方失败不破坏另一方 canonical 树」目前由「拒绝路径零写入 + 既有对象只经 `Open` 复核」结构性保证，未单独构造失败方。**下一步（非本 owner）**：#646 合并后把 PR #657 retarget 到 `main` 并在新 base 上重跑原生证据；lane tip 已在本项证据 run 之后前进（`1f28dd42` 文档、`b9629891` `native-git` 夹具清理有界重试），`ci.yml`/`SETS`/本项文件未变但最终证据必须在新 base 重取（D9）；是否 Ready 由 lead 决定。
+**仍未覆盖**：Win11 x64 Desktop 人类验收与发布接受（#647、R1）；受管设备/企业 profile 策略、launcher 提权创建变体；helper 与 `CreateDirectoryW/CreateFileW` 之外的 Windows 版本差异；并发首启只覆盖「双方成功」的收敛，「一方失败不破坏另一方 canonical 树」目前由「拒绝路径零写入 + 既有对象只经 `Open` 复核」结构性保证，未单独构造失败方。**下一步（本 PR 合并步骤）**：#646 合并后把 PR #657 retarget 到 `main` 并在新 base 上重跑原生证据（D9）；本项证据的运行时 base 已是 `b9629891`，其后 lane tip 前进到 `f10fbace`（仅 lane 计划文档），`ci.yml`/`SETS`/本项文件未变；最终证据必须以 retarget 后的新 head 重取，是否 Ready 由 lead 决定。
 
 ## Bottom Change Note
 
@@ -414,3 +415,4 @@ issue 2026-11-16 comment 提出两条由 #643 评审暴露的接口事实：
 - Change Note (2026-11-17，Batch 1)：同一 `PROGRAM` 内实现幂等 create-or-admit（两个新 P/Invoke 绑定、两个 IL wrapper、SDDL+`SECURITY_ATTRIBUTES`、`Ensure`、`directories` 帧同语义），错误 token 扩 `create-*`/`platform`，协议与 Host ABI 不变；四个原生正例 + 本机回归通过。
 - Change Note (2026-11-17，Batch 2/3)：策略矩阵、并发、sidecar、worktrees 继承与 refuse 零写入用例落地；删除 artifact win32 skip 并把 lane `allowedSkips` 归零（含 `ci.md` 与契约测试固定行）；精确 head `1a681c35` 首跑即取得 win25 标准用户证据（`native-git 18/0`、`private-data 78/0`、`standard-user exit=0`）与全绿 checks。是否 Ready 留给 lead。
 - Change Note (2026-11-17，最终验收)：把原生证据绑定到实际最终 head（产品/测试面 `1a681c35` run `44016639839`、文档面 `81ebfd99` run `44018167753`），补全提交序列与 lane tip 前进事实；记录三个 scratch ref 变异实验（fresh/packed/`broad-*` 拒绝用例分别变红，ref 已删除）与「并发一方失败不破坏对方树」未单独覆盖的残余风险；产品/测试面不变。
+- Change Note (2026-11-17，归档)：独立验收记录 `docs/review/pr-657-mmp-review.md`；按评审 P2-1 把最终证据绑定订正为最终 head `48de1e7f` / run `44021972016` / 运行时 base `b9629891` / 其后 lane tip `f10fbace`；计划移入 `docs/exec-plan/completed/` 并更新两处索引；产品/测试字节不变。
