@@ -39,6 +39,7 @@ test('packaged migrations create the single baseline schema from a clean profile
 test('生产构建与 Host 不持有第二份 SQL 文件名清单：build.mjs 与 host.ts 没有 .sql 字面量', async () => {
   for (const file of ['apps/harness-plugin/scripts/build.mjs', 'apps/harness-plugin/src/host.ts']) {
     const source = await readFile(path.join(root, file), 'utf8')
-    assert.doesNotMatch(source, /(['"])[0-9A-Za-z_]+\.sql\1/, `${file} 仍持有 SQL 文件名清单；唯一 inventory 只能来自 @harness-projects/storage-sqlite`)
+    // 三种 JS 字符串字面量引号都要覆盖：模板字面量同样能重新引入第二份清单（独立验收 M5 实测过漏报）。
+    assert.doesNotMatch(source, /(['"\x60])[0-9A-Za-z_]+\.sql\1/, `${file} 仍持有 SQL 文件名清单；唯一 inventory 只能来自 @harness-projects/storage-sqlite`)
   }
 })
