@@ -73,12 +73,122 @@ jobs:
           include-hidden-files: false
           if-no-files-found: ignore
 
+  # Windows 原生 lane（#646）：GitHub-hosted windows-2025 x64 上真实执行已交付的
+  # 原生套件。文件集、每文件用例下界与 skip 预算只在
+  # scripts/windows-native-checks.mjs 的 SETS 里，这里只按 set 名调用。
+  # 两阶段身份：runner 管理员跑 Git 路径/身份/恢复类用例；临时标准本地用户跑
+  # 安全、Host 生命周期与 packed plugin（测试用 ordinaryToken 自证非管理员）。
+  windows-native:
+    name: Windows Native（原生安全与平台契约）
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # packed plugin 原生用例直接 import dist/package，必须先构建。
+      - run: pnpm --filter @harness-projects/app-harness-plugin build
+
+      - name: 记录 runner、工具链与 runner 提权身份
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git rev-parse HEAD
+          Write-Output "ImageOS=$env:ImageOS ImageVersion=$env:ImageVersion Architecture=$env:PROCESSOR_ARCHITECTURE"
+          node --version
+          git --version
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+          $admin = (New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          $adminMember = $identity.Groups.Value -contains 'S-1-5-32-544'
+          Write-Output "runner-identity sid=$($identity.User.Value) admin=$admin adminMember=$adminMember"
+
+      # 阶段 1：唯一历史原生证据（run 43853289308 / source 3091d4ab）就是管理员
+      # 身份；这里只承担 Git 路径/身份/恢复类行为，不作为普通用户隔离证据。
+      - name: 阶段 1：runner 管理员执行 native-git 套件
+        run: node scripts/windows-native-checks.mjs --set native-git
+
+      # 阶段 2：账户、profile 与 foreign fixture 的生命周期只由这一处拥有；
+      # 清理走 finally，不用 step 级 if。输出经 <fixture> 令牌化后回显。
+      - name: 阶段 2：临时标准本地用户执行 private-data 套件
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = 'account'
+          $profile = $null
+          $sid = $null
+          $nativeExit = 1
+          $name = 'hp' + [Guid]::NewGuid().ToString('N').Substring(0, 10)
+          function Show-NativeOutput($file) {
+            if (Test-Path -LiteralPath $file) {
+              Get-Content -LiteralPath $file | ForEach-Object {
+                $line = $_.ToString()
+                foreach ($root in @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:USERPROFILE, $profile)) {
+                  if ($root) { $line = $line.Replace($root, '<fixture>').Replace($root.Replace('\', '\\'), '<fixture>').Replace($root.Replace('\', '/'), '<fixture>') }
+                }
+                Write-Output $line
+              }
+            }
+          }
+          try {
+            $password = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(30)) + 'aA1!'
+            $secure = ConvertTo-SecureString $password -AsPlainText -Force
+            New-LocalUser -Name $name -Password $secure -AccountNeverExpires -UserMayNotChangePassword | Out-Null
+            $sid = (Get-LocalUser -Name $name).SID.Value
+            Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $name
+            $credential = [Management.Automation.PSCredential]::new("$env:COMPUTERNAME\$name", $secure)
+            $node = (Get-Command node.exe).Source
+            $stage = 'profile'
+            $init = Start-Process -FilePath $node -ArgumentList @('-e', 'process.exit(0)') -Credential $credential -LoadUserProfile -WorkingDirectory $env:GITHUB_WORKSPACE -Wait -PassThru
+            if ($init.ExitCode -ne 0) { throw 'profile initialization failed' }
+            $profile = (Get-CimInstance Win32_UserProfile -Filter "SID='$sid'").LocalPath
+            if (!$profile) { throw 'profile missing' }
+            $stage = 'foreign-fixture'
+            $foreign = Join-Path $profile 'harness-foreign-profile'
+            $env:HARNESS_NATIVE_FIXTURE_PROFILE = $foreign
+            $env:HARNESS_NATIVE_FIXTURE_SID = $sid
+            $bootstrapLog = Join-Path $profile 'bootstrap.log'
+            node --input-type=module -e "import {provisionForeignFixture} from './tests/integration/harness-plugin-windows-fixture.js'; await provisionForeignFixture(process.env.HARNESS_NATIVE_FIXTURE_PROFILE,process.env.HARNESS_NATIVE_FIXTURE_SID)" *> $bootstrapLog
+            $bootstrapExit = $LASTEXITCODE
+            Show-NativeOutput $bootstrapLog
+            if ($bootstrapExit -ne 0) { throw 'foreign fixture failed' }
+            $stdout = Join-Path $profile 'native.stdout'
+            $stderr = Join-Path $profile 'native.stderr'
+            $arguments = @('scripts/windows-native-checks.mjs', '--set', 'private-data', '--profile', "`"$profile`"", '--foreign', "`"$foreign`"")
+            $stage = 'standard-user-tests'
+            # runner 在标准用户进程内把 --profile/--foreign 映射为 USERPROFILE、
+            # TEMP/TMP 与 HARNESS_WINDOWS_FOREIGN_PROFILE，再执行 SETS 里的文件。
+            $process = Start-Process -FilePath $node -ArgumentList $arguments -Credential $credential -LoadUserProfile -WorkingDirectory $env:GITHUB_WORKSPACE -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Wait -PassThru
+            $nativeExit = $process.ExitCode
+            Show-NativeOutput $stdout
+            Show-NativeOutput $stderr
+            Write-Output "standard-user exit=$nativeExit"
+          } catch {
+            Write-Output "windows-native-harness-failure stage=$stage type=$($_.Exception.GetType().Name) hresult=$($_.Exception.HResult)"
+            $nativeExit = 1
+          } finally {
+            if ($sid) { Get-CimInstance Win32_UserProfile -Filter "SID='$sid'" -ErrorAction SilentlyContinue | Remove-CimInstance -ErrorAction SilentlyContinue }
+            Remove-LocalUser -Name $name -ErrorAction SilentlyContinue
+          }
+          exit $nativeExit
+
+
   # 分支保护只 require 这一个名字（AGENTS.md §9.2）。
   # 它不 checkout PR 代码、不读 secrets，只汇总上面 lane 的结果：
   # 这样增删 lane 不会改变保护配置，也不会让"发布必需状态"的 job 执行不可信代码。
   fast-gate:
     name: PR Fast Gate
-    needs: [verify, browser]
+    needs: [verify, browser, windows-native]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
