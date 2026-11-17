@@ -37,7 +37,9 @@ export async function makeFixture(registerCleanup, initialBranch = 'main') {
   await run(['add', 'README.md'])
   await run(['-c', 'commit.gpgsign=false', 'commit', '-m', '初始提交'])
   const headCommit = (await run(['rev-parse', 'HEAD'])).trim()
-  registerCleanup(() => rm(root, { recursive: true, force: true }))
+  // Windows 上受控 hook / git 子进程刚退出时目录句柄可能尚未释放，递归删除会短暂 EBUSY；
+  // 显式重试让清理等待锁而不是把已通过的用例判红（run 44018277107 的原生 flake）。
+  registerCleanup(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }))
   return { root, repositoryPath, headCommit, run }
 }
 
