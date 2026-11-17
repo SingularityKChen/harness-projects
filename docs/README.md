@@ -26,6 +26,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
+| [2026-11-17-windows-native-lane](exec-plan/active/2026-11-17-windows-native-lane.md) | GitHub-hosted Windows 原生安全与平台契约 lane（#646） |
 
 ### Completed
 
