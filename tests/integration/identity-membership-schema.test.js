@@ -6,9 +6,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
 
-import { BASELINE_VERSION, createSqliteStorage, migrate, openDatabase } from '@harness-projects/storage-sqlite'
+import { BASELINE_VERSION, MIGRATIONS, createSqliteStorage, migrate, migrationPath, openDatabase } from '@harness-projects/storage-sqlite'
 
 /** 表 → 出处：与实际表集合互相覆盖（D8）。 */
 const TABLE_PROVENANCE = {
@@ -22,9 +21,7 @@ const TABLE_PROVENANCE = {
   planning_field_value: 'R2 / R3：字段值挂成员关系，键 (workspace, item, projectField)，不设版本列',
   workspace_projection: 'AGENTS.md §1.1 不变量 1 / 3 与 ADR-0005：规划投影按 (workspace, entity) 锚定内容，分类推导归 core',
 }
-const MIGRATION_FILE = fileURLToPath(
-  new URL('../../packages/storage/sqlite/migrations/002_identity_membership.sql', import.meta.url),
-)
+const MIGRATION_FILE = migrationPath(MIGRATIONS[0])
 
 /** 每个用例一个临时目录与数据库。 */
 function withDatabase(run) {
@@ -87,7 +84,7 @@ test('表 → 出处映射与实际表集合互相覆盖，且迁移文件里每
 })
 
 test('出处注释覆盖到约束级：每条 CREATE 与每条表内约束（含行内 REFERENCES 外键）上方都有出处（#27 验收 4）', () => {
-  const lines = readFileSync(MIGRATION_FILE, 'utf8').split('\n')
+  const lines = readFileSync(MIGRATION_FILE, 'utf8').split('-- repository：')[0].split('\n')
   const creates = []
   const undocumented = []
   lines.forEach((line, index) => {
