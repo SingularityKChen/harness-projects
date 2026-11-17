@@ -6,7 +6,7 @@
 
 | workflow | 触发与职责 | 门禁 |
 |---|---|---|
-| CI | pull_request、push main、手动运行；Verify 与 Browser 并行执行，PR Fast Gate 汇总两条 lane | PR Fast Gate 是唯一必需状态 |
+| CI | pull_request、push main、手动运行；Verify、Browser 与 Windows Native 并行执行，PR Fast Gate 汇总三条 lane | PR Fast Gate 是唯一必需状态 |
 | Issue policy | issue / PR 事件；检查标题、标签和 issue 关联 | advisory |
 | Rule checks | PR 事件；发布面和 PR 体量 | advisory |
 | Board invariants | 每日 schedule；两个 job：读取 Project 工作流启停并与裁决表比较，以及核对 `Engineering` 字段与 PR 真值 | advisory；需要 PROJECTS_TOKEN |
@@ -28,13 +28,34 @@ Node 版本来自 `.nvmrc`，pnpm 版本来自 `package.json`；lockfile 的精�
 
 普通 `pnpm test` / `pnpm verify` 通过既有层运行器各执行一次 Node 契约、集成和 E2E，并逐层拒绝空层或全 skip/todo；浏览器命令通过 `scripts/run-test-layer.mjs` 运行 `tests/browser`，空文件集、零执行/全 skip、摘要解析失败或缺少 binary 均非零。CI 新增的反馈是 Chromium 中生产组合的读取与恢复行为；它不替代安装后的 Harness 人类走查、写入链路验收或 R1 裁决。
 
-`PR Fast Gate` 的 `needs` 包含 `verify` 和 `browser`。聚合 job 继续只输出 lane 结论，不 checkout、引用 secret 或执行候选代码；任一 lane 为 failure、cancelled 或 skipped 都不放行。取消整个运行时仍以平台的 cancelled 状态为准。`tests/contract/ci-browser-workflow.test.js` 固定入口顺序、依赖与失败闭合；action pin、凭据、权限和通用超时继续由 W1–W7 检查。
+`PR Fast Gate` 的 `needs` 包含 `verify`、`browser` 和 `windows-native`。聚合 job 继续只输出 lane 结论，不 checkout、引用 secret 或执行候选代码；任一 lane 为 failure、cancelled 或 skipped 都不放行。取消整个运行时仍以平台的 cancelled 状态为准。`tests/contract/ci-browser-workflow.test.js` 固定入口顺序、依赖与 4³=64 种 needs 结果的失败闭合；action pin、凭据、权限和通用超时继续由 W1–W7 检查。
 
 浏览器失败后，pinned `actions/upload-artifact` 仅上传 `test-results/composed-browser` 下生成的 PNG 截图和 ZIP trace，保留七天，不包含隐藏文件。工具准备或 browser launch 失败时可能没有截图，缺少文件不会覆盖原失败；上传失败也不会吞掉测试失败。产物只应包含隔离 fixture 的生成数据，不能加入真实账号、凭据或业务数据。
 
 触发器为全部 `pull_request`、push main 与 `workflow_dispatch`。取消原 base 过滤，让非 main PR 也由同一 CI 承担验证；仍按目标 head 回读真实运行。
 
 门禁的 hosted 负控在隔离临时 ref 上，仅给 `pnpm test:browser` 步骤添加 `PLAYWRIGHT_BROWSERS_PATH=.superpowers/missing-browser-negative-control`，安装步骤仍使用正常目录。先确认 Verify 绿、实际浏览器用例因缺少 binary 非零、Browser 与 PR Fast Gate 红，再恢复正式 head 并重新取两条 lane 和聚合的绿色证据。最终分支不得留下该 env 或调试提交；本地 16 种 needs 结果测试只能证明仓库的聚合表达式，不能代替平台运行证据。
+
+### Windows 原生 lane（#646）
+
+`ci.yml` 的 `windows-native` job 在 GitHub-hosted `windows-2025`（Windows Server 2025 x64）上执行已交付的原生套件，`timeout-minutes: 15`，`defaults.run.shell: pwsh`。它与 `verify`、`browser` 并行，并被 `PR Fast Gate` 聚合；job 不覆盖 permissions、没有 secrets、不 checkout 固定 ref，直接跑事件 head。
+
+**唯一清单来源。** 文件集、每文件用例下界与允许 skip 数只在 `scripts/windows-native-checks.mjs` 的 `SETS` 里；`ci.yml` 只按 set 名调用两个入口：
+
+    node scripts/windows-native-checks.mjs --set native-git
+    node scripts/windows-native-checks.mjs --set private-data --profile <标准用户 profile> --foreign <管理员预置 fixture>
+
+YAML 不内联 `.test.js` 文件名。新增/删除文件或下界变化必须在同一 PR 改 `SETS` 并在 ExecPlan 的 Decision Log 记录；`windows-2025` 已在 workflow-check 的托管 runner 白名单里，本 lane 不新增 W 规则。
+
+**覆盖面与排除。** 覆盖 Git 路径/身份/恢复行为，以及私有数据根准入、Host 启动/重开/销毁、packed plugin 加载与 SQL 资产。不出现在本 lane 的：`tests/contract/**`（含 `/bin/sh`、symlink、getuid 等 POSIX 假设，由 Linux `verify` 承担）、`tests/browser/**`（由 `browser` 承担）、`tests/integration/harness-plugin-private-data.test.js` 与 `development-local-git.test.js`（POSIX fd/uid/mode/chmod 语义在 win32 上平台门会红且负例会空心）、`tests/integration/storage-restart.test.js`（无 Windows 原生证据、不在 #646 验收内；SQLite 原生证据由私有数据套件的 journal/WAL/SHM 与 packed artifact 的 migrations 承担，需要时只向 `SETS` 追加一项）。
+
+**两阶段身份。** 阶段 1 以 runner 管理员执行 `native-git`，并在日志记录 `git rev-parse HEAD`、`ImageOS`/`ImageVersion`/`PROCESSOR_ARCHITECTURE`、node/git 版本、runner 的 SID 与 `IsInRole(Administrator)`/Administrators 组判定。阶段 2 内联 pwsh 用 `New-LocalUser` 建临时标准本地账户（只加入 `Users` 即 S-1-5-32-545），初始化 profile，以管理员预置 foreign-owner fixture，再 `Start-Process -Credential -LoadUserProfile` 以标准用户执行 `--set private-data`；测试用 `ordinaryToken` 自证 `admin:false` 且 `adminMember:false`。profile/账户清理在 `finally` 内完成，不用 step 级 `if`；输出经 `<fixture>` 令牌化后回显。提权 runner 的成功不被当作普通用户隔离证据。
+
+**反空心与失败语义。** 清单文件缺失、清单清空、重复项、越界路径、非法下界、非 win32 平台、请求参数非法、本地解析预检失败、测试进程非零退出、摘要行不可解析、零执行、低于下界、`todo>0`、合计 skip 与预算不符、`--test-timeout=120000` 或 job 超时都会让 lane 非零并打印 `::error::windows-native-checks:`。不重试、不 `continue-on-error`、不全局 skip。当前唯一合法 skip 是 `harness-plugin-artifact.test.js` 中「干净数据根首次创建」的 win32 skip，归 #644；`SETS['private-data'].allowedSkips` 取精确值 1，多一条即拒绝（防 skip 造假绿），少一条也失败（强制清单随用例更新）。#644 交付时必须在同一 PR 删除该 skip、把预算归零，并按需向 `SETS` 追加文件。
+
+**负控与成本。** 门禁的 hosted 负控在从 lane head 拉出的临时 ref 上用 `gh workflow run ci.yml --ref <scratch>` 执行，不进入 PR head：负控 A 让一条 native 用例 `assert.fail`，期望 `windows-native` 与 `PR Fast Gate` 红而 `verify`/`browser` 绿；负控 B 把 skip 预算改错，期望红来自 `::error::windows-native-checks:` 而不是 node 测试失败。删除临时 ref 后对正式 head 连续两次 `workflow_dispatch` 取得绿证，PR 的 `pull_request` 运行复现同一结果。`ci.yml` 能接受 `workflow_dispatch` 的前提仍是候选 lane 不读任何 secret。真实耗时从当前 head 的 Actions job 回读，本地耗时不算 hosted 成本；15 分钟上界包含依赖安装、插件构建、建号与两阶段执行。
+
+**边界。** `windows-2025` 是 Windows Server 2025 x64，不等于 Win11 x64 Desktop；本 lane 不替代 #647 的人工安装验收，也不改变 R1 门禁或宣称 Windows 已获产品支持。接线由 `tests/contract/ci-windows-workflow.test.js` 固定（runs-on、超时、pwsh、无 `if`/`continue-on-error`、只读权限、无 secrets、两条 set 入口、标准用户片段、checkout 与 `.nvmrc`/pnpm setup）。
 
 Board invariants 的 `on` **刻意只有 `schedule`**，由 `tests/contract/check-board-workflows-live.test.js` 钉在 `['schedule']` 上。`workflow_dispatch` 带一个 ref 选择器，而被选中的 ref 同时决定 workflow 定义与 checkout 出来的脚本——这两个 job 都持有长效 PAT，于是手选一个 PR 分支就能拿 token 执行任意代码。`ci.yml` 可以用 `workflow_dispatch`，是因为候选代码 lane 不读任何 secret；这条区分不是风格，是提权边界。
 
@@ -164,11 +185,11 @@ CI workflow 的 action 必须 pin 到 40 位 commit；checkout 必须关闭 pers
 
 三点差异（`<base_sha>...<head_sha>`）本身也是被测试钉住的性质，但要按它的真实范围理解：它保证"以这两个对象为端点时，只算 head 一侧自共同祖先以来的改动"。base 分支前进（fast-forward）时共同祖先仍在分叉点，结论不变；base 被 force-push 到无关历史时共同祖先后退，base 自己的提交会被算进来。`tests/contract/rule-checks.test.js` 有一条真实 git 用例同时钉住这两种情形：base 前进（fast-forward）时只算子分支自己的 5 行；base 被 force-push 到无关历史时，固定对象对给 5 行、移动的 tip 给 1205 行，并断言两者不同。
 
-`CI` 的 PR base 过滤已于 2026-11-07（#573）取消；全部 PR 由同一 Verify / Browser / PR Fast Gate 验证，接替退役 Merge Gate 对非 main PR 的执行覆盖。平台实际准入仍以目标 head 的运行回读为准。
+`CI` 的 PR base 过滤已于 2026-11-07（#573）取消；全部 PR 由同一 Verify / Browser / Windows Native / PR Fast Gate 验证，接替退役 Merge Gate 对非 main PR 的执行覆盖。平台实际准入仍以目标 head 的运行回读为准。
 
 ### 每个候选只执行一次当前层
 
-层执行命名与发现范围以 `tests/README.md` 为准。`package.json` 的 `test` 是 contract、integration、e2e 的唯一执行清单，沿用 `scripts/run-test-layer.mjs` 的工作区解析预检、非空/未全 skip 判定和失败传播。`ci.yml` 的 Verify 调用它，Browser 单独执行，PR Fast Gate 汇总二者。
+层执行命名与发现范围以 `tests/README.md` 为准。`package.json` 的 `test` 是 contract、integration、e2e 的唯一执行清单，沿用 `scripts/run-test-layer.mjs` 的工作区解析预检、非空/未全 skip 判定和失败传播。`ci.yml` 的 Verify 调用它，Browser 与 Windows Native 各自单独执行，PR Fast Gate 汇总三条 lane。
 
 > **Superseded by 本节（2026-11-07，#573）**：旧解释“CI 判定 PR 代码是否可用，Merge Gate 判定不同候选的不变量”不能证明重复执行的价值。PR #571 的两个 workflow 均 checkout 同一个 merge commit；旧 Merge Gate 的 integration、e2e 和 boundary 与 CI 重复，MVP-0 的七节点已完成且由现有行为用例承接。
 

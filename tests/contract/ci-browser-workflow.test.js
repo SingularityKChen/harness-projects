@@ -1,7 +1,6 @@
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import test from 'node:test';
 
@@ -18,8 +17,22 @@ function job(id) {
   return value;
 }
 
-test('CI 调度 verify、browser 和稳定的 PR Fast Gate，browser 安装后执行非空层入口', () => {
-  assert.deepEqual(Object.keys(workflow.jobs).sort(), ['browser', 'fast-gate', 'verify']);
+/**
+ * 只解释聚合步骤用到的两种 shell 行：`echo "..."`（无副作用）与 `exit <n>`
+ * （返回 <n>）。替代 `/bin/sh -c`：契约测试在 POSIX 与 Windows 上都可运行，
+ * 且不会因为宿主没有 `/bin/sh` 而把聚合表达式判成假红/假绿。
+ */
+function exitCode(step, results) {
+  const command = step.run.replaceAll(/\$\{\{ join\(needs\.\*\.result, ', '\) \}\}/g, results.join(', '));
+  for (const line of command.split('\n')) {
+    const exit = /^exit (\d+)$/.exec(line.trim());
+    if (exit !== null) return Number(exit[1]);
+  }
+  return 0;
+}
+
+test('CI 调度 verify、browser、windows-native 和稳定的 PR Fast Gate，browser 安装后执行非空层入口', () => {
+  assert.deepEqual(Object.keys(workflow.jobs).sort(), ['browser', 'fast-gate', 'verify', 'windows-native']);
   const browser = job('browser');
   assert.match(browser['runs-on'], /^ubuntu-/);
   assert.equal(browser.needs, undefined, 'browser 与 verify 独立执行');
@@ -38,10 +51,10 @@ test('browser job 与准备/执行步骤不能条件跳过或吞掉非零结果'
   }
 });
 
-test('Fast Gate 必须等候 verify/browser，保持失败时可汇总且不执行候选代码', () => {
+test('Fast Gate 必须等候 verify/browser/windows-native，保持失败时可汇总且不执行候选代码', () => {
   const aggregate = job('fast-gate');
   assert.equal(aggregate.name, 'PR Fast Gate');
-  assert.deepEqual([...aggregate.needs].sort(), ['browser', 'verify']);
+  assert.deepEqual([...aggregate.needs].sort(), ['browser', 'verify', 'windows-native']);
   assert.equal(aggregate.if, '${{ !cancelled() }}');
   assert.equal(aggregate['continue-on-error'], undefined);
   assert.equal(aggregate.steps.length, 2, '聚合只含失败判定与汇总');
@@ -56,7 +69,7 @@ test('Fast Gate 必须等候 verify/browser，保持失败时可汇总且不执�
   }
 });
 
-test('Fast Gate 对两个 lane 的 16 种结果逐一失败闭合，只有双 success 放行', () => {
+test('Fast Gate 对三个 lane 的 64 种结果逐一失败闭合，只有三路 success 放行', () => {
   const [reject, summary] = job('fast-gate').steps;
   assert.equal(summary.if, undefined, '汇总只在前一步成功后运行');
   const states = [...reject.if.split('||')].map((clause) => {
@@ -65,15 +78,13 @@ test('Fast Gate 对两个 lane 的 16 种结果逐一失败闭合，只有双 su
     return match[1];
   });
   assert.deepEqual(states.sort(), ['cancelled', 'failure', 'skipped']);
-  for (const verify of ['success', 'failure', 'cancelled', 'skipped']) {
-    for (const browser of ['success', 'failure', 'cancelled', 'skipped']) {
-      const results = [verify, browser];
-      const rejected = states.some((state) => results.includes(state));
-      const step = rejected ? reject : summary;
-      const command = step.run.replaceAll(/\$\{\{ join\(needs\.\*\.result, ', '\) \}\}/g, results.join(', '));
-      const result = spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8' });
-      assert.equal(result.status, results.every((state) => state === 'success') ? 0 : 1, results.join(', '));
-    }
+  const outcomes = ['success', 'failure', 'cancelled', 'skipped'];
+  const scenarios = outcomes.flatMap((verify) => outcomes.flatMap((browser) => outcomes.map((windows) => [verify, browser, windows])));
+  assert.equal(scenarios.length, 64, '三个 lane 的 4^3 种结果必须逐一闭合');
+  for (const results of scenarios) {
+    const rejected = states.some((state) => results.includes(state));
+    const step = rejected ? reject : summary;
+    assert.equal(exitCode(step, results), results.every((state) => state === 'success') ? 0 : 1, results.join(', '));
   }
 });
 
