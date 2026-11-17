@@ -6,13 +6,15 @@
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { Worker } from 'node:worker_threads'
 
 import {
+  BASELINE_VERSION,
   BUSY_TIMEOUT_MS,
   CURRENT_SCHEMA_GENERATION,
   MIGRATIONS,
@@ -31,7 +33,7 @@ function withTempDir(run) {
   }
 }
 
-/** schema 内容 + 版本记录的快照，用来比较"重跑是否改动了任何东西"。 */
+/** schema 内容 + 账本的快照，用来比较"重跑是否改动了任何东西"。 */
 function snapshot(db) {
   return JSON.stringify({
     schema: db
@@ -57,19 +59,15 @@ function withDatabase(dir, run) {
   }
 }
 
-test('空目录上运行迁移：建库、记录版本、连接级设置生效', () => {
+test('空目录上运行迁移：建库、记录单一基线版本、连接级设置生效', () => {
   withTempDir((dir) => {
     const file = join(dir, 'workspace.sqlite')
     assert.equal(existsSync(file), false, '前置条件：空目录里还没有数据库')
     withDatabase(dir, (db) => {
       const result = migrate(db)
-      assert.deepEqual(
-        result.applied,
-        MIGRATIONS.map((entry) => entry.version),
-        '空库必须应用清单里的全部迁移',
-      )
-      assert.equal(result.version, result.applied.at(-1))
-      assert.deepEqual(appliedVersions(db), result.applied, 'schema_migrations 必须记录已应用版本')
+      assert.deepEqual(result.applied, [BASELINE_VERSION], '空库必须只记一个逻辑基线版本')
+      assert.equal(result.version, BASELINE_VERSION, '首建报告的版本就是基线版本')
+      assert.deepEqual(appliedVersions(db), [BASELINE_VERSION], 'schema_migrations 必须恰好一行且等于基线版本')
       assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1, '外键约束必须打开')
       assert.equal(db.prepare('PRAGMA busy_timeout').get().timeout, BUSY_TIMEOUT_MS)
     })
@@ -77,20 +75,25 @@ test('空目录上运行迁移：建库、记录版本、连接级设置生效',
   })
 })
 
-test('第二次运行是幂等的：schema 内容与版本都不变', () => {
+test('第二次运行是幂等的：schema、账本与文件字节都不变', () => {
   withTempDir((dir) => {
+    const file = join(dir, 'workspace.sqlite')
     withDatabase(dir, (db) => {
       const first = migrate(db)
       const before = snapshot(db)
+      const digest = () => createHash('sha256').update(readFileSync(file)).digest('hex')
+      const bytes = digest()
       const second = migrate(db)
       assert.deepEqual(second.applied, [], '重跑不得再应用任何迁移')
-      assert.equal(second.version, first.version, '重跑必须报告同一版本')
+      assert.equal(second.version, BASELINE_VERSION, '重跑必须报告同一基线版本')
       assert.equal(snapshot(db), before, '重跑必须不改动 schema，也不新增版本记录')
+      assert.equal(digest(), bytes, '重跑必须不改动数据库文件字节')
+      assert.equal(first.version, second.version)
     })
   })
 })
 
-test('双 Worker 屏障同时打开空库：只有一个进程初始化完整链', async () => {
+test('双 Worker 屏障同时打开空库：只有一个进程初始化完整链，账本只有一行基线', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'storage-concurrent-'))
   const module = new URL('../../packages/storage/sqlite/src/index.ts', import.meta.url).href
   const workers = [0, 1].map(() => new Worker(`
@@ -113,9 +116,9 @@ test('双 Worker 屏障同时打开空库：只有一个进程初始化完整链
     const results = workers.map(next)
     workers.forEach((worker) => worker.postMessage('go'))
     const applied = (await Promise.all(results)).map((result) => result.applied).sort((a, b) => a.length - b.length)
-    assert.deepEqual(applied, [[], [1, 2, 3, 4, 5, 6, 7]])
+    assert.deepEqual(applied, [[], [BASELINE_VERSION]])
     withDatabase(dir, (db) => {
-      assert.deepEqual(appliedVersions(db), [1, 2, 3, 4, 5, 6, 7])
+      assert.deepEqual(appliedVersions(db), [BASELINE_VERSION])
       assert.equal(db.prepare('PRAGMA user_version').get().user_version, CURRENT_SCHEMA_GENERATION)
       assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok')
       assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
@@ -123,16 +126,26 @@ test('双 Worker 屏障同时打开空库：只有一个进程初始化完整链
   } finally { await Promise.all(workers.map((worker) => worker.terminate())); rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('清单自检拦住重复版本、不递增的版本与缺失文件', () => {
+test('清单自检拦住空清单、重复文件名与缺失文件', () => {
   withTempDir((dir) => {
     writeFileSync(join(dir, '001_init.sql'), 'SELECT 1;\n')
     writeFileSync(join(dir, '002_next.sql'), 'SELECT 1;\n')
-    const first = { version: 1, file: '001_init.sql' }
-    const second = { version: 2, file: '002_next.sql' }
-    assert.doesNotThrow(() => assertManifestIntegrity([first, second], dir), '正例不得误报')
+    assert.doesNotThrow(() => assertManifestIntegrity(['001_init.sql', '002_next.sql'], dir), '正例不得误报')
     assert.doesNotThrow(() => assertManifestIntegrity(), '包内真实清单必须自检通过')
-    assert.throws(() => assertManifestIntegrity([first, first], dir), /重复/)
-    assert.throws(() => assertManifestIntegrity([second, first], dir), /递增/)
-    assert.throws(() => assertManifestIntegrity([{ version: 1, file: 'missing.sql' }], dir), /缺失/)
+    assert.throws(() => assertManifestIntegrity([], dir), /清单为空/, '空清单必须在应用任何迁移之前显式失败')
+    assert.throws(() => assertManifestIntegrity(['001_init.sql', '001_init.sql'], dir), /重复/)
+    assert.throws(() => assertManifestIntegrity(['missing.sql'], dir), /缺失/)
+    assert.throws(() => assertManifestIntegrity([''], dir), /文件名/)
   })
+})
+
+test('包内清单是有序的非空文件名数组：空库按清单顺序建全部 schema', () => {
+  assert.ok(MIGRATIONS.length > 0)
+  for (const file of MIGRATIONS) assert.match(file, /\.sql$/)
+  withTempDir((dir) => withDatabase(dir, (db) => {
+    migrate(db)
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name)
+    assert.ok(tables.includes('planning_sync_round'), '清单最后一份资产（007）必须已应用')
+    assert.deepEqual(appliedVersions(db), [BASELINE_VERSION])
+  }))
 })

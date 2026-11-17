@@ -1,14 +1,12 @@
 import { openDatabase, type WorkspaceDatabase } from './db.ts'
-import type { Migration } from './migrations.ts'
-import { MIGRATIONS, MIGRATIONS_DIR, assertManifestIntegrity, readMigrationSql } from './migrations.ts'
+import { BASELINE_VERSION, MIGRATIONS, MIGRATIONS_DIR, assertManifestIntegrity, readMigrationSql } from './migrations.ts'
 
 export interface MigrateOptions {
-  /** 必须与包内完整当前清单的版本和文件一致。 */
-  readonly entries?: readonly Migration[]
   /** 受信打包迁移体目录；参考结构与建库使用同一批 SQL。 */
   readonly dir?: string
 }
 
+/** 首建空库：`applied=[BASELINE_VERSION]`、`version=BASELINE_VERSION`；重开：`applied=[]`、同一基线版本。 */
 export interface MigrateResult {
   readonly applied: number[]
   readonly version: number
@@ -61,20 +59,17 @@ function assertCurrent(db: WorkspaceDatabase, expected: SchemaObject[], identifi
   if (actual.some((row) => !byName.has(fold(row.name)))) refuse('unknown_objects')
   const ledger = actual.find((row) => fold(row.name) === 'schema_migrations')
   if (!ledger || !sameObject(ledger, byName.get('schema_migrations')!, identifiers)) refuse('schema_shape')
+  // 单基线账本：恰好一行且值等于 BASELINE_VERSION。CAST 保留 int64 边界的拒绝语义（不先转 JS number）。
   const versions = (db.prepare('SELECT CAST(version AS TEXT) AS version FROM schema_migrations ORDER BY version').all() as { version: string }[]).map((row) => row.version)
-  if (versions.length !== MIGRATIONS.length || versions.some((version, index) => version !== String(MIGRATIONS[index]?.version))) refuse('version_list')
+  if (versions.length !== 1 || versions[0] !== String(BASELINE_VERSION)) refuse('version_list')
   if (actual.length !== expected.length || actual.some((row) => !sameObject(row, byName.get(fold(row.name))!, identifiers))) refuse('schema_shape')
 }
 
 /** 唯一打开期准入：非空库只认可完整当前基线；空库一次原子建立全链。 */
 export function migrate(db: WorkspaceDatabase, options: MigrateOptions = {}): MigrateResult {
-  const entries = options.entries ?? MIGRATIONS
   const dir = options.dir ?? MIGRATIONS_DIR
-  assertManifestIntegrity(entries, dir)
-  if (entries.length !== MIGRATIONS.length || entries.some((entry, index) => entry.version !== MIGRATIONS[index]?.version || entry.file !== MIGRATIONS[index]?.file)) {
-    throw new Error('迁移选项必须使用完整当前清单')
-  }
-  const sql = entries.map((entry) => readMigrationSql(entry, dir))
+  assertManifestIntegrity(MIGRATIONS, dir)
+  const sql = MIGRATIONS.map((file) => readMigrationSql(file, dir))
   const reference = openDatabase(':memory:')
   let expected: SchemaObject[]
   const identifiers = new Set<string>()
@@ -96,15 +91,13 @@ export function migrate(db: WorkspaceDatabase, options: MigrateOptions = {}): Mi
     if (generation !== 0 && generation !== CURRENT_SCHEMA_GENERATION) throw new IncompatibleDatabaseError('generation', generation)
     const empty = schema(db).length === 0
     if (empty) {
-      for (const [index, entry] of entries.entries()) {
-        db.exec(sql[index]!)
-        db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(entry.version, new Date().toISOString())
-      }
+      for (const body of sql) db.exec(body)
+      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(BASELINE_VERSION, new Date().toISOString())
     }
     assertCurrent(db, expected, identifiers, generation)
     if (generation === 0) db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_GENERATION}`)
     db.exec('COMMIT')
-    return { applied: empty ? entries.map((entry) => entry.version) : [], version: entries.at(-1)!.version }
+    return { applied: empty ? [BASELINE_VERSION] : [], version: BASELINE_VERSION }
   } catch (error) {
     try { db.exec('ROLLBACK') } catch { /* 原始失败优先；SQLite 可能已回滚。 */ }
     throw error

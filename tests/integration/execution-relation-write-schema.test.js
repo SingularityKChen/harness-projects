@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { ExecutionRunStatus, RelationClass, RelationSource } from '@harness-projects/domain'
-import { MIGRATIONS, migrate, openDatabase } from '@harness-projects/storage-sqlite'
+import { BASELINE_VERSION, migrate, openDatabase } from '@harness-projects/storage-sqlite'
 
 // 每张表期望出现在**它自己的**出处注释里的 token 集合（D8）。
 // 只断言"注释里有 R1..R8 之一"没有判别力：把两张表的出处对调、或把出处改成无关的 R 编号仍然全绿（L3 复验实测）。
@@ -55,7 +55,7 @@ function seed(db) {
 }
 
 test('空库建出 L3 十一张表，二次运行是 no-op', () => withDatabase((db) => {
-  assert.deepEqual(migrate(db).applied, MIGRATIONS.map((entry) => entry.version))
+  assert.deepEqual(migrate(db).applied, [BASELINE_VERSION])
   assert.deepEqual(allTables(db), [...Object.keys(TABLE_PROVENANCE), 'planning_sync_round', 'connector_account', 'delivery_fact', 'entity', 'external_identity', 'planning_field_value', 'project_item_membership', 'provider_binding', 'schema_migrations', 'workspace', 'workspace_binding', 'workspace_planning_mapping', 'workspace_projection'].sort())
   const before = JSON.stringify(db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all())
   assert.deepEqual(migrate(db).applied, []); assert.equal(JSON.stringify(db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY name').all()), before)

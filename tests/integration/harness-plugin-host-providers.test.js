@@ -14,7 +14,7 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { SqliteStorage } from '@harness-projects/storage-sqlite'
+import { BASELINE_VERSION, SqliteStorage } from '@harness-projects/storage-sqlite'
 import { createHostComposition } from '../../apps/harness-plugin/src/host-composition.ts'
 import { describeError } from '../../apps/harness-plugin/src/host-diagnostics.ts'
 import { PROVIDER_CATALOG, catalogOf } from '../../apps/harness-plugin/src/host-providers.ts'
@@ -63,7 +63,7 @@ async function logLines(dataDir) {
 const fakeCatalog = (onCreate) => catalogOf([...PROVIDER_CATALOG.values(), fakePlanningEntry(onCreate)])
 const seedFake = async (storage) => { await seedWorkspace(storage); await storage.putProviderBinding(mount(FAKE, 'planning', 'harness.fake')) }
 
-test('AC1 空数据根：建库迁移 1–7，零工作区，重启仍为零', async () => {
+test('AC1 空数据根：建库记录单一基线版本，零工作区，重启仍为零', async () => {
   const { dataPath } = await dataRoot()
   for (const key of ['ac1-1', 'ac1-2']) { // 第二轮是同一文件上的重启
     const host = await createHostComposition(options(dataPath))
@@ -72,7 +72,7 @@ test('AC1 空数据根：建库迁移 1–7，零工作区，重启仍为零', a
       assert.deepEqual([baseline.workspace, baseline.entities, command.writeState, command.error.code], [undefined, [], 'failed', 'not_supported'], '没有工作区：baseline 为空而不是编造一个，命令是结构化 not_supported')
     } finally { await host.dispose() }
     const dumped = dump(dataPath)
-    assert.deepEqual(rowsOf(dumped, 'schema_migrations').map((row) => row.version), [1, 2, 3, 4, 5, 6, 7])
+    assert.deepEqual(rowsOf(dumped, 'schema_migrations').map((row) => row.version), [BASELINE_VERSION])
     assert.deepEqual([rowsOf(dumped, 'workspace').length, rowsOf(dumped, 'provider_binding').length], [0, 0], '空数据根不得写出任何工作区或连接锚点')
   }
 })

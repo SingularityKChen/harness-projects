@@ -9,7 +9,7 @@ import test from 'node:test'
 import { createContext } from '@harness-projects/core'
 import { createFakeStorage, createFakePlanningProvider, exportFakeStorageState } from '@harness-projects/provider-fake'
 import { EMPTY_POLICY } from '@harness-projects/capabilities'
-import { MIGRATIONS, SqliteStorage, createSqliteStorage, migrate, openDatabase } from '@harness-projects/storage-sqlite'
+import { BASELINE_VERSION, SqliteStorage, createSqliteStorage, migrate, openDatabase } from '@harness-projects/storage-sqlite'
 import { CONNECTOR_ACCOUNT_NAMED_CASES, CONNECTOR_ACCOUNT_SHARED_CASES, WORKSPACE, account, binding, policy, workspace } from '../contract/suites/storage-connector-account.js'
 
 const dirs = []
@@ -51,7 +51,7 @@ test('restart-and-empty-schema-repeatability', async () => {
   for (const name of ['fresh-a', 'fresh-b']) { // 两个新临时目录各迁移两次：第二次 applied 为空，schema 逐字节不变
     const db = openDatabase(join(tempDir(`connector-account-${name}-`), 'workspace.sqlite'))
     try {
-      assert.deepEqual(migrate(db).applied, MIGRATIONS.map((entry) => entry.version), `${name}：空库应用全部迁移`)
+      assert.deepEqual(migrate(db).applied, [BASELINE_VERSION], `${name}：空库只记单一基线版本`)
       const schema = JSON.stringify(db.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all())
       assert.deepEqual(migrate(db).applied, [], `${name}：第二次迁移 applied 必须为空`)
       assert.equal(JSON.stringify(db.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all()), schema, `${name}：重跑不得改动 schema`)
