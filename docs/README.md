@@ -26,6 +26,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
+| [2026-11-17-storage-single-asset](exec-plan/active/2026-11-17-storage-single-asset.md) | 单一自包含 SQL 基线资产与安装件字节一致性（#596） |
 
 ### Completed
 
