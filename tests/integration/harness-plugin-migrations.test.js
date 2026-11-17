@@ -18,6 +18,7 @@ test('packaged migrations create the single baseline schema from a clean profile
   try {
     const { packageDir, manifest } = await build({ outDir: scratch })
     assert.ok(MIGRATIONS.length > 0, 'inventory 不得为空：否则下面的派生断言会空转')
+    assert.deepEqual([...MIGRATIONS], ['001_init.sql'], '物理基线必须只有一个资产')
     assert.deepEqual(manifest.files.filter((file) => file.startsWith('migrations/')).sort(),
       MIGRATIONS.map((file) => `migrations/${file}`).sort())
     assert.deepEqual((await readdir(path.join(packageDir, 'migrations'))).sort(), [...MIGRATIONS].sort())

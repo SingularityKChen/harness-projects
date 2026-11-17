@@ -6,9 +6,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { ExecutionRunStatus, RelationClass, RelationSource } from '@harness-projects/domain'
-import { BASELINE_VERSION, migrate, openDatabase } from '@harness-projects/storage-sqlite'
+import { BASELINE_VERSION, MIGRATIONS, migrate, migrationPath, openDatabase } from '@harness-projects/storage-sqlite'
 
 // 每张表期望出现在**它自己的**出处注释里的 token 集合（D8）。
 // 只断言"注释里有 R1..R8 之一"没有判别力：把两张表的出处对调、或把出处改成无关的 R 编号仍然全绿（L3 复验实测）。
@@ -30,7 +29,7 @@ const TABLE_PROVENANCE = {
 const ALLOWED_TOKENS = new Set(['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'AGENTS.md §1.1', 'release-gates.md R1', 'Batch L3-A', 'Batch L3-B'])
 const TOKEN_PATTERN = /release-gates\.md R1|AGENTS\.md §1\.1|Batch L3-[AB]|R[1-8]/g
 const literal = (token) => new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-const MIGRATION_FILE = fileURLToPath(new URL('../../packages/storage/sqlite/migrations/003_control_facts.sql', import.meta.url))
+const MIGRATION_FILE = migrationPath(MIGRATIONS[0])
 const allTables = (db) => db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((row) => row.name)
 const columns = (db, table) => db.prepare('SELECT name FROM pragma_table_info(?) ORDER BY name').all(table).map((row) => row.name)
 const fkTables = (db, table) => db.prepare('SELECT "table" AS target FROM pragma_foreign_key_list(?)').all(table).map((row) => row.target)

@@ -106,6 +106,7 @@ after(async () => { if (scratch) await rm(scratch, { recursive: true, force: tru
 
 it('the packed artifact has a demo identity and complete deployable bytes', async () => {
   assert.equal(JSON.parse(await readFile(path.join(root, 'apps/harness-plugin/package.json'))).version, '0.1.0-demo.1')
+  assert.deepEqual(migrations, ['001_init.sql'], '物理基线必须只有一个资产')
   const result = await audit(tarball)
   assert.match(result.sha256, /^[a-f0-9]{64}$/)
 })
@@ -121,6 +122,8 @@ it('actual tarball mutations are rejected without disclosing injected values', a
     ['path', /identity path/, async dir => writeFile(path.join(dir, 'lib/index.js'), '\n// /' + 'Users/' + 'artifact-canary/private\n', { flag: 'a' })],
     ['credential', /credential/, async dir => writeFile(path.join(dir, 'lib/index.js'), '\n// ghp_' + 'z'.repeat(36), { flag: 'a' })],
     ['migration', /inventory/, async dir => rm(path.join(dir, `migrations/${MIGRATIONS.at(-1)}`))],
+    ['extra-migration', /inventory/, async dir => writeFile(path.join(dir, 'migrations/999_extra.sql'), '-- injected extra baseline asset\n')],
+    ['tampered-migration', /migration bytes differ/, async dir => writeFile(path.join(dir, `migrations/${MIGRATIONS.at(-1)}`), '-- tampered baseline bytes\n')],
     ['source-export', /deep-equal/, async dir => {
       const file = path.join(dir, 'package.json'), manifest = JSON.parse(await readFile(file, 'utf8'))
       manifest.exports['.'] = './src/index.ts'
@@ -131,7 +134,7 @@ it('actual tarball mutations are rejected without disclosing injected values', a
     run('tar', ['-xzf', tarball, '-C', dest])
     await mutate(path.join(dest, 'package'))
     const candidate = path.join(scratch, `${name}.tgz`)
-    run('tar', ['-czf', candidate, '-C', dest, ...expected.filter(entry => name !== 'migration' || entry !== `migrations/${MIGRATIONS.at(-1)}`).map(entry => `package/${entry}`)])
+    run('tar', ['-czf', candidate, '-C', dest, ...expected.filter(entry => entry !== (name === 'migration' ? `migrations/${MIGRATIONS.at(-1)}` : null)).map(entry => `package/${entry}`), ...(name === 'extra-migration' ? ['package/migrations/999_extra.sql'] : [])])
     await assert.rejects(() => audit(candidate), error => {
       assert.match(error.message, reason)
       assert.ok(!String(error.message).includes('artifact-canary'))
