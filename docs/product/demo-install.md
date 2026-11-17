@@ -17,7 +17,7 @@ shasum -a 256 apps/harness-plugin/dist/harness-projects-app-harness-plugin-0.1.0
 pnpm test:file tests/integration/harness-plugin-artifact.test.js tests/integration/harness-plugin-demo-artifact.test.js
 ```
 
-验收核对 manifest、两份 JS bundle、patch、七份 migrations 和 LICENSE 共 12 个文件，并拒绝源码依赖、本机路径和凭据；路径/凭据注入、删除 migration、导出指向 `.ts` 的变异都必须失败。
+验收核对 manifest、两份 JS bundle、patch、单份 migrations 和 LICENSE 共 6 个文件，并拒绝源码依赖、本机路径和凭据；路径/凭据注入、migration 的缺失/多余/篡改、导出指向 `.ts` 的变异都必须失败。
 
 ## 使用干净的 Web profile 安装
 
