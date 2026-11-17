@@ -1,6 +1,6 @@
 # Storage 物理单 SQL 资产（#596）ExecPlan
 
-> 状态：Active（2026-11-17 实现与验证完成，等待人类评审；PR 以 `refactor/storage-logical-baseline` 为 base，未 ready、未合并）
+> 状态：Completed（2026-11-17 实现与验证完成、独立验收归档；评审记录 `docs/review/pr-659-mmp-review.md`；stacked base `refactor/storage-logical-baseline`，合并顺序为 #658 → 本 PR retarget/rebase）
 > 创建：2026-11-17
 > 范围：把 `packages/storage/sqlite/migrations/` 的 001–007 七个 SQL 片段合并为单一自包含基线资产（沿用 `001_init.sql`），删除 002–007，让 runtime inventory、build manifest、安装件 SQL 字节与 artifact/demo 负控全部经 #595 的共享 inventory 一致；不改 schema 内容、不 bump `CURRENT_SCHEMA_GENERATION`。
 > 上游输入：issue #596（含 replan-20261116 与 2026-11-10 处置段）、issue #595、issue #417、`AGENTS.md`、`PLANS.md`、`docs/development/workflow.md`、`docs/architecture/release-gates.md`、`.superpowers/iteration11-batch3/research-storage.md`（其 2026-11-16 结论已按 main `ddb94c94`、#190 合并与 #595 新契约复核）。
@@ -139,7 +139,7 @@
   - 改写：`packages/storage/sqlite/migrations/001_init.sql`。
   - 删除：`packages/storage/sqlite/migrations/{002_identity_membership,003_control_facts,004_execution_run_identity,005_source_version_carrier,006_delivery_facts,007_planning_sync_round}.sql`。
   - 修改：`packages/storage/sqlite/src/migrations.ts`、`tests/integration/identity-membership-schema.test.js`、`tests/integration/execution-relation-write-schema.test.js`、`tests/integration/harness-plugin-migrations.test.js`、`tests/integration/harness-plugin-demo-artifact.test.js`、`tests/integration/harness-plugin-artifact.test.js`、`tests/integration/storage-baseline-admission.test.js`（**仅** legacy/partial 夹具构造，见 D13；断言不得放宽）。
-  - 新增文档：`docs/exec-plan/active/2026-11-17-storage-single-asset.md`；修改文档：`docs/product/demo-install.md`（仅现行产物计数一行）。
+  - 新增文档：`docs/exec-plan/active/2026-11-17-storage-single-asset.md`；修改文档：`docs/README.md`（计划索引）、`docs/product/demo-install.md`（现行产物计数与恢复段安装文件计数）。
   - 只读（本 PR 不改，由 #595 收口）：`packages/storage/sqlite/src/{migrate,storage}.ts`、`apps/harness-plugin/scripts/build.mjs`、`apps/harness-plugin/src/host.ts`、`tests/integration/{migration-runner,storage-restart,storage-connector-account,harness-plugin-host-providers}.test.js`、`.github/**`。
 - 预算：代码（除 `docs/` 外）增删合计 ≤800；文档 ≤1300；用 `node scripts/rule-checks.mjs size <base>` 自检（该脚本仓库硬上限为 1000/1500，本任务采用更严的 800/1300，PR 里两者都要报）。**不得**通过 SQL 压缩、删判别测试、把搬移行当免费或改写生成目录来压线。
 - 不新增依赖、不新增抽象、不改包边界、不改 Loader external 列表、不加源码兜底、不做旧文件名/旧库兼容或数据迁移。
@@ -308,7 +308,7 @@ console.log("integrity:", single.prepare("PRAGMA integrity_check").get().integri
 ## Progress
 
 - [x] (2026-11-17) Batch 0：#595 head 满足共享 inventory/单 baseline 契约且 gate 命令全绿；分支/worktree 就绪，rebase 到 `ee384266` 后 gate 复跑 `fail 0`（186 + 83）。
-- [x] (2026-11-17) Batch 1：ExecPlan 落入 `docs/exec-plan/active/`；4 个测试文件在 #595 head 上按预期先红（`creates=1`、无出处 token、两处 `['001_init.sql']` 字面量守卫），提交 `6bd97f99`。
+- [x] (2026-11-17) Batch 1：ExecPlan 落入 `docs/exec-plan/active/`；4 个测试文件在 #595 head 上按预期先红（`creates=1`、无出处 token、两处 `['001_init.sql']` 字面量守卫），提交 `7994614e`（rebase 前旧对象 `6bd97f99` 仅存于 backup 分支）。
 - [x] (2026-11-17) Batch 2：新 375 行 `001_init.sql`、删除 002–007、inventory 缩为 1 条；schema 对等证据 `schema_identical: true objects: 31`、`integrity: ok fk: 0`；schema/迁移/准入 473 + 36 用例全绿；提交 `61e256cc`。
 - [x] (2026-11-17) Batch 3：packed Host integrity/FK/二次 open 断言补齐；真实构建/打包/安装与缺失/多余/篡改负控全绿；tarball 恰好 6 个文件且 migration 字节与源资产 `cmp` 相同；提交 `121a313f`。
 - [x] (2026-11-17) Batch 4：`docs/product/demo-install.md` 现行计数更新；`pnpm verify`、typecheck、boundaries、size/disclosure/diff-check 通过；PR body 回读后交人类评审（不 ready、不合并）。
@@ -378,3 +378,4 @@ console.log("integrity:", single.prepare("PRAGMA integrity_check").get().integri
 
 - 2026-11-17：创建本计划。合并三路独立设计（系统/架构、安全/失败路径、产品/验证）后选唯一方案：原地合并进 `001_init.sql`、保留文件名、删 002–007 与 005 注释、不 bump 世代；新增 #595 契约硬门、schema 文本对等证据、三个负控、精确 diff 估算（745 SQL + 约 40 其余 = 782–799）与超限兜底。Decision Log D1–D12 记录全部取舍；未决项见 Open Questions。
 - 2026-11-17：实现完成。Batch 0 gate 在 `ee384266` 全绿后 rebase 开工；Batch 1 四处先红（`creates=1`、无出处 token、两处字面量守卫），Batch 2 合并资产并收口 inventory（schema 对等 31 对象、`integrity=ok`），Batch 3 用真实 packed Host 与真实 tarball 补 integrity/FK/二次 open 与缺失/多余/篡改负控。实际 799 代码行（≤800）、383 文档行（≤1300），未改 `migrate.ts`/`storage.ts`/`host.ts`/`build.mjs`、未加依赖或抽象、未 bump 世代。唯一计划外改动是按 D13 重建 admission 夹具（lead 已裁决归 #596）。
+- 2026-11-17（归档）：独立验收记录 `docs/review/pr-659-mmp-review.md`；计划移入 `docs/exec-plan/completed/` 并更新 `docs/README.md`、`docs/review/README.md` 索引；订正状态行与 Batch 1 提交号（`7994614e`），补记 `docs/README.md` 为改动文件集；`docs/product/demo-install.md` 恢复段安装文件计数 12→6 与 manifest/packed 实测对齐。评审 P3 处置：D13 夹具现实性、005 退役注释、ADR 旧文件名指针、陈旧断言消息均为后续项（测试/注释改动会突破本任务 799/800 预算，不在本 PR 扩面）。产品/测试/SQL 字节不变。
