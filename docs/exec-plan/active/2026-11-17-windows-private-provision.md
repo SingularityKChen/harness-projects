@@ -305,8 +305,10 @@ issue 2026-11-16 comment 提出两条由 #643 评审暴露的接口事实：
 - [x] (2026-11-17) Batch 0：fixture 增 `launcherProfile`/`provisioned` 选项（默认行为不变）与 launcher-shaped plain-mkdir profile 原生用例；lane 上 GREEN，**profile/ancestor 相位未拒绝**——普通 `mkdir` 链是 `O:<user>G:<domain>D:(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;FA;;;<user>)`、`AreAccessRulesProtected=false`、三条 ACE 全部 `inherited=true`，与 D1 的推断一致，未改 #643 契约。
 - [x] (2026-11-17) Batch 1：fresh 创建/adopt 不改写/fresh Host 首启（迁移 1–7、零工作区、重开）/partial resume 四个原生用例；helper 改为同一 `PROGRAM` 内的幂等 create-or-admit（`CreateDirectoryW`、`ConvertStringSecurityDescriptorToSecurityDescriptorW`、两个 IL wrapper、SDDL+`SECURITY_ATTRIBUTES`），lane 上全部 pass，既有负控与 POSIX 59 pass 不回归。
 - [x] (2026-11-17) Batch 2：worktrees/digest 创建+后代继承+rename 拒绝+dispose 后 adopt、并发首启、sidecar 残留接纳、plain worktrees/plain root/missing profile 的 refuse 零写入；artifact win32 skip 删除、`SETS['private-data'].allowedSkips` 归零，lane `set=private-data files=3 tests=78 skipped=0 todo=0`。
-- [x] (2026-11-17) Batch 3：计划落库与索引（已在 docs commit）、最终 head 原生证据回读、size/disclosure/verify、PR 正文更新与 checks 回读（是否 Ready 由 lead 决定）。
-- [x] (2026-11-17) 原生证据：`CI` run `44016639839`（head `1a681c350d6a`，base `test/windows-native-lane@8ce447594981`），job「Windows Native（原生安全与平台契约）」`4m11s`、`ImageOS=win25-vs2026`、`ImageVersion=20261103.298.1`、`AMD64`、node `v26.13.1`、git `2.56.0.windows.4`、`native-git files=2 tests=18 skipped=0`、`private-data files=3 tests=78 skipped=0 todo=0`、`standard-user exit=0`；`PR Fast Gate`/`Verify`/`Browser` 同时 pass。PowerShell 语法/绑定修正轮次为 **0**（预留的 1–2 轮未使用）。
+- [x] (2026-11-17) Batch 3：计划落库与索引（`32b033bd`、`81ebfd99`）、产品/测试面 head 与文档面 head 各取一次原生证据、size/disclosure/verify、PR 正文更新与 checks 回读（是否 Ready 由 lead 决定）。
+- [x] (2026-11-17) 原生证据（产品/测试面 head `1a681c35`）：`CI` run `44016639839`（base `test/windows-native-lane@8ce447594981`），job「Windows Native（原生安全与平台契约）」`4m11s`（job `133816042841`）、`ImageOS=win25-vs2026`、`ImageVersion=20261103.298.1`、`AMD64`、node `v26.13.1`、git `2.56.0.windows.4`、`native-git files=2 tests=18 skipped=0`、`private-data files=3 tests=78 skipped=0 todo=0`、`standard-user exit=0`；`PR Fast Gate`/`Verify`/`Browser` 同时 pass。PowerShell 语法/绑定修正轮次为 **0**（预留的 1–2 轮未使用）。
+- [x] (2026-11-17) 原生证据（文档面 head `81ebfd99`，不沿用旧 head 结论）：`CI` run `44018167753` 的 job「Windows Native（原生安全与平台契约）」`3m54s`（job `133820996188`）在同为 `win25-vs2026` / `ImageVersion=20261103.298.1` / `AMD64` / node `v26.13.1` / git `2.56.0.windows.4` 上同得 `native-git 18/0`、`private-data files=3 tests=78 skipped=0 todo=0`、`standard-user exit=0`；`PR Fast Gate` 同 head pass。
+- [x] (2026-11-17，独立验收) 测试判别力：在临时 scratch ref 上跑变异体（ref 已删除、PR head 未变）——M1 去掉创建调用的 `SECURITY_ATTRIBUTES`：`private-data` 48/42/6 fail、packed 干净数据根 1 fail（fresh/adopt/Host 首启/worktrees/并发/sidecar 变红）；M2 把 `Ensure` 退化为普通 `Open`：`private-data` 48/39/9 fail、packed 干净数据根 1 fail（fresh/adopt/Host 首启/partial 两个子用例/worktrees/并发/sidecar 共 9 条变红）；M3 把创建后复核降为非私有：`windows-native` job 在 15 分钟 job timeout 被 cancelled、`PR Fast Gate` failure（`Verify`/`Browser` success）——既有 broad-* 拒绝对象被接纳后 `hostFixture` 泄漏 helper 进程使测试进程不退出，未留下逐用例归因；该 job 级红仍证明拒绝矩阵对准入强度敏感、不是空转。M1 首跑另命中一次 lane `native-git` `EBUSY` flake（与 lane `b9629891` 修复同根因），重跑后取得上述 stage-2 结果。
 
 ## Surprises & Discoveries
 
@@ -325,6 +327,7 @@ issue 2026-11-16 comment 提出两条由 #643 评审暴露的接口事实：
 13. **2026-11-17（lane 计数口径）**：lane 的 `ℹ tests` 含 `t.test` 子用例。base 的 `harness-plugin-windows-private-data.test.js` 在 Windows 上是 18 顶层 + 21 负控子用例 = 39（即 `minTests`）；本项后为 28 顶层 + 18 负控 + 2 partial-resume 子用例 = **48**，仍高于 39 下界。`private-data` 集合合计 `tests=78`（48+1+29）。`allowedSkips=0` 生效后三文件 `skipped=0`。
 14. **2026-11-17（打包 Host 解锁）**：`harness-plugin-artifact.test.js` 的「干净数据根首次创建」用例删除 win32 skip 后在 lane 上真实执行并通过（29/29、skipped 0），确认它本身就是「打包产物首次创建私有根」的 packed fresh 资格证据，不需要新增用例。
 15. **2026-11-17（首跑质量）**：lane 首跑即全绿，没有出现计划预留的 1–2 轮 PowerShell 语法/绑定修正；`windows-native` job 用时 `4m11s`（含 install/build/建号/两阶段）。原计划担心的 owner 显式写 SD、`CREATE_NEW` 属性级 desiredAccess、x64 `SECURITY_ATTRIBUTES` 布局在真实 Win32 上均按预期工作。
+16. **2026-11-17（验收期 lane 前进）**：本项证据 run 绑定 base `8ce44759`；此后 lane tip 前进到 `1f28dd42`（仅 lane ExecPlan）与 `b9629891`（`tests/integration/local-git-fixture.js` 清理加有界重试，修 `native-git` 阶段 `EBUSY` flake）。两者都不改 `ci.yml`、`scripts/windows-native-checks.mjs`、lane 契约测试或本项文件，但 retarget 后的最终原生证据必须在含这些提交的 base 上重取（D9，lead-owned）。独立验收在 scratch ref 上另有一次 `native-git` `EBUSY` 红，与该修复的根因一致，进一步支持它是环境 flake 而非产品回归。
 
 ## Decision Log
 
@@ -374,13 +377,15 @@ issue 2026-11-16 comment 提出两条由 #643 评审暴露的接口事实：
 
 ### 交付结果（2026-11-17）
 
-**最终 head**：`1a681c350d6a77776db122219e9fc47aa4b6f603`（base `test/windows-native-lane@8ce447594981`）。提交序列（rebase 后）：
+**产品/测试面最终 head**：`1a681c350d6a77776db122219e9fc47aa4b6f603`；**文档面最终 head**：`81ebfd994617b854559982bb2a6745e3f7e8ef4f`（两者 base 均为 `test/windows-native-lane@8ce447594981`）。提交序列（rebase 后）：
 
-1. `e99b9414 test(apps): 加入 launcher 形状 profile 链的原生接纳事实门`（Batch 0）
-2. `56120b1b feat(apps): 在 Windows 私有根首次使用时原子创建并接纳数据边界`（Batch 1）
-3. `1a681c35 test(apps): 补齐并发、sidecar、worktrees 与不修复的原生策略矩阵`（Batch 2 + lane skip 交接）
+1. `32b033bd docs(exec-plan): 起草 Windows 首次私有化 provisioning 计划`（计划落库）
+2. `e99b9414 test(apps): 加入 launcher 形状 profile 链的原生接纳事实门`（Batch 0）
+3. `56120b1b feat(apps): 在 Windows 私有根首次使用时原子创建并接纳数据边界`（Batch 1）
+4. `1a681c35 test(apps): 补齐并发、sidecar、worktrees 与不修复的原生策略矩阵`（Batch 2 + lane skip 交接）
+5. `81ebfd99 docs(exec-plan): 收口 Windows 私有化 provisioning 的原生证据`（Batch 3）
 
-**原生证据（V2，唯一资格证据）**：`CI` run `44016639839`（`pull_request`，head `1a681c35`），job「Windows Native（原生安全与平台契约）」`4m11s`（job id `133816042841`）：
+**原生证据（V2，唯一资格证据；两个 head 使用同一 lane 定义）**：`CI` run `44016639839`（`pull_request`，head `1a681c35`，job id `133816042841`，`4m11s`）与 `CI` run `44018167753`（`pull_request`，head `81ebfd99`，job id `133820996188`，`3m54s`）：
 
 - `ImageOS=win25-vs2026`、`ImageVersion=20261103.298.1`、`Architecture=AMD64`、node `v26.13.1`、git `2.56.0.windows.4`。
 - 阶段 1（runner 管理员）：`windows-native-checks: set=native-git files=2 tests=18 skipped=0 todo=0`。
@@ -394,11 +399,11 @@ issue 2026-11-16 comment 提出两条由 #643 评审暴露的接口事实：
 - `pnpm test:file tests/integration/harness-plugin-private-data.test.js`：`tests 59 / pass 59 / fail 0`（POSIX 敏感路径零改动）。
 - `pnpm test:file tests/integration/harness-plugin-windows-private-data.test.js`：`tests 28 / pass 10 / skip 18`（原生用例按 darwin 平台 skip；lane 上为 48/48）。
 - `pnpm test:file tests/integration/harness-plugin-artifact.test.js`：`tests 29 / pass 29 / skip 0`。
-- `pnpm run boundaries` 9 pass；`node scripts/workflow-check.mjs` no findings；`node scripts/rule-checks.mjs size test/windows-native-lane` 代码 317/1000、文档（含本计划，最终 head 计）413/1500；`node scripts/rule-checks.mjs disclosure test/windows-native-lane` 通过；`git diff --check test/windows-native-lane...HEAD` 无输出。
+- `pnpm run boundaries` 9 pass；`node scripts/workflow-check.mjs` no findings；`node scripts/rule-checks.mjs size test/windows-native-lane` 代码 317/1000、文档（含本计划）419/1500；`node scripts/rule-checks.mjs disclosure test/windows-native-lane` 通过；`git diff --check test/windows-native-lane...HEAD` 无输出。
 
-**与计划的偏差**：Batch 0 无需放宽 profile 契约（符合 D1 期望）；PowerShell 语法/绑定修正轮次 0（预留 1–2 轮未用）；原生 RED 未单独观测（D11，外部依赖 lane 未落地时先完成实现）；lane 计数口径见 Surprises #13；`docs/README.md` 索引行在 docs 提交时已落地，Batch 3 无需新增。
+**与计划的偏差**：Batch 0 无需放宽 profile 契约（符合 D1 期望）；PowerShell 语法/绑定修正轮次 0（预留 1–2 轮未用）；原生 RED 未单独观测（D11，外部依赖 lane 未落地时先完成实现）；lane 计数口径见 Surprises #13；`docs/README.md` 索引行在 docs 提交时已落地，Batch 3 无需新增；文档提交产生新 head 后按同一 lane 重新取证（run `44018167753`），未把 `1a681c35` 的旧 run 当作最终 head 证据。
 
-**仍未覆盖**：Win11 x64 Desktop 人类验收与发布接受（#647、R1）；受管设备/企业 profile 策略、launcher 提权创建变体；helper 与 `CreateDirectoryW/CreateFileW` 之外的 Windows 版本差异。**下一步（非本 owner）**：#646 合并后把 PR #657 retarget 到 `main` 并在新 base 上重跑原生证据；是否 Ready 由 lead 决定。
+**仍未覆盖**：Win11 x64 Desktop 人类验收与发布接受（#647、R1）；受管设备/企业 profile 策略、launcher 提权创建变体；helper 与 `CreateDirectoryW/CreateFileW` 之外的 Windows 版本差异；并发首启只覆盖「双方成功」的收敛，「一方失败不破坏另一方 canonical 树」目前由「拒绝路径零写入 + 既有对象只经 `Open` 复核」结构性保证，未单独构造失败方。**下一步（非本 owner）**：#646 合并后把 PR #657 retarget 到 `main` 并在新 base 上重跑原生证据；lane tip 已在本项证据 run 之后前进（`1f28dd42` 文档、`b9629891` `native-git` 夹具清理有界重试），`ci.yml`/`SETS`/本项文件未变但最终证据必须在新 base 重取（D9）；是否 Ready 由 lead 决定。
 
 ## Bottom Change Note
 
@@ -408,3 +413,4 @@ issue 2026-11-16 comment 提出两条由 #643 评审暴露的接口事实：
 - Change Note (2026-11-17，Batch 0)：fixture 增 `launcherProfile`/`provisioned` 选项（默认行为不变）与 launcher plain-mkdir profile 原生事实门；lane 证明 #643 接受该 profile 链，未改契约。
 - Change Note (2026-11-17，Batch 1)：同一 `PROGRAM` 内实现幂等 create-or-admit（两个新 P/Invoke 绑定、两个 IL wrapper、SDDL+`SECURITY_ATTRIBUTES`、`Ensure`、`directories` 帧同语义），错误 token 扩 `create-*`/`platform`，协议与 Host ABI 不变；四个原生正例 + 本机回归通过。
 - Change Note (2026-11-17，Batch 2/3)：策略矩阵、并发、sidecar、worktrees 继承与 refuse 零写入用例落地；删除 artifact win32 skip 并把 lane `allowedSkips` 归零（含 `ci.md` 与契约测试固定行）；精确 head `1a681c35` 首跑即取得 win25 标准用户证据（`native-git 18/0`、`private-data 78/0`、`standard-user exit=0`）与全绿 checks。是否 Ready 留给 lead。
+- Change Note (2026-11-17，最终验收)：把原生证据绑定到实际最终 head（产品/测试面 `1a681c35` run `44016639839`、文档面 `81ebfd99` run `44018167753`），补全提交序列与 lane tip 前进事实；记录三个 scratch ref 变异实验（fresh/packed/`broad-*` 拒绝用例分别变红，ref 已删除）与「并发一方失败不破坏对方树」未单独覆盖的残余风险；产品/测试面不变。
