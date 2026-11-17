@@ -309,8 +309,12 @@ describe('Harness 插件安装件契约', () => {
         assert.equal((await service.bootstrapWorkspace({ kind: 'agent', id: 'packaged-host' }, 'packaged-host-1')).writeState, 'failed', '没有工作区时命令是结构化失败')
         const db = new DatabaseSync(path.join(process.env.DSH_HOME, 'harness-projects', 'workspace.sqlite'), { readOnly: true })
         const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version)
+        const integrity = db.prepare('PRAGMA integrity_check').get().integrity_check
+        const orphans = db.prepare('PRAGMA foreign_key_check').all()
         db.close()
-        assert.deepEqual(versions, [BASELINE_VERSION], '包内 migrations 完成单一基线记账')
+        assert.deepEqual(versions, [BASELINE_VERSION], '包内 migrations 完成单一基线记账（恰好一行）')
+        assert.equal(integrity, 'ok', 'packed Host 用单资产建出的库通过 integrity_check')
+        assert.deepEqual(orphans, [], 'packed Host 建出的库没有悬空外键')
         const generatorPrototype = Object.getPrototypeOf(Object.getPrototypeOf((async function* () {})()))
         const originalReturn = generatorPrototype.return, completed = []
         t.mock.method(generatorPrototype, 'return', async function (...args) {
@@ -329,6 +333,8 @@ describe('Harness 插件安装件契约', () => {
         await assert.rejects(service.baseline(), /卸载/)
         await hostModule.apply(context)
         assert.equal((await services.get('harnessProjects').baseline()).workspace, undefined, '同 artifact 原库可以重新加载')
+        const reopened = new DatabaseSync(path.join(process.env.DSH_HOME, 'harness-projects', 'workspace.sqlite'), { readOnly: true })
+        try { assert.deepEqual(reopened.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [BASELINE_VERSION], '二次 open 不再迁移：账本仍是单行') } finally { reopened.close() }
       } finally {
         if (previousHome === undefined) delete process.env.DSH_HOME
         else process.env.DSH_HOME = previousHome
