@@ -26,6 +26,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
+| [2026-11-17-storage-logical-baseline](exec-plan/active/2026-11-17-storage-logical-baseline.md) | 单 baseline 版本、唯一 SQL inventory 与迁移准入收敛（#595） |
 
 ### Completed
 
