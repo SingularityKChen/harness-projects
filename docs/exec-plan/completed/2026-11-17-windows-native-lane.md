@@ -1,6 +1,6 @@
 # Windows 原生 CI lane（#646）ExecPlan
 
-> 状态：Active（2026-11-17 实现完成；hosted 证据见 `Outcomes & Retrospective`；未执行 `gh pr ready`，等待人类评审）
+> 状态：Completed（2026-11-17 实现完成、独立验收归档；hosted 证据见 `Outcomes & Retrospective`；评审记录 `docs/review/pr-656-mmp-review.md`）
 > 创建：2026-11-17
 > 范围：#646 —— 把 main 上已交付的 Windows 原生套件变成 `ci.yml` 中一条必需 lane，并聚合进唯一必需检查 `PR Fast Gate`；产品代码零改动；#644 以本分支为 base stack。
 > 上游输入：`docs/development/ci.md`、`docs/development/workflow.md`、`docs/architecture/release-gates.md`、`.github/workflows/ci.yml`、`scripts/workflow-check.mjs`、`tests/contract/ci-browser-workflow.test.js`、`docs/exec-plan/completed/2026-11-16-windows-root-admission.md`、`docs/exec-plan/completed/2026-11-16-windows-git-paths.md`、`docs/review/pr-655-mmp-review.md`、`docs/review/pr-653-mmp-review.md`。
@@ -145,7 +145,7 @@ Git 套件唯一原生证据是 admin（`3091d4ab` 16/16），private-data 套�
 - **I6 工具链来源**：Node 取 `.nvmrc`，pnpm 取 `package.json` 的 `packageManager`；只显式 `shell: pwsh`，不依赖继承的 bash 假设。
 - **I7 边界**：`windows-2025` 是 Windows Server 2025 x64 镜像，不等于 Win11 x64 Desktop；不替代 #647 安装验收、不替代 R1、不宣称 Windows 已获产品支持。
 - **I8 零产品改动**：不修改 `apps/**`、`packages/**`、`tests/**` 既有文件（除新增 runner 契约测试），无新依赖、无旧数据兼容/迁移、不改 Host ABI。
-- **I9 可复现**：lane 不钉产品 SHA、不覆写 ref，直接跑事件 head；每个 PR 的 lane 结果可由 `gh pr checks` 回读，精确 head 证据由 `workflow_dispatch --ref <branch>` 回读。
+- **I9 可复现**：lane 不钉产品 SHA、不覆写 ref，直接运行平台为 PR 事件生成的测试合并提交（候选 head 与当时 base，平台构造，不由仓库自建 checkout）；每个 PR 的 lane 结果可由 `gh pr checks` 回读，精确 head 证据由 `--ref <branch>` 的 `workflow_dispatch` 回读。
 
 ## Global Constraints
 
@@ -390,7 +390,7 @@ gh pr view <编号> -R SingularityKChen/harness-projects \
 
 - `.github/workflows/ci.yml`：新增 `windows-native` job（hosted `windows-2025`、15 分钟、默认 pwsh、两阶段身份、`finally` 清理），`fast-gate.needs` 变为 `[verify, browser, windows-native]`；唯一必需检查名 `PR Fast Gate` 未变。
 - `scripts/windows-native-checks.mjs`：`SETS` 唯一清单、严格参数解析、非 win32 拒绝、manifest 自检、`evaluate` 反空心判定、`spawnSync` 逐文件执行。
-- `tests/contract/windows-native-checks.test.js`（8 条）、`tests/contract/ci-windows-workflow.test.js`（5 条）；`tests/contract/ci-browser-workflow.test.js` 改为 4 job / 3 lane / 64 种 needs 组合并去掉 `/bin/sh` 依赖。
+- `tests/contract/windows-native-checks.test.js`（8 条）、`tests/contract/ci-windows-workflow.test.js`（4 条）；`tests/contract/ci-browser-workflow.test.js` 改为 4 job / 3 lane / 64 种 needs 组合并去掉 `/bin/sh` 依赖。
 - `docs/development/ci.md`：workflow 表、needs、Windows 原生 lane 一节（覆盖与排除、唯一 skip 归属 #644、两阶段身份、反空心、负控与成本、Server 2025 x64 ≠ Win11 x64）。
 
 ### Hosted 证据（2026-11-17；回读命令 + 观察时刻 + head）
@@ -448,4 +448,5 @@ gh pr view <编号> -R SingularityKChen/harness-projects \
 - 2026-11-17（Batch 4/5 证据落库）：首次 hosted 运行即绿（PR run `44016355484`，head `8ce44759`），负控 A/B 与两次精确 head dispatch 完成；按 D16 修正负控 B 的 Verify 预期，按 D17 冻结首绿清单；未执行 `gh pr ready`。
 - 2026-11-17（flake 修复）：证据 head 的 dispatch `44018277107` 命中 Windows 临时仓库清理 EBUSY flake，按 D18 给 `tests/integration/local-git-fixture.js` 加有界重试并纳入 Global Constraints 文件集；在新 head 重新取两次精确 head 绿证。
 - 2026-11-17（独立验收落库）：lane-verifier PASS 6/6、无 P0/P1；订正文档中标准用户诊断行数（28 行）与 `ci-windows-workflow.test.js` 条数（4 条）；记录 P2（`SETS` 清单仅受 review 保护）与 deferred（review 追加的原生卷反例、延迟预算归 #647）。
-- 2026-11-17：创建草案。基于 main `ddb94c9440815626a3932dcaf050653f70eedb18` 重新核对事实（#643/#645/#190 已合并；原生套件与 Host 接线在 main；run `43871692717` = 68 pass/0 fail/1 skip；Git 套件 main 上 18 条从未整体原生运行），对三路设计做对抗评审（指出设计 1 的单身份阶段、设计 2 的 `5dd6456d` 事实错误与缺下界、设计 3 的 storage-restart/双 job 判断问题），选定「单 job + 两阶段身份 + `SETS` 脚本 + 精确 skip 预算 + 临时 ref 负控」，并给出 5 个批次、文件集、验收与回滚。本副本位于 `.superpowers/iteration11-delivery-20261117/specs/windows-native-lane-execplan.md`，Batch 1 落库到 `docs/exec-plan/active/2026-11-17-windows-native-lane.md`。
+- 2026-11-17（归档）：独立验收记录 `docs/review/pr-656-mmp-review.md`；计划移入 `docs/exec-plan/completed/`，`docs/README.md` 与 `docs/review/README.md` 索引更新；本归档提交仅改文档，代码树与 workflow 字节不变。
+- 2026-11-17：创建草案。基于 main `ddb94c9440815626a3932dcaf050653f70eedb18` 重新核对事实（#643/#645/#190 已合并；原生套件与 Host 接线在 main；run `43871692717` = 68 pass/0 fail/1 skip；Git 套件 main 上 18 条从未整体原生运行），对三路设计做对抗评审（指出设计 1 的单身份阶段、设计 2 的 `5dd6456d` 事实错误与缺下界、设计 3 的 storage-restart/双 job 判断问题），选定「单 job + 两阶段身份 + `SETS` 脚本 + 精确 skip 预算 + 临时 ref 负控」，并给出 5 个批次、文件集、验收与回滚。Batch 1 落库到 `docs/exec-plan/active/2026-11-17-windows-native-lane.md`（归档后为 `docs/exec-plan/completed/`）。

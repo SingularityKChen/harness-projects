@@ -34,11 +34,11 @@ Node 版本来自 `.nvmrc`，pnpm 版本来自 `package.json`；lockfile 的精�
 
 触发器为全部 `pull_request`、push main 与 `workflow_dispatch`。取消原 base 过滤，让非 main PR 也由同一 CI 承担验证；仍按目标 head 回读真实运行。
 
-门禁的 hosted 负控在隔离临时 ref 上，仅给 `pnpm test:browser` 步骤添加 `PLAYWRIGHT_BROWSERS_PATH=.superpowers/missing-browser-negative-control`，安装步骤仍使用正常目录。先确认 Verify 绿、实际浏览器用例因缺少 binary 非零、Browser 与 PR Fast Gate 红，再恢复正式 head 并重新取两条 lane 和聚合的绿色证据。最终分支不得留下该 env 或调试提交；本地 16 种 needs 结果测试只能证明仓库的聚合表达式，不能代替平台运行证据。
+门禁的 hosted 负控在隔离临时 ref 上，仅给 `pnpm test:browser` 步骤添加 `PLAYWRIGHT_BROWSERS_PATH=.superpowers/missing-browser-negative-control`，安装步骤仍使用正常目录。先确认 Verify 绿、实际浏览器用例因缺少 binary 非零、Browser 与 PR Fast Gate 红，再恢复正式 head 并重新取全部三条 lane 和聚合的绿色证据。最终分支不得留下该 env 或调试提交；本地 64 种 needs 结果测试只能证明仓库的聚合表达式，不能代替平台运行证据。
 
 ### Windows 原生 lane（#646）
 
-`ci.yml` 的 `windows-native` job 在 GitHub-hosted `windows-2025`（Windows Server 2025 x64）上执行已交付的原生套件，`timeout-minutes: 15`，`defaults.run.shell: pwsh`。它与 `verify`、`browser` 并行，并被 `PR Fast Gate` 聚合；job 不覆盖 permissions、没有 secrets、不 checkout 固定 ref，直接跑事件 head。
+`ci.yml` 的 `windows-native` job 在 GitHub-hosted `windows-2025`（Windows Server 2025 x64）上执行已交付的原生套件，`timeout-minutes: 15`，`defaults.run.shell: pwsh`。它与 `verify`、`browser` 并行，并被 `PR Fast Gate` 聚合；job 不覆盖 permissions、没有 secrets、不 checkout 固定 ref，直接运行平台为 PR 事件生成的测试合并提交（候选 head 与当时 base，平台构造）。
 
 **唯一清单来源。** 文件集、每文件用例下界与允许 skip 数只在 `scripts/windows-native-checks.mjs` 的 `SETS` 里；`ci.yml` 只按 set 名调用两个入口：
 
@@ -47,15 +47,15 @@ Node 版本来自 `.nvmrc`，pnpm 版本来自 `package.json`；lockfile 的精�
 
 YAML 不内联 `.test.js` 文件名。新增/删除文件或下界变化必须在同一 PR 改 `SETS` 并在 ExecPlan 的 Decision Log 记录；`windows-2025` 已在 workflow-check 的托管 runner 白名单里，本 lane 不新增 W 规则。
 
-**覆盖面与排除。** 覆盖 Git 路径/身份/恢复行为，以及私有数据根准入、Host 启动/重开/销毁、packed plugin 加载与 SQL 资产。不出现在本 lane 的：`tests/contract/**`（含 `/bin/sh`、symlink、getuid 等 POSIX 假设，由 Linux `verify` 承担）、`tests/browser/**`（由 `browser` 承担）、`tests/integration/harness-plugin-private-data.test.js` 与 `development-local-git.test.js`（POSIX fd/uid/mode/chmod 语义在 win32 上平台门会红且负例会空心）、`tests/integration/storage-restart.test.js`（无 Windows 原生证据、不在 #646 验收内；SQLite 原生证据由私有数据套件的 journal/WAL/SHM 与 packed artifact 的 migrations 承担，需要时只向 `SETS` 追加一项）。
+**覆盖面与排除。** 覆盖 Git 路径/身份/恢复行为，以及私有数据根准入、Host 启动/重开/销毁、packed plugin 加载与随包 migrations 清单。不出现在本 lane 的：`tests/contract/**`（含 `/bin/sh`、symlink、getuid 等 POSIX 假设，由 Linux `verify` 承担）、`tests/browser/**`（由 `browser` 承担）、`tests/integration/harness-plugin-private-data.test.js` 与 `development-local-git.test.js`（POSIX fd/uid/mode/chmod 语义在 win32 上平台门会红且负例会空心）、`tests/integration/storage-restart.test.js`（无 Windows 原生证据、不在 #646 验收内；SQLite 原生证据由私有数据套件的 journal/WAL/SHM 承担；packed artifact 的 migrations 目前只验证随包清单与 packed 加载，干净数据根上的迁移执行由 #644 的 win32 skip 交接，其原生扩展见 #660，需要时只向 `SETS` 追加一项）。
 
 **两阶段身份。** 阶段 1 以 runner 管理员执行 `native-git`，并在日志记录 `git rev-parse HEAD`、`ImageOS`/`ImageVersion`/`PROCESSOR_ARCHITECTURE`、node/git 版本、runner 的 SID 与 `IsInRole(Administrator)`/Administrators 组判定。阶段 2 内联 pwsh 用 `New-LocalUser` 建临时标准本地账户（只加入 `Users` 即 S-1-5-32-545），初始化 profile，以管理员预置 foreign-owner fixture，再 `Start-Process -Credential -LoadUserProfile` 以标准用户执行 `--set private-data`；测试用 `ordinaryToken` 自证 `admin:false` 且 `adminMember:false`。profile/账户清理在 `finally` 内完成，不用 step 级 `if`；输出经 `<fixture>` 令牌化后回显。提权 runner 的成功不被当作普通用户隔离证据。
 
-**反空心与失败语义。** 清单文件缺失、清单清空、重复项、越界路径、非法下界、非 win32 平台、请求参数非法、本地解析预检失败、测试进程非零退出、摘要行不可解析、零执行、低于下界、`todo>0`、合计 skip 与预算不符、`--test-timeout=120000` 或 job 超时都会让 lane 非零并打印 `::error::windows-native-checks:`。不重试、不 `continue-on-error`、不全局 skip。当前唯一合法 skip 是 `harness-plugin-artifact.test.js` 中「干净数据根首次创建」的 win32 skip，归 #644；`SETS['private-data'].allowedSkips` 取精确值 1，多一条即拒绝（防 skip 造假绿），少一条也失败（强制清单随用例更新）。#644 交付时必须在同一 PR 删除该 skip、把预算归零，并按需向 `SETS` 追加文件。
+**反空心与失败语义。** 清单文件缺失、清单清空、重复项、越界路径、非法下界、非 win32 平台、请求参数非法、本地解析预检失败、测试进程非零退出、摘要行不可解析、零执行、低于下界、`todo>0`、合计 skip 与预算不符、`--test-timeout=120000` 或 job 超时都会让 lane 非零并打印 `::error::windows-native-checks:`。不重试、不 `continue-on-error`、不全局 skip。两个入口在 pwsh 中额外断言 `windows-native-checks: set=…` 通过标记：脚本若因 path/argv 形态变化跳过 `main()`，退出码仍是 0，缺少标记必须 fail closed。判定只覆盖“文件执行过、条数/预算符合”，**不能证明用例体未被改写成空断言或摘要被伪造**；`SETS` 下界与 `allowedSkips` 本身只有 review 可见性保护，门禁有效性仍依赖评审。`allowedSkips` 当前是精确值 1（`harness-plugin-artifact.test.js` 中「干净数据根首次创建」的 win32 skip，归 #644），多一条重拒绝、少一条也失败（强制清单随用例更新）。#644 交付时必须在同一 PR 删除该 skip、把预算归零，并按需向 `SETS` 追加文件；入口 fail-closed 的原生扩展见 #660。
 
 **负控与成本。** 门禁的 hosted 负控在从 lane head 拉出的临时 ref 上用 `gh workflow run ci.yml --ref <scratch>` 执行，不进入 PR head：负控 A 让一条 native 用例 `assert.fail`，期望 `windows-native` 与 `PR Fast Gate` 红而 `verify`/`browser` 绿；负控 B 把 skip 预算改错，期望红来自 `::error::windows-native-checks:` 而不是 node 测试失败。删除临时 ref 后对正式 head 连续两次 `workflow_dispatch` 取得绿证，PR 的 `pull_request` 运行复现同一结果。`ci.yml` 能接受 `workflow_dispatch` 的前提仍是候选 lane 不读任何 secret。真实耗时从当前 head 的 Actions job 回读，本地耗时不算 hosted 成本；15 分钟上界包含依赖安装、插件构建、建号与两阶段执行。
 
-**边界。** `windows-2025` 是 Windows Server 2025 x64，不等于 Win11 x64 Desktop；本 lane 不替代 #647 的人工安装验收，也不改变 R1 门禁或宣称 Windows 已获产品支持。接线由 `tests/contract/ci-windows-workflow.test.js` 固定（runs-on、超时、pwsh、无 `if`/`continue-on-error`、只读权限、无 secrets、两条 set 入口、标准用户片段、checkout 与 `.nvmrc`/pnpm setup）。
+**边界。** `windows-2025` 是 Windows Server 2025 x64，不等于 Win11 x64 Desktop；lane 的 Node 来自 `.nvmrc`（当前 26.x），也不等于安装后 Desktop 的 Electron 内嵌 Node（24.18.1）。本 lane 不替代 #647 的人工安装验收，也不改变 R1 门禁或宣称 Windows 已获产品支持。接线由 `tests/contract/ci-windows-workflow.test.js` 固定（runs-on、超时、pwsh、无 `if`/`continue-on-error`、只读权限、无 secrets、两条 set 入口、标准用户片段、checkout 与 `.nvmrc`/pnpm setup）。
 
 Board invariants 的 `on` **刻意只有 `schedule`**，由 `tests/contract/check-board-workflows-live.test.js` 钉在 `['schedule']` 上。`workflow_dispatch` 带一个 ref 选择器，而被选中的 ref 同时决定 workflow 定义与 checkout 出来的脚本——这两个 job 都持有长效 PAT，于是手选一个 PR 分支就能拿 token 执行任意代码。`ci.yml` 可以用 `workflow_dispatch`，是因为候选代码 lane 不读任何 secret；这条区分不是风格，是提权边界。
 
