@@ -15,12 +15,11 @@ const fixture = (db, count = MIGRATION_COUNT, transform = (sql) => sql) => {
   for (const file of sqlite.MIGRATIONS.slice(0, count)) db.exec(transform(sqlite.readMigrationSql(file)))
   db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(sqlite.BASELINE_VERSION, 'fixed-baseline')
 }
-/** 旧 main 布局夹具：按顺序应用前 `count` 份资产，账本逐条写 1..count 行（#595 之前 main 接受的库）。 */
-const legacyFixture = (db, count = MIGRATION_COUNT, transform = (sql) => sql) => {
-  for (const [index, file] of sqlite.MIGRATIONS.slice(0, count).entries()) {
-    db.exec(transform(sqlite.readMigrationSql(file)))
-    db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(index + 1, `fixed-${index + 1}`)
-  }
+/** 旧 main 布局夹具（#596 D13）：多行账本用例直接用完整 shape（旧链建出的 sqlite_schema 与单资产逐字相同，I3）；只应用过 001 记账表的旧库用 002 首表注释前的截断前缀。 */
+const legacyFixture = (db, fragments = 7, transform = (sql) => sql) => {
+  const sql = sqlite.readMigrationSql(sqlite.MIGRATIONS[0])
+  db.exec(transform(fragments === 1 ? sql.split('-- 002_identity_membership：')[0] : sql))
+  for (let version = 1; version <= fragments; version += 1) db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(version, `fixed-${version}`)
 }
 const snapshot = (db) => {
   const schema = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY name").all()
@@ -77,7 +76,7 @@ const cases = [
   ['wrong-baseline-0', (db) => { fixture(db); db.exec('UPDATE schema_migrations SET version=0') }, 'version_list'],
   ['int64-max-version', (db) => { fixture(db); db.exec('UPDATE schema_migrations SET version=9223372036854775807') }, 'version_list'],
   ['int64-min-version', (db) => { fixture(db); db.exec('UPDATE schema_migrations SET version=-9223372036854775808') }, 'version_list'],
-  ['partial-initialization-marked-current', (db) => { fixture(db, 1); db.exec(`PRAGMA user_version=${sqlite.CURRENT_SCHEMA_GENERATION}`) }, 'schema_shape'],
+  ['partial-initialization-marked-current', (db) => { legacyFixture(db, 1); db.exec(`PRAGMA user_version=${sqlite.CURRENT_SCHEMA_GENERATION}`) }, 'schema_shape'],
   ['quoted-workspace-primary-key', (db) => { fixture(db, MIGRATION_COUNT, (sql) => sql.replace('CREATE TABLE workspace (\n  id TEXT PRIMARY KEY', 'CREATE TABLE workspace (\n  id TEXT "PRIMARY" "KEY"')); assert.equal(db.prepare('PRAGMA table_info(workspace)').all().find((row) => row.name === 'id').pk, 0) }, 'schema_shape'],
   ['quoted-ledger-primary-key', (db) => { fixture(db, MIGRATION_COUNT, (sql) => sql.replace('version INTEGER PRIMARY KEY', 'version INTEGER "PRIMARY" "KEY"')); assert.equal(db.prepare('PRAGMA table_info(schema_migrations)').all().find((row) => row.name === 'version').pk, 0) }, 'schema_shape'],
   ['quoted-ledger-not-null', (db) => { fixture(db, MIGRATION_COUNT, (sql) => sql.replace('applied_at TEXT NOT NULL', 'applied_at TEXT "NOT" "NULL"')); assert.equal(db.prepare('PRAGMA table_info(schema_migrations)').all().find((row) => row.name === 'applied_at').notnull, 0) }, 'schema_shape'],
