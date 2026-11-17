@@ -29,7 +29,7 @@
   - fixture 与身份断言：`tests/integration/harness-plugin-windows-fixture.js` 的 `ordinaryToken` 断言 `admin:false` 且 `adminMember:false`；`provisionForeignFixture` 只能由管理员预置 foreign owner fixture。
 - 原生证据（易失值按「回读命令 + 期望」记录）：
   - `gh run view 43871692717 -R SingularityKChen/harness-projects --json headSha,conclusion` → head `90a347fb…`（`test/windows-native-qualification`），该 run 内 checkout 产品 source `86202cf9…`；`git diff 86202cf9 62e953cc -- apps/harness-plugin/src tests/integration/harness-plugin-*` 为空，即该证据覆盖 main 的产品树与原生套件。
-  - 同 run 日志：`ImageOS=win25-vs2026 ImageVersion=20261103.298.1 Architecture=AMD64`、`node v26.13.1`、`git version 2.56.0.windows.4`、`ℹ tests 69 / pass 68 / fail 0 / skipped 1`、`standard-user exit=0`、7 次 `{"admin":false,"adminMember":false,"sid":"S-1-5-21-…"}`。
+  - 同 run 日志：`ImageOS=win25-vs2026 ImageVersion=20261103.298.1 Architecture=AMD64`、`node v26.13.1`、`git version 2.56.0.windows.4`、`ℹ tests 69 / pass 68 / fail 0 / skipped 1`、`standard-user exit=0`、28 行 `{"admin":false,"adminMember":false,"sid":"S-1-5-21-…"}`（7 个顶层用例 + 21 个子用例各一行）。
   - Git 套件唯一的原生证据在 admin 身份、产品 source `3091d4ab`（run `43853289308` 的 `Native Windows Git paths`：`ℹ tests 16 / pass 16`）。`git diff 3091d4ab ddb94c94 -- tests/integration/development-local-git-windows.test.js` 为 +32 行（2 条新用例），`local-git-fixture.js` 与 `host-providers.ts` 也各有变化，所以 main 的 18 条 Git 原生用例从未整体原生运行过；本 lane 首跑是它们的首个原生证据（风险见 D11）。
 - 原型（只读参考，不移植其 pinned `ref:`、`if:false`、matrix、内嵌 worker）：`git show test/windows-native-qualification:.github/workflows/windows-native-qualification.yml`。该分支 head `90a347fb` 的 private-data job 用 `New-LocalUser` + `Start-Process -Credential -LoadUserProfile` 正是 68/0/1 的来源；同文件的 git-paths job 为 `if: false`。
 - 可复用实现：`scripts/run-test-layer.mjs` 导出 `parseSummary`（把 `ℹ tests/skipped/todo` 解析成整数，缺失时返回 `null`，POSIX 已由 `tests/contract/run-test-layer.test.js` 覆盖）；`scripts/resolution-check.mjs` 导出 `assertLocalResolutions(root)`（解析边界 fail-closed 预检）。
@@ -232,7 +232,7 @@ node scripts/resolution-check.mjs; echo "exit=$?"                 # 期望 exit=
 
 ```bash
 node --test tests/contract/ci-browser-workflow.test.js tests/contract/ci-windows-workflow.test.js
-# 期望 ℹ fail 0；ci-browser 为 5 条，ci-windows tests ≥5
+# 期望 ℹ fail 0；ci-browser 为 5 条，ci-windows 为 4 条（覆盖计划要求的全部断言，不按数量凑测试）
 node scripts/workflow-check.mjs
 # 期望 workflow-check: no findings（已检查 7 个文件），exit 0
 pnpm verify
@@ -354,6 +354,8 @@ gh pr view <编号> -R SingularityKChen/harness-projects \
 - OQ2：接受 lane 合并后立即成为所有 PR 的必需路径（issue 明确要求；以首绿、连续两次精确 head 成功、15 分钟上界为控制）。
 - OQ3：接受两阶段身份，`native-git` 保持 runner 管理员（唯一历史证据），安全/Host/packed 套件在临时标准用户下执行并由 `ordinaryToken` 自证。
 
+**独立对抗验收（2026-11-17，lane-verifier）**：6/6 PASS，无 P0/P1。独立复算 64 种 needs 组合、4 个反空心变异（删 todo/零执行/文件存在检查、allowedSkips 1→0）均按预期红并完整还原；确认标准用户 28 行 `admin:false/adminMember:false`、唯一 skip 精确、负控 A/B 结论、`docs/development/ci.md` 与实现一致、fixture 重试只影响清理。P2（`SETS` 清单/下界只受 review 保护）接受；P3 证据口径（“7 次”应为 28 行、`ci-windows` 实为 4 条）已在本文件订正。
+
 ### Open Questions（历史；已由上方 Lead 裁决关闭）
 
 1. **issue #646 评论追加的原生用例是否纳入本 PR**：真实 mapped-network / 非 NTFS 卷反例（#643 helper 与 #645 provider probe）、探针读延迟预算、可选 probe 契约测试。建议：不纳入本 PR，另开 `test(ci): extend native Windows lane with real-volume negatives` follow-up（需要 SMB 共享/VHD 等新系统级 fixture，约 +200 技术行并显著提高必需门禁的 flake 面；lane 落地后它们只是同一 lane 的增量）。代价：本 PR 关闭 #646 时这些 review surfaced 项只由 follow-up issue 跟踪，需要 lead 批准该公开面写操作。
@@ -407,7 +409,7 @@ gh pr view <编号> -R SingularityKChen/harness-projects \
   - `ImageOS=win25-vs2026 ImageVersion=20261103.298.1 Architecture=AMD64`；`node v26.13.1`；`git version 2.56.0.windows.4`。
   - runner 身份行：`runner-identity sid=S-1-5-21-…-500 admin=True adminMember=True`。
   - `native-git`：`windows-native-checks: set=native-git files=2 tests=18 skipped=0 todo=0`（第一次整体原生通过）。
-  - `private-data`：`windows-native-checks: set=private-data files=3 tests=69 skipped=1 todo=0`、`standard-user exit=0`；标准用户诊断行 7 次 `{"admin":false,"sid":"S-1-5-21-…-1003","adminMember":false,"platform":"win32"}`。
+  - `private-data`：`windows-native-checks: set=private-data files=3 tests=69 skipped=1 todo=0`、`standard-user exit=0`；标准用户诊断行 28 行（7 个顶层用例 + 21 个子用例）`{"admin":false,"sid":"S-1-5-21-…-1003","adminMember":false,"platform":"win32"}`。
 - 负控（不进入 PR head；scratch ref 已删除）：
   - A（失败传播）run `44017206193` @ `7634959a`：Windows Native=failure、PR Fast Gate=failure、Verify=success、Browser=success；日志含 `##[error]windows-native-checks: tests/integration/harness-plugin-windows-private-data.test.js: 测试进程失败（退出码 1）`、`AssertionError [ERR_ASSERTION]: windows-native-lane negative control`、`standard-user exit=1`。
   - B（skip 预算）run `44017210116` @ `591aca9e`：Windows Native=failure、PR Fast Gate=failure、Browser=success；日志含 `##[error]windows-native-checks: set private-data 的 skip 数与预算不符：期望 0，实际 1`；Verify 同时被 POSIX 预算契约判红（D16）。
@@ -445,4 +447,5 @@ gh pr view <编号> -R SingularityKChen/harness-projects \
 - 2026-11-17（lead 裁决落库）：关闭 OQ1–OQ3；确认本 PR 以 `Closes #646` 交付 lane 主闭环，未覆盖的 review-surfaced 原生卷反例写入 PR 正文与 Outcomes 作为后续项。
 - 2026-11-17（Batch 4/5 证据落库）：首次 hosted 运行即绿（PR run `44016355484`，head `8ce44759`），负控 A/B 与两次精确 head dispatch 完成；按 D16 修正负控 B 的 Verify 预期，按 D17 冻结首绿清单；未执行 `gh pr ready`。
 - 2026-11-17（flake 修复）：证据 head 的 dispatch `44018277107` 命中 Windows 临时仓库清理 EBUSY flake，按 D18 给 `tests/integration/local-git-fixture.js` 加有界重试并纳入 Global Constraints 文件集；在新 head 重新取两次精确 head 绿证。
+- 2026-11-17（独立验收落库）：lane-verifier PASS 6/6、无 P0/P1；订正文档中标准用户诊断行数（28 行）与 `ci-windows-workflow.test.js` 条数（4 条）；记录 P2（`SETS` 清单仅受 review 保护）与 deferred（review 追加的原生卷反例、延迟预算归 #647）。
 - 2026-11-17：创建草案。基于 main `ddb94c9440815626a3932dcaf050653f70eedb18` 重新核对事实（#643/#645/#190 已合并；原生套件与 Host 接线在 main；run `43871692717` = 68 pass/0 fail/1 skip；Git 套件 main 上 18 条从未整体原生运行），对三路设计做对抗评审（指出设计 1 的单身份阶段、设计 2 的 `5dd6456d` 事实错误与缺下界、设计 3 的 storage-restart/双 job 判断问题），选定「单 job + 两阶段身份 + `SETS` 脚本 + 精确 skip 预算 + 临时 ref 负控」，并给出 5 个批次、文件集、验收与回滚。本副本位于 `.superpowers/iteration11-delivery-20261117/specs/windows-native-lane-execplan.md`，Batch 1 落库到 `docs/exec-plan/active/2026-11-17-windows-native-lane.md`。
