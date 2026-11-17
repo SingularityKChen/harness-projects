@@ -10,7 +10,7 @@ import { prepareWindowsProjectData } from '../../apps/harness-plugin/src/host-pr
 import { preparePrivateWorktreeDirectories } from '../../apps/harness-plugin/src/host-private-data.ts'
 import path from 'node:path'
 import { seed, seedWorkspace } from './fixtures/host-seed.js'
-import { corrupt, denied, hostFixture, ordinaryToken, positiveHost, ps, setAcl, sqliteProbe, windowsFixture } from './harness-plugin-windows-fixture.js'
+import { corrupt, denied, hostFixture, inspectAcl, ordinaryToken, positiveHost, ps, setAcl, sqliteProbe, trustedAcl, windowsFixture } from './harness-plugin-windows-fixture.js'
 
 test('native Windows fixture loads system 5.1 cmdlets despite an inherited incompatible module path', { skip: process.platform !== 'win32' }, async () => {
   const key = Object.keys(process.env).find((key) => key.toUpperCase() === 'PSMODULEPATH') ?? 'PSModulePath', previous = process.env[key]
@@ -30,6 +30,14 @@ foreach($name in @('Set-Acl','Get-Acl','ConvertFrom-Json','ConvertTo-Json')) {
 [Console]::Write('system-51-cmdlets-v1')
 `), 'system-51-cmdlets-v1')
   } finally { if (previous === undefined) delete process.env[key]; else process.env[key] = previous }
+})
+
+// Batch 0 事实门：真实 launcher 只普通 mkdir profile 链，插件必须只接纳、不创建也不改写它。
+test('native launcher-shaped plain-mkdir profile chain is admitted by the secured-root contract', { skip: process.platform !== 'win32' }, async (t) => {
+  const f = await windowsFixture(t, { launcherProfile: true, provisioned: true })
+  t.diagnostic(JSON.stringify({ launcherProfile: inspectAcl(f.profile), launcherAncestor: inspectAcl(f.ancestor) }))
+  const lease = await prepareWindowsProjectData(f.profile)
+  try { assert.equal(lease.signal.aborted, false) } finally { fs.closeSync(lease.logFd); await lease.dispose() }
 })
 
 // Synthetic protocol/lifetime evidence only; native timing and ACL evidence are separate below.

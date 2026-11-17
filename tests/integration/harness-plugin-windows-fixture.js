@@ -38,6 +38,26 @@ if($p.callback){
 $item.SetAccessControl($acl)
 `
 export const setAcl = (location, options = {}) => ps(ACL, { path: location, ...options })
+// 独立观测：只用 `Get-Acl` 读 owner/protected/每条 ACE，不参与产品判定，也不写死任何 ACE 文本。
+const INSPECT = String.raw`
+$ErrorActionPreference='Stop'; $p=[Console]::ReadLine()|ConvertFrom-Json
+$item=Get-Item -LiteralPath $p.path -Force
+$acl=Get-Acl -LiteralPath $p.path
+$owner=(New-Object Security.Principal.NTAccount($acl.Owner)).Translate([Security.Principal.SecurityIdentifier]).Value
+$aces=@($acl.Access|ForEach-Object {
+  [pscustomobject]@{sid=$_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value;inherited=[bool]$_.IsInherited;
+    type=$_.AccessControlType.ToString();flags=[int]$_.InheritanceFlags;rights=[int]$_.FileSystemRights}
+})
+@{directory=[bool]$item.PSIsContainer;ownerSid=$owner;protected=[bool]$acl.AreAccessRulesProtected;sddl=$acl.Sddl;aces=$aces}|ConvertTo-Json -Compress -Depth 5
+`
+export const inspectAcl = (location) => JSON.parse(ps(INSPECT, { path: location }))
+/** owner=当前用户、DACL 受保护、无继承 ACE、allow 主体只含受信集合。 */
+export function trustedAcl(entry, sid) {
+  const trusted = [sid, 'S-1-5-18', 'S-1-5-32-544']
+  assert.deepEqual(entry.aces.filter(({ type, sid: ace }) => type !== 'Allow' || !trusted.includes(ace)), [], 'allow 主体必须只含 self/SY/BA')
+  assert.equal(entry.aces.every(({ type }) => type === 'Allow'), true, '安全边界上不接受显式 deny ACE')
+  return entry
+}
 // Qualification administrator only. The worker never elevates or assigns a foreign owner.
 export async function provisionForeignFixture(profile, sid) {
   const owner = ps('[Security.Principal.WindowsIdentity]::GetCurrent().User.Value')
@@ -57,14 +77,21 @@ $admin=(New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.
   t.diagnostic(JSON.stringify({ ...token, home: undefined, platform: process.platform, node: process.version }))
   return token
 }
-export async function windowsFixture(t) {
+/**
+ * `launcherProfile=true` 只给 ancestor/profile 做普通 `mkdir`（模拟 launcher 建出的 profile 链，不设 ACL）；
+ * `provisioned=false` 不预置 plugin root 与固定文件（首次启动的入口形状）。默认值保持既有预置行为。
+ */
+export async function windowsFixture(t, { launcherProfile = false, provisioned = true } = {}) {
   const token = ordinaryToken(t), ancestor = await mkdtemp(path.join(token.home, 'harness-admission-空 格-')), profile = path.join(ancestor, 'profile')
   t.after(() => rm(ancestor, { recursive: true, force: true }))
-  setAcl(ancestor); await mkdir(profile); setAcl(profile)
+  if (!launcherProfile) setAcl(ancestor)
+  await mkdir(profile); if (!launcherProfile) setAcl(profile)
   const root = path.join(profile, 'harness-projects'), dataPath = path.join(root, 'workspace.sqlite'), log = path.join(root, 'diagnostics.log')
-  await mkdir(root); setAcl(root)
-  await seed(dataPath, new Map(), seedWorkspace)
-  await writeFile(log, 'admission log sentinel\n'); setAcl(dataPath); setAcl(log)
+  if (provisioned) {
+    await mkdir(root); setAcl(root)
+    await seed(dataPath, new Map(), seedWorkspace)
+    await writeFile(log, 'admission log sentinel\n'); setAcl(dataPath); setAcl(log)
+  }
   return { token, ancestor, profile, root, dataPath, log }
 }
 export async function hostFixture(apply, f) {
