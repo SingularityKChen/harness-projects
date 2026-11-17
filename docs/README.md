@@ -26,6 +26,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
+| [2026-11-17-windows-private-provision](exec-plan/active/2026-11-17-windows-private-provision.md) | Windows 首次私有 plugin 数据创建、重开与拒绝策略（#644） |
 
 ### Completed
 
