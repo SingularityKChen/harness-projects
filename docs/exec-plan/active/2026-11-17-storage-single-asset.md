@@ -11,7 +11,7 @@
 
 成功的**最小证据**（全部可在 `.worktrees/storage-single-asset` 检出、无凭据、无网络的条件下复现）：
 
-1. 目录与 inventory 都只有一个资产：`MIGRATIONS.length === 1`、`MIGRATIONS[0] === '001_init.sql'`（#595 的 inventory 是文件名字符串数组，等价形状）；`git grep -nE '00[2-7]_[a-z_]+\.sql' -- ':!docs'` 无输出。
+1. 目录与 inventory 都只有一个资产：`MIGRATIONS.length === 1`、`MIGRATIONS[0] === '001_init.sql'`（#595 的 inventory 是文件名字符串数组，等价形状）；`git grep -nE '00[2-7]_[a-z_]+\.sql' -- ':!docs'` 只命中 `migration-runner.test.js` 运行时写入临时目录的合成探针 `002_next.sql`，没有被删资产引用。
 2. 新资产的 `sqlite_schema` 与 #595 head 七片段链建出的库**逐字相同**（31 个对象），`PRAGMA integrity_check` 为 `ok`、`PRAGMA foreign_key_check` 为空。
 3. 真实 packed Host（把 build 产物装进临时 `node_modules` 再 `import()`）用包内单资产建库；`schema_migrations` 恰好一行（baseline 版本），二次 open `applied: []`、库字节不变；旧/未知库仍结构化拒绝且零写入。
 4. 安装 tarball 的 `migrations/` 恰好 1 个文件、字节等于源资产；缺失/多余/篡改三种负控都由共享 inventory 派生并被拒绝。
@@ -213,7 +213,7 @@
 - `pnpm test:file tests/integration/identity-membership-schema.test.js tests/integration/execution-relation-write-schema.test.js` → `fail 0`。
 - `pnpm test:file tests/integration/migration-runner.test.js tests/integration/storage-baseline-admission.test.js tests/integration/storage-restart.test.js tests/integration/storage-connector-account.test.js tests/contract/storage-contract.test.js` → `fail 0`（旧/未知库拒绝、四相回滚、双 worker、二次 open 不变）。
 - `pnpm typecheck` → exit 0。
-- `git grep -nE '00[2-7]_[a-z_]+\.sql' -- ':!docs'` → 无输出。
+- `git grep -nE '00[2-7]_[a-z_]+\.sql' -- ':!docs'` → 只命中合成探针 `002_next.sql`（清单自检临时文件），没有被删资产引用。
 - schema 对等脚本（见 Validation）→ `schema_identical: true objects: 31`、`integrity: ok fk: 0`。
 
 **回滚**：`git revert <merge-commit>` 恢复 7 文件与 inventory；因为不 bump 世代且 schema 文本未变，任何已存在库在新的或不回退的 runtime 下都可打开；测试数据库都在临时目录，无需清理。
@@ -262,7 +262,7 @@
 按 issue #596 的验收逐条给出最小证据（命令都在 `.worktrees/storage-single-asset` 根、base `refactor/storage-logical-baseline` 上运行）：
 
 1. **内容完整、不压缩**：新资产 = 001 DDL + 002/003/004/006/007 原文；证据为下面的 schema 对等脚本输出 `schema_identical: true objects: 31`，加上 `identity-membership-schema` 与 `execution-relation-write-schema` 的 D8/列集/约束拒绝用例全绿；`wc -l` 显示 375 行。
-2. **旧片段与硬编码假设清除、共享 inventory 一致**：`git grep -nE '00[2-7]_[a-z_]+\.sql' -- ':!docs'` 无输出；`MIGRATIONS.length === 1`；`harness-plugin-migrations` 断言包内目录 = inventory；tar 审计断言字节相等；demo 的缺失/多余/篡改负控的目标名来自 inventory。
+2. **旧片段与硬编码假设清除、共享 inventory 一致**：`git grep -nE '00[2-7]_[a-z_]+\.sql' -- ':!docs'` 只命中合成探针 `002_next.sql`、没有被删资产引用；`MIGRATIONS.length === 1`；`harness-plugin-migrations` 断言包内目录 = inventory；tar 审计断言字节相等；demo 的缺失/多余/篡改负控的目标名来自 inventory。
 3. **初始化/重开/完整性与旧库拒绝**：`migration-runner`（空库、二次 no-op、双 worker、清单自检）、`storage-restart`、`storage-baseline-admission`（旧/未知契约拒绝、零写、四相回滚）、`storage-connector-account`、`tests/contract/storage-contract.test.js` 全绿。
 4. **真实 packed Host**：`harness-plugin-artifact` 安装真实产物并 `import()` Host，建库后 `integrity_check=ok`、`foreign_key_check` 空、ledger 单行；重载同一 artifact 后再次打开仍单行（零迁移）；`lib/index.js` 不含源码树路径（现有断言）；`harness-plugin-demo-artifact` 对真实 `pnpm pack` 的 tarball 做归档/字节/负控审计。
 5. **规模与门禁**：`rule-checks size` 代码 ≤800、文档 ≤1300；`disclosure` 通过；`git diff --check` 干净；`pnpm verify` 绿；PR Fast Gate（CI）在最终 head 上全绿。
@@ -365,16 +365,16 @@ console.log("integrity:", single.prepare("PRAGMA integrity_check").get().integri
 
 ## Outcomes & Retrospective
 
-2026-11-17 实现完成（PR #659，base `refactor/storage-logical-baseline` @ `5e7db487`；head `121a313f`）。实际结果：
+2026-11-17 实现完成（PR #659，base `refactor/storage-logical-baseline` @ `5e7db487`；实现 head `121a313f`、文档收口 `f61b5f66`；最终 head 以 PR 回读为准）。实际结果：
 
 - **资产**：`packages/storage/sqlite/migrations/` 只剩 `001_init.sql` 375 行；`MIGRATIONS = ['001_init.sql']`，`BASELINE_VERSION` 仍为 1，`CURRENT_SCHEMA_GENERATION` 仍为 6（D2 实测支持）。002–007 与 005 注释占位已删除，逐字拼接由脚本校验（五段原文各在合并结果中出现 1 次）。
 - **schema 对等（一次性证据，未写入源码快照）**：`schema_identical: true objects: 31`；`integrity: ok fk: 0`。变异证据：把 `status_policy` 的 `CHECK` 改动一个字符后同一脚本输出 `schema_identical: false` 并 exit 1，还原后复跑通过——该证据不是恒绿。
 - **packed Host**：`harness-plugin-artifact` 真实安装并 `import()` 后建库，`PRAGMA integrity_check=ok`、`foreign_key_check` 为空、`schema_migrations` 恰好一行；重载同一 artifact 再开同一库仍是一行（二次 open 零迁移）；31 个用例全绿。
 - **归档面**：`pnpm --filter @harness-projects/app-harness-plugin pack:plugin` 产出的 tarball 恰好 6 个文件（`package/{LICENSE,cordis.patch.yml,lib/client.js,lib/index.js,migrations/001_init.sql,package.json}`），其中 migration 字节与源资产 `cmp` 相同；真实 tarball 审计 14 个用例全绿，含缺失/多余/篡改 migration 三个负控（目标名由共享 inventory 派生，不回显注入值）。
-- **体积**：`node scripts/rule-checks.mjs size origin/refactor/storage-logical-baseline` → 代码 **799** / 1000（本任务上限 800）、文档 368 / 1500（本任务上限 1300）。与估算 782–799 的上沿一致；SQL 位移 745（+371/−2 与 −372）、admission 夹具重建 14、inventory 13、其余测试 27。
+- **体积**：`node scripts/rule-checks.mjs size origin/refactor/storage-logical-baseline` → 代码 **799** / 1000（本任务上限 800）、文档 383 / 1500（本任务上限 1300）。与估算 782–799 的上沿一致；SQL 位移 745（+371/−2 与 −372）、admission 夹具重建 14、inventory 13、其余测试 27。
 - **偏差与遗留**：①`storage-baseline-admission` 的旧库夹具必须语义等价重建（D13），这是设计期未预见的 6 红，已由 lead 裁决归 #596；②#595 head 在实现期前进两个提交，PR 判定基线随之更新；③`Refs #417` 热度项（历史文档中的旧文件名、`user_version` 物理世代收口）仍需 #417/#223 处理，本 PR 不声称关闭；④未 ready、未合并，交人类评审。
 
 ## Bottom Change Note
 
 - 2026-11-17：创建本计划。合并三路独立设计（系统/架构、安全/失败路径、产品/验证）后选唯一方案：原地合并进 `001_init.sql`、保留文件名、删 002–007 与 005 注释、不 bump 世代；新增 #595 契约硬门、schema 文本对等证据、三个负控、精确 diff 估算（745 SQL + 约 40 其余 = 782–799）与超限兜底。Decision Log D1–D12 记录全部取舍；未决项见 Open Questions。
-- 2026-11-17：实现完成。Batch 0 gate 在 `ee384266` 全绿后 rebase 开工；Batch 1 四处先红（`creates=1`、无出处 token、两处字面量守卫），Batch 2 合并资产并收口 inventory（schema 对等 31 对象、`integrity=ok`），Batch 3 用真实 packed Host 与真实 tarball 补 integrity/FK/二次 open 与缺失/多余/篡改负控。实际 799 代码行（≤800）、368 文档行（≤1300），未改 `migrate.ts`/`storage.ts`/`host.ts`/`build.mjs`、未加依赖或抽象、未 bump 世代。唯一计划外改动是按 D13 重建 admission 夹具（lead 已裁决归 #596）。
+- 2026-11-17：实现完成。Batch 0 gate 在 `ee384266` 全绿后 rebase 开工；Batch 1 四处先红（`creates=1`、无出处 token、两处字面量守卫），Batch 2 合并资产并收口 inventory（schema 对等 31 对象、`integrity=ok`），Batch 3 用真实 packed Host 与真实 tarball 补 integrity/FK/二次 open 与缺失/多余/篡改负控。实际 799 代码行（≤800）、383 文档行（≤1300），未改 `migrate.ts`/`storage.ts`/`host.ts`/`build.mjs`、未加依赖或抽象、未 bump 世代。唯一计划外改动是按 D13 重建 admission 夹具（lead 已裁决归 #596）。
