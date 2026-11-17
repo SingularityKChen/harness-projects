@@ -40,9 +40,9 @@ const MAX_BUFFER = 8 * 1024 * 1024;
 /**
  * 清单与判定的唯一来源。下界是「单调下限」：新增用例不需要改这里；删除或合并
  * 用例必须在同一 PR 更新，否则 lane 变红（防覆盖静默缩水）。`allowedSkips`
- * 是精确值：当前唯一合法 skip 是 `harness-plugin-artifact.test.js` 里
- * 「干净数据根首次创建」的 win32 skip，归 #644 接管；#644 必须在同一 PR
- * 删除该 skip 并把这里改成 0。
+ * 是精确值：#644 已在同一 PR 删除 `harness-plugin-artifact.test.js` 里
+ * 「干净数据根首次创建」的 win32 skip，并把这里归零；新增任何 win32-active
+ * skip 都必须同时改预算，否则 lane 以「多一条」拒绝。
  */
 export const SETS = {
   'native-git': {
@@ -58,7 +58,7 @@ export const SETS = {
       { file: 'tests/integration/harness-plugin-windows-artifact.test.js', minTests: 1 },
       { file: 'tests/integration/harness-plugin-artifact.test.js', minTests: 29 },
     ],
-    allowedSkips: 1,
+    allowedSkips: 0,
   },
 };
 

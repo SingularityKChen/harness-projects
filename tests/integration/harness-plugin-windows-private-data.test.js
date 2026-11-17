@@ -261,20 +261,98 @@ $proof|ConvertTo-Json -Compress
   assert.deepEqual(result, { 131200: true, 131201: false })
 })
 
-test('native worktree admission keeps existing private layers in the owning lease and refuses missing layers', { skip: process.platform !== 'win32' }, async (t) => {
-  const f = await windowsFixture(t), container = path.join(f.root, 'worktrees'), digest = path.join(container, 'digest')
+// Batch 2：worktrees/digest 按需以同一描述符创建、Git 后代只靠继承、lease 阻止替换、dispose 后 adopt。
+test('native worktrees and digest are created protected, inherited by Git descendants and adopted after release', { skip: process.platform !== 'win32' }, async (t) => {
+  const f = await windowsFixture(t, { launcherProfile: true }), container = path.join(f.root, 'worktrees'), digest = path.join(container, 'digest')
+  let lease = await prepareWindowsProjectData(f.profile), shape
+  try {
+    await preparePrivateWorktreeDirectories(container, digest, undefined, lease)
+    for (const location of [container, digest]) {
+      const entry = trustedAcl(inspectAcl(location), f.token.sid)
+      assert.deepEqual([entry.ownerSid, entry.protected, entry.aces.every(({ inherited }) => !inherited)], [f.token.sid, true, true], `${path.basename(location)} 必须由创建调用带目标描述符`)
+    }
+    shape = { container: inspectAcl(container).sddl, digest: inspectAcl(digest).sddl }
+    const descendant = path.join(digest, 'git-child'), payload = path.join(descendant, 'file.txt')
+    await mkdir(descendant); await writeFile(payload, 'git descendant sentinel')
+    for (const location of [descendant, payload]) {
+      const entry = inspectAcl(location)
+      assert.equal(entry.ownerSid, f.token.sid, 'Git 后代 owner 必须是当前用户')
+      trustedAcl(entry, f.token.sid)
+      assert.equal(entry.aces.every(({ inherited }) => inherited), true, 'Git 后代只靠 digest 的继承 allow，不逐个改 ACL')
+    }
+    await assert.rejects(() => rename(container, container + '-moved'), 'lease 必须阻止容器替换')
+    await assert.rejects(() => rename(digest, digest + '-moved'), 'lease 必须阻止 digest 替换')
+  } finally { fs.closeSync(lease.logFd); await lease.dispose() }
+  lease = await prepareWindowsProjectData(f.profile)
+  try {
+    await preparePrivateWorktreeDirectories(container, digest, undefined, lease)
+    assert.deepEqual([inspectAcl(container).sddl, inspectAcl(digest).sddl], [shape.container, shape.digest], 'dispose 后重开必须 adopt 既有两层且不改写 DACL')
+  } finally { fs.closeSync(lease.logFd); await lease.dispose() }
+})
+
+// Batch 2：普通 mkdir 的 worktrees（继承而来、未保护）不是 canonical，必须拒绝且不修复、不建 digest。
+test('native preexisting plain worktrees are refused without ACL repair', { skip: process.platform !== 'win32' }, async (t) => {
+  const f = await windowsFixture(t, { launcherProfile: true }), container = path.join(f.root, 'worktrees'), digest = path.join(container, 'digest')
+  await mkdir(container)
+  const plain = inspectAcl(container)
+  assert.equal(plain.protected, false, 'plain mkdir 层必须是未保护的继承形状')
   const lease = await prepareWindowsProjectData(f.profile)
   try {
     await assert.rejects(() => preparePrivateWorktreeDirectories(container, digest, undefined, lease), denied)
+    assert.deepEqual([inspectAcl(container).sddl, fs.existsSync(digest)], [plain.sddl, false], '拒绝必须零写入：不改 worktrees DACL，也不建 digest')
   } finally { fs.closeSync(lease.logFd); await lease.dispose() }
-  await mkdir(container); setAcl(container); await mkdir(digest); setAcl(digest)
-  const admitted = await prepareWindowsProjectData(f.profile)
+})
+
+// Batch 2：同一 fresh profile 上的两个并发初始化都成功并收敛到同一 canonical 树。
+test('native concurrent first starts converge on one canonical data tree', { skip: process.platform !== 'win32' }, async (t) => {
+  const f = await windowsFixture(t, { launcherProfile: true, provisioned: false })
+  const settled = await Promise.allSettled([prepareWindowsProjectData(f.profile), prepareWindowsProjectData(f.profile)])
+  const leases = settled.map(({ status, value }) => { assert.equal(status, 'fulfilled'); return value })
   try {
-    await preparePrivateWorktreeDirectories(container, digest, undefined, admitted)
-    await assert.rejects(() => rename(container, container + '-moved'))
-    await assert.rejects(() => rename(digest, digest + '-moved'))
-  } finally { fs.closeSync(admitted.logFd); await admitted.dispose() }
-  await rename(digest, digest + '-released')
+    for (const lease of leases) assert.equal(lease.signal.aborted, false)
+    for (const location of [f.root, f.dataPath, f.log]) {
+      const entry = trustedAcl(inspectAcl(location), f.token.sid)
+      assert.deepEqual([entry.ownerSid, entry.protected], [f.token.sid, true], '并发收敛结果必须仍是 canonical 私有形状')
+    }
+    assert.deepEqual([fs.readdirSync(path.dirname(f.dataPath)).filter((name) => name === 'workspace.sqlite').length,
+      fs.readdirSync(path.dirname(f.dataPath)).filter((name) => name === 'diagnostics.log').length], [1, 1], '并发后固定文件各只有一份')
+  } finally { for (const lease of leases) { fs.closeSync(lease.logFd); await lease.dispose() } }
+})
+
+// Batch 2：SQLite 在私有 root 内留下的 sidecar 是继承形状，重开必须接纳且保留字节。
+test('native sidecar residue from SQLite is adopted and preserved on reopen', { skip: process.platform !== 'win32' }, async (t) => {
+  const f = await windowsFixture(t, { launcherProfile: true, provisioned: false })
+  let lease = await prepareWindowsProjectData(f.profile)
+  fs.closeSync(lease.logFd); await lease.dispose()
+  const journal = f.dataPath + '-journal'
+  await writeFile(journal, 'sidecar sentinel')
+  const inherited = inspectAcl(journal)
+  assert.deepEqual([inherited.ownerSid, inherited.protected], [f.token.sid, false], 'sidecar 是继承形状而非 protected')
+  trustedAcl(inherited, f.token.sid)
+  lease = await prepareWindowsProjectData(f.profile)
+  try { assert.equal(await readFile(journal, 'utf8'), 'sidecar sentinel', '重开必须保留既有 sidecar 字节') } finally { fs.closeSync(lease.logFd); await lease.dispose() }
+})
+
+// Batch 2：既有 plain root（普通 mkdir、未保护）明确 refuse，不修复 DACL、不建后续对象、不发布 authority。
+test('native preexisting plain root is refused without repair or authority', { skip: process.platform !== 'win32' }, async (t) => {
+  const f = await windowsFixture(t, { launcherProfile: true })
+  await rm(f.root, { recursive: true, force: true }); await mkdir(f.root)
+  const plain = inspectAcl(f.root)
+  assert.equal(plain.protected, false, 'plain root 必须是未保护的继承形状')
+  await assert.rejects(() => prepareWindowsProjectData(f.profile), denied)
+  await assert.rejects(() => hostFixture(apply, { profile: f.profile }), (error) => {
+    assert.equal(error.name, denied.name); assert.doesNotMatch(error.message, /harness-admission-|[A-Z]:\\/i); return true
+  })
+  assert.deepEqual([inspectAcl(f.root).sddl, fs.existsSync(f.dataPath), fs.existsSync(f.log)], [plain.sddl, false, false], '拒绝必须零写入：不改 root DACL，也不建 db/log')
+})
+
+// Batch 2：profile 归 launcher，缺失时拒绝且插件不得代建。
+test('native missing launcher profile is refused and never created', { skip: process.platform !== 'win32' }, async (t) => {
+  const f = await windowsFixture(t, { launcherProfile: true })
+  await rm(f.profile, { recursive: true, force: true })
+  await assert.rejects(() => prepareWindowsProjectData(f.profile), denied)
+  await assert.rejects(() => hostFixture(apply, { profile: f.profile }), denied)
+  assert.equal(fs.existsSync(f.profile), false, '插件不得创建或代管 launcher 的 profile')
 })
 
 test('native mechanism holds original directories without compiler children and releases on helper death', { skip: process.platform !== 'win32' }, async (t) => {

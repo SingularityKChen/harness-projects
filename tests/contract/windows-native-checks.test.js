@@ -131,10 +131,10 @@ test('evaluate 对合法输入返回空 problems 与合计 counts', () => {
   });
 
   const privateFiles = SETS['private-data'].files;
-  const privateData = privateFiles.map(({ file, minTests }, index) => result(file, { tests: minTests, skipped: index === privateFiles.length - 1 ? 1 : 0 }));
+  const privateData = privateFiles.map(({ file, minTests }) => result(file, { tests: minTests }));
   const privateVerdict = evaluate('private-data', privateData);
   assert.deepEqual(privateVerdict.problems, []);
-  assert.equal(privateVerdict.totals.skipped, 1, 'allowedSkips=1 的精确预算被接受');
+  assert.equal(privateVerdict.totals.skipped, 0, 'allowedSkips=0 的精确预算被接受');
 });
 
 test('evaluate 拒绝失败、缺摘要、零执行、低于下界、todo、skip 预算不符与缺 run', () => {
