@@ -26,6 +26,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
+| [2026-11-18-pr656-pr659-review-followup](exec-plan/active/2026-11-18-pr656-pr659-review-followup.md) | PR #656–#659 复审后续修复：reparse/架构门、lane marker、storage 夹具与文档（#663） |
 
 ### Completed
 
