@@ -31,13 +31,14 @@ $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $acl = New-Object Security.AccessControl.DirectorySecurity
 $acl.SetOwner((New-Object Security.Principal.SecurityIdentifier($sid)))
 $acl.SetAccessRuleProtection($true, $false)
+$inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+$propagation = [Security.AccessControl.PropagationFlags]::None
+$allow = [Security.AccessControl.AccessControlType]::Allow
+$rights = [Security.AccessControl.FileSystemRights]::FullControl
 foreach ($trustee in @($sid, 'S-1-5-18', 'S-1-5-32-544')) {
-  $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
-    (New-Object Security.Principal.SecurityIdentifier($trustee)),
-    [Security.AccessControl.FileSystemRights]::FullControl,
-    [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit,
-    [Security.AccessControl.PropagationFlags]::None,
-    [Security.AccessControl.AccessControlType]::Allow)))
+  $identity = New-Object Security.Principal.SecurityIdentifier($trustee)
+  $rule = New-Object Security.AccessControl.FileSystemAccessRule($identity, $rights, $inheritance, $propagation, $allow)
+  $acl.AddAccessRule($rule)
 }
 Set-Acl -LiteralPath $p -AclObject $acl
 `
