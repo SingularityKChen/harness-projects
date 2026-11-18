@@ -30,7 +30,7 @@ const unavailable = (error) => {
 function helperErrorToken(profile) {
   try {
     const source = fs.readFileSync(new URL('../../apps/harness-plugin/src/host-private-windows.ts', import.meta.url), 'utf8')
-    const match = /const PROGRAM = String\.raw`([\s\S]*?)`\n\nconst unavailable/.exec(source)
+    const match = /const PROGRAM = String\.raw`([\s\S]*?)`\r?\n\r?\nconst unavailable/.exec(source)
     if (match === null) return 'PROGRAM 提取失败'
     return `ok: ${ps(match[1], { profile })}`
   } catch (error) {
