@@ -51,7 +51,7 @@ test('native dangling reparse at a fixed private-data object is refused without 
     try {
       lease = await prepareWindowsProjectData(profile)
     } catch (error) {
-      throw new Error(`首次 prepare 被拒绝；helper 原始 token：${helperErrorToken(profile)}`)
+      throw new Error(`首次 prepare 被拒绝；profile=${JSON.stringify(profile)} helper 原始 token：${helperErrorToken(profile)}`)
     }
     fs.closeSync(lease.logFd)
     await lease.dispose()
