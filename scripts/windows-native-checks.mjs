@@ -49,6 +49,7 @@ export const SETS = {
     files: [
       { file: 'tests/integration/development-local-git-windows.test.js', minTests: 15 },
       { file: 'tests/integration/local-git-start-work-resume.test.js', minTests: 3 },
+      { file: 'tests/integration/harness-plugin-windows-reparse.test.js', minTests: 4 },
     ],
     allowedSkips: 0,
   },
