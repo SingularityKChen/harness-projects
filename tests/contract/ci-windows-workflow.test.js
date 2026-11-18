@@ -34,6 +34,10 @@ function stepContaining(marker) {
   return step;
 }
 
+/** 入口 marker 的期望值从 SETS 推导，SETS 变更而 YAML 漏改时本地 verify 即红。 */
+const markerFor = (setId) =>
+  `windows-native-checks: set=${setId} files=${SETS[setId].files.length} tests=\\d+ skipped=${SETS[setId].allowedSkips} todo=0`;
+
 test('windows-native 固定 hosted windows-2025、1–15 分钟超时、默认 pwsh，且不条件静音', () => {
   const job = lane();
   assert.equal(job['runs-on'], 'windows-2025', 'Windows 原生 lane 必须跑在有原生证据的 hosted 镜像上');
@@ -67,7 +71,12 @@ test('runner 管理员阶段记录镜像、架构、node/git 与提权身份，�
     assert.ok(identity.run.includes(marker), `身份记录缺少 ${marker}`);
   }
   const entry = stepContaining('windows-native-checks.mjs --set native-git');
-  assert.equal(entry.run.trim(), 'node scripts/windows-native-checks.mjs --set native-git');
+  assert.match(entry.run, /node scripts\/windows-native-checks\.mjs --set native-git/, 'native-git 入口必须按 set 名调用 runner');
+  assert.match(entry.run, /\$LASTEXITCODE/, 'native-git 入口必须检查子进程退出码');
+  assert.ok(entry.run.includes(markerFor('native-git')),
+    'native-git 入口必须断言通过 marker（计数从 SETS 推导，入口 fail-open 时退出码仍为 0）');
+  assert.ok(entry.run.includes("-notmatch '"), 'native-git 入口必须以 -notmatch 判定 marker 是否缺失');
+  assert.match(entry.run, /::error::windows-native-checks: set=native-git[^\n]*\n\s*exit 1/, 'native-git 入口缺少 marker 时必须在错误分支 exit 1');
 });
 
 test('标准用户阶段自建临时账户、管理员预置 foreign fixture、限权启动 private-data runner 并在 finally 清理', () => {
@@ -84,6 +93,11 @@ test('标准用户阶段自建临时账户、管理员预置 foreign fixture、�
     'foreign fixture 必须由管理员在标准用户测试启动之前预置');
   assert.ok(standard.run.indexOf('Remove-LocalUser') > standard.run.indexOf('finally'),
     '账户与 profile 清理必须位于 finally，不能靠条件 step 跳过');
+  assert.ok(standard.run.includes(markerFor('private-data')),
+    'private-data 入口必须断言通过 marker（计数从 SETS 推导，入口 fail-open 时退出码仍为 0）');
+  assert.ok(standard.run.includes("-notmatch '"), 'private-data 入口必须以 -notmatch 判定 marker 是否缺失');
+  assert.match(standard.run, /::error::windows-native-checks: set=private-data[^\n]*\n\s*\$nativeExit = 1/, 'private-data 入口缺少 marker 时必须在错误分支把 nativeExit 置 1');
+  assert.ok(standard.run.includes('::error::windows-native-checks:'), '缺少 marker 时必须以 lane 错误注解失败');
 
   const yaml = JSON.stringify(lane());
   assert.doesNotMatch(yaml, /\.test\.js/, 'YAML 不得内联测试文件名（清单只在 SETS）');
