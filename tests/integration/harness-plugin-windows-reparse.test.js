@@ -40,7 +40,9 @@ function helperErrorToken(profile) {
 
 test('native dangling reparse at a fixed private-data object is refused without creating its target', { skip: process.platform !== 'win32' }, async (t) => {
   for (const name of ['workspace.sqlite', 'diagnostics.log']) await t.test(name, async (t) => {
-    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-reparse-'))
+    // 用 USERPROFILE（长路径）而不是 os.tmpdir()：GitHub runner 的 TEMP 可能解析到 8.3 短名
+    // （如 C:\\Users\\RUNNER~1\\...），而 helper 的 Lexical 明确拒绝 `~` 别名。
+    const base = fs.mkdtempSync(path.join(os.homedir(), 'harness-reparse-'))
     t.after(() => fs.rmSync(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }))
     const profile = path.join(base, 'profile')
     fs.mkdirSync(profile) // launcher 形状：普通 mkdir；管理员创建的目录默认 owner 是 Administrators，helper 的 profile 门要求 owner=当前用户，因此用既有 setAcl 写成 canonical 形状
