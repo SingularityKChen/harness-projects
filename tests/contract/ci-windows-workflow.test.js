@@ -67,7 +67,10 @@ test('runner 管理员阶段记录镜像、架构、node/git 与提权身份，�
     assert.ok(identity.run.includes(marker), `身份记录缺少 ${marker}`);
   }
   const entry = stepContaining('windows-native-checks.mjs --set native-git');
-  assert.equal(entry.run.trim(), 'node scripts/windows-native-checks.mjs --set native-git');
+  assert.match(entry.run, /node scripts\/windows-native-checks\.mjs --set native-git/, 'native-git 入口必须按 set 名调用 runner');
+  assert.match(entry.run, /\$LASTEXITCODE/, 'native-git 入口必须检查子进程退出码');
+  assert.ok(entry.run.includes("windows-native-checks: set=native-git files=3 tests=\\d+ skipped=0 todo=0"),
+    'native-git 入口必须断言通过 marker（入口 fail-open 时退出码仍为 0）');
 });
 
 test('标准用户阶段自建临时账户、管理员预置 foreign fixture、限权启动 private-data runner 并在 finally 清理', () => {
@@ -84,6 +87,9 @@ test('标准用户阶段自建临时账户、管理员预置 foreign fixture、�
     'foreign fixture 必须由管理员在标准用户测试启动之前预置');
   assert.ok(standard.run.indexOf('Remove-LocalUser') > standard.run.indexOf('finally'),
     '账户与 profile 清理必须位于 finally，不能靠条件 step 跳过');
+  assert.ok(standard.run.includes("windows-native-checks: set=private-data files=3 tests=\\d+ skipped=0 todo=0"),
+    'private-data 入口必须断言通过 marker（入口 fail-open 时退出码仍为 0）');
+  assert.ok(standard.run.includes('::error::windows-native-checks:'), '缺少 marker 时必须以 lane 错误注解失败');
 
   const yaml = JSON.stringify(lane());
   assert.doesNotMatch(yaml, /\.test\.js/, 'YAML 不得内联测试文件名（清单只在 SETS）');
