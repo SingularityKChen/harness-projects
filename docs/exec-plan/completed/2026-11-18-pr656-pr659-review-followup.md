@@ -171,7 +171,7 @@
 - 门禁面：lane 入口 marker 断言把「脚本跳过 `main()` 但 exit 0」变成红色；契约测试从 `SETS` 推导 marker 并断言失败分支的 `-notmatch`/`exit 1`/`$nativeExit = 1`；hosted 负控 A（native-git，run `44227227371`）已证明 marker 缺失时 lane 红，负控 B（private-data，run `44229943037`）验证同一分支；hosted Windows lane 在精确 head 上证明 marker 行与新原生用例。
 - 文档/测试面：storage 旧库反控覆盖真实 7 行/gen6 与截断 shape；恢复文档按匹配包代际写实际安装件（当前 6 件、折叠前 12 件）；构建脚本的 apps → storage 边进入边界契约（静态可见边）。
 - 与计划的偏差：无范围外改动；anti-hollow 强化、真实卷负控、provider-probe 契约与 Node engines 按 D3/D4 留给 #660/#313。
-- 遗留：独立复评、hosted marker 负控、issue 验收勾选与 rebase merge；`#662` 由本 PR 关闭，`#663` 关闭本批；`#660` 保持 OPEN。
+- 遗留：issue 验收勾选、PR body/标题校正、final head 门禁回读与 rebase merge；独立复评与 hosted marker 负控已完成（run `44227227371` / `44229943037`）；`#662` 由本 PR 关闭，`#663` 关闭本批；`#660` 保持 OPEN。
 
 ## Bottom Change Note
 
