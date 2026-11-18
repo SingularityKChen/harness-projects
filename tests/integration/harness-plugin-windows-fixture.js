@@ -51,9 +51,11 @@ $aces=@($acl.Access|ForEach-Object {
 @{directory=[bool]$item.PSIsContainer;ownerSid=$owner;protected=[bool]$acl.AreAccessRulesProtected;sddl=$acl.Sddl;aces=$aces}|ConvertTo-Json -Compress -Depth 5
 `
 export const inspectAcl = (location) => JSON.parse(ps(INSPECT, { path: location }))
-/** owner=当前用户、DACL 受保护、无继承 ACE、allow 主体只含受信集合。 */
+/** owner=当前用户、DACL 受保护、无继承 ACE、allow 主体只含受信集合，且当前用户自己的 allow ACE 必须存在。 */
 export function trustedAcl(entry, sid) {
   const trusted = [sid, 'S-1-5-18', 'S-1-5-32-544']
+  assert.ok(entry.aces.length >= 3, '私有边界至少有 self/SY/BA 三条 allow ACE')
+  assert.ok(entry.aces.some(({ type, sid: ace }) => type === 'Allow' && ace === sid), '当前用户自己的 allow ACE 必须存在')
   assert.deepEqual(entry.aces.filter(({ type, sid: ace }) => type !== 'Allow' || !trusted.includes(ace)), [], 'allow 主体必须只含 self/SY/BA')
   assert.equal(entry.aces.every(({ type }) => type === 'Allow'), true, '安全边界上不接受显式 deny ACE')
   return entry
