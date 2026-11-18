@@ -179,6 +179,19 @@ async function sourceFiles(dir) {
   return files
 }
 
+// 构建脚本的显式边：apps 下的 scripts 目录不是产品源码，但构建期的跨包 import 同样
+// 不得反向或越层；目录必须显式登记，未登记的新构建脚本目录按 fail closed 处理。
+const BUILD_SCRIPT_ALLOW = {
+  'apps/harness-plugin/scripts': ['packages/storage/sqlite'],
+}
+
+/** 收集一个构建脚本目录下的 .mjs 文件。 */
+async function scriptFiles(dir) {
+  const entries = await readdir(dir, { recursive: true, withFileTypes: true })
+  return entries.filter((entry) => entry.isFile() && entry.name.endsWith('.mjs'))
+    .map((entry) => path.join(entry.parentPath ?? entry.path, entry.name))
+}
+
 /** 提取一个源文件里所有静态与动态 import 的模块说明符。 */
 function importSpecifiers(source) {
   const specifiers = new Set()
@@ -364,6 +377,29 @@ test('壳：apps/harness-plugin/src 只有 .ts 文件，也不直接 import reac
         !reactImport.test(specifier),
         `${relative} 直接 import 了 ${specifier}：插件壳不得依赖 react，组件只来自 @harness-projects/ui`,
       )
+    }
+  }
+})
+
+test('构建脚本：apps/*/scripts 的跨包 import 只允许已登记的构建边', async () => {
+  // #658：build.mjs 静态 import @harness-projects/storage-sqlite 后，apps -> storage 的构建边
+  // 必须被矩阵观测；方向本身合法，但未登记的 app 构建脚本边一律失败。
+  // 范围：只解析字面量 import / export-from / dynamic import（见 importSpecifiers）；createRequire、
+  // 模板拼接与 .js/.cjs 构建脚本不在本契约内——它是静态可见边的 fail-closed，不是完整引用分析。
+  const found = []
+  for (const app of await readdir(path.join(repoRoot, 'apps'), { withFileTypes: true })) {
+    if (!app.isDirectory()) continue
+    if (await exists(path.join(repoRoot, 'apps', app.name, 'scripts'))) found.push(`apps/${app.name}/scripts`)
+  }
+  assert.deepEqual(found.sort(), Object.keys(BUILD_SCRIPT_ALLOW).sort(), 'apps/*/scripts 构建目录必须先登记到 BUILD_SCRIPT_ALLOW')
+  for (const [dir, allow] of Object.entries(BUILD_SCRIPT_ALLOW)) {
+    for (const file of await scriptFiles(path.join(repoRoot, dir))) {
+      const relative = path.relative(repoRoot, file)
+      for (const specifier of importSpecifiers(await readFile(file, 'utf8'))) {
+        const target = resolveInternal(specifier)
+        if (target === undefined) continue
+        assert.ok(allow.includes(target), `${relative} import 了 ${specifier}，构建边必须登记在 BUILD_SCRIPT_ALLOW（当前允许：${allow.join(', ') || '无'}）`)
+      }
     }
   }
 })
