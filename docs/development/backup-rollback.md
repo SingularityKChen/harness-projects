@@ -105,7 +105,7 @@ npx --yes --package @deepseek-ai/dsh@0.2.0-rc.2 dsh --profile "$HP_REHEARSAL_PRO
 npx --yes --package @deepseek-ai/dsh@0.2.0-rc.2 dsh web --patch "$HP_REHEARSAL_PATCH" --no-open --port 0
 ```
 
-逐一核对旧 tgz 中的 12 个安装文件与实际安装目录的摘要，不能只看 manifest 版本或“host ready”。再次确认 Documents 与 profile 数据根未变。会话地址包含访问材料，只在本机使用，不写入公开记录。
+逐一核对旧 tgz 中的 6 个安装文件（按 tgz 实际条目：LICENSE、package.json、patch、两份 JS、单份 migrations）与实际安装目录的摘要，不能只看 manifest 版本或“host ready”。再次确认 Documents 与 profile 数据根未变。会话地址包含访问材料，只在本机使用，不写入公开记录。
 
 从实际安装的产品读回非空列表、指定工作项和执行上下文；核对 context/run 身份与状态、原 worktree 与分支。查询仍可触发来源同步，观察到的数据新鲜度须照实记录。不要点击 Start Work、resume、cancel 或创建 PR 来“验证恢复”；这些会产生新的外部事实，不属于本次只读回滚。
 

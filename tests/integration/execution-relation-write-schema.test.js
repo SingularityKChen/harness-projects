@@ -64,7 +64,7 @@ test('D8：每张表的出处注释带该表期望的 token，且全文 token �
   const sql = readFileSync(MIGRATION_FILE, 'utf8')
   // 全文扫描：表注释、索引注释与视图注释里的出处 token 都必须落在白名单内（覆盖 release-gates.md R1 这类引用）。
   const found = sql.match(TOKEN_PATTERN) ?? []
-  assert.ok(found.length > 0, '003 里没有任何可解析的出处 token')
+  assert.ok(found.length > 0, '单资产里没有任何可解析的出处 token')
   for (const token of found) assert.ok(ALLOWED_TOKENS.has(token), `出处 token 不在白名单里：${token}`)
   // 逐表断言期望 token 出现在**该表自己的**出处注释里——这是 D8 追溯性唯一的机器证据。
   for (const [table, expected] of Object.entries(TABLE_PROVENANCE)) {

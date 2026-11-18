@@ -1,6 +1,6 @@
 -- 001_init：单一自包含物理基线（issue #417；#596）：迁移记账表与全部当前业务表、索引与约束，按原迁移顺序排列。
 -- 决策：不提供 downgrade；首次 MVP 发布前允许整份基线重写，回滚靠从备份恢复。
--- 原 002–007 片段已并入本文件；005 的版本载体历史（issue #203/#415）不含 DDL，其退役说明保留在此。
+-- 原 002–007 片段已并入本文件；005（版本载体历史，issue #203/#415）不含 DDL，已随单资产删除。载体归一/降级/离线修复由 #415 退役，写入期拒绝非规范版本见 003 的 sync_observation 注释。
 CREATE TABLE schema_migrations (
   version INTEGER PRIMARY KEY,
   applied_at TEXT NOT NULL

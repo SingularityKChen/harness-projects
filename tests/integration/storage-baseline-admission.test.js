@@ -15,11 +15,18 @@ const fixture = (db, count = MIGRATION_COUNT, transform = (sql) => sql) => {
   for (const file of sqlite.MIGRATIONS.slice(0, count)) db.exec(transform(sqlite.readMigrationSql(file)))
   db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(sqlite.BASELINE_VERSION, 'fixed-baseline')
 }
-/** 旧 main 布局夹具（#596 D13）：多行账本用例直接用完整 shape（旧链建出的 sqlite_schema 与单资产逐字相同，I3）；只应用过 001 记账表的旧库用 002 首表注释前的截断前缀。 */
-const legacyFixture = (db, fragments = 7, transform = (sql) => sql) => {
+/**
+ * 旧 main 布局夹具（#596 D13、#663）：多行账本用例用完整 shape（旧链建出的 sqlite_schema 与
+ * 单资产逐字相同，I3）并补当前世代；只应用过 001 记账表的旧库用 002 首表注释前的截断前缀。
+ * 截断必须真的发生：标记被改写时 `split[0]` 会退化为整份资产，让「只应用 001」变成完整库。
+ */
+const legacyFixture = (db, ledgerRows = 7, transform = (sql) => sql) => {
   const sql = sqlite.readMigrationSql(sqlite.MIGRATIONS[0])
-  db.exec(transform(fragments === 1 ? sql.split('-- 002_identity_membership：')[0] : sql))
-  for (let version = 1; version <= fragments; version += 1) db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(version, `fixed-${version}`)
+  const prefix = sql.split('-- 002_identity_membership：')[0]
+  assert.notEqual(prefix, sql, '旧库截断标记失效：`-- 002_identity_membership：` 必须仍在单资产里')
+  db.exec(transform(ledgerRows === 1 ? prefix : sql))
+  if (ledgerRows > 1) db.exec(`PRAGMA user_version=${sqlite.CURRENT_SCHEMA_GENERATION}`)
+  for (let version = 1; version <= ledgerRows; version += 1) db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(version, `fixed-${version}`)
 }
 const snapshot = (db) => {
   const schema = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY name").all()
@@ -63,7 +70,7 @@ const cases = [
   ...[0, sqlite.CURRENT_SCHEMA_GENERATION].map((generation) => [`masked-old-intent-shape-${generation}`, (db) => { fixture(db, MIGRATION_COUNT, withoutIntent); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
   ['old-generation-one', (db) => { fixture(db, MIGRATION_COUNT, withoutOwner); db.exec("INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=1") }, 'generation'],
   ...[0, sqlite.CURRENT_SCHEMA_GENERATION].map((generation) => [`masked-old-owner-shape-${generation}`, (db) => { fixture(db, MIGRATION_COUNT, withoutOwner); db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`) }, 'schema_shape']),
-  // #595 关键判别：旧 main 的「完整当前 shape + 1..7 行账本 + 当前世代」库必须仍以 version_list 拒绝且零写入。
+  // #595 关键判别：旧 main 的「完整当前 shape + 1..7 行账本 + 当前世代（user_version=6）」库必须仍以 version_list 拒绝且零写入。
   ['legacy-ledger-7', (db) => legacyFixture(db), 'version_list'],
   ['legacy-ledger-4', (db) => legacyFixture(db, 4), 'version_list'],
   ['legacy-ledger-2', (db) => legacyFixture(db, 2), 'version_list'],
