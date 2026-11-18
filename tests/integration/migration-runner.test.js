@@ -145,7 +145,7 @@ test('包内清单是有序的非空文件名数组：空库按清单顺序建�
   withTempDir((dir) => withDatabase(dir, (db) => {
     migrate(db)
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name)
-    assert.ok(tables.includes('planning_sync_round'), '清单最后一份资产（007）必须已应用')
+    assert.ok(tables.includes('planning_sync_round'), '清单里 planning_sync_round 的表必须已应用')
     assert.deepEqual(appliedVersions(db), [BASELINE_VERSION])
   }))
 })

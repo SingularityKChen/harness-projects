@@ -288,7 +288,7 @@ export class SqliteSyncSurface {
    * `INSERT`——键里含 `dedupe_key`，两条**不同**的观察在物理上不可能互相顶掉；已见的 `(bindingId, dedupeKey)`
    * 在入口就被挡回，因此"同一观察再投递一次"永远第二次返回 `false`（换条目也一样，见 `putMembership`）。
    * `sourceVersion` 缺失时按空串落 `updated_at`，读回时由 `columnToVersion` 还原再比较；非规范载体在入口抛错、不写行。
-   * 已提交版本非空且不是规范载体（005 之后旧载体又混进账本）时抛 `LEGACY_COMMITTED_VERSION_MESSAGE`，不再把更新的事实静默判成乱序；内存替身入口已断言，这种状态不可达，所以没有对应守卫。
+   * 已提交版本非空且不是规范载体（单基线之前的旧载体又混进账本）时抛 `LEGACY_COMMITTED_VERSION_MESSAGE`，不再把更新的事实静默判成乱序；内存替身入口已断言，这种状态不可达，所以没有对应守卫。
    */
   async recordObservation(record: ObservationRecord): Promise<boolean> {
     const { sourceVersion, ...observation } = record.observation

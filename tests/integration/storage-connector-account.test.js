@@ -78,10 +78,10 @@ test('restart-and-empty-schema-repeatability', async () => {
   assert.ok(readdirSync('/dev/fd').length - fdBefore <= 0, '迁移前拒绝必须关闭句柄，不得逐次泄漏 fd（删除工厂 catch 的 db.close() 必红）')
   assert.equal(fingerprint(legacyPath), legacyBefore, '拒绝必须零写入：schema 与既有行逐字节不变')
   const after = openDatabase(legacyPath)
-  try { assert.deepEqual(after.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '拒绝必须零写入：不落 003/004/005 的迁移版本') } finally { after.close() }
+  try { assert.deepEqual(after.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '拒绝必须零写入：不落任何待应用迁移版本') } finally { after.close() }
   const direct = openDatabase(legacyPath)
-  try { assert.throws(() => migrate(direct), (error) => error.code === 'incompatible_database', '直接 migrate 也必须在任何待应用迁移之前拒绝'); assert.deepEqual(direct.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '直接 migrate 不得先落 003–005') } finally { direct.close() }
-  // 版本 2 已记账但**表整体缺失**的损坏库（对抗验证 P2-2）：判据不能只在 `provider_binding` 存在时生效，否则 003–005 会被部分应用。
+  try { assert.throws(() => migrate(direct), (error) => error.code === 'incompatible_database', '直接 migrate 也必须在任何待应用迁移之前拒绝'); assert.deepEqual(direct.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '直接 migrate 不得先落任何待应用迁移') } finally { direct.close() }
+  // 版本 2 已记账但**表整体缺失**的损坏库（对抗验证 P2-2）：判据不能只在 `provider_binding` 存在时生效，否则待应用迁移会被部分应用。
   const truncatedPath = join(tempDir('connector-account-legacy-truncated-'), 'truncated.sqlite')
   const truncated = openDatabase(truncatedPath)
   try { truncated.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); INSERT INTO schema_migrations VALUES (1, 'x'); INSERT INTO schema_migrations VALUES (2, 'y');") } finally { truncated.close() }
@@ -89,14 +89,14 @@ test('restart-and-empty-schema-repeatability', async () => {
   assert.throws(() => createSqliteStorage(truncatedPath, policy()), (error) => error.code === 'incompatible_database', '版本 2 但表缺失必须在 migrate 之前拒绝')
   assert.equal(fingerprint(truncatedPath), truncatedBefore, '表缺失变体的拒绝也必须零写入')
   const truncatedAfter = openDatabase(truncatedPath)
-  try { assert.deepEqual(truncatedAfter.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '表缺失变体不得先落 003–005') } finally { truncatedAfter.close() }
+  try { assert.deepEqual(truncatedAfter.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '表缺失变体不得先落任何待应用迁移') } finally { truncatedAfter.close() }
   const partialPath = join(tempDir('connector-account-legacy-partial-'), 'partial.sqlite')
   seedVersion2(partialPath, 'id TEXT PRIMARY KEY')
   const partialBefore = fingerprint(partialPath)
   assert.throws(() => createSqliteStorage(partialPath, policy()), (error) => error.code === 'incompatible_database', '残缺列集的 connector_account 必须在 migrate 之前拒绝')
   assert.equal(fingerprint(partialPath), partialBefore, '残缺列集的拒绝必须零写入（含零新增表）')
   const partialAfter = openDatabase(partialPath)
-  try { assert.deepEqual(partialAfter.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '残缺列集不得先落 003–005') } finally { partialAfter.close() }
+  try { assert.deepEqual(partialAfter.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [1, 2], '残缺列集不得先落任何待应用迁移') } finally { partialAfter.close() }
   const upperPath = join(tempDir('connector-account-uppercase-'), 'upper.sqlite')
   const upperDb = openDatabase(upperPath)
   try { migrate(upperDb); upperDb.exec('ALTER TABLE connector_account RENAME COLUMN display_name TO DISPLAY_NAME') } finally { upperDb.close() }
