@@ -18,7 +18,8 @@ $script:fileSa=[IntPtr]::Zero; $script:directorySa=[IntPtr]::Zero
 try {
   if($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage'){throw 'language'}
   # SECURITY_ATTRIBUTES and pointer-bearing descriptors below are only correct for the x64 Win32 ABI.
-  if([IntPtr]::Size -ne 8){throw 'platform'}
+  # ARM64 also has 8-byte pointers, so pointer width alone is not an architecture gate.
+  if([IntPtr]::Size -ne 8 -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64'){throw 'platform'}
   $assembly=[AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object Reflection.AssemblyName('PrivateRoot')), [Reflection.Emit.AssemblyBuilderAccess]::Run)
   $builder=$assembly.DefineDynamicModule('Native').DefineType('Native','Public, Abstract, Sealed')
   function Bind($name,$dll,$return,$parameters) {
@@ -55,13 +56,26 @@ try {
   $il.Emit($op::Call,$script:createFile); $il.Emit($op::Stloc,$saved)
   $il.Emit($op::Ldarg_2); $il.Emit($op::Call,[Runtime.InteropServices.Marshal].GetMethod('GetLastWin32Error'))
   $il.Emit($op::Stind_I4); $il.Emit($op::Ldloc,$saved); $il.Emit($op::Ret)
+  # ProbeChecked(path, out win32Error): access 0, share 3, OPEN_EXISTING + BACKUP_SEMANTICS|OPEN_REPARSE_POINT.
+  # CreateDirectoryW has no reparse-point flag, so the final component is probed here before any create call;
+  # a dangling junction/symlink opens as a reparse point and the existing Open then refuses it.
+  $wrapper=$builder.DefineMethod('ProbeChecked','Public, Static',$ptr,[type[]]@($s,[int].MakeByRefType()))
+  $il=$wrapper.GetILGenerator(); $saved=$il.DeclareLocal($ptr)
+  $il.Emit($op::Ldarg_0); $il.Emit($op::Ldc_I4_0); $il.Emit($op::Ldc_I4_3)
+  $il.Emit($op::Ldsfld,[IntPtr].GetField('Zero')); $il.Emit($op::Ldc_I4_3)
+  $il.Emit($op::Ldc_I4,35651584); $il.Emit($op::Ldsfld,[IntPtr].GetField('Zero'))
+  $il.Emit($op::Call,$script:createFile); $il.Emit($op::Stloc,$saved)
+  $il.Emit($op::Ldarg_1); $il.Emit($op::Call,[Runtime.InteropServices.Marshal].GetMethod('GetLastWin32Error'))
+  $il.Emit($op::Stind_I4); $il.Emit($op::Ldloc,$saved); $il.Emit($op::Ret)
   # CreateChecked(path, sa, out win32Error): attribute-only desiredAccess=0, share 3 = READ|WRITE,
-  # CREATE_NEW=1, FILE_ATTRIBUTE_NORMAL=0x80; the error is captured in IL before any managed call can clobber it.
+  # CREATE_NEW=1, flags = FILE_ATTRIBUTE_NORMAL(0x80) | FILE_FLAG_OPEN_REPARSE_POINT(0x00200000).
+  # The reparse flag makes a pre-existing (including dangling) link fail with ERROR_FILE_EXISTS instead of
+  # following it and creating the target; the error is captured in IL before any managed call can clobber it.
   $wrapper=$builder.DefineMethod('CreateChecked','Public, Static',$ptr,[type[]]@($s,$ptr,[int].MakeByRefType()))
   $il=$wrapper.GetILGenerator(); $saved=$il.DeclareLocal($ptr)
   $il.Emit($op::Ldarg_0); $il.Emit($op::Ldc_I4_0)
   $il.Emit($op::Ldc_I4_3); $il.Emit($op::Ldarg_1)
-  $il.Emit($op::Ldc_I4_1); $il.Emit($op::Ldc_I4,128); $il.Emit($op::Ldsfld,[IntPtr].GetField('Zero'))
+  $il.Emit($op::Ldc_I4_1); $il.Emit($op::Ldc_I4,2097280); $il.Emit($op::Ldsfld,[IntPtr].GetField('Zero'))
   $il.Emit($op::Call,$script:createFile); $il.Emit($op::Stloc,$saved)
   $il.Emit($op::Ldarg_2); $il.Emit($op::Call,[Runtime.InteropServices.Marshal].GetMethod('GetLastWin32Error'))
   $il.Emit($op::Stind_I4); $il.Emit($op::Ldloc,$saved); $il.Emit($op::Ret)
@@ -173,9 +187,21 @@ try {
       if($directory){$handles.Add($h); $null=$opened.Add($p); $h=[IntPtr]::Zero}
     } finally {if($h -ne [IntPtr]::Zero){$null=$N::CloseHandle($h)}}
   }
-  # Create-or-admit: EXISTS(183 目录 / 80 文件) 表示并发或重开，交给既有 Open 复核；其它创建错误有界拒绝，绝不先建后改。
+  # Create-or-admit (adopt-only): 最终分量先探测。悬空 reparse 只能被既有 Open 拒绝，绝不能被创建调用跟随；
+  # EXISTS(183 目录 / 80 文件) 表示探测后的并发或重开，同样交给 Open 复核。其它创建错误有界拒绝。
   function Ensure([string]$p,[bool]$directory,[string]$phaseName) {
     $script:phase=$phaseName
+    $probeError=0; $existing=$N::ProbeChecked($p,[ref]$probeError)
+    if($existing -ne [IntPtr]::new(-1)){
+      $null=$N::CloseHandle($existing)
+      Open $p $directory $true ([bool]$directory) $false $false $phaseName
+      return
+    }
+    if($probeError -ne 2){
+      $script:win32=$probeError
+      $reason=switch($probeError){3{'path'}5{'access'}32{'sharing'}default{'other'}}
+      throw ('create-'+$reason)
+    }
     $errorCode=0; $created=0
     if($directory){
       $created=$N::CreateDirectoryChecked($p,$script:directorySa,[ref]$errorCode)
