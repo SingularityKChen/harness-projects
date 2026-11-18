@@ -17,39 +17,12 @@ import path from 'node:path'
 import test from 'node:test'
 
 import { prepareWindowsProjectData } from '../../apps/harness-plugin/src/host-private-windows.ts'
+import { ps, setAcl } from './harness-plugin-windows-fixture.js'
 
 const unavailable = (error) => {
   assert.equal(error?.name, 'HostAuthorityError', '拒绝必须使用既有 HostAuthorityError')
   assert.equal(error?.message, 'Host project data is unavailable', '固定错误文案不得改变')
   return true
-}
-
-const CANONICAL_PROFILE = String.raw`
-$ErrorActionPreference = 'Stop'
-$p = $env:HARNESS_REPARSE_PROFILE
-$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$acl = New-Object Security.AccessControl.DirectorySecurity
-$acl.SetOwner((New-Object Security.Principal.SecurityIdentifier($sid)))
-$acl.SetAccessRuleProtection($true, $false)
-$inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
-$propagation = [Security.AccessControl.PropagationFlags]::None
-$allow = [Security.AccessControl.AccessControlType]::Allow
-$rights = [Security.AccessControl.FileSystemRights]::FullControl
-foreach ($trustee in @($sid, 'S-1-5-18', 'S-1-5-32-544')) {
-  $identity = New-Object Security.Principal.SecurityIdentifier($trustee)
-  $rule = New-Object Security.AccessControl.FileSystemAccessRule($identity, $rights, $inheritance, $propagation, $allow)
-  $acl.AddAccessRule($rule)
-}
-Set-Acl -LiteralPath $p -AclObject $acl
-`
-
-function canonicalProfile(profile) {
-  const result = childProcess.spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', CANONICAL_PROFILE], {
-    env: { ...process.env, HARNESS_REPARSE_PROFILE: profile },
-    encoding: 'utf8',
-  })
-  if (result.status !== 0) throw new Error(`canonical profile setup failed: ${result.stderr}`)
-  // helper 的 profile 门要求 owner 与 allow 主体满足 private 形状；失败在第一次 prepare 就会暴露。
 }
 
 // 首次 prepare 意外失败时，直接以同一 PROGRAM 复跑一次并输出 helper 的固定错误 token，
@@ -59,12 +32,9 @@ function helperErrorToken(profile) {
     const source = fs.readFileSync(new URL('../../apps/harness-plugin/src/host-private-windows.ts', import.meta.url), 'utf8')
     const match = /const PROGRAM = String\.raw`([\s\S]*?)`\n\nconst unavailable/.exec(source)
     if (match === null) return 'PROGRAM 提取失败'
-    const result = childProcess.spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', match[1]], {
-      input: `${JSON.stringify({ profile })}\n`, encoding: 'utf8', timeout: 30000,
-    })
-    return `status=${result.status} stdout=${(result.stdout ?? '').trim()} stderr=${(result.stderr ?? '').trim()}`
+    return `ok: ${ps(match[1], { profile })}`
   } catch (error) {
-    return `诊断失败：${error?.message}`
+    return `status=${error.status} stdout=${(error.stdout ?? '').trim()} stderr=${(error.stderr ?? '').trim()}`
   }
 }
 
@@ -73,8 +43,8 @@ test('native dangling reparse at a fixed private-data object is refused without 
     const base = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-reparse-'))
     t.after(() => fs.rmSync(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }))
     const profile = path.join(base, 'profile')
-    fs.mkdirSync(profile) // launcher 形状：普通 mkdir；DACL/owner 由测试显式置为 canonical（管理员创建的默认 owner 是 Administrators）
-    canonicalProfile(profile)
+    fs.mkdirSync(profile) // launcher 形状：普通 mkdir；管理员创建的目录默认 owner 是 Administrators，helper 的 profile 门要求 owner=当前用户，因此用既有 setAcl 写成 canonical 形状
+    setAcl(profile)
 
     // 先建立 canonical root 与固定对象；随后把目标对象替换为指向树外不存在目标的悬空链接。
     let lease
