@@ -176,48 +176,73 @@ function validateReadInput(input: WorkItemListReadInput): ReadMarks {
   return { phase: 'pending' }
 }
 
+/** 可见性决策：能否显示行、原因与文案来源；不携带现成字符串或渲染字段。 */
+type ListVisibility =
+  | { readonly kind: 'loading'; readonly gateUnobserved: boolean }
+  | { readonly kind: 'unavailable'; readonly reason: ListReadFailure['kind']; readonly copy: 'failure' | 'gate_blocked' }
+  | { readonly kind: 'content'; readonly degradedPage: boolean; readonly refreshing: boolean }
+
+/**
+ * 可见性矩阵的唯一实现：按编号顺序短路——明确阻断 → 读门未观测 → 读门已观测不可读 → 首读 → 缓存门 → 内容。
+ * 调用方只装配，不再自行判断权限、缓存与失败；历史优先级（读门阻断时优先用结构化失败文案）原样保留。
+ */
+function decideListVisibility(marks: ReadMarks, access: AccessLevel | undefined): ListVisibility {
+  const failure = marks.phase === 'failed' ? marks.failure : undefined
+  if (failure !== undefined && !FAILURE[failure.kind].borrowsCache) return { kind: 'unavailable', reason: failure.kind, copy: 'failure' }
+  if (access === undefined && marks.phase !== 'pending') return { kind: 'unavailable', reason: failure?.kind ?? 'unknown', copy: 'failure' }
+  if (access !== undefined && !READABLE.includes(access)) {
+    return failure === undefined
+      ? { kind: 'unavailable', reason: 'unknown', copy: 'gate_blocked' }
+      : { kind: 'unavailable', reason: failure.kind, copy: 'failure' }
+  }
+  if (marks.phase === 'pending') return { kind: 'loading', gateUnobserved: access === undefined }
+  if (marks.phase === 'failed' && !(marks.hasReceivedSnapshot && marks.cacheVisibility === 'authorized')) {
+    return { kind: 'unavailable', reason: marks.failure.kind, copy: 'failure' }
+  }
+  return { kind: 'content', degradedPage: marks.phase === 'failed' || access === AccessLevel.Degraded, refreshing: marks.phase === 'received' && marks.refreshing }
+}
+
+/** 四级状态文案的唯一实现：刷新 > 部分读取 > 整表未确认 > 已读取当前快照。 */
+function listStatusText(refreshing: boolean, partial: boolean, stale: boolean, readableCount: number): string {
+  return refreshing ? '正在刷新，当前显示的是最后已知值'
+    : partial ? '部分条目尚未确认，已显示的条目是当前值'
+    : stale ? '当前结果尚未确认，最后已知值不是当前值' : `已读取当前快照，共 ${readableCount} 项可读条目`
+}
+
 /**
  * 优先级：明确阻断（permission_denied / not_supported / unknown）→ 读门阻断 → 读取过程。读门缺失只说明"未观测"：
  * pending 时继续 loading，收到快照后转不可用（尚未确认）；读门已观测不可读但没有结构化原因时 reason 只能是 unknown，
  * 文案说能力已确认不可用、原因未提供，不解析 reason 猜权限。坏 phase、failed 缺 failure 或坏 failure.kind、非布尔的
- * refreshing / hasReceivedSnapshot、非两值的 cacheVisibility 与坏时间一样是接线缺陷，响亮失败：它们都落在缓存门上。
+ * refreshing / hasReceivedSnapshot、非两值的 cacheVisibility 与坏时间一样是接线缺陷，响亮失败。
  */
 export function deriveWorkItemListView(input: WorkItemListReadInput): WorkItemListView {
   const { read, metadata } = input
   const marks = validateReadInput(input)
-  const failure = marks.phase === 'failed' ? marks.failure : undefined
   const list = deriveWorkItemList(read)
   const access = accessIndex(read.capabilities ?? []).get(READ_KEY)
+  const visibility = decideListVisibility(marks, access)
   const planning = read.planningSource
   const nameOf = (bindingId: string): string | undefined => pick(metadata.sourceNames, bindingId) ?? (bindingId === planning?.bindingId ? planning.name : undefined)
   const mappingSourceText = planning?.mappingOrigin === 'derived' ? '字段映射：自动派生' : planning?.mappingOrigin === 'user' ? '字段映射：用户配置' : undefined
   const shell = { ...(mappingSourceText === undefined ? {} : { mappingSourceText }), workspaceName: read.workspace.name, planningSourceName: metadata.planningSourceName || planning?.name || '规划来源名称未提供' }
   const flags = { readOnly: access === AccessLevel.ReadOnly, degraded: access === AccessLevel.Degraded }
+  const failure = marks.phase === 'failed' ? marks.failure : undefined
   const unavailable = (reason: ListReadFailure['kind'], copy: 'failure' | 'gate_blocked' = 'failure'): WorkItemListView => {
     const source = copy === 'gate_blocked' ? { message: GATE_BLOCKED[0], remaining: GATE_BLOCKED[1] } : FAILURE[reason]
     const safe = failure?.safeMessage
     return { ...shell, readOnly: false, degraded: false, statusText: '无法读取工作项', body: { kind: 'unavailable', reason, message: safe ? `${source.message} ${safe}` : source.message, remaining: source.remaining } }
   }
-  if (failure !== undefined && !FAILURE[failure.kind].borrowsCache) return unavailable(failure.kind)
-  // 读门未观测：pending 继续等候，之后一律当作尚未确认；读门已观测：只认三个可读级别，其余（含非枚举值）都阻断。
-  if (access === undefined && marks.phase !== 'pending') return unavailable(failure?.kind ?? 'unknown')
-  if (access !== undefined && !READABLE.includes(access)) return failure ? unavailable(failure.kind) : unavailable('unknown', 'gate_blocked')
-  if (marks.phase === 'pending') {
-    const note = access === undefined ? '，读取能力尚未确认' : ''
+  if (visibility.kind === 'unavailable') return unavailable(visibility.reason, visibility.copy)
+  if (visibility.kind === 'loading') {
+    const note = visibility.gateUnobserved ? '，读取能力尚未确认' : ''
     return { ...shell, readOnly: flags.readOnly, degraded: false, statusText: `正在首次读取工作项${note}`, body: { kind: 'loading' } }
   }
-  if (marks.phase === 'failed' && !(marks.hasReceivedSnapshot && marks.cacheVisibility === 'authorized')) {
-    return unavailable(marks.failure.kind)
-  }
-  const degradedPage = marks.phase === 'failed' || flags.degraded
+  const { degradedPage, refreshing } = visibility
   const stale = list.stale || degradedPage
-  const refreshing = marks.phase === 'received' && marks.refreshing
   const rows = list.rows.map((row) => rowView(row, nameOf, row.freshness.stale || degradedPage || refreshing))
   // 部分读取：工作区未确认，但每一条可见条目都已确认；redacted 自身 freshness 不参与整页结论（D）。
   const partial = stale && rows.some((row) => row.kind === 'item') && rows.every((row) => row.kind === 'redacted' || !row.stale)
-  const statusText = refreshing ? '正在刷新，当前显示的是最后已知值'
-    : partial ? '部分条目尚未确认，已显示的条目是当前值'
-    : stale ? '当前结果尚未确认，最后已知值不是当前值' : `已读取当前快照，共 ${rows.filter(row => row.kind === 'item').length} 项可读条目`
+  const statusText = listStatusText(refreshing, partial, stale, rows.filter(row => row.kind === 'item').length)
   return {
     ...shell, ...flags, statusText,
     body: {

@@ -65,11 +65,11 @@ const FAILURE: Readonly<Record<ListReadFailure['kind'],
   { readonly message: string; readonly remaining: string; readonly borrowsCache: boolean }>>
 
 function validateReadInput(input: WorkItemListReadInput): ReadMarks
-function decideListVisibility(marks: ReadMarks, access: AccessLevel | undefined, listStale: boolean): ListVisibility
+function decideListVisibility(marks: ReadMarks, access: AccessLevel | undefined): ListVisibility
 function listStatusText(refreshing: boolean, partial: boolean, stale: boolean, readableCount: number): string
 ```
 
-`deriveWorkItemListView` 正文固定为：① `const marks = validateReadInput(input)`；② `const list = deriveWorkItemList(read)`（时间戳校验保持在决策之前）；③ `const access = accessIndex(read.capabilities ?? []).get(READ_KEY)`；④ `const visibility = decideListVisibility(marks, access, list.stale)`；⑤ 装配。装配段落逐字保留：`shell`、`flags`、`nameOf`、`rowView`、`partial`、`listStatusText` 的输出、body 字段顺序与可选键（`lastUpdatedAt` / `reconciledAt` / `notice` / `partial`）。
+`deriveWorkItemListView` 正文固定为：① `const marks = validateReadInput(input)`；② `const list = deriveWorkItemList(read)`（时间戳校验保持在决策之前）；③ `const access = accessIndex(read.capabilities ?? []).get(READ_KEY)`；④ `const visibility = decideListVisibility(marks, access)`（`list.stale` 只在装配期与 `degradedPage` 合并为 `body.stale`，见 D12）；⑤ 装配。装配段落逐字保留：`shell`、`flags`、`nameOf`、`rowView`、`partial`、`listStatusText` 的输出、body 字段顺序与可选键（`lastUpdatedAt` / `reconciledAt` / `notice` / `partial`）。
 
 `copy` 只有两值：`'failure'` 表示用 `FAILURE[reason]`（读门未观测且没有结构化失败时 reason 为 `unknown`，即「尚未确认」文案）；`'gate_blocked'` 表示用 `GATE_BLOCKED`（只出现在读门已观测不可读且没有结构化失败时）。`safeMessage` 仍只在 unavailable message 后追加。
 
@@ -142,16 +142,18 @@ function listStatusText(refreshing: boolean, partial: boolean, stale: boolean, r
 
 变异验证（在最终 head 上临时改源码，记录红/绿后还原，不提交）：
 
-| 变异 | 期望变红的用例 |
+| 变异（最终 head 上临时改源码，记录后已还原） | 实际红（`node --test tests/contract/ui-work-item-list-view.test.js`，18 项基线） |
 |---|---|
-| M1 明确阻断判断移到缓存门之后 | 矩阵第 1 段边界格 |
-| M2 缓存门忽略 cacheVisibility | 矩阵 offline + cache unknown 格 |
-| M3 gate_blocked 改用「尚未确认」文案 | 矩阵 gate blocked 格 |
-| M4 把 `deriveWorkItemList` 移到决策之后 | 坏接线用例（坏时间戳） |
-| M5 用 truthy 代替布尔标记校验 | 坏接线用例 |
-| M6 行 stale 改用 `body.stale` | 矩阵 gap 混合新鲜度格 + 既有「行新鲜度」用例 |
-| M7 loading 带 degraded=true | 既有「read_only 与 degraded」用例 |
-| M8 body 增加内部字段 | 输出形状白名单用例 |
+| M1 明确阻断借用授权缓存（「明确阻断判断移到缓存门之后」的语义等价改写：缓存门通过时不再明确阻断） | 红 3：矩阵、既有「不借缓存」、既有「read_only 与 degraded」 |
+| M2 缓存门忽略 cacheVisibility | 红 5：矩阵、既有「offline / error」、既有「恢复路径」、既有「read_only 与 degraded」、输出形状 |
+| M3 gate_blocked 改用「尚未确认」文案 | 红 3：矩阵、既有「不借缓存」、既有「恢复路径」 |
+| M4 只在内容分支派生 list（阻断/首读跳过时间戳校验） | 红 1：坏接线先于可见性决策（坏时间戳） |
+| M5 用 truthy 代替 hasReceivedSnapshot 的布尔校验 | 红 4：既有「接线」、矩阵、既有「不借缓存」、既有「offline / error」 |
+| M6 行 stale 改用 `body.stale` | 红 3：矩阵、既有「行新鲜度」、输出形状 |
+| M7 loading 带 degraded=true | 红 2：矩阵、既有「read_only 与 degraded」 |
+| M8 body 增加内部字段 | 红 3：矩阵投影未覆盖该键，但既有「首次读取」/「陈旧 / 断线 / 缺口」与输出形状白名单红 |
+
+实际执行中 M1/M4/M5 的原始措辞是行为等价的（见 Surprises 第 14 条），已按上表的语义等价变异执行；每个变异结束后用 `cp` 回填备份并 `cmp` 校验，最终 `git diff` 只剩预期改动，V1 回到 21/21（矩阵文件 18/18）。
 
 ### 明确不在范围
 
@@ -203,11 +205,11 @@ function listStatusText(refreshing: boolean, partial: boolean, stale: boolean, r
 **最小闭环**：可见性优先级集中为 `decideListVisibility`，导出函数只剩编排 + 装配。
 **涉及文件**：`packages/ui-model/src/work-item-list-view.ts`。
 
-1. 引入 `ListVisibility` 与 `decideListVisibility(marks, access, list.stale)`；导出函数改为五步编排。
+1. 引入 `ListVisibility` 与 `decideListVisibility(marks, access)`（不含未使用的 `listStale`，见 D12）；导出函数改为五步编排。
 2. 引入 `listStatusText` 承接四段文案；删除被搬走的死分支与重复收窄；不改任何字符串、字段或键。
 3. 跑 V1–V4、V9。
 4. 跑 M1–M8，记录每个变异的红/绿与具体失败用例；逐个还原后用 V1 与 `git diff --quiet` 确认工作树只余预期改动。
-**验证**：V1（21/21）、V2（exit 0）、V3（28/28）、V4（10/10）、V9（169/169）。
+**验证**：V1（21/21）、V2（exit 0）、V3（28/28）、V4（10/10）、V9（全量 165/169：4 个失败都在未触碰文件且由环境/并行负载造成，见 Surprises 第 13 条；排除该 2 个文件的 13 文件子集 148/148）。
 **回滚**：单提交 revert 回到 Batch 2；无数据、配置或外部状态影响。
 
 ### Batch 4 · 文档归档、体量与发布面门禁
@@ -298,6 +300,8 @@ node scripts/resolution-check.mjs && node --test --test-timeout=180000 $(grep -r
 
 期望：`ℹ tests 169`、`ℹ pass 169`、`ℹ fail 0`（15 个文件；基线 166，新增 3 个用例）。该命令覆盖 renderer、浏览器打包、detail、overview、board、integration 与 e2e 消费链。
 
+实际（2026-11-21，本工作树）：`ℹ tests 169 / pass 165 / fail 4`；4 个失败都在未触碰文件且为本机环境/并行负载所致（见 Surprises 第 13 条），排除这 2 个文件后的 13 文件子集为 `ℹ tests 148 / pass 148 / fail 0`。不把该环境失败当作回归，也不把它粉饰成绿色门。
+
 **不使用 `pnpm test` 作为本地门**：clean `main` 上它已有 2 个与本改动无关的失败（见 Surprises 第 7 条）；本计划用 V1–V4、V9 作为可复现的本地证据，合并门仍是 CI `PR Fast Gate`。
 
 **验收标准映射（issue 原文）**
@@ -312,7 +316,7 @@ node scripts/resolution-check.mjs && node --test --test-timeout=180000 $(grep -r
 
 - [x] Batch 1 · 特性化矩阵与判别力证明（2026-11-21，a634f122）：新增 3 个用例（21 行矩阵 + 输出形状白名单 + 坏接线优先），当前实现上全绿；V1 `ℹ tests 21 / pass 21 / fail 0`、V2 exit 0；临时变异 MA（EXPLICIT_BLOCK 去掉 permission_denied）→ 矩阵等 3 用例红，MB（缓存门忽略 cacheVisibility）→ 5 用例红，MC（GATE_BLOCKED 换成 FAILURE.unknown）→ 3 用例红，均已还原且 `git diff --quiet` 通过。
 - [x] Batch 2 · 校验与失败表合并（2026-11-21，本提交）：`FAILURE` 单表替换 `UNAVAILABLE` + `EXPLICIT_BLOCK`（`borrowsCache` 与文案同表），新增私有 `ReadMarks` / `validateReadInput`，`deriveWorkItemListView` 改为先校验、再派生 list、再进入可见性阶梯（阶梯仍是内联 if 链，装配段逐字未动）；V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`。
-- [ ] Batch 3 · 决策提取与装配收口
+- [x] Batch 3 · 决策提取与装配收口（2026-11-21，本提交）：新增私有 `ListVisibility` union、`decideListVisibility(marks, access)`（有序短路六段）与 `listStatusText`；`deriveWorkItemListView` 变成校验 → 派生 → 读门 → 决策 → 装配，装配段只按 `visibility.kind` 分派，不再自行判断权限、缓存或失败。V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`；V9 全量 165/169（4 个失败在未触碰文件，见 Surprises 第 13 条），排除该 2 个文件后 13 文件 148/148；M1–M8 全部按预期变红并已还原（见判别性测试策略表）。
 - [ ] Batch 4 · 文档归档、体量与发布面门禁
 - 2026-11-21：计划创建；事实在 `f74a3b8b` 独立核实（基线见 Surprises 第 9 条）；实现未开始。
 
@@ -330,22 +334,27 @@ node scripts/resolution-check.mjs && node --test --test-timeout=180000 $(grep -r
 10. #366/#429/#430 已 CLOSED；并行 #191/#396/#138 的写面（core 重协调、tests 共享 walker、providers worktree）与本 PR 不重叠。
 11. issue 验收命令点名的是 2 个测试文件（view + browser），不是 3 个。
 12. 矩阵实际为 21 行而非创建时的 20 行：把「gap 混合新鲜度」「gap 部分读取」「全 redacted 且 partial 不成立」拆成三个独立格，避免同一格同时承担三种决策；逐行证据见 Batch 1 提交。
+13. V9 全量在本工作树为 165/169（期望 169）：4 个失败全部在未触碰的文件，且与本改动无关——`tests/contract/ui-local-table-view.test.js` 的隔离子进程在同一台机器上 `ETIMEDOUT`（`spawnSync` 5000ms 寿命守卫），`tests/integration/harness-plugin-host-planning-mapping.test.js` 12/13 失败于 `HostAuthorityError: Host project data is unavailable`（`apps/harness-plugin/src/host-private-data.ts:122`，与本 PR 零文件交集；单个文件单独运行同样失败，指向本机 Host 私有数据/凭据环境）。因此本 PR 的等价证据用 V1/V3/V4 加排除这 2 个文件后的 V9 子集 148/148；全量 V9 结果如实记录，不当成绿色门。
+14. M1/M4/M5 的原始措辞在本实现上不可区分：把明确阻断移到缓存门之后（M1）与只在内容分支派生 list（M4）在等价改写前不会改变任何输出——第一段判断仍先于其它分支、时间戳校验只影响 content 分支。已改为语义等价但可失败的变异（缓存门通过时不再明确阻断；阻断/首读分支不派生 list；hasReceivedSnapshot 用 truthy 校验），并记录实际红。
+15. `listStatusText` 只需要 `refreshing / partial / stale / readableCount`，不需要 `list.stale`：`stale` 在装配期已与 `degradedPage` 合并。计划原先写 `decideListVisibility(marks, access, list.stale)`，实现据实收窄为两参（D12）。
 
 ## Decision Log
 
 | 编号 | 决策 | Rationale | 日期 / 来源 |
 |---|---|---|---|
 | D1 | 同文件私有单元 + 单张失败表；不新建模块、不导出决策函数 | issue 要求 within the same authoritative reducer；detail/overview 只需要 `View`；导出会成为第二语义落点 | 2026-11-21 计划评审 |
-| D2 | 原样保留两处历史优先级行为（读门分支用失败文案；pending + gate blocked 直接 unavailable），矩阵标注「现状契约」，另开 issue 讨论 | 行为保持验收优先；修正会改变用户可见文案 | 2026-11-21 计划评审 |
+| D2 | 原样保留两处历史优先级行为（读门分支用失败文案；pending + gate blocked 直接 unavailable），矩阵标注「现状契约」，本 PR 不修正 | 行为保持验收优先；修正会改变用户可见文案。人类已批准保留并作为现状契约（Q1） | 2026-11-21 计划评审；2026-11-21 Lead 批准 |
 | D3 | 决策 union 只携带 `copy: 'failure' \| 'gate_blocked'` 选择器，不携带文案元组或 safeMessage | 装配拥有展示文案；避免语义决策与展示耦合 | 2026-11-21 计划评审 |
 | D4 | content 携带 `degradedPage` 而非 `stale`；行 staleness 由 `degradedPage` 传播 | 保护 #366/#382 的 partial 契约（整表原因只降级整表，已确认行保持 fresh） | 2026-11-21 计划评审（探针 M17） |
-| D5 | 保留 `flags`、`safeMessage`；不改 `work-item-app.ts` 的硬编码标记 | 非死代码 / 公共安全通道 / 行为变化超出范围 | 2026-11-21 计划评审 |
-| D6 | 矩阵唯一权威在本计划；测试表按 6 段生成；代码 JSDoc 只留优先级摘要 | 避免三份完整副本漂移（PLANS「一个事实只写一处」） | 2026-11-21 计划评审 |
+| D5 | 保留 `flags`、`safeMessage`；不改 `work-item-app.ts` 的硬编码标记 | 非死代码 / 公共安全通道 / 行为变化超出范围；`safeMessage` 与生产装配硬编码均获人类批准保留（Q3/Q4） | 2026-11-21 计划评审；2026-11-21 Lead 批准 |
+| D6 | 矩阵唯一权威在本计划 + 测试表；不新增 `docs/architecture/` 常驻矩阵页；代码 JSDoc 只留优先级摘要 | 避免多份完整副本漂移（PLANS「一个事实只写一处」）；人类批准该放置（Q2） | 2026-11-21 计划评审；2026-11-21 Lead 批准 |
 | D7 | 只新增测试，不改不删现有测试；用「特征化绿 + 变异必红」证明判别力 | 行为保持重构没有可先红的缺陷；变异是可失败的证据 | 2026-11-21 计划评审 |
 | D8 | 本地门用 V1/V3/V4/V9，不用 clean `main` 已失败的 `pnpm test`；CI `PR Fast Gate` 为最终门 | 证据必须在本仓可复现；不把环境噪声当成回归 | 2026-11-21 计划评审 |
 | D9 | 历史证据 SHA-256 文件不更新 | 记录的是过去捕获身份，不属于本 PR 的当前字节契约 | 2026-11-21 计划评审 |
 | D10 | 本计划先以 active 路径提交，Batch 4 验收后移到 completed 并加 `docs/README.md` 一行 | PLANS §2 生命周期；与既有归档提交一致 | 2026-11-21 计划评审 |
-| D11 | 待人类批准：两处历史优先级 quirk 是否长期作为产品契约；生产装配硬编码是否需要另立 issue | 默认选择（保留 + 记录）不阻塞本 PR；不擅自扩大范围 | 2026-11-21 计划评审 |
+| D11 | 两处历史优先级 quirk 长期作为现状契约保留；生产装配硬编码（`work-item-app.ts:56-57`）不在本 PR 修、不另立 issue，只在计划记录 | 人类批准（Q1/Q3）：行为保持优先，擅自修正会改变用户可见文案或扩大发布面 | 2026-11-21 Lead 批准 |
+| D12 | `decideListVisibility` 只接收已校验 marks 与读门访问级别，不接收 `list.stale` | 决策不消费 `list.stale`（只在装配期与 `degradedPage` 合并为 `body.stale`）；传未使用参数会触发 `noUnusedParameters` | 2026-11-21 Batch 3 实现 |
+| D13 | 体量只按 V5 的 PR 上限（代码 ≤800 / 文档 ≤1300）收敛，不追求 CodeBudget 600 | 本 PR 是行为保持重构，范围已收敛在单文件 + 测试；更小预算属后续独立事项，人类已确认不扩大本 PR（Q5） | 2026-11-21 Lead 批准 |
 
 ## Idempotence and Recovery
 
