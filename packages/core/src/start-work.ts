@@ -20,7 +20,10 @@ import {
   type StartWorkRequest, type StartWorkResult,
 } from './execution-context.ts'
 import { runReadGate, validRunRef } from './execution-run.ts'
-import { guardedDevelopmentReads, namesFor, namesProblem, outcomeOf, provisionGit, type GitOutcome } from './git-provisioning.ts'
+import {
+  gitIntentKey, guardedDevelopmentReads, namesFor, namesProblem, outcomeOf, provisionGit, reconcileGitStep, unknownGitIntent,
+  type GitOutcome, type GitReconcileOutcome,
+} from './git-provisioning.ts'
 import { EdgeProvenance, asEntityId, recordEdges, type DiscoveredEdge, type RelationStore } from './relations.ts'
 import { bindingConflict, requestFingerprint, requestMismatch, requestScopeMatches, snapshotRequest } from './start-work-request.ts'
 import { beginWrite, createWriteLedger, markFailed, reportFor, WritePhase, type WriteReport } from './write-machine.ts'
@@ -55,7 +58,11 @@ export async function startWork(context: CoreContext, input: StartWorkRequest): 
   const replayed = await context.storage.findMutationAttempt(context.workspaceId, request.idempotencyKey)
   const changed = await startTargetError(context, request.workItemId, admissionEpoch)
   if (changed) return startWorkUnavailable(changed)
-  if (replayed !== undefined && !await safeResume(context, contextId, request, replayed)) return admittedResult(context, admissionEpoch, request.workItemId, replayRequest(context, contextId, request, replayed))
+  // 同 key 重放未决 Git 写之前先做一次只读对账（issue #191）：adopted / absent 走结论驱动续跑，
+  // conflict / inconclusive 直接作为本次答复（零写入，保留既有句柄与状态）。
+  const resuming = replayed === undefined ? undefined : await reconcileReplay(context, contextId, request, replayed)
+  if (resuming !== undefined && 'result' in resuming) return admittedResult(context, admissionEpoch, request.workItemId, Promise.resolve(resuming.result))
+  if (replayed !== undefined && resuming === undefined && !await safeResume(context, contextId, request, replayed)) return admittedResult(context, admissionEpoch, request.workItemId, replayRequest(context, contextId, request, replayed))
   // 只有没有 context 记录的新请求才预检、过能力门并 ack；已有记录（终态接管、过期续跑、在途、Ready）沿用原路径。
   const existing = await context.storage.getExecutionContext(contextId)
   const prepared = existing === undefined ? await prepareRegistration(context, request, contextId) : undefined
@@ -166,6 +173,41 @@ async function replayRequest(context: CoreContext, contextId: ExecutionContextId
   const supplied = attempt.state === 'pending' && !unresolved(attempt) ? undefined : await createWriteLedger(context.storage).replay(context.workspaceId, request.idempotencyKey)
   return existingResult(context, contextId, supplied)
 }
+/** 同 key 重放时携带的对账证据：采样到的未决行，以及被采纳的那一步（absent 时为 undefined）。 */
+type Resuming = { readonly attempt: MutationAttemptRecord; readonly adopted: Extract<GitReconcileOutcome, { kind: 'adopted' }> | undefined }
+
+/**
+ * 同 key 重放的前置只读对账（issue #191）。只有「确实可能重放」的形态才探测：命令是 Start Work、
+ * 根状态是 unknown、请求指纹一致、持久 Git intent 指向本上下文与当代 owner、上下文可续跑且没有 run、
+ * 路由仍然解析到同一个 binding。任一不满足都返回 undefined，原有重放行为完全不变（在途、Ready、
+ * 已结算、换请求指纹、路由已变都不探测）。
+ *
+ * 对账只改这一次的答复：conflict / inconclusive 用 `existingResult` 保留既有句柄与状态，零写入；
+ * adopted / absent 作为续跑证据返回，由认领事务在同一条记录上继续。
+ */
+async function reconcileReplay(
+  context: CoreContext, contextId: ExecutionContextId, request: StartWorkRequest, attempt: MutationAttemptRecord,
+): Promise<{ readonly result: StartWorkResult } | Resuming | undefined> {
+  const intent = unknownGitIntent(attempt)
+  if (intent === undefined || requestMismatch(context.workspaceId, request, attempt)) return undefined
+  const record = await context.storage.getExecutionContext(contextId)
+  if (record === undefined || !needsSupply(record, context.clock())) return undefined
+  if (await context.storage.getExecutionRun(runIdFor(contextId)) !== undefined) return undefined
+  if (intent.contextId !== contextId || intent.ownerGeneration !== record.provisioningGeneration) return undefined
+  const route = await selectDevelopment(context, request.repositoryId, START_WORK_ROUTE.anchor[0])
+  if (!route.ok || route.binding.ref.bindingId !== attempt.bindingId) return undefined
+  const outcome = await reconcileGitStep(context, route, intent)
+  if (outcome.kind === 'conflict') {
+    const report = reportFor(WritePhase.Conflict, { attemptedValue: outcome.attemptedValue, lastKnownAuthoritative: outcome.lastKnownAuthoritative }, outcome.error)
+    return { result: await existingResult(context, contextId, report, false) }
+  }
+  if (outcome.kind === 'inconclusive') {
+    const report = reportFor(WritePhase.Unknown, beginWrite(gitIntentKey(intent)).values, outcome.error)
+    return { result: await existingResult(context, contextId, report, false) }
+  }
+  return undefined
+}
+
 function unresolved(attempt: MutationAttemptRecord): boolean {
   return attempt.externalIntent !== undefined && (['pending', 'unknown'].includes(attempt.externalIntent.state) || attempt.state === 'unknown')
 }

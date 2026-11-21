@@ -2,7 +2,8 @@
  *
  */
 import {
-  CapabilityKey, ProjectErrorCode, projectError, providerErr, providerError, type ExternalObjectRef, type ProjectError, type ResolvedBinding, type StartWorkExternalOperation,
+  CapabilityKey, ProjectErrorCode, projectError, providerErr, providerError, type ExternalObjectRef, type MutationAttemptRecord, type ProjectError, type ResolvedBinding,
+  type StartWorkExternalIntent, type StartWorkExternalOperation,
 } from '@harness-projects/capabilities'
 import { ExecutionContextStatus, ProviderErrorCode, type ExecutionContextId, type ProviderBindingId } from '@harness-projects/domain'
 import { toProjectError, unsupportedCapability } from './capabilities.ts'
@@ -348,4 +349,72 @@ async function branchProbe(provider: Development, repository: ExternalObjectRef,
     `读了 ${PROBE_MAX_PAGES} 页仍没有读完分支列表，无法确认分支 ${name} 是否存在：provider 的游标没有结束`,
   )
   return { probe: { found: false, value: undefined, error }, headCommit: undefined }
+}
+/** 未决 Git 创建步的持久意图：重启对账唯一接受的输入形状（issue #191）。 */
+type GitIntent = Extract<StartWorkExternalIntent, { operation: 'createBranch' | 'createWorktree' }>
+
+/** 重启对账的结论；只在一次调用内存在，不落盘（ExecPlan D3 不新增持久形状）。 */
+export type GitReconcileOutcome =
+  | { readonly kind: 'adopted'; readonly operation: 'createBranch' | 'createWorktree'; readonly value: string; readonly headCommit: string | undefined }
+  | { readonly kind: 'absent'; readonly operation: 'createBranch' | 'createWorktree' }
+  | { readonly kind: 'conflict'; readonly attemptedValue: string | undefined; readonly lastKnownAuthoritative: string | undefined; readonly error: ProjectError }
+  | { readonly kind: 'inconclusive'; readonly error: ProjectError }
+
+/** 只认「未决的 Git 创建步」：Start Work 的 unknown 行，intent 是两种 Git 创建之一。 */
+export function unknownGitIntent(attempt: MutationAttemptRecord): GitIntent | undefined {
+  const intent = attempt.externalIntent
+  if (attempt.commandName !== 'startWork' || attempt.state !== 'unknown' || intent === undefined) return undefined
+  if (intent.operation !== 'createBranch' && intent.operation !== 'createWorktree') return undefined
+  return intent
+}
+
+/** 报告面用的自然键：分支名 / 持久工作树句柄（没有句柄时退回稳定 key）。 */
+export function gitIntentKey(intent: GitIntent): string {
+  return intent.operation === 'createBranch' ? intent.input.name : intent.input.path ?? intent.input.worktreeKey
+}
+
+const RECONCILE_READ_ONLY = '对账只读，未重发外部写入'
+/** 读不出唯一结论：保留读失败自身的 code（ExecPlan D4），只在消息里补一条「只读」事实。 */
+function readOnlyFailure(error: ProjectError): GitReconcileOutcome {
+  return { kind: 'inconclusive', error: projectError(error.code, `${error.message}；${RECONCILE_READ_ONLY}`) }
+}
+
+/**
+ * 未决 Git 创建步的只读对账：用**持久 intent 里的精确输入**读回外部对象，回答
+ * adopted / absent / conflict / inconclusive。它不写任何本地状态，也不改变所有权。
+ *
+ * 分支走 `branchProbe`（读完所有分页才敢说不存在）；工作树只认持久 `path` 句柄——
+ * 拿本次请求重新推导句柄会读到另一个目标。两种读都经 `guardedDevelopmentReads`，
+ * 与首遇路径共享同一读门与能力记账口径；provider 抛错也归 inconclusive。
+ */
+export async function reconcileGitStep(
+  context: CoreContext, route: Extract<DevelopmentRoute, { ok: true }>, intent: GitIntent,
+): Promise<GitReconcileOutcome> {
+  const provider = guardedDevelopmentReads(context, route)
+  if (intent.operation === 'createBranch') {
+    const name = intent.input.name
+    const probed = await branchProbe(provider, route.repository, name)
+    if (probed.probe.error !== undefined) return readOnlyFailure(probed.probe.error)
+    if (!probed.probe.found) return { kind: 'absent', operation: 'createBranch' }
+    return { kind: 'adopted', operation: 'createBranch', value: name, headCommit: probed.headCommit }
+  }
+  const path = intent.input.path
+  if (path === undefined) return readOnlyFailure(projectError(ProjectErrorCode.ResultUnknown, '未决工作树意图没有持久句柄，无法对账'))
+  if (provider.getWorktree === undefined) return readOnlyFailure(projectError(ProjectErrorCode.NotSupported, '当前 Development provider 没有工作树读能力，无法对账'))
+  const ref = { bindingId: route.binding.ref.bindingId, objectKind: 'worktree', externalId: path, url: undefined }
+  let observed
+  try { observed = await provider.getWorktree({ worktree: ref }) }
+  catch (error) { return readOnlyFailure(projectError(ProjectErrorCode.ResultUnknown, String(error))) }
+  if (!observed.ok) {
+    if (observed.error.code === ProviderErrorCode.NotFound) return { kind: 'absent', operation: 'createWorktree' }
+    return readOnlyFailure(toProjectError(observed.error))
+  }
+  const branch = intent.input.branch
+  if (observed.value.branch !== branch) {
+    return {
+      kind: 'conflict', attemptedValue: branch, lastKnownAuthoritative: observed.value.branch,
+      error: projectError(ProjectErrorCode.Conflict, `对账读到工作树 ${path} 检出 ${observed.value.branch}，不是持久意图里的 ${branch}`),
+    }
+  }
+  return { kind: 'adopted', operation: 'createWorktree', value: observed.value.path, headCommit: undefined }
 }

@@ -198,7 +198,7 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 - [x] 2026-11-21：事实核对与基线取证（`main@f74a3b8b`）：V1 exit 0；V5 10/10；V2 11/11；V3 与 V4 的文件同批 186/186（其中 V2 文件单独跑过 3 次：1.8s / 2.7s 通过，并发负载下 5.0s 超时）。
 - [x] 2026-11-21：一次性只读探针确认红态——同 key 重放后 `listBranches`/`getWorktree` 调用数 0、外部写 0、结果 `unknown` + `status=failed`（分支采纳、工作树采纳、缺失重发三种场景都复现）。
 - [x] 2026-11-21：Batch 1 · 判别性用例先行（红）。V2 `tests 17 / pass 13 / fail 4`（新增 4 条正控分别卡在 `unknown !== saved`×3 与 `unknown !== conflict`；两条负控在旧实现即绿）；V3 前半 `external-intent + request-binding` `73 tests / 60 pass / 13 fail`（12 条 Git 创建步用例卡在「读计数没有增加」、1 条 SQLite 重开收敛用例卡在 `unknown !== saved`）；V4 `18 tests / 17 pass / 1 fail`（真实磁盘采纳卡在 `unknown !== saved`）。
-- [ ] Batch 2 · 只读对账接入（inconclusive/conflict）。
+- [x] 2026-11-21：Batch 2 · 只读对账接入（inconclusive/conflict）。GREEN 证据：V2 `tests 17 / pass 14 / fail 3`（冲突用例转绿，三条 adopted/absent 用例仍红——本批显式过渡态）；V3 前半 `external-intent + request-binding` `73 tests / 72 pass / 1 fail`（12 条 Git 创建步的读计数断言转绿，仅剩 SQLite 重开收敛用例等 Batch 3）；V1 exit 0。inconclusive 消息以「对账只读，未重发外部写入」结尾并保留读失败 code（D4）；conflict 两侧值都进入报告。
 - [ ] Batch 3 · 结论驱动续跑（adopted/absent）。
 - [ ] Batch 4 · 变异验证、文档收尾与归档。
 - [ ] 人类评审与 PR ready（由人类伙伴决定合并）。
