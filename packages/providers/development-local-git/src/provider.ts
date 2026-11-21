@@ -256,7 +256,7 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
       if (entry.branch !== `refs/heads/${input.branch}`) {
         return this.invalidInput(`工作树路径已登记但检出分支不是 ${input.branch}：${target}；请更换路径或先移除登记`)
       }
-      const blocked = await this.reuseBlockedBy(target, input.branch)
+      const blocked = await this.worktreeIdentityProblem(target, input.branch)
       if (blocked !== undefined) return this.invalidInput(`工作树登记不可复用：${target}；${blocked}`)
       return this.fail(ProviderErrorCode.Conflict, `工作树路径已登记且与分支 ${input.branch} 一致：${target}`)
     }
@@ -304,6 +304,21 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     // 是假的成功，所以交人工 prune，provider 不替人清理登记。
     if (entry.prunable || !(await occupied(target))) {
       return this.fail(ProviderErrorCode.NotFound, `工作树登记仍在但目录不存在：${target}；请先执行 git worktree prune`)
+    }
+    // detached 工作树可能承载未被任何引用可达的提交，删除会丢数据；provider 只创建分支附着的工作树。
+    if (entry.branch === undefined) {
+      return this.invalidInput(`工作树没有检出分支（detached 等），拒绝移除：${target}；请人工处理`)
+    }
+    const identity = await this.worktreeIdentityProblem(target, entry.branch.replace(/^refs\/heads\//, ''))
+    if (identity !== undefined) return this.invalidInput(`工作树身份不符合可移除条件：${target}；${identity}`)
+    // 干净判定用 Git 口径：porcelain 记录数为 0。--untracked-files=normal 覆盖 status.showUntrackedFiles=no
+    // （否则未跟踪文件会静默消失）；--no-optional-locks 让只读判定不抢 index 锁，拒绝路径不产生 Git 写。
+    const status = await this.runGit(['-C', target, '--no-optional-locks', 'status', '--porcelain=v1', '-z', '--untracked-files=normal'])
+    if (status.code !== 0) return cap.providerErr(this.failureOf(status, false))
+    const dirty = status.stdout.split('\0').filter(Boolean)
+    const [firstDirty] = dirty
+    if (firstDirty !== undefined) {
+      return this.invalidInput(`工作树有 ${dirty.length} 个未提交路径，拒绝移除：${firstDirty.slice(3)}；请先提交、stash 或清理后重试`)
     }
     const removed = await this.git(['worktree', 'remove', target])
     if (removed.code !== 0) return cap.providerErr(this.failureOf(removed, true))
@@ -382,9 +397,10 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     return { found: true, sha: found.sha, symbolic: found.symbolic, error: undefined }
   }
 
-  /** 正面确认「这个目录就是本仓库的链接工作树、且检出的正是请求的分支」：core 把 `conflict` 当
-   *  「已创建 → 复用成功」，而登记记录只说明 git 的账本里有一条。返回 undefined 表示可以安全复用。 */
-  private async reuseBlockedBy(target: string, branch: string): Promise<string | undefined> {
+  /** 正面确认「这个目录就是本仓库的链接工作树、且检出的正是期望分支」：create 用它判可复用，remove 用它判
+   *  可删除（比复用更具破坏性，必须复用同一条判据）。登记记录只说明 git 的账本里有一条，不能代替身份。
+   *  返回 undefined 表示身份成立。 */
+  private async worktreeIdentityProblem(target: string, branch: string): Promise<string | undefined> {
     const probe = await this.runGit(['-C', target, 'rev-parse', '--git-dir', '--git-common-dir', '--symbolic-full-name', 'HEAD'])
     if (probe.code !== 0) return '目录不是可读的 Git 工作树'
     const [gitDir = '', commonDir = '', head = ''] = probe.stdout.trim().split('\n')
