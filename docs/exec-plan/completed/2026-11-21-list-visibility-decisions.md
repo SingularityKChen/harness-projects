@@ -1,6 +1,6 @@
 # 列表可见性决策显式化（#314）ExecPlan
 
-> 状态：Completed（实现完成；独立验收与人类合并决定待处理）
+> 状态：Completed（实现与独立验收完成；人类合并决定待处理）
 > 创建：2026-11-21
 > 范围：把 `deriveWorkItemListView` 的入参校验、行可见性决策与展示装配在同一权威归约点内显式分离；公开输入/输出、全部文案、渲染结果与用户可见行为不变；不改 `packages/ui` 与 `apps`。
 > 上游输入：issue #314 正文（含 2026-10-28 / 2026-10-29 的容量预测；验收标准与人类决策不变）。本计划自包含，不依赖仓库外文档。实现工作树 `.worktrees/list-visibility-decisions`，分支 `refactor/list-visibility-decisions`，基于 `main` @ `f74a3b8b`。
@@ -136,7 +136,7 @@ function listStatusText(refreshing: boolean, partial: boolean, stale: boolean, r
 
 只在 `tests/contract/ui-work-item-list-view.test.js` 新增 3 个用例：
 
-1. `可见性矩阵：按阶段 / 读门 / 失败 / 快照 / 缓存授权的顺序判定，每格恰有一个决策`：21 行表驱动（见 Surprises 第 12 条），逐行断言 `{readOnly, degraded, statusText, body.kind, body.reason, body.stale, body.refreshing, body.partial, rows(kind,key,stale), 'rows' in body}`，并对每行 `JSON.stringify(view)` 做 canary 扫描；覆盖第 1–6 段与下列边界格：明确阻断压过授权缓存、offline + 读门未观测与读门不可读、gate blocked 的两种文案来源（无失败 vs 有失败）、pending + gate blocked 不进 loading、pending + read_only / degraded、received + read_only / degraded / refreshing、failed + 授权缓存 + read_only、failed + ¬snapshot / ¬authorized、gap 的 partial 与混合新鲜度、全 redacted 的 partial 不成立。
+1. `可见性矩阵：按阶段 / 读门 / 失败 / 快照 / 缓存授权的顺序判定，每格恰有一个决策`：21 行表驱动（见 Surprises 第 12 条），逐行断言 `{readOnly, degraded, statusText, body.kind, body.reason, body.stale, body.refreshing, body.partial, rows(kind,key,stale), 'rows' in body}`，并逐行用选择器断言 `body.message` 与整句锚定的 `body.remaining`（文案来源与恢复说明必须同属一条，见 D14），再对每行 `JSON.stringify(view)` 做 canary 扫描；覆盖第 1–6 段与下列边界格：明确阻断压过授权缓存、offline + 读门未观测与读门不可读、gate blocked 的两种文案来源（无失败 vs 有失败）、pending + gate blocked 不进 loading、pending + read_only / degraded、received + read_only / degraded / refreshing、failed + 授权缓存 + read_only、failed + ¬snapshot / ¬authorized、gap 的 partial 与混合新鲜度、全 redacted 的 partial 不成立。
 2. `输出形状白名单：view、不可用 body、content body 与行对象的键集固定`：精确键集 + 可见行正控；新增调试字段、把 failure 或内部 cause 塞进 body 必红。
 3. `坏接线先于可见性决策：阻断态不掩盖非法 phase / failure / 读取标记 / 时间戳`：新增 `failed(permission_denied) + lastUpdatedAt:'yesterday'` 抛 TypeError，以及 `failure.kind='constructor'` 抛 TypeError。
 
@@ -152,6 +152,7 @@ function listStatusText(refreshing: boolean, partial: boolean, stale: boolean, r
 | M6 行 stale 改用 `body.stale` | 红 3：矩阵、既有「行新鲜度」、输出形状 |
 | M7 loading 带 degraded=true | 红 2：矩阵、既有「read_only 与 degraded」 |
 | M8 body 增加内部字段 | 红 3：矩阵投影未覆盖该键，但既有「首次读取」/「陈旧 / 断线 / 缺口」与输出形状白名单红 |
+| R1 只改 offline 的 `remaining`（`message` 不变） | 红 1：矩阵（逐行整句锚定的 remaining 断言，D14）；修复前该变异在 view 文件为绿的 P3 缺口 |
 
 实际执行中 M1/M4/M5 的原始措辞是行为等价的（见 Surprises 第 14 条），已按上表的语义等价变异执行；每个变异结束后用 `cp` 回填备份并 `cmp` 校验，最终 `git diff` 只剩预期改动，V1 回到 21/21（矩阵文件 18/18）。
 
@@ -209,7 +210,7 @@ function listStatusText(refreshing: boolean, partial: boolean, stale: boolean, r
 2. 引入 `listStatusText` 承接四段文案；删除被搬走的死分支与重复收窄；不改任何字符串、字段或键。
 3. 跑 V1–V4、V9。
 4. 跑 M1–M8，记录每个变异的红/绿与具体失败用例；逐个还原后用 V1 与 `git diff --quiet` 确认工作树只余预期改动。
-**验证**：V1（21/21）、V2（exit 0）、V3（28/28）、V4（10/10）、V9（全量 165/169：4 个失败都在未触碰文件且由环境/并行负载造成，见 Surprises 第 13 条；排除该 2 个文件的 13 文件子集 148/148）。
+**验证**：V1（21/21）、V2（exit 0）、V3（28/28）、V4（10/10）、V9（当时并行执行为全量 165/169：4 个失败都在未触碰文件且由环境/并行负载造成，见 Surprises 第 13 条；排除该 2 个文件的 13 文件子集 148/148；单独运行 169/169，见 D15）。
 **回滚**：单提交 revert 回到 Batch 2；无数据、配置或外部状态影响。
 
 ### Batch 4 · 文档归档、体量与发布面门禁
@@ -300,7 +301,7 @@ node scripts/resolution-check.mjs && node --test --test-timeout=180000 $(grep -r
 
 期望：`ℹ tests 169`、`ℹ pass 169`、`ℹ fail 0`（15 个文件；基线 166，新增 3 个用例）。该命令覆盖 renderer、浏览器打包、detail、overview、board、integration 与 e2e 消费链。
 
-实际（2026-11-21，本工作树）：`ℹ tests 169 / pass 165 / fail 4`；4 个失败都在未触碰文件且为本机环境/并行负载所致（见 Surprises 第 13 条），排除这 2 个文件后的 13 文件子集为 `ℹ tests 148 / pass 148 / fail 0`。不把该环境失败当作回归，也不把它粉饰成绿色门。
+实际（2026-11-21，本工作树，独立验收轮单独运行）：`ℹ tests 169 / pass 169 / fail 0`，exit 0。同一 head 上此前并行执行时曾观察到 2 个未触碰文件的失败（实现者记录 `169/165/4`，独立验证记录 `169/166/3`）；单独重跑这两个文件均全绿，整条 V9 在无并行负载时也全绿，故计数波动属本机环境/并行负载，不归因本 PR。本计划以「命令 + 期望 169/169」为可复现证据；计数本身不是门（见 Surprises 第 13 条、D15）。
 
 **不使用 `pnpm test` 作为本地门**：clean `main` 上它已有 2 个与本改动无关的失败（见 Surprises 第 7 条）；本计划用 V1–V4、V9 作为可复现的本地证据，合并门仍是 CI `PR Fast Gate`。
 
@@ -314,11 +315,12 @@ node scripts/resolution-check.mjs && node --test --test-timeout=180000 $(grep -r
 
 ## Progress
 
+- [x] Batch 0 · 计划起草与事实核实（2026-11-21，99f90b05）：计划先于代码入库；事实在 `f74a3b8b` 独立核实（基线见 Surprises 第 9 条）。该提交 body 的 `Refs #314` 前误用了字面量 `\n\n`（应由换行分隔），属已推送历史：不改写，仅在 D16 记录。
 - [x] Batch 1 · 特性化矩阵与判别力证明（2026-11-21，a634f122）：新增 3 个用例（21 行矩阵 + 输出形状白名单 + 坏接线优先），当前实现上全绿；V1 `ℹ tests 21 / pass 21 / fail 0`、V2 exit 0；临时变异 MA（EXPLICIT_BLOCK 去掉 permission_denied）→ 矩阵等 3 用例红，MB（缓存门忽略 cacheVisibility）→ 5 用例红，MC（GATE_BLOCKED 换成 FAILURE.unknown）→ 3 用例红，均已还原且 `git diff --quiet` 通过。
 - [x] Batch 2 · 校验与失败表合并（2026-11-21，749bc069）：`FAILURE` 单表替换 `UNAVAILABLE` + `EXPLICIT_BLOCK`（`borrowsCache` 与文案同表），新增私有 `ReadMarks` / `validateReadInput`，`deriveWorkItemListView` 改为先校验、再派生 list、再进入可见性阶梯（阶梯仍是内联 if 链，装配段逐字未动）；V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`。
-- [x] Batch 3 · 决策提取与装配收口（2026-11-21，5f15c6b7）：新增私有 `ListVisibility` union、`decideListVisibility(marks, access)`（有序短路六段）与 `listStatusText`；`deriveWorkItemListView` 变成校验 → 派生 → 读门 → 决策 → 装配，装配段只按 `visibility.kind` 分派，不再自行判断权限、缓存或失败。V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`；V9 全量 165/169（4 个失败在未触碰文件，见 Surprises 第 13 条），排除该 2 个文件后 13 文件 148/148；M1–M8 全部按预期变红并已还原（见判别性测试策略表）。
-- [x] Batch 4 · 文档归档、体量与发布面门禁（2026-11-21）：计划移入 `docs/exec-plan/completed/` 并更新 `docs/README.md`；V5 代码 263 / 文档 388（均低于 PR 上限）、V6 机械扫描通过、V7 无输出、V8 通过（gh 已登录）；V1/V2 在最终 head 复跑通过；分支已 push 到 `origin/refactor/list-visibility-decisions`（draft PR #672，未 ready、未合并）。
-- 2026-11-21：计划创建；事实在 `f74a3b8b` 独立核实（基线见 Surprises 第 9 条）；实现未开始。
+- [x] Batch 3 · 决策提取与装配收口（2026-11-21，5f15c6b7）：新增私有 `ListVisibility` union、`decideListVisibility(marks, access)`（有序短路六段）与 `listStatusText`；`deriveWorkItemListView` 变成校验 → 派生 → 读门 → 决策 → 装配，装配段只按 `visibility.kind` 分派，不再自行判断权限、缓存或失败。V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`；V9 全量当时并行执行为 165/169（4 个失败在未触碰文件，见 Surprises 第 13 条；单独运行 169/169，见 D15），排除该 2 个文件后 13 文件 148/148；M1–M8 全部按预期变红并已还原（见判别性测试策略表）。
+- [x] Batch 4 · 文档归档、体量与发布面门禁（2026-11-21）：计划移入 `docs/exec-plan/completed/` 并更新 `docs/README.md`；V5 代码 263 / 文档 388（均低于 PR 上限；验收轮后为 278/396，见 Outcomes）、V6 机械扫描通过、V7 无输出、V8 通过（gh 已登录）；V1/V2 在最终 head 复跑通过；分支已 push 到 `origin/refactor/list-visibility-decisions`（draft PR #672，未 ready、未合并）。
+- [x] 独立验收轮（2026-11-21，accept-314）：复跑 V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`、V5 `代码 278 / 文档 396`、V7 无输出、V9 `169/169`；自建 head vs `main` 差分探针 23,200 组合 0 差异（正控报 435 差异）。P3 收口：矩阵补锚定 `remaining` 断言（R1 变异被杀，D14）、V9 计数与「12/13」表述订正（D15）、Batch 0 旧状态行改为历史条目、99f90b05 不改写只记录（D16）。行为零变化，未新增依赖/导出/文件。
 
 ## Surprises & Discoveries
 
@@ -334,7 +336,7 @@ node scripts/resolution-check.mjs && node --test --test-timeout=180000 $(grep -r
 10. #366/#429/#430 已 CLOSED；并行 #191/#396/#138 的写面（core 重协调、tests 共享 walker、providers worktree）与本 PR 不重叠。
 11. issue 验收命令点名的是 2 个测试文件（view + browser），不是 3 个。
 12. 矩阵实际为 21 行而非创建时的 20 行：把「gap 混合新鲜度」「gap 部分读取」「全 redacted 且 partial 不成立」拆成三个独立格，避免同一格同时承担三种决策；逐行证据见 Batch 1 提交。
-13. V9 全量在本工作树为 165/169（期望 169）：4 个失败全部在未触碰的文件，且与本改动无关——`tests/contract/ui-local-table-view.test.js` 的隔离子进程在同一台机器上 `ETIMEDOUT`（`spawnSync` 5000ms 寿命守卫），`tests/integration/harness-plugin-host-planning-mapping.test.js` 12/13 失败于 `HostAuthorityError: Host project data is unavailable`（`apps/harness-plugin/src/host-private-data.ts:122`，与本 PR 零文件交集；单个文件单独运行同样失败，指向本机 Host 私有数据/凭据环境）。因此本 PR 的等价证据用 V1/V3/V4 加排除这 2 个文件后的 V9 子集 148/148；全量 V9 结果如实记录，不当成绿色门。
+13. V9 全量计数不可稳定复现，抖动来自本机环境而非改动：同一 head 上并行执行时观察到 2 个未触碰文件的失败——`tests/contract/ui-local-table-view.test.js` 的隔离子进程 `ETIMEDOUT`（`spawnSync` 5000ms 寿命守卫；该文件 8 项单独运行全绿），`tests/integration/harness-plugin-host-planning-mapping.test.js` 的 2 项 `HostAuthorityError: Host project data is unavailable`（`apps/harness-plugin/src/host-private-data.ts:122`；该文件 13 项，单独运行 13/13 全绿）。实现者记录 `169/165/4`、独立验证记录 `169/166/3`、独立验收轮单独运行 `169/169`。结论：V9 的可复现证据是「命令 + 期望 169/169」，计数波动随本机并行负载/凭据环境变化，既不是回归也不是绿色门（D15）。
 14. M1/M4/M5 的原始措辞在本实现上不可区分：把明确阻断移到缓存门之后（M1）与只在内容分支派生 list（M4）在等价改写前不会改变任何输出——第一段判断仍先于其它分支、时间戳校验只影响 content 分支。已改为语义等价但可失败的变异（缓存门通过时不再明确阻断；阻断/首读分支不派生 list；hasReceivedSnapshot 用 truthy 校验），并记录实际红。
 15. `listStatusText` 只需要 `refreshing / partial / stale / readableCount`，不需要 `list.stale`：`stale` 在装配期已与 `degradedPage` 合并。计划原先写 `decideListVisibility(marks, access, list.stale)`，实现据实收窄为两参（D12）。
 
@@ -355,6 +357,9 @@ node scripts/resolution-check.mjs && node --test --test-timeout=180000 $(grep -r
 | D11 | 两处历史优先级 quirk 长期作为现状契约保留；生产装配硬编码（`work-item-app.ts:56-57`）不在本 PR 修、不另立 issue，只在计划记录 | 人类批准（Q1/Q3）：行为保持优先，擅自修正会改变用户可见文案或扩大发布面 | 2026-11-21 Lead 批准 |
 | D12 | `decideListVisibility` 只接收已校验 marks 与读门访问级别，不接收 `list.stale` | 决策不消费 `list.stale`（只在装配期与 `degradedPage` 合并为 `body.stale`）；传未使用参数会触发 `noUnusedParameters` | 2026-11-21 Batch 3 实现 |
 | D13 | 体量只按 V5 的 PR 上限（代码 ≤800 / 文档 ≤1300）收敛，不追求 CodeBudget 600 | 本 PR 是行为保持重构，范围已收敛在单文件 + 测试；更小预算属后续独立事项，人类已确认不扩大本 PR（Q5） | 2026-11-21 Lead 批准 |
+| D14 | 矩阵逐行补 `body.message` 与整句锚定的 `body.remaining` 断言，而不是把注释改成「只断言 message」；同时把重复的长标记契约文案收为私有常量 | 注释声称两者都断言而实际只断言 message（独立验证 F1/F5）；补断言（不弱化）才能让「只改 remaining」的 R1 变异被杀，锚定整句才能杀掉追加式改动 | 2026-11-21 独立验收（accept-314） |
+| D15 | V9 证据改写为「命令 + 期望 169/169」，计数与「12/13」表述按实跑订正，不把并行负载抖动当门 | 同一 head 上出现 165/169、166/169、169/169 三种计数，2 个失败文件单独运行均全绿；原「12/13 失败」把该文件 13 项测试与 2 项失败混写，不可复现 | 2026-11-21 独立验收（accept-314） |
+| D16 | 已推送提交 99f90b05 body 中 `Refs #314` 前的字面量 `\n\n` 不改写历史，只在计划记录 | 该提交已在远端；改写共享历史超出本轮范围且无发布面实质问题（PR body 的 `Closes #314` 合法、issue 关联回读正常）；不改写比补一个假修复更诚实 | 2026-11-21 独立验收（accept-314） |
 
 ## Idempotence and Recovery
 
@@ -373,15 +378,18 @@ node scripts/resolution-check.mjs && node --test --test-timeout=180000 $(grep -r
 
 ## Outcomes & Retrospective
 
-实现完成（2026-11-21，分支 `refactor/list-visibility-decisions`，draft PR #672；独立验收与人类合并决定待处理）：
+实现与独立验收完成（2026-11-21，分支 `refactor/list-visibility-decisions`，draft PR #672；人类合并决定待处理）：
 
-- 体量：V5 实际 `代码 263 / 1000`、`文档 388 / 1500`（申报上限 800/1300）。
-- 偏差与恢复：矩阵 20 → 21 行（Surprises 12）；M1/M4/M5 原始措辞行为等价，改为语义等价可失败变异（Surprises 14）；`decideListVisibility` 收窄为两参（Surprises 15 / D12）；V9 全量因本机环境/并行负载在 2 个未触碰文件上失败，改用 V1/V3/V4 + V9 子集 148/148 作等价证据（Surprises 13）。Batch 间无 revert；每个变异用 `/tmp` 备份 + `cmp` 还原，最终 `git diff` 只剩预期改动。
-- 判别力：MA/MB/MC（Batch 1）与 M1–M8（Batch 3）全部实跑变红并还原，失败用例名见 Batch Progress 与变异表。
-- 验证：V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`、V9 子集 `148/148`（全量 165/169，环境失败已归因）；V5/V6/V7/V8 见 Batch 4 Progress。
-- 未完成/阻塞：真实 CI lane、`gh pr checks` 回读、人类视觉验收与合并决定留给独立验证与人类伙伴；本 agent 不 push `main`、不执行 `gh pr ready`、不合并。矩阵未收窄，未放弃任何格。
+- 体量：验收轮复跑 V5 为 `代码 278 / 1000`、`文档 396 / 1500`（申报上限 800/1300）；代码增量来自 D14 的断言与私有常量，文档增量来自验收记录与 D15，未新增依赖、导出或文件。
+- 偏差与恢复：矩阵 20 → 21 行（Surprises 12）；M1/M4/M5 原始措辞行为等价，改为语义等价可失败变异（Surprises 14）；`decideListVisibility` 收窄为两参（Surprises 15 / D12）；V9 全量在并行负载下曾抖动、单独运行 169/169（Surprises 13 / D15）。Batch 间无 revert；每个变异用备份 + `cmp` 还原，最终 `git diff` 只剩预期改动。
+- 判别力：MA/MB/MC（Batch 1）、M1–M8（Batch 3）与验收轮新增 R1（只改 `remaining`）全部实跑变红并还原，失败用例名见 Batch Progress 与变异表。
+- 验证（验收轮，同一 head 系谱）：V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`、V7 无输出、V9 `169/169`；V5/V6/V8 见 Batch 4 Progress 与验收追加条目。
+- 独立等价证据：验收 agent 另建差分探针，把 `main` 版本实现与 head 同时 import，对 23,200 个组合比较 `JSON.stringify(view)` 与抛错的 `name + message`，差异 0（含键顺序）、canary 泄漏 0、redacted 行形状违规 0；正控（只改 baseline 的一条 `remaining`）报 435 处差异，证明探针对文案级改动敏感。该结论独立于实现者与验证者的自述。
+- P3 收口（不改变行为）：F1 矩阵补 `message`/整句锚定 `remaining` 断言（D14，R1 变异因此被杀）；F2 V9 计数与「12/13」表述按实际复跑订正（D15）；F3 归档计划残留旧状态行改为历史 Batch 0 条目；F4 已推送提交 99f90b05 body 中的字面量 `\n\n` 不改写历史，仅记录（D16）；F5 重复的长标记契约文案收为私有常量（D14）。
+- 未完成/阻塞：人类合并决定（本 agent 不 push `main`、不执行 `gh pr ready`、不合并）；矩阵未收窄，未放弃任何格。
 
 ## Bottom Change Note
 
 - 2026-11-21：创建。收敛两份本地独立设计，按 `f74a3b8b` 独立重核源码、测试、脚本与 issue 事实；确定同文件私有单元 + 单失败表的最终方案，记录被否决方案、有序矩阵、判别性测试、变异、批次回滚点与本地 `pnpm test` 的基线失败。
-- 2026-11-21：实现完成（Batch 1 a634f122、Batch 2 749bc069、Batch 3 5f15c6b7、Batch 4 归档提交）；行为保持由现有 15 个消费文件 + 21 行矩阵 + MA–MC / M1–M8 变异证明；独立验收与合并待人类伙伴。
+- 2026-11-21：实现完成（Batch 1 a634f122、Batch 2 749bc069、Batch 3 5f15c6b7、Batch 4 归档提交）；行为保持由现有 15 个消费文件 + 21 行矩阵 + MA–MC / M1–M8 变异证明。
+- 2026-11-21：独立验收（accept-314）复跑全部门禁并自建 23,200 组合差分探针；收口 4 条 P3（D14/D15/D16），行为零变化；合并待人类伙伴。

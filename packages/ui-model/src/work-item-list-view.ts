@@ -152,6 +152,9 @@ type ReadMarks =
   | { readonly phase: 'failed'; readonly failure: ListReadFailure
       readonly hasReceivedSnapshot: boolean; readonly cacheVisibility: 'authorized' | 'unknown' }
 
+/** failed / received 两个分支报的是同一句标记契约：共用一个后缀，避免同一句文案在两处漂移。 */
+const MARKS_CONTRACT_SUFFIX = ' 的读取标记不合契约：refreshing / hasReceivedSnapshot 须为布尔，cacheVisibility 须为 authorized / unknown'
+
 /** 唯一入参校验：非法 phase / failure / 读取标记在这里响亮失败，后续代码只消费收窄后的标记。 */
 function validateReadInput(input: WorkItemListReadInput): ReadMarks {
   const phase: string = input.phase
@@ -163,13 +166,13 @@ function validateReadInput(input: WorkItemListReadInput): ReadMarks {
       throw new TypeError(`failure.kind 不合契约，收到 ${JSON.stringify(input.failure?.kind)}`)
     }
     if (typeof input.hasReceivedSnapshot !== 'boolean' || !['authorized', 'unknown'].includes(input.cacheVisibility)) {
-      throw new TypeError(`${input.phase} 的读取标记不合契约：refreshing / hasReceivedSnapshot 须为布尔，cacheVisibility 须为 authorized / unknown`)
+      throw new TypeError(`${input.phase}${MARKS_CONTRACT_SUFFIX}`)
     }
     return { phase: 'failed', failure: input.failure, hasReceivedSnapshot: input.hasReceivedSnapshot, cacheVisibility: input.cacheVisibility }
   }
   if (input.phase === 'received') {
     if (typeof input.refreshing !== 'boolean') {
-      throw new TypeError(`${input.phase} 的读取标记不合契约：refreshing / hasReceivedSnapshot 须为布尔，cacheVisibility 须为 authorized / unknown`)
+      throw new TypeError(`${input.phase}${MARKS_CONTRACT_SUFFIX}`)
     }
     return { phase: 'received', refreshing: input.refreshing }
   }

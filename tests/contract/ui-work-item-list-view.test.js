@@ -273,6 +273,15 @@ const COPY = {
   error: /读取工作项失败/,
   gate_blocked: /当前不可用，原因未提供/,
 }
+/** 与 COPY 同源的 remaining 选择器：首尾锚定到整句，证明恢复说明与文案来源同属一条、不能被换掉或串用。 */
+const REMAINING = {
+  permission_denied: /^请在规划来源恢复授权后重试；此前的缓存不会显示。$/,
+  not_supported: /^补充授权无法解决，请改用支持读取的来源。$/,
+  unknown: /^工作区与规划来源仍可查看；确认之前不显示条目，也不判断是否有工作项。$/,
+  offline: /^连接恢复后会重新读取。$/,
+  error: /^请稍后重试；失败原因不在此展示。$/,
+  gate_blocked: /^工作区与规划来源仍可查看；读取能力恢复之前不显示条目，也不显示此前的缓存。$/,
+}
 const itemRow = (key, stale) => ({ kind: 'item', key, stale })
 const hiddenRow = (key) => ({ kind: 'redacted', key })
 const unavailablePage = (reason) => ({ readOnly: false, degraded: false, statusText: BLOCKED, kind: 'unavailable', reason, rows: undefined })
@@ -281,7 +290,7 @@ const contentPage = (statusText, rows, { readOnly = false, degraded = false, sta
   readOnly, degraded, statusText, kind: 'content', stale, refreshing,
   ...(partial === undefined ? {} : { partial }), rows,
 })
-/** 矩阵断言投影：只保留与可见性决策有关且用户可观察的面；message/remaining 另按选择器断言。 */
+/** 矩阵断言投影：只保留与可见性决策有关且用户可观察的面；message/remaining 逐行按 COPY/REMAINING 选择器断言。 */
 const decisionView = (view) => {
   const body = view.body
   return {
@@ -356,7 +365,10 @@ test('可见性矩阵：按阶段 / 读门 / 失败 / 快照 / 缓存授权的�
     assert.deepEqual(decisionView(view), row.expected, row.name)
     assert.equal('rows' in view.body, view.body.kind === 'content', row.name + '：只有内容页带 rows')
     if (row.copy === undefined) assert.equal('message' in view.body, false, row.name + '：非不可用页没有文案')
-    else assert.match(view.body.message, COPY[row.copy], row.name + '：文案来源')
+    else {
+      assert.match(view.body.message, COPY[row.copy], row.name + '：文案来源')
+      assert.match(view.body.remaining, REMAINING[row.copy], row.name + '：恢复说明来源')
+    }
     const json = JSON.stringify(view)
     for (const canary of CANARIES) assert.ok(!json.includes(canary), row.name + ' 泄漏 ' + canary)
     for (const visible of view.body.rows ?? []) {
