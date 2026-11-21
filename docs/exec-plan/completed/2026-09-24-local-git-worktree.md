@@ -796,7 +796,7 @@ D-F / 悬空链接五组用例与三处套件断言（断言一条未删）。**
 - Decision: 本层**不实现** `removeWorktree`，也不声明 `development.worktree.remove`；移除交 **#138** 按「仅显式请求、仅干净工作树」交付，安全/丢弃分层（默认安全、显式 `discard` 才丢弃修改、`overrideLock` 再升一级、结构化返回被阻止的原因）写进 #138 的验收。
   Rationale: `git worktree remove` 不带 `--force` 只把已跟踪文件的修改与未跟踪文件算作"脏"，**被忽略的文件**（`.env`、`node_modules/`）会随目录一起消失（实测）；provider 也无法区分"本 binding 建的工作树"与"人工建的工作树"；`git grep removeWorktree -- packages apps` 在 core 与宿主里零调用方；#137 的 Out of scope 明确写了它。同栈的调研（git / Terraform `force_destroy` / MCP `destructiveHint`）一致指向「capability 声明 + 默认安全 + 显式破坏性意图 + 确认在调用方」这一分层，而不是把它塞进创建能力的 PR。
   Date/Author: 2026-09-26 / agent（人类伙伴在 2026-09-26 裁决「拆套件 PR + 删 removeWorktree」）
-  > **Superseded（2026-11-21，#138 交付时）**：safe/discard 分层**未随 #138 交付**——issue #138 的验收只要求「仅显式请求、仅干净（Git 口径）工作树」；被忽略内容随显式移除删除是已文档化的数据损失面，分层留给后续 issue（见 `docs/exec-plan/active/2026-11-21-worktree-clean-removal.md` 的 D2/D10）。
+  > **Superseded（2026-11-21，#138 交付时）**：safe/discard 分层**未随 #138 交付**——issue #138 的验收只要求「仅显式请求、仅干净（Git 口径）工作树」；被忽略内容随显式移除删除是已文档化的数据损失面，分层留给后续 issue（见 `docs/exec-plan/completed/2026-11-21-worktree-clean-removal.md` 的 D2/D10）。
 - Decision: 改 **#137 验收条目 3** 的措辞：`LOCAL_GIT_FAILURE` → 「闭集 `ProviderErrorCode` 内的结构化错误（`invalid_input`），绝不静默复用」。
   Rationale: `ProviderErrorCode` 是恰好 8 个值的闭集，加第 9 个 provider 专用码会破坏「调用方只按 capability key 分支」的契约；条目的意图本来就是「结构化失败、不静默复用」。`AGENTS.md` §7 要求这类验收条目变更走人类批准，人类伙伴在 2026-09-26 明确批准。
   Date/Author: 2026-09-26 / agent（人类伙伴批准，已执行：`gh issue edit 137`）

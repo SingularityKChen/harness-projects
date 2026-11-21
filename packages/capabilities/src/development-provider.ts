@@ -123,8 +123,9 @@ export interface DevelopmentProvider {
   /**
    * 显式移除一份工作树。只移除本 provider 绑定、允许根内、Git 登记在册、正面确认是本仓库链接工作树且当前
    * 工作树干净的对象；脏树答 `invalid_input` 且在 message 报告未提交路径数（Git 口径：`git status --porcelain`
-   * 为空；被忽略内容不算脏，但会随目录一起删除）。永不 `--force`、不 prune、不删分支；本方法没有自动或批量
-   * 触发路径，真实文件系统行为由 local-git 集成测试钉住。
+   * 为空；被忽略内容不算脏，但会随目录一起删除）。路径数是 `status --porcelain -z` 的**记录数**，不是文件数：
+   * rename 计 2 条、未跟踪目录折叠为 1 条。永不 `--force`、不 prune、不删分支；本方法没有自动或批量触发路径，
+   * 真实文件系统行为由 local-git 集成测试钉住。
    */
   removeWorktree?(input: ProviderRemoveWorktreeInput): Promise<ProviderResult<void>>
   /** 观察的 `sourceVersion` 只取 `observation.ts` R4 的规范时间戳或 `undefined`；变更请求的头部 sha 不得填进去。 */
