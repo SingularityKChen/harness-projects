@@ -1,6 +1,6 @@
 # restart-reconciliation ExecPlan
 
-> 状态：Completed（实现完成，验收待独立验证）
+> 状态：Completed（实现完成；独立验收通过，待人类评审与合并决定）
 > 创建：2026-11-21
 > 范围：issue #191 —— Start Work 的同 key 重放在报告未决 Git 外部写之前，先重跑一次只读对账，用对账结论决定「采纳 / 重发 / 冲突 / 未知」；不新增列、表、port、兼容层
 > 上游依据：issue #191 正文与验收（`kind:fix area:core`，Milestone M2.1）；`docs/adr/ADR-0004-unknown-external-create-is-product-visible.md`；`docs/architecture/gate-e1-ruling.md` §4 R8 与 §9 的偏离说明；`docs/product/vertical-path.md` §2
@@ -67,7 +67,7 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 ### 被放弃的方案
 
 1. **给 `mutation_attempt` 加 `resolution` 列/新表/新 port**（issue 明示否决）：把「怎么知道的」重新物化成第二状态列，正是 L1（#119/#28）刚拆掉的轴；且落盘结论会过期，能力恢复后仍要重对账，还要额外失效规则。
-2. **由新 idempotency key 接管旧未决槽位，并「取代」旧行**（设计 b 的跨 key 分支）：与端口契约「未决槽位由 core 跨 key 阻挡」（`packages/capabilities/src/storage.ts:396-398`）、DDL 注释「未知步骤跨 key/lease 保守阻挡，非自动恢复日志」（`packages/storage/sqlite/migrations/001_init.sql:338`）与 R8 偏离说明「未决槽位不因换 key 或租约过期解除」（`docs/architecture/gate-e1-ruling.md:242`）直接冲突；并且证成的写发生在旧行、操作交给新请求时，旧行无论记 `saved` 还是 `failed` 都会把获知方式塞回结果轴，还必须新增「谁能接管别人的未决操作」的 authority 规则。留作 follow-up issue（见 Decision Log D1）。
+2. **由新 idempotency key 接管旧未决槽位，并「取代」旧行**（设计 b 的跨 key 分支）：与端口契约「未决槽位由 core 跨 key 阻挡」（`packages/capabilities/src/storage.ts:396-398`）、DDL 注释「未知步骤跨 key/lease 保守阻挡，非自动恢复日志」（`packages/storage/sqlite/migrations/001_init.sql:338`）与 R8 偏离说明「未决槽位不因换 key 或租约过期解除」（`docs/architecture/gate-e1-ruling.md:242`）直接冲突；并且证成的写发生在旧行、操作交给新请求时，旧行无论记 `saved` 还是 `failed` 都会把获知方式塞回结果轴，还必须新增「谁能接管别人的未决操作」的 authority 规则。留作 follow-up 建议（本 PR 未创建 issue，见 Decision Log D1/D19）。
 3. **claim 之前先 CAS 结算旧行，再重入 claim**（设计 b 的同 key 机制）：在「尚无 owner generation」的时刻引入第二个写者决定旧行结果；本方案改为对账零写入、所有写入留在既有 claim/provision 事务内（I1）。
 4. **启动时扫描 `mutation_attempt` 批量对账**：把宿主启动与外部可用性硬耦合，且仍要落「上次对账时间/结论」才能避免重复扫描，等于方案 1 的变体；与 #193/#421 的责任边界也冲突。
 5. **只修答复不续跑**（重探一次，命中就把答复改成 Saved）：会让「分支已存在但工作树/run 未建」冒充权威 Saved，违反「外部写入得到 ack/reconcile 前本地不得显示权威 Saved」。
@@ -88,11 +88,11 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 
 - 读结论类型放在 `git-provisioning.ts`（它是「Git 读回」的唯一实现处），不新增模块。
 - 对外只复用既有 `StartWorkResult` 与 `WritePhase`；不新增 wire 字段、不新增客户端状态。
-- 明确不做：`pending` 行的对账（硬崩溃残留会变成永久的「正在处理」，另开 issue）、Ready 缺口的自动收敛（#193）、一般 Planning 写的重启对账（#191 的审计行仍保留）、真实平台 provider 的端到端验证。
+- 明确不做：`pending` 行的对账（硬崩溃残留会变成永久的「正在处理」，需独立 issue，本 PR 未创建）、Ready 缺口的自动收敛（#193）、一般 Planning 写的重启对账（#191 的审计行仍保留）、真实平台 provider 的端到端验证。
 
 ## Global Constraints
 
-- 只允许改：`packages/core/src/start-work.ts`、`packages/core/src/git-provisioning.ts`、`tests/integration/start-work-step-recording.test.js`、`tests/integration/start-work-external-intent.test.js`、`tests/integration/start-work-request-binding.test.js`、`tests/integration/local-git-core-provisioning.test.js`、`docs/exec-plan/active/2026-11-21-restart-reconciliation.md`、`docs/README.md`（仅索引）。
+- 只允许改：`packages/core/src/start-work.ts`、`packages/core/src/git-provisioning.ts`、`tests/integration/start-work-step-recording.test.js`、`tests/integration/start-work-external-intent.test.js`、`tests/integration/start-work-request-binding.test.js`、`tests/integration/local-git-core-provisioning.test.js`、本计划自身（归档后为 `docs/exec-plan/completed/2026-11-21-restart-reconciliation.md`）、`docs/README.md`（仅索引）。
 - 禁止改：`packages/capabilities/`、`packages/domain/`、`packages/storage/sqlite/`（含 `001_init.sql` 与任何迁移）、`packages/client/`、`packages/ui/`、`packages/controller/`、`providers/`、`docs/adr/`、`docs/architecture/`、`docs/product/`。不新增依赖、不新增 port/表/列/事件、不做数据迁移、不加兼容层或开关。
 - 体量：技术改动（代码+测试+夹具，增删之和）≤800 行，目标 ≈380；文档 ≤1300 行，目标 ≈360。仓库硬上限 1000/1500 是外层边界。
 - 判别力：只允许「新增断言 / 新增用例」；不删既有用例、不放宽任何既有断言、不改既有用例的失败注入语义。负控用例（读不可用 → 仍 unknown）必须保持最优。
@@ -166,7 +166,7 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 7. M7 删掉工作树分支一致性检查 → 用例 4 红（冲突被误报成 adopted）。
 8. M8 让 adopted 也照常调用 `ensureBranch`/`ensureWorktree` → 用例 1/2 红（外部写计数增加）。
 9. 若某个变异跑不出红：不得保留无法判别的守卫，也不得用「看起来对」代替证据——在 Batch 1 补一条针对该守卫的负控（只加断言），再重跑该变异；补不出判别用例的守卫按最小化原则删除并记入 Decision Log。
-10. 归档：`docs/exec-plan/active/2026-11-21-restart-reconciliation.md` → `docs/exec-plan/completed/`（文件名不变），`docs/README.md` 索引行从 Active 移到 Completed，回填 `Outcomes & Retrospective` 与 `Progress`。
+10. 归档（已完成）：计划文件移入 `docs/exec-plan/completed/2026-11-21-restart-reconciliation.md`（文件名不变），`docs/README.md` 索引行从 Active 移到 Completed，回填 `Outcomes & Retrospective` 与 `Progress`。
 
 **验证**：V6、V7、V8（期望分别达标 / 「机械扫描通过」/ 无输出）；V1–V5 在恢复所有变异后再跑一遍全绿。
 
@@ -177,7 +177,7 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 以下命令是唯一来源，批次只引用编号；均在工作树 `.worktrees/restart-reconciliation/` 根目录运行，且不要同时跑其他重负载命令（`start-work-step-recording.test.js` 里「游标永不结束」用例有 5s 预算，本机在并发负载下观察到过超时，见 `Surprises & Discoveries`）。
 
 - **V1** `pnpm run typecheck` → 期望 exit 0、无输出。
-- **V2** `pnpm test:file tests/integration/start-work-step-recording.test.js` → 期望 `fail 0`；`tests` 由基线 11 增至 17（新增 4 条正控 + 2 条负控），且 4 条新增用例出现在 pass 列表。
+- **V2** `pnpm test:file tests/integration/start-work-step-recording.test.js` → 期望 `fail 0`；`tests` 由基线 11 增至 18（新增 4 条正控 + 3 条负控；第 3 条负控是对账采样行守卫的判别用例，见 D18），且新增用例出现在 pass 列表。
 - **V3** `pnpm test:file tests/integration/start-work-external-intent.test.js tests/integration/start-work-request-binding.test.js tests/integration/start-work-owner-fencing.test.js tests/integration/start-work-retry-identity.test.js tests/integration/start-work-execution-uniqueness.test.js tests/e2e/start-work-recovery.test.js` → 期望 `fail 0`。2026-11-21 基线实测 V3 六文件与 V4 一文件同批 186 pass / 0 fail；本轮分开实测 V3 `170 tests / 170 pass / 0 fail`，V4 `18 tests / 18 pass`。
 - **V4** `pnpm test:file tests/integration/local-git-core-provisioning.test.js` → 期望 `fail 0`，且真实磁盘采纳用例出现。2026-11-21 本轮实测 18 tests / 18 pass / 0 fail（基线 17 + 新增 1）。
 - **V5** `pnpm run boundaries` → 期望 `tests 10` / `pass 10` / `fail 0`（2026-11-21 基线实测）。
@@ -191,7 +191,7 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 2. 产品面：`unknown` 之后用同一份表单再提交（同 key），provider 恢复可读时收敛到 Ready 且分支/工作树/run 各 1 份；仍不可读时保持 `unknown`、零外部写；工作树分支不一致时得到 `conflict` 且两侧值可见。
 3. 守卫面：V3 全绿——读不可用仍 unknown 且外部写只 1 次、在途不被接管、Ready 不触发外部写、已结算同 key 逐字回放、新 key 仍被挡。
 4. 边界：`git diff --stat` 只含 `Global Constraints` 列出的文件；无 schema/契约/UI 变化；V6 达标、V7 清洁、V8 干净。
-5. 不做未验证声明：真实平台 provider 与 Host 端到端不在本 PR 证据内，PR 描述必须写明（本 PR 的证据面是 fake + local-git + 真实 SQLite 重开）。
+5. 不做未验证声明：真实平台 provider 与 Host 端到端不在本 PR 证据内；证据面 = fake + 真实 local-git 临时仓库 + 真实 SQLite 关库重开。PR 描述由规划所有者回填（独立验收按约定不改 PR 描述；当前 body 仍是占位验证段与已归档路径，见 `Outcomes & Retrospective` 的「交付面遗留」）。
 
 ## Progress
 
@@ -199,8 +199,7 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 - [x] 2026-11-21：一次性只读探针确认红态——同 key 重放后 `listBranches`/`getWorktree` 调用数 0、外部写 0、结果 `unknown` + `status=failed`（分支采纳、工作树采纳、缺失重发三种场景都复现）。
 - [x] 2026-11-21：Batch 1 · 判别性用例先行（红）。V2 `tests 17 / pass 13 / fail 4`（新增 4 条正控分别卡在 `unknown !== saved`×3 与 `unknown !== conflict`；两条负控在旧实现即绿）；V3 前半 `external-intent + request-binding` `73 tests / 60 pass / 13 fail`（12 条 Git 创建步用例卡在「读计数没有增加」、1 条 SQLite 重开收敛用例卡在 `unknown !== saved`）；V4 `18 tests / 17 pass / 1 fail`（真实磁盘采纳卡在 `unknown !== saved`）。
 - [x] 2026-11-21：Batch 2 · 只读对账接入（inconclusive/conflict）。GREEN 证据：V2 `tests 17 / pass 14 / fail 3`（冲突用例转绿，三条 adopted/absent 用例仍红——本批显式过渡态）；V3 前半 `external-intent + request-binding` `73 tests / 72 pass / 1 fail`（12 条 Git 创建步的读计数断言转绿，仅剩 SQLite 重开收敛用例等 Batch 3）；V1 exit 0。inconclusive 消息以「对账只读，未重发外部写入」结尾并保留读失败 code（D4）；conflict 两侧值都进入报告。
-- [ ] Batch 3 · 结论驱动续跑（adopted/absent）。
-- [ ] Batch 4 · 变异验证、文档收尾与归档。
+- [x] 2026-11-21：Batch 3 · 结论驱动续跑（adopted/absent）。GREEN：V2 `tests 17 / pass 17 / fail 0`（3 条 adopted/absent 正控转绿；当时新增用例共 6 条）、V3 `170/170`、V4 `18/18`（真实磁盘采纳）、V1 exit 0。
 - [x] 2026-11-21：Batch 4 · 变异验证（八个变异各自只让对应判别用例变红，逐个改回后重跑）：
   - M1（去掉认领事务里被采纳分支的身份写回）→ V2「外部已建同名分支」红（`createBranch` 被再调一次；D15 说明变异点为何从 `provisionGit` 移到这里）。
   - M2（`probe.error` 当 absent）→ external-intent 六条 `createBranch` lost-ack 用例红（外部写计数 2 ≠ 1）。
@@ -210,7 +209,10 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
   - M6（用 `intent.input.worktreeKey` 代替持久 `path`）→ V4 真实磁盘采纳用例红（`createWorktree` 被再调一次）。
   - M7（去掉工作树分支一致性检查）→ V2「工作树检出别的分支」红（冲突被误报 adopted）。
   - M8（让 adopted 也照常调用 `ensureWorktree`）→ V2「工作树已落盘但 ack 丢失」红（`createWorktree` 被再调一次）。
-- [x] 2026-11-21：Batch 4 · 文档与归档：本计划移入 `docs/exec-plan/completed/`（文件名不变），`docs/README.md` 索引从 Active 移到 Completed；实现完成、验收待独立验证。
+- [x] 2026-11-21：Batch 4 · 文档与归档：本计划移入 `docs/exec-plan/completed/`（文件名不变），`docs/README.md` 索引从 Active 移到 Completed。
+- [x] 2026-11-21 23:2x（Asia/Singapore，独立验收，实现 head `adf77c83` + 本收尾提交）：P2-1 文档真实性修正——本计划自身路径改指 `docs/exec-plan/completed/2026-11-21-restart-reconciliation.md`（active/ 路径在 head 上 404）、follow-up 统一改为「建议，本 PR 未创建」（D1/D6/D13/D19）、`docs/README.md` 索引复核为 Completed。
+- [x] 2026-11-21 23:2x（独立验收）：P2-2 并发守卫补判别用例——「对账采样后同 key 未决行被别的写者推进时不得采纳」。RED→GREEN 证据：把 `packages/core/src/start-work.ts:429,438` 两处「当前行与采样行逐字相同」守卫放宽成「任意未决行」（M9）后 V2 `18 tests / 17 pass / 1 fail`，新用例红（`行已不是采样行：必须按原有重放语义作答，不得拿旧证据续跑`），既有 17 条全绿；`git checkout -- packages/core/src/start-work.ts` 还原后 V2 `18 tests / 18 pass / 0 fail`。实现未改动（D18）。
+- [x] 2026-11-21 23:2x（独立验收复跑）：V1 exit 0；V2 连跑 3 次均 `18/18`（游标用例 2469 / 1792 / 1869 ms，5s 预算内）；V3 `170/170`；V4 `18/18`；V5 `10/10`；V7「机械扫描通过」；V8 无输出；V6 见 `Outcomes & Retrospective` 的规模行（数字按最终 head 重算）。逐条 AC 对照同章节。
 - [ ] 人类评审与 PR ready（由人类伙伴决定合并）。
 
 ## Surprises & Discoveries
@@ -219,29 +221,36 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 2. **新 key 阻挡有契约级依据**，不只是测试习惯：`packages/capabilities/src/storage.ts:396-398`「未决槽位由 core 跨 key 阻挡」、`packages/storage/sqlite/migrations/001_init.sql:338`「未知步骤跨 key/lease 保守阻挡，非自动恢复日志」、`docs/architecture/gate-e1-ruling.md:242` 的人类采纳说明。这条把「restart 是否包含新 key」的裁定从偏好问题变成契约问题。
 3. **产品的恢复动作就是同 key**：`packages/client/src/start-work.ts:52,59` 在 `uncertain` 时复用 key，`packages/ui/src/start-work-section.ts:27` 冻结表单但允许再次提交，client 只在插件加载时组合一次（`apps/harness-plugin/src/client.ts:72`）。因此同 key 重放不是边缘路径。
 4. **一条既有用例在修复后会失去判别力**：`tests/integration/start-work-request-binding.test.js:139-149` 的失败注入是永久的，修复后重放会真的再探测/再试一次，但最终仍是 `unknown`、外部对象计数不变，断言仍绿。因此必须新补「探针确实被调用」的断言（Batch 1 第 5/6 项），否则「没跑对账」与「跑了但读不到」无法区分。
-5. **基线存在一个 5s 预算的时序敏感用例**：`tests/integration/start-work-step-recording.test.js:336`「游标永不结束」在并发负载下观察到 `test timed out after 5000ms`（同批 8 文件 5125ms、另一个并发运行 5015ms），空闲单跑 1832ms / 2651ms 通过。它是 1000 页分页上限用例，与本改动无关；**不改测试、不改预算**，验证时避免并发即可，且必须在 Progress 记录每次实际观察值。
-7. **本轮验证期间宿主上还有其他工作树在跑整套测试**：「游标永不结束」用例在最终 V2 运行中观察到 5004ms（5s 预算），与第 5 条同一时序敏感形态；node 的汇总为 `tests 17 / pass 16 / fail 0` 且 exit 0，但失败列表仍打印该超时诊断。空闲时该用例 2.7s 通过。按第 5 条约定不改测试与预算，只如实记录。
-8. **两个变异揭示了守卫的真实承重点**：(a) 原计划 M1 指向 `provisionGit` 的 adopted 分支块，但认领事务写回身份后它不可判别，删掉它不会变红——按最小化删除并改到认领事务（D15）；(b) M3 单独放宽「未决状态」或单独去掉 `needsSupply` 都不会被杀死，两者联合才让在途同 key 重放开始探测，负控因此补了 `getWorktree` 读计数。
-6. **`getWorktree` 的句柄在两种 provider 上都可重建**：local-git 的 `getWorktree` 按 externalId 解析路径再读 `worktree list`（`packages/providers/development-local-git/src/provider.ts:274-292,318-330`），fake 的工作树 externalId 就是 `path ?? worktreeKey`（`packages/providers/fake/src/development.ts:202-243`），而两者的 `preflightWorktree` 都会把规范化路径写进持久 intent，所以「用持久 intent 的 path 读回」在两种实现上都成立。没有 preflight 的 provider 没有持久句柄，本方案按 `inconclusive` 处理，不猜。
+5. **基线存在一个 5s 预算的时序敏感用例，且 main 基线同样复现（预存在 flake）**：`tests/integration/start-work-step-recording.test.js:336`「游标永不结束」在并发负载下观察到 `test timed out after 5000ms`（同批 8 文件 5125ms、另一个并发运行 5015ms），空闲单跑 1832ms / 2651ms 通过。独立验证者在**同一测试文件的 main 基线副本**上复现 5009.9ms 超时（4262.9ms 通过 / 5009.9ms 超时），证明它与本 PR 无关；本 PR 未改该用例、未改 `branchProbe` 的 1000 页上限、未改预算。独立验收本轮复跑 3 次分别 2469 / 1792 / 1869 ms 通过（`18/18`×3），当前 head 的 CI 全绿（见 `Outcomes & Retrospective`）。**不改测试、不改预算**，验证时避免并发并在 Progress/本条目记录实际观察值。
+6. **本轮验证期间宿主上还有其他工作树在跑整套测试**：实现阶段最终 V2 运行中该用例观察到 5004ms（5s 预算），与第 5 条同一时序敏感形态；node 的汇总为 `tests 17 / pass 16 / fail 0` 且 exit 0，但失败列表仍打印该超时诊断。空闲时 2.7s 通过。按第 5 条约定不改测试与预算，只如实记录。
+7. **两个变异揭示了守卫的真实承重点**：(a) 原计划 M1 指向 `provisionGit` 的 adopted 分支块，但认领事务写回身份后它不可判别，删掉它不会变红——按最小化删除并改到认领事务（D15）；(b) M3 单独放宽「未决状态」或单独去掉 `needsSupply` 都不会被杀死，两者联合才让在途同 key 重放开始探测，负控因此补了 `getWorktree` 读计数。
+8. **`getWorktree` 的句柄在两种 provider 上都可重建**：local-git 的 `getWorktree` 按 externalId 解析路径再读 `worktree list`（`packages/providers/development-local-git/src/provider.ts:274-292,318-330`），fake 的工作树 externalId 就是 `path ?? worktreeKey`（`packages/providers/fake/src/development.ts:202-243`），而两者的 `preflightWorktree` 都会把规范化路径写进持久 intent，所以「用持久 intent 的 path 读回」在两种实现上都成立。没有 preflight 的 provider 没有持久句柄，本方案按 `inconclusive` 处理，不猜。
+9. **一条既有断言按 spec 被「同 key 化」替换，覆盖因此转移**：`tests/integration/start-work-external-intent.test.js` 里关库重开后的重放从新 key `'restart'` 改成同 key `'first'`（spec §7.5 明确要求，为的是证明重启后同 key 会先对账收敛）。因此「关库重开后**新 key** 仍被阻挡」不再由该文件断言；它仍由同文件前置循环、`start-work-step-recording.test.js:311-334`、`tests/e2e/start-work-recovery.test.js` 与 `start-work-execution-uniqueness.test.js` 覆盖。后续可补回一条最小的新 key 断言，不阻塞本 PR。
+10. **并发守卫此前没有判别用例（P2-2）**：把 `packages/core/src/start-work.ts:429,438` 的「当前行与对账采样行逐字相同」放宽为「任意未决行」后，原 6 条同 key 重放用例全绿（M9 SURVIVED），说明「另一写者在对账采样后推进了同一行」这个窗口没有负控。补的用例在探针读之后把同 key 行推进成新的 `pending` 行，断言重放回落原语义（`Pending`、不采纳、不重发、记录与槽位一字不改）；同一变异下该用例红、其余 17 条绿（D18）。
 
 ## Decision Log
 
-- **D1（2026-11-21）restart 范围 = 同 idempotency key 重放；新 key 接管不在本 PR。** 依据：端口契约（`capabilities/storage.ts:396-398`）、DDL 注释（`001_init.sql:338`）、R8 偏离说明（`gate-e1-ruling.md:242`）与五条既有用例；跨 key 需要「取代」语义与 authority 决策。跟进：另开 issue（标题建议 `fix(core): allow a later idempotency key to take over a reconciled start-work attempt`），在 PR 描述里 `Refs` 它。
+- **D1（2026-11-21）restart 范围 = 同 idempotency key 重放；新 key 接管不在本 PR。** 依据：端口契约（`capabilities/storage.ts:396-398`）、DDL 注释（`001_init.sql:338`）、R8 偏离说明（`gate-e1-ruling.md:242`）与五条既有用例；跨 key 需要「取代」语义与 authority 决策。跟进：**建议 follow-up（本 PR 未创建 issue，需规划所有者决定；见 D19）**，标题建议 `fix(core): allow a later idempotency key to take over a reconciled start-work attempt`；若创建，PR 描述用 `Refs` 关联。
 - **D2（2026-11-21）关闭点 = `start-work.ts` 的命令 resume 路径；对账只读，写入全在既有认领/供应事务内。** 否决 storage / 投影层 / 查询路径 / 启动扫描 / claim 前 CAS 结算，理由见 `Design / Spec` 的「被放弃的方案」。
 - **D3（2026-11-21）不新增任何持久形状。** 四态结论只存在于一次调用的返回值；`mutation_attempt.state` 仍是唯一结果轴。
 - **D4（2026-11-21）`inconclusive` 保留读失败自身的错误码（`unavailable`/`permission_denied`/`not_supported`/`result_unknown`），`writeState` 仍是 `unknown`。** 理由：与首遇路径（`start-work-step-recording.test.js:326` 已把「探测失败原因」钉成 `unavailable`）一致，且 client 的 `permission 层拒绝` 恢复文案依赖真实 code；压平成 `result_unknown` 会丢掉「为什么读不出来」这个可操作信息。消息必须含「对账只读，未重发外部写入」。
 - **D5（2026-11-21）`absent` 在同一个调用里重发那一步（不先落 `failed` 等用户再按一次）。** 依据：ADR-0004 第 2 条「找到就直接采纳、找不到才重试」；用户的再次提交本身就是显式重试；认领事务先覆盖旧槽位再调用 provider，满足 R8。被否决的替代（先 CAS 结算 `failed`，让用户用新 key 重试）需要 claim 之外的第二个写者，且把可恢复状态呈现成终态失败。
-- **D6（2026-11-21）只对 `state='unknown'` 的行对账，不动 `pending` 行。** `pending`（硬崩溃残留）会长期停在「正在处理」；把它纳入需要同时决定「租约过期 + 时间证据」的语义，与 owner-fencing 的「时间不是证据」冲突，另开 issue（Decision Log D6 的跟进项写进 PR 风险段）。
+- **D6（2026-11-21）只对 `state='unknown'` 的行对账，不动 `pending` 行。** `pending`（硬崩溃残留）会长期停在「正在处理」；把它纳入需要同时决定「租约过期 + 时间证据」的语义，与 owner-fencing 的「时间不是证据」冲突，需独立 issue（**本 PR 未创建**）；该跟进项写进 PR 风险段（由规划所有者回填）。
 - **D7（2026-11-21）工作树对账只用持久 `intent.input.path`；没有句柄就 `inconclusive`。** 不用本次请求重新派生，避免读到另一个目标；不新增「从请求推导句柄」的便利路径。
 - **D8（2026-11-21）采纳按自然键，不额外校验分支 head 与 `intent.input.fromRef` 是否一致。** 与既有 conflict/ambiguous 采纳同判据；额外校验会改变 `#160` 的冲突复用语义，属独立决策。
 - **D9（2026-11-21）不同的 `branchName` 声明仍结构化拒绝。** 与 `#183` 的「重放不得改变已决定的分支身份」一致；adopted 的分支名视同已决定身份。
 - **D10（2026-11-21）跳过被证明的写步骤时不得记 capability 健康。** `observeOperation(..., false, version)` 只表示「刚刚成功写过」，跳过时记健康会污染 runtimeAccess 的事实。
 - **D11（2026-11-21）不改 `ADR-0004`、`gate-e1-ruling`、audit 文档。** 它们是人类采纳的决策/证据记录；本计划只在 Decision Log 记录解释，PR 描述说明「与 ADR-0004 第 2 条一致，不修改决策记录」。
 - **D12（2026-11-21）验证命令 V1–V8 唯一来源在 `Validation and Acceptance`。** 批次只引用编号，避免同一命令多处副本在执行期间不同步。
-- **D13（2026-11-21）Lead 批准的 Q1–Q5 执行裁定（本轮不重新讨论）。** Q1 restart 范围 = 同 key 重放，新 key 接管旧未决槽位不在本 PR（见 `Outcomes & Retrospective` 的 follow-up）；Q2 对账读被 capability 门拒绝时保留读失败自身 code、`writeState=unknown`，消息注明「对账只读，未重发外部写入」；Q3 不改 ADR-0004 / R8 偏离文案，解释只记在本 Decision Log（与 D11 一致）；Q4 不把硬崩溃 `pending` 残留纳入对账（与 D6 一致）；Q5 采纳不额外校验分支 head 与 `intent.input.fromRef` 一致（与 D8 一致），该风险写入 `Outcomes & Retrospective`。
+- **D13（2026-11-21）Lead 批准的 Q1–Q5 执行裁定（本轮不重新讨论）。** Q1 restart 范围 = 同 key 重放，新 key 接管旧未决槽位不在本 PR（见 `Outcomes & Retrospective` 的 follow-up 建议；本 PR 未创建 issue）；Q2 对账读被 capability 门拒绝时保留读失败自身 code、`writeState=unknown`，消息注明「对账只读，未重发外部写入」；Q3 不改 ADR-0004 / R8 偏离文案，解释只记在本 Decision Log（与 D11 一致）；Q4 不把硬崩溃 `pending` 残留纳入对账（与 D6 一致）；Q5 采纳不额外校验分支 head 与 `intent.input.fromRef` 一致（与 D8 一致），该风险写入 `Outcomes & Retrospective`。
 - **D14（2026-11-21）对账结论的答复面用 `existingResult(record, report, verify=false)`。** 触发对账的前提是上下文可续跑（终态或租约过期）且没有 run，因此记录不可能是「完整 Ready」；仍显式跳过 Ready 验证读，让 conflict / inconclusive 的答复与零写入是同一个事实。被采纳的分支身份在认领事务里写回（`branchExternalId`），**不**在那里写工作树句柄：句柄继续只由步骤回填产生，谱系锚点纪律不变。
 
 - **D15（2026-11-21）`provisionGit` 不再消费 adopted 分支证据：认领事务写回的分支身份已是唯一来源。** 变异验证发现「provisionGit 的 adopted 分支块」在认领事务已写回 `branchExternalId` 之后不可判别（删掉它，用例 1 仍绿：`decided` 路径本来就跳过 `ensureBranch`）。按计划第 9 条的最小化原则删除这份同义实现，并把 M1 变异点改到认领事务的身份写回（那里删掉会让 `createBranch` 被再调一次，用例 1 变红）。adopted 只驱动两件事：预检看到被采纳的工作树路径、以及跳过被证明的工作树步。
+
+- **D16（2026-11-21，独立验收）「对账只读」的精确边界 = 零契约事实写入；runtimeAccess/`sync_cursor` 记账例外被接受。** `reconcileGitStep` 经 `guardedDevelopmentReads` 读 provider，与 `verifyExistingWorktree` 同形：`DevelopmentRepositoryRead` 会捕获 delivery ticket 并推进 `sync_cursor`（fake 观察 `cursorValue` version 2→3；SQLite 表 `sync_cursor`，`migrations/001_init.sql:292`）。context / mutation_attempt / relation / entity / run 等契约事实轴全部不变（V2 冲突例整库快照不变、V3 在途负控记录不变）。因此文档与 PR 文案里的「零写入」必须限定为「零契约事实写入」，不得被读成「一次数据库写都不发生」；本计划把该记账接受为已知成本，不为此新增抑制机制。
+- **D17（2026-11-21，独立验收）存在不同 key 的未决行时仍会先探测一次：接受成本。** `reconcileReplay` 在 `claimContext` 判定 `pendingClaim` 之前就调用了 `reconcileGitStep`，因此「另一个 key 有未决行、本次注定被保守阻挡」的路径会多一次只读 provider 调用（无写入、行为不变）。把阻塞判定前移需要复制 `pendingClaim` 的跨事务语义（且仍要在认领事务里复核），收益不抵重复实现与 TOCTOU 风险，故保留现状并记录。
+- **D18（2026-11-21，独立验收）并发守卫必须有判别用例；只补测试，不放宽实现。** P2-2：`start-work.ts:429,438` 的「当前行与对账采样行逐字相同」守卫原来没有负控——把两处放宽成「任意未决行」后原 6 条同 key 用例全绿（M9 SURVIVED）。在 `start-work-step-recording.test.js` 新增「对账采样后同 key 未决行被别的写者推进时不得采纳」：对账探针读回后、认领事务前把同 key 行推进成新的 `pending` 行，断言答复回落原重放语义（`Pending`）、不采纳分支、不重发外部写、不起 run、记录与槽位一字不改。M9 下该用例红（其余 17 条绿），还原实现后 V2 `18/18`。生产代码零改动。
+- **D19（2026-11-21，独立验收）follow-up 的状态如实记录为「未创建」。** 本 PR 不新建 issue、不改 capabilities/R8 契约；ExecPlan 原先「另开 issue / 在 PR 描述里 Refs 它」的表述改为「建议 follow-up（本 PR 未创建，需规划所有者决定）」。PR #673 描述仍写着「已记 follow-up」且链接指向已归档的 `active/` 路径——按验收约定**验收者不改 PR 描述**，该更正由规划所有者在合并前完成（见 `Outcomes & Retrospective` 的「交付面遗留」）。
 
 ## Idempotence and Recovery
 
@@ -270,29 +279,46 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 - 工作树检出别的分支 → `conflict`，两侧分支名都报出，零写入。
 - 读失败 / 权限拒绝 / 缺能力 / provider 抛错 → `unknown`，保留读失败自身 code，消息以「对账只读，未重发外部写入」结尾，零写入、零外部写。
 
-仍未收敛：`pending` 硬崩溃残留（D6）、换新 key 接管（D1）、Ready 缺口与自动对账（#193/#421）、真实平台 provider 与 Host 端到端（本 PR 证据面是 fake + local-git + 真实 SQLite 重开）。
+独立验收（2026-11-21 23:2x Asia/Singapore；分支 `fix/restart-reconciliation`，实现 head `adf77c83`，本收尾提交在其后）。验收者与实现者、验证者都不是同一 agent：重新跑 V1–V8、重放 P2-2 的变异、逐条对照 issue #191 与 spec §7 的判据。
+
+**issue #191 验收对照**
+
+| 判据 | 结论 | 本轮证据 |
+|---|---|---|
+| 关闭条件「restart always re-runs reconciliation first」（范围 = 同 key 重放；跨 key 由 §2 R1 裁定排除） | PASS（同 key） | V2 三条 adopted/absent 正控：探针 ≥1、`createBranch`/`createWorktree` 计数不变或恰好 +1；V3 SQLite 关库重开同 key 收敛；V4 真实磁盘 adopt |
+| ADR-0004「`unknown` 只在本次对账跑过且无唯一结论时出现」 | PASS | 在途/旧代际负控探针 = 0；读不可用、权限拒绝、缺持久句柄 → `unknown` 且保留读失败 code；`absent` 只来自完整分页读或确定 `not_found` |
+| vertical-path §2「失败形状是 unavailable，不是静默空列表」 | PASS | `inconclusive` 不压平成 `result_unknown`：保留 `unavailable` / `permission_denied` / `not_supported`，消息含「对账只读，未重发外部写入」 |
+| 不新增 `resolution` 轴 / 列 / 表 / port | PASS | 边界 diff 为空（`capabilities`、`domain`、`storage/sqlite`、`client`、`ui` 零改动）；结论只在一次调用的返回值里 |
+| 至多一次外部写、既有守卫不削弱 | PASS | V2 冲突例整库快照不变；V2/V4 外部写计数断言；V3 `170/170` 保留读不可用、在途、Ready、已结算、新 key 阻挡 |
+| 规模（仓库 1000/1500 与 issue 500–800 预报） | PASS | `node scripts/rule-checks.mjs size main`：代码 494 / 1000，文档 325 / 1500（用户预算 800 / 1300 内） |
+
+**本轮实际输出**（V1–V8，均在工作树 `.worktrees/restart-reconciliation/` 根目录运行）：V1 `pnpm run typecheck` exit 0、无输出；V2 `pnpm test:file tests/integration/start-work-step-recording.test.js` 连跑 3 次均 `18 tests / 18 pass / fail 0`（游标用例 2469 / 1792 / 1869 ms）；V3 六文件 `170 tests / 170 pass / 0 fail`；V4 `18 tests / 18 pass / 0 fail`；V5 `tests 10 / pass 10 / fail 0`；V7「机械扫描通过」；V8 无输出与 exit 0；V6 见上表。宿主 1 分钟负载 39–46（其他工作树并发）下 V2 未复现 5s 超时（见 Surprises 5/6）。
+
+**P2/P3 处理**：P2-1 文档真实性 → 本计划自身路径改指 `docs/exec-plan/completed/2026-11-21-restart-reconciliation.md`，follow-up 统一为「建议（本 PR 未创建）」，`docs/README.md` 索引复核为 Completed（D19）；P2-2 并发守卫 → 新增判别用例，M9 RED→GREEN（D18、`Progress`）。P3-1 → `Progress` 勾选/重复段/编号已订正；P3-2 → 5s 预算按「main 基线同样复现的预存在负载敏感 flake」记录（Surprises 5/6，CI 对该 head 全绿）；P3-3 → `sync_cursor` 记账接受为 D16；P3-4 → 阻塞路径先探测一次接受为 D17；P3-5 → 关库重开后新 key 断言被同 key 化替换记入 Surprises 9。
+
+**重构审查**：本轮只改测试与文档。复核两个生产文件后未找到可判别的重复实现、死代码或有净收益的抽取（`reconcileGitStep` 的只读边界、`claimContext` 的采样行双检、`provisionGit` 的 adopted 跳过都是最小承重结构）；唯一候选是把未对外使用的 `GitReconcileOutcome` 类型收窄为模块私有，属纯风格且会改动已验收的生产文件，收益不抵改动风险，故不做生产重构。新用例复用本文件既有 `localGitLikeBranch` / `controllableClock` 装置，未新增夹具。
 
 与计划的偏差（均有 Decision Log 对应条目）：
 
 1. `provisionGit` 的 adopted 分支块按最小化删除（D15）：认领事务写回的分支身份已是唯一来源，保留它会是不可判别的第二份实现；M1 变异点因此改到认领事务的身份写回。
 2. M3 需要同时放宽「未决状态」与 `needsSupply` 两处守卫才能被杀死，负控补了 `getWorktree` 读计数（`test(core): 在途负控同时计数工作树读`）。
-3. V2 的新增用例是 6 条（4 条正控 + 2 条负控），计划原文「新增 4 条」只数了正控；已在 V2 期望里订正为 17。
+3. V2 在实现阶段新增 6 条（4 正控 + 2 负控），计划原文「新增 4 条」只数了正控；独立验收补 1 条并发守卫负控（D18），最终 18 条（4 + 3），V2 期望已订正为 18。
 
 遗留项与 follow-up 建议（不新建 issue、不改 capabilities/R8 契约）：
 
-1. 跨 key 接管仍未放开（D1），建议 follow-up：`fix(core): allow a later idempotency key to take over a reconciled start-work attempt`；
-2. `pending` 硬崩溃残留仍会停在「正在处理」（D6），需独立 issue 决定租约与时间证据语义；
-3. 采纳只按自然键、不校验 head/起点（D8），在出现「同名可被他人复用的 provider」时需要复核；
-4. Ready 缺口与自动对账仍归 #193/#421；
-5. 真实平台 provider 与 Host 端到端不在本 PR 证据面内。
-
-1. 跨 key 接管仍未放开（D1），follow-up issue 待开；
-2. `pending` 硬崩溃残留仍会停在「正在处理」（D6），需独立 issue；
+1. 跨 key 接管仍未放开（D1），**建议 follow-up（本 PR 未创建 issue，需规划所有者决定）**：`fix(core): allow a later idempotency key to take over a reconciled start-work attempt`；
+2. `pending` 硬崩溃残留仍会停在「正在处理」（D6），需独立 issue 决定租约与时间证据语义（本 PR 未创建）；
 3. 采纳只按自然键、不校验 head/起点（D8），在出现「同名可被他人复用的 provider」时需要复核；
 4. Ready 缺口与自动对账仍归 #193/#421，本 PR 不改变 `existingResult` 的缺口文案；
-5. 真实平台 provider 与 Host 端到端不在本 PR 证据面内。
+5. 真实平台 provider 与 Host 端到端不在本 PR 证据面内；
+6. 5s 游标预算的负载敏感 flake（Surprises 5/6）建议另立 issue 把 1000 页压测改成可注入页数上限或独立进程，不阻塞本 PR。
+
+交付面遗留（非代码；按验收约定，验收者不改 PR 描述、不 gh pr ready、不合并）：
+
+1. PR #673 描述的「真实验证证据」段仍是 draft 占位句、ExecPlan 链接指向已归档的 `docs/exec-plan/active/` 路径（404）、并称「已记 follow-up」——与事实不符；需规划所有者回填本计划的 V1–V8 摘要、改指 `docs/exec-plan/completed/2026-11-21-restart-reconciliation.md`、并把 follow-up 措辞改为「建议（本 PR 未创建）」。
 
 ## Bottom Change Note
 
 - 2026-11-21（Asia/Singapore）：创建。来源是对两份独立设计提案（variant a / variant b）的 facts 复核与裁定：采纳「同 key 重放前置只读对账 + 结论驱动续跑」，否决「新 key 接管」「`resolution` 列」「启动扫描」「只修答复」；修正了 variant a 的「丢 ack 后必已对账」与 variant b 的引用错位，并把「restart 是否含新 key」的裁定依据落到端口契约、DDL 注释与 R8 说明上。
 - 2026-11-21（Asia/Singapore）impl-191：按批次实现并逐个取证：Batch 1 判别性用例（RED 4/17），Batch 2 只读对账（conflict / inconclusive 零写入），Batch 3 结论驱动续跑（adopted / absent），Batch 4 八个变异全部被对应断言杀死，并按最小化原则删除不可判别的 adopted 分支重复实现（D15）。V1 exit 0、V2 17 条（16 pass + 1 条基线时序 flake）、V3 170/170、V4 18/18、V5 10/10；计划归档到 Completed，索引同步。
+- 2026-11-21（Asia/Singapore）accept-191 独立验收：P2-1 修正自身路径与 follow-up 措辞（D19）；P2-2 新增并发守卫判别用例，M9 RED → 实现 GREEN（D18、`Progress`）；P3 记录（5s flake 的 main 基线复现、`sync_cursor` 记账 D16、阻塞路径先探测 D17、关库重开新 key 断言替换 Surprises 9）；补独立验收 V1–V8 与 issue #191 AC 对照；未改生产代码。状态更新为「独立验收通过，待人类评审与合并决定」。
