@@ -10,7 +10,7 @@
 2. `restart restore` —— 进程重启后身份、关系与执行上下文不丢失（`storage-restart`：关句柄后重开同一文件）；
 3. `event dedupe` —— 同一条 Provider 事件处理 N 次与处理 1 次结果相同（`storage-sync-surface`）；
 4. `mutation idempotency` —— 重复提交同一外部写入不产生第二个外部对象（`storage-restart` 的写尝试幂等覆盖；Start Work 的同键重放见下文）；
-5. `worktree lifecycle` —— 工作树创建、重复创建拦截、脏工作区拒绝清理（未落地，随 #160）；
+5. `worktree lifecycle` —— 工作树创建、重复创建拦截、脏工作区拒绝清理（创建随 #160、显式仅干净的移除随 #138 落地）；
 6. `rollback on failed transaction` —— 事务失败后不留下半写状态（`storage-restart`、`storage-sync-surface`）。
 
 ## Start Work 恢复（#183 / #184 / #165）
@@ -95,13 +95,14 @@
 
 | 用例 | 保护的不变量 |
 |---|---|
-| Development 契约套件（能力子集从 `describeCapabilities()` 推导） | 本地子集也满足 Development 契约；未声明的能力是结构化 `not_supported` + 对象集合逐字不变；方法可用时快照必须说 `available`（双向断言）；未声明的工作树移除不被索取；分支列表按 `pageSize` 逐页读完恰好枚举每个分支一次（分页契约，core 的分支探测依赖它） |
+| Development 契约套件（能力子集从 `describeCapabilities()` 推导） | 本地子集也满足 Development 契约；未声明的能力是结构化 `not_supported` + 对象集合逐字不变；方法可用时快照必须说 `available`（双向断言）；工作树移除按自己的键声明（本地 Git 声明后套件要求真移除、对象变新鲜、二次 `not_found`；未声明形态仍是结构化拒绝且对象不变）；分支列表按 `pageSize` 逐页读完恰好枚举每个分支一次（分页契约，core 的分支探测依赖它） |
 | 路径安全 + 零 Git 调用 | 越界、含 `..`、符号链接逃逸、悬空符号链接叶子、首尾空白都在**任何 Git 命令之前**被拒（断言注入 runner 的调用次数为 0；argv-only 另由源码扫描契约保证）；`..wi` 是根内合法名字，不得判成逃逸 |
 | 幂等与复用担保 | 同一路径重复创建报 `conflict`；`conflict` 只留给**正面确认可复用**的登记（目录存在、分支一致、确为本仓库的链接工作树）。目录消失 / `.git` 被删（prunable）/ 被换成独立仓库 / 被 lock 后替换 / 指向主检出都硬失败 |
 | 分支名校验 / 同名异指向 | 非法分支名（含 git refname 规则的 10 类）零调用被拒；同名分支只在指向请求声明的起点时复用，否则 `invalid_input`；D/F 引用冲突同样是 `invalid_input` |
 | 分支身份 | 只认 `for-each-ref` 能逐字枚举、且非符号引用的名字；`pack-refs` 之后大小写变体仍被拒，磁盘上只有一条该名字的引用；符号引用不得成为工作树身份 |
 | 写后回读 | `worktree add` 落到别处时报 `ambiguous_result`，不把判定时的路径报成写入后的事实 |
-| 能力子集 | 只声明三个键、不实现工作树移除；`worktreeCreate: false` 时快照不可用、`not_supported`、零次 Git 调用 |
+| 能力子集 | 声明仓库读、分支建、工作树建/读/移除五个键；`worktreeCreate: false` 时快照不可用、`not_supported`、零次 Git 调用；`worktreeRemove: false` 时快照不出现该键、调用 `not_supported` 且零次 Git 调用（能力先于身份） |
+| 工作树移除（#138） | 干净工作树仅在显式请求下移除：目录与登记消失、分支保留、二次 `not_found`，argv 无 `--force`；脏树答 `invalid_input` 并报告未提交路径数，工作树逐字节不变（`--untracked-files=normal` 覆盖 `status.showUntrackedFiles=no`）；ignored-only 按 Git 口径算干净，被忽略内容随移除删除；越界/含 `..`/符号链接逃逸在任何 Git 命令之前被拒（零调用）；未登记/主检出/被换成独立仓库/detached/prunable 结构化拒绝且不发出 `remove` argv；写后回读不一致答 `ambiguous_result`，Git 侧确定性拒绝（locked/submodule/validation 等）答 `invalid_input`；其它创建/读取/预检/分支方法都不移除工作树 |
 | 默认分支 | 无 `origin/HEAD` 时按本地事实推断（唯一本地分支 → `init.defaultBranch` → 约定名），**不用当前检出分支冒充**；缺失的起点 ref 在错误信息里点名 |
 | 默认允许根 | 默认根只给独立检出派生：checkout 根的 sibling `<checkout-name>.worktrees`；位于另一个 Git 检出之内（外层 `.git` 须是 Git 目录或 `gitdir:` 文件，空 `.git/` 不算）与 bare 仓库在任何 Git argv 之前 `invalid_input`，`repository.path` 缺席答 `unavailable` 且不借用外层检出，派生结论不缓存；checkout 内 `.worktrees` 符号链接不能改变目标；默认创建不写 `git-common-dir/info/exclude` 或 `.gitignore`；显式 `allowedRoot` 构造参数（含旧 checkout-relative root）仍受路径安全守卫 |
 | 拒绝分类 | 占用路径、被别处检出的分支（前置判定必须自己点名原因）、不可访问（mode 000）目标都结构化拒绝，不伪造成功 |
