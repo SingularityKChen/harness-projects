@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-21-restart-reconciliation](exec-plan/completed/2026-11-21-restart-reconciliation.md) | 同 key 重放未决 Git 写前先跑只读对账，按结论采纳 / 重发 / 冲突 / 未知（#191） |
 | [2026-11-20-planning-source-projection-filter](exec-plan/completed/2026-11-20-planning-source-projection-filter.md) | 规划来源切换后只读服务启用挂载的投影，Fake 与 SQLite 同义（#202） |
 | [2026-11-20-default-branch-restriction-explanation](exec-plan/completed/2026-11-20-default-branch-restriction-explanation.md) | 合并仅在默认分支关闭 Issue 的提交前说明（#580，Refs #556） |
 | [2026-11-20-delivery-lineage-hop-fields](exec-plan/completed/2026-11-20-delivery-lineage-hop-fields.md) | 常量交付跳字段 `observed`/`detail` 的生产者、解码器与夹具退役（#633） |

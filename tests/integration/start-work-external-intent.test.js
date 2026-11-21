@@ -72,13 +72,25 @@ for (const kind of ['Fake', 'SQLite']) {
     const method = operation.startsWith('create') ? operation : 'startRun', call = provider[method].bind(provider); let calls = 0
     provider[method] = async (input) => { calls++; await call(input); if (response === 'throw') throw Error('accepted but ack lost'); return providerFail('ambiguous_result', 'accepted but ack lost') }
     const unreadable = async () => { if (response === 'read-throw') throw Error('reconcile read interrupted'); return providerFail('unavailable', 'read unavailable') }
-    d.listBranches = unreadable; d.getWorktree = unreadable
+    const reads = { listBranches: 0, worktrees: 0 }
+    d.listBranches = async () => { reads.listBranches++; return unreadable() }
+    d.getWorktree = async () => { reads.worktrees++; return unreadable() }
     unknown(await start(w)); const row = await receipt(w), record = await w.storage.getExecutionContext(w.contextId)
     assert.equal(row.externalIntent.operation, operation); assert.equal(row.externalIntent.state, 'unknown')
+    const readsAfterFirst = reads.listBranches + reads.worktrees
     for (const key of ['first', 'replacement']) { w.time.advance(31_000); unknown(await start(w, key)) }
+    // Git 创建步的同 key 重放必须先做只读对账：读计数增加是「真的跑过」的唯一可观察证据；外部写计数仍是 1。
+    // 运行步的重放走既有的执行回执读回，不在本套用例的对账范围内。
+    if (operation.startsWith('create')) assert.ok(reads.listBranches + reads.worktrees > readsAfterFirst, '同 key 重放必须先跑只读对账，读失败也要读一次')
     assert.equal(calls, 1); assert.equal(fallbackCalls, operation === 'startFallbackRun' ? 1 : 0); assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'replacement'), undefined)
     assert.deepEqual(await w.storage.getExecutionContext(w.contextId), record)
-    if (kind === 'SQLite') { w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w); assert.deepEqual(await receipt(w), row); unknown(await start(w, 'restart')); assert.equal(calls, 1) }
+    if (kind === 'SQLite') {
+      w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w); assert.deepEqual(await receipt(w), row)
+      const readsBeforeRestart = reads.listBranches + reads.worktrees
+      unknown(await start(w, 'first'))
+      if (operation.startsWith('create')) assert.ok(reads.listBranches + reads.worktrees > readsBeforeRestart, '关库重开后的同 key 重放也必须先跑只读对账')
+      assert.equal(calls, 1); assert.deepEqual(await w.storage.getExecutionContext(w.contextId), record)
+    }
   })
   const failures = [
     ['createBranch', [0, 0, 0, 0], [1, 0, 0, 0]],
