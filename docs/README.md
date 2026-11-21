@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-20-delivery-lineage-hop-fields](exec-plan/completed/2026-11-20-delivery-lineage-hop-fields.md) | 常量交付跳字段 `observed`/`detail` 的生产者、解码器与夹具退役（#633） |
 | [2026-11-18-pr656-pr659-review-followup](exec-plan/completed/2026-11-18-pr656-pr659-review-followup.md) | PR #656–#659 复审后续修复：reparse/架构门、lane marker、storage 夹具与文档（#663） |
 | [2026-11-17-storage-single-asset](exec-plan/completed/2026-11-17-storage-single-asset.md) | 单一自包含 SQL 基线资产与安装件字节一致性（#596） |
 | [2026-11-17-storage-logical-baseline](exec-plan/completed/2026-11-17-storage-logical-baseline.md) | 单 baseline 版本、唯一 SQL inventory 与迁移准入收敛（#595） |

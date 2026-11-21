@@ -29,7 +29,7 @@ export function createDeliveryLineageReader(port: { read(scope: DeliveryLineageS
       if (p.workItemId !== scope.workItemId || p.repositoryId !== scope.repositoryId || typeof p.degraded !== 'boolean' || !Array.isArray(p.hops) || !Array.isArray(p.optional) || !Array.isArray(p.freshness) || !Array.isArray(p.gaps)) throw new TypeError(INVALID)
       const positions = ['execution_context', 'worktree', 'commit', 'change_request', 'pipeline_run', 'check_run']
       for (const entry of p.hops) {
-        const hop = record(entry, ['relationType', 'source', 'relationSource', 'relationState', 'provenance', 'from', 'to', 'entityKind', 'externalId', 'label', 'observed', 'unavailable', 'detail', 'fact', 'stale'])
+        const hop = record(entry, ['relationType', 'source', 'relationSource', 'relationState', 'provenance', 'from', 'to', 'entityKind', 'externalId', 'label', 'unavailable', 'fact', 'stale'])
         if (!positions.includes(String(hop.entityKind)) || !['candidate', 'confirmed', 'rejected'].includes(String(hop.relationState)) || typeof hop.stale !== 'boolean' || typeof hop.unavailable !== 'boolean' || ['from', 'to'].some((key) => typeof hop[key] !== 'string') || ['externalId', 'label'].some((key) => hop[key] !== undefined && typeof hop[key] !== 'string')) throw new TypeError(INVALID)
       }
       for (const entry of p.freshness) { const set = record(entry, ['kind', 'confirmedAt', 'stale']); if (!positions.slice(2).includes(String(set.kind)) || typeof set.stale !== 'boolean' || (set.confirmedAt !== undefined && typeof set.confirmedAt !== 'string')) throw new TypeError(INVALID) }

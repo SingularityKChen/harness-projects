@@ -34,8 +34,8 @@ const hop = (entityKind, extra = {}) => ({
   relationType: ({ execution_context: 'tracks', worktree: 'has_worktree', commit: 'derived_from', change_request: 'produced_by' })[entityKind] ?? 'runs_on',
   source: 'lineage', relationSource: ['execution_context', 'worktree'].includes(entityKind) ? 'explicit' : 'deterministic',
   relationState: ['execution_context', 'worktree'].includes(entityKind) ? 'confirmed' : 'candidate', provenance: ['execution_context', 'worktree'].includes(entityKind) ? 'command' : 'provider_read',
-  from: `${entityKind}-from`, to: `${entityKind}-to`, entityKind, externalId: `${entityKind}-1`, label: undefined, observed: true,
-  unavailable: false, detail: undefined, fact: undefined, stale: false, ...extra,
+  from: `${entityKind}-from`, to: `${entityKind}-to`, entityKind, externalId: `${entityKind}-1`, label: undefined,
+  unavailable: false, fact: undefined, stale: false, ...extra,
 })
 const SETS = ['commit', 'change_request', 'pipeline_run', 'check_run']
 const freshSets = (confirmedAt = T0) => SETS.map((kind) => set(kind, confirmedAt))

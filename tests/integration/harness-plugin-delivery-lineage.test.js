@@ -27,11 +27,20 @@ test('Host delivery query is scoped and pure; explicit refresh repeats and acces
 test('client delivery envelope rejects scope, projection and Host-time wire defects', async () => {
   assert.equal(typeof client.createDeliveryLineageReader, 'function')
   const scope = { workspaceId: 'ws', workItemId: 'wi', repositoryId: 'repo' }
-  const good = { ...scope, now: '2026-10-26T00:00:00.000Z', projection: { workItemId: 'wi', repositoryId: 'repo', hops: [], optional: [], freshness: [], gaps: [], degraded: false } }
+  // 一跳字段合法的跳：不携带已退役的 observed/detail（#633）；同一形状用于正负对照。
+  const hop = { relationType: 'tracks', source: 'lineage', relationSource: 'explicit', relationState: 'confirmed', provenance: 'command', from: 'ctx-from', to: 'ctx-to', entityKind: 'execution_context', externalId: 'ctx-1', label: undefined, unavailable: false, fact: undefined, stale: false }
+  const good = { ...scope, now: '2026-10-26T00:00:00.000Z', projection: { workItemId: 'wi', repositoryId: 'repo', hops: [hop], optional: [], freshness: [], gaps: [], degraded: false } }
   for (const bad of [{ ...good, now: '2026' }, { ...good, workspaceId: 'other' }, { ...good, extra: 1 }, { ...good, projection: { ...good.projection, repositoryId: 'other' } }, { ...good, projection: { ...good.projection, hops: [{}] } }]) {
     await assert.rejects(() => client.createDeliveryLineageReader({ read: async () => bad, refresh: async () => ({}) }).read(scope), TypeError)
   }
+  // 正对照：不含退役字段的跳必须被接受。
   assert.deepEqual(await client.createDeliveryLineageReader({ read: async () => good, refresh: async () => ({}) }).read(scope), good)
+  // 负对照（#633）：退役字段是未知跳键，旧 Host 形状失败关闭；两个字段都取结论，避免首个失败掩盖第二个。
+  const retired = await Promise.all(['observed', 'detail'].map(async (field) => {
+    const legacy = { ...good, projection: { ...good.projection, hops: [{ ...hop, [field]: field === 'detail' ? 'legacy' : true }] } }
+    try { await client.createDeliveryLineageReader({ read: async () => legacy, refresh: async () => ({}) }).read(scope); return `${field}:accepted` } catch (error) { return `${field}:${error.constructor.name}` }
+  }))
+  assert.deepEqual(retired, ['observed:TypeError', 'detail:TypeError'], '退役字段 observed/detail 必须被解码器拒绝')
 })
 
 import { composeCore } from '@harness-projects/core'
