@@ -322,10 +322,10 @@ provider 契约与能力快照。
 ## Progress
 
 - [x] 2026-11-21 计划创建与事实核验：复核两份设计提案，实测 Git 行为，锁定最终方案与拒绝项（证据见 Surprises & Discoveries）。
-- [ ] Batch 1 · 能力声明与干净移除往返（日期待执行时填）。
-- [ ] Batch 2 · 安全拒绝（路径/身份/脏/能力关闭）。
-- [ ] Batch 3 · 诚实写路径、守卫与文档。
-- [ ] 最终门禁 V1–V8 与 PR 描述/回读。
+- [x] 2026-11-21 Batch 1 · 能力声明与干净移除往返（`5042e1a1`，TDD：V2 红线 4≠5 键 + `removeWorktree is not a function`、V4 键集合不等 → V2 80/80、V4 21/21）。
+- [x] 2026-11-21 Batch 2 · 安全拒绝（路径/身份/脏/能力关闭）（`11138076`，TDD：脏树被 Git 拒成 `ambiguous_result`、主检出/detached 身份未判 → V2 86/86）。
+- [x] 2026-11-21 Batch 3 · 诚实写路径、守卫与文档（`d3e785bf`，TDD：假成功被报 ok、locked 落成 `ambiguous_result` → V2 89/89）。
+- [ ] 最终门禁 V1–V8 与 PR 描述/回读（实现完成；独立验收待人类/评审执行）。
 
 ## Surprises & Discoveries
 
@@ -354,7 +354,18 @@ provider 契约与能力快照。
 9. **历史计划把 safe/discard 分层许诺给 #138。** `2026-09-24-local-git-worktree.md:796` 与
    `2026-09-26-development-suite-capability-driven.md:190` 的措辞超出本 issue 的 AC；按 `PLANS.md` §4 在原处
    加 Superseded 注记，而不是让历史结论与本 PR 相反。
-10. **core 的元数据不报告移除键。** `development-route.ts:41` 的 reports 固定为开始工作四键，
+10. **实现期：未映射的确定性拒绝会先落成 `ambiguous_result`。** 实现 dirty 门与 REFUSALS 映射之前，真实脏工作树的
+    `git worktree remove` 失败被写命令兜底报成 `ambiguous_result`（Batch 2 红线实测），而不是「成功删除」——这既
+    验证了 dirty 门的必要性，也说明「确定性拒绝必须有显式映射」不是理论担忧；locked 的 Git 文案是两行
+    （`fatal: cannot remove a locked working tree;` + `use 'remove -f -f' to override or unlock first`）。
+11. **实现期：unborn 独立仓库会被身份探针读成「不可读」。** 「登记路径被换成独立仓库」的测试若只 `git init` 而
+    不提交，`rev-parse --symbolic-full-name HEAD` 会失败，探针答「目录不是可读的 Git 工作树」而走不到
+    「不是本仓库的工作树」这一支；测试改为让替换仓库先有一个提交，才真正钉住身份比较。
+12. **实现期：环境负载会让子进程矩阵与 spawnSync 期限用例假红。** 并行实现者同时跑全量门禁时，本机 load
+    average 长期在 100+（观测 364），`development-contract.test.js` 的坏 adapter 子进程矩阵会撞 120s 单测期限、
+    `路径安全：长分隔符…` 的 5s `spawnSync` 期限也会偶发超时。二者与 #138 改动无关，单独重跑或以更长
+    `--test-timeout` 复验即可（见 Outcomes）。
+13. **core 的元数据不报告移除键。** `development-route.ts:41` 的 reports 固定为开始工作四键，
     `git-provisioning.ts:21` 的门表也不含移除；因此声明新键不会改变 e2e AC5 的「4+1」报告面，也不会改 UI 可用性。
 
 ## Decision Log
@@ -386,6 +397,19 @@ provider 契约与能力快照。
   影响（实测），少一个选项面。
 - **D12 体量控制**（同上）：预估技术 350–420、文档 440–490；若逼近 500/800 线，按「detached → 注入
   main/validation 子例 → port JSDoc」的顺序收缩，不省 AC1/2/3 与防 force/删分支证据。
+- **D13 人类伙伴批准的 5 项裁决（2026-11-21 / Lead 转达，实施期直接执行）**：Q1 ignored 不算脏（Git 口径
+  `status --porcelain` 为空即干净），显式移除会连带 ignored 内容，作为已文档化的数据损失面；不做 safe/discard
+  分层、不加 `--force`。Q2 未提交计数只放 error message，不扩 `ProviderError.details`/`rawClass`。Q3 确定性
+  拒绝一律 `invalid_input` + `retryable:false`。Q4 prunable 登记返回 `not_found` 并给 `git worktree prune`
+  出路；detached 拒绝为 `invalid_input`。Q5 不接 core/controller/UI 入口、不处理 #211 旧句柄，PR 描述明示
+  仅 provider 层能力。Rationale：与 D1–D10、ADR-0007 一致，且不扩大 issue 验收范围。
+- **D14 TDD 顺序微调（实施期）**：计划 Batch 1 步骤 2 原含判定链 9（REFUSALS 映射）与 10（写后回读）的
+  「最小骨架」，但这两步唯一的判别性测试在 Batch 3；若 Batch 1 先实现，Batch 3 的 RED 会预先为绿（测的是
+  已有行为）。实际拆为：Batch 1 = 步骤 1–5、8；Batch 3 = 步骤 9–10。每批因此都满足「先写能红的判别性
+  测试，再实现转绿」；批次回滚点与验证编号不变。
+- **D15 计数口径回读（实施期）**：重写的「能力子集」用例不计新增；V2 的 `pass` 由基线 79 → Batch 1 80 →
+  Batch 2 86 → Batch 3 89（= 79 + 新增 10），与 V2 的期望一致。e2e 的 `FLAGS` 同步写进 Batch 1 的 RED 证据
+  （不同步则 V4 的键集合比较必红），属 D8 的事实同步。
 
 ## Idempotence and Recovery
 
@@ -421,16 +445,38 @@ provider 契约与能力快照。
 
 ## Outcomes & Retrospective
 
-本计划创建时（2026-11-21）尚未实施。完成后必须在本节回填：
+实现完成（2026-11-21，代码 head `d3e785bf`；本 ExecPlan 更新是其后唯一的文档提交）。验收待独立验证。
 
-- V1–V8 的实际输出（不写「应该通过」），以及最终 head/base 的回读；
-- 实际技术与文档行数（`rule-checks size origin/main` 读数）；
-- 与计划的偏差：批次数、新增/改写的用例、是否有收缩项、是否发现新的 Git 版本差异；
-- 遗留问题：ignored 内容删除的产品语义是否升级为后续 issue、Ready 上下文旧句柄（#211）是否另开 issue、
-  Windows 原生证据缺口。
+- **V1**：`pnpm run typecheck` → exit 0，无输出错误。
+- **V2**：`pnpm test:file tests/integration/development-local-git.test.js` → `ℹ tests 89 / ℹ pass 89 / ℹ fail 0`
+  （Batch 1 后 80，Batch 2 后 86，Batch 3 后 89）。
+- **V3**：精确命令在最终 head 上仍撞 120s 单测期限（load average 观测 405）：`pass 95 / fail 0 / cancelled 2`，
+  被取消的是坏 adapter 子进程矩阵（`development-subset-matrix-rejects-liars`）与文件级期限；同一文件用
+  `node --test --test-timeout=600000` 在最终 head 复跑 → `ℹ tests 96 / pass 96 / fail 0 / cancelled 0` 全绿。
+  该矩阵 fixture 只用 fake provider、与 #138 文件集无交集，按 `docs/review/README.md` §2 把「精确 V3 命令」记为
+  环境受限项，以最终 head 的 PR Fast Gate 复核。
+- **V4**：`pnpm test:file tests/e2e/repository-routing.test.js` → `ℹ tests 21 / pass 21 / fail 0`（含 AC2 键集合相等）。
+- **V5**：`pnpm run boundaries` → `ℹ tests 10 / pass 10 / fail 0`。
+- **V6**：`node scripts/rule-checks.mjs size origin/main` → 代码 406 / 1000、文档 492 / 1500（最终 head
+  读数）；disclosure 机械扫描通过；`git diff --check origin/main...HEAD` 无输出。两项预算（800/1300）均未逼近。
+- **V7**：`git grep -nE "\.removeWorktree\s*\(" -- packages/core ... apps` 无输出（exit 1）；
+  `git grep -n "'worktree', 'remove'" -- packages/providers/development-local-git/src` 恰好 1 处
+  （`provider.ts` 的 `removeWorktree` 内）。
+- **V8**：`pnpm verify` 未在实现期完整执行；以最终 head 的 PR Fast Gate 为准（共享机器的负载使全量门禁的
+  子进程矩阵同样不稳定）。
+- **与计划的偏差**：批次数不变；新增用例 10 个（重写 1 个不计）；D14 调整了步骤 9–10 的实现批次（TDD 需要）；
+  无收缩项（detached 等判别性子例全部保留）；实现的 Git 行为与计划实测一致（locked 文案两行）。
+- **最终体量**：代码 406 / 1000 行、文档 492 / 1500 行（`size origin/main` 最终 head 读数；用户上限
+  800/1300 均满足，计划估算 350–420 技术 / 440–490 文档与此一致）。
+- **遗留问题**：ignored 内容随显式移除删除的产品语义需后续 issue 决定是否升级（D2/D10）；Ready 上下文旧句柄
+  #211 仍未处理（Q5 明确不在本 PR 范围）；Windows 原生未运行本组新用例（`development-local-git-windows.test.js`
+  只覆盖路径准入）；V3 精确命令与 V8 全量门禁的最终证据以 CI PR Fast Gate 为准。
 
 ## Bottom Change Note
 
 - 2026-11-21 / 独立 spec 评审：创建本计划。独立复核两份设计提案后收敛：取最小 provider 闭环；裁定 Git 口径 clean、`invalid_input`、
   prunable `not_found`、复用正面身份探针；否决 ignored 算脏、rawClass/details、core-UI 接线、跨包源扫描；补上
   补上两份设计都漏掉的 e2e 键集合同步与历史计划 Superseded 注记；写入 V1–V8 唯一验证命令、变异表与回滚点。
+- 2026-11-21 / 实施（TDD，3 批 + 本计划回填）：Batch 1 `5042e1a1` 能力声明 + 干净往返；Batch 2 `11138076`
+  正面身份（`reuseBlockedBy` → `worktreeIdentityProblem`）+ detached + 干净门；Batch 3 `d3e785bf` 写后回读 +
+  REFUSALS 映射 + port JSDoc + 文档同步。每批都先跑出真实红线再转绿；实现偏差见 D14/D15。
