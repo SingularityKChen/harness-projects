@@ -183,6 +183,43 @@ test('eligible Issue preview defaults to reference, allows clearing and rejects 
   stale({ defaultRelation: 'reference', relations: ['reference', 'none'], target: { repositoryName: 'hidden/old', number: 777 } }); await Promise.resolve()
   assert.doesNotMatch(JSON.stringify(render()), /example\/project#545|hidden\/old|777/)
 })
+test('eligible default-branch closing explains the restriction beside exact clause and nondefault base still enforces', async () => {
+  const { CreateChangeRequestSection } = await import('../../packages/ui/src/create-change-request-section.ts')
+  const sentence = '“合并时关闭”仅在 PR 目标分支为仓库默认分支时生效：GitHub 会在合并后关闭所选 Issue。'
+  let submitted, creates = 0, release
+  const props = { scope, connected: true, creator: {
+    operation: async () => read({ kind: 'none' }),
+    options: () => new Promise(done => { release = done }),
+    submit: async value => { submitted = value; creates++; return { writeState: 'failed' } },
+  }, onConfirmed() {} }
+  const render = componentHarness(CreateChangeRequestSection, props)
+  render(); await Promise.resolve(); render()
+  release({ defaultRelation: 'reference', relations: ['reference', 'closing', 'none'], target: { repositoryName: 'example/project', number: 545 }, targetStamp: 'target-1' }); await Promise.resolve()
+  const nodes = () => render().props.children.flat().filter(Boolean)
+  const select = () => nodes().find(n => n?.type === 'label' && n.props.children[1]?.type === 'select').props.children[1]
+  const preview = () => nodes().find(n => n?.type === 'p' && Array.isArray(n.props.children) && /^(?:Refs|Closes) /.test(String(n.props.children[0])))
+  const restriction = () => nodes().find(n => n?.type === 'p' && typeof n.props.id === 'string' && n.props.id.startsWith('create-change-request-issue-restriction'))
+  assert.equal(restriction()?.props.children, sentence, 'eligible default base must explain the closing restriction beside the preview')
+  assert.equal(restriction()?.props.role, undefined, 'static help needs no live-region role')
+  assert.equal(restriction()?.props['aria-live'], undefined, 'static help needs no live region')
+  assert.equal(select().props['aria-describedby'], 'create-change-request-issue-restriction-repo')
+  assert.deepEqual(preview().props.children, ['Refs example/project#545', ''], 'exact target clause stays byte-identical')
+  select().props.onChange({ target: { value: 'closing' } })
+  assert.deepEqual(preview().props.children, ['Closes example/project#545', ''], 'eligible closing preview is the exact clause only')
+  render().props.onSubmit({ preventDefault() {} }); await Promise.resolve()
+  assert.equal(submitted.issueRelation, 'closing'); assert.equal(submitted.issueTargetStamp, 'target-1')
+  nodes().find(n => n?.type === 'label' && n.props.children[1]?.props.name === 'base').props.children[1].props.onChange({ target: { value: 'release' } })
+  render()
+  release({ defaultRelation: 'reference', relations: ['reference', 'none'], target: { repositoryName: 'example/project', number: 545 }, reason: '合并关闭仅适用于仓库默认分支' }); await Promise.resolve(); render()
+  assert.equal(restriction(), undefined, 'nondefault base must not render the eligible explanation')
+  assert.equal(select().props['aria-describedby'], undefined, 'nondefault base must not bind the eligible explanation')
+  assert.equal(select().props.children.find(option => option.props.value === 'closing').props.disabled, true)
+  assert.deepEqual(preview().props.children, ['Closes example/project#545', '；合并关闭仅适用于仓库默认分支'])
+  assert.equal(nodes().find(n => n?.type === 'button' && n.props.type === 'submit').props.disabled, true)
+  const before = creates
+  render().props.onSubmit({ preventDefault() {} }); await Promise.resolve()
+  assert.equal(creates, before, 'nondefault closing must not dispatch a create request')
+})
 for (const late of ['options', 'operation', 'resume', 'acknowledged']) test(`access metadata fences late ${late} without remount, probing or replay`, async () => {
   const { CreateChangeRequestSection } = await import('../../packages/ui/src/create-change-request-section.ts')
   const linked = { ...operation, state: 'saved', issueRelation: 'reference', issueTarget: { repositoryName: 'example/project', number: 545 } }

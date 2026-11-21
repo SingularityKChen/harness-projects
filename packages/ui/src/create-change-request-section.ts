@@ -38,6 +38,9 @@ export function CreateChangeRequestSection({ scope, creator, connected, accessTo
   } : saved
   const options = issueView?.owner === current && issueView.access === access && issueView.base === fields.base ? issueView.value : undefined
   const issueRelation = fields.issueRelation ?? options?.defaultRelation ?? 'none'
+  // Core 以 relations 单点拥有默认分支 eligibility；UI 只读该事实，不比较分支名。
+  const issueRestriction = options !== undefined && options.target !== undefined && options.relations.includes('closing')
+  const restrictionId = `create-change-request-issue-restriction-${encodeURIComponent(scope.repositoryId)}`
   const loadOptions = () => {
     if (!connected || current.pending || operation?.kind !== 'none') return
     const generation = current.generation, base = fields.base, receipt = accessRef.current, probe = ++current.probe
@@ -100,8 +103,9 @@ export function CreateChangeRequestSection({ scope, creator, connected, accessTo
     h('h4', null, '创建变更请求'),
     ...(['base', 'title', 'body'] as const).map((name) => h('label', { key: name }, { base: '目标分支', title: '标题', body: '正文' }[name],
       h(name === 'body' ? 'textarea' : 'input', { name, value: fields[name], required: name !== 'body', disabled: busy, onChange: (event: { target: { value: string } }) => setFields((old) => ({ ...old, [name]: event.target.value })) }))),
-    h('label', null, '来源 Issue 关系', h('select', { name: 'issueRelation', value: issueRelation, disabled: busy || !options, onChange: (event: { target: { value: string } }) => setFields(old => ({ ...old, issueRelation: event.target.value as IssueRelation })) }, ...(['reference', 'closing', 'none'] as const).map(relation => h('option', { key: relation, value: relation, disabled: !options?.relations.includes(relation) }, { reference: '仅引用', closing: '合并时关闭', none: '不关联 Issue' }[relation])))),
+    h('label', null, '来源 Issue 关系', h('select', { name: 'issueRelation', value: issueRelation, disabled: busy || !options, 'aria-describedby': issueRestriction ? restrictionId : undefined, onChange: (event: { target: { value: string } }) => setFields(old => ({ ...old, issueRelation: event.target.value as IssueRelation })) }, ...(['reference', 'closing', 'none'] as const).map(relation => h('option', { key: relation, value: relation, disabled: !options?.relations.includes(relation) }, { reference: '仅引用', closing: '合并时关闭', none: '不关联 Issue' }[relation])))),
     h('p', null, options?.target && issueRelation !== 'none' ? `${issueRelation === 'closing' ? 'Closes' : 'Refs'} ${options.target.repositoryName}#${options.target.number}` : '不添加 Issue 关联', options?.reason ? `；${options.reason}` : ''),
+    issueRestriction ? h('p', { id: restrictionId }, '“合并时关闭”仅在 PR 目标分支为仓库默认分支时生效：GitHub 会在合并后关闭所选 Issue。') : null,
     h('button', { type: 'button', disabled: busy, onClick: loadOptions }, '重新验证来源 Issue'),
     creator.assignees ? h(ChangeRequestAssigneePicker, { key: JSON.stringify([key, accessToken, refreshToken]), scope, port: creator.assignees, connected, accessToken: assigneeAccessToken, value: assigneeIds, disabled: busy, onChange: ids => setSelection({ access: assigneeAccess, ids }) }) : h('p', null, '当前连接不支持选择负责人'),
     h('button', { type: 'button', disabled: busy || !assigneeIds.length, onClick: () => setSelection({ access: assigneeAccess, ids: [] }) }, '不指定负责人'),
