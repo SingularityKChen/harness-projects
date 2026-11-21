@@ -68,8 +68,8 @@ const importerDirectories = (lock) => Object.keys(lock.importers ?? {}).sort()
  * 清单，比如测试夹具，不是 workspace 成员）；并跳过依赖与被 .gitignore 忽略的构建产物（根 `.gitignore` 的裸目录规则，
  * 如 `node_modules`、`dist`、`build`），否则按文档跑一次 `pack:plugin` 生成的
  * `apps/harness-plugin/dist/package/package.json` 会被算成「磁盘上的包」。
- * 与 `package-boundaries.test.js` 的 `findPackageDirs` 一样找到包根就停；不同的是它只看两层、各自手写跳过名单
- * （ExecPlan 2026-10-21-scans-skip-build-output 的 D5 把它们留给后续 PR），这里逐层递归，跳过名单取自共享来源。
+ * 与 `package-boundaries.test.js` 的包根发现一样找到包根就停；不同的是本文件从根目录逐层递归（含根 `.`），
+ * 而那条契约测试是定长两层，两处跳过名单都来自 `tests/fixtures/source-tree.mjs`。
  */
 async function packageDirectoriesOnDisk(root = repoRoot) {
   const skipped = ignoredDirectoryNames(root)

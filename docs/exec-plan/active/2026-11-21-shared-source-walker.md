@@ -160,7 +160,7 @@ export function listPackageDirectories(root, groups) {
 - [x] Batch 0 对齐与基线（2026-11-21，工作树 `.worktrees/shared-source-walker`）：`pnpm install --frozen-lockfile` exit 0；V3 `ℹ tests 10 / pass 10 / fail 0`；V4 `ℹ tests 12 / pass 12 / fail 0`；V7 基线 `ℹ tests 1620 / pass 1613 / fail 7`（7 条全是高负载下的子进程期限断言，见 F10）；V8 基线未整跑（同机四路实现并行，见 F10），终局按 V8 整跑一次
 - [x] Batch 1 计划落档（2026-11-21，commit d899e16f：本计划 + `docs/README.md` Active 行）
 - [x] Batch 2 helper 与夹具（2026-11-21）：V4 先 `SyntaxError: ... does not provide an export named 'listPackageDirectories'`，再空桩 `ℹ tests 14 / pass 11 / fail 3`（C3/C7/C8 红），实现后 `ℹ tests 14 / pass 14 / fail 0`；K1–K8 全部被杀死，见 F9
-- [ ] Batch 3 迁移两处扫描（未开始；需记录 grep 与 18/206 对照）
+- [x] Batch 3 迁移两处扫描（2026-11-21）：RED = 迁移前两条 `grep` 命中（跳过名字面量 3 处：:137/:144/:173；本地实现引用 6 处：:138/:162/:174/:233/:250/:285），GREEN = 迁移后两条 `grep` 均无命中（exit 1）；V3 `10/10`、V5 `10/10`、V6 `5/5`、V4 `14/14`；迁移前后集合探针（F11）：包根 18 vs 18、差集 `[]`，源码 206 vs 206、差集 `[]`，206 个全是 `.ts`
 - [ ] Batch 4 文档与最终门禁（未开始；需记录 V8–V13 输出）
 - [ ] PR 创建与回读（未开始；draft PR 关联 #396，最终 push 后回读 head/base/checks/issue 关联）
 
@@ -185,6 +185,7 @@ export function listPackageDirectories(root, groups) {
   | K7 | 用主检出 `.gitignore` 而非调用方 root | 14 / pass 12 / fail 2 | C3、C8 |
   | K8 | 扩展名换回旧本地集合 `/\\.(ts\|tsx\|mts\|cts)$/` | 14 / pass 12 / fail 2 | 「共享源码集合覆盖…扩展名」、C4 |
   说明：计划预期「K4/K7 红 C8、其余红 C7」；实际 K4 额外红 C3（硬编码不再读 `.gitignore`，缺文件时不抛 ENOENT）、K7 额外红 C3（换成存在的主检出 root 后夹具缺 `.gitignore` 也不再抛 ENOENT）、K8 额外红 C4（Git 可见的 `.js/.mjs` 源码漏项）。更强不改变结论：8 个变异无一存活。
+- F11（B3 迁移前后集合探针，2026-11-21，一次性脚本不落盘）：从 `d899e16f:tests/contract/package-boundaries.test.js` 取出旧的 `findPackageDirs` / `sourceFiles`（经 `new Function` 式 shim 加载，不改仓库），与迁移后的 `listPackageDirectories` / `listSourceFiles` 在同一棵树上对比：包根 18 vs 18、`pkgOnlyOld=[]` / `pkgOnlyNew=[]`；源码 206 vs 206、`fileOnlyOld=[]` / `fileOnlyNew=[]`；新集合里非 `.ts` 文件 0 个。这是 I1「判定不变」的逐项证据（数字相同只是计数，差集为空才是逐项）。
 - F10（基线门禁在共享机器高负载下的观察，2026-11-21）：Batch 0 时同机有四个实现者并行跑测试，`load averages` 约 280/310/300（10 核）。V7 基线 `pnpm test:contract` 得 `ℹ tests 1620 / pass 1613 / fail 7`，7 条全是子进程期限类断言（`W3：step 的畸形长引用有界拒绝` 的 5 s `spawnSync` 超时、`spec 不合法…` 31.6 s、浏览器用例 2.6–5.0 s）；`pnpm test:file tests/contract/workflow-check.test.js` 单独复跑 55/55 绿。结论同 F8：属环境性超时，不是基线回归。V8 基线因同机四路整测并发被主动中止，终局只整跑一次 V8（失败时按 Idempotence and Recovery 先复跑命中文件再判断）。
 - F8（基线门禁的环境敏感性，2026-11-21 实测）：在主检出跑 V8 时，`tests/contract/ui-safe-markdown.test.js` 的一次 `spawnSync` 子进程触发 `ETIMEDOUT`（`execFileSync` 传入 200000 字符输入），同文件单独复跑 `ℹ tests 18 / ℹ pass 18 / ℹ fail 0`，`pnpm run typecheck` 也通过。结论：该失败与本改动无关，属高负载下的既有超时；Batch 0 的 V8 基线按「单独复跑该文件」的结论记录，最终门禁遇到同类现象时先复跑再判断，不把它当作 #396 的回归。
 
@@ -202,6 +203,7 @@ export function listPackageDirectories(root, groups) {
 - D10（2026-11-21，Lead 裁决 Q1，直接采用不再讨论）：**接受缺 group 目录抛原生 ENOENT（fail-closed）**。这是 D4 的最终确认：不加 `existsSync` 守卫、不返回空集；C3 用两条 `assert.throws(..., { code: 'ENOENT' })` 钉住，K4/K7 证明守卫消失时它会红。
 - D11（2026-11-21，Lead 裁决 Q2）：**不得用「本机有 `dist` 残留仍绿」冒充结构证据**。`pnpm run boundaries` 10/10 只作「未误报」观察；「两条路径只剩一份实现」的判别力来自 C7/C8 夹具（K1–K8 变异表，F9）与删除 diff + 两条 `grep` 无命中，不来自任何运行期测试。
 - D12（2026-11-21，Lead 裁决 Q3）：TD-087 在本 PR 标记 `Resolved`，但**不**把 `host-node-types` 的递归包发现与 `development-local-git-source` 的本地扫描并入，也不为本项新建 issue；理由与残余统一写进本计划的 Outcomes 与 tracker 说明（复用 D6 的边界）。
+- D14（2026-11-21，实现期）：B3 是行为保持的迁移，"先失败"的判别对象不是运行期判定（D7 已排除用运行期测试证明「没有第二份实现」），而是结构性主张——迁移前 `package-boundaries.test.js` 里有 3 处跳过名字面量与 6 处本地实现引用（两条 `grep` 命中），迁移后均为 0 命中；判定不变的护栏是 B2 的 C7/C8（K1–K8 已证明可杀）加 V3/V5/V6 与 F11 集合探针。RED/GREEN 记录见 Progress。
 - D13（2026-11-21，实现期）：B2 的变异还原用 `/tmp` 下的 green 副本 `cp` 回写，而不是 `git checkout -- tests/fixtures/source-tree.mjs`——变异阶段实现尚未提交，`git checkout` 会连实现一起丢弃。每次还原后核对 `RESTORED_IDENTICAL=true` 并复跑 V4 回到 14/14。
 
 ## Idempotence and Recovery
