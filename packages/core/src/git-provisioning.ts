@@ -168,10 +168,9 @@ export async function provisionGit(
   // 恢复：上下文里已经记录了分支步的结果就**整个跳过它**——不解析 `fromRef`，因此「基线是否
   // 前进」不进入判定。分支名是身份，我们记录的那一行是所有权（批次计划 D1 / D2）。
   const recorded = await context.storage.getExecutionContext(contextId)
-  // 被对账采纳的分支是**已决定的身份**（D9）：即使本次还没有写回记录，也按它做预检、
-  // 拒绝声明了其它分支名的重放，并跳过被证明的那一步外部写。
-  const adoptedBranch = adopted?.operation === 'createBranch' ? adopted : undefined
-  const decided = recorded?.branchExternalId ?? adoptedBranch?.value
+  // 被对账采纳的分支身份**已经由认领事务写回记录**（D9/D14）：`decided` 这一条就是唯一来源，
+  // 因此这里不需要第二份 adopted 分支实现——预检、branchName 拒绝与跳过 ensureBranch 都走同一条路径。
+  const decided = recorded?.branchExternalId
   const intent: Names = recorded?.worktreeExternalId === undefined ? names : { ...names, path: recorded.worktreeExternalId }
   // 调用方在重放时声明一个**不同**的分支名是**矛盾**，不是新输入：序列已经决定了身份，静默采纳新名字
   // 会让「报出去的身份」与「磁盘上的事实」分叉——工作树落在新名字上、而 `branchExternalId` 报的是旧名字，
@@ -196,21 +195,15 @@ export async function provisionGit(
   const target = await preflightWorktree(provider, repository, preflightIntent)
   if (!target.ok) return gitFailure(contextId, target.report, bindingId, decided)
   const branchVersion = context.runtimeAccess.operationVersion(bindingId, CapabilityKey.DevelopmentBranchCreate, request.repositoryId)
-  const prior = decided === undefined || adoptedBranch !== undefined ? undefined : await branchProbe(provider, repository, decided)
+  const prior = decided === undefined ? undefined : await branchProbe(provider, repository, decided)
   if (prior?.probe.error?.code === ProjectErrorCode.PermissionDenied) return gitFailure(contextId, markFailed(beginWrite(decided), prior.probe.error), bindingId, decided)
-  const branch = adoptedBranch !== undefined
-    // 被证明的那一步不重发：报告直接取对账证据，并保留被采纳分支的头提交。
-    ? {
-      report: reportFor(WritePhase.Reconciled, { attemptedValue: adoptedBranch.value, lastKnownAuthoritative: adoptedBranch.value }, undefined),
-      ok: true, value: adoptedBranch.value, headCommit: adoptedBranch.headCommit,
+  const branch = decided === undefined
+    ? await ensureBranch(provider, repository, names.branch, beforeExternalWrite)
+    : {
+      report: confirmWrite(markWriting(beginWrite(decided)), decided),
+      ok: true, value: decided,
+      headCommit: prior?.headCommit,
     }
-    : decided === undefined
-      ? await ensureBranch(provider, repository, names.branch, beforeExternalWrite)
-      : {
-        report: confirmWrite(markWriting(beginWrite(decided)), decided),
-        ok: true, value: decided,
-        headCommit: prior?.headCommit,
-      }
   if (!branch.ok || branch.value === undefined) {
     if (!branch.failureKey && branch.report.error?.code === ProjectErrorCode.PermissionDenied) context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentBranchCreate, request.repositoryId, true)
     return gitFailure(contextId, branch.report, bindingId, undefined)

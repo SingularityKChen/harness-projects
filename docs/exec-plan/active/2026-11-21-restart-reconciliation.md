@@ -229,6 +229,8 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 - **D13（2026-11-21）Lead 批准的 Q1–Q5 执行裁定（本轮不重新讨论）。** Q1 restart 范围 = 同 key 重放，新 key 接管旧未决槽位不在本 PR（见 `Outcomes & Retrospective` 的 follow-up）；Q2 对账读被 capability 门拒绝时保留读失败自身 code、`writeState=unknown`，消息注明「对账只读，未重发外部写入」；Q3 不改 ADR-0004 / R8 偏离文案，解释只记在本 Decision Log（与 D11 一致）；Q4 不把硬崩溃 `pending` 残留纳入对账（与 D6 一致）；Q5 采纳不额外校验分支 head 与 `intent.input.fromRef` 一致（与 D8 一致），该风险写入 `Outcomes & Retrospective`。
 - **D14（2026-11-21）对账结论的答复面用 `existingResult(record, report, verify=false)`。** 触发对账的前提是上下文可续跑（终态或租约过期）且没有 run，因此记录不可能是「完整 Ready」；仍显式跳过 Ready 验证读，让 conflict / inconclusive 的答复与零写入是同一个事实。被采纳的分支身份在认领事务里写回（`branchExternalId`），**不**在那里写工作树句柄：句柄继续只由步骤回填产生，谱系锚点纪律不变。
 
+- **D15（2026-11-21）`provisionGit` 不再消费 adopted 分支证据：认领事务写回的分支身份已是唯一来源。** 变异验证发现「provisionGit 的 adopted 分支块」在认领事务已写回 `branchExternalId` 之后不可判别（删掉它，用例 1 仍绿：`decided` 路径本来就跳过 `ensureBranch`）。按计划第 9 条的最小化原则删除这份同义实现，并把 M1 变异点改到认领事务的身份写回（那里删掉会让 `createBranch` 被再调一次，用例 1 变红）。adopted 只驱动两件事：预检看到被采纳的工作树路径、以及跳过被证明的工作树步。
+
 ## Idempotence and Recovery
 
 - **对账本身幂等**：`reconcileGitStep` 是纯读（只调用 `listBranches`/`getWorktree` 与 `runtimeAccess` 记账），可任意重跑，不产生外部或本地写入。
