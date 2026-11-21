@@ -25,13 +25,13 @@
 
 | 计划 | 用途 |
 |---|---|
-| [2026-11-21-list-visibility-decisions](exec-plan/active/2026-11-21-list-visibility-decisions.md) | 列表可见性显式决策（#314） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-21-list-visibility-decisions](exec-plan/completed/2026-11-21-list-visibility-decisions.md) | 列表可见性决策显式化：单文件私有决策 + 矩阵/变异判别测试（#314） |
 | [2026-11-20-planning-source-projection-filter](exec-plan/completed/2026-11-20-planning-source-projection-filter.md) | 规划来源切换后只读服务启用挂载的投影，Fake 与 SQLite 同义（#202） |
 | [2026-11-20-default-branch-restriction-explanation](exec-plan/completed/2026-11-20-default-branch-restriction-explanation.md) | 合并仅在默认分支关闭 Issue 的提交前说明（#580，Refs #556） |
 | [2026-11-20-delivery-lineage-hop-fields](exec-plan/completed/2026-11-20-delivery-lineage-hop-fields.md) | 常量交付跳字段 `observed`/`detail` 的生产者、解码器与夹具退役（#633） |

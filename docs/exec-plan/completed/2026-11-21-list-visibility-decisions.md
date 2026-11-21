@@ -1,6 +1,6 @@
 # 列表可见性决策显式化（#314）ExecPlan
 
-> 状态：Active（计划创建；实现批次尚未执行）
+> 状态：Completed（实现完成；独立验收与人类合并决定待处理）
 > 创建：2026-11-21
 > 范围：把 `deriveWorkItemListView` 的入参校验、行可见性决策与展示装配在同一权威归约点内显式分离；公开输入/输出、全部文案、渲染结果与用户可见行为不变；不改 `packages/ui` 与 `apps`。
 > 上游输入：issue #314 正文（含 2026-10-28 / 2026-10-29 的容量预测；验收标准与人类决策不变）。本计划自包含，不依赖仓库外文档。实现工作树 `.worktrees/list-visibility-decisions`，分支 `refactor/list-visibility-decisions`，基于 `main` @ `f74a3b8b`。
@@ -315,9 +315,9 @@ node scripts/resolution-check.mjs && node --test --test-timeout=180000 $(grep -r
 ## Progress
 
 - [x] Batch 1 · 特性化矩阵与判别力证明（2026-11-21，a634f122）：新增 3 个用例（21 行矩阵 + 输出形状白名单 + 坏接线优先），当前实现上全绿；V1 `ℹ tests 21 / pass 21 / fail 0`、V2 exit 0；临时变异 MA（EXPLICIT_BLOCK 去掉 permission_denied）→ 矩阵等 3 用例红，MB（缓存门忽略 cacheVisibility）→ 5 用例红，MC（GATE_BLOCKED 换成 FAILURE.unknown）→ 3 用例红，均已还原且 `git diff --quiet` 通过。
-- [x] Batch 2 · 校验与失败表合并（2026-11-21，本提交）：`FAILURE` 单表替换 `UNAVAILABLE` + `EXPLICIT_BLOCK`（`borrowsCache` 与文案同表），新增私有 `ReadMarks` / `validateReadInput`，`deriveWorkItemListView` 改为先校验、再派生 list、再进入可见性阶梯（阶梯仍是内联 if 链，装配段逐字未动）；V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`。
-- [x] Batch 3 · 决策提取与装配收口（2026-11-21，本提交）：新增私有 `ListVisibility` union、`decideListVisibility(marks, access)`（有序短路六段）与 `listStatusText`；`deriveWorkItemListView` 变成校验 → 派生 → 读门 → 决策 → 装配，装配段只按 `visibility.kind` 分派，不再自行判断权限、缓存或失败。V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`；V9 全量 165/169（4 个失败在未触碰文件，见 Surprises 第 13 条），排除该 2 个文件后 13 文件 148/148；M1–M8 全部按预期变红并已还原（见判别性测试策略表）。
-- [ ] Batch 4 · 文档归档、体量与发布面门禁
+- [x] Batch 2 · 校验与失败表合并（2026-11-21，749bc069）：`FAILURE` 单表替换 `UNAVAILABLE` + `EXPLICIT_BLOCK`（`borrowsCache` 与文案同表），新增私有 `ReadMarks` / `validateReadInput`，`deriveWorkItemListView` 改为先校验、再派生 list、再进入可见性阶梯（阶梯仍是内联 if 链，装配段逐字未动）；V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`。
+- [x] Batch 3 · 决策提取与装配收口（2026-11-21，5f15c6b7）：新增私有 `ListVisibility` union、`decideListVisibility(marks, access)`（有序短路六段）与 `listStatusText`；`deriveWorkItemListView` 变成校验 → 派生 → 读门 → 决策 → 装配，装配段只按 `visibility.kind` 分派，不再自行判断权限、缓存或失败。V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`；V9 全量 165/169（4 个失败在未触碰文件，见 Surprises 第 13 条），排除该 2 个文件后 13 文件 148/148；M1–M8 全部按预期变红并已还原（见判别性测试策略表）。
+- [x] Batch 4 · 文档归档、体量与发布面门禁（2026-11-21）：计划移入 `docs/exec-plan/completed/` 并更新 `docs/README.md`；V5 代码 263 / 文档 388（均低于 PR 上限）、V6 机械扫描通过、V7 无输出、V8 通过（gh 已登录）；V1/V2 在最终 head 复跑通过；分支已 push 到 `origin/refactor/list-visibility-decisions`（draft PR #672，未 ready、未合并）。
 - 2026-11-21：计划创建；事实在 `f74a3b8b` 独立核实（基线见 Surprises 第 9 条）；实现未开始。
 
 ## Surprises & Discoveries
@@ -373,8 +373,15 @@ node scripts/resolution-check.mjs && node --test --test-timeout=180000 $(grep -r
 
 ## Outcomes & Retrospective
 
-创建时（2026-11-21）：实现批次尚未执行，本计划不预先声称实现结果。执行完成后本节必须记录以下事实（逐项写入实际值）：① V5 实际代码 / 文档行数；② 各批次实际偏差与恢复次数；③ M1–M8 与 MA–MC 实际红/绿及失败用例名；④ PR 编号、最终 head、`gh pr checks` 回读结果与人类合并决定；⑤ 若矩阵收窄，说明保留与放弃的格及理由。无法本地验证的项（真实 CI lane、人类视觉验收、安装验收）写成阻塞或明确遗留，不使用「应该可以」这类措辞。
+实现完成（2026-11-21，分支 `refactor/list-visibility-decisions`，draft PR #672；独立验收与人类合并决定待处理）：
+
+- 体量：V5 实际 `代码 263 / 1000`、`文档 388 / 1500`（申报上限 800/1300）。
+- 偏差与恢复：矩阵 20 → 21 行（Surprises 12）；M1/M4/M5 原始措辞行为等价，改为语义等价可失败变异（Surprises 14）；`decideListVisibility` 收窄为两参（Surprises 15 / D12）；V9 全量因本机环境/并行负载在 2 个未触碰文件上失败，改用 V1/V3/V4 + V9 子集 148/148 作等价证据（Surprises 13）。Batch 间无 revert；每个变异用 `/tmp` 备份 + `cmp` 还原，最终 `git diff` 只剩预期改动。
+- 判别力：MA/MB/MC（Batch 1）与 M1–M8（Batch 3）全部实跑变红并还原，失败用例名见 Batch Progress 与变异表。
+- 验证：V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`、V9 子集 `148/148`（全量 165/169，环境失败已归因）；V5/V6/V7/V8 见 Batch 4 Progress。
+- 未完成/阻塞：真实 CI lane、`gh pr checks` 回读、人类视觉验收与合并决定留给独立验证与人类伙伴；本 agent 不 push `main`、不执行 `gh pr ready`、不合并。矩阵未收窄，未放弃任何格。
 
 ## Bottom Change Note
 
 - 2026-11-21：创建。收敛两份本地独立设计，按 `f74a3b8b` 独立重核源码、测试、脚本与 issue 事实；确定同文件私有单元 + 单失败表的最终方案，记录被否决方案、有序矩阵、判别性测试、变异、批次回滚点与本地 `pnpm test` 的基线失败。
+- 2026-11-21：实现完成（Batch 1 a634f122、Batch 2 749bc069、Batch 3 5f15c6b7、Batch 4 归档提交）；行为保持由现有 15 个消费文件 + 21 行矩阵 + MA–MC / M1–M8 变异证明；独立验收与合并待人类伙伴。
