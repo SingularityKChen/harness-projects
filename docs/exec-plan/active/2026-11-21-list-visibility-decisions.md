@@ -136,7 +136,7 @@ function listStatusText(refreshing: boolean, partial: boolean, stale: boolean, r
 
 只在 `tests/contract/ui-work-item-list-view.test.js` 新增 3 个用例：
 
-1. `可见性矩阵：按阶段 / 读门 / 失败 / 快照 / 缓存授权的顺序判定，每格恰有一个决策`：20 行表驱动，逐行断言 `{readOnly, degraded, statusText, body.kind, body.reason, body.stale, body.refreshing, body.partial, rows(kind,key,stale), 'rows' in body}`，并对每行 `JSON.stringify(view)` 做 canary 扫描；覆盖第 1–6 段与下列边界格：明确阻断压过授权缓存、offline + 读门未观测与读门不可读、gate blocked 的两种文案来源（无失败 vs 有失败）、pending + gate blocked 不进 loading、pending + read_only / degraded、received + read_only / degraded / refreshing、failed + 授权缓存 + read_only、failed + ¬snapshot / ¬authorized、gap 的 partial 与混合新鲜度、全 redacted 的 partial 不成立。
+1. `可见性矩阵：按阶段 / 读门 / 失败 / 快照 / 缓存授权的顺序判定，每格恰有一个决策`：21 行表驱动（见 Surprises 第 12 条），逐行断言 `{readOnly, degraded, statusText, body.kind, body.reason, body.stale, body.refreshing, body.partial, rows(kind,key,stale), 'rows' in body}`，并对每行 `JSON.stringify(view)` 做 canary 扫描；覆盖第 1–6 段与下列边界格：明确阻断压过授权缓存、offline + 读门未观测与读门不可读、gate blocked 的两种文案来源（无失败 vs 有失败）、pending + gate blocked 不进 loading、pending + read_only / degraded、received + read_only / degraded / refreshing、failed + 授权缓存 + read_only、failed + ¬snapshot / ¬authorized、gap 的 partial 与混合新鲜度、全 redacted 的 partial 不成立。
 2. `输出形状白名单：view、不可用 body、content body 与行对象的键集固定`：精确键集 + 可见行正控；新增调试字段、把 failure 或内部 cause 塞进 body 必红。
 3. `坏接线先于可见性决策：阻断态不掩盖非法 phase / failure / 读取标记 / 时间戳`：新增 `failed(permission_denied) + lastUpdatedAt:'yesterday'` 抛 TypeError，以及 `failure.kind='constructor'` 抛 TypeError。
 
@@ -179,7 +179,7 @@ function listStatusText(refreshing: boolean, partial: boolean, stale: boolean, r
 **最小闭环**：新用例在当前实现上全绿（特征化），并用临时变异证明可失败。
 **涉及文件**：`tests/contract/ui-work-item-list-view.test.js`。
 
-1. 新增 `VISIBILITY_MATRIX` 表（20 行，覆盖上文第 1–6 段与边界格）、归一化投影函数与逐行断言；每行附带 canary JSON 扫描。
+1. 新增 `VISIBILITY_MATRIX` 表（21 行，覆盖上文第 1–6 段与边界格）、归一化投影函数与逐行断言；每行附带 canary JSON 扫描。
 2. 新增输出形状白名单用例与坏接线优先用例。
 3. 跑 V1（期望 `tests 21 / pass 21 / fail 0`）、V2。
 4. 在**当前实现**上做三个临时变异并各跑一次 V1：MA 从 `EXPLICIT_BLOCK` 去掉 `permission_denied`；MB 让缓存门忽略 `cacheVisibility`；MC 把 `GATE_BLOCKED` 换成 `UNAVAILABLE.unknown`。确认矩阵变红后逐项还原，再跑 V1 回到 21/21。
@@ -310,7 +310,7 @@ node scripts/resolution-check.mjs && node --test --test-timeout=180000 $(grep -r
 
 ## Progress
 
-- [ ] Batch 1 · 特性化矩阵与判别力证明
+- [x] Batch 1 · 特性化矩阵与判别力证明（2026-11-21，本提交）：新增 3 个用例（21 行矩阵 + 输出形状白名单 + 坏接线优先），当前实现上全绿；V1 `ℹ tests 21 / pass 21 / fail 0`、V2 exit 0；临时变异 MA（EXPLICIT_BLOCK 去掉 permission_denied）→ 矩阵等 3 用例红，MB（缓存门忽略 cacheVisibility）→ 5 用例红，MC（GATE_BLOCKED 换成 FAILURE.unknown）→ 3 用例红，均已还原且 `git diff --quiet` 通过。
 - [ ] Batch 2 · 校验与失败表合并
 - [ ] Batch 3 · 决策提取与装配收口
 - [ ] Batch 4 · 文档归档、体量与发布面门禁
@@ -329,6 +329,7 @@ node scripts/resolution-check.mjs && node --test --test-timeout=180000 $(grep -r
 9. 基线与环境（2026-11-21）：`main` 工作树干净 @ `f74a3b8b211f`；Node v26.13.1；V1 18/18、V3 28/28、V4 10/10、V9 166/166（改后预期 169）、V2 exit 0、V5 0/0；实现工作树 `.worktrees/list-visibility-decisions` 已在分支 `refactor/list-visibility-decisions`。
 10. #366/#429/#430 已 CLOSED；并行 #191/#396/#138 的写面（core 重协调、tests 共享 walker、providers worktree）与本 PR 不重叠。
 11. issue 验收命令点名的是 2 个测试文件（view + browser），不是 3 个。
+12. 矩阵实际为 21 行而非创建时的 20 行：把「gap 混合新鲜度」「gap 部分读取」「全 redacted 且 partial 不成立」拆成三个独立格，避免同一格同时承担三种决策；逐行证据见 Batch 1 提交。
 
 ## Decision Log
 
