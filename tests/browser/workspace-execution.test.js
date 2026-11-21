@@ -7,6 +7,7 @@ import { chromium } from 'playwright'
 import { startExecutionServer } from '../fixtures/execution-drawer-browser.mjs'
 
 const REPOSITORY = 'local-repository', TITLE = '规划项 issue-1'
+const ISSUE_RESTRICTION = '“合并时关闭”仅在 PR 目标分支为仓库默认分支时生效：GitHub 会在合并后关闭所选 Issue。'
 const visible = (page, text) => page.getByText(text, { exact: true }).filter({ visible: true }).first().waitFor()
 function rows(h, table) {
   assert.ok(['execution_context', 'execution_run', 'mutation_attempt'].includes(table))
@@ -224,7 +225,9 @@ for (const relation of ['reference', 'closing', 'none']) test(`preselected Draft
   h.platform.flags.issueTarget = true
   await start(page); await visible(page, '开始工作已确认')
   await page.getByLabel('目标分支', { exact: true }).fill('main'); await page.getByLabel('标题', { exact: true }).fill('Browser Issue choice')
+  await page.getByText(ISSUE_RESTRICTION, { exact: true }).waitFor()
   const select = page.locator('select[name="issueRelation"]')
+  assert.equal(await select.getAttribute('aria-describedby'), 'create-change-request-issue-restriction-local-repository')
   await page.getByText('Refs example/project#545', { exact: true }).waitFor()
   await tabTo(page, select, 'source Issue relation'); await select.selectOption(relation)
   assert.equal(await select.inputValue(), relation)
@@ -233,6 +236,22 @@ for (const relation of ['reference', 'closing', 'none']) test(`preselected Draft
   const intent = JSON.parse(rows(h, 'mutation_attempt').find(r => r.command_name === 'createChangeRequest').external_intent_json)
   assert.equal(intent.issueSelection.relation, relation); assert.deepEqual(intent.requestedAssigneeIds, ['U_browser']); assert.equal(intent.input.draft, true)
   assert.equal(h.platform.prCreates, 1); assert.equal(h.platform.assignment.adds, 1)
+}))
+test('nondefault base removes the eligible restriction and keeps closing enforcement', { timeout: 60000 }, async t => scene(t, async ({ h, page }) => {
+  h.platform.flags.issueTarget = true
+  await start(page); await visible(page, '开始工作已确认')
+  await page.getByLabel('目标分支', { exact: true }).fill('main'); await page.getByLabel('标题', { exact: true }).fill('Nondefault restriction')
+  const select = page.locator('select[name="issueRelation"]')
+  await page.getByText(ISSUE_RESTRICTION, { exact: true }).waitFor()
+  await select.selectOption('closing')
+  await page.getByText('Closes example/project#545', { exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '创建 PR', exact: true }).isDisabled(), false)
+  await page.getByLabel('目标分支', { exact: true }).fill('release')
+  await page.getByText('Closes example/project#545；合并关闭仅适用于仓库默认分支', { exact: true }).waitFor()
+  assert.equal(await select.locator('option[value="closing"]').evaluate(element => element.disabled), true)
+  assert.equal(await page.getByText(ISSUE_RESTRICTION, { exact: true }).count(), 0)
+  assert.equal(await page.getByRole('button', { name: '创建 PR', exact: true }).isDisabled(), true)
+  assert.equal(h.platform.prCreates, 0)
 }))
 test('native candidate denial masks late browser response while keeping same-item Draft fields', { timeout: 60000 }, async t => scene(t, async ({ h, page }) => {
   await start(page); await visible(page, '开始工作已确认')
