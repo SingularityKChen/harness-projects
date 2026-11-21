@@ -1,6 +1,6 @@
 # restart-reconciliation ExecPlan
 
-> 状态：Active
+> 状态：Completed（实现完成，验收待独立验证）
 > 创建：2026-11-21
 > 范围：issue #191 —— Start Work 的同 key 重放在报告未决 Git 外部写之前，先重跑一次只读对账，用对账结论决定「采纳 / 重发 / 冲突 / 未知」；不新增列、表、port、兼容层
 > 上游依据：issue #191 正文与验收（`kind:fix area:core`，Milestone M2.1）；`docs/adr/ADR-0004-unknown-external-create-is-product-visible.md`；`docs/architecture/gate-e1-ruling.md` §4 R8 与 §9 的偏离说明；`docs/product/vertical-path.md` §2
@@ -157,9 +157,9 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 
 **涉及文件**：本 ExecPlan、`docs/README.md`（仅索引），以及变异期间临时改动的两个生产文件（必须逐个恢复后跑 V1/V2/V3/V4）。
 
-1. M1 删掉 `provisionGit` 的 adopted 分支 → 用例 1 红（`createBranch` 再被调用或结果不是 reconciled）。
+1. M1 删掉认领事务里被采纳分支的身份写回（原计划的 `provisionGit` adopted 分支块不可判别，按 D15 删除后改到这里）→ 用例 1 红（`createBranch` 再被调用）。
 2. M2 把 `probe.error` 当 `absent` → 第 5 组负控红（外部写计数 >1）。
-3. M3 把「`state==='unknown'`」放宽成「任何 unresolved（含 `pending`）」 → 第 8(a) 组在途负控红（在途同 key 重放开始探测/改写）。
+3. M3 同时放宽「未决状态」与 `needsSupply` 两处守卫（单独放宽任一处都不会被杀死，见 Progress）→ 第 8(a) 组在途负控红（在途同 key 重放开始探测/改写）。
 4. M4 把「同 key 证据行」判定改成「任意未决行」 → `start-work-step-recording`「conflict 后列表读取失败…恢复读取也不能用新键盲写」红（证明新 key 边界没被放开）。
 5. M5 删掉「`intent.ownerGeneration === record.provisioningGeneration`」守卫 → 第 8(b) 组旧代际负控红。
 6. M6 用本次请求的 `namesFor(request)` 重新派生工作树句柄 → 用例 2/6 红（读不到持久句柄或读到错的位置）。
@@ -177,9 +177,9 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 以下命令是唯一来源，批次只引用编号；均在工作树 `.worktrees/restart-reconciliation/` 根目录运行，且不要同时跑其他重负载命令（`start-work-step-recording.test.js` 里「游标永不结束」用例有 5s 预算，本机在并发负载下观察到过超时，见 `Surprises & Discoveries`）。
 
 - **V1** `pnpm run typecheck` → 期望 exit 0、无输出。
-- **V2** `pnpm test:file tests/integration/start-work-step-recording.test.js` → 期望 `fail 0`；`tests` 由基线 11 增至 15（新增 4 条），且 4 条新增用例出现在 pass 列表。
-- **V3** `pnpm test:file tests/integration/start-work-external-intent.test.js tests/integration/start-work-request-binding.test.js tests/integration/start-work-owner-fencing.test.js tests/integration/start-work-retry-identity.test.js tests/integration/start-work-execution-uniqueness.test.js tests/e2e/start-work-recovery.test.js` → 期望 `fail 0`。2026-11-21 基线实测：V3 六个文件与 V4 一个文件同批运行共 186 pass / 0 fail / 0 cancelled（两批未分开计数，分开的数字在 Batch 1 的验证记录里补记）。
-- **V4** `pnpm test:file tests/integration/local-git-core-provisioning.test.js` → 期望 `fail 0`，且真实磁盘采纳用例出现。
+- **V2** `pnpm test:file tests/integration/start-work-step-recording.test.js` → 期望 `fail 0`；`tests` 由基线 11 增至 17（新增 4 条正控 + 2 条负控），且 4 条新增用例出现在 pass 列表。
+- **V3** `pnpm test:file tests/integration/start-work-external-intent.test.js tests/integration/start-work-request-binding.test.js tests/integration/start-work-owner-fencing.test.js tests/integration/start-work-retry-identity.test.js tests/integration/start-work-execution-uniqueness.test.js tests/e2e/start-work-recovery.test.js` → 期望 `fail 0`。2026-11-21 基线实测 V3 六文件与 V4 一文件同批 186 pass / 0 fail；本轮分开实测 V3 `170 tests / 170 pass / 0 fail`，V4 `18 tests / 18 pass`。
+- **V4** `pnpm test:file tests/integration/local-git-core-provisioning.test.js` → 期望 `fail 0`，且真实磁盘采纳用例出现。2026-11-21 本轮实测 18 tests / 18 pass / 0 fail（基线 17 + 新增 1）。
 - **V5** `pnpm run boundaries` → 期望 `tests 10` / `pass 10` / `fail 0`（2026-11-21 基线实测）。
 - **V6** `node scripts/rule-checks.mjs size main` → 期望首行打印 base/head SHA 后给出 `代码：≤800 / 1000 行` 与 `文档：≤1300 / 1500 行`。
 - **V7** `node scripts/rule-checks.mjs disclosure main` → 期望输出含「机械扫描通过」。
@@ -201,6 +201,16 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 - [x] 2026-11-21：Batch 2 · 只读对账接入（inconclusive/conflict）。GREEN 证据：V2 `tests 17 / pass 14 / fail 3`（冲突用例转绿，三条 adopted/absent 用例仍红——本批显式过渡态）；V3 前半 `external-intent + request-binding` `73 tests / 72 pass / 1 fail`（12 条 Git 创建步的读计数断言转绿，仅剩 SQLite 重开收敛用例等 Batch 3）；V1 exit 0。inconclusive 消息以「对账只读，未重发外部写入」结尾并保留读失败 code（D4）；conflict 两侧值都进入报告。
 - [ ] Batch 3 · 结论驱动续跑（adopted/absent）。
 - [ ] Batch 4 · 变异验证、文档收尾与归档。
+- [x] 2026-11-21：Batch 4 · 变异验证（八个变异各自只让对应判别用例变红，逐个改回后重跑）：
+  - M1（去掉认领事务里被采纳分支的身份写回）→ V2「外部已建同名分支」红（`createBranch` 被再调一次；D15 说明变异点为何从 `provisionGit` 移到这里）。
+  - M2（`probe.error` 当 absent）→ external-intent 六条 `createBranch` lost-ack 用例红（外部写计数 2 ≠ 1）。
+  - M3（未决状态放宽到 `pending` + 去掉 `needsSupply` 守卫）→ V2「在途的同 key 重放不得探测」红；单独放宽任一处不会被杀死，两处联合承重。
+  - M4（同 key 证据行判定改成任意未决行）→ V2「conflict 后列表读取失败…新键盲写」红。
+  - M5（去掉 `intent.ownerGeneration === record.provisioningGeneration`）→ V2「旧代际的同 key 重放不得探测」红。
+  - M6（用 `intent.input.worktreeKey` 代替持久 `path`）→ V4 真实磁盘采纳用例红（`createWorktree` 被再调一次）。
+  - M7（去掉工作树分支一致性检查）→ V2「工作树检出别的分支」红（冲突被误报 adopted）。
+  - M8（让 adopted 也照常调用 `ensureWorktree`）→ V2「工作树已落盘但 ack 丢失」红（`createWorktree` 被再调一次）。
+- [x] 2026-11-21：Batch 4 · 文档与归档：本计划移入 `docs/exec-plan/completed/`（文件名不变），`docs/README.md` 索引从 Active 移到 Completed；实现完成、验收待独立验证。
 - [ ] 人类评审与 PR ready（由人类伙伴决定合并）。
 
 ## Surprises & Discoveries
@@ -210,6 +220,8 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 3. **产品的恢复动作就是同 key**：`packages/client/src/start-work.ts:52,59` 在 `uncertain` 时复用 key，`packages/ui/src/start-work-section.ts:27` 冻结表单但允许再次提交，client 只在插件加载时组合一次（`apps/harness-plugin/src/client.ts:72`）。因此同 key 重放不是边缘路径。
 4. **一条既有用例在修复后会失去判别力**：`tests/integration/start-work-request-binding.test.js:139-149` 的失败注入是永久的，修复后重放会真的再探测/再试一次，但最终仍是 `unknown`、外部对象计数不变，断言仍绿。因此必须新补「探针确实被调用」的断言（Batch 1 第 5/6 项），否则「没跑对账」与「跑了但读不到」无法区分。
 5. **基线存在一个 5s 预算的时序敏感用例**：`tests/integration/start-work-step-recording.test.js:336`「游标永不结束」在并发负载下观察到 `test timed out after 5000ms`（同批 8 文件 5125ms、另一个并发运行 5015ms），空闲单跑 1832ms / 2651ms 通过。它是 1000 页分页上限用例，与本改动无关；**不改测试、不改预算**，验证时避免并发即可，且必须在 Progress 记录每次实际观察值。
+7. **本轮验证期间宿主上还有其他工作树在跑整套测试**：「游标永不结束」用例在最终 V2 运行中观察到 5004ms（5s 预算），与第 5 条同一时序敏感形态；node 的汇总为 `tests 17 / pass 16 / fail 0` 且 exit 0，但失败列表仍打印该超时诊断。空闲时该用例 2.7s 通过。按第 5 条约定不改测试与预算，只如实记录。
+8. **两个变异揭示了守卫的真实承重点**：(a) 原计划 M1 指向 `provisionGit` 的 adopted 分支块，但认领事务写回身份后它不可判别，删掉它不会变红——按最小化删除并改到认领事务（D15）；(b) M3 单独放宽「未决状态」或单独去掉 `needsSupply` 都不会被杀死，两者联合才让在途同 key 重放开始探测，负控因此补了 `getWorktree` 读计数。
 6. **`getWorktree` 的句柄在两种 provider 上都可重建**：local-git 的 `getWorktree` 按 externalId 解析路径再读 `worktree list`（`packages/providers/development-local-git/src/provider.ts:274-292,318-330`），fake 的工作树 externalId 就是 `path ?? worktreeKey`（`packages/providers/fake/src/development.ts:202-243`），而两者的 `preflightWorktree` 都会把规范化路径写进持久 intent，所以「用持久 intent 的 path 读回」在两种实现上都成立。没有 preflight 的 provider 没有持久句柄，本方案按 `inconclusive` 处理，不猜。
 
 ## Decision Log
@@ -250,7 +262,29 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 
 ## Outcomes & Retrospective
 
-本计划创建于实现之前，尚无实现结果。全部批次完成后必须在此记录：实际修复的缺口形状（哪些场景收敛、哪些仍 unknown）、与计划的偏差（含被放弃方案的最终取舍）、七个变异的实际输出位置，以及遗留项。计划当前已确认的遗留：
+实现完成（2026-11-21，分支 `fix/restart-reconciliation`，基于 `main@f74a3b8b`）。同 key 重放一条未决 Git 外部写时，core 先用持久 intent 的精确输入做一次只读对账，再决定答复：
+
+- 分支已落盘（分页读完命中同名）→ 采纳：认领事务把被采纳的分支名写成已决定身份，跳过分支创建，续跑工作树与 run，报 Saved/Ready（头提交来自对账证据）。
+- 工作树已落盘且检出同一分支 → 采纳：跳过 `createWorktree`，报 Saved/Ready，句柄取持久 `path`。
+- 确定不存在（分页读完仍无同名 / `not_found`）→ 认领先覆盖旧槽位，再重发那一步一次，报 Saved/Ready。
+- 工作树检出别的分支 → `conflict`，两侧分支名都报出，零写入。
+- 读失败 / 权限拒绝 / 缺能力 / provider 抛错 → `unknown`，保留读失败自身 code，消息以「对账只读，未重发外部写入」结尾，零写入、零外部写。
+
+仍未收敛：`pending` 硬崩溃残留（D6）、换新 key 接管（D1）、Ready 缺口与自动对账（#193/#421）、真实平台 provider 与 Host 端到端（本 PR 证据面是 fake + local-git + 真实 SQLite 重开）。
+
+与计划的偏差（均有 Decision Log 对应条目）：
+
+1. `provisionGit` 的 adopted 分支块按最小化删除（D15）：认领事务写回的分支身份已是唯一来源，保留它会是不可判别的第二份实现；M1 变异点因此改到认领事务的身份写回。
+2. M3 需要同时放宽「未决状态」与 `needsSupply` 两处守卫才能被杀死，负控补了 `getWorktree` 读计数（`test(core): 在途负控同时计数工作树读`）。
+3. V2 的新增用例是 6 条（4 条正控 + 2 条负控），计划原文「新增 4 条」只数了正控；已在 V2 期望里订正为 17。
+
+遗留项与 follow-up 建议（不新建 issue、不改 capabilities/R8 契约）：
+
+1. 跨 key 接管仍未放开（D1），建议 follow-up：`fix(core): allow a later idempotency key to take over a reconciled start-work attempt`；
+2. `pending` 硬崩溃残留仍会停在「正在处理」（D6），需独立 issue 决定租约与时间证据语义；
+3. 采纳只按自然键、不校验 head/起点（D8），在出现「同名可被他人复用的 provider」时需要复核；
+4. Ready 缺口与自动对账仍归 #193/#421；
+5. 真实平台 provider 与 Host 端到端不在本 PR 证据面内。
 
 1. 跨 key 接管仍未放开（D1），follow-up issue 待开；
 2. `pending` 硬崩溃残留仍会停在「正在处理」（D6），需独立 issue；
@@ -261,3 +295,4 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 ## Bottom Change Note
 
 - 2026-11-21（Asia/Singapore）：创建。来源是对两份独立设计提案（variant a / variant b）的 facts 复核与裁定：采纳「同 key 重放前置只读对账 + 结论驱动续跑」，否决「新 key 接管」「`resolution` 列」「启动扫描」「只修答复」；修正了 variant a 的「丢 ack 后必已对账」与 variant b 的引用错位，并把「restart 是否含新 key」的裁定依据落到端口契约、DDL 注释与 R8 说明上。
+- 2026-11-21（Asia/Singapore）impl-191：按批次实现并逐个取证：Batch 1 判别性用例（RED 4/17），Batch 2 只读对账（conflict / inconclusive 零写入），Batch 3 结论驱动续跑（adopted / absent），Batch 4 八个变异全部被对应断言杀死，并按最小化原则删除不可判别的 adopted 分支重复实现（D15）。V1 exit 0、V2 17 条（16 pass + 1 条基线时序 flake）、V3 170/170、V4 18/18、V5 10/10；计划归档到 Completed，索引同步。
