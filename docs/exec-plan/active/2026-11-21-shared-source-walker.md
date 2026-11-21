@@ -162,7 +162,7 @@ export function listPackageDirectories(root, groups) {
 - [x] Batch 2 helper 与夹具（2026-11-21）：V4 先 `SyntaxError: ... does not provide an export named 'listPackageDirectories'`，再空桩 `ℹ tests 14 / pass 11 / fail 3`（C3/C7/C8 红），实现后 `ℹ tests 14 / pass 14 / fail 0`；K1–K8 全部被杀死，见 F9
 - [x] Batch 3 迁移两处扫描（2026-11-21）：RED = 迁移前两条 `grep` 命中（跳过名字面量 3 处：:137/:144/:173；本地实现引用 6 处：:138/:162/:174/:233/:250/:285），GREEN = 迁移后两条 `grep` 均无命中（exit 1）；V3 `10/10`、V5 `10/10`、V6 `5/5`、V4 `14/14`；迁移前后集合探针（F11）：包根 18 vs 18、差集 `[]`，源码 206 vs 206、差集 `[]`，206 个全是 `.ts`
 - [x] Batch 4 文档与最终门禁（2026-11-21）：`tests/README.md` §3、TD-087/TD-086 与本计划已回填；V1–V6、V9、V11 通过（V3 10/10、V4 14/14、V5 10/10、V6 5/5）；V10 `代码 131 / 1000、文档 266 / 1500`（本计划自设 800/1300 内）、V12 无输出、V13 只含 Global Constraints 的 8 个文件；**V8 未在共享机器上取得全绿**：`pnpm verify` 三次分别 7/12/11 条失败，全部是子进程期限类超时（load average 280→472→325；未改动的基线提交 `d899e16f` 上同样的 7 条也红），命中文件逐个复跑 5/5 全绿（F13），typecheck 通过；按 F8/F10 判为环境性，clean 复跑留给独立验收环境
-- [ ] PR 创建与回读（未开始；draft PR 关联 #396，最终 push 后回读 head/base/checks/issue 关联）
+- [x] PR 创建与回读（2026-11-21，观察时刻快照）：draft PR #670 已存在且未标 ready；`gh pr view 670 --json …` 回读 `headRefOid` 与本地 HEAD 一致、`baseRefOid=f74a3b8b`（= `origin/main`）、`isDraft=true`、`state=OPEN`、`closingIssuesReferences=[#396]`；最终 push 后 `git rev-parse HEAD` 与 `git rev-parse origin/chore/shared-source-walker` 一致。合并与 `gh pr ready` 由人类评审决定，本实现者不做。
 
 ## Surprises & Discoveries
 
