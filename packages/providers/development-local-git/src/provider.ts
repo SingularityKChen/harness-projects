@@ -1,7 +1,7 @@
-/** 本地 Git 只声明仓库读、分支建、工作树建：没有远端，不伪造变更请求；写未知失败为 ambiguous_result，
- * 读未知失败为 unavailable；一实例一仓库以保持引用归属明确。变更请求方法仍存在但返回 not_supported。
- * 工作树移除是破坏性操作，不在本层（issue #137 的 Out of scope、issue #138 交付），所以本 provider
- * 既不实现 `removeWorktree` 也不声明 `development.worktree.remove`。 */
+/** 本地 Git 只声明仓库读、分支建、工作树建/读/移除：没有远端，不伪造变更请求；写未知失败为
+ * ambiguous_result，读未知失败为 unavailable；一实例一仓库以保持引用归属明确。变更请求方法仍存在但返回
+ * not_supported。工作树移除是唯一的破坏性能力（issue #138）：只在显式请求且工作树干净时移除，永不 force、
+ * 永不删分支。 */
 import path from 'node:path'
 import { readFile, realpath, stat } from 'node:fs/promises'
 
@@ -18,6 +18,7 @@ export interface LocalGitRepositoryConfig {
 
 export interface LocalGitCapabilityFlags {
   readonly branchCreate?: boolean; readonly worktreeCreate?: boolean; readonly worktreeRead?: boolean
+  readonly worktreeRemove?: boolean
 }
 export interface LocalGitDevelopmentProviderOptions {
   readonly bindingId?: ProviderBindingId
@@ -99,9 +100,10 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     this.repository = options.repository
     this.allowedRoot = options.allowedRoot
     this.flags = {
-    branchCreate: options.capabilities?.branchCreate ?? true,
-    worktreeCreate: options.capabilities?.worktreeCreate ?? true,
+      branchCreate: options.capabilities?.branchCreate ?? true,
+      worktreeCreate: options.capabilities?.worktreeCreate ?? true,
       worktreeRead: options.capabilities?.worktreeRead ?? true,
+      worktreeRemove: options.capabilities?.worktreeRemove ?? true,
     }
     this.runGit = options.runGit ?? defaultGitRunner
     this.observedAt = options.observedAt ?? new Date().toISOString()
@@ -113,6 +115,7 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
       ...(this.flags.branchCreate ? { [cap.CapabilityKey.DevelopmentBranchCreate]: available } : {}),
       ...(this.flags.worktreeCreate ? { [cap.CapabilityKey.DevelopmentWorktreeCreate]: available } : {}),
       ...(this.flags.worktreeRead ? { [cap.CapabilityKey.DevelopmentWorktreeRead]: available } : {}),
+      ...(this.flags.worktreeRemove ? { [cap.CapabilityKey.DevelopmentWorktreeRemove]: available } : {}),
     }
     return Promise.resolve({ bindingId: this.bindingId, capability, permission: capability, observedAt: this.observedAt })
   }
@@ -282,6 +285,29 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     const target = listed.records.find((_record, index) => matches[index])
     if (target === undefined || target.prunable || !(await occupied(target.path)) || target.branch === undefined) return this.notFound('工作树')
     return cap.providerOk({ ref: this.refOf('worktree', target.path), path: target.path, branch: target.branch.replace(/^refs\/heads\//, '') })
+  }
+
+  /** 显式移除一份本 provider 绑定、允许根内的干净链接工作树。判定顺序固定：能力 → 身份 → 路径（纯 fs）
+   *  → 登记 → 删除。不 force、不 prune、不删分支；报成功前必须回读登记与目录（AGENTS.md §1.1）。 */
+  async removeWorktree(input: cap.ProviderRemoveWorktreeInput): Promise<cap.ProviderResult<void>> {
+    if (!this.flags.worktreeRemove) return this.notSupported(cap.CapabilityKey.DevelopmentWorktreeRemove)
+    if (input.worktree.bindingId !== this.bindingId || input.worktree.objectKind !== 'worktree') return this.notFound('工作树')
+    const resolved = await this.resolveTarget(input.worktree.externalId)
+    if (!resolved.ok) return this.fail(resolved.code, resolved.message)
+    const target = resolved.path
+    const registered = await this.listWorktrees()
+    if (registered.error !== undefined) return cap.providerErr(registered.error)
+    const matches = await Promise.all(registered.records.map((record) => samePath(record.path, target)))
+    const entry = registered.records.find((_record, index) => matches[index])
+    if (entry === undefined) return this.notFound('工作树')
+    // 登记仍在而目录已不在（prunable）时，Git 的 remove 会 exit 0 并只清登记；把它报成「删除了工作树」
+    // 是假的成功，所以交人工 prune，provider 不替人清理登记。
+    if (entry.prunable || !(await occupied(target))) {
+      return this.fail(ProviderErrorCode.NotFound, `工作树登记仍在但目录不存在：${target}；请先执行 git worktree prune`)
+    }
+    const removed = await this.git(['worktree', 'remove', target])
+    if (removed.code !== 0) return cap.providerErr(this.failureOf(removed, true))
+    return cap.providerOk(undefined)
   }
 
   private async git(args: readonly string[]): Promise<GitInvocation> {
