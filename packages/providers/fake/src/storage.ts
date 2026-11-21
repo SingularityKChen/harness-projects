@@ -148,6 +148,7 @@ export class MemoryStorage implements cap.Storage {
     }
     this.#data = structuredClone(this.#data)
     this.#assertIdentityGroups()
+    for (const projection of this.#data.projections) this.#assertProjectionSource(projection)
   }
   #assertIdentityGroups(): void {
     for (const entity of this.#data.entities) {
@@ -418,10 +419,16 @@ export class MemoryStorage implements cap.Storage {
     })
   }
 
+  #assertProjectionSource(projection: domain.WorkspaceProjection): void {
+    if (typeof projection.sourceBindingId !== 'string' || projection.sourceBindingId.length === 0) throw new Error('projection source binding is required')
+    if (!this.#data.providerBindings.some(binding => binding.id === projection.sourceBindingId)) throw new Error('projection source binding does not exist')
+  }
+
   #assertProjections(workspaceId: domain.WorkspaceId, items: readonly domain.WorkspaceProjection[]): void {
     if (!this.#data.workspaces.some((workspace) => workspace.id === workspaceId)) throw new Error('projection workspace does not exist')
     for (const item of items) {
       if (!this.#data.entities.some((entity) => entity.id === item.entityId)) throw new Error('projection entity does not exist')
+      this.#assertProjectionSource(item)
       if (item.content.contentKind !== 'redacted' && item.content.sourceNumber !== undefined) domain.sourceNumberSnapshot(item.content.sourceNumber)
     }
   }
@@ -439,11 +446,9 @@ export class MemoryStorage implements cap.Storage {
     return this.#mutate(() => {
       this.#assertProjections(scope.workspaceId, items)
       const incoming = new Set(items.map((item) => item.entityId))
-      const scoped = new Set(this.#data.identities
-        .filter((identity) => identity.bindingId === scope.bindingId)
-        .map((identity) => identity.entityId))
+      if (items.some(item => item.sourceBindingId !== scope.bindingId)) throw new Error('projection source does not match replacement scope')
       const stale = new Set(this.#data.projections
-        .filter((projection) => projection.workspaceId === scope.workspaceId && scoped.has(projection.entityId) && !incoming.has(projection.entityId))
+        .filter((projection) => projection.workspaceId === scope.workspaceId && projection.sourceBindingId === scope.bindingId && !incoming.has(projection.entityId))
         .map((projection) => projection.entityId))
       this.#data.projections = this.#data.projections.filter((projection) => !(projection.workspaceId === scope.workspaceId && stale.has(projection.entityId)))
       for (const item of items) {

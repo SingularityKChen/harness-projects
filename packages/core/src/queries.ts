@@ -11,7 +11,7 @@ import {
   type EffectiveCapability,
   type ProviderBindingRecord, type StorageTransaction,
 } from '@harness-projects/capabilities'
-import { IdentityRole, type EntityId, type ProjectError, type ProviderBindingId, type WorkspaceId } from '@harness-projects/domain'
+import { IdentityRole, type EntityId, type WorkspaceProjection, type ProjectError, type ProviderBindingId, type WorkspaceId } from '@harness-projects/domain'
 import { getIssueClosingLinks, issueClosingLinksAccessVersion, type IssueClosingLinksScope, type IssueClosingLinksObservation } from './issue-closing-links.ts'
 import { getChangeRequestAssigneeOperation, type AssigneeQuery, type AssigneeOperation } from './change-request-assignees.ts'
 import { getChangeRequestOperation, type PrOperationQuery, type PrOperationView } from './create-change-request.ts'
@@ -95,7 +95,9 @@ export function createQueries(context: CoreContext): CoreQueries {
         const identities = await context.storage.listIdentitiesForEntity(entityId)
         const primary = identities.find((identity) => identity.role === IdentityRole.Primary)
         if (primary === undefined) return undefined
-        const access = await context.runtimeAccess.planning(context.storage), sync = await syncSummary(context, context.storage, access)
+        const access = await context.runtimeAccess.planning(context.storage)
+        if (!servedByPlanningMount(projection, access.binding?.ref.bindingId)) return undefined
+        const sync = await syncSummary(context, context.storage, access)
         return { ...toPlanningItemView(access.masked ? redactPlanning(projection) : projection, primary, sync), identities }
       })
     },
@@ -111,14 +113,24 @@ export function createQueries(context: CoreContext): CoreQueries {
   }
 }
 
+/**
+ * 投影可被服务的前提：当前 payload 的已提交来源属于启用规划挂载；实体历史身份不是来源证明。
+ * 没有启用挂载时保留 D23 的最后已知值，不把「未启用」读成「无来源」。
+ */
+function servedByPlanningMount(projection: WorkspaceProjection, bindingId: ProviderBindingId | undefined): boolean {
+  return bindingId === undefined || projection.sourceBindingId === bindingId
+}
+
 async function planningSnapshot(context: CoreContext) {
   return consistentRead(context, () => context.storage.transaction(async (tx) => {
     const access = await context.runtimeAccess.planning(tx), sync = await syncSummary(context, tx, access)
+    const bindingId = access.binding?.ref.bindingId
     const projections = await tx.listPlanningProjections(context.workspaceId)
     const views: PlanningItemView[] = []
     for (const projection of projections) {
-      const identity = (await tx.listIdentitiesForEntity(projection.entityId)).find((entry) => entry.role === IdentityRole.Primary)
-      if (identity !== undefined) views.push(toPlanningItemView(access.masked ? redactPlanning(projection) : projection, identity, sync))
+      const identities = await tx.listIdentitiesForEntity(projection.entityId)
+      const identity = identities.find((entry) => entry.role === IdentityRole.Primary)
+      if (identity !== undefined && servedByPlanningMount(projection, bindingId)) views.push(toPlanningItemView(access.masked ? redactPlanning(projection) : projection, identity, sync))
     }
     return { views: views.sort((left, right) => left.entityId < right.entityId ? -1 : 1), sync, revision: await tx.currentRevision(context.workspaceId), metadata: await workspaceMetadata(context, tx, access) }
   }))

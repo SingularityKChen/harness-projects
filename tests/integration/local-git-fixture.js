@@ -156,5 +156,5 @@ export async function registerWorkItem(storage, workspaceId, workItemId, content
     await tx.putEntity({ id: workItemId, kind: 'work_item', primaryIdentityId: identity.id })
     await tx.putExternalIdentity(identity)
   })
-  await storage.putPlanningProjection(workspaceId, { workspaceId, entityId: workItemId, planningStatus: 'todo', revision: 1, content })
+  await storage.putPlanningProjection(workspaceId, { workspaceId, entityId: workItemId, sourceBindingId: identity.bindingId, planningStatus: 'todo', revision: 1, content })
 }
