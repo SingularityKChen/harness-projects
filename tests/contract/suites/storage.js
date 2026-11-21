@@ -134,6 +134,7 @@ export function storageFoundationSuite(adapter, register = test) {
     const storage = makeStorage()
     await seedWorkspace(storage)
     await seedEntity(storage, 'entity-1')
+    await storage.putProviderBinding(binding('binding-1'))
     await storage.putPlanningProjection(WORKSPACE, projection)
     assert.deepEqual(await storage.getPlanningProjection(WORKSPACE, 'entity-1'), projection)
     assert.deepEqual((await storage.listPlanningProjections(WORKSPACE)).map((p) => p.entityId), ['entity-1'])
@@ -145,12 +146,40 @@ export function storageFoundationSuite(adapter, register = test) {
   })
 
   register(`${label}：同一 (工作区, 实体) 的第二次写入覆盖前值`, async () => {
-    const storage = makeStorage(); await seedWorkspace(storage); await seedEntity(storage, 'entity-1')
+    const storage = makeStorage(); await seedWorkspace(storage); await seedEntity(storage, 'entity-1'); await storage.putProviderBinding(binding('binding-1'))
     const updated = { ...projection, planningStatus: 'done', revision: projection.revision + 1, content: { contentKind: 'change_request', number: 42, title: '新标题', body: '新正文' } }
     await storage.putPlanningProjection(WORKSPACE, projection); await storage.putPlanningProjection(WORKSPACE, updated)
     assert.deepEqual(await storage.getPlanningProjection(WORKSPACE, 'entity-1'), updated, '同键第二次写入必须覆盖前值，而不是保留旧行')
     assert.deepEqual(await storage.listPlanningProjections(WORKSPACE), [updated], '覆盖不得变成追加第二行')
   })
+  register(`${label}：投影来源独立于实体身份并原子收敛且跨重启保留`, async () => {
+    let storage = makeStorage(); await seedWorkspace(storage)
+    await storage.putProviderBinding(binding('binding-1'))
+    await storage.putProviderBinding(developmentBinding('binding-2'))
+    await seedIdentity(storage, { id: 'source-primary', entityId: 'shared', bindingId: 'binding-1', externalKind: 'change_request', externalId: 'pr', role: 'primary' }, 'change_request')
+    await storage.putExternalIdentity({ id: 'source-alias', entityId: 'shared', bindingId: 'binding-2', externalKind: 'change_request', externalId: 'pr', role: 'alias' })
+    const a = { ...projection, entityId: 'shared', sourceBindingId: 'binding-1' }
+    const b = { ...a, sourceBindingId: 'binding-2', planningStatus: 'done', content: { ...a.content, title: 'B payload' } }
+    await storage.putPlanningProjection(WORKSPACE, a)
+    await storage.replacePlanningProjections({ workspaceId: WORKSPACE, bindingId: 'binding-2' }, [b])
+    assert.deepEqual(await storage.getPlanningProjection(WORKSPACE, 'shared'), b, '共享实体的来源和完整 payload 一起覆盖')
+    await storage.replacePlanningProjections({ workspaceId: WORKSPACE, bindingId: 'binding-1' }, [])
+    assert.deepEqual(await storage.listPlanningProjections(WORKSPACE), [b], '历史 A 身份不得扩大 A 的来源收敛范围')
+    storage = await adapter.restart(storage)
+    assert.deepEqual(await storage.getPlanningProjection(WORKSPACE, 'shared'), b, '重开必须保留实际来源')
+    for (const sourceBindingId of [undefined, null, '', 'missing-source']) {
+      await assert.rejects(storage.putPlanningProjection(WORKSPACE, { ...a, sourceBindingId }), '缺失或未登记来源不得被推断补值')
+    }
+    for (const caught of [false, true]) {
+      const invalid = async (tx) => {
+        await assert.rejects(tx.replacePlanningProjections({ workspaceId: WORKSPACE, bindingId: 'binding-1' }, [a, b]), '混来源批次必须在写第一行前拒绝')
+      }
+      if (caught) await storage.transaction(invalid); else await invalid(storage)
+      assert.deepEqual(await storage.listPlanningProjections(WORKSPACE), [b], '即使拒绝被事务调用者捕获，也不得留下合法前项或删除旧行')
+    }
+    assert.deepEqual((await storage.listIdentitiesForEntity('shared')).map(row => row.role), ['primary', 'alias'])
+  })
+
   register(`${label}：replace 收敛指定 binding，保留作用域外投影`, async () => {
     const storage = makeStorage()
     await seedWorkspace(storage)
@@ -160,9 +189,9 @@ export function storageFoundationSuite(adapter, register = test) {
     await seedIdentity(storage, { id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' })
     await seedIdentity(storage, { id: 'identity-2', entityId: 'entity-2', bindingId: 'binding-2', externalKind: 'issue', externalId: 'issue-2', role: 'primary' })
     await storage.putPlanningProjection(WORKSPACE, projection)
-    await storage.putPlanningProjection(WORKSPACE, { ...projection, entityId: 'entity-2' })
+    await storage.putPlanningProjection(WORKSPACE, { ...projection, entityId: 'entity-2', sourceBindingId: 'binding-2' })
     await storage.replacePlanningProjections({ workspaceId: WORKSPACE, bindingId: 'binding-1' }, [])
-    assert.deepEqual(await storage.listPlanningProjections(WORKSPACE), [{ ...projection, entityId: 'entity-2' }])
+    assert.deepEqual(await storage.listPlanningProjections(WORKSPACE), [{ ...projection, entityId: 'entity-2', sourceBindingId: 'binding-2' }])
   })
 
   register(`${label}：replace 同键投影完整覆盖状态与内容且仅保留一行`, async () => {

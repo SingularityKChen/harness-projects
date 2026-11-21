@@ -61,6 +61,14 @@ WHERE NOT EXISTS (
       OR (newer.updated_at = ledger.updated_at AND newer.observed_at = ledger.observed_at AND newer.rowid > ledger.rowid))
 );`
 const cases = [
+  ...[0, 6, 7].map(generation => [`projection-without-source-${generation}`, db => {
+    fixture(db, MIGRATION_COUNT, sql => {
+      const old = sql.replace(/^.*source_binding_id TEXT NOT NULL.*\n/gm, '')
+      assert.notEqual(old, sql, '旧 shape 夹具必须实际移除投影来源列')
+      return old
+    })
+    db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`)
+  }, generation === 6 ? 'generation' : 'schema_shape']),
   ...[4, sqlite.CURRENT_SCHEMA_GENERATION].map((generation) => [`old-snapshot-view-${generation}`, (db) => {
     fixture(db, MIGRATION_COUNT, (sql) => sql.replace(/CREATE VIEW committed_observation_version AS[\s\S]*?;/, oldSnapshotView))
     db.exec(`INSERT INTO workspace VALUES ('kept','kept','provider_authoritative'); PRAGMA user_version=${generation}`)

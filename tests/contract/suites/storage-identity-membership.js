@@ -13,7 +13,7 @@ const binding = (id, isDefault = false) => ({ id, workspaceId: WORKSPACE, domain
 /** planning 域只允许一个启用的挂载（不变量 1），跨域用例换域。 */
 const developmentBinding = (id, overrides = {}) => ({ ...binding(id), domain: 'development', ...overrides })
 const projection = {
-  workspaceId: WORKSPACE, entityId: 'entity-1', planningStatus: 'todo', revision: 1, content: { contentKind: 'work_item', title: '标题', body: '正文' },
+  workspaceId: WORKSPACE, entityId: 'entity-1', sourceBindingId: 'binding-1', planningStatus: 'todo', revision: 1, content: { contentKind: 'work_item', title: '标题', body: '正文' },
 }
 const membership = (overrides = {}) => ({ workspaceId: WORKSPACE, projectExternalId: 'project-1', itemExternalId: 'item-1', contentKind: 'issue',
   contentExternalId: 'issue-1', membershipCreatedAt: '2026-09-20T00:00:00Z', membershipUpdatedAt: '2026-09-20T00:00:00Z', ...overrides })
@@ -177,6 +177,7 @@ export function storageIdentityFoundationSuite(adapter, register = test) {
       await seedEntity(storage, 'entity-1')
       await assert.rejects(storage.putPlanningProjection('ws-none', projection), '投影必须属于存在的工作区')
       assert.deepEqual(await storage.listPlanningProjections('ws-none'), [], '被拒绝的写入不得留下任何行')
+      await storage.putProviderBinding(binding('binding-1'))
       await storage.putPlanningProjection(WORKSPACE, projection)
       assert.deepEqual((await storage.listPlanningProjections(WORKSPACE)).map((p) => p.entityId), ['entity-1'], '工作区与实体都存在时同一写入必须成功')
     })
@@ -202,7 +203,7 @@ export function storageIdentityFoundationSuite(adapter, register = test) {
           await seedIdentity(storage, identity)
         }
         const old = { ...projection, entityId: 'entity-old', revision: 7, planningStatus: 'in_progress' }
-        const outside = { ...projection, entityId: 'entity-outside', revision: 8 }
+        const outside = { ...projection, entityId: 'entity-outside', sourceBindingId: 'binding-outside', revision: 8 }
         const otherWorkspace = { ...old, workspaceId: 'ws-2', revision: 9 }
         await storage.putPlanningProjection(WORKSPACE, old)
         await storage.putPlanningProjection(WORKSPACE, outside)

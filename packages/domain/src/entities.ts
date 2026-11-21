@@ -1,6 +1,6 @@
 /** 实体与规划内容：Entity 是全局锚点并显式选择主身份；规划状态与内容属于工作区投影（AGENTS.md §1.1 不变量 1）。 */
 import { ContentKind, EntityKind, type NormalizedStatus } from './enums.ts'
-import type { EntityId, ExternalIdentityId, WorkspaceId } from './ids.ts'
+import type { EntityId, ExternalIdentityId, ProviderBindingId, WorkspaceId } from './ids.ts'
 import type { PlanningFieldsSnapshot } from './planning-fields.ts'
 
 /** issue #190：源对象必须选择外部主身份；内部锚点允许没有外部身份。种类责任只在这里声明一次。 */
@@ -91,6 +91,8 @@ export interface Entity {
 export interface WorkspaceProjection {
   readonly workspaceId: WorkspaceId
   readonly entityId: EntityId
+  /** 当前规划 payload 最后一次已提交的来源；与可跨来源共享的实体身份分离。 */
+  readonly sourceBindingId: ProviderBindingId
   readonly planningStatus: NormalizedStatus
   readonly content: PlanningContent
   readonly revision: number

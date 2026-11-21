@@ -345,3 +345,15 @@ test('Fake constructor 与 factory 在克隆前校验原始导入记录', async 
     assert.throws(() => construct({ ...base, planningMappings: [Object.assign(Object.create({}), { workspaceId: 'seed', bindingId: 'seed-binding', projectExternalId: 'project', origin: 'user', mapping: {} })] }), /invalid workspace planning mapping/)
   }
 })
+
+
+test('Fake import rejects projections without a recorded source instead of guessing from identity', async () => {
+  const storage = createFakeStorage()
+  await storage.putWorkspace(workspace('source-import', 'source import'))
+  await storage.putProviderBinding(bindingRecord('source-import-binding', 'source-import'))
+  await seedIdentity(storage, { id: 'source-import-id', entityId: 'source-import-entity', bindingId: 'source-import-binding', externalKind: 'issue', externalId: '1', role: 'primary' })
+  await storage.putPlanningProjection('source-import', { workspaceId: 'source-import', entityId: 'source-import-entity', sourceBindingId: 'source-import-binding', planningStatus: 'todo', revision: 1, content: { contentKind: 'work_item', title: 'kept', body: '' } })
+  const data = exportFakeStorageState(storage)
+  delete data.projections[0].sourceBindingId
+  assert.throws(() => createFakeStorage(data), /projection source/, '导入不能绕过来源契约')
+})

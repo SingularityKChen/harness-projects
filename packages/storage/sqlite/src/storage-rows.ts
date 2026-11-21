@@ -135,7 +135,7 @@ function rowToPlanningFields(row: Row): PlanningFieldsSnapshot | undefined {
 export const rowToProjection = (row: Row): WorkspaceProjection => {
   const planningFields = rowToPlanningFields(row)
   return { workspaceId: text(row, 'workspace_id') as WorkspaceId,
-    entityId: text(row, 'entity_id') as EntityId, planningStatus: text(row, 'planning_status') as NormalizedStatus,
+    entityId: text(row, 'entity_id') as EntityId, sourceBindingId: text(row, 'source_binding_id') as ProviderBindingId, planningStatus: text(row, 'planning_status') as NormalizedStatus,
     revision: row['revision'] as number, content: rowToContent(row), ...(planningFields === undefined ? {} : { planningFields }) }
 }
 

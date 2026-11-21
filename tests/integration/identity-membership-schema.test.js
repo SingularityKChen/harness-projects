@@ -52,7 +52,7 @@ function seed(db) {
     INSERT INTO workspace_binding (workspace_id, binding_id, domain, enabled, is_default) VALUES ('ws-2', 'binding-1', 'planning', 1, 1); INSERT INTO entity (id,kind,primary_identity_id) VALUES ('entity-1', 'work_item','identity-1');
     INSERT INTO entity (id,kind,primary_identity_id) VALUES ('entity-2', 'change_request','identity-cr'); INSERT INTO external_identity VALUES ('identity-cr','entity-2','binding-1','change_request','cr-2','primary'); INSERT INTO external_identity VALUES ('identity-1', 'entity-1', 'binding-1', 'issue', 'issue-1', 'primary');
     INSERT INTO project_item_membership VALUES ('ws-1', 'project-1', 'item-1', 'issue', 'issue-1', '2026-09-20T00:00:00Z', '2026-09-20T00:00:00Z');
-    INSERT INTO planning_field_value VALUES ('ws-1', 'item-1', 'field-1', 'In Progress', '2026-09-20T00:00:02Z'); INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1', 'entity-1', 'in_progress', 'work_item', '标题', '正文', NULL, NULL, NULL, NULL, NULL, 1);
+    INSERT INTO planning_field_value VALUES ('ws-1', 'item-1', 'field-1', 'In Progress', '2026-09-20T00:00:02Z'); INSERT INTO workspace_projection (source_binding_id,workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('binding-1','ws-1', 'entity-1', 'in_progress', 'work_item', '标题', '正文', NULL, NULL, NULL, NULL, NULL, 1);
   COMMIT;`)
 }
 
@@ -111,7 +111,7 @@ test('行为 1：外部身份挂在连接锚点上，因此跨工作区只有一
     rejects(db, "INSERT INTO external_identity VALUES ('identity-9','entity-2','binding-1','issue','issue-1','alias')", '同一连接上的同一对象只有一条身份，无论从哪个工作区发起')
     assert.equal(db.prepare("SELECT COUNT(DISTINCT entity_id) AS n FROM external_identity WHERE external_id = 'issue-1'").get().n, 1, '同一外部对象只能解析出一个内部实体（ADR-0001 / 不变量 6）')
     db.exec("INSERT INTO project_item_membership VALUES ('ws-2','project-1','item-1','issue','issue-1','x','x')")
-    db.exec("INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-2','entity-1','todo','work_item','标题','正文',NULL,NULL,NULL,NULL,NULL,1)")
+    db.exec("INSERT INTO workspace_projection (source_binding_id,workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('binding-1','ws-2','entity-1','todo','work_item','标题','正文',NULL,NULL,NULL,NULL,NULL,1)")
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM project_item_membership WHERE content_external_id = 'issue-1'").get().n, 2, '同一内容在两个工作区是两条成员关系')
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM workspace_projection WHERE entity_id = 'entity-1'").get().n, 2, '每工作区一行投影')
   })
@@ -261,12 +261,12 @@ test('同一工作区里同一实体只有一行投影（storage 保证的那一
     migrate(db); seed(db)
     const count = () => db.prepare("SELECT COUNT(*) AS n FROM workspace_projection WHERE workspace_id = 'ws-1' AND entity_id = 'entity-1'").get().n
     assert.equal(count(), 1, 'seed 里该实体已有一行投影')
-    db.exec("INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1','entity-1','todo','work_item','更新标题','更新正文',NULL,NULL,NULL,NULL,NULL,2) ON CONFLICT (workspace_id, entity_id) DO UPDATE SET content_title = excluded.content_title, content_body = excluded.content_body, revision = excluded.revision")
+    db.exec("INSERT INTO workspace_projection (source_binding_id,workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('binding-1','ws-1','entity-1','todo','work_item','更新标题','更新正文',NULL,NULL,NULL,NULL,NULL,2) ON CONFLICT (workspace_id, entity_id) DO UPDATE SET content_title = excluded.content_title, content_body = excluded.content_body, revision = excluded.revision")
     assert.equal(count(), 1, '同一 (workspace, entity) 的第二行必须是更新')
     assert.equal(db.prepare("SELECT content_title FROM workspace_projection WHERE workspace_id = 'ws-1' AND entity_id = 'entity-1'").get().content_title, '更新标题')
-    rejects(db, "INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1','entity-1','todo','change_request','另一个','正文',NULL,NULL,NULL,NULL,NULL,3)", /UNIQUE constraint failed: workspace_projection.workspace_id, workspace_projection.entity_id/)
+    rejects(db, "INSERT INTO workspace_projection (source_binding_id,workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('binding-1','ws-1','entity-1','todo','change_request','另一个','正文',NULL,NULL,NULL,NULL,NULL,3)", /UNIQUE constraint failed: workspace_projection.workspace_id, workspace_projection.entity_id/)
     db.exec("BEGIN; INSERT INTO entity (id,kind,primary_identity_id) VALUES ('entity-3','work_item','identity-3'); INSERT INTO external_identity VALUES ('identity-3','entity-3','binding-1','issue','issue-3','primary'); COMMIT")
-    db.exec("INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1','entity-3','todo','work_item','另一项','正文',NULL,NULL,NULL,NULL,NULL,1)")
+    db.exec("INSERT INTO workspace_projection (source_binding_id,workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('binding-1','ws-1','entity-3','todo','work_item','另一项','正文',NULL,NULL,NULL,NULL,NULL,1)")
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM workspace_projection WHERE workspace_id = 'ws-1'").get().n, 2, '不同实体各自保留一行')
   })
 })
@@ -299,7 +299,8 @@ test('#27 验收 5：显式 schema 审查——没有列能存 token / key / pas
       'workspace_projection.workspace_id': '标识', 'workspace_projection.entity_id': '标识',
       'workspace_projection.planning_status': '归一化状态', 'workspace_projection.content_kind': '枚举：内容三态',
       'workspace_projection.content_title': '内容', 'workspace_projection.content_body': '内容',
-      'workspace_projection.source_number_json': '闭集原生展示编号（来源名、scope身份/展示名、正整数，不含凭据）',
+      'workspace_projection.source_binding_id': '当前 payload 写入来源连接，必填 FK；与实体身份分离',
+    'workspace_projection.source_number_json': '闭集原生展示编号（来源名、scope身份/展示名、正整数，不含凭据）',
       'workspace_projection.content_number': '内容', 'workspace_projection.redaction_reason': '枚举：脱敏原因',
       'workspace_projection.field_status_name': '#133 原生选项名（展示）', 'workspace_projection.field_iteration_title': '#133 迭代 title（展示）',
       'workspace_projection.field_target_date': '#133 date-only 目标日期（展示）',
@@ -335,7 +336,7 @@ test('每张表的外键指向存在的表，且悬空引用被拒绝', () => {
     rejects(db, "INSERT INTO external_identity VALUES ('identity-fk','entity-1','binding-none','issue','issue-fk','alias')", /FOREIGN KEY constraint failed/, '身份必须挂在存在的连接锚点上（ADR-0006 的核心外键）')
     rejects(db, "INSERT INTO external_identity VALUES ('identity-fk','entity-none','binding-1','issue','issue-fk','alias')", /FOREIGN KEY constraint failed/, '身份必须指向存在的实体')
     rejects(db, "INSERT INTO project_item_membership VALUES ('ws-none','project-1','item-9','issue','issue-9','x','x')", '成员关系必须属于存在的工作区')
-    rejects(db, "INSERT INTO workspace_projection (workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('ws-1','entity-none','todo','work_item','标题','正文',NULL,NULL,NULL,NULL,NULL,1)", '工作区投影必须指向存在的实体')
+    rejects(db, "INSERT INTO workspace_projection (source_binding_id,workspace_id,entity_id,planning_status,content_kind,content_title,content_body,content_number,redaction_reason,field_status_name,field_iteration_title,field_target_date,revision) VALUES ('binding-1','ws-1','entity-none','todo','work_item','标题','正文',NULL,NULL,NULL,NULL,NULL,1)", '工作区投影必须指向存在的实体')
   })
 })
 
@@ -362,7 +363,7 @@ test('#133：投影缺字段展示列的旧 002 库在 migrate 之前以可执�
     createSqliteStorage(upper).close()
     fingerprint(upper, FIELDS.map((column) => `ALTER TABLE workspace_projection RENAME COLUMN ${column} TO ${column.toUpperCase()};`).join(''))
     const storage = createSqliteStorage(upper) // 列名按 SQLite 语义大小写不敏感：大写声明的合法库不得被误拒，三列事实照常往返
-    const projection = { workspaceId: 'ws-u', entityId: 'e-u', planningStatus: 'todo', revision: 1, content: { contentKind: 'work_item', title: 'T', body: 'B' }, planningFields: { statusName: 'Todo', iterationTitle: 'S1', targetDate: '2026-10-01' } }
+    const projection = { workspaceId: 'ws-u', entityId: 'e-u', sourceBindingId: 'u', planningStatus: 'todo', revision: 1, content: { contentKind: 'work_item', title: 'T', body: 'B' }, planningFields: { statusName: 'Todo', iterationTitle: 'S1', targetDate: '2026-10-01' } }
     try {
       await storage.putWorkspace({ id: 'ws-u', name: 'U', statusPolicy: 'provider_authoritative' }); await storage.putProviderBinding({ id: 'u', workspaceId: 'ws-u', domain: 'planning', implementationKey: 'fake', enabled: true, isDefault: true }); await seedIdentity(storage, { id: 'i-u', entityId: 'e-u', bindingId: 'u', externalKind: 'issue', externalId: 'e-u', role: 'primary' }); await storage.putPlanningProjection('ws-u', projection)
       assert.deepEqual([await storage.getPlanningProjection('ws-u', 'e-u'), await storage.listPlanningProjections('ws-u')], [projection, [projection]])
@@ -376,7 +377,7 @@ test('#133：投影缺字段展示列的旧 002 库在 migrate 之前以可执�
 test('SQLite scoped replacement SQL rejection preserves outer writes and the old collection', async () => {
   const storage = createSqliteStorage(':memory:')
   const workspace = { id: 'ws', name: 'before', statusPolicy: 'provider_authoritative' }
-  const projection = (id) => ({ workspaceId: 'ws', entityId: id, planningStatus: 'todo', revision: 1,
+  const projection = (id) => ({ workspaceId: 'ws', entityId: id, sourceBindingId: 'binding', planningStatus: 'todo', revision: 1,
     content: { contentKind: 'work_item', title: id, body: '' } })
   try {
     await storage.putWorkspace(workspace)

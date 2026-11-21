@@ -28,6 +28,8 @@ test('packaged migrations create the single baseline schema from a clean profile
     const db = new DatabaseSync(dbPath)
     try {
       assert.deepEqual(db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map(({ version }) => version), [BASELINE_VERSION])
+      assert.equal(db.prepare('PRAGMA table_info(workspace_projection)').all().find(row => row.name === 'source_binding_id')?.notnull, 1, '打包基线也必须保存投影来源')
+      assert.ok(db.prepare('PRAGMA foreign_key_list(workspace_projection)').all().some(row => row.from === 'source_binding_id' && row.table === 'provider_binding'))
     } finally { db.close() }
     const second = createSqliteStorage(dbPath, undefined, { migrationsDir: path.join(packageDir, 'migrations') })
     second.close()

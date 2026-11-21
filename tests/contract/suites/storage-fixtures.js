@@ -7,7 +7,7 @@ export const binding = (id, isDefault = false) => ({ id, workspaceId: WORKSPACE,
 // planning 域只允许一个启用的挂载（不变量 1），因此「同工作区多个启用绑定」的用例必须换域。
 export const developmentBinding = (id, overrides = {}) => ({ ...binding(id), domain: 'development', ...overrides })
 export const projection = {
-  workspaceId: WORKSPACE, entityId: 'entity-1', planningStatus: 'todo', revision: 1, content: { contentKind: 'work_item', title: '标题', body: '正文' },
+  workspaceId: WORKSPACE, entityId: 'entity-1', sourceBindingId: 'binding-1', planningStatus: 'todo', revision: 1, content: { contentKind: 'work_item', title: '标题', body: '正文' },
 }
 export const observation = (dedupeKey, state = ObservationState.Pending, overrides = {}) => ({ state, observation: {
   bindingId: 'binding-1', dedupeKey, type: 'issue.updated', eventTime: undefined, receivedTime: '2026-09-20T00:00:01Z',

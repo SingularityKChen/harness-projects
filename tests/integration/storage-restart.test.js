@@ -23,7 +23,7 @@ const WORKSPACE = 'ws-1'
 const workspace = { id: WORKSPACE, name: '工作区', statusPolicy: 'provider_authoritative' }
 const binding = { id: 'binding-1', workspaceId: WORKSPACE, domain: 'planning', implementationKey: 'fake', enabled: true, isDefault: true }
 const identity = { id: 'identity-1', entityId: 'entity-1', bindingId: 'binding-1', externalKind: 'issue', externalId: 'issue-1', role: 'primary' }
-const projection = { workspaceId: WORKSPACE, entityId: 'entity-1', planningStatus: 'in_progress', revision: 3,
+const projection = { workspaceId: WORKSPACE, entityId: 'entity-1', sourceBindingId: 'binding-1', planningStatus: 'in_progress', revision: 3,
   content: { contentKind: 'change_request', number: 42, title: '标题', body: '正文' } }
 // 执行面的夹具（Batch L6）：执行上下文 / 运行 / 关系（确认 + 候选）/ 写尝试，字段刻意全部取具体值，
 // 让"逐字段不变"能分辨任何一列被丢掉——可选列取 `undefined` 与取值各出现一次。

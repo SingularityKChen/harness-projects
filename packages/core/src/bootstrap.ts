@@ -4,7 +4,7 @@
  * upsert。普通失败保留最后许可值；明确拒读原子提交 redacted 并推进内容修订，落库失败仍以内存拒读关闭读门。异常原文仅交宿主诊断出口（TD-030）。
  */
 import {
-  CapabilityKey, ObservationState, ProjectErrorCode, SyncState, projectCodeForProviderError,
+  CapabilityDomain, CapabilityKey, ObservationState, ProjectErrorCode, SyncState, projectCodeForProviderError,
   projectError, providerErr, providerError, providerOk, singlePlanningBinding, providerRegistry,
   type ExternalObjectRef, type MembershipRecord, type PlanningProvider, type PlanningSyncRoundRecord, type ProviderError, type ProviderObservation,
   type ProviderProject, type ResolvedBinding, type ProviderPlanningContent, type ProviderPlanningItem, type ProviderResult, type StorageTransaction,
@@ -218,6 +218,12 @@ async function collectObservations(planning: PlanningProvider): Promise<readonly
   return observations
 }
 
+/** 提交/失败结算都在事务内重新核对持久挂载，旧来源的在途轮次不得越过来源切换。 */
+async function planningSourceIsCurrent(storage: StorageTransaction, workspaceId: WorkspaceId, bindingId: ProviderBindingId): Promise<boolean> {
+  const active = (await storage.listProviderBindings(workspaceId)).filter(row => row.domain === CapabilityDomain.Planning && row.enabled)
+  return active.length === 1 && active[0]?.id === bindingId
+}
+
 async function commitSync(
   context: CoreContext, bindingId: ProviderBindingId,
   read: ValidatedPlanningRead, observations: readonly ProviderObservation[], round: PlanningSyncRoundRecord, captured: number, project: ProviderProject, verified?: ResolvedBinding,
@@ -226,7 +232,8 @@ async function commitSync(
   return context.runtimeAccess.local(async () => {
     const committed = await context.storage.transaction(async (tx) => {
       const latest = await tx.getPlanningSyncRound(workspaceId, bindingId, PLANNING_SYNC_SCOPE)
-      if (context.runtimeAccess.epoch !== captured || latest?.latestStartedRound !== round.latestStartedRound) {
+      if (context.runtimeAccess.epoch !== captured || latest?.latestStartedRound !== round.latestStartedRound
+        || !(await planningSourceIsCurrent(tx, workspaceId, bindingId))) {
         return { stale: true as const, revision: await tx.currentRevision(workspaceId) }
       }
       const before = await tx.listPlanningProjections(workspaceId)
@@ -355,7 +362,7 @@ function toProjection(
   workspaceId: WorkspaceId, entityId: EntityId, item: ProviderPlanningItem,
   mapping: WorkspacePlanningFieldMapping | undefined,
 ): UnstampedProjection {
-  return { workspaceId, entityId, content: toContent(item.content), ...planningFieldsOf(item, mapping) }
+  return { workspaceId, entityId, sourceBindingId: item.ref.bindingId, content: toContent(item.content), ...planningFieldsOf(item, mapping) }
 }
 
 /** provider 内容三态 → 领域三态；redacted 是一等状态，不回退到缓存或推断值。 */
@@ -385,6 +392,7 @@ async function fail(
   if (error.code === ProjectErrorCode.PermissionDenied) error = projectError(ProjectErrorCode.PermissionDenied, PLANNING_DENIED)
   if (bindingId !== undefined) {
     await context.runtimeAccess.local(() => context.storage.transaction(async (tx) => {
+      if (!(await planningSourceIsCurrent(tx, context.workspaceId, bindingId))) return
       if (!denied && context.runtimeAccess.epoch !== captured) return
       if (round !== undefined) {
         const latest = await tx.getPlanningSyncRound(context.workspaceId, bindingId, PLANNING_SYNC_SCOPE)
@@ -393,7 +401,7 @@ async function fail(
       const access = await context.runtimeAccess.planning(tx)
       if (access.masked && !context.runtimeAccess.denied) return
       if (context.runtimeAccess.denied) {
-        const before = await tx.listPlanningProjections(context.workspaceId), redacted = before.map(redactPlanning)
+        const before = (await tx.listPlanningProjections(context.workspaceId)).filter(row => row.sourceBindingId === bindingId), redacted = before.map(redactPlanning)
         if (!sameProjections(before, redacted)) {
           const revision = await tx.advanceRevision(context.workspaceId)
           await tx.replacePlanningProjections({ workspaceId: context.workspaceId, bindingId }, redacted.map((row) => ({ ...row, revision })))

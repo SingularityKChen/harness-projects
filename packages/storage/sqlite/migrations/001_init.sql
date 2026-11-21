@@ -145,6 +145,8 @@ CREATE TABLE workspace_projection (
   workspace_id TEXT NOT NULL REFERENCES workspace (id),
   -- 不变量 6：投影按实体键控；同一工作区里同一实体只有一行投影（主键见下）。内容种类一致性不在 storage（ADR-0005）。
   entity_id TEXT NOT NULL REFERENCES entity (id),
+  -- 不变量 1 / #202：当前 payload 的写入来源必须有连接锚点（ADR-0006）；身份可以共享，来源随同键覆盖而更新。
+  source_binding_id TEXT NOT NULL REFERENCES provider_binding (id),
   -- 归一化状态（R2 / R3）：原样字段值留在 planning_field_value，归一化由 core 做。
   planning_status TEXT NOT NULL CHECK (planning_status IN ('todo', 'in_progress', 'blocked', 'done', 'canceled', 'unknown')),
   -- 内容三态（ADR-0005：分类没有库级闸门，redacted 由本列与下面的 CHECK 约束）。
