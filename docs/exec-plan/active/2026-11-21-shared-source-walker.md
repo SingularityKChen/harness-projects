@@ -157,9 +157,9 @@ export function listPackageDirectories(root, groups) {
 
 ## Progress
 
-- [ ] Batch 0 对齐与基线（2026-11-21 计划创建，未开始；需记录 V7 基线 `ℹ tests` 与耗时）
-- [ ] Batch 1 计划落档（未开始）
-- [ ] Batch 2 helper 与夹具（未开始；需记录两段红输出与 K1–K8 杀掉/存活）
+- [x] Batch 0 对齐与基线（2026-11-21，工作树 `.worktrees/shared-source-walker`）：`pnpm install --frozen-lockfile` exit 0；V3 `ℹ tests 10 / pass 10 / fail 0`；V4 `ℹ tests 12 / pass 12 / fail 0`；V7 基线 `ℹ tests 1620 / pass 1613 / fail 7`（7 条全是高负载下的子进程期限断言，见 F10）；V8 基线未整跑（同机四路实现并行，见 F10），终局按 V8 整跑一次
+- [x] Batch 1 计划落档（2026-11-21，commit d899e16f：本计划 + `docs/README.md` Active 行）
+- [x] Batch 2 helper 与夹具（2026-11-21）：V4 先 `SyntaxError: ... does not provide an export named 'listPackageDirectories'`，再空桩 `ℹ tests 14 / pass 11 / fail 3`（C3/C7/C8 红），实现后 `ℹ tests 14 / pass 14 / fail 0`；K1–K8 全部被杀死，见 F9
 - [ ] Batch 3 迁移两处扫描（未开始；需记录 grep 与 18/206 对照）
 - [ ] Batch 4 文档与最终门禁（未开始；需记录 V8–V13 输出）
 - [ ] PR 创建与回读（未开始；draft PR 关联 #396，最终 push 后回读 head/base/checks/issue 关联）
@@ -173,6 +173,19 @@ export function listPackageDirectories(root, groups) {
 - F5（忽略残留本机可见）：写作时主检出存在 `apps/harness-plugin/dist/package/package.json`，`git check-ignore` 命中 `.gitignore` 第 12 行 `dist/`，而 V3 基线仍 10/10——说明「有残留仍绿」只能证明未误报，不能证明「只剩一份实现」。
 - F6（范围外第二实现）：`tests/contract/development-local-git-source.test.js:20-28` 仍有自己的 `sourceFiles`（无跳过名单，扩展名集合是 helper 真子集），`host-node-types.test.js:74-91` 有递归版包发现。两者本 PR 不改，理由见 Design / Spec 被放弃方案 8 与 Decision Log D6。
 - F7（设计稿偏差）：设计稿 a 的安装命令用 `--offline`，不是本仓 workflow 的写法；设计稿 b 主张「缺 group 时跳过」，与 helper 既有失败闭合契约不一致。均按 Decision Log D3/D4 处理。
+- F9（B2 变异表，2026-11-21 在 `.worktrees/shared-source-walker` 实跑）：每次只改 `tests/fixtures/source-tree.mjs` 一处、跑 V4、用 `/tmp` 下的 green 副本逐字节还原并核对 `RESTORED_IDENTICAL=true`；还原后复跑 V4 回到 14/14。实际结果（比计划预期更严）：
+  | 变异 | 内容 | V4 结果 | 被杀的用例 |
+  |---|---|---|---|
+  | K1 | 去掉组层与嵌套层剪枝 | 14 / pass 12 / fail 2 | C7、C8 |
+  | K2 | 只在组层剪枝（嵌套层不剪） | 14 / pass 12 / fail 2 | C7、C8 |
+  | K3 | 只在嵌套层剪枝（组层不剪） | 14 / pass 13 / fail 1 | C7 |
+  | K4 | 换硬编码 `{node_modules,dist}` | 14 / pass 11 / fail 3 | C3、C7、C8 |
+  | K5 | 只发现一层（删嵌套循环） | 14 / pass 12 / fail 2 | C7、C8 |
+  | K6 | 找到 manifest 仍下钻 | 14 / pass 13 / fail 1 | C7 |
+  | K7 | 用主检出 `.gitignore` 而非调用方 root | 14 / pass 12 / fail 2 | C3、C8 |
+  | K8 | 扩展名换回旧本地集合 `/\\.(ts\|tsx\|mts\|cts)$/` | 14 / pass 12 / fail 2 | 「共享源码集合覆盖…扩展名」、C4 |
+  说明：计划预期「K4/K7 红 C8、其余红 C7」；实际 K4 额外红 C3（硬编码不再读 `.gitignore`，缺文件时不抛 ENOENT）、K7 额外红 C3（换成存在的主检出 root 后夹具缺 `.gitignore` 也不再抛 ENOENT）、K8 额外红 C4（Git 可见的 `.js/.mjs` 源码漏项）。更强不改变结论：8 个变异无一存活。
+- F10（基线门禁在共享机器高负载下的观察，2026-11-21）：Batch 0 时同机有四个实现者并行跑测试，`load averages` 约 280/310/300（10 核）。V7 基线 `pnpm test:contract` 得 `ℹ tests 1620 / pass 1613 / fail 7`，7 条全是子进程期限类断言（`W3：step 的畸形长引用有界拒绝` 的 5 s `spawnSync` 超时、`spec 不合法…` 31.6 s、浏览器用例 2.6–5.0 s）；`pnpm test:file tests/contract/workflow-check.test.js` 单独复跑 55/55 绿。结论同 F8：属环境性超时，不是基线回归。V8 基线因同机四路整测并发被主动中止，终局只整跑一次 V8（失败时按 Idempotence and Recovery 先复跑命中文件再判断）。
 - F8（基线门禁的环境敏感性，2026-11-21 实测）：在主检出跑 V8 时，`tests/contract/ui-safe-markdown.test.js` 的一次 `spawnSync` 子进程触发 `ETIMEDOUT`（`execFileSync` 传入 200000 字符输入），同文件单独复跑 `ℹ tests 18 / ℹ pass 18 / ℹ fail 0`，`pnpm run typecheck` 也通过。结论：该失败与本改动无关，属高负载下的既有超时；Batch 0 的 V8 基线按「单独复跑该文件」的结论记录，最终门禁遇到同类现象时先复跑再判断，不把它当作 #396 的回归。
 
 ## Decision Log
@@ -186,6 +199,10 @@ export function listPackageDirectories(root, groups) {
 - D7（2026-11-21，spec-396）：不新增运行时测试来证明「没有第二份实现」。Rationale：helper 与副本行为相同，任何断言都只能空转；证据用删除 diff、`grep` 与变异表，机械守卫由 TD-086 承接。
 - D8（2026-11-21，spec-396）：`tests/contract/host-node-types.test.js` 只改注释 2 行。Rationale：避免仓库内出现指向已删除标识符的引用；不改变任何断言与扫描行为，属同一迁移的必要收尾。
 - D9（2026-11-21，spec-396）：TD-087 在本 PR 内移入 Resolved；TD-086 保持 Open 并更新下一步。Rationale：tracker 允许随 PR 关闭，但要求当前 head 的验证证据；TD-086 的触发条件刚满足，其判定标准尚未裁决。
+- D10（2026-11-21，Lead 裁决 Q1，直接采用不再讨论）：**接受缺 group 目录抛原生 ENOENT（fail-closed）**。这是 D4 的最终确认：不加 `existsSync` 守卫、不返回空集；C3 用两条 `assert.throws(..., { code: 'ENOENT' })` 钉住，K4/K7 证明守卫消失时它会红。
+- D11（2026-11-21，Lead 裁决 Q2）：**不得用「本机有 `dist` 残留仍绿」冒充结构证据**。`pnpm run boundaries` 10/10 只作「未误报」观察；「两条路径只剩一份实现」的判别力来自 C7/C8 夹具（K1–K8 变异表，F9）与删除 diff + 两条 `grep` 无命中，不来自任何运行期测试。
+- D12（2026-11-21，Lead 裁决 Q3）：TD-087 在本 PR 标记 `Resolved`，但**不**把 `host-node-types` 的递归包发现与 `development-local-git-source` 的本地扫描并入，也不为本项新建 issue；理由与残余统一写进本计划的 Outcomes 与 tracker 说明（复用 D6 的边界）。
+- D13（2026-11-21，实现期）：B2 的变异还原用 `/tmp` 下的 green 副本 `cp` 回写，而不是 `git checkout -- tests/fixtures/source-tree.mjs`——变异阶段实现尚未提交，`git checkout` 会连实现一起丢弃。每次还原后核对 `RESTORED_IDENTICAL=true` 并复跑 V4 回到 14/14。
 
 ## Idempotence and Recovery
 

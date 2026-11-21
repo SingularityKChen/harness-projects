@@ -16,7 +16,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { callSites, ignoredDirectoryNames, listSourceFiles } from '../fixtures/source-tree.mjs'
+import { callSites, ignoredDirectoryNames, listPackageDirectories, listSourceFiles } from '../fixtures/source-tree.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
 const SCOPES = ['packages', 'apps']
@@ -76,12 +76,39 @@ test('C2 只认裸目录规则：锚定、通配、取反、注释和带路径�
   assert.deepEqual(callSites(root, SCOPES.slice(0, 1), CALL), ['p/a.local/x.ts', 'p/gone/x.ts', 'p/keep/x.ts', 'p/out/x.ts', 'p/src/gen/x.ts', 'p/tmp1/x.ts'])
 })
 
-test('C3 缺 .gitignore 或缺 scope 时抛错，不悄悄返回空集', (t) => {
+test('C3 缺 .gitignore、缺 scope 或缺 group 时抛错，不悄悄返回空集', (t) => {
   const noIgnore = fixture(t, undefined, ['packages/core/src/a.ts'])
   assert.throws(() => ignoredDirectoryNames(noIgnore), { code: 'ENOENT' })
   assert.throws(() => callSites(noIgnore, SCOPES.slice(0, 1), CALL), { code: 'ENOENT' })
+  // 包根发现同样不能在没有忽略来源时静默返回空集：空集会冒充「没有未登记的包」。
+  assert.throws(() => listPackageDirectories(noIgnore, SCOPES.slice(0, 1)), { code: 'ENOENT' })
   const noScope = fixture(t, 'dist/\n', ['packages/core/src/a.ts'])
   assert.throws(() => callSites(noScope, SCOPES, CALL), { code: 'ENOENT' })
+  // 缺 group 目录时抛原生 ENOENT，不跳过（布局写错必须响亮失败，不能少发现成空集）。
+  assert.throws(() => listPackageDirectories(noScope, SCOPES), { code: 'ENOENT' })
+})
+
+test('C7 包根只认两层、找到 manifest 即停；组层与嵌套层都按调用方根 .gitignore 的裸目录规则剪枝', (t) => {
+  const root = fixture(t, 'node_modules/\ndist/\nbuild/\n', [
+    'apps/app-a/package.json', // 组层直属包根
+    'packages/build/package.json', // 被忽略的组层目录：不能因为里面有 manifest 就当包根
+    'packages/direct/package.json', // 找到 manifest 即停
+    'packages/direct/inner/package.json', // 已停，不再下钻
+    'packages/group/build/package.json', // 被忽略的嵌套层目录
+    'packages/group/deep/mid/package.json', // 第三层，超出两层发现
+    'packages/group/node_modules/dep/package.json', // 被忽略的嵌套层依赖目录
+    'packages/group/pkg/package.json',
+  ])
+  assert.deepEqual(listPackageDirectories(root, SCOPES), ['apps/app-a', 'packages/direct', 'packages/group/pkg'])
+})
+
+test('C8 剪枝名单只来自调用方 root 的 .gitignore：换一个根就不会沿用别处的构建目录名', (t) => {
+  // 这个夹具只有 artifacts/ 被忽略；dist/ 在本仓库根 .gitignore 里，但在这个夹具根里不是构建产物。
+  const root = fixture(t, 'artifacts/\n', [
+    'packages/p/dist/package.json', // 本根不忽略 dist，应算包根
+    'packages/q/artifacts/package.json', // 本根忽略 artifacts，不算
+  ])
+  assert.deepEqual(listPackageDirectories(root, SCOPES.slice(0, 1)), ['packages/p/dist'])
 })
 
 test('C2b 按 git 的行语义解析：行首空白不是规则，取反规则末段（含通配）匹配到的目录名不剪枝，CRLF、行尾空格与 BOM 被去掉', (t) => {
