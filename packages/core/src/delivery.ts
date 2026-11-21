@@ -25,8 +25,8 @@ export interface DeliveryLineageHop {
   readonly relationType: RelationType; readonly source: RelationSource // source 恒为 lineage：沿已记录关系走到的，不是重新识别
   readonly relationSource: RelationSource; readonly relationState: RelationState; readonly provenance: EdgeProvenance
   readonly from: EntityId; readonly to: EntityId; readonly entityKind: EntityKind
-  readonly externalId: string | undefined; readonly label: string | undefined; readonly observed: boolean
-  readonly unavailable: boolean; readonly detail: string | undefined
+  readonly externalId: string | undefined; readonly label: string | undefined
+  readonly unavailable: boolean
   readonly fact: EngineeringFactKind | undefined // 这一跳隐含的工程事实（CI 成功/失败）：只能折成派生标记
   /** 这一跳来自最近一次刷新没能重新确认的集合：是最后确认的值，不是当前值（#221）；`tracks` / `has_worktree` 是命令事实，恒为 false。 */
   readonly stale: boolean
@@ -148,7 +148,7 @@ async function deliveryProjection(context: CoreContext, scope: DeliveryScopeInpu
   const hop = (relation: Relation | undefined, entityKind: EntityKind, node: { externalId: string | undefined; label: string | undefined; fact?: EngineeringFactKind | undefined },
     provenance: EdgeProvenance, stale = false, key?: CapabilityKey): DeliveryLineageHop[] => relation === undefined ? [] : [{
     relationType: relation.type, source: RelationSource.Lineage, relationSource: relation.source, relationState: relation.state,
-    provenance, from: relation.from, to: relation.to, entityKind, externalId: node.externalId, label: node.label, observed: true, detail: undefined, fact: node.fact, stale,
+    provenance, from: relation.from, to: relation.to, entityKind, externalId: node.externalId, label: node.label, fact: node.fact, stale,
     unavailable: key !== undefined && !gateCommand(context.registry, key, 'read').allowed,
   }]
   // 缺口：链的六个位置里没有跳的那些，按链的顺序，原因由本地事实算出（不落库）。上下文记录不存在是没开始；记录在而命令边不在是没观察到

@@ -122,7 +122,7 @@ async function world(label, t, order) {
   return result
 }
 
-const observedArtifacts = (projection) => projection.hops.filter((hop) => ['commit', 'change_request'].includes(hop.entityKind)).map((hop) => [hop.entityKind, hop.externalId, hop.observed])
+const observedArtifacts = (projection) => projection.hops.filter((hop) => ['commit', 'change_request'].includes(hop.entityKind)).map((hop) => [hop.entityKind, hop.externalId])
 const worktreeId = (projection) => projection.hops.find((hop) => hop.entityKind === 'worktree')?.to
 
 async function assertObserved(w, selected, expectedPR) {
@@ -131,7 +131,7 @@ async function assertObserved(w, selected, expectedPR) {
   for (const { input } of selected.calls) assert.deepEqual(input.repository, expected, '两跳都使用完整远端引用')
   assert.deepEqual([result.error, result.gaps], [undefined, []], '公开刷新必须经已登记仓库的唯一操作路由成功，无 capability gap')
   const projection = await w.core.queries.getDeliveryProjection(w.scope)
-  assert.deepEqual(observedArtifacts(projection), [['commit', REMOTE_HEAD, true], ['change_request', expectedPR, true]], 'commit 与 PR 两跳均须观察到选中连接的事实')
+  assert.deepEqual(observedArtifacts(projection), [['commit', REMOTE_HEAD], ['change_request', expectedPR]], 'commit 与 PR 两跳均须观察到选中连接的事实')
   assert.deepEqual(selected.calls.map(({ method }) => method), ['listBranches', 'listChangeRequests'])
   return projection
 }

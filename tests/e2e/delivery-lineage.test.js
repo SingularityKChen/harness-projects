@@ -121,7 +121,7 @@ test('交付谱系：每一跳都是带显式 provenance 的关系，且按已�
   assert.equal(worktreeHop.externalId, chain.started.worktreeExternalId, '工作树跳必须回指已建工作树')
   assert.equal(worktreeHop.relationState, RelationState.Confirmed, '命令确认的系统事实是已确认边')
   const commitHop = hops.find((hop) => hop.entityKind === 'commit')
-  assert.ok(commitHop.observed && typeof commitHop.externalId === 'string', '提交必须由 provider 读到')
+  assert.ok(typeof commitHop.externalId === 'string' && commitHop.provenance === 'provider_read' && commitHop.source === RelationSource.Lineage, '提交跳必须带 provider 读到的外部标识，并标 lineage 来源')
   const ciHop = hops.find((hop) => hop.relationType === 'runs_on')
   assert.equal(ciHop.relationState, RelationState.Candidate, 'provider 读到的确定性事实只能先进候选')
   assert.equal(await planningSnapshot(core), before, '读交付谱系不得改写规划状态')
@@ -175,7 +175,7 @@ test('正向：真实链路走完后 CI 跳出现（无锚点不读不得削弱�
   await ingest(core, chain.scope)
   const ci = (await core.queries.getDeliveryLineage(chain.scope)).filter((hop) => hop.relationType === 'runs_on')
   assert.ok(ci.length > 0, '提交被观察到之后必须读到该提交上的流水线运行')
-  assert.ok(ci.every((hop) => hop.observed === true && typeof hop.externalId === 'string'), 'CI 跳必须是真实观察到的运行')
+  assert.ok(ci.every((hop) => typeof hop.externalId === 'string' && hop.stale === false && hop.source === RelationSource.Lineage), 'CI 跳必须是真实读到的运行，带外部标识且不陈旧')
 })
 
 test('候选关系：确定性发现先进候选，显式确认才升级，同一三元组不重复（issue #78）', async () => {

@@ -57,7 +57,7 @@ test('core 端到端：PR 只经 head 分支挂上谱系，标题 / fork / 大�
     assert.equal((await core.commands.refreshDeliveryFacts(scope)).error, undefined, `${mode}：刷新本身不得失败`)
     const hops = (await core.queries.getDeliveryProjection(scope)).hops
     const changeRequest = hops.find((hop) => hop.entityKind === 'change_request')
-    assert.deepEqual([mode, changeRequest?.externalId, changeRequest?.observed], [mode, 'PR_target', true], `平台${mode}过滤：只挂上同仓库、分支字节相等的 PR`)
+    assert.deepEqual([mode, changeRequest?.externalId, changeRequest?.provenance], [mode, 'PR_target', 'provider_read'], `平台${mode}过滤：只挂上同仓库、分支字节相等的 PR`)
     assert.match(changeRequest.from, /^change_request-[0-9a-f]{32}$/, '`produced_by` 的变更请求端是 core 派生的哈希，不是 node id')
     const state = exportFakeStorageState(providers.storage)
     const stored = JSON.stringify(state)
@@ -189,7 +189,7 @@ test('录制 Development + 真实双 adapter + SQLite：概念链逐字段可追
   assert.deepEqual([context.from, context.to, worktree.from, commit.to, cr.to, byKind('pipeline_run').to, byKind('check_run').to],
     [w.scope.workItemId, w.started.executionContextId, w.started.executionContextId, worktree.to, worktree.to, commit.from, cr.from])
   assert.deepEqual(projection.hops.map((hop) => hop.relationType), ['tracks', 'has_worktree', 'derived_from', 'produced_by', 'runs_on', 'runs_on'])
-  assert.ok(projection.hops.every((hop) => hop.observed && !hop.stale && hop.source === 'lineage'))
+  assert.ok(projection.hops.every((hop) => typeof hop.externalId === 'string' && !hop.stale && hop.source === 'lineage'))
   const keys = await graphKeys(w)
   const primaryKeys = [...keys.entities, ...(await w.storage.listRelations((await w.snapshot()).workspaceId)).flatMap(({ from, to }) => [from, to]), ...sqlRows(w.storage.location, 'repository').map((row) => row.id)]
   assert.deepEqual(primaryKeys.filter((id) => [RECORDED_PR.id, RECORDED_REPOSITORY_ID].includes(id)), [])
