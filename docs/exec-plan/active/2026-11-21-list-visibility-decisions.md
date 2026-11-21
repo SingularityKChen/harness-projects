@@ -310,8 +310,8 @@ node scripts/resolution-check.mjs && node --test --test-timeout=180000 $(grep -r
 
 ## Progress
 
-- [x] Batch 1 · 特性化矩阵与判别力证明（2026-11-21，本提交）：新增 3 个用例（21 行矩阵 + 输出形状白名单 + 坏接线优先），当前实现上全绿；V1 `ℹ tests 21 / pass 21 / fail 0`、V2 exit 0；临时变异 MA（EXPLICIT_BLOCK 去掉 permission_denied）→ 矩阵等 3 用例红，MB（缓存门忽略 cacheVisibility）→ 5 用例红，MC（GATE_BLOCKED 换成 FAILURE.unknown）→ 3 用例红，均已还原且 `git diff --quiet` 通过。
-- [ ] Batch 2 · 校验与失败表合并
+- [x] Batch 1 · 特性化矩阵与判别力证明（2026-11-21，a634f122）：新增 3 个用例（21 行矩阵 + 输出形状白名单 + 坏接线优先），当前实现上全绿；V1 `ℹ tests 21 / pass 21 / fail 0`、V2 exit 0；临时变异 MA（EXPLICIT_BLOCK 去掉 permission_denied）→ 矩阵等 3 用例红，MB（缓存门忽略 cacheVisibility）→ 5 用例红，MC（GATE_BLOCKED 换成 FAILURE.unknown）→ 3 用例红，均已还原且 `git diff --quiet` 通过。
+- [x] Batch 2 · 校验与失败表合并（2026-11-21，本提交）：`FAILURE` 单表替换 `UNAVAILABLE` + `EXPLICIT_BLOCK`（`borrowsCache` 与文案同表），新增私有 `ReadMarks` / `validateReadInput`，`deriveWorkItemListView` 改为先校验、再派生 list、再进入可见性阶梯（阶梯仍是内联 if 链，装配段逐字未动）；V1 `21/21`、V2 exit 0、V3 `28/28`、V4 `10/10`。
 - [ ] Batch 3 · 决策提取与装配收口
 - [ ] Batch 4 · 文档归档、体量与发布面门禁
 - 2026-11-21：计划创建；事实在 `f74a3b8b` 独立核实（基线见 Surprises 第 9 条）；实现未开始。
