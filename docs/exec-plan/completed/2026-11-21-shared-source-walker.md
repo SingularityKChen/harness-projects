@@ -1,9 +1,9 @@
 # 共享源码树包根发现 ExecPlan（shared-source-walker）
 
-> 状态：Active
+> 状态：Completed（2026-11-21 实现与独立验收完成并归档；PR #670 的 ready/合并决定仍属人类评审）
 > 创建：2026-11-21
 > 范围：issue #396 —— 把 `tests/contract/package-boundaries.test.js` 的两处手写扫描迁到共享源码树 helper，删除本地跳过名单，并补齐判别夹具；单 PR 闭环。
-> 上游输入：issue #396 正文与验收标准（本计划自带全部执行所需上下文，不依赖外部讨论记录）。
+> 上游输入：issue #396 正文与验收标准、独立对抗验证报告 `.superpowers/iteration12-20261121/verify/shared-source-walker.md`（本计划自带全部执行所需上下文，不依赖外部讨论记录）。
 
 ## Purpose / Big Picture
 
@@ -22,7 +22,7 @@
 
 关键术语：**裸目录规则**指 `.gitignore` 里形如 `name/`（不含斜杠、通配、锚定）的行，按 git 语义匹配任意深度同名目录；**两层发现**指只认 `group/<a>` 与 `group/<a>/<b>`（group ∈ `packages`、`apps`），某层出现 `package.json` 即认定为包根并停止下钻。
 
-已核实事实（基线 `f74a3b8b`，主检出实跑）：包根 18 个，与 `EXPECTED` 键集合差为 `[]`；18 个 `<pkg>/src` 源文件 206 个，与候选实现差为 `[]`，且 206 个全是 `.ts`；根 `.gitignore` 的忽略名 15 个，是旧本地 `{node_modules,dist}` 的超集；本机存在 `apps/harness-plugin/dist/package/package.json`（被 `dist/` 忽略，旧实现靠「`apps/harness-plugin` 自带 manifest 即停」碰巧避开，属潜在漂移）；`pnpm run boundaries` 在该残留在位时仍 10/10。技术债：`docs/exec-plan/tech-debt-tracker.md` 的 TD-087（本 issue 承接项）与 TD-086（「扫描必须经 helper」的机械守卫，明确排在本 issue 之后）。
+已核实事实（基线 `f74a3b8b`，主检出实跑）：包根 18 个，与 `EXPECTED` 键集合差为 `[]`；18 个 `<pkg>/src` 源文件 206 个，与候选实现差为 `[]`，且 206 个全是 `.ts`；根 `.gitignore` 的忽略名 13 个（含 `node_modules`、`dist`、`build`、`coverage`、`.worktrees` 等；初稿写 15 个，2026-11-21 独立验收实测订正为 13，base 与 head 的 `.gitignore` 相同），是旧本地 `{node_modules,dist}` 的超集；本机存在 `apps/harness-plugin/dist/package/package.json`（被 `dist/` 忽略，旧实现靠「`apps/harness-plugin` 自带 manifest 即停」碰巧避开，属潜在漂移）；`pnpm run boundaries` 在该残留在位时仍 10/10。技术债：`docs/exec-plan/tech-debt-tracker.md` 的 TD-087（本 issue 承接项）与 TD-086（「扫描必须经 helper」的机械守卫，明确排在本 issue 之后）。
 
 ## Design / Spec
 
@@ -72,7 +72,7 @@ export function listPackageDirectories(root, groups) {
 
 ## Global Constraints
 
-- 文件集合（本 PR 只允许出现这些路径，按 PLANS.md §4 只在此处声明一次）：`tests/fixtures/source-tree.mjs`、`tests/contract/source-tree.test.js`、`tests/contract/package-boundaries.test.js`、`tests/contract/host-node-types.test.js`（仅注释第 71–72 行）、`docs/exec-plan/active/2026-11-21-shared-source-walker.md`、`tests/README.md`、`docs/exec-plan/tech-debt-tracker.md`、`docs/README.md`。
+- 文件集合（本 PR 只允许出现这些路径，按 PLANS.md §4 只在此处声明一次）：`tests/fixtures/source-tree.mjs`、`tests/contract/source-tree.test.js`、`tests/contract/package-boundaries.test.js`、`tests/contract/host-node-types.test.js`（仅注释第 71–72 行）、`docs/exec-plan/completed/2026-11-21-shared-source-walker.md`（本计划自身；验收归档时从 `active/` 移入，历史提交中位于 `active/` 同名文件）、`tests/README.md`、`docs/exec-plan/tech-debt-tracker.md`、`docs/README.md`。
 - 禁止改动：`packages/`、`apps/`、`scripts/`、`.github/`、根 `package.json`、`pnpm-lock.yaml`；不新增依赖、不新增其它文件、不写兼容层、不改 import 解析语义（模板字面量解析属 #339）、不改 C4 的 Git oracle 与独立扩展名副本（#350 的 D12）、不实现 TD-086 机械守卫。
 - 体量：技术 ≤800 行、文档 ≤1300 行（仓库硬门 1000/1500）。本计划预估技术 ~105–125 行、文档 ~220–260 行；实现中若技术超过 200 行或文档超过 400 行，停止并重新裁定，不靠拆 PR 规避。
 - 语言：正文中文，代码标识符、路径、命令英文；提交信息 `<type>(<scope>): <中文摘要>`，正文写为什么，含 `Closes #396`。
@@ -93,7 +93,7 @@ export function listPackageDirectories(root, groups) {
 
 **最小闭环**：实现开始前仓库里已有可审阅的 ExecPlan 与索引。
 **涉及文件**：本计划、`docs/README.md`（Active 表一行）。
-步骤：把本文件落到 `docs/exec-plan/active/2026-11-21-shared-source-walker.md`；在 `docs/README.md` §2 的 Active 表加一行指向它，用途写「包边界两处扫描改走共享源码树 helper、删除本地跳过名单（#396）」。
+步骤：把本文件落到 `docs/exec-plan/active/2026-11-21-shared-source-walker.md`（验收阶段归档到 `docs/exec-plan/completed/`，见 Global Constraints）；在 `docs/README.md` §2 的 Active 表加一行指向它，用途写「包边界两处扫描改走共享源码树 helper、删除本地跳过名单（#396）」。
 **验证**：V13（此时 diff 只含这两个文档文件）。
 **回滚**：`git revert` 本批提交（纯文档，无代码牵连）。
 
@@ -161,8 +161,9 @@ export function listPackageDirectories(root, groups) {
 - [x] Batch 1 计划落档（2026-11-21，commit d899e16f：本计划 + `docs/README.md` Active 行）
 - [x] Batch 2 helper 与夹具（2026-11-21）：V4 先 `SyntaxError: ... does not provide an export named 'listPackageDirectories'`，再空桩 `ℹ tests 14 / pass 11 / fail 3`（C3/C7/C8 红），实现后 `ℹ tests 14 / pass 14 / fail 0`；K1–K8 全部被杀死，见 F9
 - [x] Batch 3 迁移两处扫描（2026-11-21）：RED = 迁移前两条 `grep` 命中（跳过名字面量 3 处：:137/:144/:173；本地实现引用 6 处：:138/:162/:174/:233/:250/:285），GREEN = 迁移后两条 `grep` 均无命中（exit 1）；V3 `10/10`、V5 `10/10`、V6 `5/5`、V4 `14/14`；迁移前后集合探针（F11）：包根 18 vs 18、差集 `[]`，源码 206 vs 206、差集 `[]`，206 个全是 `.ts`
-- [x] Batch 4 文档与最终门禁（2026-11-21）：`tests/README.md` §3、TD-087/TD-086 与本计划已回填；V1–V6、V9、V11 通过（V3 10/10、V4 14/14、V5 10/10、V6 5/5）；V10 `代码 131 / 1000、文档 266 / 1500`（本计划自设 800/1300 内）、V12 无输出、V13 只含 Global Constraints 的 8 个文件；**V8 未在共享机器上取得全绿**：`pnpm verify` 三次分别 7/12/11 条失败，全部是子进程期限类超时（load average 280→472→325；未改动的基线提交 `d899e16f` 上同样的 7 条也红），命中文件逐个复跑 5/5 全绿（F13），typecheck 通过；按 F8/F10 判为环境性。——干净环境的复核（观察时刻快照，head `5c23a838`）：PR #670 的 CI `Verify（typecheck + 契约测试）`、`Browser`、`Windows Native`、`Disclosure scan`、`PR size`、`Issue policy` 全部 success，说明整测全绿在干净环境成立，本机失败确为共享机器负载
+- [x] Batch 4 文档与最终门禁（2026-11-21）：`tests/README.md` §3、TD-087/TD-086 与本计划已回填；V1–V6、V9、V11 通过（V3 10/10、V4 14/14、V5 10/10、V6 5/5）；V10 `代码 131 / 1000、文档 266 / 1500`（本计划自设 800/1300 内）、V12 无输出、V13 只含 Global Constraints 的 8 个文件；**V8 未在共享机器上取得全绿**：`pnpm verify` 三次分别 7/12/11 条失败，全部是子进程期限类超时（load average 280→472→325；未改动的基线提交 `d899e16f` 上同样的 7 条也红），命中文件逐个复跑 5/5 全绿（F13），typecheck 通过；按 F8/F10 判为环境性。——干净环境的复核（观察时刻快照，head `5c23a838`）：PR #670 的 CI `Verify（typecheck + 契约测试）`、`Browser`、`Windows Native`、`Disclosure scan`、`PR size`、`Issue policy` 全部 success，说明整测全绿在干净环境成立，本机失败确为共享机器负载；代码终局 head 回读（2026-11-21，head `fb43a1f9`）的 check-runs 12/12 success（含 `Verify`、`Browser`、`Windows Native`、`PR Fast Gate`、`CodeQL`），归档提交后的 head 按 Outcomes 的易失值回读规则复核
 - [x] PR 创建与回读（2026-11-21，观察时刻快照）：draft PR #670 已存在且未标 ready；`gh pr view 670 --json …` 回读 `headRefOid` 与本地 HEAD 一致、`baseRefOid=f74a3b8b`（= `origin/main`）、`isDraft=true`、`state=OPEN`、`closingIssuesReferences=[#396]`；最终 push 后 `git rev-parse HEAD` 与 `git rev-parse origin/chore/shared-source-walker` 一致。合并与 `gh pr ready` 由人类评审决定，本实现者不做。
+- [x] 独立对抗验证与最终验收（2026-11-21，verify-396 报告 + accept-396，验收时代码终局 head `fb43a1f9` + 本归档提交）：P0/P1 无、issue #396 的 AC1–AC4 全部 PASS；判定不变、复核读数、P3 处理、无净收益重构结论与易失值回读规则见 Outcomes & Retrospective（唯一记录处）；计划已归档到 `docs/exec-plan/completed/`，`docs/README.md` Active→Completed 索引同步。
 
 ## Surprises & Discoveries
 
@@ -184,12 +185,18 @@ export function listPackageDirectories(root, groups) {
   | K6 | 找到 manifest 仍下钻 | 14 / pass 13 / fail 1 | C7 |
   | K7 | 用主检出 `.gitignore` 而非调用方 root | 14 / pass 12 / fail 2 | C3、C8 |
   | K8 | 扩展名换回旧本地集合 `/\\.(ts\|tsx\|mts\|cts)$/` | 14 / pass 12 / fail 2 | 「共享源码集合覆盖…扩展名」、C4 |
-  说明：计划预期「K4/K7 红 C8、其余红 C7」；实际 K4 额外红 C3（硬编码不再读 `.gitignore`，缺文件时不抛 ENOENT）、K7 额外红 C3（换成存在的主检出 root 后夹具缺 `.gitignore` 也不再抛 ENOENT）、K8 额外红 C4（Git 可见的 `.js/.mjs` 源码漏项）。更强不改变结论：8 个变异无一存活。
+  | K9（独立验证追加） | 删除 `found.sort()` | 14 / pass 13 / fail 1 | C7 |
+  | K10（独立验证追加） | `path.posix.join` → `path.join` | 14 / pass 14 / fail 0 | —（SURVIVED） |
+  | K11（独立验证追加） | 去掉 `entry.isDirectory()` 目录类型守卫（组层与嵌套层） | 14 / pass 14 / fail 0 | —（SURVIVED） |
+  | K12（独立验证追加） | 嵌套层误用组层 `entry.name` 判断 | 14 / pass 12 / fail 2 | C7、C8 |
+  说明：计划预期「K4/K7 红 C8、其余红 C7」；实际 K4 额外红 C3（硬编码不再读 `.gitignore`，缺文件时不抛 ENOENT）、K7 额外红 C3（换成存在的主检出 root 后夹具缺 `.gitignore` 也不再抛 ENOENT）、K8 额外红 C4（Git 可见的 `.js/.mjs` 源码漏项）。更强不改变结论：K1–K8 无一存活。独立验证（verify-396）追加的 K9–K12 中 K9/K12 被杀、K10/K11 存活；验收阶段（accept-396）复跑 K1/K10/K11 核对读数一致（K1 14/12/2、K10 与 K11 14/14/0），每次用 `cp` 还原后核对 sha256 与 HEAD 一致、控制组 14/14。两处存活按边界如实记录，不作为 #396 验收缺口：K10 在 POSIX 上 `path.join` 与 `path.posix.join` 完全等价，仓库没有 Windows 契约 lane（`scripts/windows-native-checks.mjs` 只登记 `tests/integration/`，R4 已记录无 Windows posix 证据）；K11 是夹具边界——C7/C8 夹具的 `packages/`、`apps/` 直接子项今天全为目录（实测 non-dir 为 0），普通文件或目录 symlink 下「不跟随、不把文件当目录」的守卫语义未被钉住，钉住它属于 TD-086 之后的守卫 issue，不在 issue #396 点名的「忽略来源、扩展名、嵌套发现」三类破坏之内。
 - F13（V8 在共享机器上的三次观察，2026-11-21）：第一次 `pnpm verify`（load ~280→371）在 contract 层 7 条失败、`ℹ tests 1622`（= 基线 1620 + 新增 2，符合 V7 的增量预期）、`ℹ pass 1615`；第二次（load ~472）12 条；第三次（load ~325）11 条。失败集合同类往复，且未改动代码的基线提交 `d899e16f` 上的 `pnpm test:contract` 也有 7 条同类失败（F10）——同一套超时敏感用例在基线与本分支上都红，可排除 #396 回归。两轮失败项全部是子进程期限类断言：`review-mutation-harness` 的三条 120 s 超时、`ui-safe-markdown` 的 4–7 s 有界进程断言、两个 browser 用例 2–13 s、`W3 畸形长引用` 5 s `spawnSync`、`pending watch value` 250–413 ms、`EPIPE 崩溃 / 还原后基线` 20 s。把命中的 5 个文件（`ui-safe-markdown` 18/18、`ui-execution-context` 13/13、`ui-local-table-view` 8/8、`review-mutation-harness` 18/18、`development-contract` 96 条 95 pass/0 fail）逐个复跑全部全绿；`pnpm run typecheck` 通过。结论同 F8/F10：是四路实现者并发时的机器负载，不是 #396 的回归。干净环境复核（观察时刻快照，head `5c23a838`）：PR #670 的 CI `Verify（typecheck + 契约测试）` success，同 head 的 `Browser`、`Windows Native` 也 success，`PR Fast Gate` 由聚合 job 收尾。本地整跑不绿与 CI 整测全绿并存，正好把「环境性超时」与「判定回归」区分开。
 - F12（计划的验证命令有误，2026-11-21 实测）：V9 初稿写 `node scripts/policy-check.mjs`，但该脚本只接受 `areas` / `issue <n>` / `pr <n>` 三种调用，无模式时打印 usage 并 exit 2（不是「exit 0，无输出」）；`issue` / `pr` 两种要走 `gh` 与网络，也不适合作为离线终局门禁。按 D16 把 V9 换成仓库 `AGENTS.md` §9 的离线日常门禁 `node scripts/workflow-check.mjs`（实测 exit 0，7 个文件无 findings）；PR 的标题/标签/关联规则由 PR 侧 `node scripts/policy-check.mjs pr 670` 在评审时回读。
 - F11（B3 迁移前后集合探针，2026-11-21，一次性脚本不落盘）：从 `d899e16f:tests/contract/package-boundaries.test.js` 取出旧的 `findPackageDirs` / `sourceFiles`（经 `new Function` 式 shim 加载，不改仓库），与迁移后的 `listPackageDirectories` / `listSourceFiles` 在同一棵树上对比：包根 18 vs 18、`pkgOnlyOld=[]` / `pkgOnlyNew=[]`；源码 206 vs 206、`fileOnlyOld=[]` / `fileOnlyNew=[]`；新集合里非 `.ts` 文件 0 个。这是 I1「判定不变」的逐项证据（数字相同只是计数，差集为空才是逐项）。
 - F10（基线门禁在共享机器高负载下的观察，2026-11-21）：Batch 0 时同机有四个实现者并行跑测试，`load averages` 约 280/310/300（10 核）。V7 基线 `pnpm test:contract` 得 `ℹ tests 1620 / pass 1613 / fail 7`，7 条全是子进程期限类断言（`W3：step 的畸形长引用有界拒绝` 的 5 s `spawnSync` 超时、`spec 不合法…` 31.6 s、浏览器用例 2.6–5.0 s）；`pnpm test:file tests/contract/workflow-check.test.js` 单独复跑 55/55 绿。结论同 F8：属环境性超时，不是基线回归。V8 基线因同机四路整测并发被主动中止，终局只整跑一次 V8（失败时按 Idempotence and Recovery 先复跑命中文件再判断）。
 - F8（基线门禁的环境敏感性，2026-11-21 实测）：在主检出跑 V8 时，`tests/contract/ui-safe-markdown.test.js` 的一次 `spawnSync` 子进程触发 `ETIMEDOUT`（`execFileSync` 传入 200000 字符输入），同文件单独复跑 `ℹ tests 18 / ℹ pass 18 / ℹ fail 0`，`pnpm run typecheck` 也通过。结论：该失败与本改动无关，属高负载下的既有超时；Batch 0 的 V8 基线按「单独复跑该文件」的结论记录，最终门禁遇到同类现象时先复跑再判断，不把它当作 #396 的回归。
+- F14（`package-boundaries` 里仍有非 helper 的目录枚举，2026-11-21 独立验证发现，验收期如实记录）：迁移后该文件仍有两处独立 `readdir` 遍历——`:317` 的壳扫描 `readdir(shellSrc, { recursive: true })`（有意列出全部扩展名，注释说明扫描面必须不小于安装件构建输入面）与 `:347` 枚举 `apps/*` 找 `scripts` 构建脚本目录（另有 `:147` 的 `scriptFiles` 只走 `BUILD_SCRIPT_ALLOW` 显式登记的构建脚本目录）。两处都不是本 PR 迁移的 `findPackageDirs`/`sourceFiles` 路径，也没有跳过名单，diff 只改了相邻注释；它们是「同一文件里仍有第二套目录枚举」的既有事实，也是 TD-086 机械守卫的潜在误报源（若按「任何对 packages/apps 的递归 readdir」判红会把这两条判红），未来守卫必须在白名单中列明。`tests/contract/development-local-git-source.test.js:20` 的本地 `sourceFiles` 与 `host-node-types` 的递归包发现见 F6。
+- F15（文档事实订正，2026-11-21 独立验证发现、验收期订正）：Context and Orientation 初稿写「根 `.gitignore` 的忽略名 15 个」，实测 `ignoredDirectoryNames('.') === 13`（`.idea`、`.nyc_output`、`.pnpm-store`、`.superpowers`、`.tmp-pnpm`、`.worktrees`、`build`、`coverage`、`deepseek-harness-project-delivery-engineering-pack-v0.1`、`dist`、`node_modules`、`playwright-report`、`test-results`）；base `f74a3b8b` 与 head 的 `.gitignore` 相同（`git diff f74a3b8b...HEAD -- .gitignore` 为空）。已在原处订正为 13；「是旧本地 `{node_modules,dist}` 的超集」的结论不变。
 
 ## Decision Log
 
@@ -209,6 +216,9 @@ export function listPackageDirectories(root, groups) {
 - D15（2026-11-21，实现期，偏离 Global Constraints）：提交信息 trailer 用 `Refs #396`，不用 `Closes #396`。原因：Lead 委派指令统一要求 `Refs #${n}`；仓库 `AGENTS.md` §6 允许二者，且计划事实守卫（F9 类栈内计划）偏好 Refs、issue 关闭由人类与 PR 的 closingIssuesReferences 裁决。功能闭环不变。
 - D14（2026-11-21，实现期）：B3 是行为保持的迁移，"先失败"的判别对象不是运行期判定（D7 已排除用运行期测试证明「没有第二份实现」），而是结构性主张——迁移前 `package-boundaries.test.js` 里有 3 处跳过名字面量与 6 处本地实现引用（两条 `grep` 命中），迁移后均为 0 命中；判定不变的护栏是 B2 的 C7/C8（K1–K8 已证明可杀）加 V3/V5/V6 与 F11 集合探针。RED/GREEN 记录见 Progress。
 - D13（2026-11-21，实现期）：B2 的变异还原用 `/tmp` 下的 green 副本 `cp` 回写，而不是 `git checkout -- tests/fixtures/source-tree.mjs`——变异阶段实现尚未提交，`git checkout` 会连实现一起丢弃。每次还原后核对 `RESTORED_IDENTICAL=true` 并复跑 V4 回到 14/14。
+- D17（2026-11-21，accept-396，独立验收）：issue #396 的 AC1–AC4 全部 PASS，复跑证据见 Outcomes & Retrospective；本 agent 不合并、不 `gh pr ready`、不改 PR 描述，ready 与合并由人类评审决定。验收期额外复跑集合差集探针（18/18、206/206）、K1/K10/K11 变异与 V 命令，未发现新的 P0/P1。
+- D18（2026-11-21，accept-396，独立验收）：`docs/review/README.md` §6 写「`.github/workflows/`、`tests/contract/package-boundaries.test.js` 的改动不与其他改动混在一个 PR 里」，本 PR 同时改 helper、该契约文件与文档，字面上落入该规则。事实是依赖边矩阵 `EXPECTED` 与 `HOST_ENTRY` 边未改（该文件的 diff 只有两段本地扫描实现删除、调用改写与一处注释改写），本 PR 是「扫描实现迁移」而非「规则变更」，且 issue #396 的 Scope 要求单 PR 闭环。处理：不改仓库级评审规则（agent 不自行放宽 `docs/review/` 的策略文本），由人类评审按「非规则变更」豁免或要求拆分；处理方式与 `docs/review/pr-329-mmp-review.md` 记录同类冲突时的做法一致。
+- D19（2026-11-21，accept-396，独立验收，重构审查）：不做净收益重构。理由：`listPackageDirectories` 的两层循环与 spec §4 明确否决的「通用 walk + maxDepth/stopAt 旋钮」只差一层封装，折叠会把深度/停止策略变回可配参数或本地递归；`ignoredDirectoryNames` / `listSourceFiles` 的重复调用是无模块级状态的显式契约，抽缓存会引入调用方可见的状态；`path.posix.join` 改模板串、`hasManifest` 外提等是零行为收益的 churn。唯一有净收益的改进是补 K11 的目录类型守卫夹具，但那属于 TD-086 的守卫范围、会改变夹具与扫描契约，超出「不改变验收结果」的验收重构边界，故只如实记录（F9/F14）。
 
 ## Idempotence and Recovery
 
@@ -232,28 +242,53 @@ export function listPackageDirectories(root, groups) {
 
 ## Outcomes & Retrospective
 
-状态：实现完成（2026-11-21），验收待独立验证。
+状态：Completed（2026-11-21 实现、独立对抗验证与最终验收完成，计划归档；PR #670 的 ready/合并决定仍属人类评审）。
 
-实际结果：
-- `tests/fixtures/source-tree.mjs` 新增 `listPackageDirectories(root, groups)`；`tests/contract/package-boundaries.test.js` 的两处本地实现（`findPackageDirs` / `sourceFiles`）与 `node_modules` / `dist` 字面量删除，包发现改调新导出、源码枚举改调 `listSourceFiles`，`host-node-types` 的过时注释同步订正。
-- 判定不变：迁移前后集合探针 18 vs 18、206 vs 206，双向差集为空（F11）；V3 `10/10`、V5 `10/10`、V6 `5/5`、V4 `14/14`。
-- 判别力：C3/C7/C8 夹具 + 8 个定向变异 K1–K8 全部被杀死（F9）；没有用「本机有 dist 残留仍绿」冒充结构证据（D11）。
-- 文档：`tests/README.md` §3 扩到「找源码或包根」并登记 `listPackageDirectories`；TD-087 移入 Resolved，TD-086 保持 Open 并补 #396 边界说明（D9/D12）。
+issue #396 验收标准逐条判定（独立验收，2026-11-21，检出 `chore/shared-source-walker` 的 `.worktrees/shared-source-walker` 工作树根目录，代码终局 head `fb43a1f9` + 本归档提交）：
+
+| AC | 判定 | 证据 |
+|---|---|---|
+| 1 包发现与源码枚举使用同一共享实现，两条路径不再有本地跳过名单 | PASS | `tests/contract/package-boundaries.test.js` 里 `grep -nE 'node_modules|dist'` 与 `grep -nE 'findPackageDirs|function sourceFiles|await sourceFiles\('` 均无命中（exit 1）；两段本地函数整段删除；临时让 `listPackageDirectories` 抛错 → `9 pass / 1 fail`（「不存在未登记的包」红）、让 `listSourceFiles` 抛错 → `8 pass / 2 fail`（两条 import 契约红），还原后 10/10，证明消费者真实调用 helper 而非平行实现 |
+| 2 当前仓库树上的既有包边界判定不变 | PASS | 独立集合探针：`EXPECTED` 18 = 发现 18、双向差集 `[]`；18 个 `<pkg>/src` 源文件 206 = 206、差集 `[]`、非 `.ts` 0；main 版旧测试文件在 head 树上 `10/10` 且 10 条用例名与顺序不变；main 与 head 两侧 `pnpm run boundaries` 均 10/10 |
+| 3 helper 的忽略来源、扩展名、嵌套发现被改坏时夹具失败 | PASS | K1–K8 全部被杀（F9）；独立验证追加的 K9（删排序）与 K12（嵌套层误用组层名）也被杀；K10（path.posix.join 与 path.join 在 POSIX 等价）与 K11（目录类型守卫）在当前 POSIX 夹具下存活，按平台/夹具边界记录于 F9，不属本 AC 点名的三类破坏 |
+| 4 记录确切命令与结果；不新增生产代码或依赖 | PASS | 本节与 V1–V13 记录命令与读数；`git diff --name-only main...HEAD` 的生产面为空（`packages/`、`apps/`、`scripts/`、`.github/`、`package.json`、`pnpm-lock.yaml` 零改动），无新依赖 |
+
+最终门禁复跑（2026-11-21，accept-396，在检出 `chore/shared-source-walker` 的 `.worktrees/shared-source-walker` 工作树根目录）：
+
+- `pnpm run boundaries`：`ℹ tests 10 / pass 10 / fail 0`，exit 0。
+- `node --test tests/contract/source-tree.test.js`：`14 / 14 / fail 0`；`node --test tests/contract/package-boundaries.test.js`：`10 / 10 / fail 0`；`node --test tests/contract/host-node-types.test.js`：`5 / 5 / fail 0`。
+- `pnpm run typecheck`：exit 0。`pnpm verify`（typecheck + contract/integration/e2e 三层）：exit 0；contract `1622 / 1622 / fail 0`（= 基线 1620 + 新增 2）、integration `2341 tests / 2313 pass / 0 fail / 28 skipped`、e2e `226 / 226 / fail 0`。
+- `node scripts/rule-checks.mjs size main`：代码 131 / 1000、文档 301 / 1500，exit 0（在用户预算 800/1300 内）。
+- `node scripts/rule-checks.mjs disclosure main`：机械扫描通过，exit 0；`node scripts/workflow-check.mjs`：no findings（已检查 7 个文件），exit 0；`git diff --check main...HEAD`：无输出，exit 0。
+- 归档提交后的 head 是易失值：`git rev-parse HEAD` 应等于 `git rev-parse origin/chore/shared-source-walker`；CI 用 `gh api repos/SingularityKChen/harness-projects/commits/$(git rev-parse HEAD)/check-runs --jq '[.check_runs[] | select(.conclusion != "success")]'`（期望空数组）回读。代码终局 head `fb43a1f9` 的观察快照为 12/12 success（含 `Verify`、`Browser`、`Windows Native`、`PR Fast Gate`、`CodeQL`）。
+
+P2/P3 处理结果（依据独立验证报告 `.superpowers/iteration12-20261121/verify/shared-source-walker.md`）：
+- P2-1（PR 描述「真实验证证据」仍是 draft 占位）：由 Lead 统一回填 PR 描述；本计划不改发布面，证据已在 F13 与本节的命令/读数中。
+- P3-1/P3-2（K11 目录类型守卫、K10 posix/平台等价两处变异存活）：如实记录为夹具/平台边界（F9 附注），不新增测试；钉住守卫属于 TD-086 后续。
+- P3-3（忽略名「15 个」实测 13）：已在 Context and Orientation 原处订正，测量方式记入 F15。
+- P3-4（`package-boundaries` 仍有非 helper 的独立 `readdir`）：如实记录（F14），并补进 TD-086 的下一步，作为未来机械守卫的白名单要求。
+- P3-5（`docs/review/README.md` §6「改依赖边矩阵的 PR 单独提交」与本 PR 的字面冲突）：不改仓库级评审规则，事实与待人类裁决点记入 D18。
+- P3-6（4 个背靠背文档回填提交）：不做 history rewrite（验收指令明确禁止），既有提交序列保留；是否在合并前收敛由人类决定。
+- P3-7（计划里的 CI 快照停在 `5c23a838`）：F13 保留该观察快照，Progress 补回代码终局 head `fb43a1f9` 的 12/12 success；归档提交后的 head 按上文易失值规则回读。
+- ExecPlan 归档后路径引用：Global Constraints 与 Batch 1 的路径说明已同步到 `completed/`，`docs/README.md` 的 Active 行移入 Completed。
+
+重构审查（不改变验收结果）：审查了 `listPackageDirectories` 的两层循环、`ignoredDirectoryNames` 与 `listSourceFiles` 的共享点以及消费方调用形态。唯一可见的「去重」是把两层发现折叠成带 depth/stopAt 的本地递归，但这正是 spec §4 否决的旋钮回漏；其余候选（`path.posix.join` 改模板串、`hasManifest` 外提、合并消费方）要么零行为收益要么扩大范围。结论：**无净收益改动，不重构**（D19）。
 
 与计划的偏差：
 - 提交 trailer 用 `Refs #396` 而不是 Global Constraints 写的 `Closes #396`：Lead 委派指令统一要求 Refs，issue 是否随合并关闭由人类与 PR 最终裁决，见 D15。
-- Batch 0 的 V8 基线未整跑完；V7 基线（1620 条）与终局 V8 三次整跑都在共享机器高负载（load 280→472，四路实现者并发）下出现子进程期限类失败，命中文件单独复跑全部全绿（F10/F13），判为环境性而非 #396 回归。契约层终局计数 `ℹ tests 1622`（= 基线 1620 + 新增 2）符合 V7 的增量预期；整跑全绿待独立验收环境复跑。
-- 变异验证的还原改用 `/tmp` 下的 green 副本（D13），因为变异阶段实现尚未提交。
-- K1–K8 实际杀死集合比计划预期更强（F9），结论不变（无变异存活）。
+- Batch 0 的 V8 基线未整跑完；V7 基线（1620 条）与终局 V8 三次整跑都在共享机器高负载（load 280→472，四路实现者并发）下出现子进程期限类失败，命中文件单独复跑全部全绿（F10/F13），判为环境性而非 #396 回归。契约层终局计数 `ℹ tests 1622`（= 基线 1620 + 新增 2）符合 V7 的增量预期；验收阶段在低负载窗口整跑 V8 全绿，与代码终局 head 的 CI `Verify` success 互证。
+- 变异验证的还原改用 `/tmp` 下的 green 副本（D13）；验收复核同样用 `cp` 还原并核对 sha256 与 HEAD 一致（F9 附注）。
+- K1–K8 实际杀死集合比计划预期更强（F9）；独立验证追加的 K9/K12 也被杀，K10/K11 按边界记录。
 
 遗留（不在本 PR，按 D6/D12 不新建 issue）：
-- TD-086 的机械守卫仍未实现：判定标准（怎样算手写遍历）与扫描范围尚未裁决。
+- TD-086 的机械守卫仍未实现：判定标准（怎样算手写遍历）与扫描范围尚未裁决；`package-boundaries` 内仍有两处非 helper 的目录枚举（F14），未来守卫必须把它们列入白名单或显式说明。
 - `tests/contract/host-node-types.test.js` 的递归包发现与 `tests/contract/development-local-git-source.test.js` 的本地源码扫描未统一到 helper，行为未变。
-- 人类验收需确认 D4/D10 的失败闭合行为变化（缺 group 或缺根 `.gitignore` 时抛原生 ENOENT，而不是返回空集）可接受。
+- 人类验收需确认 D4/D10 的失败闭合行为变化（缺 group 或缺根 `.gitignore` 时抛原生 ENOENT，而不是返回空集）可接受，并裁决 D18 的 `docs/review/README.md` §6 冲突。
 
-判定完成的标准仍是 Validation and Acceptance 的 V1–V13 全部通过且人类评审结束。
+判定完成的标准：Validation and Acceptance 的 V1–V13 通过、独立验收通过且人类评审结束；本计划已按 PLANS.md §2 归档到 `docs/exec-plan/completed/`。
 
 ## Bottom Change Note
 
 - 2026-11-21：实现完成（B2 helper + C7/C8 夹具 + K1–K8 变异；B3 迁移两处扫描；B4 文档收尾）并推送分支，验收待独立验证；偏差与遗留见 Outcomes。
 - 2026-11-21：创建本计划（spec-396 独立评审）。依据 issue #396 与两份独立设计稿复核源码后收敛：确定单函数 API、迁移映射、加强后的 C7/C8 夹具（修正两稿的嵌套剪枝判别力缺口）、失败闭合语义、4 个批次与 V1–V13 验证命令；记录 7 条 Surprises 与 9 条 Decision。
+- 2026-11-21：独立验收与归档（accept-396）——AC1–AC4 全 PASS；处理 P3（忽略名订正为 13、记录 K10/K11 平台/夹具边界、`package-boundaries` 残留独立 `readdir`、`docs/review` §6 规则冲突待人类裁决、CI 快照与归档后路径引用），证据与读数回填 Outcomes；计划从 `docs/exec-plan/active/` 归档到 `docs/exec-plan/completed/`，`docs/README.md` Active→Completed 索引同步；不做净收益重构（D19）。ready/合并仍由人类评审决定。
