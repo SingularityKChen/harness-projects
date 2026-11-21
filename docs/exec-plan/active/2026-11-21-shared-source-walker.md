@@ -147,7 +147,7 @@ export function listPackageDirectories(root, groups) {
 | V6 | `pnpm test:file tests/contract/host-node-types.test.js` | `ℹ tests 5`、`ℹ pass 5`、`ℹ fail 0` |
 | V7 | `pnpm test:contract` | exit 0；`ℹ fail 0`；`ℹ tests` 比 Batch 0 基线恰多 2 |
 | V8 | `pnpm verify` | exit 0（typecheck 加契约/集成/端到端三层全绿）；失败时先判断是否与本改动相关，无关的环境性超时按 Idempotence and Recovery 处理 |
-| V9 | `node scripts/policy-check.mjs` | exit 0，无输出 |
+| V9 | `node scripts/workflow-check.mjs` | exit 0；打印 `workflow-check: no findings（已检查 7 个文件）`（本计划初稿写的 `node scripts/policy-check.mjs` 是缺模式的调用，实测 exit 2 usage error，见 F12 / D16） |
 | V10 | `node scripts/rule-checks.mjs size origin/main` | exit 0；技术 ≤800、文档 ≤1300（脚本报告的两列均在限内） |
 | V11 | `node scripts/rule-checks.mjs disclosure origin/main` | exit 0，无命中 |
 | V12 | `git diff --check origin/main...HEAD` | 无输出 |
@@ -161,7 +161,7 @@ export function listPackageDirectories(root, groups) {
 - [x] Batch 1 计划落档（2026-11-21，commit d899e16f：本计划 + `docs/README.md` Active 行）
 - [x] Batch 2 helper 与夹具（2026-11-21）：V4 先 `SyntaxError: ... does not provide an export named 'listPackageDirectories'`，再空桩 `ℹ tests 14 / pass 11 / fail 3`（C3/C7/C8 红），实现后 `ℹ tests 14 / pass 14 / fail 0`；K1–K8 全部被杀死，见 F9
 - [x] Batch 3 迁移两处扫描（2026-11-21）：RED = 迁移前两条 `grep` 命中（跳过名字面量 3 处：:137/:144/:173；本地实现引用 6 处：:138/:162/:174/:233/:250/:285），GREEN = 迁移后两条 `grep` 均无命中（exit 1）；V3 `10/10`、V5 `10/10`、V6 `5/5`、V4 `14/14`；迁移前后集合探针（F11）：包根 18 vs 18、差集 `[]`，源码 206 vs 206、差集 `[]`，206 个全是 `.ts`
-- [ ] Batch 4 文档与最终门禁（未开始；需记录 V8–V13 输出）
+- [x] Batch 4 文档与最终门禁（2026-11-21）：`tests/README.md` §3、TD-087/TD-086 与本计划已回填；V1–V6、V9、V11 通过（V3 10/10、V4 14/14、V5 10/10、V6 5/5）；V10/V12/V13 在提交后回读（代码/文档行数见该次 `rule-checks.mjs size` 输出）；**V8 未在共享机器上取得全绿**：`pnpm verify` 两次分别 7/12 条失败，全部是子进程期限类超时（load average 280→472），命中文件逐个复跑 5/5 全绿（F13），typecheck 通过；按 F8/F10 判为环境性，clean 复跑留给独立验收环境
 - [ ] PR 创建与回读（未开始；draft PR 关联 #396，最终 push 后回读 head/base/checks/issue 关联）
 
 ## Surprises & Discoveries
@@ -185,6 +185,8 @@ export function listPackageDirectories(root, groups) {
   | K7 | 用主检出 `.gitignore` 而非调用方 root | 14 / pass 12 / fail 2 | C3、C8 |
   | K8 | 扩展名换回旧本地集合 `/\\.(ts\|tsx\|mts\|cts)$/` | 14 / pass 12 / fail 2 | 「共享源码集合覆盖…扩展名」、C4 |
   说明：计划预期「K4/K7 红 C8、其余红 C7」；实际 K4 额外红 C3（硬编码不再读 `.gitignore`，缺文件时不抛 ENOENT）、K7 额外红 C3（换成存在的主检出 root 后夹具缺 `.gitignore` 也不再抛 ENOENT）、K8 额外红 C4（Git 可见的 `.js/.mjs` 源码漏项）。更强不改变结论：8 个变异无一存活。
+- F13（V8 在共享机器上的两次观察，2026-11-21）：第一次 `pnpm verify`（load ~280→371）在 contract 层 7 条失败、`ℹ tests 1622`（= 基线 1620 + 新增 2，符合 V7 的增量预期）、`ℹ pass 1615`；第二次（load ~472）contract 层 12 条失败。两轮失败项全部是子进程期限类断言：`review-mutation-harness` 的三条 120 s 超时、`ui-safe-markdown` 的 4–7 s 有界进程断言、两个 browser 用例 2–13 s、`W3 畸形长引用` 5 s `spawnSync`、`pending watch value` 250–413 ms、`EPIPE 崩溃 / 还原后基线` 20 s。把命中的 5 个文件（`ui-safe-markdown` 18/18、`ui-execution-context` 13/13、`ui-local-table-view` 8/8、`review-mutation-harness` 18/18、`development-contract` 96 条 95 pass/0 fail）逐个复跑全部全绿；`pnpm run typecheck` 通过。结论同 F8/F10：是四路实现者并发时的机器负载，不是 #396 的回归；整跑全绿需在独立验收环境复跑。
+- F12（计划的验证命令有误，2026-11-21 实测）：V9 初稿写 `node scripts/policy-check.mjs`，但该脚本只接受 `areas` / `issue <n>` / `pr <n>` 三种调用，无模式时打印 usage 并 exit 2（不是「exit 0，无输出」）；`issue` / `pr` 两种要走 `gh` 与网络，也不适合作为离线终局门禁。按 D16 把 V9 换成仓库 `AGENTS.md` §9 的离线日常门禁 `node scripts/workflow-check.mjs`（实测 exit 0，7 个文件无 findings）；PR 的标题/标签/关联规则由 PR 侧 `node scripts/policy-check.mjs pr 670` 在评审时回读。
 - F11（B3 迁移前后集合探针，2026-11-21，一次性脚本不落盘）：从 `d899e16f:tests/contract/package-boundaries.test.js` 取出旧的 `findPackageDirs` / `sourceFiles`（经 `new Function` 式 shim 加载，不改仓库），与迁移后的 `listPackageDirectories` / `listSourceFiles` 在同一棵树上对比：包根 18 vs 18、`pkgOnlyOld=[]` / `pkgOnlyNew=[]`；源码 206 vs 206、`fileOnlyOld=[]` / `fileOnlyNew=[]`；新集合里非 `.ts` 文件 0 个。这是 I1「判定不变」的逐项证据（数字相同只是计数，差集为空才是逐项）。
 - F10（基线门禁在共享机器高负载下的观察，2026-11-21）：Batch 0 时同机有四个实现者并行跑测试，`load averages` 约 280/310/300（10 核）。V7 基线 `pnpm test:contract` 得 `ℹ tests 1620 / pass 1613 / fail 7`，7 条全是子进程期限类断言（`W3：step 的畸形长引用有界拒绝` 的 5 s `spawnSync` 超时、`spec 不合法…` 31.6 s、浏览器用例 2.6–5.0 s）；`pnpm test:file tests/contract/workflow-check.test.js` 单独复跑 55/55 绿。结论同 F8：属环境性超时，不是基线回归。V8 基线因同机四路整测并发被主动中止，终局只整跑一次 V8（失败时按 Idempotence and Recovery 先复跑命中文件再判断）。
 - F8（基线门禁的环境敏感性，2026-11-21 实测）：在主检出跑 V8 时，`tests/contract/ui-safe-markdown.test.js` 的一次 `spawnSync` 子进程触发 `ETIMEDOUT`（`execFileSync` 传入 200000 字符输入），同文件单独复跑 `ℹ tests 18 / ℹ pass 18 / ℹ fail 0`，`pnpm run typecheck` 也通过。结论：该失败与本改动无关，属高负载下的既有超时；Batch 0 的 V8 基线按「单独复跑该文件」的结论记录，最终门禁遇到同类现象时先复跑再判断，不把它当作 #396 的回归。
@@ -203,6 +205,8 @@ export function listPackageDirectories(root, groups) {
 - D10（2026-11-21，Lead 裁决 Q1，直接采用不再讨论）：**接受缺 group 目录抛原生 ENOENT（fail-closed）**。这是 D4 的最终确认：不加 `existsSync` 守卫、不返回空集；C3 用两条 `assert.throws(..., { code: 'ENOENT' })` 钉住，K4/K7 证明守卫消失时它会红。
 - D11（2026-11-21，Lead 裁决 Q2）：**不得用「本机有 `dist` 残留仍绿」冒充结构证据**。`pnpm run boundaries` 10/10 只作「未误报」观察；「两条路径只剩一份实现」的判别力来自 C7/C8 夹具（K1–K8 变异表，F9）与删除 diff + 两条 `grep` 无命中，不来自任何运行期测试。
 - D12（2026-11-21，Lead 裁决 Q3）：TD-087 在本 PR 标记 `Resolved`，但**不**把 `host-node-types` 的递归包发现与 `development-local-git-source` 的本地扫描并入，也不为本项新建 issue；理由与残余统一写进本计划的 Outcomes 与 tracker 说明（复用 D6 的边界）。
+- D16（2026-11-21，实现期，订正验证命令）：V9 由 `node scripts/policy-check.mjs` 改为 `node scripts/workflow-check.mjs`。原因见 F12：前者缺模式时 exit 2，带 `issue` / `pr` 模式时依赖 `gh` 与网络，不是本 PR 可稳定复跑的离线门禁；`workflow-check` 是 `AGENTS.md` §9 列出的日常离线检查，覆盖本 PR 未改动的 workflow 约束（W1–W7）。PR 级策略仍由评审者用 `pr 670` 回读。
+- D15（2026-11-21，实现期，偏离 Global Constraints）：提交信息 trailer 用 `Refs #396`，不用 `Closes #396`。原因：Lead 委派指令统一要求 `Refs #${n}`；仓库 `AGENTS.md` §6 允许二者，且计划事实守卫（F9 类栈内计划）偏好 Refs、issue 关闭由人类与 PR 的 closingIssuesReferences 裁决。功能闭环不变。
 - D14（2026-11-21，实现期）：B3 是行为保持的迁移，"先失败"的判别对象不是运行期判定（D7 已排除用运行期测试证明「没有第二份实现」），而是结构性主张——迁移前 `package-boundaries.test.js` 里有 3 处跳过名字面量与 6 处本地实现引用（两条 `grep` 命中），迁移后均为 0 命中；判定不变的护栏是 B2 的 C7/C8（K1–K8 已证明可杀）加 V3/V5/V6 与 F11 集合探针。RED/GREEN 记录见 Progress。
 - D13（2026-11-21，实现期）：B2 的变异还原用 `/tmp` 下的 green 副本 `cp` 回写，而不是 `git checkout -- tests/fixtures/source-tree.mjs`——变异阶段实现尚未提交，`git checkout` 会连实现一起丢弃。每次还原后核对 `RESTORED_IDENTICAL=true` 并复跑 V4 回到 14/14。
 
@@ -228,8 +232,28 @@ export function listPackageDirectories(root, groups) {
 
 ## Outcomes & Retrospective
 
-状态：计划创建（2026-11-21），尚未开始实现。完成后在此写实际结果、与计划的偏差（体量、变异存活项、失败路径变化是否被人类接受）与遗留问题（TD-086 机械守卫、`development-local-git-source` 与 `host-node-types` 的两处未统一实现），以及验收时人类对 Decision Log D4 的确认结论。判定完成的标准是 Validation and Acceptance 的 V1–V13 全部通过且人类评审结束。
+状态：实现完成（2026-11-21），验收待独立验证。
+
+实际结果：
+- `tests/fixtures/source-tree.mjs` 新增 `listPackageDirectories(root, groups)`；`tests/contract/package-boundaries.test.js` 的两处本地实现（`findPackageDirs` / `sourceFiles`）与 `node_modules` / `dist` 字面量删除，包发现改调新导出、源码枚举改调 `listSourceFiles`，`host-node-types` 的过时注释同步订正。
+- 判定不变：迁移前后集合探针 18 vs 18、206 vs 206，双向差集为空（F11）；V3 `10/10`、V5 `10/10`、V6 `5/5`、V4 `14/14`。
+- 判别力：C3/C7/C8 夹具 + 8 个定向变异 K1–K8 全部被杀死（F9）；没有用「本机有 dist 残留仍绿」冒充结构证据（D11）。
+- 文档：`tests/README.md` §3 扩到「找源码或包根」并登记 `listPackageDirectories`；TD-087 移入 Resolved，TD-086 保持 Open 并补 #396 边界说明（D9/D12）。
+
+与计划的偏差：
+- 提交 trailer 用 `Refs #396` 而不是 Global Constraints 写的 `Closes #396`：Lead 委派指令统一要求 Refs，issue 是否随合并关闭由人类与 PR 最终裁决，见 D15。
+- Batch 0 的 V8 基线未整跑完；V7 基线（1620 条）与终局 V8 两次整跑都在共享机器高负载（load 280→472，四路实现者并发）下出现子进程期限类失败，命中文件单独复跑全部全绿（F10/F13），判为环境性而非 #396 回归。契约层终局计数 `ℹ tests 1622`（= 基线 1620 + 新增 2）符合 V7 的增量预期；整跑全绿待独立验收环境复跑。
+- 变异验证的还原改用 `/tmp` 下的 green 副本（D13），因为变异阶段实现尚未提交。
+- K1–K8 实际杀死集合比计划预期更强（F9），结论不变（无变异存活）。
+
+遗留（不在本 PR，按 D6/D12 不新建 issue）：
+- TD-086 的机械守卫仍未实现：判定标准（怎样算手写遍历）与扫描范围尚未裁决。
+- `tests/contract/host-node-types.test.js` 的递归包发现与 `tests/contract/development-local-git-source.test.js` 的本地源码扫描未统一到 helper，行为未变。
+- 人类验收需确认 D4/D10 的失败闭合行为变化（缺 group 或缺根 `.gitignore` 时抛原生 ENOENT，而不是返回空集）可接受。
+
+判定完成的标准仍是 Validation and Acceptance 的 V1–V13 全部通过且人类评审结束。
 
 ## Bottom Change Note
 
+- 2026-11-21：实现完成（B2 helper + C7/C8 夹具 + K1–K8 变异；B3 迁移两处扫描；B4 文档收尾）并推送分支，验收待独立验证；偏差与遗留见 Outcomes。
 - 2026-11-21：创建本计划（spec-396 独立评审）。依据 issue #396 与两份独立设计稿复核源码后收敛：确定单函数 API、迁移映射、加强后的 C7/C8 夹具（修正两稿的嵌套剪枝判别力缺口）、失败闭合语义、4 个批次与 V1–V13 验证命令；记录 7 条 Surprises 与 9 条 Decision。
