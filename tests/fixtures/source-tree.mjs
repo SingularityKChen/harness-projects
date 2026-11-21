@@ -1,7 +1,7 @@
 /**
  * 源码树扫描的共享来源（issue #350、ExecPlan 2026-10-21-scans-skip-build-output）。
  *
- * 遍历 `packages/`、`apps/` 的测试一律经这里：什么算构建产物只由根 `.gitignore` 回答，各测试不再各抄一份跳过名单。
+ * 遍历 `packages/`、`apps/` 找源码或包根的测试一律经这里：什么算构建产物只由根 `.gitignore` 回答，各测试不再各抄一份跳过名单。
  * 否则本机跑过 `pack:plugin` 之后，被忽略的 `apps/harness-plugin/dist/` 会被扫描当成源码，扫描看到的集合与 CI 的干净检出不一致。
  *
  * 只认 `.gitignore` 里的裸目录规则（`name/`，不含斜杠以外的路径成分，不含通配、取反、锚定）：按 gitignore 语义它匹配任意深度的同名目录。
@@ -14,7 +14,7 @@
  *
  * 同步实现，只用 `node:fs` 与 `node:path`，不调用 git；没有模块级状态，每个函数都接受根目录。
  */
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 
 const SOURCE_FILE = /\.[cm]?[jt]sx?$/
@@ -51,6 +51,33 @@ export function ignoredDirectoryNames(root) {
   }
   for (const name of names) if (negated.some((pattern) => pattern.test(name))) names.delete(name)
   return names
+}
+
+/**
+ * 包根：`group/<pkg>` 或 `group/<pkg>/<sub>` 下带 `package.json` 的目录，逐层最多两层、找到 manifest 即停；
+ * 返回相对 root 的 posix 路径、已排序。组层与嵌套层都按根 `.gitignore` 的裸目录规则剪枝，否则被忽略的构建/依赖目录
+ * 里的 manifest 会冒充包根。缺失的 group 目录直接抛原生 ENOENT，不跳过成空集。
+ */
+export function listPackageDirectories(root, groups) {
+  const ignored = ignoredDirectoryNames(root)
+  const found = []
+  const hasManifest = (relative) => existsSync(path.join(root, relative, 'package.json'))
+  for (const group of groups) {
+    for (const entry of readdirSync(path.join(root, group), { withFileTypes: true })) {
+      if (!entry.isDirectory() || ignored.has(entry.name)) continue
+      const direct = path.posix.join(group, entry.name)
+      if (hasManifest(direct)) {
+        found.push(direct)
+        continue
+      }
+      for (const nested of readdirSync(path.join(root, direct), { withFileTypes: true })) {
+        if (!nested.isDirectory() || ignored.has(nested.name)) continue
+        const child = path.posix.join(direct, nested.name)
+        if (hasManifest(child)) found.push(child)
+      }
+    }
+  }
+  return found.sort()
 }
 
 /** 在每个 scope 下列出源码文件，被忽略的目录整棵剪掉。`file` 是相对 scope 的 posix 路径。 */

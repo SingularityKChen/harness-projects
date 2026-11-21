@@ -29,6 +29,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 
+import { listPackageDirectories, listSourceFiles } from '../fixtures/source-tree.mjs'
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 const pkg = (name, allow) => ({ name, allow })
@@ -134,51 +136,6 @@ async function exists(file) {
   }
 }
 
-/** 收集 package.json 所在目录（packages/**、apps/*），跳过 node_modules 与 dist。 */
-async function findPackageDirs() {
-  const found = []
-  for (const group of ['packages', 'apps']) {
-    const groupDir = path.join(repoRoot, group)
-    if (!(await exists(groupDir))) continue
-    for (const entry of await readdir(groupDir, { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.name === 'node_modules') continue
-      const direct = path.join(groupDir, entry.name)
-      if (await exists(path.join(direct, 'package.json'))) {
-        found.push(path.relative(repoRoot, direct))
-        continue
-      }
-      for (const nested of await readdir(direct, { withFileTypes: true })) {
-        if (!nested.isDirectory()) continue
-        const nestedDir = path.join(direct, nested.name)
-        if (await exists(path.join(nestedDir, 'package.json'))) {
-          found.push(path.relative(repoRoot, nestedDir))
-        }
-      }
-    }
-  }
-  return found.sort()
-}
-
-async function sourceFiles(dir) {
-  const files = []
-  let entries
-  try {
-    entries = await readdir(dir, { withFileTypes: true })
-  } catch {
-    return files
-  }
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) {
-      if (entry.name === 'node_modules' || entry.name === 'dist') continue
-      files.push(...(await sourceFiles(full)))
-    } else if (/\.(ts|tsx|mts|cts)$/.test(entry.name)) {
-      files.push(full)
-    }
-  }
-  return files
-}
-
 // 构建脚本的显式边：apps 下的 scripts 目录不是产品源码，但构建期的跨包 import 同样
 // 不得反向或越层；目录必须显式登记，未登记的新构建脚本目录按 fail closed 处理。
 const BUILD_SCRIPT_ALLOW = {
@@ -230,7 +187,7 @@ test('结构：目标包全部存在，且 manifest 契约一致', async () => {
 })
 
 test('结构：不存在未登记的包', async () => {
-  const found = await findPackageDirs()
+  const found = listPackageDirectories(repoRoot, ['packages', 'apps'])
   const unexpected = found.filter((dir) => !(dir in EXPECTED))
   assert.deepEqual(unexpected, [], `新增包必须先登记到本测试的依赖矩阵：${unexpected.join(', ')}`)
   assert.equal(found.length, Object.keys(EXPECTED).length)
@@ -247,9 +204,9 @@ test('结构：每个包声明责任与允许的依赖方向', async () => {
 test('依赖：源码中的跨包 import 必须落在允许的边上', async () => {
   for (const dir of Object.keys(EXPECTED)) {
     const { allow } = EXPECTED[dir]
-    for (const file of await sourceFiles(path.join(repoRoot, dir, 'src'))) {
-      const source = await readFile(file, 'utf8')
-      const relative = path.relative(repoRoot, file)
+    for (const { scope, file } of listSourceFiles(repoRoot, [`${dir}/src`])) {
+      const source = await readFile(path.join(repoRoot, scope, file), 'utf8')
+      const relative = `${scope}/${file}`
       for (const specifier of importSpecifiers(source)) {
         const target = resolveInternal(specifier)
         if (target !== undefined) {
@@ -260,7 +217,7 @@ test('依赖：源码中的跨包 import 必须落在允许的边上', async () 
           continue
         }
         if (specifier.startsWith('.')) {
-          const resolved = path.resolve(path.dirname(file), specifier)
+          const resolved = path.resolve(path.dirname(path.join(repoRoot, scope, file)), specifier)
           assert.ok(
             resolved.startsWith(path.join(repoRoot, dir)),
             `${relative} 通过相对路径逃出了本包：${specifier}`,
@@ -282,9 +239,9 @@ test('依赖：源码 import 的兄弟包必须在本包 manifest 中声明', as
       ...Object.keys(manifest.peerDependencies ?? {}),
       ...Object.keys(manifest.devDependencies ?? {}),
     ])
-    for (const file of await sourceFiles(path.join(repoRoot, dir, 'src'))) {
-      const source = await readFile(file, 'utf8')
-      const relative = path.relative(repoRoot, file)
+    for (const { scope, file } of listSourceFiles(repoRoot, [`${dir}/src`])) {
+      const source = await readFile(path.join(repoRoot, scope, file), 'utf8')
+      const relative = `${scope}/${file}`
       for (const specifier of importSpecifiers(source)) {
         const target = resolveInternal(specifier)
         if (target === undefined) continue
@@ -355,7 +312,7 @@ test('依赖：manifest 中声明的内部与外部依赖同样受约束', async
 test('壳：apps/harness-plugin/src 只有 .ts 文件，也不直接 import react / react-dom', async () => {
   // 插件壳只注册，组件只来自 @harness-projects/ui（#227 验收 4）；
   // 组件一旦在壳里用 JSX 或 createElement 自写，业务界面就有了第二个落点。
-  // 列全部文件而不用 sourceFiles：安装件构建也会打入 .tsx / .jsx / .js，扫描面必须不小于构建的输入面。
+  // 列全部文件而不用 listSourceFiles：安装件构建也会打入 .tsx / .jsx / .js，扫描面必须不小于构建的输入面。
   const shellSrc = path.join(repoRoot, 'apps', 'harness-plugin', 'src')
   const entries = await readdir(shellSrc, { recursive: true, withFileTypes: true })
   const files = entries.filter((entry) => entry.isFile()).map((entry) => path.join(entry.parentPath, entry.name))
