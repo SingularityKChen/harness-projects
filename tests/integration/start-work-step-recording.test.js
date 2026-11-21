@@ -546,3 +546,50 @@ test('负控：旧代际的同 key 重放不得探测（#191）', async () => {
   assert.deepEqual(await providers.storage.getExecutionContext(contextId), bumped, '记录一字不改')
   assert.equal(createCalls, 1, '旧代际重放不得再发起外部写')
 })
+
+test('负控：对账采样后同 key 未决行被别的写者推进时不得采纳（#191）', async () => {
+  const providers = createFakeProviders()
+  const time = controllableClock()
+  const core = await compose(providers, time.clock)
+  const workItemId = await workItemIdOf(core)
+  const control = { baseMoved: false, createBranchCalls: 0 }
+  localGitLikeBranch(providers, control)
+  const repository = providers.development.state.repositories[0].ref
+  const name = `work/${workItemId}`
+  assert.equal((await providers.development.createBranch({ repository, name, fromRef: 'main' })).ok, true, '前置条件：目标分支已经真的存在')
+  const originalList = providers.development.listBranches.bind(providers.development)
+  providers.development.listBranches = async () => providerErr(providerError(ProviderErrorCode.Unavailable, '临时列表故障'))
+
+  assert.equal((await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'advanced-row' })).writeState, WriteState.Unknown, '前置条件：首次作答停在 unknown')
+  const sampled = await providers.storage.findMutationAttempt(WORKSPACE.id, 'advanced-row')
+  assert.ok(sampled?.externalIntent !== undefined, '前置条件：未决行带着 Git 创建意图')
+  const callsAfterFirst = control.createBranchCalls
+  const runsAfterFirst = providers.execution.state.runs.length
+  const contextBefore = exportFakeStorageState(providers.storage).contexts[0]
+
+  // 对账采样之后、认领事务之前，另一个写者把同一 key 的行推进成一次新的在途写：
+  // 采样行与当前行不再逐字相同，本次重放就**不再拥有**「跳过 replay / 跳过 observe」的资格。
+  // 这条负控钉住的是「逐字相同」而不是「任意未决行」——把守卫放宽成后者时本用例必红。
+  const advanced = { ...sampled, state: 'pending', externalIntent: { ...sampled.externalIntent, state: 'pending' } }
+  let advancedInProbe = false
+  providers.development.listBranches = async (input) => {
+    const listed = await originalList(input)
+    if (!advancedInProbe) {
+      advancedInProbe = true
+      await providers.storage.putMutationAttempt(advanced)
+    }
+    return listed
+  }
+
+  time.advance(LEASE_MS)
+  const replayed = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'advanced-row' })
+
+  assert.equal(advancedInProbe, true, '前置条件：对账确实跑过，行是在对账之后被推进的')
+  assert.equal(replayed.writeState, WriteState.Pending, '行已不是采样行：必须按原有重放语义作答，不得拿旧证据续跑')
+  assert.equal(replayed.branchExternalId, undefined, '不得采纳任何分支身份')
+  assert.equal(control.createBranchCalls, callsAfterFirst, '不得重发 createBranch：既没采纳也没重试')
+  assert.equal(providers.development.state.worktrees.length, 0, '不得创建工作树：供应序列根本没被认领')
+  assert.equal(providers.execution.state.runs.length, runsAfterFirst, '不得启动第二个 run')
+  assert.deepEqual(exportFakeStorageState(providers.storage).contexts[0], contextBefore, '认领事务不得改写记录')
+  assert.deepEqual(await providers.storage.findMutationAttempt(WORKSPACE.id, 'advanced-row'), advanced, '另一写者推进的那一行保持原样，不被本次重放覆盖')
+})
