@@ -504,6 +504,8 @@ test('负控：在途的同 key 重放不得探测（#191）', async () => {
   let probes = 0
   const list = providers.development.listBranches.bind(providers.development)
   providers.development.listBranches = async (input) => { probes += 1; return list(input) }
+  const get = providers.development.getWorktree.bind(providers.development)
+  providers.development.getWorktree = async (input) => { probes += 1; return get(input) }
 
   const running = core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'inflight-same' })
   await entered.promise
