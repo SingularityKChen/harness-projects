@@ -393,7 +393,7 @@ test('真实磁盘：工作树落盘但 ack 丢失后，同 key 重放采纳而�
   assert.equal(resumed.writeState, 'saved')
   assert.equal(resumed.status, ExecutionContextStatus.Ready)
   assert.equal(createCalls, 1, '工作树已被证明落地，不得重发 createWorktree')
-  const expected = path.join(path.dirname(fixture.repositoryPath), `${path.basename(fixture.repositoryPath)}.worktrees`, 'wi-adopt')
+  const expected = path.join(fixture.root, 'wi-adopt')
   assert.deepEqual(await worktreePaths(fixture), [fixture.repositoryPath, expected], '磁盘上仍只有主检出 + 1 份工作树')
   const workBranches = (await git(['for-each-ref', '--format=%(refname:short)', 'refs/heads'], fixture.repositoryPath))
     .trim().split('\n').filter((name) => name.startsWith('work/'))

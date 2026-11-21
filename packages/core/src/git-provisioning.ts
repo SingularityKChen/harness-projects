@@ -12,7 +12,7 @@ import { operationDeniedReason } from './runtime-access.ts'
 import { routeDevelopment, type DevelopmentRoute } from './development-route.ts'
 import { StartWorkFallback, type StartOutcome, type StartWorkRequest } from './execution-context.ts'
 import {
-  beginWrite, confirmWrite, markFailed, markUnknown, markWriting, reconcileWrite, WritePhase,
+  beginWrite, confirmWrite, markFailed, markUnknown, markWriting, reconcileWrite, reportFor, WritePhase,
   type ReconcileProbe, type WriteReport,
 } from './write-machine.ts'
 
@@ -159,6 +159,7 @@ function stepRecord(
 export async function provisionGit(
   context: CoreContext, request: StartWorkRequest, names: Names, contextId: ExecutionContextId,
   recordStep: RecordStep = async () => {}, frozenRoute?: DevelopmentRoute, beforeExternalWrite: BeforeExternalWrite = async () => {},
+  adopted?: AdoptedGitStep,
 ): Promise<GitOutcome> {
   const route = frozenRoute ?? await routeDevelopment(context, request.repositoryId, CapabilityKey.DevelopmentWorktreeCreate, 'write')
   if (!route.ok) return gitFailure(contextId, markFailed(beginWrite(names.path ?? names.worktreeKey), route.error), undefined, undefined)
@@ -167,7 +168,10 @@ export async function provisionGit(
   // 恢复：上下文里已经记录了分支步的结果就**整个跳过它**——不解析 `fromRef`，因此「基线是否
   // 前进」不进入判定。分支名是身份，我们记录的那一行是所有权（批次计划 D1 / D2）。
   const recorded = await context.storage.getExecutionContext(contextId)
-  const decided = recorded?.branchExternalId
+  // 被对账采纳的分支是**已决定的身份**（D9）：即使本次还没有写回记录，也按它做预检、
+  // 拒绝声明了其它分支名的重放，并跳过被证明的那一步外部写。
+  const adoptedBranch = adopted?.operation === 'createBranch' ? adopted : undefined
+  const decided = recorded?.branchExternalId ?? adoptedBranch?.value
   const intent: Names = recorded?.worktreeExternalId === undefined ? names : { ...names, path: recorded.worktreeExternalId }
   // 调用方在重放时声明一个**不同**的分支名是**矛盾**，不是新输入：序列已经决定了身份，静默采纳新名字
   // 会让「报出去的身份」与「磁盘上的事实」分叉——工作树落在新名字上、而 `branchExternalId` 报的是旧名字，
@@ -182,19 +186,31 @@ export async function provisionGit(
   }
   // 预检也属于同一条供应序列：恢复时分支身份已经由先前的 ack 决定，
   // 分支敏感 provider 不得看本次请求重新推导的 names.branch。
-  const preflightIntent: Names = decided === undefined ? intent : { ...intent, branch: decided }
+  // 预检照跑（它仍是权限与安全边界），但看到的是序列已经决定 / 被采纳的身份：
+  // 分支名取已决定的分支，工作树路径取被采纳的持久句柄。
+  const preflightIntent: Names = {
+    ...intent,
+    ...(decided === undefined ? {} : { branch: decided }),
+    ...(adopted?.operation === 'createWorktree' ? { path: adopted.value } : {}),
+  }
   const target = await preflightWorktree(provider, repository, preflightIntent)
   if (!target.ok) return gitFailure(contextId, target.report, bindingId, decided)
   const branchVersion = context.runtimeAccess.operationVersion(bindingId, CapabilityKey.DevelopmentBranchCreate, request.repositoryId)
-  const prior = decided === undefined ? undefined : await branchProbe(provider, repository, decided)
+  const prior = decided === undefined || adoptedBranch !== undefined ? undefined : await branchProbe(provider, repository, decided)
   if (prior?.probe.error?.code === ProjectErrorCode.PermissionDenied) return gitFailure(contextId, markFailed(beginWrite(decided), prior.probe.error), bindingId, decided)
-  const branch = decided === undefined
-    ? await ensureBranch(provider, repository, names.branch, beforeExternalWrite)
-    : {
-      report: confirmWrite(markWriting(beginWrite(decided)), decided),
-      ok: true, value: decided,
-      headCommit: prior?.headCommit,
+  const branch = adoptedBranch !== undefined
+    // 被证明的那一步不重发：报告直接取对账证据，并保留被采纳分支的头提交。
+    ? {
+      report: reportFor(WritePhase.Reconciled, { attemptedValue: adoptedBranch.value, lastKnownAuthoritative: adoptedBranch.value }, undefined),
+      ok: true, value: adoptedBranch.value, headCommit: adoptedBranch.headCommit,
     }
+    : decided === undefined
+      ? await ensureBranch(provider, repository, names.branch, beforeExternalWrite)
+      : {
+        report: confirmWrite(markWriting(beginWrite(decided)), decided),
+        ok: true, value: decided,
+        headCommit: prior?.headCommit,
+      }
   if (!branch.ok || branch.value === undefined) {
     if (!branch.failureKey && branch.report.error?.code === ProjectErrorCode.PermissionDenied) context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentBranchCreate, request.repositoryId, true)
     return gitFailure(contextId, branch.report, bindingId, undefined)
@@ -203,16 +219,19 @@ export async function provisionGit(
   // 分支步已经成功：立刻回填，然后才跑工作树步。中断在两步之间时，重放因此能跳过它。
   // 工作树步用的是**序列已经决定的分支**（`branch.value`），不是本次请求重新算出来的 `names.branch`：
   // 序列一旦决定了身份，后续每一步都必须用它，否则「报出去的」与「落盘的」会指向两个分支。
-  // 工作树步本身**故意不跳过**——它必须重跑才能保证工作树真的在（PR #160 的 F1 教训）；幂等由稳定的
-  // 实体身份提供，不由跳过提供。
+  // 工作树步**正常重跑**才能保证工作树真的在（PR #160 的 F1 教训）；幂等由稳定的实体身份提供，不由跳过提供。
+  // 唯一的例外是同 key 对账已经用**持久句柄**读到「工作树在、且检出同一分支」：那时才采信对账证据并跳过它。
   await recordStep(stepRecord(contextId, branch.report, bindingId, branch.value, branch.headCommit))
   const worktreeVersion = context.runtimeAccess.operationVersion(bindingId, CapabilityKey.DevelopmentWorktreeCreate, request.repositoryId)
-  const worktree = await ensureWorktree(provider, repository, branch.value, intent, target.path, beforeExternalWrite)
+  const worktree = adopted?.operation === 'createWorktree'
+    ? { report: reportFor(WritePhase.Reconciled, { attemptedValue: adopted.value, lastKnownAuthoritative: adopted.value }, undefined), ok: true, value: adopted.value }
+    : await ensureWorktree(provider, repository, branch.value, intent, target.path, beforeExternalWrite)
   if (!worktree.ok || worktree.value === undefined) {
     if (!worktree.failureKey && worktree.report.error?.code === ProjectErrorCode.PermissionDenied) context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentWorktreeCreate, request.repositoryId, true)
     return gitFailure(contextId, worktree.report, bindingId, branch.value, branch.headCommit)
   }
-  context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentWorktreeCreate, request.repositoryId, false, worktreeVersion)
+  // 跳过被证明的工作树步不得把该写能力记成健康（D10）：`observeOperation(..., false, ...)` 只表示「刚刚成功写过」。
+  if (adopted?.operation !== 'createWorktree') context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentWorktreeCreate, request.repositoryId, false, worktreeVersion)
   const done: GitOutcome = {
     contextId, report: worktree.report, ok: true, bindingId, status: ExecutionContextStatus.Ready,
     branchExternalId: branch.value, worktreeExternalId: worktree.value, branchHeadCommit: branch.headCommit,
@@ -359,6 +378,9 @@ export type GitReconcileOutcome =
   | { readonly kind: 'absent'; readonly operation: 'createBranch' | 'createWorktree' }
   | { readonly kind: 'conflict'; readonly attemptedValue: string | undefined; readonly lastKnownAuthoritative: string | undefined; readonly error: ProjectError }
   | { readonly kind: 'inconclusive'; readonly error: ProjectError }
+
+/** 被对账采纳的那一步：值就是已落地的身份，头提交只在分支步可得。 */
+export type AdoptedGitStep = Extract<GitReconcileOutcome, { kind: 'adopted' }>
 
 /** 只认「未决的 Git 创建步」：Start Work 的 unknown 行，intent 是两种 Git 创建之一。 */
 export function unknownGitIntent(attempt: MutationAttemptRecord): GitIntent | undefined {

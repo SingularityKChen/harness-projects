@@ -226,6 +226,8 @@ run intent 的重放**已经**重跑对账：`replayRequest:159` 走 `recoverAtt
 - **D10（2026-11-21）跳过被证明的写步骤时不得记 capability 健康。** `observeOperation(..., false, version)` 只表示「刚刚成功写过」，跳过时记健康会污染 runtimeAccess 的事实。
 - **D11（2026-11-21）不改 `ADR-0004`、`gate-e1-ruling`、audit 文档。** 它们是人类采纳的决策/证据记录；本计划只在 Decision Log 记录解释，PR 描述说明「与 ADR-0004 第 2 条一致，不修改决策记录」。
 - **D12（2026-11-21）验证命令 V1–V8 唯一来源在 `Validation and Acceptance`。** 批次只引用编号，避免同一命令多处副本在执行期间不同步。
+- **D13（2026-11-21）Lead 批准的 Q1–Q5 执行裁定（本轮不重新讨论）。** Q1 restart 范围 = 同 key 重放，新 key 接管旧未决槽位不在本 PR（见 `Outcomes & Retrospective` 的 follow-up）；Q2 对账读被 capability 门拒绝时保留读失败自身 code、`writeState=unknown`，消息注明「对账只读，未重发外部写入」；Q3 不改 ADR-0004 / R8 偏离文案，解释只记在本 Decision Log（与 D11 一致）；Q4 不把硬崩溃 `pending` 残留纳入对账（与 D6 一致）；Q5 采纳不额外校验分支 head 与 `intent.input.fromRef` 一致（与 D8 一致），该风险写入 `Outcomes & Retrospective`。
+- **D14（2026-11-21）对账结论的答复面用 `existingResult(record, report, verify=false)`。** 触发对账的前提是上下文可续跑（终态或租约过期）且没有 run，因此记录不可能是「完整 Ready」；仍显式跳过 Ready 验证读，让 conflict / inconclusive 的答复与零写入是同一个事实。被采纳的分支身份在认领事务里写回（`branchExternalId`），**不**在那里写工作树句柄：句柄继续只由步骤回填产生，谱系锚点纪律不变。
 
 ## Idempotence and Recovery
 
