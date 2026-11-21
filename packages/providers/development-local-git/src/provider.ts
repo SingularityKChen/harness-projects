@@ -41,6 +41,9 @@ const REFUSALS: readonly (readonly [RegExp, ProviderErrorCode, string])[] = [
   [/already exists|already used by worktree|is already checked out|could not create leading directories|not a directory/i, ProviderErrorCode.InvalidInput, 'Git 拒绝了工作树操作'],
   [/permission denied|operation not permitted|eacces/i, ProviderErrorCode.PermissionDenied, 'Git 没有权限'],
   [/index\.lock|another git process|resource temporarily unavailable|eagain/i, ProviderErrorCode.Unavailable, 'Git 暂时不可用'],
+  // 工作树移除在写命令时才暴露的确定性拒绝（检查后变脏的 TOCTOU、submodule、locked、主检出、validation）：
+  // 修正后重新显式请求即可，不是「结果不确定」。必须排在写命令兜底 ambiguous_result 之前。
+  [/contains modified or untracked files|working trees containing submodules|cannot remove a locked working tree|is a main working tree|validation failed, cannot remove working tree/i, ProviderErrorCode.InvalidInput, 'Git 拒绝移除工作树'],
 ]
 const CONVENTIONAL_BASES: readonly string[] = ['main', 'master', 'develop', 'trunk']
 async function occupied(target: string): Promise<boolean> {
@@ -322,6 +325,16 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     }
     const removed = await this.git(['worktree', 'remove', target])
     if (removed.code !== 0) return cap.providerErr(this.failureOf(removed, true))
+    // 报成功前必须观测（AGENTS.md §1.1）：写命令成功不等于删除已生效。登记回读失败、目标仍在登记或目录
+    // 仍存在，都只能诚实标 ambiguous_result，绝不报 ok。
+    const landed = await this.listWorktrees()
+    if (landed.error !== undefined) {
+      return this.fail(ProviderErrorCode.AmbiguousResult, `工作树移除结果不确定：回读登记失败（${landed.error.code}）；请先 reconcile 后再决定是否重试`)
+    }
+    const here = await Promise.all(landed.records.map((record) => samePath(record.path, target)))
+    if (here.some(Boolean) || (await occupied(target))) {
+      return this.fail(ProviderErrorCode.AmbiguousResult, `工作树移除结果不确定：登记或目录仍然存在 ${target}；请先 reconcile 后再决定是否重试`)
+    }
     return cap.providerOk(undefined)
   }
 

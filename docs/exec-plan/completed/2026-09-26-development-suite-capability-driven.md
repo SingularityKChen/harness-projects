@@ -188,6 +188,7 @@
 - 实际结果：套件对变更请求三个方法与工作树移除只断言快照能表达的东西；"能创建但不能移除"与"能读不能建变更请求"都成为可构造并通过套件的形态。分支与工作树创建仍按「已声明」使用（见下面的遗留问题）。四个适配器（全能力 / 只读子集 / 未声明移除 / 省略可选方法）覆盖了四种真实 provider 形态，四个判别性变异（`if (false)` 2 红 / 家族门 8 红 / 谎报能力 5 红 / 只看分支的钩子 6 红）证明新断言是承重的。
 - 与计划的偏差：第一版把「变更请求」当一族、用一个 `change_request.read` 门代表整族（第五轮评审 blocking），并漏记了 `expect.objects` 从可选升级为强制；两者都已订正（见 `Surprises & Discoveries` 与 `Decision Log`）。
 - 遗留问题：`removeWorktree` 的 safe / discard 分层语义（默认安全、显式 `discard` 才丢弃修改、`overrideLock` 再升一级、结构化返回被阻止的原因）留给 #138；本 PR 只让"能不能移除"可声明。
+  > **Superseded（2026-11-21，#138 交付时）**：#138 只交付「仅显式请求、仅干净（Git 口径）」；safe/discard 分层未随之交付，留给后续 issue（见 `docs/exec-plan/active/2026-11-21-worktree-clean-removal.md` 的 D2/D10）。
 - #205 保持开启，剩余验收：
   - 验收 2：`createBranch` / `createWorktree` 按各自的键驱动（未声明时走 `assertUndeclared` + `expect.objects` 不变），并补一个不声明工作树创建的适配器；
   - 验收 4：本地 Git provider 以真实子集通过套件——随 #160 合并成立（Start Work 栈第六轮评审时 #160 因 P1 未合并）；
