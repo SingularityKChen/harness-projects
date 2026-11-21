@@ -368,3 +368,35 @@ test('无法确定仓库基线时不得由 core 猜测 main', async (t) => {
   assert.match(outcome.report.error?.message ?? '', /无法确定仓库基线/)
   assert.deepEqual((await git(['for-each-ref', '--format=%(refname:short)', 'refs/heads'], fixture.repositoryPath)).trim().split('\n').sort(), ['alpha', 'beta'])
 })
+test('真实磁盘：工作树落盘但 ack 丢失后，同 key 重放采纳而不重建（#191）', async (t) => {
+  const fixture = await fixtureFor(t)
+  const clock = controllableClock()
+  let createCalls = 0, lost = true
+  const provider = withHooks(providerFor(fixture), {
+    createWorktree: (fn) => async (input) => {
+      createCalls += 1
+      const result = await fn(input)
+      if (lost) { lost = false; throw new Error('测试注入：工作树落盘后 ack 丢失') }
+      return result
+    },
+  })
+  const { storage, workspaceId, context } = await coreContextFor(fixture, { development: provider }, { clock: clock.clock })
+  await registerWorkItem(storage, workspaceId, 'wi-adopt')
+  const request = {
+    task: 'Synthetic explicit task', workItemId: 'wi-adopt', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'adopt-worktree',
+  }
+  assert.equal((await startWork(context, request)).writeState, 'unknown')
+
+  clock.advance(LEASE_EXPIRED_MS)
+  const resumed = await startWork(context, request)
+
+  assert.equal(resumed.writeState, 'saved')
+  assert.equal(resumed.status, ExecutionContextStatus.Ready)
+  assert.equal(createCalls, 1, '工作树已被证明落地，不得重发 createWorktree')
+  const expected = path.join(path.dirname(fixture.repositoryPath), `${path.basename(fixture.repositoryPath)}.worktrees`, 'wi-adopt')
+  assert.deepEqual(await worktreePaths(fixture), [fixture.repositoryPath, expected], '磁盘上仍只有主检出 + 1 份工作树')
+  const workBranches = (await git(['for-each-ref', '--format=%(refname:short)', 'refs/heads'], fixture.repositoryPath))
+    .trim().split('\n').filter((name) => name.startsWith('work/'))
+  assert.deepEqual(workBranches, ['work/wi-adopt'], '采纳不得产生第二条工作分支')
+  assert.equal(await handlePath(fixture, resumed.worktreeExternalId), await handlePath(fixture, expected), '报出的句柄必须指向盘上那一份')
+})

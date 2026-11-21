@@ -167,3 +167,26 @@ test('SQLite: dual handles read no attempt before cross-context admission; one w
   } finally { branchRelease.release(); await first }
   assert.equal((await first).writeState, 'saved'); assert.deepEqual(counts(w), [1, 1, 1])
 })
+test('SQLite: close/reopen 之后同 key 重放先对账再收敛，不重发已落盘的分支（#191）', async () => {
+  const w = await setup('SQLite'); const d = w.providers.development
+  const create = d.createBranch.bind(d); let calls = 0
+  // 分支真的落盘了，但进程在 ack 返回之前退出：持久槽位因此停在 unknown。
+  d.createBranch = async (input) => { calls += 1; const result = await create(input); if (calls === 1) throw Error('分支写入落盘后进程退出'); return result }
+  const name = `work/${w.request.workItemId}`
+  assert.equal((await start(w)).writeState, 'unknown')
+  assert.equal(calls, 1)
+  assert.equal(d.state.branches.filter((branch) => branch.name === name).length, 1, '前置条件：分支已经真的落盘')
+  const row = await w.storage.findMutationAttempt(w.workspace.id, 'first')
+  w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w)
+  assert.deepEqual(await w.storage.findMutationAttempt(w.workspace.id, 'first'), row, '关库重开保留未决意图')
+  let probes = 0; const list = d.listBranches.bind(d)
+  d.listBranches = async (input) => { probes += 1; return list(input) }
+  w.time.advance(60_000)
+  const resumed = await start(w)
+  assert.deepEqual([resumed.writeState, resumed.status, resumed.confirmed], ['saved', 'ready', true], '恢复可读后同 key 重放必须续上')
+  assert.ok(probes >= 1, '重启后同 key 重放必须先跑只读对账')
+  assert.equal(calls, 1, '分支已被证明落地，不得重发 createBranch')
+  assert.equal(d.state.branches.filter((branch) => branch.name === name).length, 1)
+  assert.equal(d.state.worktrees.length, 1)
+  assert.equal((await w.storage.findMutationAttempt(w.workspace.id, 'first')).state, 'saved')
+})
