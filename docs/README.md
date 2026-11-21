@@ -25,6 +25,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-21-restart-reconciliation](exec-plan/active/2026-11-21-restart-reconciliation.md) | 重启先重跑对账（#191） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
