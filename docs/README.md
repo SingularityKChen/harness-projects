@@ -25,6 +25,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-21-shared-source-walker](exec-plan/active/2026-11-21-shared-source-walker.md) | 包边界扫描收敛到共享源码树 helper（#396） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed
