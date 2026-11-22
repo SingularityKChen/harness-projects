@@ -1,9 +1,10 @@
-/** 本地 Git 只声明仓库读、分支建、工作树建：没有远端，不伪造变更请求；写未知失败为 ambiguous_result，
- * 读未知失败为 unavailable；一实例一仓库以保持引用归属明确。变更请求方法仍存在但返回 not_supported。
- * 工作树移除是破坏性操作，不在本层（issue #137 的 Out of scope、issue #138 交付），所以本 provider
- * 既不实现 `removeWorktree` 也不声明 `development.worktree.remove`。 */
+/** 本地 Git 只声明仓库读、分支建、工作树建/读/移除：没有远端，不伪造变更请求；写未知失败为
+ * ambiguous_result，读未知失败为 unavailable；一实例一仓库以保持引用归属明确。变更请求方法仍存在但返回
+ * not_supported。工作树移除是唯一的破坏性能力（issue #138）：只在显式请求且工作树干净时移除，永不 force、
+ * 永不删分支。 */
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { readFile, realpath, stat } from 'node:fs/promises'
+import { lstat, readFile, readdir, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
 
 import * as cap from '@harness-projects/capabilities'
 import { ProviderErrorCode, newProviderBindingId, type ProviderBindingId } from '@harness-projects/domain'
@@ -18,6 +19,7 @@ export interface LocalGitRepositoryConfig {
 
 export interface LocalGitCapabilityFlags {
   readonly branchCreate?: boolean; readonly worktreeCreate?: boolean; readonly worktreeRead?: boolean
+  readonly worktreeRemove?: boolean
 }
 export interface LocalGitDevelopmentProviderOptions {
   readonly bindingId?: ProviderBindingId
@@ -28,7 +30,7 @@ export interface LocalGitDevelopmentProviderOptions {
   readonly observedAt?: string
 }
 interface WorktreeRecord {
-  readonly path: string; readonly branch: string | undefined; readonly prunable: boolean
+  readonly path: string; readonly branch: string | undefined; readonly prunable: boolean; readonly locked: boolean
 }
 interface BranchRecord {
   readonly name: string; readonly sha: string; readonly symbolic: boolean
@@ -44,6 +46,23 @@ const REFUSALS: readonly (readonly [RegExp, ProviderErrorCode, string])[] = [
 const CONVENTIONAL_BASES: readonly string[] = ['main', 'master', 'develop', 'trunk']
 async function occupied(target: string): Promise<boolean> {
   return stat(target).then(() => true, () => false)
+}
+const errnoOf = (error: unknown): string | undefined => {
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' ? code : undefined
+}
+/** Git 失败的 detail 行：优先 `fatal:`/`error:`，否则第一行；保持 message 可行动。 */
+const detailLine = (result: GitInvocation): string => {
+  const lines = (result.stderr === '' ? result.stdout : result.stderr).split('\n').map((line) => line.trim()).filter((line) => line !== '')
+  return lines.find((line) => /\b(fatal|error):/i.test(line)) ?? lines[0] ?? ''
+}
+/** 允许根下的隔离目录名；随机名不是身份保护，只避免与并发/残留重名，冲突最多重取 3 次。 */
+const quarantinePath = async (rootReal: string): Promise<string | undefined> => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const candidate = path.join(rootReal, `.harness-remove-${randomUUID()}`)
+    if (!(await occupied(candidate))) return candidate
+  }
+  return undefined
 }
 type TargetResolution = { readonly ok: true; readonly path: string } | { readonly ok: false; readonly code: ProviderErrorCode; readonly message: string }
 const statOf = (target: string) => stat(target).catch(() => undefined)
@@ -99,9 +118,10 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     this.repository = options.repository
     this.allowedRoot = options.allowedRoot
     this.flags = {
-    branchCreate: options.capabilities?.branchCreate ?? true,
-    worktreeCreate: options.capabilities?.worktreeCreate ?? true,
+      branchCreate: options.capabilities?.branchCreate ?? true,
+      worktreeCreate: options.capabilities?.worktreeCreate ?? true,
       worktreeRead: options.capabilities?.worktreeRead ?? true,
+      worktreeRemove: options.capabilities?.worktreeRemove ?? true,
     }
     this.runGit = options.runGit ?? defaultGitRunner
     this.observedAt = options.observedAt ?? new Date().toISOString()
@@ -113,6 +133,7 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
       ...(this.flags.branchCreate ? { [cap.CapabilityKey.DevelopmentBranchCreate]: available } : {}),
       ...(this.flags.worktreeCreate ? { [cap.CapabilityKey.DevelopmentWorktreeCreate]: available } : {}),
       ...(this.flags.worktreeRead ? { [cap.CapabilityKey.DevelopmentWorktreeRead]: available } : {}),
+      ...(this.flags.worktreeRemove ? { [cap.CapabilityKey.DevelopmentWorktreeRemove]: available } : {}),
     }
     return Promise.resolve({ bindingId: this.bindingId, capability, permission: capability, observedAt: this.observedAt })
   }
@@ -253,7 +274,7 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
       if (entry.branch !== `refs/heads/${input.branch}`) {
         return this.invalidInput(`工作树路径已登记但检出分支不是 ${input.branch}：${target}；请更换路径或先移除登记`)
       }
-      const blocked = await this.reuseBlockedBy(target, input.branch)
+      const blocked = await this.worktreeIdentityProblem(target, input.branch)
       if (blocked !== undefined) return this.invalidInput(`工作树登记不可复用：${target}；${blocked}`)
       return this.fail(ProviderErrorCode.Conflict, `工作树路径已登记且与分支 ${input.branch} 一致：${target}`)
     }
@@ -284,6 +305,182 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     return cap.providerOk({ ref: this.refOf('worktree', target.path), path: target.path, branch: target.branch.replace(/^refs\/heads\//, '') })
   }
 
+  /** 显式移除一份本 provider 绑定、允许根内的干净链接工作树。判定顺序固定：能力 → 身份 → 路径（纯 fs）
+   *  → 登记 → locked/prunable/detached/身份 → ref backend → HEAD 协调锁 → 锁内身份复验 → 对象锚 → 干净门
+   *  → rename 隔离 → 对象复核 → repair 绑定登记 → remove 隔离目录 → 回读。不 force、不 prune、不删分支。 */
+  async removeWorktree(input: cap.ProviderRemoveWorktreeInput): Promise<cap.ProviderResult<void>> {
+    if (!this.flags.worktreeRemove) return this.notSupported(cap.CapabilityKey.DevelopmentWorktreeRemove)
+    if (input.worktree.bindingId !== this.bindingId || input.worktree.objectKind !== 'worktree') return this.notFound('工作树')
+    const resolved = await this.resolveTarget(input.worktree.externalId)
+    if (!resolved.ok) return this.fail(resolved.code, resolved.message)
+    const target = resolved.path
+    const registered = await this.listWorktrees()
+    if (registered.error !== undefined) return cap.providerErr(registered.error)
+    const matches = await Promise.all(registered.records.map((record) => samePath(record.path, target)))
+    const entry = registered.records.find((_record, index) => matches[index])
+    if (entry === undefined) return this.notFound('工作树')
+    // 真实 locked 下 fs.rename 仍会成功（实测 F11），不能留给 remove 阶段兜底：必须写前拦并给 unlock 出路。
+    if (entry.locked) {
+      return this.invalidInput(`工作树已被 Git 锁定，拒绝移除：${target}；请先执行 git worktree unlock ${target} 后重试`)
+    }
+    // 登记仍在而目录已不在（prunable）时，Git 的 remove 会 exit 0 并只清登记；把它报成「删除了工作树」
+    // 是假的成功，所以交人工 prune，provider 不替人清理登记。
+    if (entry.prunable || !(await occupied(target))) {
+      return this.fail(ProviderErrorCode.NotFound, `工作树登记仍在但目录不存在：${target}；请先执行 git worktree prune；上次中断的移除可能残留在允许根下的 .harness-remove-* 目录`)
+    }
+    // detached 工作树可能承载未被任何引用可达的提交，删除会丢数据；provider 只创建分支附着的工作树。
+    if (entry.branch === undefined) {
+      return this.invalidInput(`工作树没有检出分支（detached 等），拒绝移除：${target}；请人工处理`)
+    }
+    const branch = entry.branch.slice('refs/heads/'.length)
+    const identity = await this.worktreeIdentityProblem(target, branch)
+    if (identity !== undefined) return this.invalidInput(`工作树身份不符合可移除条件：${target}；${identity}`)
+    // files backend 的 HEAD.lock 才能拦住并发的 HEAD/引用变更；reftable 下该锁无效（实测 detach 仍 exit 0），
+    // 所以显式拒绝破坏性移除而不是假装有并发协调。读不到配置/未知退出码一律 fail closed。
+    const refStorage = await this.runGit(['-C', target, 'config', '--local', '--get', 'extensions.refstorage'])
+    if (refStorage.code !== 0 && refStorage.code !== 1) {
+      return this.fail(ProviderErrorCode.Unavailable, `读不到工作树的引用后端配置（exit ${refStorage.code}）：${target}；拒绝在未知引用后端上做破坏性移除`)
+    }
+    const backend = refStorage.stdout.trim()
+    if (refStorage.code === 0 && backend !== '' && backend !== 'files') {
+      return this.fail(ProviderErrorCode.NotSupported, `工作树使用 ${backend} 引用后端，HEAD 协调锁无法覆盖它，拒绝破坏性移除：${target}；请人工执行 git worktree remove ${target}`)
+    }
+    // HEAD 协调锁：files backend 下它让 checkout/commit/amend/reset 等改 HEAD 的 Git 进程失败（实测 F2），
+    // 覆盖「检查后身份变更」的窗口；锁持有到删除结束，成功 remove 会连 admin dir 与锁一起删除。
+    const headPath = await this.runGit(['-C', target, 'rev-parse', '--git-path', 'HEAD'])
+    if (headPath.code !== 0) return cap.providerErr(this.failureOf(headPath, false))
+    const lockPath = `${path.resolve(target, headPath.stdout.trim())}.lock`
+    const marker = `harness worktree removal ${process.pid} ${new Date().toISOString()}`
+    try {
+      await writeFile(lockPath, marker, { flag: 'wx' })
+    } catch (error) {
+      const code = errnoOf(error)
+      if (code === 'EEXIST') return this.fail(ProviderErrorCode.Unavailable, `HEAD 协调锁已被占用，暂时不能移除：${lockPath}；确认没有并发 Git 进程后删除残锁再重试`)
+      if (code === 'EACCES' || code === 'EPERM') return this.fail(ProviderErrorCode.PermissionDenied, `没有权限创建 HEAD 协调锁：${lockPath}`)
+      return this.fail(ProviderErrorCode.Unavailable, `创建 HEAD 协调锁失败（${code ?? 'unknown'}）：${lockPath}；暂时不能移除`)
+    }
+    try {
+      // 锁后身份复验：干净门与对象锚都在锁内，检查与删除之间不再有可被普通 Git 改身份的窗口。
+      const underLock = await this.runGit(['-C', target, 'rev-parse', '--symbolic-full-name', 'HEAD'])
+      if (underLock.code !== 0 || underLock.stdout.trim() !== `refs/heads/${branch}`) {
+        return this.invalidInput(`工作树在锁内复验时不再检出分支 ${branch}，拒绝移除：${target}`)
+      }
+      const root = await this.allowedRootForUse()
+      if (!root.ok) return this.fail(root.code, root.message)
+      const rootReal = await realpath(root.path).catch(() => undefined)
+      if (rootReal === undefined) return this.fail(ProviderErrorCode.Unavailable, `允许根不可读，拒绝移除：${root.path}`)
+      // 对象锚：只有 (dev, ino) 能区分准入对象与「复制 gitfile 的替身」（实测 Git 认替身，字节相等不是身份）。
+      const anchored = await lstat(target).catch(() => undefined)
+      if (anchored === undefined || anchored.isSymbolicLink() || !anchored.isDirectory()) {
+        return this.invalidInput(`工作树目标不是真实目录（可能是符号链接或已消失），拒绝移除：${target}`)
+      }
+      const anchor = await stat(target, { bigint: true })
+      if (anchor.ino === 0n) return this.fail(ProviderErrorCode.NotSupported, `文件系统不提供稳定的对象身份（ino=0），拒绝破坏性移除：${target}`)
+      // 干净判定用 Git 口径：porcelain 记录数为 0。--untracked-files=normal 覆盖 status.showUntrackedFiles=no
+      // （否则未跟踪文件会静默消失）；--no-optional-locks 让只读判定不抢 index 锁，拒绝路径不产生 Git 写。
+      // 这一步是删除前最后一次只读 Git 读，判别性回归的注入点即此调用。
+      const status = await this.runGit(['-C', target, '--no-optional-locks', 'status', '--porcelain=v1', '-z', '--untracked-files=normal'])
+      if (status.code !== 0) return cap.providerErr(this.failureOf(status, false))
+      const dirty = status.stdout.split('\0').filter(Boolean)
+      const [firstDirty] = dirty
+      if (firstDirty !== undefined) {
+        return this.invalidInput(`工作树有 ${dirty.length} 个未提交路径，拒绝移除：${firstDirty.slice(3)}；请先提交、stash 或清理后重试`)
+      }
+      const quarantine = await quarantinePath(rootReal)
+      if (quarantine === undefined) {
+        return this.fail(ProviderErrorCode.Unavailable, `无法在允许根下取得隔离目录名：${rootReal}；请清理 .harness-remove-* 残留后重试`)
+      }
+      // 原子隔离：rename 失败即零副作用，按 errno 确定性分类（不把可证未发生的写报成不确定）。
+      try {
+        await rename(target, quarantine)
+      } catch (error) {
+        return await this.classifyRenameFailure(errnoOf(error), target)
+      }
+      // 复核隔离对象就是锚定的那个对象：准入后被换成同 gitfile 替身时 (dev, ino) 不符，回滚且不删除内容。
+      const moved = await lstat(quarantine).catch(() => undefined)
+      const movedStat = moved !== undefined && moved.isDirectory() && !moved.isSymbolicLink()
+        ? await stat(quarantine, { bigint: true }).catch(() => undefined) : undefined
+      if (movedStat === undefined || movedStat.dev !== anchor.dev || movedStat.ino !== anchor.ino) {
+        const rolled = await rename(quarantine, target).then(() => true, () => false)
+        if (!rolled || (await lstat(target).catch(() => undefined)) === undefined) {
+          return this.fail(ProviderErrorCode.AmbiguousResult, `准入后工作树对象被替换，且隔离目录回滚失败，结果不确定：${quarantine}（目标 ${target}）；请先 reconcile`)
+        }
+        return this.invalidInput(`准入后工作树对象被替换（同 gitfile 替身或并发替换），已回滚隔离目录，未删除任何内容：${target}`)
+      }
+      // 先把登记绑定到隔离目录（只改登记），失败时先 rename 回滚再分类；unknown subcommand = Git 版本门。
+      const repaired = await this.git(['worktree', 'repair', quarantine])
+      if (repaired.code !== 0) {
+        // repair 非零可能已改写登记：只 rename 回目录不等于登记也回滚，不能声称零写入。
+        const rolled = await rename(quarantine, target).then(() => true, () => false)
+        if (!rolled || (await lstat(target).catch(() => undefined)) === undefined) {
+          return this.fail(ProviderErrorCode.AmbiguousResult, `工作树登记绑定失败，且隔离目录回滚失败，结果不确定：${quarantine}（目标 ${target}）；请先 reconcile`)
+        }
+        if (/unknown subcommand|not a git command|usage: git worktree/i.test(repaired.stderr + repaired.stdout)) {
+          return this.fail(ProviderErrorCode.NotSupported, `当前 Git 不支持 worktree repair（需 Git ≥2.30），命令未执行、登记未被修改，已回滚隔离目录：${target}；请人工执行 git worktree remove ${target}`)
+        }
+        const reversed = await this.git(['worktree', 'repair', target])
+        const listed = await this.listWorktrees()
+        const at = async (candidate: string) => listed.error === undefined && (await Promise.all(listed.records.map((record) => samePath(record.path, candidate)))).some(Boolean)
+        if (reversed.code === 0 && (await at(target)) && !(await at(quarantine))) {
+          return this.invalidInput(`工作树登记绑定失败，已反向 repair 并回读确认登记仍指 ${target}，未删除任何内容`)
+        }
+        const observed = listed.error !== undefined ? `登记回读失败（${listed.error.code}）` : (await at(quarantine)) ? `登记仍指隔离路径 ${quarantine}` : (await at(target)) ? `登记仍指 ${target}` : '登记不含 target 或隔离路径'
+        return this.fail(ProviderErrorCode.AmbiguousResult,
+          `工作树登记绑定失败，登记是否已被改写无法证明，结果不确定：隔离目录已回滚到 ${target}，原隔离路径 ${quarantine}；${observed}；分支 ${branch}。请先 reconcile：人工执行 git worktree repair ${target} 后回读 git worktree list，必要时 git worktree prune；分支与提交未丢，可 git worktree add ${target} ${branch} 恢复。原因：${detailLine(repaired)}`)
+      }
+      // 删除隔离目录（无 force）：任何非零都可能是部分删除，只能诚实标 ambiguous 并要求 reconcile。
+      const removed = await this.git(['worktree', 'remove', quarantine])
+      if (removed.code !== 0) return await this.ambiguousRemoval(quarantine, target, branch, detailLine(removed))
+      // 报成功前必须观测（AGENTS.md §1.1）：回读登记与隔离目录，观测不到就绝不报 ok。
+      const landed = await this.listWorktrees()
+      if (landed.error !== undefined) {
+        return this.fail(ProviderErrorCode.AmbiguousResult, `工作树移除结果不确定：回读登记失败（${landed.error.code}），隔离目录可能在 ${quarantine}；请先 reconcile 后再决定是否重试`)
+      }
+      const registeredAt = await Promise.all(landed.records.map(async (record) => (await samePath(record.path, quarantine)) || (await samePath(record.path, target))))
+      if (registeredAt.some(Boolean) || (await occupied(quarantine))) {
+        return await this.ambiguousRemoval(quarantine, target, branch, '回读仍发现隔离目录或登记')
+      }
+      return cap.providerOk(undefined)
+    } finally {
+      await this.releaseHeadLock(lockPath, marker)
+    }
+  }
+
+  /** rename 失败是原子失败（可证零副作用），按 errno 确定性分类；ENOENT/ENOTDIR 重新回读登记再下结论。 */
+  private async classifyRenameFailure(code: string | undefined, target: string): Promise<cap.ProviderResult<void>> {
+    if (code === 'EACCES' || code === 'EPERM') return this.fail(ProviderErrorCode.PermissionDenied, `没有权限把工作树移入隔离目录（可证未做任何删除）：${target}`)
+    if (code === 'EXDEV') return this.invalidInput(`工作树与允许根不在同一文件系统，无法原子隔离，拒绝移除：${target}`)
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      const listed = await this.listWorktrees()
+      if (listed.error !== undefined) return cap.providerErr(listed.error)
+      const still = (await Promise.all(listed.records.map((record) => samePath(record.path, target)))).some(Boolean)
+      if (!still) return this.fail(ProviderErrorCode.NotFound, `工作树登记已不存在，拒绝移除：${target}；请先执行 git worktree prune`)
+      return this.fail(ProviderErrorCode.Unavailable, `工作树目录在隔离时消失，结果不确定：${target}；请先 reconcile 后重试`)
+    }
+    return this.fail(ProviderErrorCode.Unavailable, `隔离工作树失败（${code ?? 'unknown'}，可证未做任何删除）：${target}；可原样重试`)
+  }
+
+  /** remove 非零 = 可能已部分删除：一律 ambiguous_result(retryable:false)，并给出隔离残留、登记观察与恢复步骤。 */
+  private async ambiguousRemoval(quarantine: string, target: string, branch: string, detail: string): Promise<cap.ProviderResult<void>> {
+    const listed = await this.listWorktrees()
+    const registered = listed.error !== undefined
+      ? `登记回读失败（${listed.error.code}）`
+      : (await Promise.all(listed.records.map(async (record) => (await samePath(record.path, quarantine)) || (await samePath(record.path, target))))).some(Boolean)
+        ? '登记仍指隔离目录或原目标'
+        : '登记已不含隔离目录与原目标'
+    const residue = (await readdir(quarantine).catch(() => [] as string[])).slice(0, 5)
+    const present = (await occupied(quarantine)) ? `隔离目录仍在 ${quarantine}` : `隔离目录已不存在 ${quarantine}`
+    return this.fail(ProviderErrorCode.AmbiguousResult,
+      `工作树移除结果不确定：${present}（残留：${residue.length === 0 ? '无' : residue.join('、')}）；${registered}；目标 ${target}，分支 ${branch}。请先 reconcile：检查隔离目录并按需保留证据，登记残留用 git worktree prune 清理；分支与提交未丢，可 git worktree add ${target} ${branch} 恢复。原因：${detail}`)
+  }
+
+  /** 只删除本进程写入的 HEAD.lock：内容不匹配说明不是自己的锁（例如成功 remove 已连 admin dir 一起删除）。 */
+  private async releaseHeadLock(lockPath: string, marker: string): Promise<void> {
+    const held = await readFile(lockPath, 'utf8').catch(() => undefined)
+    if (held !== marker) return
+    await unlink(lockPath).catch(() => undefined)
+  }
+
   private async git(args: readonly string[]): Promise<GitInvocation> {
     return this.runGit(['-C', this.repository.path, ...args])
   }
@@ -292,9 +489,8 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     if (result.interrupted) return cap.providerError(write ? ProviderErrorCode.AmbiguousResult : ProviderErrorCode.Unavailable,
       write ? 'Git 写进程被终止或输出超限，结果不确定；请先 reconcile' : 'Git 读进程被终止或输出超限，暂时不可用')
     const text = `${result.stderr}\n${result.stdout}`
-    const lines = (result.stderr === '' ? result.stdout : result.stderr).split('\n').map((line) => line.trim()).filter((line) => line !== '')
     // `worktree add` 的第一行是 `Preparing worktree (…)`，真正的原因在后面的 `fatal:` / `error:` 行。
-    const detail = lines.find((line) => /\b(fatal|error):/i.test(line)) ?? lines[0] ?? ''
+    const detail = detailLine(result)
     const refusal = REFUSALS.find(([pattern]) => pattern.test(text))
     if (refusal !== undefined) return cap.providerError(refusal[1], `${refusal[2]}：${detail}`)
     return write
@@ -324,7 +520,11 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
       if (worktree === undefined) return []
       const fieldOf = (prefix: string) => fields.find((line) => line.startsWith(prefix))?.slice(prefix.length)
       // prunable 字段总是带原因（`prunable gitdir file points to non-existent location`），只能按前缀判。
-      return [{ path: worktree.slice('worktree '.length), branch: fieldOf('branch '), prunable: fields.some((line) => line.startsWith('prunable')) }]
+      // locked 行总在前缀 `locked` 后带可选原因，同样只能按前缀判（真实 locked 必须在任何写之前拦下）。
+      return [{
+        path: worktree.slice('worktree '.length), branch: fieldOf('branch '),
+        prunable: fields.some((line) => line.startsWith('prunable')), locked: fields.some((line) => line.startsWith('locked')),
+      }]
     })
     return { records: await Promise.all(records.map(async (record) => ({ ...record, path: await realpath(record.path).catch(() => path.normalize(record.path)) }))), error: undefined }
   }
@@ -356,9 +556,10 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
     return { found: true, sha: found.sha, symbolic: found.symbolic, error: undefined }
   }
 
-  /** 正面确认「这个目录就是本仓库的链接工作树、且检出的正是请求的分支」：core 把 `conflict` 当
-   *  「已创建 → 复用成功」，而登记记录只说明 git 的账本里有一条。返回 undefined 表示可以安全复用。 */
-  private async reuseBlockedBy(target: string, branch: string): Promise<string | undefined> {
+  /** 正面确认「这个目录就是本仓库的链接工作树、且检出的正是期望分支」：create 用它判可复用，remove 用它判
+   *  可删除（比复用更具破坏性，必须复用同一条判据）。登记记录只说明 git 的账本里有一条，不能代替身份。
+   *  返回 undefined 表示身份成立。 */
+  private async worktreeIdentityProblem(target: string, branch: string): Promise<string | undefined> {
     const probe = await this.runGit(['-C', target, 'rev-parse', '--git-dir', '--git-common-dir', '--symbolic-full-name', 'HEAD'])
     if (probe.code !== 0) return '目录不是可读的 Git 工作树'
     const [gitDir = '', commonDir = '', head = ''] = probe.stdout.trim().split('\n')

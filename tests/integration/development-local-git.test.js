@@ -5,7 +5,8 @@ import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { chmod, cp, lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { after, test } from 'node:test'
@@ -309,16 +310,544 @@ test('写后回读：worktree add 落到别处时不得把判定时的路径报�
   assert.deepEqual(await worktreePaths(fixture), [fixture.repositoryPath, elsewhere], '写入确实落到了别处，所以报告不能是 target')
 })
 
-test('能力子集：只声明三个键，且不实现工作树移除', async (t) => {
+test('能力子集：声明五个键（含工作树移除），移除是可选能力', async (t) => {
   const fixture = await fixtureFor(t)
   const provider = providerFor(fixture)
   assert.deepEqual(
     Object.keys((await provider.describeCapabilities()).capability).sort(),
-    ['development.branch.create', 'development.repository.read', 'development.worktree.create', 'development.worktree.read'],
-    '本地 Git 声明仓库、分支、工作树创建和工作树读取能力',
+    [
+      'development.branch.create', 'development.repository.read', 'development.worktree.create',
+      'development.worktree.read', 'development.worktree.remove',
+    ],
+    '本地 Git 声明仓库、分支、工作树创建/读取与工作树移除能力',
   )
-  // 移除是破坏性能力，本层不实现也不声明（issue #137 的 Out of scope，由 #138 交付）：能创建不等于能移除。
-  assert.equal(provider.removeWorktree, undefined, '本层不得实现工作树移除')
+  // 移除是破坏性能力（AGENTS.md §7）：能创建不等于能移除，声明必须由实现兑现。
+  assert.equal(typeof provider.removeWorktree, 'function', '声明了 development.worktree.remove 就必须实现 removeWorktree')
+})
+
+test('工作树移除：干净工作树仅显式移除，隔离目录绑定登记且不 force，二次移除答 not_found', async (t) => {
+  const fixture = await fixtureFor(t)
+  const rootReal = await realpath(fixture.root)
+  const target = path.join(fixture.root, 'wt-remove-clean')
+  const branch = 'work/remove-clean'
+  const recorder = recordingRunner()
+  const provider = providerFor(fixture, { runGit: recorder.runGit })
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await provider.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  const headBefore = (await git(['rev-parse', `refs/heads/${branch}`], fixture.repositoryPath)).trim()
+  const worktree = worktreeRefFor(target)
+  recorder.calls.length = 0
+  const removed = await provider.removeWorktree({ worktree })
+  assert.equal(removed.ok, true, '干净工作树在显式请求下必须真的被移除')
+  const repair = recorder.calls.find((call) => call.includes('repair'))
+  const removal = recorder.calls.find((call) => call.includes('remove'))
+  assert.ok(repair !== undefined, '隔离后必须先用 worktree repair 把登记绑定到隔离目录')
+  assert.ok(removal !== undefined, '必须发出 worktree remove')
+  const quarantine = repair[repair.length - 1]
+  assert.match(quarantine, /^.+[/\\]\.harness-remove-[0-9a-f-]+$/, '隔离目录必须是允许根下的 .harness-remove-<uuid>')
+  assert.equal(path.dirname(quarantine), rootReal, '隔离目录的父目录必须是允许根的 realpath')
+  assert.deepEqual(repair, ['-C', fixture.repositoryPath, 'worktree', 'repair', quarantine], 'repair 只改登记，目标是隔离目录')
+  assert.deepEqual(removal, ['-C', fixture.repositoryPath, 'worktree', 'remove', quarantine], '删除目标是隔离目录，不得带 --force / -f')
+  assert.equal(
+    recorder.calls.some((call) => call.includes('--force') || call.includes('-f') || call.includes('move')),
+    false,
+    '移除路径不得 force，也不得用 worktree move 作隔离原语',
+  )
+  assert.deepEqual(await quarantineEntries(fixture.root), [], '成功后允许根下不得残留隔离目录')
+  await assert.rejects(stat(target), { code: 'ENOENT' }, '目录必须消失')
+  assert.equal((await worktreePaths(fixture)).includes(target), false, '登记必须消失')
+  const branches = await provider.listBranches({ repository: repositoryRef, cursor: undefined, limit: 100 })
+  assert.ok(branches.value.items.some((item) => item.name === branch), '移除工作树不得删除分支')
+  assert.equal((await git(['rev-parse', `refs/heads/${branch}`], fixture.repositoryPath)).trim(), headBefore, '分支头必须保留')
+  const again = await provider.removeWorktree({ worktree })
+  assert.equal(again.ok, false, '第二次移除不得静默成功')
+  assert.equal(again.error.code, 'not_found', '工作树已经不存在，第二次移除必须答 not_found')
+})
+
+test('工作树移除：准入后对象被换成同 gitfile 替身时答 invalid_input，不删除任何内容', async (t) => {
+  const fixture = await fixtureFor(t)
+  await commitGitignore(fixture, ['.env'])
+  const target = path.join(fixture.root, 'wt-swapped')
+  const movedReal = path.join(fixture.root, 'wt-swapped-real')
+  const branch = 'work/swapped'
+  const provider = providerFor(fixture)
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await provider.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  const recorder = recordingRunner()
+  let substituteBefore
+  let realBefore
+  let swapped = false
+  const racing = providerFor(fixture, {
+    runGit: async (args) => {
+      // 注入点 = 干净门的 status：新实现的 dev/ino 锚已取，这是删除前最后一次只读 Git 读。
+      // 复制目标的 .git gitfile 后，Git 会把替身当成同一登记工作树（F8），只有对象身份能区分。
+      if (!swapped && args.includes('status')) {
+        swapped = true
+        await rename(target, movedReal)
+        await cp(movedReal, target, { recursive: true })
+        await writeFile(path.join(target, '.env'), 'SECRET=1\n')
+        substituteBefore = await snapshotTree(target)
+        realBefore = await snapshotTree(movedReal)
+      }
+      return recorder.runGit(args)
+    },
+  })
+  const result = await racing.removeWorktree({ worktree: worktreeRefFor(target) })
+  assert.equal(result.ok, false, '准入后对象被替换时必须拒绝，不得删除替身')
+  assert.equal(result.error.code, 'invalid_input', '对象复核不符是确定性拒绝，不是结果不确定')
+  assert.equal(result.error.retryable, false)
+  assert.match(result.error.message, /对象被替换|已回滚/, '必须说明对象被替换且已回滚')
+  assert.deepEqual(await snapshotTree(target), substituteBefore, '回滚后的替身必须逐字节不变（未删除任何内容）')
+  assert.deepEqual(await snapshotTree(movedReal), realBefore, '被移走的准入对象必须完整')
+  assert.equal((await worktreePaths(fixture)).includes(target), true, '登记必须仍指向 target')
+  assert.deepEqual(await quarantineEntries(fixture.root), [], '不得留下隔离目录')
+  assert.equal(recorder.calls.some(destructiveCall), false, '零 repair/remove/move argv')
+})
+
+test('工作树移除：检查后 checkout --detach 被 HEAD 协调锁拒绝，独有提交无法产生', async (t) => {
+  const fixture = await fixtureFor(t)
+  const target = path.join(fixture.root, 'wt-detach-race')
+  const branch = 'work/detach-race'
+  const provider = providerFor(fixture)
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await provider.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  const headBefore = (await git(['rev-parse', `refs/heads/${branch}`], fixture.repositoryPath)).trim()
+  const recorder = recordingRunner()
+  let detachCode
+  let detachStderr = ''
+  let commitCode
+  let injected = false
+  const racing = providerFor(fixture, {
+    runGit: async (args) => {
+      // 同一注入点（干净门的 status）：真实 Git 尝试把工作树切成 detached 并造一条独有提交。
+      if (!injected && args.includes('status')) {
+        injected = true
+        const detach = spawnSync('git', ['checkout', '--detach'], { cwd: target, encoding: 'utf8' })
+        detachCode = detach.status
+        detachStderr = detach.stderr ?? ''
+        if (detachCode === 0) {
+          commitCode = spawnSync('git', ['-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', '竞态独有提交'], { cwd: target, encoding: 'utf8' }).status
+        }
+      }
+      return recorder.runGit(args)
+    },
+  })
+  const removed = await racing.removeWorktree({ worktree: worktreeRefFor(target) })
+  assert.notEqual(detachCode, 0, 'HEAD 协调锁必须让注入的 checkout --detach 失败')
+  assert.match(detachStderr, /cannot lock ref .*HEAD/i, 'Git 必须报告 HEAD 引用锁冲突')
+  assert.equal(commitCode, undefined, 'detach 被拒后不得再产生独有提交')
+  assert.equal(removed.ok, true, '锁内复验通过后，干净工作树仍必须被移除')
+  assert.equal((await git(['rev-parse', `refs/heads/${branch}`], fixture.repositoryPath)).trim(), headBefore, '分支头不得变化')
+  assert.equal((await git(['fsck', '--unreachable', '--no-reflogs'], fixture.repositoryPath)).trim(), '', '不得留下不可达提交')
+  await assert.rejects(stat(target), { code: 'ENOENT' }, '目录必须消失')
+  assert.equal((await worktreePaths(fixture)).includes(target), false, '登记必须消失')
+})
+
+test('工作树移除：真实权限导致的可能部分删除答 ambiguous_result 并保留隔离残留与恢复信息', async (t) => {
+  const fixture = await fixtureFor(t)
+  const target = path.join(fixture.root, 'wt-partial')
+  const branch = 'work/partial'
+  const provider = providerFor(fixture)
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await provider.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  await writeFile(path.join(target, 'a-user-file.txt'), 'a\n')
+  await mkdir(path.join(target, 'z-read-only'))
+  await writeFile(path.join(target, 'z-read-only', 'user-file.txt'), 'z\n')
+  await git(['add', 'a-user-file.txt', 'z-read-only/user-file.txt'], target)
+  await git(['-c', 'commit.gpgsign=false', 'commit', '-m', '部分删除夹具文件'], target)
+  const headBefore = (await git(['rev-parse', `refs/heads/${branch}`], fixture.repositoryPath)).trim()
+  await chmod(path.join(target, 'z-read-only'), 0o555)
+  try {
+    const result = await provider.removeWorktree({ worktree: worktreeRefFor(target) })
+    assert.equal(result.ok, false, '真实权限失败必须失败')
+    assert.equal(result.error.code, 'ambiguous_result', '可能已经删掉部分内容，不能报成确定的 permission_denied')
+    assert.equal(result.error.retryable, false, '结果不确定必须先 reconcile，不能原样重发')
+    const [quarantineName] = await quarantineEntries(fixture.root)
+    assert.ok(quarantineName !== undefined, '隔离目录必须仍在允许根下')
+    const quarantine = path.join(fixture.root, quarantineName)
+    assert.match(result.error.message, /\.harness-remove-/, 'message 必须点名隔离目录')
+    assert.ok(result.error.message.includes(quarantine), 'message 必须包含完整隔离路径')
+    assert.ok(result.error.message.includes(target), 'message 必须包含原目标路径')
+    assert.ok(result.error.message.includes(branch), 'message 必须包含分支名')
+    assert.match(result.error.message, /reconcile/, 'message 必须要求 reconcile')
+    assert.match(result.error.message, /残留/, 'message 必须报告隔离目录残留')
+    assert.match(result.error.message, /恢复/, 'message 必须给出恢复步骤')
+    const residue = await readdir(quarantine).catch(() => [])
+    const marker = await stat(path.join(quarantine, '.git')).catch(() => undefined)
+    t.diagnostic(`部分删除残余：${residue.join('、') || '（空）'}；.git 仍在：${marker !== undefined}（删除顺序随平台变化，不作断言）`)
+    const readOnly = await readFile(path.join(quarantine, 'z-read-only', 'user-file.txt'), 'utf8').catch(() => undefined)
+    if (readOnly !== undefined) assert.equal(readOnly, 'z\n', '只读子目录文件若仍存在，内容必须逐字节保留')
+    await assert.rejects(stat(target), { code: 'ENOENT' }, '原目标已让位给隔离目录')
+    const registered = await worktreePaths(fixture)
+    assert.equal(registered.includes(target), false, '登记不得再指 target')
+    assert.equal(registered.includes(quarantine), false, '登记不得再指隔离目录')
+    assert.equal((await git(['rev-parse', `refs/heads/${branch}`], fixture.repositoryPath)).trim(), headBefore, '分支头必须保留')
+    const again = await provider.removeWorktree({ worktree: worktreeRefFor(target) })
+    assert.equal(again.error?.code, 'not_found', '第二次调用只剩 not_found，不能掩盖部分删除')
+  } finally {
+    const bases = [target, ...(await quarantineEntries(fixture.root)).map((name) => path.join(fixture.root, name))]
+    for (const base of bases) await chmod(path.join(base, 'z-read-only'), 0o755).catch(() => undefined)
+  }
+})
+
+test('工作树移除：reftable 引用后端拒绝破坏性移除（not_supported），工作树与登记逐字节不变', async (t) => {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'local-git-reftable-')))
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }))
+  const repositoryPath = path.join(root, 'repo')
+  await mkdir(repositoryPath)
+  const init = spawnSync('git', ['init', '--ref-format=reftable', '-b', 'main'], { cwd: repositoryPath, encoding: 'utf8' })
+  if (init.status !== 0) {
+    t.skip('本机 Git 不支持 --ref-format=reftable')
+    return
+  }
+  const run = (args) => git(args, repositoryPath)
+  await run(['config', 'user.email', 'local-git-provider@example.invalid'])
+  await run(['config', 'user.name', 'Local Git Provider Test'])
+  await writeFile(path.join(repositoryPath, 'README.md'), '# reftable fixture\n')
+  await run(['add', 'README.md'])
+  await run(['-c', 'commit.gpgsign=false', 'commit', '-m', '初始提交'])
+  const target = path.join(root, 'wt-reftable')
+  await run(['branch', 'work/reftable'])
+  await run(['worktree', 'add', target, 'work/reftable'])
+  const fixture = { root, repositoryPath, headCommit: '' }
+  const before = await snapshotTree(target)
+  const registeredBefore = await worktreePaths(fixture)
+  const recorder = recordingRunner()
+  const result = await providerFor(fixture, { runGit: recorder.runGit }).removeWorktree({ worktree: worktreeRefFor(target) })
+  assert.equal(result.ok, false, 'reftable 后端上的破坏性移除必须拒绝，不能静默降级')
+  assert.equal(result.error.code, 'not_supported', 'HEAD 协调锁只在 files 后端成立，必须 fail closed')
+  assert.equal(result.error.retryable, false)
+  assert.match(result.error.message, /reftable/, '必须说明是引用后端限制')
+  assert.match(result.error.message, /git worktree remove/, '必须给人工移除出路')
+  assert.deepEqual(await snapshotTree(target), before, '被拒的工作树必须逐字节不变')
+  assert.deepEqual(await worktreePaths(fixture), registeredBefore, '被拒后登记必须不变')
+  assert.equal(recorder.calls.some(destructiveCall), false, '拒绝必须发生在任何破坏性 argv 之前')
+  assert.deepEqual(await quarantineEntries(root), [], '不得留下隔离目录')
+  const adminHead = path.resolve(target, (await git(['-C', target, 'rev-parse', '--git-path', 'HEAD'], repositoryPath)).trim())
+  await assert.rejects(stat(`${adminHead}.lock`), { code: 'ENOENT' }, '必须在创建 HEAD.lock 之前拒绝，不留锁残留')
+})
+
+const worktreeRefFor = (externalId) => ({ bindingId: BINDING, objectKind: 'worktree', externalId, url: undefined })
+
+/** 允许根下由 provider 创建的隔离目录（`.harness-remove-*`）：成功与回滚都不许留下它们。 */
+const quarantineEntries = async (root) => (await readdir(root)).filter((name) => name.startsWith('.harness-remove-'))
+
+/** 破坏性 argv：repair / remove / move 任一出现都说明已经越过了写前判定，零副作用断言必须一起看。 */
+const destructiveCall = (call) => ['repair', 'remove', 'move'].some((verb) => call.includes(verb))
+
+/** 逐字节快照：相对路径、类型、mode、文件内容 sha256 与链接目标，排序后比较。拒绝路径的「零副作用」必须
+ *  是逐字节事实，不能只看目录还在——被拒绝的移除可能改坏文件内容却留下同名目录。 */
+const snapshotTree = async (root) => {
+  const entries = []
+  const walk = async (dir, prefix) => {
+    const names = (await readdir(dir)).sort()
+    for (const name of names) {
+      const full = path.join(dir, name)
+      const relative = prefix === '' ? name : `${prefix}/${name}`
+      const info = await lstat(full)
+      const mode = info.mode & 0o777
+      if (info.isSymbolicLink()) entries.push({ relative, kind: 'link', mode, target: await readlink(full) })
+      else if (info.isDirectory()) { entries.push({ relative, kind: 'dir', mode }); await walk(full, relative) }
+      else if (info.isFile()) entries.push({ relative, kind: 'file', mode, hash: createHash('sha256').update(await readFile(full)).digest('hex') })
+      else entries.push({ relative, kind: 'other', mode })
+    }
+  }
+  await walk(root, '')
+  return entries
+}
+
+/** 在基线提交里先放 .gitignore，被忽略内容才真的是「被忽略」；否则 .gitignore 自己就是一条未提交路径。 */
+const commitGitignore = async (fixture, patterns) => {
+  await writeFile(path.join(fixture.repositoryPath, '.gitignore'), `${patterns.join('\n')}\n`)
+  await fixture.run(['add', '.gitignore'])
+  await fixture.run(['-c', 'commit.gpgsign=false', 'commit', '-m', '忽略测试内容'])
+}
+
+test('工作树移除：脏工作树被拒且逐字节不变，错误报告未提交路径数', async (t) => {
+  const fixture = await fixtureFor(t)
+  await commitGitignore(fixture, ['.env'])
+  const target = path.join(fixture.root, 'wt-dirty')
+  const branch = 'work/dirty'
+  assert.equal((await providerFor(fixture).createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await providerFor(fixture).createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  // 3 条 porcelain 记录：已跟踪文件被修改、已暂存的新文件、未跟踪文件；.env 被忽略，不是未提交路径。
+  await writeFile(path.join(target, 'README.md'), '# 修改后的内容\n')
+  await writeFile(path.join(target, 'staged.txt'), 'staged\n')
+  await git(['add', 'staged.txt'], target)
+  await writeFile(path.join(target, 'untracked.txt'), 'untracked\n')
+  await writeFile(path.join(target, '.env'), 'SECRET=1\n')
+  // 负控：仓库配置会让未跟踪文件从默认 status 里消失；脏检查必须显式 --untracked-files=normal 才看得到 3 条。
+  await git(['config', 'status.showUntrackedFiles', 'no'], target)
+  const before = await snapshotTree(target)
+  const headBefore = (await git(['rev-parse', 'HEAD'], target)).trim()
+  const recorder = recordingRunner()
+  const result = await providerFor(fixture, { runGit: recorder.runGit }).removeWorktree({ worktree: worktreeRefFor(target) })
+  assert.equal(result.ok, false, '脏工作树必须被拒')
+  assert.equal(result.error.code, 'invalid_input', '脏树是确定性拒绝，不能是 conflict / ambiguous_result')
+  assert.equal(result.error.retryable, false, '脏树必须由用户处理后重新显式请求，原样重发没有意义')
+  assert.match(result.error.message, /3 个未提交路径/, '必须报告 porcelain 记录数（显式 --untracked-files=normal 才数得到未跟踪文件）')
+  assert.match(result.error.message, /README\.md/, '必须点名一条未提交路径，让用户知道该处理什么')
+  assert.match(result.error.message, /请先提交、stash 或清理/, '必须给出可行动出路')
+  assert.deepEqual(await snapshotTree(target), before, '被拒的移除不得改动工作树任何一个字节（含被忽略内容）')
+  assert.equal((await worktreePaths(fixture)).includes(target), true, '被拒后工作树登记必须保留')
+  assert.equal((await git(['rev-parse', 'HEAD'], target)).trim(), headBefore, '被拒后 HEAD 不得变化')
+  assert.equal(recorder.calls.some(destructiveCall), false, '脏树拒绝不得发出 remove argv')
+})
+
+test('工作树移除：Git 口径下只有被忽略内容的工作树视为干净，显式移除会删除被忽略内容', async (t) => {
+  const fixture = await fixtureFor(t)
+  await commitGitignore(fixture, ['.env', 'node_modules/'])
+  const target = path.join(fixture.root, 'wt-ignored-only')
+  const branch = 'work/ignored-only'
+  assert.equal((await providerFor(fixture).createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await providerFor(fixture).createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  await writeFile(path.join(target, '.env'), 'SECRET=1\n')
+  await mkdir(path.join(target, 'node_modules', 'pkg'), { recursive: true })
+  await writeFile(path.join(target, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1\n')
+  assert.equal(await git(['status', '--porcelain'], target), '', '前提：只有被忽略内容时 Git 口径下工作树是干净的')
+  const before = await snapshotTree(target)
+  assert.ok(before.some((entry) => entry.relative === '.env'), '前提：被忽略内容确实在磁盘上')
+  const removed = await providerFor(fixture).removeWorktree({ worktree: worktreeRefFor(target) })
+  assert.equal(removed.ok, true, 'Git 口径下 ignored-only 是干净工作树，显式请求必须真的移除')
+  await assert.rejects(stat(target), { code: 'ENOENT' }, '目录连同被忽略内容一起消失（D2 已文档化的数据损失面）')
+  assert.equal((await worktreePaths(fixture)).includes(target), false, '登记必须消失')
+})
+
+test('工作树移除：越界、含 .. 与符号链接逃逸都在任何 Git 命令之前被拒（零次调用）', async (t) => {
+  const fixture = await fixtureFor(t)
+  const outsideDirectory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'local-git-remove-outside-')))
+  t.after(() => rm(outsideDirectory, { recursive: true, force: true }))
+  await symlink(outsideDirectory, path.join(fixture.root, 'escape'))
+  await symlink(path.join(fixture.root, 'nowhere'), path.join(fixture.root, 'dangling'))
+  const cases = [
+    { what: '绝对路径越界', target: path.resolve(fixture.root, '..', 'outside-worktree') },
+    { what: '绝对路径含 .. 分量', target: `${fixture.root}/nested/../worktree` },
+    { what: '相对路径含 .. 分量', target: '../escape-worktree' },
+    { what: '符号链接逃逸', target: path.join(fixture.root, 'escape', 'worktree') },
+    { what: '悬空符号链接叶子', target: path.join(fixture.root, 'dangling') },
+    { what: '首尾空白', target: `${fixture.root}/worktree ` },
+  ]
+  for (const item of cases) {
+    const recorder = recordingRunner()
+    const result = await providerFor(fixture, { runGit: recorder.runGit }).removeWorktree({ worktree: worktreeRefFor(item.target) })
+    assert.deepEqual(recorder.calls, [], `${item.what} 必须在任何 Git 命令之前被拒（实际调用 ${recorder.calls.length} 次）`)
+    assert.equal(result.ok, false, `${item.what} 必须被拒`)
+    assert.equal(result.error.code, 'invalid_input', `${item.what} 的拒绝码必须是 invalid_input`)
+    assert.equal(result.error.retryable, false, `${item.what} 是输入错误，原样重发没有意义`)
+  }
+  assert.equal((await worktreePaths(fixture)).length, 1, '被拒的移除不得留下任何工作树')
+})
+
+test('工作树移除：未登记、主检出、被换成独立仓库与 detached 都不是可移除对象，且不发出 remove argv', async (t) => {
+  const fixture = await fixtureFor(t)
+  const target = path.join(fixture.root, 'wt-not-removable')
+  const branch = 'work/not-removable'
+  const recorder = recordingRunner()
+  const provider = providerFor(fixture, { runGit: recorder.runGit })
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await provider.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  const unregistered = await provider.removeWorktree({ worktree: worktreeRefFor(path.join(fixture.root, 'wt-never-registered')) })
+  assert.equal(unregistered.ok, false, '未登记路径没有可移除对象')
+  assert.equal(unregistered.error.code, 'not_found', '未登记是 not_found，不是 invalid_input')
+  const mainCheckout = await provider.removeWorktree({ worktree: worktreeRefFor(fixture.repositoryPath) })
+  assert.equal(mainCheckout.ok, false, '主检出不是可移除的链接工作树')
+  assert.equal(mainCheckout.error.code, 'invalid_input')
+  assert.match(mainCheckout.error.message, /主检出/, '主检出拒绝必须点名原因')
+  await rm(target, { recursive: true, force: true })
+  await mkdir(target)
+  await git(['init', '-b', 'other'], target)
+  // 独立仓库要有自己的提交，才算「可读但属于别人」；unborn HEAD 会被读成不可读，测不到身份比较这一支。
+  await git(['config', 'user.email', 'other@example.invalid'], target)
+  await git(['config', 'user.name', 'Other Repo'], target)
+  await git(['-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', '独立仓库的提交'], target)
+  const replaced = await provider.removeWorktree({ worktree: worktreeRefFor(target) })
+  assert.equal(replaced.ok, false, '登记路径被换成独立仓库时不得按账本删除')
+  assert.equal(replaced.error.code, 'invalid_input')
+  assert.match(replaced.error.message, /不是本仓库的工作树/, '被换目录的拒绝必须点名原因')
+  const detachedTarget = path.join(fixture.root, 'wt-detached')
+  const detachedBranch = 'work/detached'
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: detachedBranch, fromRef: 'main' })).ok, true)
+  assert.equal((await provider.createWorktree({ repository: repositoryRef, path: detachedTarget, branch: detachedBranch })).ok, true)
+  await git(['checkout', '--detach'], detachedTarget)
+  const detached = await provider.removeWorktree({ worktree: worktreeRefFor(detachedTarget) })
+  assert.equal(detached.ok, false, 'detached 工作树可能承载未被引用的提交，不得移除')
+  assert.equal(detached.error.code, 'invalid_input')
+  assert.match(detached.error.message, /没有检出分支/, 'detached 拒绝必须点名原因')
+  assert.equal(recorder.calls.some(destructiveCall), false, '所有不可移除形态都不得发出 remove argv')
+})
+
+test('工作树移除：登记在册但目录已删（prunable）答 not_found 并给出 prune 出路，不静默清理登记', async (t) => {
+  const fixture = await fixtureFor(t)
+  const target = path.join(fixture.root, 'wt-prunable')
+  const branch = 'work/prunable'
+  const provider = providerFor(fixture)
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await provider.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  await rm(target, { recursive: true, force: true })
+  const registeredBefore = await worktreePaths(fixture)
+  assert.equal(registeredBefore.includes(target), true, '前提：目录已删而登记仍在')
+  const recorder = recordingRunner()
+  const result = await providerFor(fixture, { runGit: recorder.runGit }).removeWorktree({ worktree: worktreeRefFor(target) })
+  assert.equal(result.ok, false, '只清登记不能报成删除了工作树')
+  assert.equal(result.error.code, 'not_found')
+  assert.match(result.error.message, /git worktree prune/, '必须给人工 prune 出路')
+  assert.deepEqual(await worktreePaths(fixture), registeredBefore, '被拒的移除不得静默清理登记')
+  assert.equal(recorder.calls.some(destructiveCall), false, 'prunable 不得交给 Git remove 去静默清登记')
+})
+
+test('工作树移除：能力关闭时快照不出现该键、调用 not_supported 且零次 Git 调用', async (t) => {
+  const fixture = await fixtureFor(t)
+  const recorder = recordingRunner()
+  const provider = providerFor(fixture, { runGit: recorder.runGit, capabilities: { worktreeRemove: false } })
+  assert.equal((await provider.describeCapabilities()).capability['development.worktree.remove'], undefined, '未启用的能力不得出现在快照里')
+  // 能力先于身份（port 义务 1）：关闭能力 + 外来 ref 必须答 not_supported，而不是 not_found。
+  const result = await provider.removeWorktree({ worktree: { ...worktreeRefFor(path.join(fixture.root, 'wt-off')), bindingId: `${BINDING}-foreign` } })
+  assert.equal(result.ok, false)
+  assert.equal(result.error.code, 'not_supported', '能力未声明时结论与输入无关')
+  assert.equal(result.error.retryable, false, 'not_supported 必须转人工流程，不是可重试的平台错误')
+  assert.deepEqual(recorder.calls, [], '被拒的能力不得触发任何 Git 命令')
+})
+
+test('工作树移除：写命令返回成功但隔离残留仍在时答 ambiguous_result，不把未完成删除报成成功', async (t) => {
+  const fixture = await fixtureFor(t)
+  const target = path.join(fixture.root, 'wt-fake-success')
+  const branch = 'work/fake-success'
+  const provider = providerFor(fixture)
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await provider.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  const worktree = worktreeRefFor(target)
+  // 1) remove 返回 0 却没有真的删除：报成功就是假绿，只能靠回读隔离目录判成不确定。
+  const liar = providerFor(fixture, {
+    runGit: async (args) => (args.includes('remove') ? { code: 0, stdout: '', stderr: '' } : defaultGitRunner(args)),
+  })
+  const lied = await liar.removeWorktree({ worktree })
+  assert.equal(lied.ok, false, '写命令自称成功但回读不一致时不得报 ok')
+  assert.equal(lied.error.code, 'ambiguous_result', '可能已删/未删之间只能诚实标不确定')
+  assert.equal(lied.error.retryable, false, '结果不确定必须先 reconcile，不能原样重发')
+  assert.match(lied.error.message, /不确定|reconcile/, '错误消息必须要求 reconcile')
+  const [leftover] = await quarantineEntries(fixture.root)
+  assert.ok(leftover !== undefined, '隔离目录必须保留，供人工复查')
+  const quarantine = path.join(fixture.root, leftover)
+  assert.ok(lied.error.message.includes(quarantine), 'message 必须点名隔离目录，让 reconcile 有落点')
+  assert.equal((await stat(path.join(quarantine, '.git'))).isFile(), true, '隔离残留里仍是完整工作树')
+  await assert.rejects(stat(target), { code: 'ENOENT' }, 'target 已让位给隔离目录')
+  assert.equal((await worktreePaths(fixture)).includes(quarantine), true, '登记仍指隔离目录')
+  // 2) 真删除之后回读登记失败：观测不到就不能报成功（另起一个工作树，避免上一段残留污染）。
+  const blindBranch = 'work/fake-success-blind'
+  const blindTarget = path.join(fixture.root, 'wt-fake-success-blind')
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: blindBranch, fromRef: 'main' })).ok, true)
+  assert.equal((await provider.createWorktree({ repository: repositoryRef, path: blindTarget, branch: blindBranch })).ok, true)
+  let removeIssued = false
+  const blind = providerFor(fixture, {
+    runGit: async (args) => {
+      if (args.includes('remove')) { removeIssued = true; return defaultGitRunner(args) }
+      if (removeIssued && args.includes('list')) return { code: 128, stdout: '', stderr: 'fatal: Permission denied' }
+      return defaultGitRunner(args)
+    },
+  })
+  const blindResult = await blind.removeWorktree({ worktree: worktreeRefFor(blindTarget) })
+  assert.equal(blindResult.ok, false, '回读失败时不得报成功')
+  assert.equal(blindResult.error.code, 'ambiguous_result', '删除已发出但观测不到时必须诚实标不确定')
+  assert.equal((await worktreePaths(fixture)).some((entry) => entry.includes('blind')), false, '前提：工作树确实已被删除')
+})
+
+test('工作树移除：真实 locked 在写入前答 invalid_input 并给 unlock 出路，工作树逐字节不变', async (t) => {
+  const fixture = await fixtureFor(t)
+  const provider = providerFor(fixture)
+  const branch = 'work/locked'
+  const target = path.join(fixture.root, 'wt-locked')
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await provider.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  await git(['worktree', 'lock', target], fixture.repositoryPath)
+  const lockedBefore = await snapshotTree(target)
+  const headBefore = (await git(['rev-parse', `refs/heads/${branch}`], fixture.repositoryPath)).trim()
+  const recorder = recordingRunner()
+  const locked = await providerFor(fixture, { runGit: recorder.runGit }).removeWorktree({ worktree: worktreeRefFor(target) })
+  assert.equal(locked.ok, false, 'locked 工作树不得移除')
+  assert.equal(locked.error.code, 'invalid_input', '真实 locked 是确定性拒绝，必须在任何破坏性写之前拦下')
+  assert.equal(locked.error.retryable, false)
+  assert.match(locked.error.message, /git worktree unlock/, '必须给人工 unlock 出路')
+  assert.deepEqual(await snapshotTree(target), lockedBefore, '被拒的 locked 工作树必须逐字节不变')
+  assert.equal((await worktreePaths(fixture)).includes(target), true, '被拒后登记必须保留')
+  assert.equal(recorder.calls.some(destructiveCall), false, 'locked 必须在任何破坏性 argv 之前拒绝')
+  assert.equal((await git(['rev-parse', `refs/heads/${branch}`], fixture.repositoryPath)).trim(), headBefore, '分支头不得变化')
+  assert.deepEqual(await quarantineEntries(fixture.root), [], '不得留下隔离目录')
+})
+
+test('工作树移除：repair 非零不得声称已回滚，反向 repair 回读确认后才答 invalid_input', async (t) => {
+  const setup = async (name) => {
+    const fixture = await fixtureFor(t)
+    const target = path.join(fixture.root, `wt-${name}`)
+    const provider = providerFor(fixture)
+    assert.equal((await provider.createBranch({ repository: repositoryRef, name: `work/${name}`, fromRef: 'main' })).ok, true)
+    assert.equal((await provider.createWorktree({ repository: repositoryRef, path: target, branch: `work/${name}` })).ok, true)
+    const adminDir = path.dirname(path.resolve(target, (await git(['-C', target, 'rev-parse', '--git-path', 'HEAD'], fixture.repositoryPath)).trim()))
+    return { fixture, target, adminDir, before: await snapshotTree(target) }
+  }
+  // repair 已把 admin gitdir 改写到隔离路径后失败：只 rename 回目录不等于登记也回滚。
+  const partial = (adminDir, value) => writeFile(path.join(adminDir, 'gitdir'), `${value}/.git\n`)
+  const a = await setup('repair-recovered')
+  let injected = false
+  const recovered = providerFor(a.fixture, {
+    runGit: async (args) => {
+      if (!injected && args.includes('repair')) {
+        injected = true
+        await partial(a.adminDir, args[args.length - 1])
+        return { code: 128, stdout: '', stderr: 'fatal: 模拟 repair 中断', interrupted: true }
+      }
+      return defaultGitRunner(args)
+    },
+  })
+  const recoveredResult = await recovered.removeWorktree({ worktree: worktreeRefFor(a.target) })
+  assert.equal(recoveredResult.error?.code, 'invalid_input', '反向 repair 并回读确认登记回到 target 后才是确定性拒绝')
+  assert.match(recoveredResult.error.message, /反向 repair|回读确认/, '必须给出恢复依据，而不是空口声称已回滚')
+  assert.doesNotMatch(recoveredResult.error.message, /已回滚隔离目录，未删除任何内容/, '不得保留旧的无证据 message')
+  assert.deepEqual(await snapshotTree(a.target), a.before, '恢复不得删除或改动内容')
+  assert.deepEqual((await worktreePaths(a.fixture)).filter((entry) => entry === a.target || entry.includes('.harness-remove-')), [a.target], '登记必须回到 target 且不指隔离路径')
+  const b = await setup('repair-ambiguous')
+  let firstRepair = true
+  const ambiguous = providerFor(b.fixture, {
+    runGit: async (args) => {
+      if (args.includes('repair') && firstRepair) {
+        firstRepair = false
+        await partial(b.adminDir, args[args.length - 1])
+        return { code: 128, stdout: '', stderr: 'fatal: 模拟 repair 中断', interrupted: true }
+      }
+      if (args.includes('repair')) return { code: 128, stdout: '', stderr: 'fatal: 模拟反向 repair 失败' }
+      return defaultGitRunner(args)
+    },
+  })
+  const ambiguousResult = await ambiguous.removeWorktree({ worktree: worktreeRefFor(b.target) })
+  assert.equal(ambiguousResult.error?.code, 'ambiguous_result', '登记是否已改写无法证明时必须诚实标不确定')
+  assert.equal(ambiguousResult.error.retryable, false)
+  assert.match(ambiguousResult.error.message, /登记仍指隔离路径/, 'message 必须报告登记的实际位置')
+  assert.match(ambiguousResult.error.message, /git worktree repair/, 'message 必须给登记恢复出路')
+  assert.doesNotMatch(ambiguousResult.error.message, /已回滚隔离目录，未删除任何内容/, '不得用无法证明的零写入声明')
+  const lingering = (await worktreePaths(b.fixture)).filter((entry) => entry.includes('.harness-remove-'))
+  assert.equal(lingering.length, 1, '登记确实仍指隔离路径（可核对读数）')
+  assert.ok(ambiguousResult.error.message.includes(lingering[0]) && ambiguousResult.error.message.includes(b.target), 'message 必须含完整隔离路径与目标')
+})
+test('工作树移除：创建、读取、预检与分支方法都不会移除工作树（AC2 的唯一入口）', async (t) => {
+  const fixture = await fixtureFor(t)
+  const provider = providerFor(fixture)
+  const branch = 'work/read-only-surface'
+  const target = path.join(fixture.root, 'wt-read-only-surface')
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await provider.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  const worktree = worktreeRefFor(target)
+  const before = await worktreePaths(fixture)
+  const recorder = recordingRunner()
+  const recording = providerFor(fixture, { runGit: recorder.runGit })
+  await recording.getRepository(repositoryRef)
+  await recording.listBranches({ repository: repositoryRef, cursor: undefined, limit: 10 })
+  await recording.preflightWorktree({ repository: repositoryRef, worktreeKey: 'wt-preflight-guard', branch })
+  await recording.getWorktree({ worktree })
+  const reused = await recording.createBranch({ repository: repositoryRef, name: branch, fromRef: fixture.headCommit })
+  assert.equal(reused.ok, true, '同名分支指向请求起点时必须复用成功；这条分支路径同样不得触发移除')
+  const duplicate = await recording.createWorktree({ repository: repositoryRef, path: target, branch })
+  assert.equal(duplicate.error?.code, 'conflict', '同一路径重复创建仍是 conflict，不得改写为移除')
+  assert.deepEqual(await worktreePaths(fixture), before, '除 removeWorktree 外没有任何方法可以移除工作树')
+  assert.equal(recorder.calls.some(destructiveCall), false, '非移除方法不得发出 remove argv')
 })
 
 test('能力子集：worktreeCreate 关掉后快照不可用、创建被 not_supported 且零次 Git 调用', async (t) => {
