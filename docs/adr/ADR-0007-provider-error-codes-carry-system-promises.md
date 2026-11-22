@@ -37,7 +37,7 @@
 - **只把义务写进共享套件**（现状的加强版）。套件是测试，不是 port；provider 作者在写实现时读不到它，而
   套件只在跑测试时才说话。#200 已经证明这条路会拖：它开着，fake 就还是错的。
 - **让每个 provider 自己正面确认后报 `conflict`**（本层第三～五轮的做法）。可行，而且本层已按它实现
-  （`reuseBlockedBy`），但它把 core 的决策表复制到每一个 provider；A 族 4 条 P1 全部来自这次复制没有复制
+  （`worktreeIdentityProblem`，2026-11-21 由 `reuseBlockedBy` 更名），但它把 core 的决策表复制到每一个 provider；A 族 4 条 P1 全部来自这次复制没有复制
   全。作为**过渡**保留，作为**终点**放弃。
 - **让 `createWorktree` 正面幂等（`ok: true`）而不报 `conflict`**，与同文件里 `createBranch` 的既有形态
   对称（同名分支指向请求起点时它已经返回 `ok: true`）。这是最干净的终点，但它与已合入 `main` 的共享套件
@@ -49,7 +49,7 @@
 ## Consequences
 
 - **在 #212 落地前**，每一个实现 `createWorktree` / `createBranch` 的 provider 都必须满足第 1 条；本层的
-  `reuseBlockedBy`（正面确认目标目录确为本仓库的链接工作树、且检出的正是请求的分支）是承重实现，不得为
+  `worktreeIdentityProblem`（2026-11-21 由 `reuseBlockedBy` 更名；正面确认目标目录确为本仓库的链接工作树、且检出的正是请求的分支）是承重实现，不得为
   省行数删掉。
 - core 当前有三处「以假设代替观测」，全部已登记、全部不在本 ADR 的落地范围内：
   `ensureWorktree` 对 `conflict` 不探测（#212）、`existingResult` 对已 `ready` 的上下文不复核（#211）、

@@ -120,6 +120,25 @@ export interface DevelopmentProvider {
   createWorktree?(input: ProviderCreateWorktreeInput): Promise<ProviderResult<ProviderWorktree>>
   getWorktree?(input: ProviderGetWorktreeInput): Promise<ProviderResult<ProviderWorktree>>
   createChangeRequest?(input: ProviderCreateChangeRequestInput): Promise<ProviderResult<ProviderChangeRequest>>
+  /**
+   * 显式移除一份工作树。只移除本 provider 绑定、允许根内、Git 登记在册、正面确认是本仓库链接工作树且当前
+   * 工作树干净的对象；脏树答 `invalid_input` 且在 message 报告未提交路径数（Git 口径：`git status --porcelain`
+   * 为空；被忽略内容不算脏，但会随目录一起删除）。路径数是 `status --porcelain -z` 的**记录数**，不是文件数：
+   * rename 计 2 条、未跟踪目录折叠为 1 条。永不 `--force`、不 prune、不删分支；本方法没有自动或批量触发路径，
+   * 真实文件系统行为由 local-git 集成测试钉住。
+   *
+   * 破坏性边界（支持矩阵与残余风险，不静默）：删除前把准入对象 `rename` 到允许根下 `.harness-remove-<uuid>`
+   * 隔离目录，并用 `(dev, ino)` 复核仍是同一对象；删除期间持有目标 admin dir 的 `HEAD.lock`，仅对 **files**
+   * 引用后端成立（reftable 等显式答 `not_supported`，需人工移除）。因此仅承诺：普通 Git 进程无法在检查与删除
+   * 之间切 detached/改分支/提交；**不承诺**防御直接改 `.git` 文件或写工作树内容的非协作进程，也不承诺
+   * `repair`/`remove` 末窗内替换隔离目录的防御（Node 无 handle-relative 删除、Git CLI 只收路径）。`remove`
+   * 任何非零都答 `ambiguous_result`（retryable=false）并报告隔离残留与恢复步骤，不降级为普通权限拒绝。
+   *
+   * 崩溃/中止残留：锁后崩溃留下 `<admin>/HEAD.lock`（确认无 Git 进程后删除）；`rename` 后崩溃留下登记指向
+   * 原路径（`prunable`）与允许根下 `.harness-remove-*`，可 `git worktree repair <q>` 后再移除或 rename 回；
+   * `repair` 后崩溃可直接 `git worktree remove <q>`。provider 不自动清理未知残留。`worktree repair` 需
+   * Git ≥2.30（更老版本答 `not_supported`）；Windows 原生 lane 未覆盖锁/rename/ino/repair。
+   */
   removeWorktree?(input: ProviderRemoveWorktreeInput): Promise<ProviderResult<void>>
   /** 观察的 `sourceVersion` 只取 `observation.ts` R4 的规范时间戳或 `undefined`；变更请求的头部 sha 不得填进去。 */
   reconcile?(scope: ProviderReconcileScope): AsyncIterable<ProviderObservation>
