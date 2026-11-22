@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test, { after } from 'node:test'
 import { composeCore, contextIdFor } from '@harness-projects/core'
-import { CapabilityKey } from '@harness-projects/capabilities'
-import { AccessLevel } from '@harness-projects/domain'
+import { CapabilityKey, providerErr, providerError, providerOk } from '@harness-projects/capabilities'
+import { AccessLevel, ProviderErrorCode } from '@harness-projects/domain'
 import { createFakeProviders, createFakeDevelopmentProvider, exportFakeStorageState } from '@harness-projects/provider-fake'
 import { createSqliteStorage, openDatabase } from '@harness-projects/storage-sqlite'
 import { controllableClock } from './local-git-fixture.js'
@@ -166,4 +166,152 @@ test('SQLite: dual handles read no attempt before cross-context admission; one w
     assert.equal(await second.getExecutionContext(contextIdFor(w.workspace.id, w.items[1], 'repo-alpha')), undefined)
   } finally { branchRelease.release(); await first }
   assert.equal((await first).writeState, 'saved'); assert.deepEqual(counts(w), [1, 1, 1])
+})
+test('SQLite: close/reopen 之后同 key 重放先对账再收敛，不重发已落盘的分支（#191）', async () => {
+  const w = await setup('SQLite'); const d = w.providers.development
+  const create = d.createBranch.bind(d); let calls = 0
+  // 分支真的落盘了，但进程在 ack 返回之前退出：持久槽位因此停在 unknown。
+  d.createBranch = async (input) => { calls += 1; const result = await create(input); if (calls === 1) throw Error('分支写入落盘后进程退出'); return result }
+  const name = `work/${w.request.workItemId}`
+  assert.equal((await start(w)).writeState, 'unknown')
+  assert.equal(calls, 1)
+  assert.equal(d.state.branches.filter((branch) => branch.name === name).length, 1, '前置条件：分支已经真的落盘')
+  const row = await w.storage.findMutationAttempt(w.workspace.id, 'first')
+  w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w)
+  assert.deepEqual(await w.storage.findMutationAttempt(w.workspace.id, 'first'), row, '关库重开保留未决意图')
+  let probes = 0; const list = d.listBranches.bind(d)
+  d.listBranches = async (input) => { probes += 1; return list(input) }
+  w.time.advance(60_000)
+  const resumed = await start(w)
+  assert.deepEqual([resumed.writeState, resumed.status, resumed.confirmed], ['saved', 'ready', true], '恢复可读后同 key 重放必须续上')
+  assert.ok(probes >= 1, '重启后同 key 重放必须先跑只读对账')
+  assert.equal(calls, 1, '分支已被证明落地，不得重发 createBranch')
+  assert.equal(d.state.branches.filter((branch) => branch.name === name).length, 1)
+  assert.equal(d.state.worktrees.length, 1)
+  assert.equal((await w.storage.findMutationAttempt(w.workspace.id, 'first')).state, 'saved')
+})
+
+/** 把 storage.transaction 包一层：事务提交后按 putExecutionContext 累计次数抛错，模拟「已提交但进程死掉」；事务体内抛错会回滚，模拟不出该窗口。 */
+function crashAfterCommit(storage, commits) {
+  const transaction = storage.transaction.bind(storage); let writes = 0
+  storage.transaction = async (work) => {
+    const result = await transaction((tx) => work(new Proxy(tx, { get(target, key) {
+      const fn = Reflect.get(target, key)
+      return key === 'putExecutionContext' ? async (...args) => { writes += 1; return fn.apply(target, args) } : typeof fn === 'function' ? fn.bind(target) : fn
+    } })))
+    if (writes === commits) throw new Error('测试注入：进程在提交后退出')
+    return result
+  }
+  return () => { storage.transaction = transaction }
+}
+for (const window of [{ name: '认领', commits: 1 }, { name: '分支回填', commits: 2 }]) {
+  test(`SQLite: ${window.name}提交后崩溃且默认目标变化，同 key 重放仍按持久身份恢复（#191 F1a/F1b）`, async () => {
+    const w = await setup('SQLite'); const d = w.providers.development, originalPath = '.worktrees/original-target'
+    let defaultTarget = originalPath, createCalls = 0, lost = true
+    d.preflightWorktree = async (input) => providerOk({ path: input.path ?? defaultTarget })
+    const create = d.createWorktree.bind(d)
+    d.createWorktree = async (input) => { createCalls += 1; const result = await create(input); if (lost) { lost = false; throw new Error('测试注入：工作树落盘后 ack 丢失') } return result }
+    assert.equal((await start(w)).writeState, 'unknown', '前置条件：工作树已落盘，答复停在 unknown'); assert.equal(createCalls, 1)
+    assert.equal(d.state.worktrees.length, 1, '前置条件：工作树已经真的落盘')
+    const restore = crashAfterCommit(w.storage, window.commits)
+    await start(w).then((crashed) => assert.equal(crashed.writeState, 'unknown', '提交后崩溃：本次答复停在 unknown'), (error) => assert.match(error.message, /进程在提交后退出/, '提交后崩溃：拒绝必须来自注入的崩溃')).finally(restore)
+    const contextId = contextIdFor(w.workspace.id, w.request.workItemId, 'repo-alpha')
+    assert.equal((await w.storage.getExecutionContext(contextId)).worktreeExternalId, originalPath, '被采纳的工作树身份必须与认领 / 分支回填写入一起耐久，不得留在进程内')
+    w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w)
+    defaultTarget = '.worktrees/new-default'; w.time.advance(60_000)
+    const resumed = await start(w)
+    assert.deepEqual([resumed.writeState, resumed.status], ['saved', 'ready'], '关库重开 + 默认目标变化后必须按持久身份收敛')
+    assert.equal(createCalls, 2, '第二次 createWorktree 由同路径 conflict 复用，不是重建')
+    assert.equal(d.state.worktrees.length, 1, '只允许一份工作树')
+    assert.equal(d.state.worktrees[0].path, originalPath, '工作树必须落在被采纳的原始路径上')
+    assert.equal((await w.storage.findMutationAttempt(w.workspace.id, 'first')).state, 'saved')
+  })
+}
+for (const method of ['createBranch', 'createWorktree']) {
+  test(`SQLite: ${method} 读已证 absent 但写门 read_only：零写入保留 unknown，恢复后同 key 收敛（#191 F2）`, async () => {
+    const w = await setup('SQLite'); const d = w.providers.development
+    const create = d[method].bind(d); let calls = 0
+    d[method] = async (input) => { calls += 1; if (calls === 1) throw new Error('测试注入：首次外部写之前进程退出'); return create(input) }
+    assert.equal((await start(w)).writeState, 'unknown', '前置条件：首次外部写的结果未知')
+    assert.equal(calls, 1)
+    const external = counts(w), attemptBefore = await w.storage.findMutationAttempt(w.workspace.id, 'first')
+    assert.deepEqual([attemptBefore.state, attemptBefore.externalIntent.state], ['unknown', 'unknown'], '前置条件：落库的是可对账的未决行')
+    const readonly = await composeCore({ ...w, policy: { [CapabilityKey.DevelopmentWorktreeCreate]: AccessLevel.ReadOnly } })
+    const contextId = contextIdFor(w.workspace.id, w.request.workItemId, 'repo-alpha')
+    const contextBefore = await w.storage.getExecutionContext(contextId), slotBefore = await w.storage.findMutationAttempt(w.workspace.id, 'first')
+    const denied = await start(w, {}, readonly)
+    assert.deepEqual([denied.writeState, denied.error?.code], ['unknown', 'permission_denied'], '写门拒绝必须保留可恢复 unknown，而不是把未决行终结成 failed')
+    assert.deepEqual(await w.storage.getExecutionContext(contextId), contextBefore, '拒绝路径零写入：上下文记录逐字不变')
+    assert.deepEqual(await w.storage.findMutationAttempt(w.workspace.id, 'first'), slotBefore, '拒绝路径零写入：未决行逐字不变')
+    assert.deepEqual(counts(w), external, '拒绝路径不得发起任何外部写')
+    const blocked = await start(w, { idempotencyKey: 'fresh-before-recovery' }, readonly)
+    assert.equal(blocked.writeState, 'unknown', '恢复前新 key 仍被未决行保守阻挡')
+    assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'fresh-before-recovery'), undefined)
+    assert.deepEqual(counts(w), external, '被保守阻挡的新 key 不得发起外部写')
+    w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w); w.time.advance(60_000)
+    const resumed = await start(w)
+    assert.deepEqual([resumed.writeState, resumed.status], ['saved', 'ready'], '写权限恢复 + 关库重开后同 key 必须收敛')
+    assert.deepEqual(counts(w), [1, 1, 1], '恢复后至多一份分支 / 工作树 / run')
+    const newcomer = await start(w, { idempotencyKey: 'fresh-after-recovery' })
+    assert.deepEqual([newcomer.writeState, newcomer.error?.code], ['conflict', 'conflict'], '已 ready 后用新 key 仍必须被阻挡')
+    assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'fresh-after-recovery'), undefined)
+  })
+}
+/** F1 残余：adopted claim 已持久化 A 后，普通读取/预检临时失败不得清掉 A；recover() 恢复能力并把默认目标改成 B。 */
+async function residualAfterTransientRead(method) {
+  const w = await setup('SQLite'); const d = w.providers.development, A = '.worktrees/adopted-a', B = '.worktrees/new-default'
+  d.preflightWorktree = async (input) => providerOk({ path: input.path ?? A })
+  const create = d.createWorktree.bind(d); let creates = 0
+  d.createWorktree = async (input) => { creates += 1; const out = await create(input); if (creates === 1) throw new Error('测试注入：A 落盘后 ack 丢失'); return out }
+  assert.equal((await start(w)).writeState, 'unknown', '前置条件：A 落盘但答复 unknown'); w.time.advance(60_000)
+  const list = d.listBranches.bind(d)
+  if (method === 'preflight') d.preflightWorktree = async () => providerErr(providerError(ProviderErrorCode.Unavailable, '临时预检故障'))
+  else d.listBranches = async () => providerErr(providerError(ProviderErrorCode.PermissionDenied, '临时列表故障'))
+  const replay = await start(w), contextId = contextIdFor(w.workspace.id, w.request.workItemId, 'repo-alpha')
+  return { w, d, A, replay, record: await w.storage.getExecutionContext(contextId), recover: () => { d.listBranches = list; d.preflightWorktree = async (input) => providerOk({ path: input.path ?? B }) } }
+}
+for (const method of ['preflight', 'listBranches']) {
+  test(`SQLite: adopted 后 ${method} 临时失败不得清掉已耐久 A，恢复后只留 A（#191 F1 残余）`, async () => {
+    const { w, d, A, replay, record, recover } = await residualAfterTransientRead(method)
+    assert.deepEqual([replay.writeState, replay.error?.code], ['failed', method === 'preflight' ? 'unavailable' : 'permission_denied'], '失败语义诚实：保留读失败自身 code')
+    assert.equal(record.worktreeExternalId, A, '普通读取/预检失败也不得清掉已对账 durability 的句柄')
+    assert.equal((await w.storage.findMutationAttempt(w.workspace.id, 'first')).state, 'failed', '已结算失败行如实落 failed')
+    assert.equal((await start(w)).writeState, 'failed', '同 key 已结算失败逐字回放，不重新尝试（I3）'); recover(); w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w); w.time.advance(60_000)
+    const resumed = await start(w, { idempotencyKey: 'after-transient' })
+    assert.deepEqual([resumed.writeState, resumed.status], ['saved', 'ready'], '新 key 必须用持久句柄 A 收敛')
+    assert.deepEqual(d.state.worktrees.map((tree) => tree.path), [A], '只允许已采纳的 A，不得因默认目标漂移产生 B')
+  })
+}
+test('SQLite: 失败结算保留的句柄不得被读侧当作已观察锚点（#191 F1 残余观察面）', async () => {
+  const { w, replay, record } = await residualAfterTransientRead('preflight')
+  assert.deepEqual([replay.writeState, record.status, record.worktreeExternalId], ['failed', 'failed', '.worktrees/adopted-a'], '前置：失败根 + 耐久句柄 A')
+  const scope = { workItemId: w.request.workItemId, repositoryId: 'repo-alpha' }
+  assert.equal((await w.storage.listRelations(w.workspace.id)).some((edge) => edge.type === 'has_worktree'), false, '前置：失败结算未写 has_worktree 边')
+  const refreshed = await w.core.commands.refreshDeliveryFacts(scope)
+  assert.deepEqual([refreshed.anchored, refreshed.applied], [false, false], '失败句柄不是已观察锚点：不得提交交付事实')
+  assert.deepEqual((await w.core.queries.getDeliveryProjection(scope)).hops.filter((hop) => hop.entityKind === 'commit' || hop.entityKind === 'pipeline_run'), [], '失败上下文不得出现 commit / pipeline 投影跳')
+})
+test('SQLite: refresh 写事务 BEGIN 前真实失败先提交：事务内复核拒绝 fresh 事实（#191 观察面竞态）', async () => {
+  const w = await setup('SQLite'); const d = w.providers.development, scope = { workItemId: w.request.workItemId, repositoryId: 'repo-alpha' }
+  d.preflightWorktree = async (input) => providerOk({ path: input.path ?? '.worktrees/race-a' })
+  const create = d.createWorktree.bind(d); let creates = 0
+  d.createWorktree = async (input) => { creates += 1; const out = await create(input); if (creates === 1) throw new Error('测试注入：A 落盘后 ack 丢失'); return out }
+  assert.equal((await start(w)).writeState, 'unknown', '前置：A 落盘但 ack 丢失')
+  w.time.advance(60_000)
+  const entered = Promise.withResolvers(), release = Promise.withResolvers()
+  d.preflightWorktree = async () => { entered.resolve(); await release.promise; return providerErr(providerError(ProviderErrorCode.Unavailable, '临时预检故障')) }
+  const failed = start(w)
+  await entered.promise // 上下文 Provisioning + 耐久 A（无关系边）：refresh 事务外采样因此判定有锚点
+  const delivery = w.providers.delivery, list = delivery.listPipelineRuns.bind(delivery); let armed = false, triggered = false
+  delivery.listPipelineRuns = async (input) => { armed = true; return list(input) }
+  const transaction = w.storage.transaction.bind(w.storage)
+  // 在 refresh 写事务 BEGIN 前放行真实失败事务并等它提交；只拦携带 putDeliveryFacts 的目标事务。
+  w.storage.transaction = async (work) => {
+    if (armed && !triggered && work.toString().includes('putDeliveryFacts')) { triggered = true; release.resolve(); await failed }
+    return transaction(work)
+  }
+  const refreshed = await w.core.commands.refreshDeliveryFacts(scope)
+  w.storage.transaction = transaction
+  assert.equal(triggered, true, '前置：竞态路径被走到（失败事务先于写事务提交）'); assert.equal(refreshed.applied, false, '写事务内复核 Failed + 无关系边：不得提交新的 fresh 事实')
+  assert.deepEqual((await w.core.queries.getDeliveryProjection(scope)).hops.filter((hop) => hop.entityKind === 'commit' || hop.entityKind === 'pipeline_run'), [], '不得产生 fresh commit / pipeline 投影跳')
 })

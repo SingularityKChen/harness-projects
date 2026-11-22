@@ -112,9 +112,9 @@ push 后必须回读当前 PR head/base、CI、issue 关联和 review threads。
 | 位置 | PR / issue | 当前事实与下一道门 |
 |---|---|---|
 | 已合入 1 | #670 / #396 | 2026-11-22 rebase `57a0f51745e4530cbfd2cded0c99a2f26f804b36`；#396 CLOSED；三项 P3 修正独立复核、最终 head 门通过。 |
-| 已合入 2 | #672 / #314 | 2026-11-22 rebase merge，落在 main `4907adaaae126a8063ba62b1110b6afcd97db74b`（base `57a0f517`）；`gh pr view 672` 回读 state=MERGED，#314 CLOSED。 |
-| 本轮不合并（待复审） | #671 / #138 | 首审 2 P1 + 2 P2；修复已回传（provider 修复 + 计划/评审记录闭环，评审方 4 轮独立核对，R671-01..05 技术关闭），`Refs #138` 保持 OPEN；待 push 后复审、ready、逐条回复与 resolve threads；不预写未来合并 SHA。 |
-| 本轮不合并 | #673 / #191 | 首审两项 P1 耐久恢复问题；完整意见已交原实现会话，修复并独立复审后重新入队；关闭范围须诚实核对。 |
+| 已合入 2 | #672 / #314 | 2026-11-22 rebase `4907adaaae126a8063ba62b1110b6afcd97db74b`；#314 CLOSED，最终 head 门与合入树已核对。 |
+| 已合入 3 | #671 / #138 | 2026-11-22 expected-head rebase `520ef1d7ccf1b836470699dfc20510127101a64d`；批准 head `2a1870cc` 的树与合入树相同，Linux 测试口径已修，Refs #138 保持 OPEN。 |
+| 4（最终门） | #673 / #191 | 四轮技术修复与独立复评通过；接合 #671 真实 main 时保留双方评审索引和队列，7 个自身代码/测试 blob 不变。按已授权流程回读当前 head 的 CI、全部线程、issue 关联和 Bot 批准，再 expected-head rebase；Refs #191 保持 OPEN，余项无 owner。实际结果用 `gh pr view 673 --json state,headRefOid,mergeCommit` 回读，不预写合并 SHA。 |
 
 各 PR 的完整矩阵、反例和局限在 `docs/review/pr-<n>-mmp-review.md`。每次合入后 fetch 真实 main 再接下一条；当前结果用 `gh pr view` / `gh pr checks` 回读，旧 head 的结论不冒充新版本批准。规划 Status、父项和 MMP/R1 人类接受保持独立。
 

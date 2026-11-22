@@ -2,7 +2,8 @@
  *
  */
 import {
-  CapabilityKey, ProjectErrorCode, projectError, providerErr, providerError, type ExternalObjectRef, type ProjectError, type ResolvedBinding, type StartWorkExternalOperation,
+  CapabilityKey, ProjectErrorCode, projectError, providerErr, providerError, type ExternalObjectRef, type MutationAttemptRecord, type ProjectError, type ResolvedBinding,
+  type StartWorkExternalIntent, type StartWorkExternalOperation,
 } from '@harness-projects/capabilities'
 import { ExecutionContextStatus, ProviderErrorCode, type ExecutionContextId, type ProviderBindingId } from '@harness-projects/domain'
 import { toProjectError, unsupportedCapability } from './capabilities.ts'
@@ -11,7 +12,7 @@ import { operationDeniedReason } from './runtime-access.ts'
 import { routeDevelopment, type DevelopmentRoute } from './development-route.ts'
 import { StartWorkFallback, type StartOutcome, type StartWorkRequest } from './execution-context.ts'
 import {
-  beginWrite, confirmWrite, markFailed, markUnknown, markWriting, reconcileWrite, WritePhase,
+  beginWrite, confirmWrite, markFailed, markUnknown, markWriting, reconcileWrite, reportFor, WritePhase,
   type ReconcileProbe, type WriteReport,
 } from './write-machine.ts'
 
@@ -129,10 +130,12 @@ export function namesFor(request: StartWorkRequest): Names {
 function gitFailure(
   contextId: ExecutionContextId, report: WriteReport, bindingId: ProviderBindingId | undefined,
   branch: string | undefined, branchHeadCommit: string | undefined = undefined,
+  worktreeExternalId: string | undefined = undefined,
 ): GitOutcome {
+  // 失败的尝试也必须携带**已耐久的工作树句柄**（对账 ack 证明过的物质身份，只有新否定证据才能清掉）；清成 undefined 会让重启按默认目标重发。
   return {
     contextId, report, ok: false, bindingId, status: ExecutionContextStatus.Failed,
-    branchExternalId: branch, worktreeExternalId: undefined, branchHeadCommit,
+    branchExternalId: branch, worktreeExternalId, branchHeadCommit,
   }
 }
 
@@ -148,16 +151,18 @@ export function outcomeOf(git: GitOutcome, fallback?: StartWorkFallback, runExte
 function stepRecord(
   contextId: ExecutionContextId, report: WriteReport, bindingId: ProviderBindingId | undefined,
   branchExternalId: string | undefined, branchHeadCommit: string | undefined,
+  worktreeExternalId: string | undefined = undefined,
 ): GitOutcome {
   return {
     contextId, report, ok: true, bindingId, status: ExecutionContextStatus.Provisioning,
-    branchExternalId, worktreeExternalId: undefined, branchHeadCommit,
+    branchExternalId, worktreeExternalId, branchHeadCommit,
   }
 }
 
 export async function provisionGit(
   context: CoreContext, request: StartWorkRequest, names: Names, contextId: ExecutionContextId,
   recordStep: RecordStep = async () => {}, frozenRoute?: DevelopmentRoute, beforeExternalWrite: BeforeExternalWrite = async () => {},
+  adopted?: AdoptedGitStep, resendPath?: string,
 ): Promise<GitOutcome> {
   const route = frozenRoute ?? await routeDevelopment(context, request.repositoryId, CapabilityKey.DevelopmentWorktreeCreate, 'write')
   if (!route.ok) return gitFailure(contextId, markFailed(beginWrite(names.path ?? names.worktreeKey), route.error), undefined, undefined)
@@ -166,8 +171,13 @@ export async function provisionGit(
   // 恢复：上下文里已经记录了分支步的结果就**整个跳过它**——不解析 `fromRef`，因此「基线是否
   // 前进」不进入判定。分支名是身份，我们记录的那一行是所有权（批次计划 D1 / D2）。
   const recorded = await context.storage.getExecutionContext(contextId)
+  // 被对账采纳的分支身份**已经由认领事务写回记录**（D9/D14）：`decided` 这一条就是唯一来源，
+  // 因此这里不需要第二份 adopted 分支实现——预检、branchName 拒绝与跳过 ensureBranch 都走同一条路径。
   const decided = recorded?.branchExternalId
-  const intent: Names = recorded?.worktreeExternalId === undefined ? names : { ...names, path: recorded.worktreeExternalId }
+  // 工作树输入优先取**持久句柄**（认领事务写入的唯一来源）；absent 重发带回同一调用内对账用过的精确输入。
+  // 注意它**不是证据**：只用于本次重发、不写进记录——句柄仍只由 ack / 步骤回填产生。
+  const durablePath = recorded?.worktreeExternalId ?? resendPath
+  const intent: Names = durablePath === undefined ? names : { ...names, path: durablePath }
   // 调用方在重放时声明一个**不同**的分支名是**矛盾**，不是新输入：序列已经决定了身份，静默采纳新名字
   // 会让「报出去的身份」与「磁盘上的事实」分叉——工作树落在新名字上、而 `branchExternalId` 报的是旧名字，
   // 与 PR #160 第二轮 P1 是同一形态。所以拒绝并点名两个名字，而不是忽略调用方的输入。
@@ -176,17 +186,23 @@ export async function provisionGit(
       + '重放不得改变已经决定的身份，请去掉 branchName 或另开一次供应'
     return gitFailure(
       contextId, markFailed(beginWrite(names.branch), projectError(ProjectErrorCode.InvalidInput, message)),
-      bindingId, decided,
+      bindingId, decided, undefined, recorded?.worktreeExternalId,
     )
   }
   // 预检也属于同一条供应序列：恢复时分支身份已经由先前的 ack 决定，
   // 分支敏感 provider 不得看本次请求重新推导的 names.branch。
-  const preflightIntent: Names = decided === undefined ? intent : { ...intent, branch: decided }
+  // 预检照跑（它仍是权限与安全边界），但看到的是序列已经决定 / 被采纳的身份：
+  // 分支名取已决定的分支，工作树路径取被采纳的持久句柄。
+  const preflightIntent: Names = {
+    ...intent,
+    ...(decided === undefined ? {} : { branch: decided }),
+    ...(adopted?.operation === 'createWorktree' ? { path: adopted.value } : {}),
+  }
   const target = await preflightWorktree(provider, repository, preflightIntent)
-  if (!target.ok) return gitFailure(contextId, target.report, bindingId, decided)
+  if (!target.ok) return gitFailure(contextId, target.report, bindingId, decided, undefined, recorded?.worktreeExternalId)
   const branchVersion = context.runtimeAccess.operationVersion(bindingId, CapabilityKey.DevelopmentBranchCreate, request.repositoryId)
   const prior = decided === undefined ? undefined : await branchProbe(provider, repository, decided)
-  if (prior?.probe.error?.code === ProjectErrorCode.PermissionDenied) return gitFailure(contextId, markFailed(beginWrite(decided), prior.probe.error), bindingId, decided)
+  if (prior?.probe.error?.code === ProjectErrorCode.PermissionDenied) return gitFailure(contextId, markFailed(beginWrite(decided), prior.probe.error), bindingId, decided, undefined, recorded?.worktreeExternalId)
   const branch = decided === undefined
     ? await ensureBranch(provider, repository, names.branch, beforeExternalWrite)
     : {
@@ -196,22 +212,26 @@ export async function provisionGit(
     }
   if (!branch.ok || branch.value === undefined) {
     if (!branch.failureKey && branch.report.error?.code === ProjectErrorCode.PermissionDenied) context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentBranchCreate, request.repositoryId, true)
-    return gitFailure(contextId, branch.report, bindingId, undefined)
+    return gitFailure(contextId, branch.report, bindingId, undefined, undefined, recorded?.worktreeExternalId)
   }
   if (decided === undefined) context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentBranchCreate, request.repositoryId, false, branchVersion)
   // 分支步已经成功：立刻回填，然后才跑工作树步。中断在两步之间时，重放因此能跳过它。
   // 工作树步用的是**序列已经决定的分支**（`branch.value`），不是本次请求重新算出来的 `names.branch`：
   // 序列一旦决定了身份，后续每一步都必须用它，否则「报出去的」与「落盘的」会指向两个分支。
-  // 工作树步本身**故意不跳过**——它必须重跑才能保证工作树真的在（PR #160 的 F1 教训）；幂等由稳定的
-  // 实体身份提供，不由跳过提供。
-  await recordStep(stepRecord(contextId, branch.report, bindingId, branch.value, branch.headCommit))
+  // 工作树步**正常重跑**才能保证工作树真的在（PR #160 的 F1 教训）；幂等由稳定的实体身份提供，不由跳过提供。
+  // 唯一的例外是同 key 对账已经用**持久句柄**读到「工作树在、且检出同一分支」：那时才采信对账证据并跳过它。
+  // 回填必须携带记录里已有的工作树句柄：分支步回填写 `undefined` 会清掉认领事务刚写入的被采纳身份（F1b）。
+  await recordStep(stepRecord(contextId, branch.report, bindingId, branch.value, branch.headCommit, recorded?.worktreeExternalId))
   const worktreeVersion = context.runtimeAccess.operationVersion(bindingId, CapabilityKey.DevelopmentWorktreeCreate, request.repositoryId)
-  const worktree = await ensureWorktree(provider, repository, branch.value, intent, target.path, beforeExternalWrite)
+  const worktree = adopted?.operation === 'createWorktree'
+    ? { report: reportFor(WritePhase.Reconciled, { attemptedValue: adopted.value, lastKnownAuthoritative: adopted.value }, undefined), ok: true, value: adopted.value }
+    : await ensureWorktree(provider, repository, branch.value, intent, target.path, beforeExternalWrite)
   if (!worktree.ok || worktree.value === undefined) {
     if (!worktree.failureKey && worktree.report.error?.code === ProjectErrorCode.PermissionDenied) context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentWorktreeCreate, request.repositoryId, true)
-    return gitFailure(contextId, worktree.report, bindingId, branch.value, branch.headCommit)
+    return gitFailure(contextId, worktree.report, bindingId, branch.value, branch.headCommit, recorded?.worktreeExternalId)
   }
-  context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentWorktreeCreate, request.repositoryId, false, worktreeVersion)
+  // 跳过被证明的工作树步不得把该写能力记成健康（D10）：`observeOperation(..., false, ...)` 只表示「刚刚成功写过」。
+  if (adopted?.operation !== 'createWorktree') context.runtimeAccess.observeOperation(bindingId, CapabilityKey.DevelopmentWorktreeCreate, request.repositoryId, false, worktreeVersion)
   const done: GitOutcome = {
     contextId, report: worktree.report, ok: true, bindingId, status: ExecutionContextStatus.Ready,
     branchExternalId: branch.value, worktreeExternalId: worktree.value, branchHeadCommit: branch.headCommit,
@@ -348,4 +368,75 @@ async function branchProbe(provider: Development, repository: ExternalObjectRef,
     `读了 ${PROBE_MAX_PAGES} 页仍没有读完分支列表，无法确认分支 ${name} 是否存在：provider 的游标没有结束`,
   )
   return { probe: { found: false, value: undefined, error }, headCommit: undefined }
+}
+/** 未决 Git 创建步的持久意图：重启对账唯一接受的输入形状（issue #191）。 */
+type GitIntent = Extract<StartWorkExternalIntent, { operation: 'createBranch' | 'createWorktree' }>
+
+/** 重启对账的结论；只在一次调用内存在，不落盘（ExecPlan D3 不新增持久形状）。 */
+export type GitReconcileOutcome =
+  | { readonly kind: 'adopted'; readonly operation: 'createBranch' | 'createWorktree'; readonly value: string; readonly headCommit: string | undefined }
+  | { readonly kind: 'absent'; readonly operation: 'createBranch' | 'createWorktree' }
+  | { readonly kind: 'conflict'; readonly attemptedValue: string | undefined; readonly lastKnownAuthoritative: string | undefined; readonly error: ProjectError }
+  | { readonly kind: 'inconclusive'; readonly error: ProjectError }
+
+/** 被对账采纳的那一步：值就是已落地的身份，头提交只在分支步可得。 */
+export type AdoptedGitStep = Extract<GitReconcileOutcome, { kind: 'adopted' }>
+
+/** 只认「未决的 Git 创建步」：Start Work 的 unknown 行，intent 是两种 Git 创建之一。 */
+export function unknownGitIntent(attempt: MutationAttemptRecord): GitIntent | undefined {
+  const intent = attempt.externalIntent
+  if (attempt.commandName !== 'startWork' || attempt.state !== 'unknown' || intent === undefined) return undefined
+  if (intent.operation !== 'createBranch' && intent.operation !== 'createWorktree') return undefined
+  return intent
+}
+
+/** 报告面用的自然键：分支名 / 持久工作树句柄（没有句柄时退回稳定 key）。 */
+export function gitIntentKey(intent: GitIntent): string {
+  return intent.operation === 'createBranch' ? intent.input.name : intent.input.path ?? intent.input.worktreeKey
+}
+
+const RECONCILE_READ_ONLY = '对账只读，未重发外部写入'
+/** 读不出唯一结论：保留读失败自身的 code（ExecPlan D4），只在消息里补一条「只读」事实。 */
+function readOnlyFailure(error: ProjectError): GitReconcileOutcome {
+  return { kind: 'inconclusive', error: projectError(error.code, `${error.message}；${RECONCILE_READ_ONLY}`) }
+}
+
+/**
+ * 未决 Git 创建步的只读对账：用**持久 intent 里的精确输入**读回外部对象，回答
+ * adopted / absent / conflict / inconclusive。它不写任何本地状态，也不改变所有权。
+ *
+ * 分支走 `branchProbe`（读完所有分页才敢说不存在）；工作树只认持久 `path` 句柄——
+ * 拿本次请求重新推导句柄会读到另一个目标。两种读都经 `guardedDevelopmentReads`，
+ * 与首遇路径共享同一读门与能力记账口径；provider 抛错也归 inconclusive。
+ */
+export async function reconcileGitStep(
+  context: CoreContext, route: Extract<DevelopmentRoute, { ok: true }>, intent: GitIntent,
+): Promise<GitReconcileOutcome> {
+  const provider = guardedDevelopmentReads(context, route)
+  if (intent.operation === 'createBranch') {
+    const name = intent.input.name
+    const probed = await branchProbe(provider, route.repository, name)
+    if (probed.probe.error !== undefined) return readOnlyFailure(probed.probe.error)
+    if (!probed.probe.found) return { kind: 'absent', operation: 'createBranch' }
+    return { kind: 'adopted', operation: 'createBranch', value: name, headCommit: probed.headCommit }
+  }
+  const path = intent.input.path
+  if (path === undefined) return readOnlyFailure(projectError(ProjectErrorCode.ResultUnknown, '未决工作树意图没有持久句柄，无法对账'))
+  if (provider.getWorktree === undefined) return readOnlyFailure(projectError(ProjectErrorCode.NotSupported, '当前 Development provider 没有工作树读能力，无法对账'))
+  const ref = { bindingId: route.binding.ref.bindingId, objectKind: 'worktree', externalId: path, url: undefined }
+  let observed
+  try { observed = await provider.getWorktree({ worktree: ref }) }
+  catch (error) { return readOnlyFailure(projectError(ProjectErrorCode.ResultUnknown, String(error))) }
+  if (!observed.ok) {
+    if (observed.error.code === ProviderErrorCode.NotFound) return { kind: 'absent', operation: 'createWorktree' }
+    return readOnlyFailure(toProjectError(observed.error))
+  }
+  const branch = intent.input.branch
+  if (observed.value.branch !== branch) {
+    return {
+      kind: 'conflict', attemptedValue: branch, lastKnownAuthoritative: observed.value.branch,
+      error: projectError(ProjectErrorCode.Conflict, `对账读到工作树 ${path} 检出 ${observed.value.branch}，不是持久意图里的 ${branch}`),
+    }
+  }
+  return { kind: 'adopted', operation: 'createWorktree', value: observed.value.path, headCommit: undefined }
 }

@@ -21,7 +21,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { providerErr, providerError, providerOk } from '@harness-projects/capabilities'
-import { composeCore } from '@harness-projects/core'
+import { composeCore, contextIdFor } from '@harness-projects/core'
 import { ExecutionContextStatus, ProviderErrorCode, WriteState, newWorkspaceId } from '@harness-projects/domain'
 import { FaultKind, createFakeProviders, exportFakeStorageState, refOf } from '@harness-projects/provider-fake'
 
@@ -351,4 +351,270 @@ test('游标永不结束：探测读到页数上限后报 unknown，不判成不
   assert.equal(result.writeState, WriteState.Unknown, '读不完只能说不知道，不能 markFailed')
   assert.equal(result.error.code, 'result_unknown')
   assert.ok(calls > 1, `探测必须跟着游标继续读（实际调用 ${calls} 次）`)
+})
+
+/**
+ * 重启对账（issue #191）：同 key 重放一个未决 Git 外部写时，必须**先做一次只读对账**，
+ * 用对账结论决定「采纳 / 重发 / 冲突 / 未知」，而不是把持久化的 `unknown` 逐字回放。
+ *
+ * 判别点都在「探针计数」与「外部写计数」上：只断言最终 saved 无法区分「重发了一次写」
+ * 与「采纳了既有对象」。
+ */
+test('同 key 重放：外部已建同名分支时采纳，不重发 createBranch（#191）', async () => {
+  const providers = createFakeProviders()
+  const time = controllableClock()
+  const core = await compose(providers, time.clock)
+  const workItemId = await workItemIdOf(core)
+  const control = { baseMoved: false, createBranchCalls: 0 }
+  localGitLikeBranch(providers, control)
+  const repository = providers.development.state.repositories[0].ref
+  const name = `work/${workItemId}`
+  assert.equal((await providers.development.createBranch({ repository, name, fromRef: 'main' })).ok, true, '前置条件：目标分支已经真的存在')
+  const branchBefore = providers.development.state.branches.find((branch) => branch.name === name)
+  const originalList = providers.development.listBranches.bind(providers.development)
+  providers.development.listBranches = async () => providerErr(providerError(ProviderErrorCode.Unavailable, '临时列表故障'))
+
+  const interrupted = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'adopt-branch' })
+  assert.equal(interrupted.writeState, WriteState.Unknown, '读不到分支列表时只能报 unknown')
+  const branchCallsAfterFirst = control.createBranchCalls
+  const runsAfterFirst = providers.execution.state.runs.length
+
+  let probes = 0
+  providers.development.listBranches = async (input) => { probes += 1; return originalList(input) }
+  time.advance(LEASE_MS)
+  const resumed = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'adopt-branch' })
+
+  assert.equal(resumed.writeState, WriteState.Saved, '恢复可读后同 key 重放必须收敛到 Saved')
+  assert.equal(resumed.confirmed, true)
+  assert.equal(resumed.status, ExecutionContextStatus.Ready)
+  assert.equal(resumed.branchExternalId, name, '采纳的分支名来自持久意图，不是本次请求重新推导的')
+  assert.equal(resumed.branchHeadCommit, branchBefore.headCommit, '采纳必须报出被采纳分支的头提交')
+  assert.ok(probes >= 1, '同 key 重放必须先做只读对账（探针至少要跑一次）')
+  assert.equal(control.createBranchCalls, branchCallsAfterFirst, '分支已被证明落地，不得重发 createBranch')
+  assert.equal(providers.development.state.worktrees.length, 1, '采纳之后只允许一份工作树')
+  assert.equal(providers.execution.state.runs.length, runsAfterFirst + 1, '采纳之后只启动一个 run')
+  assert.equal((await providers.storage.findMutationAttempt(WORKSPACE.id, 'adopt-branch')).state, 'saved')
+})
+
+test('同 key 重放：工作树已落盘但 ack 丢失时采纳，不重发 createWorktree（#191）', async () => {
+  const providers = createFakeProviders()
+  const time = controllableClock()
+  const core = await compose(providers, time.clock)
+  const workItemId = await workItemIdOf(core)
+  const original = providers.development.createWorktree.bind(providers.development)
+  let createCalls = 0, lost = true
+  providers.development.createWorktree = async (input) => {
+    createCalls += 1
+    const result = await original(input)
+    if (lost) { lost = false; throw new Error('测试注入：工作树写入落盘后 ack 丢失') }
+    return result
+  }
+
+  const first = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'adopt-worktree' })
+  assert.equal(first.writeState, WriteState.Unknown, 'ack 丢失时只能报 unknown')
+  const landed = providers.development.state.worktrees[0]
+  assert.ok(landed, '前置条件：工作树已经真的落盘')
+  const originalGet = providers.development.getWorktree.bind(providers.development)
+  let probes = 0
+  providers.development.getWorktree = async (input) => { probes += 1; return originalGet(input) }
+
+  time.advance(LEASE_MS)
+  const resumed = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'adopt-worktree' })
+
+  assert.equal(resumed.writeState, WriteState.Saved)
+  assert.equal(resumed.status, ExecutionContextStatus.Ready)
+  assert.ok(probes >= 1, '工作树对账必须用持久句柄读回')
+  assert.equal(createCalls, 1, '工作树已被证明落地，不得重发 createWorktree')
+  assert.equal(providers.development.state.worktrees.length, 1, '采纳不得产生第二份工作树')
+  assert.equal(resumed.worktreeExternalId, landed.path, '采纳必须报出已落盘的那份工作树')
+})
+
+test('同 key 重放：工作树确定不存在时重发一次并收敛（#191）', async () => {
+  const providers = createFakeProviders()
+  const time = controllableClock()
+  const core = await compose(providers, time.clock)
+  const workItemId = await workItemIdOf(core)
+  const original = providers.development.createWorktree.bind(providers.development)
+  let createCalls = 0
+  providers.development.createWorktree = async (input) => {
+    createCalls += 1
+    if (createCalls === 1) throw new Error('测试注入：工作树没有落盘就中断')
+    return original(input)
+  }
+
+  assert.equal((await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'absent-worktree' })).writeState, WriteState.Unknown)
+  assert.equal(providers.development.state.worktrees.length, 0, '前置条件：工作树确定没有落盘')
+  const originalGet = providers.development.getWorktree.bind(providers.development)
+  let probes = 0
+  providers.development.getWorktree = async (input) => { probes += 1; return originalGet(input) }
+
+  time.advance(LEASE_MS)
+  const resumed = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'absent-worktree' })
+
+  assert.equal(resumed.writeState, WriteState.Saved, '确定不存在时必须重发那一步并收敛')
+  assert.equal(resumed.status, ExecutionContextStatus.Ready)
+  assert.ok(probes >= 1, '重发之前必须先读回确认不存在')
+  assert.equal(createCalls, 2, '确定不存在时恰好重发一次 createWorktree')
+  assert.equal(providers.development.state.worktrees.length, 1)
+})
+
+test('同 key 重放：工作树检出别的分支时结构化冲突，零写入（#191）', async () => {
+  const providers = createFakeProviders()
+  const time = controllableClock()
+  const core = await compose(providers, time.clock)
+  const workItemId = await workItemIdOf(core)
+  const original = providers.development.createWorktree.bind(providers.development)
+  let createCalls = 0, lost = true
+  providers.development.createWorktree = async (input) => {
+    createCalls += 1
+    const result = await original(input)
+    if (lost) { lost = false; throw new Error('测试注入：工作树写入落盘后 ack 丢失') }
+    return result
+  }
+  const name = `work/${workItemId}`
+  assert.equal((await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'conflict-worktree' })).writeState, WriteState.Unknown)
+  // 已落盘的工作树现在检出别的分支：采纳它就是拿错误的身份冒充这次供应。
+  providers.development.state.worktrees[0].branch = 'work/other'
+  const contextBefore = exportFakeStorageState(providers.storage).contexts[0]
+  const attemptBefore = await providers.storage.findMutationAttempt(WORKSPACE.id, 'conflict-worktree')
+  const branchesBefore = providers.development.state.branches.length
+  const runsBefore = providers.execution.state.runs.length
+
+  time.advance(LEASE_MS)
+  const resumed = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'conflict-worktree' })
+
+  assert.equal(resumed.writeState, WriteState.Conflict, '工作树分支不一致必须是结构化冲突，不是 adopted')
+  assert.match(resumed.error.message, new RegExp(name), '冲突消息必须点名持久意图里的分支')
+  assert.match(resumed.error.message, /work\/other/, '冲突消息必须点名读到的分支')
+  assert.equal(createCalls, 1, '冲突路径不得重发外部写')
+  assert.equal(providers.development.state.branches.length, branchesBefore)
+  assert.equal(providers.execution.state.runs.length, runsBefore)
+  assert.deepEqual(exportFakeStorageState(providers.storage).contexts[0], contextBefore, '冲突路径零写入：上下文记录一字不改')
+  assert.deepEqual(await providers.storage.findMutationAttempt(WORKSPACE.id, 'conflict-worktree'), attemptBefore, '冲突路径零写入：未决槽位一字不改')
+})
+
+test('负控：在途的同 key 重放不得探测（#191）', async () => {
+  const providers = createFakeProviders()
+  const time = controllableClock()
+  const core = await compose(providers, time.clock)
+  const workItemId = await workItemIdOf(core)
+  const original = providers.development.createWorktree.bind(providers.development)
+  const entered = Promise.withResolvers(), release = Promise.withResolvers()
+  providers.development.createWorktree = async (input) => { entered.resolve(); await release.promise; return original(input) }
+  let probes = 0
+  const list = providers.development.listBranches.bind(providers.development)
+  providers.development.listBranches = async (input) => { probes += 1; return list(input) }
+  const get = providers.development.getWorktree.bind(providers.development)
+  providers.development.getWorktree = async (input) => { probes += 1; return get(input) }
+
+  const running = core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'inflight-same' })
+  await entered.promise
+  try {
+    const recordBefore = exportFakeStorageState(providers.storage).contexts[0]
+    const replay = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'inflight-same' })
+    assert.equal(replay.writeState, WriteState.Pending, '在途的同 key 重放仍报在途')
+    assert.equal(probes, 0, 'attempt 不是 unknown 时不得做对账读：在途不是未决结论')
+    assert.deepEqual(exportFakeStorageState(providers.storage).contexts[0], recordBefore, '在途重放不得改写记录')
+  } finally { release.resolve(); await running }
+})
+
+test('负控：旧代际的同 key 重放不得探测（#191）', async () => {
+  const providers = createFakeProviders()
+  const time = controllableClock()
+  const core = await compose(providers, time.clock)
+  const workItemId = await workItemIdOf(core)
+  const create = providers.development.createBranch.bind(providers.development)
+  let createCalls = 0
+  providers.development.createBranch = async (input) => { createCalls += 1; await create(input); throw new Error('测试注入：分支写入落盘后 ack 丢失') }
+
+  assert.equal((await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'old-generation' })).writeState, WriteState.Unknown)
+  const contextId = contextIdFor(WORKSPACE.id, workItemId, REQUEST.repositoryId)
+  const record = await providers.storage.getExecutionContext(contextId)
+  await providers.storage.putExecutionContext({ ...record, provisioningGeneration: record.provisioningGeneration + 1 })
+  const bumped = await providers.storage.getExecutionContext(contextId)
+  let probes = 0
+  const list = providers.development.listBranches.bind(providers.development)
+  providers.development.listBranches = async (input) => { probes += 1; return list(input) }
+  const get = providers.development.getWorktree.bind(providers.development)
+  providers.development.getWorktree = async (input) => { probes += 1; return get(input) }
+
+  time.advance(LEASE_MS)
+  const replay = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'old-generation' })
+
+  assert.equal(replay.writeState, WriteState.Unknown, '旧代际的同 key 重放仍保守报 unknown')
+  assert.equal(probes, 0, 'intent 的代际与记录不一致时不得探测')
+  assert.deepEqual(await providers.storage.getExecutionContext(contextId), bumped, '记录一字不改')
+  assert.equal(createCalls, 1, '旧代际重放不得再发起外部写')
+})
+
+test('负控：对账采样后同 key 未决行被别的写者推进时不得采纳（#191）', async () => {
+  const providers = createFakeProviders()
+  const time = controllableClock()
+  const core = await compose(providers, time.clock)
+  const workItemId = await workItemIdOf(core)
+  const control = { baseMoved: false, createBranchCalls: 0 }
+  localGitLikeBranch(providers, control)
+  const repository = providers.development.state.repositories[0].ref
+  const name = `work/${workItemId}`
+  assert.equal((await providers.development.createBranch({ repository, name, fromRef: 'main' })).ok, true, '前置条件：目标分支已经真的存在')
+  const originalList = providers.development.listBranches.bind(providers.development)
+  providers.development.listBranches = async () => providerErr(providerError(ProviderErrorCode.Unavailable, '临时列表故障'))
+
+  assert.equal((await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'advanced-row' })).writeState, WriteState.Unknown, '前置条件：首次作答停在 unknown')
+  const sampled = await providers.storage.findMutationAttempt(WORKSPACE.id, 'advanced-row')
+  assert.ok(sampled?.externalIntent !== undefined, '前置条件：未决行带着 Git 创建意图')
+  const callsAfterFirst = control.createBranchCalls
+  const runsAfterFirst = providers.execution.state.runs.length
+  const contextBefore = exportFakeStorageState(providers.storage).contexts[0]
+
+  // 对账采样之后、认领事务之前，另一个写者把同一 key 的行推进成一次新的在途写：
+  // 采样行与当前行不再逐字相同，本次重放就**不再拥有**「跳过 replay / 跳过 observe」的资格。
+  // 这条负控钉住的是「逐字相同」而不是「任意未决行」——把守卫放宽成后者时本用例必红。
+  const advanced = { ...sampled, state: 'pending', externalIntent: { ...sampled.externalIntent, state: 'pending' } }
+  let advancedInProbe = false
+  providers.development.listBranches = async (input) => {
+    const listed = await originalList(input)
+    if (!advancedInProbe) {
+      advancedInProbe = true
+      await providers.storage.putMutationAttempt(advanced)
+    }
+    return listed
+  }
+
+  time.advance(LEASE_MS)
+  const replayed = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'advanced-row' })
+
+  assert.equal(advancedInProbe, true, '前置条件：对账确实跑过，行是在对账之后被推进的')
+  assert.equal(replayed.writeState, WriteState.Pending, '行已不是采样行：必须按原有重放语义作答，不得拿旧证据续跑')
+  assert.equal(replayed.branchExternalId, undefined, '不得采纳任何分支身份')
+  assert.equal(control.createBranchCalls, callsAfterFirst, '不得重发 createBranch：既没采纳也没重试')
+  assert.equal(providers.development.state.worktrees.length, 0, '不得创建工作树：供应序列根本没被认领')
+  assert.equal(providers.execution.state.runs.length, runsAfterFirst, '不得启动第二个 run')
+  assert.deepEqual(exportFakeStorageState(providers.storage).contexts[0], contextBefore, '认领事务不得改写记录')
+  assert.deepEqual(await providers.storage.findMutationAttempt(WORKSPACE.id, 'advanced-row'), advanced, '另一写者推进的那一行保持原样，不被本次重放覆盖')
+})
+test('同 key 重放：absent 重发必须复用对账证明的精确输入（#191 F1c）', async () => {
+  const providers = createFakeProviders(), time = controllableClock(), core = await compose(providers, time.clock)
+  const workItemId = await workItemIdOf(core)
+  // 对账只能证明「这个精确目标不存在」：默认目标由 provider 当前策略决定，重放必须显式带回持久输入。
+  let defaultTarget = '.worktrees/original-target'
+  providers.development.preflightWorktree = async (input) => providerOk({ path: input.path ?? defaultTarget })
+  const writes = [], originalCreate = providers.development.createWorktree.bind(providers.development)
+  let lost = true
+  providers.development.createWorktree = async (input) => {
+    writes.push(input)
+    if (lost) { lost = false; throw new Error('测试注入：工作树没有落盘就中断') }
+    return originalCreate(input)
+  }
+  assert.equal((await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'resend-path' })).writeState, WriteState.Unknown)
+  const intent = (await providers.storage.findMutationAttempt(WORKSPACE.id, 'resend-path')).externalIntent
+  assert.deepEqual([intent.operation, intent.input.path], ['createWorktree', '.worktrees/original-target'], '前置条件：持久意图记下了对账使用的精确输入')
+  assert.equal(providers.development.state.worktrees.length, 0, '前置条件：工作树确定没有落盘')
+  defaultTarget = '.worktrees/new-default'
+  time.advance(LEASE_MS)
+  const resumed = await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey: 'resend-path' })
+  assert.equal(resumed.writeState, WriteState.Saved); assert.equal(resumed.status, ExecutionContextStatus.Ready)
+  assert.equal(writes.length, 2, '确定不存在时恰好重发一次 createWorktree')
+  assert.deepEqual(writes.map((write) => write.path), ['.worktrees/original-target', '.worktrees/original-target'], '重发必须复用持久意图里的精确路径，不得改用变化后的默认目标')
+  assert.equal(providers.development.state.worktrees.length, 1, '重发只允许产生一份工作树')
 })

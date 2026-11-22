@@ -12,9 +12,11 @@ import { mkdir, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { test } from 'node:test'
 
-import { ExecutionContextStatus, RelationType } from '@harness-projects/domain'
+import { providerErr, providerError } from '@harness-projects/capabilities'
+import { ExecutionContextStatus, ProviderErrorCode, RelationType } from '@harness-projects/domain'
 import { contextIdFor, namesFor, provisionGit, readChainFacts, startWork, worktreeEntityId } from '@harness-projects/core'
 import { createLocalGitDevelopmentProvider } from '@harness-projects/provider-development-local-git'
+import { createSqliteStorage } from '@harness-projects/storage-sqlite'
 
 import {
   BINDING, LEASE_EXPIRED_MS, REPOSITORY_ID, controllableClock, coreContextFor, fixtureFor, git,
@@ -367,4 +369,109 @@ test('无法确定仓库基线时不得由 core 猜测 main', async (t) => {
   assert.equal(outcome.report.error?.code, 'not_found')
   assert.match(outcome.report.error?.message ?? '', /无法确定仓库基线/)
   assert.deepEqual((await git(['for-each-ref', '--format=%(refname:short)', 'refs/heads'], fixture.repositoryPath)).trim().split('\n').sort(), ['alpha', 'beta'])
+})
+test('真实磁盘：工作树落盘但 ack 丢失后，同 key 重放采纳而不重建（#191）', async (t) => {
+  const fixture = await fixtureFor(t)
+  const clock = controllableClock()
+  let createCalls = 0, lost = true
+  const provider = withHooks(providerFor(fixture), {
+    createWorktree: (fn) => async (input) => {
+      createCalls += 1
+      const result = await fn(input)
+      if (lost) { lost = false; throw new Error('测试注入：工作树落盘后 ack 丢失') }
+      return result
+    },
+  })
+  const { storage, workspaceId, context } = await coreContextFor(fixture, { development: provider }, { clock: clock.clock })
+  await registerWorkItem(storage, workspaceId, 'wi-adopt')
+  const request = {
+    task: 'Synthetic explicit task', workItemId: 'wi-adopt', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'adopt-worktree',
+  }
+  assert.equal((await startWork(context, request)).writeState, 'unknown')
+
+  clock.advance(LEASE_EXPIRED_MS)
+  const resumed = await startWork(context, request)
+
+  assert.equal(resumed.writeState, 'saved')
+  assert.equal(resumed.status, ExecutionContextStatus.Ready)
+  assert.equal(createCalls, 1, '工作树已被证明落地，不得重发 createWorktree')
+  const expected = path.join(fixture.root, 'wi-adopt')
+  assert.deepEqual(await worktreePaths(fixture), [fixture.repositoryPath, expected], '磁盘上仍只有主检出 + 1 份工作树')
+  const workBranches = (await git(['for-each-ref', '--format=%(refname:short)', 'refs/heads'], fixture.repositoryPath))
+    .trim().split('\n').filter((name) => name.startsWith('work/'))
+  assert.deepEqual(workBranches, ['work/wi-adopt'], '采纳不得产生第二条工作分支')
+  assert.equal(await handlePath(fixture, resumed.worktreeExternalId), await handlePath(fixture, expected), '报出的句柄必须指向盘上那一份')
+})
+
+test('真实磁盘 + SQLite：认领提交后崩溃且默认根变化，同 key 重放复用持久身份（#191 F1）', async (t) => {
+  const fixture = await fixtureFor(t), clock = controllableClock()
+  const sqlitePath = path.join(fixture.root, 'restart-reconciliation.sqlite'), originalPath = path.join(fixture.root, 'wi-claim-crash')
+  let defaultTarget, createCalls = 0, lost = true
+  const provider = withHooks(providerFor(fixture), {
+    // 恢复阶段把「没有持久句柄时的默认根」换成 new-default：只有 core 带回持久身份，预检才会看到 input.path。
+    preflightWorktree: (fn) => async (input) => {
+      const out = await fn(input)
+      return !out.ok || defaultTarget === undefined || input.path !== undefined ? out : { ...out, value: { ...out.value, path: defaultTarget } }
+    },
+    createWorktree: (fn) => async (input) => { createCalls += 1; const out = await fn(input); if (lost) { lost = false; throw new Error('测试注入：工作树落盘后 ack 丢失') } return out },
+  })
+  const storage = createSqliteStorage(sqlitePath), { context, workspaceId } = await coreContextFor(fixture, { development: provider }, { storage, clock: clock.clock })
+  await registerWorkItem(storage, workspaceId, 'wi-claim-crash')
+  const request = { task: 'Synthetic explicit task', workItemId: 'wi-claim-crash', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'claim-crash' }
+  assert.equal((await startWork(context, request)).writeState, 'unknown', '前置条件：工作树已落盘，答复停在 unknown'); assert.equal(createCalls, 1)
+  assert.deepEqual(await worktreePaths(fixture), [fixture.repositoryPath, originalPath], '前置条件：磁盘上已经有一份工作树')
+  const transaction = storage.transaction.bind(storage); let puts = 0
+  storage.transaction = async (work) => {
+    const result = await transaction((tx) => work(new Proxy(tx, { get(target, key) {
+      const fn = Reflect.get(target, key)
+      return key === 'putExecutionContext' ? async (...args) => { puts += 1; return fn.apply(target, args) } : typeof fn === 'function' ? fn.bind(target) : fn
+    } })))
+    if (puts === 1) throw new Error('测试注入：认领提交后进程退出')
+    return result
+  }
+  await assert.rejects(startWork(context, request), /认领提交后进程退出/, '认领提交后崩溃必须中断本次调用（不能在崩溃点之后继续写别的行）')
+  storage.transaction = transaction
+  const contextId = contextIdFor(workspaceId, request.workItemId, REPOSITORY_ID)
+  assert.equal((await storage.getExecutionContext(contextId)).worktreeExternalId, originalPath, '认领事务必须原子持久化被采纳的工作树身份，不能只留在进程内')
+  storage.close(); const reopened = createSqliteStorage(sqlitePath); t.after(() => { try { reopened.close() } catch {} })
+  const restarted = (await coreContextFor(fixture, { development: provider }, { storage: reopened, workspaceId, clock: clock.clock })).context
+  defaultTarget = path.join(fixture.root, 'new-default')
+  clock.advance(LEASE_EXPIRED_MS)
+  const resumed = await startWork(restarted, request)
+  assert.deepEqual([resumed.writeState, resumed.status], ['saved', 'ready'], '关库重开 + 默认根变化后必须按持久身份收敛')
+  assert.equal(createCalls, 2, '第二次 createWorktree 由同路径 conflict 复用，不是重建')
+  assert.deepEqual(await worktreePaths(fixture), [fixture.repositoryPath, originalPath], '磁盘上必须仍只有主检出 + 1 份工作树')
+  const workBranches = (await git(['for-each-ref', '--format=%(refname:short)', 'refs/heads'], fixture.repositoryPath)).trim().split('\n').filter((name) => name.startsWith('work/'))
+  assert.deepEqual(workBranches, ['work/wi-claim-crash'], '不得产生第二条工作分支')
+})
+test('真实磁盘 + SQLite：adopted 后 preflight 临时失败不得清掉 A，恢复后只留 A（#191 F1 残余）', async (t) => {
+  const fixture = await fixtureFor(t), clock = controllableClock()
+  const A = path.join(fixture.root, 'wi-residual'), B = path.join(fixture.root, 'new-default')
+  let failPreflight = false, defaultB, createCalls = 0
+  const provider = withHooks(providerFor(fixture), {
+    preflightWorktree: (fn) => async (input) => {
+      if (failPreflight) return providerErr(providerError(ProviderErrorCode.Unavailable, '临时预检故障'))
+      const out = await fn(input)
+      return !out.ok || defaultB === undefined || input.path !== undefined ? out : { ...out, value: { ...out.value, path: defaultB } }
+    },
+    createWorktree: (fn) => async (input) => { createCalls += 1; const out = await fn(input); if (createCalls === 1) throw new Error('测试注入：A 落盘后 ack 丢失'); return out },
+  })
+  const file = path.join(fixture.root, 'residual.sqlite'), storage = createSqliteStorage(file)
+  const { context, workspaceId } = await coreContextFor(fixture, { development: provider }, { storage, clock: clock.clock })
+  await registerWorkItem(storage, workspaceId, 'wi-residual')
+  const request = { task: 'Synthetic explicit task', workItemId: 'wi-residual', repositoryId: REPOSITORY_ID, actor: { kind: 'agent' }, idempotencyKey: 'first' }
+  assert.equal((await startWork(context, request)).writeState, 'unknown', '前置条件：A 落盘但 ack 丢失')
+  clock.advance(60_000)
+  failPreflight = true
+  const replay = await startWork(context, request)
+  const contextId = contextIdFor(workspaceId, request.workItemId, REPOSITORY_ID), record = await storage.getExecutionContext(contextId)
+  assert.deepEqual([replay.writeState, replay.error?.code], ['failed', 'unavailable'], '失败语义诚实：保留预检失败的自身 code')
+  assert.equal(record.worktreeExternalId, A, '普通预检失败也不得清掉已对账 durability 的句柄')
+  failPreflight = false; defaultB = B
+  storage.close(); const reopened = createSqliteStorage(file); t.after(() => { try { reopened.close() } catch {} })
+  const restarted = (await coreContextFor(fixture, { development: provider }, { storage: reopened, workspaceId, clock: clock.clock })).context
+  clock.advance(60_000)
+  const resumed = await startWork(restarted, { ...request, idempotencyKey: 'after-transient' })
+  assert.deepEqual([resumed.writeState, resumed.status], ['saved', 'ready'], '换新 key 必须用持久句柄 A 收敛'); assert.equal(createCalls, 2, '第二次 createWorktree 由同路径 conflict 复用，不是重建')
+  assert.deepEqual(await worktreePaths(fixture), [fixture.repositoryPath, A], '磁盘上只能有主检出 + A，不得出现默认漂移的 B')
 })

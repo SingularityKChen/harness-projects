@@ -33,6 +33,7 @@
 |---|---|
 | [2026-11-21-worktree-clean-removal](exec-plan/completed/2026-11-21-worktree-clean-removal.md) | 显式请求且干净的 Local Git worktree 移除（#138；2026-11-22 评审修复轮收敛，R671-01..05 关闭） |
 | [2026-11-21-list-visibility-decisions](exec-plan/completed/2026-11-21-list-visibility-decisions.md) | 列表可见性决策显式化：单文件私有决策 + 矩阵/变异判别测试（#314） |
+| [2026-11-21-restart-reconciliation](exec-plan/completed/2026-11-21-restart-reconciliation.md) | 同 key 重放未决 Git 写前先跑只读对账（#191；2026-11-22 评审四轮修复轮收敛，含 F1 残余修复轮 2、读侧观察面门修复轮 3 与写事务内锚点复核修复轮 4；Refs #191 保持 OPEN） |
 | [2026-11-21-shared-source-walker](exec-plan/completed/2026-11-21-shared-source-walker.md) | 包边界两处扫描改走共享源码树 helper，删除本地跳过名单（#396） |
 | [2026-11-20-planning-source-projection-filter](exec-plan/completed/2026-11-20-planning-source-projection-filter.md) | 规划来源切换后只读服务启用挂载的投影，Fake 与 SQLite 同义（#202） |
 | [2026-11-20-default-branch-restriction-explanation](exec-plan/completed/2026-11-20-default-branch-restriction-explanation.md) | 合并仅在默认分支关闭 Issue 的提交前说明（#580，Refs #556） |
