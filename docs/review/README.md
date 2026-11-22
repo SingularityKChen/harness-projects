@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [PR #670 MMP 评审](pr-670-mmp-review.md) | 共享包发现与源码扫描 | 首审三项 P3；范围、恢复与决定来源修正文档，工程检查不代替 R1 |
 | [PR #659 MMP 评审](pr-659-mmp-review.md) | 单 SQL 基线资产、inventory 与安装件字节一致 | 首审 8 P3，无 P0–P2；31 对象语义等价与 5/5 变异；父项/R1 独立 |
 | [PR #658 MMP 评审](pr-658-mmp-review.md) | 单逻辑基线、唯一 SQL inventory 与真实 packed Host | 首审 4 P3，无 P0–P2；独立 probe 56/56 与 fail-closed 反例；父项/R1 独立 |
 | [PR #657 MMP 评审](pr-657-mmp-review.md) | Windows 首次私有化 provisioning 与既有根重开 | 首审 1 P2/5 P3，无 P0/P1；原生 ACL/拒绝矩阵与三个变异；#647 人验/R1 独立 |
