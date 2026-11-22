@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [PR #673 MMP 评审](pr-673-mmp-review.md) | Start Work 同 key 对账采纳身份、写门拒绝零写入与读侧提交时序 | 首审 2 P1+P2+P3；原实现会话四轮修复、评审方四轮独立复评；F1–F4 技术关闭，Refs #191 保持 OPEN，正式 R1/平台资格独立 |
 | [PR #671 MMP 评审](pr-671-mmp-review.md) | Local Git 显式移除的隔离对象绑定、HEAD 锁与失败分类 | 首审 2 P1+2 P2；原实现会话修复、评审方 4 轮独立核对；R671-01..05 技术关闭，Refs #138 保持 OPEN，正式 R1/平台资格独立 |
 | [PR #672 MMP 评审](pr-672-mmp-review.md) | 列表可见性显式决策 | 首审三项 P3；来源、恢复与摘要修正，行为与授权边界保持 |
 | [PR #670 MMP 评审](pr-670-mmp-review.md) | 共享包发现与源码扫描 | 首审三项 P3；范围、恢复与决定来源修正文档，工程检查不代替 R1 |

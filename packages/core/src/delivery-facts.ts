@@ -3,7 +3,7 @@
  * TD-009、TD-014）并整行覆盖本上下文的快照。完整读到的集合整组替换（含删除），其余原样保留并标陈旧；不推进修订号（K1），任何异常都折成结构化结果（K2）。
  */
 import { CapabilityKey, ProjectErrorCode, projectError, type DeliveryFactSetKind, type DeliveryFactsRecord, type DeliveryNodeFact, type ProjectError } from '@harness-projects/capabilities'
-import { EntityKind, ExternalIdentityKind, RelationType, type ExecutionContextId } from '@harness-projects/domain'
+import { EntityKind, ExecutionContextStatus, ExternalIdentityKind, RelationType, type ExecutionContextId } from '@harness-projects/domain'
 import { readChainFacts, type ChainFacts } from './chain-facts.ts'
 import type { CoreContext } from './context.ts'
 import { deliveryMasks, isDeliveryScope, type NormalizedDeliveryScope } from './delivery.ts'
@@ -89,7 +89,11 @@ export async function refreshDeliveryFacts(context: CoreContext, scope: Normaliz
     const confirmedAt = new Date(wall).toISOString() // 读数不能解析时这里抛 RangeError，走下面的降级路径，不写入非法的确认时刻
     const facts = await readChainFacts({ ...context, registry: context.runtimeAccess.probeRegistry }, scope)
     gaps = facts.gaps.map(({ key, code }) => ({ key, ...(code === undefined ? {} : { code }) }))
-    if (!facts.context.observed || !facts.worktree.observed) {
+    // 已观察锚点的单一权威：非失败上下文或已提交的 has_worktree 关系；失败结算保留的耐久句柄不是新观察（D21）。
+    const record = await context.storage.getExecutionContext(contextId)
+    const anchor = record?.status !== ExecutionContextStatus.Failed
+      || (await context.storage.listRelations(context.workspaceId)).some((edge) => edge.type === RelationType.HasWorktree && edge.to === facts.worktree.id)
+    if (!facts.context.observed || !facts.worktree.observed || !anchor) {
       await markStale(context, contextId, attemptedAt) // 什么也没读，证明不了已提交的快照还是最新；这一步失败走下面的 catch，返回诚实的失败
       return { ok: true, anchored: false, applied: false, gaps, error: undefined }
     }
@@ -102,6 +106,9 @@ export async function refreshDeliveryFacts(context: CoreContext, scope: Normaliz
       const value = await context.storage.transaction(async (tx) => {
       const existing = await tx.getDeliveryFacts(context.workspaceId, contextId)
       if (superseded(existing, attemptedAt)) return false
+      // 事务外采样与本次写事务之间可能有真实 start-work 事务提交（Failed、无关系）：用 tx 复核同一权威，不合格不提交 fresh 事实。
+      if ((await tx.getExecutionContext(contextId))?.status === ExecutionContextStatus.Failed
+        && !(await tx.listRelations(context.workspaceId)).some((edge) => edge.type === RelationType.HasWorktree && edge.to === facts.worktree.id)) return false
       if (complete.has('change_request') && facts.changeRequestIdentity !== undefined) {
         const { ref } = facts.changeRequestIdentity
         // 复验 read 阶段选定的 exact identity：读后写前出现另一指向时回滚，不能重绑或只改端点。
