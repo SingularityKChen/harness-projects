@@ -255,3 +255,159 @@ test('字段映射来源由真实状态披露呈现，未配置和异来源时�
     assert.deepEqual(rows[1], { kind: 'redacted', key: 'z-hidden' })
   }
 })
+// ---- 可见性矩阵（issue #314）：把 6 段优先级钉成一张可审阅的表，每格恰有一个决策 ----
+
+const READ_ONCE = '已读取当前快照，共 1 项可读条目'
+const READ_STALE = '当前结果尚未确认，最后已知值不是当前值'
+const READ_PARTIAL = '部分条目尚未确认，已显示的条目是当前值'
+const READ_REFRESHING = '正在刷新，当前显示的是最后已知值'
+const FIRST_READ = '正在首次读取工作项'
+const FIRST_READ_UNCONFIRMED = '正在首次读取工作项，读取能力尚未确认'
+const BLOCKED = '无法读取工作项'
+/** 五类失败文案与读门阻断文案的选择器；矩阵只断言「用了哪一条」，文案本身由既有用例逐字保护。 */
+const COPY = {
+  permission_denied: /没有读取工作项的权限/,
+  not_supported: /该规划来源不支持读取工作项/,
+  unknown: /尚未确认读取工作项的能力/,
+  offline: /当前无法连接规划来源/,
+  error: /读取工作项失败/,
+  gate_blocked: /当前不可用，原因未提供/,
+}
+/** 与 COPY 同源的 remaining 选择器：首尾锚定到整句，证明恢复说明与文案来源同属一条、不能被换掉或串用。 */
+const REMAINING = {
+  permission_denied: /^请在规划来源恢复授权后重试；此前的缓存不会显示。$/,
+  not_supported: /^补充授权无法解决，请改用支持读取的来源。$/,
+  unknown: /^工作区与规划来源仍可查看；确认之前不显示条目，也不判断是否有工作项。$/,
+  offline: /^连接恢复后会重新读取。$/,
+  error: /^请稍后重试；失败原因不在此展示。$/,
+  gate_blocked: /^工作区与规划来源仍可查看；读取能力恢复之前不显示条目，也不显示此前的缓存。$/,
+}
+const itemRow = (key, stale) => ({ kind: 'item', key, stale })
+const hiddenRow = (key) => ({ kind: 'redacted', key })
+const unavailablePage = (reason) => ({ readOnly: false, degraded: false, statusText: BLOCKED, kind: 'unavailable', reason, rows: undefined })
+const loadingPage = (statusText, readOnly = false) => ({ readOnly, degraded: false, statusText, kind: 'loading', rows: undefined })
+const contentPage = (statusText, rows, { readOnly = false, degraded = false, stale = false, refreshing = false, partial } = {}) => ({
+  readOnly, degraded, statusText, kind: 'content', stale, refreshing,
+  ...(partial === undefined ? {} : { partial }), rows,
+})
+/** 矩阵断言投影：只保留与可见性决策有关且用户可观察的面；message/remaining 逐行按 COPY/REMAINING 选择器断言。 */
+const decisionView = (view) => {
+  const body = view.body
+  return {
+    readOnly: view.readOnly, degraded: view.degraded, statusText: view.statusText, kind: body.kind,
+    ...('reason' in body ? { reason: body.reason } : {}),
+    ...('stale' in body ? { stale: body.stale } : {}),
+    ...('refreshing' in body ? { refreshing: body.refreshing } : {}),
+    ...('partial' in body ? { partial: body.partial } : {}),
+    rows: 'rows' in body
+      ? body.rows.map((row) => row.kind === 'redacted' ? { kind: 'redacted', key: row.key } : { kind: 'item', key: row.key, stale: row.stale })
+      : undefined,
+  }
+}
+
+const E = [wire('e1'), redacted('e2')]
+const VISIBILITY_MATRIX = [
+  { segment: 1, name: 'permission_denied 明确阻断压过授权缓存', copy: 'permission_denied',
+    build: () => failed('permission_denied', { entities: E }), expected: unavailablePage('permission_denied') },
+  { segment: 1, name: 'not_supported 明确阻断', copy: 'not_supported',
+    build: () => failed('not_supported', { entities: E, cacheVisibility: 'unknown' }), expected: unavailablePage('not_supported') },
+  { segment: 1, name: 'unknown 明确阻断，读门 read_only 也不借缓存', copy: 'unknown',
+    build: () => failed('unknown', { entities: E, access: 'read_only' }), expected: unavailablePage('unknown') },
+  { segment: 2, name: '读门未观测 + received：尚未确认', copy: 'unknown',
+    build: () => received({ entities: E, capabilities: [] }), expected: unavailablePage('unknown') },
+  { segment: 2, name: '读门未观测 + offline：用结构化失败文案而不是尚未确认', copy: 'offline',
+    build: () => failed('offline', { entities: E, capabilities: [] }), expected: unavailablePage('offline') },
+  { segment: 3, name: '读门已观测不可读且无失败：gate blocked 文案、reason 仍是 unknown', copy: 'gate_blocked',
+    build: () => received({ entities: E, access: 'unavailable' }), expected: unavailablePage('unknown') },
+  { segment: 3, name: '读门已观测不可读 + error：用结构化失败文案而不是 gate blocked', copy: 'error',
+    build: () => failed('error', { entities: E, access: 'unavailable' }), expected: unavailablePage('error') },
+  { segment: 3, name: 'pending + 读门不可读：直接不可用，不无限等候', copy: 'gate_blocked',
+    build: () => view('pending', { access: 'unavailable', entities: E }), expected: unavailablePage('unknown') },
+  { segment: 4, name: 'pending + 读门可读：首读 skeleton', copy: undefined,
+    build: () => view('pending', { entities: E }), expected: loadingPage(FIRST_READ) },
+  { segment: 4, name: 'pending + 读门未观测：首读文案追加能力未确认', copy: undefined,
+    build: () => view('pending', { capabilities: [], entities: E }), expected: loadingPage(FIRST_READ_UNCONFIRMED) },
+  { segment: 4, name: 'pending + read_only：只读标记可见但不算降级', copy: undefined,
+    build: () => view('pending', { access: 'read_only', entities: E }), expected: loadingPage(FIRST_READ, true) },
+  { segment: 4, name: 'pending + degraded：loading 不带降级', copy: undefined,
+    build: () => view('pending', { access: 'degraded', entities: E }), expected: loadingPage(FIRST_READ) },
+  { segment: 5, name: 'failed + 从未收到快照：无行，不借缓存', copy: 'offline',
+    build: () => failed('offline', { entities: E, hasReceivedSnapshot: false }), expected: unavailablePage('offline') },
+  { segment: 5, name: 'failed + 缓存可见性未授权：无行，不借缓存', copy: 'offline',
+    build: () => failed('offline', { entities: E, cacheVisibility: 'unknown' }), expected: unavailablePage('offline') },
+  { segment: 6, name: 'received + read_only：只读内容页，行保持当前值', copy: undefined,
+    build: () => received({ entities: E, access: 'read_only' }),
+    expected: contentPage(READ_ONCE, [itemRow('e1', false), hiddenRow('e2')], { readOnly: true }) },
+  { segment: 6, name: 'received + degraded：整表与全部行降级', copy: undefined,
+    build: () => received({ entities: E, access: 'degraded' }),
+    expected: contentPage(READ_STALE, [itemRow('e1', true), hiddenRow('e2')], { degraded: true, stale: true }) },
+  { segment: 6, name: 'received + refreshing：保行但全部行不算当前值', copy: undefined,
+    build: () => received({ entities: E, refreshing: true }),
+    expected: contentPage(READ_REFRESHING, [itemRow('e1', true), hiddenRow('e2')], { refreshing: true }) },
+  { segment: 6, name: 'failed + 授权缓存 + read_only：保行，只读标记仍成立', copy: undefined,
+    build: () => failed('offline', { entities: E, access: 'read_only' }),
+    expected: contentPage(READ_STALE, [itemRow('e1', true), hiddenRow('e2')], { readOnly: true, stale: true }) },
+  { segment: 6, name: 'gap 混合新鲜度：整表未确认只降级未确认行，partial 不成立', copy: undefined,
+    build: () => received({ entities: [wire('e1'), wire('e2', { source: { freshness: 'degraded' } })], read: { reason: '来源读取不完整' } }),
+    expected: contentPage(READ_STALE, [itemRow('e1', false), itemRow('e2', true)], { stale: true }) },
+  { segment: 6, name: 'gap 且每条可见条目已确认：redacted 新鲜度不参与 partial', copy: undefined,
+    build: () => received({ entities: [wire('e1'), redacted('e2')], read: { reason: '来源读取不完整' } }),
+    expected: contentPage(READ_PARTIAL, [itemRow('e1', false), hiddenRow('e2')], { stale: true, partial: true }) },
+  { segment: 6, name: 'gap 且全部行被遮蔽：没有可见条目，partial 不成立', copy: undefined,
+    build: () => received({ entities: [redacted('e1')], read: { reason: '来源读取不完整' } }),
+    expected: contentPage(READ_STALE, [hiddenRow('e1')], { stale: true }) },
+]
+
+test('可见性矩阵：按阶段 / 读门 / 失败 / 快照 / 缓存授权的顺序判定，每格恰有一个决策', () => {
+  assert.deepEqual([...new Set(VISIBILITY_MATRIX.map((row) => row.segment))], [1, 2, 3, 4, 5, 6], '矩阵覆盖全部 6 段优先级')
+  for (const row of VISIBILITY_MATRIX) {
+    const view = row.build()
+    assert.deepEqual(decisionView(view), row.expected, row.name)
+    assert.equal('rows' in view.body, view.body.kind === 'content', row.name + '：只有内容页带 rows')
+    if (row.copy === undefined) assert.equal('message' in view.body, false, row.name + '：非不可用页没有文案')
+    else {
+      assert.match(view.body.message, COPY[row.copy], row.name + '：文案来源')
+      assert.match(view.body.remaining, REMAINING[row.copy], row.name + '：恢复说明来源')
+    }
+    const json = JSON.stringify(view)
+    for (const canary of CANARIES) assert.ok(!json.includes(canary), row.name + ' 泄漏 ' + canary)
+    for (const visible of view.body.rows ?? []) {
+      if (visible.kind === 'redacted') assert.deepEqual(Object.keys(visible).sort(), ['key', 'kind'], row.name + '：遮蔽行只剩占位')
+    }
+  }
+})
+
+test('输出形状白名单：view、不可用 body、content body 与行对象的键集固定', () => {
+  const keys = (value) => Object.keys(value).sort()
+  const number = { sourceName: 'GitHub', scopeIdentity: { namespace: 'github.com/graphql/Repository', id: 'R_1' }, scopeName: 'sample/alpha', number: 328 }
+  const full = received({
+    entities: [wire('e1', { content: { sourceNumber: number } })],
+    read: { reason: '来源读取不完整', reconciledAt: T, planningSource: { bindingId: 'bind-1', name: '项目', mappingOrigin: 'derived' } },
+    meta: { ...metadata, safeNotice: '主机提示' },
+  })
+  assert.deepEqual(keys(full), ['body', 'degraded', 'mappingSourceText', 'planningSourceName', 'readOnly', 'statusText', 'workspaceName'])
+  assert.deepEqual(keys(full.body), ['kind', 'lastUpdatedAt', 'notice', 'partial', 'reconciledAt', 'refreshing', 'rows', 'stale'], '可选 content 键只在有值时出现')
+  assert.deepEqual([full.body.partial, full.body.notice, full.body.reconciledAt, full.mappingSourceText], [true, '主机提示', T, '字段映射：自动派生'], '白名单不是“全部隐藏”的空绿：可选键的正控都在')
+  assert.deepEqual(keys(full.body.rows[0]), ['authority', 'engineering', 'identity', 'iteration', 'key', 'kind', 'numberLabel', 'planningStatus', 'planningStatusKey', 'schedule', 'source', 'sourceNumber', 'stale', 'targetDate', 'title'])
+  assert.equal(full.body.rows[0].numberLabel, 'GitHub sample/alpha#328', '行白名单正控：原生编号仍可见')
+  const minimal = received({ entities: [wire('e2')] })
+  assert.deepEqual(keys(minimal), ['body', 'degraded', 'planningSourceName', 'readOnly', 'statusText', 'workspaceName'])
+  assert.deepEqual(keys(minimal.body), ['kind', 'lastUpdatedAt', 'refreshing', 'rows', 'stale'])
+  assert.deepEqual(keys(minimal.body.rows[0]), ['authority', 'engineering', 'identity', 'iteration', 'key', 'kind', 'planningStatus', 'planningStatusKey', 'schedule', 'source', 'stale', 'targetDate', 'title'])
+  const hidden = received({ entities: [redacted('e1')], read: { reason: '来源读取不完整' } })
+  assert.deepEqual(keys(hidden.body.rows[0]), ['key', 'kind'], '遮蔽行没有可扩展字段面')
+  for (const [name, page, bodyKeys] of [
+    ['loading', view('pending'), ['kind']],
+    ['unavailable', failed('offline', { cacheVisibility: 'unknown' }), ['kind', 'message', 'reason', 'remaining']],
+  ]) {
+    assert.deepEqual(keys(page), ['body', 'degraded', 'planningSourceName', 'readOnly', 'statusText', 'workspaceName'], name)
+    assert.deepEqual(keys(page.body), bodyKeys, name)
+    assert.equal('rows' in page.body, false, name + '：阻断态不能携带行')
+  }
+})
+
+test('坏接线先于可见性决策：阻断态不掩盖非法 phase / failure / 读取标记 / 时间戳', () => {
+  assert.throws(() => failed('permission_denied', { read: { lastUpdatedAt: 'yesterday' } }), TypeError, '明确阻断掩盖不了坏时间戳')
+  assert.throws(() => failed('constructor'), TypeError, '原型链键不是失败分类')
+  assert.throws(() => failed('offline', { cacheVisibility: 'Authorized' }), TypeError, '缓存可见性只认两个小写枚举值')
+})
