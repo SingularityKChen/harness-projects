@@ -182,13 +182,18 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 
 ## Progress
 
-- [ ] Batch 0 · 基线、开工门与 draft PR（2026-11-24 进行中：计划与 `docs/README.md` 索引已提交并 push；draft PR 由 Lead 创建后补记 PR 号）
+- [x] Batch 0 · 基线、开工门与 draft PR（2026-11-24：计划与 `docs/README.md` 索引已提交并 push；draft PR #690 由 Lead 创建，base main、head `1c9650bf`）
   - 开工门回读（2026-11-24，head `66da5841`）：`gh pr checks 689 -R SingularityKChen/harness-projects` 显示 Windows Native pass（run `45400911352` / job `138468941022`）；同 run 日志 grep 得 `set=native-git files=3 tests=22 skipped=0 todo=0`、`set=private-data files=4 tests=82 skipped=0 todo=0`、`standard-user exit=0`、`ImageOS=win25-vs2026 ImageVersion=20261116.315.1`、`git version 2.56.1.windows.1`、`node v26.13.1`、`admin=True`。门成立。
-- [ ] Batch 1 · 测试先行 RED（helper 抽取、9 条用例、本机变异）
-- [ ] Batch 2 · 实现/校准（Windows 机制 helper 与结构验证）
+- [x] Batch 1 · 测试先行 RED（2026-11-24：helper 抽取 + 9 条用例 + 本机变异判别）
+  - 基线回读：`pnpm test:file tests/integration/development-local-git.test.js` → `tests 96 / pass 96 / skipped 0 / fail 0`；`pnpm test:file tests/integration/development-local-git-windows.test.js` → `tests 15 / pass 7 / skipped 8 / fail 0`。
+  - 抽取 `snapshotTree`/`quarantineEntries`/`destructiveCall` 到 `tests/integration/local-git-fixture.js` 后 POSIX 仍 `96 / 96 / 0 / 0`；追加 9 条后 Windows 文件本机 `tests 24 / pass 7 / skipped 17 / fail 0`（`native` 门按平台跳过）。
+  - 判别性 RED（临时去掉 `native` 门的未提交副本，macOS）：T1/T2/T3/T4/T6/T9 通过；T5 在 ADS 项失败（POSIX 允许 `:` 文件名）；T7/T8 因无 `powershell.exe`/`icacls.exe` 失败——后三类保留 `native` 门并只由 hosted Windows 产出证据。
+  - 产品变异负控（改 `packages/providers/development-local-git/src/provider.ts`，每次后 `git checkout -- packages/`）：M13 去掉 HEAD.lock 创建 → T3 红；M17 跳过 `(dev, ino)` 复核 → T4 红；M20 去掉 `--untracked-files=normal` → T2 红（只报 2 个未提交路径）；M14 跳过隔离 rename → T1 红（答 `ambiguous_result`）。四个变异全部 KILLED。
+  - 规模与发布面：`node scripts/rule-checks.mjs size main` → 代码 475 / 1000、文档 240 / 1500；`disclosure main` 机械扫描通过；`git diff --check main...HEAD` 无输出。
+- [x] Batch 2 · 实现/校准（2026-11-24：机制 helper 与 9 条用例同批交付；本机结构验证通过——`pnpm test:file …windows.test.js` → `24 / 7 / 17 / 0`、`node --check` 通过。原生校准留 Batch 3 按 hosted 日志进行）
 - [ ] Batch 3 · Hosted 证据与负控
 - [ ] Batch 4 · 全量与归档
-- 阻塞项：无（Batch 0 开工门已回读成立；draft PR 待 Lead 创建）。
+- 阻塞项：无（draft PR #690 已创建）。
 
 ## Surprises & Discoveries
 
@@ -196,6 +201,8 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 - 2026-11-24：设计 A §3.4 说诊断路径「沿用 `ci.yml:142-152` 令牌化」不成立——那段 `Show-NativeOutput` 只在阶段 2；阶段 1 直接 `Write-Output $output`（`ci.yml:124-130`）。结论：新 token 自身不得含绝对路径/SID/账号。
 - 2026-11-24：两份设计对部分删除的登记读数互斥（A 期望 `登记已不含隔离目录与原目标`，B 期望 `登记仍指隔离目录或原目标`）。本机 probe：`git worktree remove` 在目录不可删时 exit 255、先删登记、目录仍在。结论：不在断言里写死平台顺序，改由测试独立 `git worktree list` 回读决定期望 token。
 - 2026-11-24：设计 B 把 `git rev-parse --show-ref-format` 当产品判据，产品实际读 `config --local --get extensions.refstorage`（`provider.ts:340-347`）。本机 probe：files 仓库 exit 1 空输出；reftable 仓库 exit 0 `reftable`；git 2.56.1 支持 `init --ref-format=reftable` + `worktree add`。结论：`--show-ref-format` 只作诊断，三分支保留以防 Windows 构建差异。
+- 2026-11-24 / Batch 1：Windows 夹具的允许根是 `<root>/WorkTrees`，主检出 `<root>/Repo 空 格` 不在其内；主检出的 `invalid_input` 会先被 `outside_root` 拦下，所以 T6 的主检出调用改用 `allowedRoot: f.root`（包含仓库的父根）才走到身份拒绝。证据：未加门副本在 macOS 上原写法得到「规范化后逃出允许根：…/Repo 空 格」。
+- 2026-11-24 / Batch 1：独占句柄必须用 `FileShare.Read` 而不是 `FileShare.None`——后者同时挡住干净门 `git status` 的读取，产品会答 `unavailable` 而不是部分删除的 `ambiguous_result`；`FileShare.Read` 仍拒写/拒删。T8 自探针同时要求「`rm` 必败 + 父目录 rename 成功」，不成立才退到 ACL deny DELETE（同样门槛）。
 - 2026-11-24：规模算术不一致——设计 A §7.1 合计约 527，但按其用例清单（490 + 45 helper + 抽取净增约 6）应为约 541；本计划按 470–560 重估并给裁剪阶梯（超 560 时依次把 T3 锁观察并入 T1、压缩 T5 反例清单、压缩 T8 探针文案，不删 AC 覆盖）。本机 windows 文件基线 `tests 15 / pass 7 / skipped 8 / fail 0`，追加 9 条后预期 `24 / 7 / 17 / 0`（`native` 门本机全跳不是造假绿，lane 判定只在 win32 生效）。
 
 ## Decision Log
@@ -206,6 +213,9 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 - 2026-11-24 / r681：T9 采用三分支（init 不可用 / `worktree add` 不可用 / 全可用）且都含真实断言、禁止 skip。Rationale：设计 A 只覆盖两分支；本机 probe 证明 2.56.1 支持 reftable worktree，但 hosted 构建差异必须由日志回答而不是靠假设。
 - 2026-11-24 / r681：部分删除的登记 token 由测试独立回读决定，不写死平台顺序。Rationale：见 Surprises 第 3 条；这样断言仍具判别力且不会因 Windows 删除顺序差异变成假红/假绿。
 - 2026-11-24 / r681：机制不可用时允许换**真实** OS 机制（ACL deny / 目录 cwd），不允许 mock/skip；两者都不可用则记 blocked 证据并保持 `#681` OPEN。Rationale：Lead 裁决「不降级安全门」，替代真实机制不降低断言强度（Q1 裁决确认，见 2026-11-24 Lead 裁决条目）。
+- 2026-11-24 / impl-681：T6 主检出用例改用 `allowedRoot: f.root`；Rationale 见 Surprises（Windows 夹具几何），身份拒绝语义不变（仍须 `invalid_input` + 点名主检出）。
+- 2026-11-24 / impl-681：T8 主机制 = `FileShare.Read` 的独占写/删除句柄 + 双事实自探针；ACL deny DELETE 只在探针不成立时启用。Rationale：真实 OS 拒绝，且不阻断只读干净门（Q1 授权范围内）。
+- 2026-11-24 / impl-681：判别性 RED 用未提交的 ungated 副本 + 产品变异完成，不把平台门移除提交。Rationale：TDD 证据留在本计划 Progress 与运行态证据，不牺牲 Windows lane 的真实性。
 - 2026-11-24 / Lead 裁决：产品修复仅在 hosted 复现真实失败时进行，≤120 技术行、不动 Host ABI/依赖、不削弱拒绝与诚实分类；否则停止并报告。本计划把该阈值写成 Batch 3 的硬规则。
 - 2026-11-24 / r681：文档只改 `tests/integration/README.md` 1 行 + `docs/README.md` 索引，不写 `docs/development/ci.md`（#679 owner 独占）；PR body 解释 marker 语义；归档在 PR 内完成（状态 Completed、移入 `docs/exec-plan/completed/` 并更新索引），沿用 PR671 的 `520ef1d7` 先例，合并仍由人类决定。
 - 2026-11-24 / r681（独立评审上下文）：本计划由独立收敛评审上下文（`r681`）依据两份独立设计与 `main@eadf4901` 仓库事实收敛，未复用设计者推理；实现者须用独立上下文执行，对抗验收另行起上下文（不复用实现者结论代替证据）。
@@ -237,3 +247,4 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 
 - 2026-11-24 / r681（收敛评审）：初稿。读取 issue #681/#678、`AGENTS.md`、`PLANS.md`、`docs/development/workflow.md`、`docs/review/README.md`、`docs/development/ci.md`、两份独立设计 A/B 与 `main@eadf4901` 代码/本机 probe 后收敛：采用 Lead 裁决的 A1，统一 9 条用例与 AC 映射、机制替代与校准规则、登记读数的回读式断言、T9 三分支、预算裁剪阶梯与 blocked/授权阶梯，并剔除 B 的新文件/新契约测试与 C/D 方案。
 - 2026-11-24 / Lead 批准执行：状态改为 Active；删除仅评审用附录（Reviewer Handoff）并把 Q1–Q4 裁决写入 Decision Log；工作树路径校正为 `.worktrees/iteration12-windows-worktree-removal`；Batch 0 记录开工门回读（PR #689 @ `66da5841` 的 Windows Native pass 与 `files=4`）。
+- 2026-11-24 / Batch 1：记录基线与抽取后计数、9 条用例结构、ungated 判别分类、四个产品变异 KILLED 与 475/240 规模；补 T6 允许根与 T8 句柄共享模式两条 Discovery。
