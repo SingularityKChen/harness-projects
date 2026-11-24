@@ -70,7 +70,7 @@ export async function createComposedExecutionPlatform() {
     })))
     const policy = hostStoragePolicy(catalog), workspaceId = '00000000-0000-4000-8000-000000000282'
     storage = createSqliteStorage(dataPath, policy)
-    const core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture' }, providers: table, storage })
+    const core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture' }, providers: { ...table, storage } })
     await storage.putBindingConfiguration({ ref: { workspaceId, bindingId: 'planning-browser', domain: 'planning' }, configuration: { projectNodeId: providers.planning.state.projects[0].ref.externalId } })
     await storage.transaction(tx => registerRepository(tx, defaultIdFactory, workspaceId, REPOSITORY, [local.bindingId, repository.bindingId]))
     const itemId = (await core.queries.listPlanningItems()).find(item => item.content.title === '规划项 issue-1').entityId

@@ -14,10 +14,16 @@ import { controllableClock } from './local-git-fixture.js'
 const dir = mkdtempSync(join(tmpdir(), 'request-binding-')); let files = 0
 const handles = []; after(() => { for (const s of handles) { try { s.close() } catch {} } rmSync(dir, { recursive: true, force: true }) })
 const sqlite = (path = join(dir, `${files++}.sqlite`)) => { const s = createSqliteStorage(path); handles.push(s); return s }
+/** world 形组装（#632）：storage 只经 provider 表进入 core；w.storage 会在 reopen 后替换，组装时必须读实时值；over.storage 覆写本次 Storage。 */
+const depsOf = (w, over = {}) => {
+  const { storage, ...rest } = w
+  const { storage: overrideStorage, providers = w.providers, ...extra } = over
+  return { ...rest, ...extra, providers: { ...providers, storage: overrideStorage ?? storage } }
+}
 async function setup(kind) {
   const providers = createFakeProviders(); const storage = kind === 'SQLite' ? sqlite() : providers.storage
   const workspace = { id: 'request-binding', name: 'request binding' }; const time = controllableClock()
-  const options = { providers, storage, workspace, clock: time.clock }; const core = await composeCore(options)
+  const options = { providers, storage, workspace, clock: time.clock }; const core = await composeCore(depsOf(options))
   const items = (await core.queries.listPlanningItems()).filter((v) => v.content.contentKind === 'work_item').map((v) => v.entityId)
   const request = { task: 'Synthetic explicit task', workItemId: items[0], repositoryId: 'repo-alpha', actor: { kind: 'agent', id: 'one' }, idempotencyKey: 'first' }
   return { ...options, core, items, request, time, initial: [providers.development.state.branches.length, providers.development.state.worktrees.length, providers.execution.state.runs.length] }
@@ -66,7 +72,7 @@ for (const kind of ['Fake', 'SQLite']) {
   test(`${kind}: admitted route stays frozen through supply when repository routing changes after commit`, async () => {
     const w = await setup(kind); await start(w)
     const d = w.providers.development; const bindingId = d.gate.bindingId; const extra = createFakeDevelopmentProvider({ bindingId: 'after-admission' })
-    const core = await composeCore({ ...w, providers: { ...w.providers, development: [d, extra] } })
+    const core = await composeCore(depsOf(w, { providers: { ...w.providers, development: [d, extra] } }))
     const identity = await w.storage.findExternalIdentity(bindingId, 'repository', 'repo-alpha')
     const transaction = w.storage.transaction.bind(w.storage); let changed = false; let foreignCalls = 0; const targets = []
     for (const key of ['createBranch', 'createWorktree']) {
@@ -97,7 +103,7 @@ for (const kind of ['Fake', 'SQLite']) {
     conflict(await start(w, { ...patch, actor: { kind: 'a', id: 'b"\\中|c' } }))
     conflict(await start(w, { ...patch, worktreePath: '.worktrees/a|b"/中' }))
     const first = await w.storage.findMutationAttempt(w.workspace.id, 'first')
-    const workspace = { id: 'independent-workspace', name: 'independent' }; const other = await composeCore({ ...w, workspace })
+    const workspace = { id: 'independent-workspace', name: 'independent' }; const other = await composeCore(depsOf(w, { workspace }))
     assert.equal((await start(w, { branchName: 'work/independent', worktreePath: '.worktrees/independent' }, other)).writeState, 'saved')
     assert.deepEqual(await w.storage.findMutationAttempt(w.workspace.id, 'first'), first)
     assert.equal(JSON.parse((await w.storage.findMutationAttempt(workspace.id, 'first')).requestFingerprint)[1], workspace.id)
@@ -123,15 +129,15 @@ for (const kind of ['Fake', 'SQLite']) {
   })
   test(`${kind}: replay requires the original route while create-readonly permits observation`, async () => {
     const w = await setup(kind); await start(w); const external = counts(w)
-    const readonly = await composeCore({ ...w, policy: { [CapabilityKey.DevelopmentBranchCreate]: AccessLevel.ReadOnly, [CapabilityKey.DevelopmentWorktreeCreate]: AccessLevel.ReadOnly } })
+    const readonly = await composeCore(depsOf(w, { policy: { [CapabilityKey.DevelopmentBranchCreate]: AccessLevel.ReadOnly, [CapabilityKey.DevelopmentWorktreeCreate]: AccessLevel.ReadOnly } }))
     assert.equal((await start(w, {}, readonly)).writeState, 'saved')
     const extra = createFakeDevelopmentProvider({ bindingId: 'extra-development' })
-    const added = await composeCore({ ...w, providers: { ...w.providers, development: [w.providers.development, extra] } })
+    const added = await composeCore(depsOf(w, { providers: { ...w.providers, development: [w.providers.development, extra] } }))
     assert.equal((await start(w, {}, added)).writeState, 'saved', 'unrelated mount cannot alter identity')
     const identity = await w.storage.findExternalIdentity(w.providers.development.gate.bindingId, 'repository', 'repo-alpha')
     await w.storage.putExternalIdentity({ id: 'ambiguous-alias', entityId: identity.entityId, bindingId: 'extra-development', externalKind: 'repository', externalId: 'repo-alpha', role: 'alias' })
     const ambiguous = local(w.storage); conflict(await start(w, {}, added), 'idempotency_target_changed'); assert.equal(local(w.storage), ambiguous)
-    const fresh = createFakeProviders(); const moved = await composeCore({ ...w, providers: { ...fresh, planning: w.providers.planning } })
+    const fresh = createFakeProviders(); const moved = await composeCore(depsOf(w, { providers: { ...fresh, planning: w.providers.planning } }))
     const before = local(w.storage); conflict(await start(w, {}, moved), 'idempotency_target_changed'); assert.equal(local(w.storage), before); assert.deepEqual(counts(w), external)
     assert.equal((await start(w)).writeState, 'saved')
   })
@@ -141,14 +147,14 @@ for (const stage of ['pending', 'branch ack', 'settled']) test(`SQLite: close/re
   const method = stage === 'pending' ? 'createBranch' : 'createWorktree'; const create = d[method].bind(d)
   if (stage !== 'settled') d[method] = async () => { throw Error('process interruption') }
   if (stage === 'settled') await start(w); else assert.equal((await start(w)).writeState, 'unknown')
-  const row = await w.storage.findMutationAttempt(w.workspace.id, 'first'); w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w)
+  const row = await w.storage.findMutationAttempt(w.workspace.id, 'first'); w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(depsOf(w))
   assert.deepEqual(await w.storage.findMutationAttempt(w.workspace.id, 'first'), row)
   const before = local(w.storage); conflict(await start(w, { task: 'changed after restart' })); conflict(await start(w, { workItemId: w.items[1] })); assert.equal(local(w.storage), before)
   w.time.advance(60_000); const external = counts(w); assert.equal((await start(w)).writeState, stage === 'settled' ? 'saved' : 'unknown'); assert.deepEqual(counts(w), external)
   d[method] = create; if (stage !== 'settled') { assert.equal((await start(w, { idempotencyKey: 'recover' })).writeState, 'unknown'); assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'recover'), undefined) }
 })
 test('SQLite: dual handles read no attempt before cross-context admission; one wins, loser cannot mutate', async () => {
-  const w = await setup('SQLite'); const second = sqlite(w.storage.location); const other = await composeCore({ ...w, storage: second })
+  const w = await setup('SQLite'); const second = sqlite(w.storage.location); const other = await composeCore(depsOf(w, { storage: second }))
   const readers = [gate(), gate()]; const release = [gate(), gate()]; const branchEntered = gate(); const branchRelease = gate()
   const d = w.providers.development; const get = d.getRepository.bind(d); let read = 0; let branches = 0
   d.getRepository = async (...args) => { const n = read++; if (n < 2) { readers[n].release(); await release[n].wait } return get(...args) }
@@ -177,7 +183,7 @@ test('SQLite: close/reopen 之后同 key 重放先对账再收敛，不重发已
   assert.equal(calls, 1)
   assert.equal(d.state.branches.filter((branch) => branch.name === name).length, 1, '前置条件：分支已经真的落盘')
   const row = await w.storage.findMutationAttempt(w.workspace.id, 'first')
-  w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w)
+  w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(depsOf(w))
   assert.deepEqual(await w.storage.findMutationAttempt(w.workspace.id, 'first'), row, '关库重开保留未决意图')
   let probes = 0; const list = d.listBranches.bind(d)
   d.listBranches = async (input) => { probes += 1; return list(input) }
@@ -217,7 +223,7 @@ for (const window of [{ name: '认领', commits: 1 }, { name: '分支回填', co
     await start(w).then((crashed) => assert.equal(crashed.writeState, 'unknown', '提交后崩溃：本次答复停在 unknown'), (error) => assert.match(error.message, /进程在提交后退出/, '提交后崩溃：拒绝必须来自注入的崩溃')).finally(restore)
     const contextId = contextIdFor(w.workspace.id, w.request.workItemId, 'repo-alpha')
     assert.equal((await w.storage.getExecutionContext(contextId)).worktreeExternalId, originalPath, '被采纳的工作树身份必须与认领 / 分支回填写入一起耐久，不得留在进程内')
-    w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w)
+    w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(depsOf(w))
     defaultTarget = '.worktrees/new-default'; w.time.advance(60_000)
     const resumed = await start(w)
     assert.deepEqual([resumed.writeState, resumed.status], ['saved', 'ready'], '关库重开 + 默认目标变化后必须按持久身份收敛')
@@ -236,7 +242,7 @@ for (const method of ['createBranch', 'createWorktree']) {
     assert.equal(calls, 1)
     const external = counts(w), attemptBefore = await w.storage.findMutationAttempt(w.workspace.id, 'first')
     assert.deepEqual([attemptBefore.state, attemptBefore.externalIntent.state], ['unknown', 'unknown'], '前置条件：落库的是可对账的未决行')
-    const readonly = await composeCore({ ...w, policy: { [CapabilityKey.DevelopmentWorktreeCreate]: AccessLevel.ReadOnly } })
+    const readonly = await composeCore(depsOf(w, { policy: { [CapabilityKey.DevelopmentWorktreeCreate]: AccessLevel.ReadOnly } }))
     const contextId = contextIdFor(w.workspace.id, w.request.workItemId, 'repo-alpha')
     const contextBefore = await w.storage.getExecutionContext(contextId), slotBefore = await w.storage.findMutationAttempt(w.workspace.id, 'first')
     const denied = await start(w, {}, readonly)
@@ -248,7 +254,7 @@ for (const method of ['createBranch', 'createWorktree']) {
     assert.equal(blocked.writeState, 'unknown', '恢复前新 key 仍被未决行保守阻挡')
     assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'fresh-before-recovery'), undefined)
     assert.deepEqual(counts(w), external, '被保守阻挡的新 key 不得发起外部写')
-    w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w); w.time.advance(60_000)
+    w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(depsOf(w)); w.time.advance(60_000)
     const resumed = await start(w)
     assert.deepEqual([resumed.writeState, resumed.status], ['saved', 'ready'], '写权限恢复 + 关库重开后同 key 必须收敛')
     assert.deepEqual(counts(w), [1, 1, 1], '恢复后至多一份分支 / 工作树 / run')
@@ -276,7 +282,7 @@ for (const method of ['preflight', 'listBranches']) {
     assert.deepEqual([replay.writeState, replay.error?.code], ['failed', method === 'preflight' ? 'unavailable' : 'permission_denied'], '失败语义诚实：保留读失败自身 code')
     assert.equal(record.worktreeExternalId, A, '普通读取/预检失败也不得清掉已对账 durability 的句柄')
     assert.equal((await w.storage.findMutationAttempt(w.workspace.id, 'first')).state, 'failed', '已结算失败行如实落 failed')
-    assert.equal((await start(w)).writeState, 'failed', '同 key 已结算失败逐字回放，不重新尝试（I3）'); recover(); w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w); w.time.advance(60_000)
+    assert.equal((await start(w)).writeState, 'failed', '同 key 已结算失败逐字回放，不重新尝试（I3）'); recover(); w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(depsOf(w)); w.time.advance(60_000)
     const resumed = await start(w, { idempotencyKey: 'after-transient' })
     assert.deepEqual([resumed.writeState, resumed.status], ['saved', 'ready'], '新 key 必须用持久句柄 A 收敛')
     assert.deepEqual(d.state.worktrees.map((tree) => tree.path), [A], '只允许已采纳的 A，不得因默认目标漂移产生 B')

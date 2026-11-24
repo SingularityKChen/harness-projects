@@ -48,7 +48,7 @@ for (const [name, open] of [['Fake', createFakeStorage], ['SQLite', () => create
         return result
       }
     } })
-    const core = await composeCore({ workspace: { id, name }, providers, storage: wrap(storage), clock: () => T(1) })
+    const core = await composeCore({ workspace: { id, name }, providers: { ...providers, storage: wrap(storage) }, clock: () => T(1) })
     await seedIdentity(storage, { id: 'repo-identity', entityId: 'repo-entity', bindingId: providers.development.gate.bindingId, externalKind: 'repository', externalId: 'repo-old', role: 'primary' }, 'repository')
     await storage.putRepository({ id: 'repo-old', workspaceId: id, externalIdentityId: 'repo-identity' })
     const before = await storage.currentRevision(id)

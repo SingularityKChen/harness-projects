@@ -13,7 +13,7 @@ import {
   ProjectErrorCode, type ProjectError, type WorkspaceId,
 } from '@harness-projects/domain'
 
-/** 注入表：每个能力域一个可选 provider（Development 可以是多个），外加本地 storage；core 不 import 任何实现。 */
+/** 注入表：每个能力域一个可选 provider（Development 可以是多个），外加本地 storage（#632 起是 Storage 的唯一装配入口）；core 不 import 任何实现。 */
 export interface CoreProviderTable {
   readonly planning?: PlanningProvider
   /** 单个与单元素数组同义；空数组即没有挂载。唯一挂载是默认，多个挂载一律非默认、命令按仓库路由（`development-route.ts`）。 */
@@ -21,6 +21,7 @@ export interface CoreProviderTable {
   readonly delivery?: DeliveryProvider
   readonly execution?: ExecutionProvider
   readonly executionFallback?: ExecutionProvider
+  /** 唯一的 Storage 装配入口：一个组合一个实例；不属于外部域挂载（`SLOT_NAMES` 只把它当作合法注入键）。 */
   readonly storage?: Storage
 }
 

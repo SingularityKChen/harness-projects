@@ -15,14 +15,14 @@ for (const [name, open] of [['Fake', createFakeStorage], ['SQLite', () => create
   test(`${name}: switch serves only the enabled planning mount (#202)`, async (t) => {
     const storage = open(), id = newWorkspaceId(), providers = createFakeProviders(), clock = () => CLOCK
     t.after(() => storage.close?.())
-    const old = await composeCore({ workspace: { id, name: 'switch' }, providers, storage, clock })
+    const old = await composeCore({ workspace: { id, name: 'switch' }, providers: { ...providers, storage }, clock })
     const before = await old.queries.listPlanningItems(), oldBindingId = providers.planning.bindingId
     assert.ok(before.length > 0, '前置：旧来源有已提交投影')
     assert.ok(before.every((view) => view.content.identity.bindingId === oldBindingId), '前置：旧投影来自旧挂载')
     const mount = (await storage.listProviderBindings(id)).find((row) => row.id === oldBindingId)
     await storage.putProviderBinding({ ...mount, enabled: false, isDefault: false })
     const planning = createFakePlanningProvider({ fixture: FakeFixtureName.DraftBacked })
-    const core = await composeCore({ workspace: { id, name: 'switch' }, providers: { ...providers, planning }, storage, clock })
+    const core = await composeCore({ workspace: { id, name: 'switch' }, providers: { ...providers, planning, storage }, clock })
     const mounts = (await storage.listProviderBindings(id)).filter((row) => row.domain === 'planning')
     assert.deepEqual(mounts.filter((row) => row.enabled).map((row) => row.id), [planning.bindingId], '前置：恰好一个启用规划挂载')
     assert.deepEqual(mounts.filter((row) => !row.enabled).map((row) => row.id), [oldBindingId], '前置：旧挂载已停用')
@@ -86,7 +86,7 @@ async function sharedSourceWorld(name, t, clock = () => CLOCK) {
         }
       }
       const core = await composeCore({ workspace: { id, name: 'shared source', project: fixtureProjectRef(source.provider.bindingId), planningFieldMapping: FIELD_MAPPING },
-        providers: { ...providers, planning: source.port }, storage, clock })
+        providers: { ...providers, planning: source.port, storage }, clock })
       assert.deepEqual((await storage.listProviderBindings(id)).filter((row) => row.domain === 'planning' && row.enabled).map((row) => row.id),
         [source.provider.bindingId], '前置：唯一启用来源对应当前 provider 和有效项目')
       return core

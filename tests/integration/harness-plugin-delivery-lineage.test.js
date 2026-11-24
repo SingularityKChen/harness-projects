@@ -70,7 +70,7 @@ test('real Core route denial masks protected CR through Host and section; pure q
   dev.state.changeRequests = [{ repository, ref: refOf(dev.gate.bindingId, 'change_request', 'lineage-pr'), number: 1, title: 'Last PR', body: '', state: 'open', head: branch, headBranch: branch, headCommit: 'sha-1', sourceVersion: 'sha-1', reviewState: 'unknown' }]
   for (const row of providers.delivery.state.runs) row.branch = branch
   const compose = async () => {
-    const core = await composeCore({ workspace: { id: h.workspaceId, name: 'Lineage' }, storage: h.storage, providers: { ...providers, planning: wrap(providers.planning), execution: wrap(providers.execution), development: wrap(dev), delivery: wrap(providers.delivery) } })
+    const core = await composeCore({ workspace: { id: h.workspaceId, name: 'Lineage' }, providers: { ...providers, planning: wrap(providers.planning), execution: wrap(providers.execution), development: wrap(dev), delivery: wrap(providers.delivery), storage: h.storage } })
     h.host.controller.queries.getDeliveryProjection = (query) => core.queries.getDeliveryProjection(query)
     h.host.controller.commands.refreshDeliveryFacts = async (query) => ({ writeState: 'local_only', value: await core.commands.refreshDeliveryFacts(query) })
     calls.length = 0

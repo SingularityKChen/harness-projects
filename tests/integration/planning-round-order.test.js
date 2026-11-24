@@ -25,8 +25,8 @@ for (const [label, makeStorage] of STORAGES) {
     const storage = makeStorage()
     const firstWorkspace = { id: newWorkspaceId(), name: `planning-round-shared-a/${label}`, statusPolicy: StatusPolicy.ProviderAuthoritative, project: fixtureProjectRef(providers.planning.bindingId) }
     const secondWorkspace = { id: newWorkspaceId(), name: `planning-round-shared-b/${label}`, statusPolicy: StatusPolicy.ProviderAuthoritative, project: fixtureProjectRef(providers.planning.bindingId) }
-    const first = await createContext({ workspace: firstWorkspace, providers, storage })
-    const second = await createContext({ workspace: secondWorkspace, providers, storage })
+    const first = await createContext({ workspace: firstWorkspace, providers: { ...providers, storage } })
+    const second = await createContext({ workspace: secondWorkspace, providers: { ...providers, storage } })
     assert.ok(first && second, `${label}：两个 workspace 必须共享同一 provider 但各自创建 context`)
 
     const item = providers.planning.state.items.find((candidate) => candidate.content.kind === ContentKind.WorkItem)
@@ -78,7 +78,7 @@ for (const [label, makeStorage] of STORAGES) {
     const directory = mkdtempSync(join(tmpdir(), 'harness-planning-round-'))
     const location = label === 'SQLite' ? join(directory, 'round.sqlite') : undefined
     const storage = location === undefined ? makeStorage() : createSqliteStorage(location)
-    const context = await createContext({ workspace, providers, storage })
+    const context = await createContext({ workspace, providers: { ...providers, storage } })
     assert.ok(context)
     assert.equal((await bootstrapWorkspace(context)).ok, true)
     assert.equal((await bootstrapWorkspace(context)).ok, true)
@@ -104,7 +104,7 @@ for (const [label, makeStorage] of STORAGES) {
       reopened = createFakeStorage(exportFakeStorageState(storage))
     }
     assert.deepEqual(await reopened.getPlanningSyncRound(workspace.id, providers.planning.bindingId, 'planning.project'), round)
-    const reopenedContext = await createContext({ workspace, providers, storage: reopened })
+    const reopenedContext = await createContext({ workspace, providers: { ...providers, storage: reopened } })
     assert.ok(reopenedContext)
     assert.equal((await bootstrapWorkspace(reopenedContext)).ok, true, `${label}：重启后的新实例必须能接管下一轮`)
     const takenOver = await reopened.getPlanningSyncRound(workspace.id, providers.planning.bindingId, 'planning.project')
@@ -117,7 +117,7 @@ for (const [label, makeStorage] of STORAGES) {
     const providers = createFakeProviders()
     const storage = makeStorage()
     const workspace = { id: newWorkspaceId(), name: `planning-round/${label}`, statusPolicy: StatusPolicy.ProviderAuthoritative, project: fixtureProjectRef(providers.planning.bindingId) }
-    const context = await createContext({ workspace, providers, storage })
+    const context = await createContext({ workspace, providers: { ...providers, storage } })
     assert.ok(context, `${label}：必须能创建 core context`)
     const before = await bootstrapWorkspace(context)
     assert.equal(before.ok, true, `${label}：先建立已确认基线`)
@@ -161,7 +161,7 @@ for (const [label, makeStorage] of STORAGES) {
     const providers = createFakeProviders()
     const storage = makeStorage()
     const workspace = { id: newWorkspaceId(), name: `planning-round-failure/${label}`, statusPolicy: StatusPolicy.ProviderAuthoritative, project: fixtureProjectRef(providers.planning.bindingId) }
-    const context = await createContext({ workspace, providers, storage })
+    const context = await createContext({ workspace, providers: { ...providers, storage } })
     assert.ok(context, `${label}：必须能创建 core context`)
     const before = await bootstrapWorkspace(context)
     assert.equal(before.ok, true, `${label}：先建立已确认基线`)
@@ -246,7 +246,7 @@ for (const [label, makeStorage] of STORAGES) {
     const providers = createFakeProviders()
     const storage = makeStorage()
     const workspace = { id: newWorkspaceId(), name: `planning-round-new-failure/${label}`, statusPolicy: StatusPolicy.ProviderAuthoritative, project: fixtureProjectRef(providers.planning.bindingId) }
-    const context = await createContext({ workspace, providers, storage })
+    const context = await createContext({ workspace, providers: { ...providers, storage } })
     assert.ok(context, `${label}：必须能创建 core context`)
     assert.equal((await bootstrapWorkspace(context)).ok, true, `${label}：先建立已确认基线`)
     const original = providers.planning.listPlanningItems.bind(providers.planning)

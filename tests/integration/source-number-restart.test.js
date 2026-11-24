@@ -39,7 +39,7 @@ test('production provider → SQLite reopen → controller/client → default li
   const ids = { ...defaultIdFactory, entityId: () => `00000449-0450-4449-8450-${String(++sequence).padStart(12,'0')}` }
   let storage = createSqliteStorage(path)
   try {
-    let context = await createContext({workspace,providers:{planning},storage,ids})
+    let context = await createContext({workspace,providers:{planning, storage},ids})
     assert.equal((await bootstrapWorkspace(context)).ok,true)
     const before = await createQueries(context).listPlanningItems()
     const issue = before.find(v => v.content.identity.externalId === 'issue-one')
@@ -127,7 +127,7 @@ test('Core rejects inconsistent PR dual numbers before committing any row', asyn
   }
   const storage=createSqliteStorage(':memory:')
   try {
-    const context=await createContext({workspace:{id:'conflict',name:'Conflict'},providers:{planning},storage})
+    const context=await createContext({workspace:{id:'conflict',name:'Conflict'},providers:{planning, storage}})
     const result=await bootstrapWorkspace(context)
     assert.equal(result.ok,false)
     assert.deepEqual(await storage.listPlanningProjections('conflict'),[])

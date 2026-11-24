@@ -19,7 +19,7 @@ async function fixture(t, sqlite = false, providers = createFakeProviders()) {
   const root = sqlite ? await mkdtemp(path.join(tmpdir(), 'delivery-access-')) : undefined
   const storage = sqlite ? createSqliteStorage(path.join(root, 'project.sqlite')) : providers.storage
   t.after(async () => { if (sqlite) { storage.close(); await rm(root, { recursive: true, force: true }) } })
-  const core = await composeCore({ workspace, providers, storage })
+  const core = await composeCore({ workspace, providers: { ...providers, storage } })
   const workItemId = (await core.queries.listPlanningItems()).find((row) => row.content.contentKind === 'work_item').entityId
   const scope = { workItemId, repositoryId: 'repo-alpha' }
   const started = await core.commands.startWork({ task: 'Synthetic explicit task', ...scope, actor: { kind: 'user' }, idempotencyKey: 'delivery-access' })
@@ -165,7 +165,7 @@ test('new Core owner preserves a storage-failed denial over the same SQLite', as
   assert.equal(result.applied, false)
   assert.equal(nodes(await h.core.queries.getDeliveryProjection(h.scope), 'pipeline_run').length, 0)
   h.storage.transaction = transaction
-  const newCore = await composeCore({workspace,providers:h.providers,storage:h.storage})
+  const newCore = await composeCore({workspace,providers:{ ...h.providers, storage: h.storage }})
   const view = await newCore.queries.getDeliveryProjection(h.scope)
   t.diagnostic(JSON.stringify({applied:result.applied,newOwnerPipelineNodes:nodes(view,'pipeline_run').length,newOwnerPipelineFreshness:view.freshness.find(row=>row.kind==='pipeline_run')}))
   assert.equal(nodes(view,'pipeline_run').length,0,'recomposition must not turn a failed redaction into allowed historical facts')
@@ -201,23 +201,23 @@ test('historical delivery facts remain unavailable after creating a fresh Core o
  h.providers.delivery.listPipelineRuns = async () => denied();
  await h.core.commands.refreshDeliveryFacts(h.scope);
  assert.equal(nodes(await h.core.queries.getDeliveryProjection(history),'pipeline_run').length,0);
- const reopened = await composeCore({workspace,providers:h.providers,storage:h.storage});
+ const reopened = await composeCore({workspace,providers:{ ...h.providers, storage: h.storage }});
  const view = await reopened.queries.getDeliveryProjection(history);
  assert.equal(nodes(view,'pipeline_run').length,0,'a new Core owner cannot restore an unverified historical collection');
 });
 
 test('durable health survives close/reopen, cross-owner denial, offline and same-scope recovery', async (t) => {
   const h = await fixture(t, true), original = h.providers.delivery.listPipelineRuns.bind(h.providers.delivery), location = h.storage.location
-  const second = await composeCore({ workspace, providers: h.providers, storage: h.storage })
+  const second = await composeCore({ workspace, providers: { ...h.providers, storage: h.storage } })
   h.providers.delivery.listPipelineRuns = async () => denied(); await second.commands.refreshDeliveryFacts(h.scope)
   assert.equal(nodes(await h.core.queries.getDeliveryProjection(h.scope), 'pipeline_run').length, 0, 'already existing owner observes persisted newer denial')
   h.storage.close(); const storage = createSqliteStorage(location); t.after(() => storage.close())
-  const reopened = await composeCore({ workspace, providers: h.providers, storage })
+  const reopened = await composeCore({ workspace, providers: { ...h.providers, storage } })
   assert.equal(nodes(await reopened.queries.getDeliveryProjection(h.scope), 'pipeline_run').length, 0)
   h.providers.delivery.listPipelineRuns = original; await reopened.commands.refreshDeliveryFacts(h.scope)
   assert.ok(nodes(await reopened.queries.getDeliveryProjection(h.scope), 'pipeline_run').length)
   h.providers.delivery.listPipelineRuns = async () => unavailable(); await reopened.commands.refreshDeliveryFacts(h.scope)
-  const offline = await composeCore({ workspace, providers: h.providers, storage }), view = await offline.queries.getDeliveryProjection(h.scope)
+  const offline = await composeCore({ workspace, providers: { ...h.providers, storage } }), view = await offline.queries.getDeliveryProjection(h.scope)
   assert.ok(nodes(view, 'pipeline_run').length && nodes(view, 'pipeline_run').every((node) => node.stale), 'ordinary offline retains authorized cache across new owners')
 })
 test('failed health observation leaves a durable incomplete-read marker; read-start failure sends no Provider request', async (t) => {
@@ -230,7 +230,7 @@ test('failed health observation leaves a durable incomplete-read marker; read-st
   const transaction = h.storage.transaction.bind(h.storage)
   h.storage.transaction = (work) => transaction((tx) => work(new Proxy(tx, { get(object, key) { return key === 'putSyncCursor' ? async (record) => { if (record.lastErrorCode === 'permission_denied') throw new Error('health-result-fault'); return object[key](record) } : typeof object[key] === 'function' ? object[key].bind(object) : object[key] } })))
   await h.core.commands.refreshDeliveryFacts(h.scope); h.storage.transaction = transaction
-  const fresh = await composeCore({ workspace, providers: h.providers, storage: h.storage })
+  const fresh = await composeCore({ workspace, providers: { ...h.providers, storage: h.storage } })
   assert.equal(nodes(await fresh.queries.getDeliveryProjection(h.scope), 'pipeline_run').length, 0)
   h.providers.delivery.listPipelineRuns = createFakeProviders().delivery.listPipelineRuns.bind(h.providers.delivery)
   await fresh.commands.refreshDeliveryFacts(h.scope)
@@ -263,7 +263,7 @@ test('read-start rollback cannot leave phantom ownership that hides another owne
   t.after(() => release.resolve())
   h.storage.transaction = (work) => transaction(async (tx) => { await work(tx); throw new Error('begin-ack-rollback') })
   assert.equal((await h.core.commands.refreshDeliveryFacts(h.scope)).applied, false); h.storage.transaction = transaction
-  const other = await composeCore({ workspace, providers: h.providers, storage: h.storage })
+  const other = await composeCore({ workspace, providers: { ...h.providers, storage: h.storage } })
   h.providers.development.listBranches = async () => { entered.resolve(); await release.promise; return unavailable() }
   const refresh = other.commands.refreshDeliveryFacts(h.scope); await entered.promise
   assert.equal(nodes(await h.core.queries.getDeliveryProjection(h.scope), 'pipeline_run').length, 0, 'a rolled-back marker cannot claim another owner pending read')
@@ -279,7 +279,7 @@ const within = (promise, ms, message) => new Promise((resolve, reject) => {
 for (const sqlite of [false, true]) test(`${sqlite ? 'SQLite' : 'Memory'} Core read retries after another owner commits Delivery denial`, async (t) => {
   const h = await fixture(t, sqlite)
   assert.ok(nodes(await h.core.queries.getDeliveryProjection(h.scope), 'pipeline_run').length)
-  const other = await composeCore({ workspace, providers: h.providers, storage: h.storage })
+  const other = await composeCore({ workspace, providers: { ...h.providers, storage: h.storage } })
   const getSyncCursor = h.storage.getSyncCursor.bind(h.storage), entered = deferred(), release = deferred()
   let held = false
   h.storage.getSyncCursor = async (...args) => {
@@ -310,7 +310,7 @@ for (const sqlite of [false, true]) test(`${sqlite ? 'SQLite roots' : 'Memory'} 
     if (!sqlite) return h.storage
     const storage = createSqliteStorage(h.storage.location); t.after(() => storage.close()); return storage
   }
-  const owner = storage => composeCore({ workspace, providers: h.providers, storage })
+  const owner = storage => composeCore({ workspace, providers: { ...h.providers, storage } })
   const other = await owner(workspaceStorage()), original = h.providers.development.getRepository.bind(h.providers.development)
   assert.ok(nodes(await other.queries.getDeliveryProjection(h.scope), 'pipeline_run').length, 'successful operation reads leave no pending marker')
   const request = { task: 'Synthetic explicit task', ...h.scope, workItemId: item, actor: { kind: 'user' }, idempotencyKey: 'operation-read-denial' }
@@ -353,7 +353,7 @@ for (const sqlite of [false, true]) for (const refusals of [1, 2]) test(`${sqlit
   await h.core.commands.startWork(request); assert.equal(calls, 0, 'marker ack is required before the actual repository read')
   h.storage.transaction = transaction
   const held = holdFirst(dev, 'listBranches'), older = h.core.commands.refreshDeliveryFacts(h.scope); await held.waiting
-  const other = await composeCore({ workspace, providers: h.providers, storage: h.storage })
+  const other = await composeCore({ workspace, providers: { ...h.providers, storage: h.storage } })
   const items = await otherWorkItems(h), entered = deferred(), release = deferred(); let deniedReads = 0, failures = 0
   dev.getRepository = async () => { if (++deniedReads === refusals) entered.resolve(); await release.promise; return denied() }
   const reads = items.slice(0, refusals).map((item, index) => other.commands.startWork({ ...request, workItemId: item.entityId, idempotencyKey: `denial-settlement-${index}` }))
@@ -366,7 +366,7 @@ for (const sqlite of [false, true]) for (const refusals of [1, 2]) test(`${sqlit
   h.storage.transaction = transaction; held.release(); await older
   const peerStorage = sqlite && refusals === 2 ? createSqliteStorage(h.storage.location) : h.storage
   if (peerStorage !== h.storage) t.after(() => peerStorage.close())
-  const reopened = await composeCore({ workspace, providers: h.providers, storage: peerStorage })
+  const reopened = await composeCore({ workspace, providers: { ...h.providers, storage: peerStorage } })
   assert.notEqual((await other.queries.getWorkspaceMetadata()).repositories[0].accessVersion, observedToken, 'a failed durable settlement still changes the protected detail access token')
   for (const core of [h.core, other, reopened]) assert.equal(nodes(await core.queries.getDeliveryProjection(h.scope), 'pipeline_run').length, 0)
   dev.getRepository = original
@@ -386,7 +386,7 @@ for (const sqlite of [false, true]) for (const refusals of [1, 2]) test(`${sqlit
 for (const sqlite of [false, true]) for (const confirmed of [false, true]) test(`${sqlite ? 'SQLite' : 'Memory'} older owned read cannot hide another owner marker and ordinary operation failure leaves no phantom pending${confirmed ? ' after full facts reset' : ''}`, async t => {
   const h = await fixture(t, sqlite), item = (await otherWorkItems(h))[0].entityId, dev = h.providers.development, oldRead = holdFirst(dev, 'listBranches')
   const refreshing = h.core.commands.refreshDeliveryFacts(h.scope); await oldRead.waiting
-  const other = await composeCore({ workspace, providers: h.providers, storage: h.storage })
+  const other = await composeCore({ workspace, providers: { ...h.providers, storage: h.storage } })
   if (confirmed) assert.equal((await other.commands.refreshDeliveryFacts(h.scope)).applied, true)
   const operation = holdFirst(dev, 'getRepository', unavailable())
   const starting = other.commands.startWork({ task: 'Synthetic explicit task', ...h.scope, workItemId: item, actor: { kind: 'user' }, idempotencyKey: 'ordinary-failed-operation' }); await operation.waiting
@@ -398,7 +398,7 @@ for (const sqlite of [false, true]) for (const confirmed of [false, true]) test(
     }
   } finally { operation.release(); oldRead.release() }
   assert.equal((await starting).confirmed, false); await refreshing
-  const reopened = await composeCore({ workspace, providers: h.providers, storage: h.storage })
+  const reopened = await composeCore({ workspace, providers: { ...h.providers, storage: h.storage } })
   for (const core of [h.core, other, reopened]) assert.ok(nodes(await core.queries.getDeliveryProjection(h.scope), 'pipeline_run').length, 'ordinary unavailable closes its marker without revoking authorized cache')
 })
 
@@ -408,7 +408,7 @@ for (const sqlite of [false, true]) for (const action of ['operation', 'facts'])
   const request = index => ({ task: 'Synthetic explicit task', ...h.scope, workItemId: items[index].entityId, actor: { kind: 'user' }, idempotencyKey: `late-denial-${index}` })
   const counts = [dev.state.branches.length, dev.state.worktrees.length, h.providers.execution.state.runs.length]
   const older = h.core.commands.startWork(request(0)); await held.waiting
-  const other = await composeCore({ workspace, providers: h.providers, storage: h.storage })
+  const other = await composeCore({ workspace, providers: { ...h.providers, storage: h.storage } })
   const next = action === 'operation' ? holdFirst(dev, 'getRepository') : undefined
   const newer = next ? other.commands.startWork(request(1)) : other.commands.refreshDeliveryFacts(h.scope)
   if (next) await next.waiting
@@ -420,7 +420,7 @@ for (const sqlite of [false, true]) for (const action of ['operation', 'facts'])
 })
 
 async function observationFixture(t, sqlite = false) {
-  const h = await fixture(t, sqlite), context = await createContext({ workspace, providers: h.providers, storage: h.storage })
+  const h = await fixture(t, sqlite), context = await createContext({ workspace, providers: { ...h.providers, storage: h.storage } })
   const route = await routeDevelopment(context, 'repo-alpha', 'development.worktree.create', 'write')
   assert.equal(route.ok, true)
   return { ...h, context, queries: createQueries(context), route, guarded: guardedDevelopmentReads(context, route) }

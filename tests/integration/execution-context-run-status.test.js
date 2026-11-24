@@ -14,7 +14,7 @@ for (const adapter of ['fake', 'sqlite']) test(`${adapter}: Controller runStatus
   const root = await mkdtemp(path.join(tmpdir(), 'execution-status-')); t.after(() => rm(root, { recursive: true, force: true }))
   const providers = createFakeProviders(), storage = adapter === 'fake' ? providers.storage : createSqliteStorage(path.join(root, 'data.sqlite'))
   t.after(() => storage.close?.())
-  const core = await composeCore({ workspace: { name: 'Execution' }, providers, storage }), controller = createController(core)
+  const core = await composeCore({ workspace: { name: 'Execution' }, providers: { ...providers, storage } }), controller = createController(core)
   const workItemId = (await core.queries.listPlanningItems()).find((item) => item.content.contentKind === 'work_item').entityId
   await core.commands.startWork({ task: 'Synthetic explicit task', workItemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'start' })
   const workspaceId = (await controller.baseline()).workspace.id, id = contextIdFor(workspaceId, workItemId, 'repo-alpha'), runId = runIdFor(id)

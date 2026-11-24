@@ -25,7 +25,7 @@ const REPOSITORY = 'repo-alpha'
 const REQUEST = { task: 'Synthetic explicit task', repositoryId: REPOSITORY, actor: { kind: 'agent' } }
 
 const compose = (providers, storage) =>
-  composeCore(storage === undefined ? { workspace: WORKSPACE, providers } : { workspace: WORKSPACE, providers, storage })
+  composeCore({ workspace: WORKSPACE, providers: storage === undefined ? providers : { ...providers, storage } })
 
 async function workItemIdOf(core) {
   const item = (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item') // redacted 条目的 kind 也是 work_item（issue-3），但没有可操作的规划条目，不能当开始工作的对象
@@ -244,7 +244,7 @@ async function readyOnce(makeStorage, idempotencyKey) {
   assert.equal((await core.commands.startWork({ ...REQUEST, workItemId, idempotencyKey })).writeState, WriteState.Saved)
   return { providers, storage, core, workItemId }
 }
-const recompose = (w, development, policy) => composeCore({ workspace: WORKSPACE, providers: { ...w.providers, development }, storage: w.storage, policy })
+const recompose = (w, development, policy) => composeCore({ workspace: WORKSPACE, providers: { ...w.providers, development, storage: w.storage }, policy })
 /** 规划种子里除 `skip` 之外的第一个工作项：换一个新工作项开始，而不是重放同一个。 */
 const anotherWorkItem = async (core, ...skip) =>
   (await core.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item' && !skip.includes(view.entityId)).entityId

@@ -28,7 +28,8 @@ const REPOSITORY = 'repo-alpha'
 const REQUEST = { task: 'Synthetic explicit task', repositoryId: REPOSITORY, actor: { kind: 'agent' } }
 const CHAIN_TYPES = ['tracks', 'has_worktree', 'derived_from', 'produced_by', 'runs_on']
 
-const compose = (providers, extra = {}) => composeCore({ workspace: WORKSPACE, providers, ...extra })
+const compose = (providers, { storage, ...extra } = {}) =>
+  composeCore({ workspace: WORKSPACE, providers: storage === undefined ? providers : { ...providers, storage }, ...extra })
 
 /** 摄入的唯一调用点：交付事实只经显式刷新命令写入（#222）；查询只读它提交的结果。返回刷新结果，不是投影——读投影另调查询。 */
 const ingest = (core, scope) => core.commands.refreshDeliveryFacts(scope)

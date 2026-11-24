@@ -17,7 +17,7 @@ async function workItemIdOf(core) {
 }
 
 const compose = (providers, storage, clock) => composeCore({
-  workspace: WORKSPACE, providers, ...(storage === undefined ? {} : { storage }), ...(clock === undefined ? {} : { clock }),
+  workspace: WORKSPACE, providers: storage === undefined ? providers : { ...providers, storage }, ...(clock === undefined ? {} : { clock }),
 })
 
 /** 可控时钟：租约过期由测试显式决定，不靠真实等待。 */

@@ -28,7 +28,7 @@ const query = (w, operationId) => createControllerQueries(w.core, 'provider').ge
 
 for (const change of ['planning-denied', 'planning-regranted', 'development-denied', 'projection-redacted', 'binding-disabled', 'last-gate-denied', 'development-denied-before']) test(`original history fences ${change} at its final lineage read`, async t => {
   const w = await world(t, 'SQLite'), row = await historical(w); install(w, row)
-  const context = await createContext({ workspace: w.workspace, providers: w.providers, storage: w.storage })
+  const context = await createContext({ workspace: w.workspace, providers: { ...w.providers, storage: w.storage } })
   if (change === 'development-denied-before') context.runtimeAccess.observeOperation(row.bindingId, 'development.change_request.read', w.scope.repositoryId, true)
   const transaction = w.storage.transaction.bind(w.storage); let final = false
   const storage = new Proxy(w.storage, { get(object, key) {

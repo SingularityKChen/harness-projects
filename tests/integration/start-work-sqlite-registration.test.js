@@ -32,7 +32,7 @@ async function setup(makeStorage, { policy, clock } = {}) {
   const providers = createFakeProviders()
   const workspaceId = newWorkspaceId()
   const storage = makeStorage(providers)
-  const core = await composeCore({ workspace: { id: workspaceId, name: 'B-1' }, providers, storage, policy, clock })
+  const core = await composeCore({ workspace: { id: workspaceId, name: 'B-1' }, providers: { ...providers, storage }, policy, clock })
   const items = await core.queries.listPlanningItems()
   const pick = (contentKind) => items.find((view) => view.content.contentKind === contentKind).entityId
   return { providers, storage, core, workspaceId, pick, bindingId: providers.development.gate.bindingId }
@@ -408,7 +408,7 @@ for (const [label, makeStorage] of ADAPTERS) {
 
   test(`${label}：两个工作区挂同一个 binding 的同一个仓库——一个 canonical 实体与身份、两个挂载，彼此的上下文引用不被搬走`, async () => {
     const one = await setup(makeStorage); const { providers, storage } = one
-    const second = newWorkspaceId(); const core2 = await composeCore({ workspace: { id: second, name: 'B-1 二' }, providers, storage })
+    const second = newWorkspaceId(); const core2 = await composeCore({ workspace: { id: second, name: 'B-1 二' }, providers: { ...providers, storage } })
     const items = (await one.core.queries.listPlanningItems()).filter((view) => view.content.contentKind === 'work_item').map((view) => view.entityId)
     assert.equal((await start(one.core, items[0], 'ws1')).status, 'ready')
     assert.equal((await start(core2, items[1], 'ws2')).status, 'ready')
@@ -482,7 +482,7 @@ for (const [label, makeStorage] of ADAPTERS) {
     const before = await world(w.providers, w.storage, w.workspaceId, w.contextId)
     const results = [await start(w.core, w.workItemId, 'saved')], observations = [await start(w.core, w.workItemId, 'new-key')]; const views = [await query(w.core)]
     const storage = w.storage.location === undefined ? w.storage : (w.storage.close(), createSqliteStorage(w.storage.location))
-    const core = await composeCore({ workspace: { id: w.workspaceId, name: 'B-3 重开' }, providers: w.providers, storage })
+    const core = await composeCore({ workspace: { id: w.workspaceId, name: 'B-3 重开' }, providers: { ...w.providers, storage } })
     results.push(await start(core, w.workItemId, 'saved')); observations.push(await start(core, w.workItemId, 'reopen-key')); views.push(await query(core))
     const source = (await storage.findMutationAttempt(w.workspaceId, 'saved')); const blocked = ['pending', 'unknown'].includes(source.externalIntent?.state) || source.state === 'unknown'
     for (const r of results) assert.deepEqual([r.writeState, r.confirmed, r.degraded, r.status, r.error?.code], [writeState, confirmed, degraded, 'ready', degraded ? 'result_unknown' : undefined])
@@ -525,7 +525,7 @@ for (const [label, makeStorage] of ADAPTERS) {
     ['读失败', false, reads(async () => providerFail('unavailable', '注入')), 'ready'],
     ['权限被拒', false, reads(async () => providerFail('permission_denied', '注入')), 'ready'],
     ['没有工作树读方法', false, reads(undefined), 'ready'],
-    ['工作树读能力被策略设为不可用', false, (w) => composeCore({ workspace: { id: w.workspaceId, name: '策略' }, providers: w.providers, storage: w.storage, policy: { [CapabilityKey.DevelopmentWorktreeRead]: AccessLevel.Unavailable } }), 'ready'],
+    ['工作树读能力被策略设为不可用', false, (w) => composeCore({ workspace: { id: w.workspaceId, name: '策略' }, providers: { ...w.providers, storage: w.storage }, policy: { [CapabilityKey.DevelopmentWorktreeRead]: AccessLevel.Unavailable } }), 'ready'],
     ['确定不存在', false, reads(async () => providerFail('not_found', '注入')), 'failed'],
     ['检出了别的分支', false, ({ providers: { development: d } }) => { const get = d.getWorktree.bind(d); d.getWorktree = async (input) => { const r = await get(input); return r.ok ? { ...r, value: { ...r.value, branch: 'work/other' } } : r } }, 'failed'],
   ]
@@ -571,7 +571,7 @@ for (const [label, makeStorage] of ADAPTERS) {
   test(`${label}：Development 绑定 id 变了——已挂载仓库上的新工作项在任何外部写入之前 conflict，文案点名绑定 id（评审 P2）`, async () => {
     const w = await started(); const fresh = createFakeProviders(); const providers = { ...fresh, planning: w.providers.planning } // 规划绑定沿用，Development 换实例
     const storage = w.storage.location === undefined ? w.storage : (w.storage.close(), createSqliteStorage(w.storage.location))
-    const core = await composeCore({ workspace: { id: w.workspaceId, name: '重启' }, providers, storage })
+    const core = await composeCore({ workspace: { id: w.workspaceId, name: '重启' }, providers: { ...providers, storage } })
     const other = (await core.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item' && v.entityId !== w.workItemId).entityId
     const before = external(providers); const result = await start(core, other, 'after-restart')
     assert.deepEqual([result.writeState, result.error?.code, external(providers)], ['failed', 'conflict', before], '在任何外部写入之前拒绝')
@@ -611,7 +611,7 @@ for (const [label, makeStorage] of ADAPTERS) {
   ]
   for (const [name, fault, policy, [writeState, confirmed, degraded]] of TAKEOVERS) test(`${label}：接管时已有 run（${name}）——${writeState}，不起第二个 run，与重放、Query 同一个答案`, async () => {
     const w = await started(fault); w.providers.execution.faultsSwitch.set(FaultKind.HarnessFailure, false); await w.storage.putExecutionContext({ ...(await w.storage.getExecutionContext(w.contextId)), status: 'failed' })
-    const core = policy === undefined ? w.core : await composeCore({ workspace: { id: w.workspaceId, name: 'B-3 接管' }, providers: w.providers, storage: w.storage, policy })
+    const core = policy === undefined ? w.core : await composeCore({ workspace: { id: w.workspaceId, name: 'B-3 接管' }, providers: { ...w.providers, storage: w.storage }, policy })
     const runs = w.providers.execution.state.runs.length; const face = (r) => [r.writeState, r.confirmed, r.degraded, r.status, r.fallback, r.runExternalId, r.branchExternalId, r.worktreeExternalId]
     const taken = await start(core, w.workItemId, 'retake'); const view = await core.queries.getExecutionContext({ workItemId: w.workItemId, repositoryId: REQUEST.repositoryId })
     if (writeState !== 'unknown') {

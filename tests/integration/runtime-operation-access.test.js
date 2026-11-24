@@ -17,7 +17,7 @@ async function fixture(sqlite = false, t) {
     const describe = provider.describeCapabilities.bind(provider)
     provider.describeCapabilities = async () => { const value = await describe(); return { ...value, capability: { ...value.capability, ...(provider === fallback ? { [K.ExecutionRunFallback]: AccessLevel.Available } : {}) }, permission: { ...value.permission, ...(provider === fallback ? { [K.ExecutionRunFallback]: AccessLevel.Available } : {}), ...Object.fromEntries([...denied].map(key => [key, AccessLevel.Unavailable])) } } }
   }
-  const core = await composeCore({ workspace: { id: 'runtime-operations', name: 'Operations' }, providers: { ...p, executionFallback: fallback }, storage })
+  const core = await composeCore({ workspace: { id: 'runtime-operations', name: 'Operations' }, providers: { ...p, executionFallback: fallback, storage } })
   const items = (await core.queries.listPlanningItems()).filter(row => row.content.contentKind === 'work_item')
   const item = items[0].entityId
   const request = { task: 'Synthetic explicit task', workItemId: item, repositoryId: 'repo-alpha', idempotencyKey: 'original-intent', actor: { kind: 'human' } }

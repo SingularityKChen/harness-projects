@@ -13,9 +13,9 @@ async function open(t, make) {
   const providers = createFakeProviders(), storage = make()
   t.after(() => storage.close?.())
   const workspace = { id: 'runtime-workspace', name: 'runtime', project: fixtureProjectRef(providers.planning.bindingId) }
-  const context = await createContext({ workspace, providers, storage }), queries = createQueries(context)
+  const context = await createContext({ workspace, providers: { ...providers, storage } }), queries = createQueries(context)
   await bootstrapWorkspace(context)
-  const core = await composeCore({ workspace, providers, storage }), controller = createController(core)
+  const core = await composeCore({ workspace, providers: { ...providers, storage } }), controller = createController(core)
   return { providers, storage, workspace, context, queries, core, controller }
 }
 for (const [label, make] of [['fake', createFakeStorage], ['sqlite', () => createSqliteStorage(':memory:')]]) {
@@ -67,7 +67,7 @@ for (const [label, make] of [['fake', createFakeStorage], ['sqlite', () => creat
     s.transaction = (work) => transaction((tx) => work(new Proxy(tx, { get(target, key) { const value = Reflect.get(target, key); return key === 'putSyncCursor' ? async (record) => { if (record.state === 'syncing') throw new Error('marker-disk-fault'); return value.call(target, record) } : typeof value === 'function' ? value.bind(target) : value } })))
     assert.equal((await core.commands.refreshPlanning()).ok, false)
     assert.equal(reads, 0); assert.deepEqual((await core.queries.getPlanningSnapshot()).views.map((row) => row.content), before.views.map((row) => row.content))
-    const workspace = await s.getWorkspace('runtime-workspace'); await s.putSyncCursor({ workspaceId: workspace.id, bindingId: p.planning.bindingId, scopeKey: 'planning.project', cursorValue: 'healthy', state: 'syncing', lastErrorCode: undefined }); assert.equal((await createContext({ workspace: { id: workspace.id, name: workspace.name, project: fixtureProjectRef(p.planning.bindingId) }, providers: p, storage: s })).runtimeAccess.denied, true)
+    const workspace = await s.getWorkspace('runtime-workspace'); await s.putSyncCursor({ workspaceId: workspace.id, bindingId: p.planning.bindingId, scopeKey: 'planning.project', cursorValue: 'healthy', state: 'syncing', lastErrorCode: undefined }); assert.equal((await createContext({ workspace: { id: workspace.id, name: workspace.name, project: fixtureProjectRef(p.planning.bindingId) }, providers: { ...p, storage: s } })).runtimeAccess.denied, true)
     assert.equal((await core.queries.getPlanningSnapshot()).metadata.capabilities.find((entry) => entry.key === 'planning.item.read').access, 'unavailable')
   })
   for (const rowGap of [false, true]) test(`${label}: held retry preserves ${rowGap ? 'healthy row gap admission' : 'unavailable read-only admission'}`, async (t) => {
@@ -81,7 +81,7 @@ for (const [label, make] of [['fake', createFakeStorage], ['sqlite', () => creat
   for (const initialized of [false, true]) for (const stage of ['read-round', 'before-callback', 'cursor-write', 'round-write', 'marker-commit']) test(`${label}: ${stage} failure ${initialized ? 'cannot overwrite a newer completed read' : 'settles the initial round without Provider I/O'}`, async (t) => {
     const p = createFakeProviders(), s = make(), seen = [], w = { id: 'begin-failure', name: 'begin-failure', project: fixtureProjectRef(p.planning.bindingId) }
     t.after(() => s.close?.())
-    const context = await createContext({ providers: p, storage: s, workspace: w, diagnostics: { syncRoundFailed: (error) => seen.push(error) } })
+    const context = await createContext({ providers: { ...p, storage: s }, workspace: w, diagnostics: { syncRoundFailed: (error) => seen.push(error) } })
     if (initialized) await bootstrapWorkspace(context)
     const reads = ['reconcile', 'getProject', 'getPlanningItem', 'listPlanningItems'].map((key) => t.mock.method(p.planning, key))
     const entered = deferred(), release = deferred(), transaction = s.transaction.bind(s), failure = new Error('marker-rollback'); let armed = true
@@ -291,13 +291,13 @@ test('explicit refresh cannot bypass declared capability or policy denial', asyn
 })
 for (const markerError of [null, 'marker-string', Object.freeze(new Error('marker-object'))]) for (const [label, make] of [['fake', createFakeStorage], ['sqlite', () => createSqliteStorage(':memory:')]]) test(`${label}: marker ${markerError === null ? 'null' : typeof markerError} failure stays structured and reports each original error once`, async (t) => {
   const providers = createFakeProviders(), storage = make(); t.after(() => storage.close?.()); const workspace = { id: `marker-${label}-${markerError === null ? 'null' : 'string'}`, name: 'marker', project: fixtureProjectRef(providers.planning.bindingId) }
-  const transaction = storage.transaction.bind(storage); storage.transaction = (work) => transaction((tx) => work(new Proxy(tx, { get(target, key) { const value = Reflect.get(target, key); return key === 'putSyncCursor' ? async (record) => { if (record.state === 'syncing') throw markerError; return value.call(target, record) } : typeof value === 'function' ? value.bind(target) : value } }))); const seen = [], core = await composeCore({ workspace, providers, storage, diagnostics: { syncRoundFailed: (error) => seen.push(error) } }), result = await core.commands.refreshPlanning(); assert.equal(result.ok, false); assert.equal(result.error.code, 'unavailable'); assert.deepEqual(seen, [markerError, markerError])
+  const transaction = storage.transaction.bind(storage); storage.transaction = (work) => transaction((tx) => work(new Proxy(tx, { get(target, key) { const value = Reflect.get(target, key); return key === 'putSyncCursor' ? async (record) => { if (record.state === 'syncing') throw markerError; return value.call(target, record) } : typeof value === 'function' ? value.bind(target) : value } }))); const seen = [], core = await composeCore({ workspace, providers: { ...providers, storage }, diagnostics: { syncRoundFailed: (error) => seen.push(error) } }), result = await core.commands.refreshPlanning(); assert.equal(result.ok, false); assert.equal(result.error.code, 'unavailable'); assert.deepEqual(seen, [markerError, markerError])
 })
 
 for(const [label,make] of [['fake',createFakeStorage],['sqlite',()=>createSqliteStorage(':memory:')]]) for(const rollback of [false,true]) test(`${label} peer denied ${rollback?'rollback':'committed'} does not expose source or start work`,async(t)=>{
  const p=createFakeProviders(),s=make(),w={id:'r9-peer-denial',name:'probe',project:fixtureProjectRef(p.planning.bindingId)};t.after(()=>s.close?.())
  p.planning.state.projects[0].title='peer-source-canary'
- const a=await composeCore({workspace:w,providers:p,storage:s}), b=await composeCore({workspace:w,providers:p,storage:s})
+ const a=await composeCore({workspace:w,providers:{ ...p, storage: s }}), b=await composeCore({workspace:w,providers:{ ...p, storage: s }})
  const target=(await b.queries.listPlanningItems()).find(v=>v.content.contentKind==='work_item')
  if(rollback){const transaction=s.transaction.bind(s);s.transaction=work=>transaction(tx=>work(new Proxy(tx,{get(target,key){const method=Reflect.get(target,key);return key==='replacePlanningProjections'?async(...args)=>{if(args[1].some(row=>row.content.contentKind==='redacted'))throw new Error('redaction-failed');return method.apply(target,args)}:typeof method==='function'?method.bind(target):method}})))}
  const external=()=>[p.development.state.branches.length,p.development.state.worktrees.length,p.execution.state.runs.length],before=external()
@@ -316,7 +316,7 @@ for (const sqlite of [false, true]) for (const scenario of ['peer-recovers-local
   const p = createFakeProviders(), storage = sqlite ? createSqliteStorage(':memory:') : p.storage, workspace = { id: 'peer-latest-proof', name: 'proof' }
   t.after(() => storage.close?.())
   p.planning.state.projects[0].title = 'private-latest-proof-source'
-  const first = await composeCore({ workspace, providers: p, storage }), second = await composeCore({ workspace, providers: p, storage })
+  const first = await composeCore({ workspace, providers: { ...p, storage } }), second = await composeCore({ workspace, providers: { ...p, storage } })
   const target = (await first.queries.listPlanningItems()).find(row => row.content.contentKind === 'work_item')
   if (scenario !== 'late-denial-cannot-replace-new-proof') {
     p.planning.faultsSwitch.set(FaultKind.PermissionDenied, true)
@@ -361,7 +361,7 @@ for (const sqlite of [false, true]) test(`${sqlite ? 'SQLite' : 'Memory'} beginn
   const p = createFakeProviders(), storage = sqlite ? createSqliteStorage(':memory:') : p.storage, workspace = { id: 'unclosed-owned-retry', name: 'retry' }
   t.after(() => storage.close?.())
   p.planning.state.projects[0].title = 'private-retry-source'
-  const first = await composeCore({ workspace, providers: p, storage }), second = await composeCore({ workspace, providers: p, storage })
+  const first = await composeCore({ workspace, providers: { ...p, storage } }), second = await composeCore({ workspace, providers: { ...p, storage } })
   const target = (await second.queries.listPlanningItems()).find(row => row.content.contentKind === 'work_item'), transaction = storage.transaction.bind(storage)
   storage.transaction = work => transaction(tx => work(new Proxy(tx, { get(object, key) { return key === 'replacePlanningProjections' ? async () => { throw Error('denial-redaction-rollback') } : typeof object[key] === 'function' ? object[key].bind(object) : object[key] } })))
   p.planning.faultsSwitch.set(FaultKind.PermissionDenied, true); await assert.rejects(first.commands.refreshPlanning()); storage.transaction = transaction
@@ -384,7 +384,7 @@ for (const sqlite of [false, true]) test(`${sqlite ? 'SQLite' : 'Memory'} beginn
 for (const sqlite of [false, true]) for (const pending of [false, true]) test(`${sqlite ? 'SQLite' : 'Memory'} healthy row-gap retains permitted Planning rows with own pending=${pending}`, async t => {
   const p = createFakeProviders(), storage = sqlite ? createSqliteStorage(':memory:') : p.storage, workspace = { id: 'row-gap-visible', name: 'row gap' }
   t.after(() => storage.close?.())
-  const core = await composeCore({ workspace, providers: p, storage })
+  const core = await composeCore({ workspace, providers: { ...p, storage } })
   const target = (await core.queries.listPlanningItems()).find(row => row.content.contentKind === 'work_item')
   p.planning.state.items.push({ ...p.planning.state.items[0], ref: { bindingId: p.planning.bindingId, objectKind: 'project_item', externalId: 'orphan' }, membership: { externalId: 'orphan' }, content: { kind: 'redacted', reason: 'unavailable' } })
   await core.commands.refreshPlanning()

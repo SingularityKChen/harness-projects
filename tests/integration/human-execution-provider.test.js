@@ -81,8 +81,7 @@ async function composeManualCore({
   const executionFallback = fallbackHuman ? human(`${humanBinding}-fallback`, { fallback: true }) : undefined
   const core = await composeCore({
     workspace: { id: workspaceId, name: 'MVP-1 人工执行' },
-    providers: { development, execution, executionFallback },
-    storage, policy,
+    providers: { development, execution, executionFallback, storage }, policy,
     ...(clock === undefined ? {} : { clock }),
   })
   for (const id of WORK_ITEMS) await registerWorkItem(storage, workspaceId, id)

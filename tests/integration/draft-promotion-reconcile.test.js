@@ -10,6 +10,12 @@ import { createSqliteStorage } from '@harness-projects/storage-sqlite'
 
 const workspace = { id: 'draft-promotion', name: 'Draft promotion' }
 const sourceNumber = { sourceName: 'GitHub', scopeIdentity: { namespace: 'github.com/graphql/Repository', id: 'repository-one' }, scopeName: 'example/one', number: 449 }
+/** world 形组装（#632）：storage 只经 provider 表进入 core；w.storage 会在 reopen 后替换，组装时必须读实时值；over.storage 覆写本次 Storage。 */
+const depsOf = (w, over = {}) => {
+  const { storage, ...rest } = w
+  const { storage: overrideStorage, providers = w.providers, ...extra } = over
+  return { ...rest, ...extra, providers: { ...providers, storage: overrideStorage ?? storage } }
+}
 
 async function setup(t, adapter) {
   const dir = mkdtempSync(join(tmpdir(), 'draft-promotion-'))
@@ -17,11 +23,11 @@ async function setup(t, adapter) {
   const path = join(dir, 'data.sqlite')
   const w = { providers, workspace, storage: adapter === 'SQLite' ? createSqliteStorage(path) : providers.storage, clock: () => '2026-11-09T12:00:00Z' }
   t.after(() => { w.storage.close?.(); rmSync(dir, { recursive: true, force: true }) })
-  w.core = await composeCore(w)
+  w.core = await composeCore(depsOf(w))
   w.draft = providers.planning.state.items.find(item => item.ref.externalId === 'draft-1')
   w.original = await w.storage.findExternalIdentity(providers.planning.bindingId, 'draft', 'draft-1')
   assert.ok(w.original, 'first production sync registers the draft')
-  w.reopen = async () => { w.storage.close(); w.storage = createSqliteStorage(path); w.core = await composeCore(w) }
+  w.reopen = async () => { w.storage.close(); w.storage = createSqliteStorage(path); w.core = await composeCore(depsOf(w)) }
   return w
 }
 
@@ -184,7 +190,7 @@ for (const adapter of ['Fake Storage', 'SQLite']) {
     const w = await setup(t, adapter)
     const foreignProviders = createFakeProviders({ planning: { bindingId: 'planning-foreign', fixture: FakeFixtureName.DraftBacked } })
     const foreignWorkspace = { id: 'foreign-workspace', name: 'Foreign workspace' }
-    await composeCore({ ...w, workspace: foreignWorkspace, providers: foreignProviders })
+    await composeCore(depsOf(w, { workspace: foreignWorkspace, providers: foreignProviders }))
     const foreign = await w.storage.findExternalIdentity('planning-foreign', 'draft', 'draft-1')
     assert.ok(foreign)
     const foreignFacts = async () => ({
@@ -238,7 +244,7 @@ for (const adapter of ['Fake Storage', 'SQLite']) {
         await w.storage.putProviderBinding({ ...old, enabled: false, isDefault: false })
         const providers = createFakeProviders({ planning: { bindingId: 'planning-other', fixture: FakeFixtureName.DraftBacked } })
         providers.planning.promoteDraft(providers.planning.state.items.find(i => i.ref.externalId === 'draft-1').ref, 'issue-promoted')
-        w.core = await composeCore({ ...w, providers })
+        w.core = await composeCore(depsOf(w, { providers }))
       }
       if (control === 'mismatched visible content') item.content = { kind: 'change_request', changeRequest: { externalId: item.ref.externalId, number: 449, title: 'Mismatched content', body: '' } }
       if (control.endsWith('project item')) {
