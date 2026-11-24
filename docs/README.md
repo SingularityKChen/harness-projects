@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-24-local-git-provider-boundary-tests](exec-plan/completed/2026-11-24-local-git-provider-boundary-tests.md) | Local Git provider 分页下界与 stat 错误分类的判别性测试（#174；test-only） |
 | [2026-11-21-worktree-clean-removal](exec-plan/completed/2026-11-21-worktree-clean-removal.md) | 显式请求且干净的 Local Git worktree 移除（#138；2026-11-22 评审修复轮收敛，R671-01..05 关闭） |
 | [2026-11-21-list-visibility-decisions](exec-plan/completed/2026-11-21-list-visibility-decisions.md) | 列表可见性决策显式化：单文件私有决策 + 矩阵/变异判别测试（#314） |
 | [2026-11-21-restart-reconciliation](exec-plan/completed/2026-11-21-restart-reconciliation.md) | 同 key 重放未决 Git 写前先跑只读对账（#191；2026-11-22 评审四轮修复轮收敛，含 F1 残余修复轮 2、读侧观察面门修复轮 3 与写事务内锚点复核修复轮 4；Refs #191 保持 OPEN） |
