@@ -4,6 +4,7 @@
  * 并发两次绑定恰好一个成功（不变量 1）；AC3 #202 之前的切换以 not_supported 拒绝且零写入；AC5 凭据只以句柄落库，令牌不进库、不上结果；
  * 原子性：被拒绝的命令不留任何行（#353 继承同一事务模式），只有存储写口的 RangeError 映射成 invalid_input（#376）；AC4 controller 的 `createSetupCommands` 账本丢失后同键重发，由命令按自然键找回同一结果、零写入，
  * 拒绝只在账本存活期间重放（账本丢失后按当时状态重判），账本内同键异请求以 conflict 拒绝且不进 core。
+ * #368 的解绑只停用 Development / Delivery 挂载（行、账号、配置、身份与仓库锚点保留；planning / execution 无恢复路径，not_supported），同仓库同实现同目标重绑以原 id revive（交付恢复默认槽）；解绑后换另一实现绑定同一仓库仍走既有新建路径（新挂载、原行保留停用、引用并列）。
  */
 import '../fixtures/resolution-preflight.mjs';
 
@@ -430,7 +431,7 @@ for (const kind of ['memory', 'sqlite']) {
     const setup = createWorkspaceSetup(spy.storage)
     const accountId = await workspaceWithAccount(setup)
     assert.equal(codeOf(await setup.bindRepository(repositoryRequest([localGit(), github(accountId)]))), 'ok')
-    // 生产尚无解绑（M4.1）：经端口卸载 repo-gamma 唯一的挂载，制造「已登记、锚点不在本工作区任何挂载下」。
+    // 设置命令只有停用：本用例仍用端口级删除制造「已登记、锚点不在本工作区任何挂载下」。
     const orphan = await setup.bindRepository(repositoryRequest([localGit('repo-gamma')], { repositoryId: 'repo-gamma' }))
     await store.storage.removeProviderBinding({ workspaceId: WORKSPACE, bindingId: orphan.value.bindingIds[0], domain: 'development' })
     const delta = (overrides) => repositoryRequest([localGit('repo-delta'), ...overrides], { repositoryId: 'repo-delta' })
@@ -477,6 +478,182 @@ for (const kind of ['memory', 'sqlite']) {
     assert.ok(!JSON.stringify(outcomes).includes(CANARY), '结果不回显令牌')
     assert.ok(spy.writes.includes('putProviderBinding'), '阳性对照：Local Git 挂载在被拒之前确实写过')
     assert.deepEqual(await store.snapshot(), before, '整笔回滚：没有挂载、账号关联、配置、身份或仓库挂载留下')
+  })
+}
+
+/*
+ * 解绑工作区挂载（#368，disable-not-delete）：只停用 Development / Delivery 挂载——行、账号关联、配置、外部身份与仓库锚点全部保留，
+ * 下一次 restoreProviders 不再组合它；planning / execution 没有恢复路径，一律结构化拒绝；同仓库同实现同目标 bindRepository 是唯一逆操作。
+ */
+const restoreEnv = () => ({
+  fetch: replayFetch().fetch, worktreesDir: path.join(tmpdir(), 'harness-workspace-setup-unused-worktrees'), resolveCredential: async () => CANARY,
+})
+/** 装配面的可观察投影：每个槽位组合了哪些绑定 id，以及被跳过的挂载 id。 */
+const composedIds = async (restored) => ({
+  development: await Promise.all((restored.table.development ?? []).map(async (port) => (await port.describeCapabilities()).bindingId)),
+  delivery: restored.table.delivery === undefined ? undefined : (await restored.table.delivery.describeCapabilities()).bindingId,
+  disabled: restored.disabled.map((entry) => entry.bindingId),
+})
+const unbindRequest = (bindingId, domain, overrides = {}) => ({ workspaceId: WORKSPACE, bindingId, domain, ...overrides })
+
+for (const kind of ['memory', 'sqlite']) {
+  test(`AC1-368 解绑 Development / Delivery 只停用挂载：行、账号、配置、身份与锚点保留，下一次 restoreProviders 不再组合（${kind}）`, async (t) => {
+    const store = await openStore(kind, bindingPolicy())
+    t.after(() => store.close())
+    const setup = createWorkspaceSetup(store.storage)
+    const accountId = await workspaceWithAccount(setup)
+    const bound = await setup.bindRepository(repositoryRequest([github(accountId), actions(accountId)]))
+    assert.equal(codeOf(bound), 'ok')
+    const [development, delivery] = bound.value.bindingIds
+    const identity = await store.storage.findExternalIdentity(development, 'repository', REPOSITORY)
+    const restored = async () => restoreProviders(store.storage, WORKSPACE, PROVIDER_CATALOG, restoreEnv())
+    assert.deepEqual(await composedIds(await restored()), { development: [development], delivery, disabled: [] }, '解绑前：两个挂载都被组合')
+    const spy = writeSpy(store.storage)
+    const commands = createSetupCommands(createWorkspaceSetup(spy.storage))
+    const outcomes = [
+      await commands.unbindProviderBinding({ ...envelope('unbind-development'), ...unbindRequest(development, 'development') }),
+      await commands.unbindProviderBinding({ ...envelope('unbind-delivery'), ...unbindRequest(delivery, 'delivery') }),
+    ]
+    assert.deepEqual(outcomes.map(({ writeState, authoritative, value }) => [writeState, authoritative, value]),
+      [['local_only', false, { bindingId: development }], ['local_only', false, { bindingId: delivery }]], '成功只是 local_only，结果只含绑定 id')
+    assert.deepEqual(spy.writes, ['putProviderBinding', 'putProviderBinding'], '每个挂载一次停用写，不删除任何行')
+    assert.deepEqual((await store.storage.listProviderBindings(WORKSPACE)).map(({ id, enabled, isDefault }) => [id, enabled, isDefault]).sort(),
+      [[development, false, false], [delivery, false, false]].sort(), '行保留：enabled 与 isDefault 都写回 false（不变量：默认必然启用）')
+    for (const [bindingId, reference] of [[development, github(accountId)], [delivery, actions(accountId)]]) {
+      assert.deepEqual([
+        await store.storage.getProviderBindingAccount(bindingId),
+        (await store.storage.getBindingConfiguration({ workspaceId: WORKSPACE, bindingId, domain: reference.domain }))?.configuration,
+      ], [accountId, reference.configuration], '账号关联与挂载配置保留')
+    }
+    assert.deepEqual([
+      (await store.storage.findExternalIdentity(development, 'repository', REPOSITORY))?.entityId,
+      (await store.storage.findExternalIdentity(delivery, 'repository', REPOSITORY))?.entityId,
+      identity?.entityId, await repositoryEntities(store),
+      (await store.storage.listRepositories(WORKSPACE)).map(({ externalIdentityId }) => externalIdentityId),
+    ], [identity?.entityId, identity?.entityId, identity?.entityId, 1, [identity?.id]], '外部身份、仓库实体与仓库锚点保留：停用不是删除')
+    assert.deepEqual(await composedIds(await restored()), { development: [], delivery: undefined, disabled: [] }, '下一次装配跳过停用的挂载，且不把它算作 disabled')
+  })
+
+  test(`AC2-368 解绑幂等：同键重放、账本丢失与已停用都零写入，同键异请求 conflict（${kind}）`, async (t) => {
+    const store = await openStore(kind, bindingPolicy())
+    t.after(() => store.close())
+    const setup = createWorkspaceSetup(store.storage)
+    const accountId = await workspaceWithAccount(setup)
+    const bound = await setup.bindRepository(repositoryRequest([localGit(), github(accountId)]))
+    assert.equal(codeOf(bound), 'ok')
+    const [local, remote] = bound.value.bindingIds
+    const input = { ...envelope('unbind-1'), ...unbindRequest(local, 'development') }
+    const spy = writeSpy(store.storage)
+    const commands = createSetupCommands(createWorkspaceSetup(spy.storage))
+    const first = await commands.unbindProviderBinding(input)
+    assert.deepEqual([first.writeState, first.authoritative, first.value, spy.writes], ['local_only', false, { bindingId: local }, ['putProviderBinding']], '启用中的挂载只写一次')
+    const before = await store.snapshot()
+    spy.writes.length = 0
+    assert.deepEqual([await commands.unbindProviderBinding(input), spy.writes, await store.snapshot()], [first, [], before], '账本内同键重放：结果深等，零写入，库不变')
+    const lost = () => createSetupCommands(createWorkspaceSetup(spy.storage))
+    assert.deepEqual([await lost().unbindProviderBinding(input), spy.writes, await store.snapshot()], [first, [], before], '账本丢失后同键重发：按自然键判为已停用，结果深等，零写入')
+    const live = lost()
+    assert.deepEqual((await live.unbindProviderBinding(input)).value, { bindingId: local }, '已停用再解绑：成功且零写入')
+    const mismatch = await live.unbindProviderBinding({ ...input, bindingId: remote })
+    assert.deepEqual([mismatch.writeState, mismatch.error?.code, spy.writes], ['conflict', 'conflict', []], '账本内同键异请求：conflict，不进 core')
+  })
+
+  test(`AC3-368 解绑拒绝：形状、存储/未知域、规划/执行与三键缺失都结构化拒绝且零写入（${kind}）`, async (t) => {
+    const store = await openStore(kind, bindingPolicy())
+    t.after(() => store.close())
+    const spy = writeSpy(store.storage)
+    const setup = createWorkspaceSetup(spy.storage)
+    const { accountId, bindingId: planning } = await setupAll(setup)
+    const execution = await setup.installExecutionBindings({ workspaceId: WORKSPACE })
+    assert.equal(codeOf(execution), 'ok')
+    const bound = await setup.bindRepository(repositoryRequest([localGit(), actions(accountId)]))
+    assert.equal(codeOf(bound), 'ok')
+    const [local, delivery] = bound.value.bindingIds
+    const before = await store.snapshot()
+    spy.writes.length = 0
+    const base = unbindRequest(local, 'development')
+    const cases = [
+      ['invalid_input', { ...base, token: CANARY }],
+      ['invalid_input', Object.assign(Object.create({ token: CANARY }), base)],
+      ['invalid_input', { ...base, workspaceId: ' ' }],
+      ['invalid_input', { ...base, bindingId: undefined }],
+      ['invalid_input', { ...base, domain: 'storage' }],
+      ['invalid_input', { ...base, domain: 'unknown' }],
+      ['invalid_input', [base]],
+      ['not_supported', { ...base, bindingId: planning, domain: 'planning' }],
+      ['not_supported', { ...base, bindingId: '00000000-0000-4000-8000-0000000000ff', domain: 'planning' }],
+      ['not_supported', { ...base, bindingId: execution.value.bindingIds[0], domain: 'execution' }],
+      ['not_found', { ...base, workspaceId: OTHER_WORKSPACE }],
+      ['not_found', { ...base, bindingId: '00000000-0000-4000-8000-0000000000ff' }],
+      ['not_found', { ...base, bindingId: delivery, domain: 'development' }],
+    ]
+    const outcomes = []
+    for (const [, request] of cases) outcomes.push(await setup.unbindProviderBinding(request))
+    assert.deepEqual(outcomes.map(codeOf), cases.map(([code]) => code), '逐行对照 Design 的错误表：形状先于域政策，域政策先于行查找')
+    assert.deepEqual([spy.writes, await store.snapshot()], [[], before], '全部在任何写之前拒绝：没有写调用，库不变')
+    assert.ok(!JSON.stringify(outcomes).includes(CANARY), '文案不回显请求值')
+  })
+
+  test(`AC4-368 解绑后同目标重绑 revive 原挂载与默认槽，不新增行/身份；不同目标与交付槽竞争 conflict（${kind}）`, async (t) => {
+    const store = await openStore(kind, bindingPolicy())
+    t.after(() => store.close())
+    const spy = writeSpy(store.storage)
+    const setup = createWorkspaceSetup(spy.storage)
+    const accountId = await workspaceWithAccount(setup)
+    const [local, delivery] = (await setup.bindRepository(repositoryRequest([localGit(), actions(accountId)]))).value.bindingIds
+    const primary = await store.storage.findExternalIdentity(local, 'repository', REPOSITORY)
+    const identities = async () => (await store.storage.listIdentitiesForEntity(primary.entityId)).map(({ id, bindingId, role }) => [id, bindingId, role]).sort()
+    const initial = await identities()
+    for (const [bindingId, domain] of [[local, 'development'], [delivery, 'delivery']]) {
+      assert.equal(codeOf(await setup.unbindProviderBinding(unbindRequest(bindingId, domain))), 'ok')
+    }
+    const before = await store.snapshot()
+    spy.writes.length = 0
+    const elsewhere = repositoryRequest([localGit(REPOSITORY, { configuration: { repositoryPath: '/srv/git/elsewhere', repositoryExternalId: REPOSITORY } })])
+    assert.deepEqual([codeOf(await setup.bindRepository(elsewhere)), spy.writes, await store.snapshot()], ['conflict', [], before], '停用挂载换目标：conflict，零写入，行保持停用')
+    const revived = await setup.bindRepository(repositoryRequest([localGit(), actions(accountId)]))
+    assert.deepEqual(revived.value, { repositoryId: REPOSITORY, bindingIds: [local, delivery] }, 'revive 复用原挂载 id，顺序与请求一致')
+    assert.deepEqual((await store.storage.listProviderBindings(WORKSPACE)).map(({ id, enabled, isDefault }) => [id, enabled, isDefault]).sort(),
+      [[delivery, true, true], [local, true, false]].sort(), '停用行翻回启用：交付恢复默认槽，Development 非默认')
+    assert.deepEqual(spy.writes, ['putProviderBinding', 'putProviderBinding'], '每个停用挂载一次启用写，不新建行')
+    assert.deepEqual([await identities(), await repositoryEntities(store), (await store.storage.listRepositories(WORKSPACE)).map(({ externalIdentityId }) => externalIdentityId)],
+      [initial, 1, [primary.id]], '外部身份、实体与仓库锚点不变：revive 不新增身份')
+    // 交付槽竞争：另一仓库占用默认槽后，旧交付来源不能被 revive 静默替换。
+    assert.equal(codeOf(await setup.unbindProviderBinding(unbindRequest(delivery, 'delivery'))), 'ok')
+    const beta = await setup.bindRepository(repositoryRequest([localGit('repo-beta'), actions(accountId, 'repo-beta')], { repositoryId: 'repo-beta' }))
+    assert.equal(codeOf(beta), 'ok')
+    const occupied = await store.snapshot()
+    spy.writes.length = 0
+    assert.deepEqual([codeOf(await setup.bindRepository(repositoryRequest([actions(accountId)]))), spy.writes, await store.snapshot()], ['conflict', [], occupied], '已有启用的交付来源：revive 不静默抢默认，零写入')
+    // 恢复路径：先解绑占用默认槽的交付来源，再 revive 原交付来源。
+    assert.equal(codeOf(await setup.unbindProviderBinding(unbindRequest(beta.value.bindingIds[1], 'delivery'))), 'ok')
+    const recovered = await setup.bindRepository(repositoryRequest([actions(accountId)]))
+    assert.deepEqual([codeOf(recovered), recovered.value.bindingIds, (await store.storage.listProviderBindings(WORKSPACE)).filter(({ id }) => id === delivery).map(({ enabled, isDefault }) => [enabled, isDefault])],
+      ['ok', [delivery], [[true, true]]], '默认槽空出后 revive 恢复原 id 与默认槽')
+  })
+
+  test(`AC5-368 解绑后同仓库换另一实现 = 既有新建路径：新挂载、原行保留停用、引用并列与装配（${kind}）`, async (t) => {
+    const store = await openStore(kind, bindingPolicy())
+    t.after(() => store.close())
+    const setup = createWorkspaceSetup(store.storage)
+    const accountId = await workspaceWithAccount(setup)
+    const [local, delivery] = (await setup.bindRepository(repositoryRequest([localGit(), actions(accountId)]))).value.bindingIds
+    const primary = await store.storage.findExternalIdentity(local, 'repository', REPOSITORY)
+    assert.equal(codeOf(await setup.unbindProviderBinding(unbindRequest(local, 'development'))), 'ok')
+    const anchored = (await store.storage.listRepositories(WORKSPACE)).map(({ id, externalIdentityId }) => [id, externalIdentityId])
+    const rebound = await setup.bindRepository(repositoryRequest([github(accountId)]))
+    assert.equal(codeOf(rebound), 'ok', '解绑后以另一实现绑定同一仓库走既有新建路径')
+    const [githubMount] = rebound.value.bindingIds
+    assert.notEqual(githubMount, local, '不是 revive：新实现得到新挂载 id')
+    assert.deepEqual((await store.storage.listProviderBindings(WORKSPACE)).map(({ id, implementationKey, enabled, isDefault }) => [id, implementationKey, enabled, isDefault]).sort(),
+      [[local, 'development.local-git', false, false], [githubMount, 'development.github', true, false], [delivery, 'github-actions', true, true]].sort(),
+      '原挂载行保留停用，新实现追加启用挂载，交付默认槽不变')
+    assert.deepEqual([await repositoryEntities(store), (await store.storage.listRepositories(WORKSPACE)).map(({ id, externalIdentityId }) => [id, externalIdentityId])],
+      [1, anchored], '仓库实体与锚点不改指：新引用是同一实体上的 alias')
+    assert.deepEqual((await store.storage.listIdentitiesForEntity(primary.entityId)).map(({ bindingId, role }) => [bindingId, role]).sort(),
+      [[local, 'primary'], [delivery, 'alias'], [githubMount, 'alias']].sort(), '原实现身份保留，新实现只追加 alias')
+    assert.deepEqual(await composedIds(await restoreProviders(store.storage, WORKSPACE, PROVIDER_CATALOG, restoreEnv())),
+      { development: [githubMount], delivery, disabled: [] }, '下一次装配只组合新实现；停用挂载保留但跳过')
   })
 }
 
