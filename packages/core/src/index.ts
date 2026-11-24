@@ -26,7 +26,7 @@ export * from './execution-run.ts'
 export type { ExecutionBindingPair, InstallExecutionRequest } from './execution-setup.ts'
 export {
   createWorkspaceSetup, type BindPlanningSourceRequest, type BindRepositoryRequest, type ConnectAccountRequest, type CreateWorkspaceRequest, type RepositoryBinding,
-  type RepositoryReferenceRequest, type SetupOutcome, type WorkspaceSetup,
+  type RepositoryReferenceRequest, type SetupOutcome, type UnbindProviderBindingRequest, type WorkspaceSetup,
 } from './workspace-setup.ts'
 
 export type { SetPlanningMappingRequest } from './planning-mapping.ts'

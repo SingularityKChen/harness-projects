@@ -15,7 +15,7 @@ import {
   type AssigneeOptions, type AssigneeAdd, type AssigneeResume, type AssigneeResult, WritePhase, type CreateChangeRequestRequest, type CreateChangeRequestResult, type ResumeChangeRequestRequest, type ExecutionContextQuery, type RefreshExecutionRunResult,
   type BindPlanningSourceRequest, type BindRepositoryRequest, type BootstrapResult, type ConnectAccountRequest, type CoreApi, type CreateWorkspaceRequest, type DeliveryRefreshResult,
   type IssueDependenciesScope, type IssueDependenciesObservation, type IssueClosingLinksScope, type IssueClosingLinksObservation, type DeliveryScope, type DeliveryWriteAttempt, type RecordedEdge, type RelationRef, type RepositoryBinding, type SetupOutcome, type StartWorkResult, type StatusDecision,
-  type WorkspaceSetup, type SetPlanningMappingRequest, type ExecutionBindingPair, type InstallExecutionRequest,
+  type WorkspaceSetup, type SetPlanningMappingRequest, type ExecutionBindingPair, type InstallExecutionRequest, type UnbindProviderBindingRequest,
 } from '@harness-projects/core'
 
 export const CommandWriteState = {
@@ -343,6 +343,7 @@ export type ConnectAccountInput = CommandEnvelope & ConnectAccountRequest
 export type BindPlanningSourceInput = CommandEnvelope & BindPlanningSourceRequest
 export type SetPlanningMappingInput = CommandEnvelope & SetPlanningMappingRequest
 export type BindRepositoryInput = CommandEnvelope & BindRepositoryRequest
+export type UnbindProviderBindingInput = CommandEnvelope & UnbindProviderBindingRequest
 
 /**
  * 工作区设置命令（#127）：独立于 `Controller`——工作区未创建时 Host 的 Controller 建在 unavailableCore 上；由 Host 每进程建一次、跨重组持有账本（#354）。
@@ -355,6 +356,7 @@ export interface SetupCommands {
   connectAccount(input: ConnectAccountInput): Promise<CommandResult<{ readonly accountId: ConnectorAccountId }>>
   bindPlanningSource(input: BindPlanningSourceInput): Promise<CommandResult<{ readonly bindingId: ProviderBindingId }>>
   bindRepository(input: BindRepositoryInput): Promise<CommandResult<RepositoryBinding>>
+  unbindProviderBinding(input: UnbindProviderBindingInput): Promise<CommandResult<{ readonly bindingId: ProviderBindingId }>>
 }
 
 /** 设置命令只写本地事实：成功报 local_only（没有 provider ack，不是权威）；core 的 conflict 与账本内同键异请求同报 conflict，其余报 failed。不推进修订号（快照内容没变，ADR-0012）。 */
@@ -372,5 +374,6 @@ export function createSetupCommands(setup: WorkspaceSetup): SetupCommands {
     bindPlanningSource: (input) => replay('bindPlanningSource', input, requestPayload(input), async () => setupResult(await setup.bindPlanningSource(requestPayload(input)))),
     installExecutionBindings: (input) => replay('installExecutionBindings', input, requestPayload(input), async () => setupResult(await setup.installExecutionBindings(requestPayload(input)))),
     bindRepository: (input) => replay('bindRepository', input, requestPayload(input), async () => setupResult(await setup.bindRepository(requestPayload(input)))),
+    unbindProviderBinding: (input) => replay('unbindProviderBinding', input, requestPayload(input), async () => setupResult(await setup.unbindProviderBinding(requestPayload(input)))),
   }
 }

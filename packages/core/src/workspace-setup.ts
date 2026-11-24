@@ -28,6 +28,8 @@ export interface BindPlanningSourceRequest {
 /** 仓库在一条连接下的引用（#353）：挂载目标加能力域；本版本只接 Development 与交付。 */
 export interface RepositoryReferenceRequest extends MountTarget { readonly domain: Extract<CapabilityDomain, 'development' | 'delivery'> }
 export interface BindRepositoryRequest { readonly workspaceId: WorkspaceId; readonly repositoryId: string; readonly references: readonly RepositoryReferenceRequest[] }
+/** 显式解绑一个工作区挂载（#368）：Storage 的自然键；闭集形状先于能力域政策，政策先于行查找。 */
+export interface UnbindProviderBindingRequest { readonly workspaceId: WorkspaceId; readonly bindingId: ProviderBindingId; readonly domain: CapabilityDomain }
 /** `bindingIds` 与请求的引用一一对应、同序。 */
 export interface RepositoryBinding { readonly repositoryId: string; readonly bindingIds: readonly ProviderBindingId[] }
 export interface WorkspaceSetup {
@@ -39,6 +41,8 @@ export interface WorkspaceSetup {
   bindPlanningSource(request: BindPlanningSourceRequest): Promise<SetupOutcome<{ readonly bindingId: ProviderBindingId }>>
   /** 一个仓库实体并列持有各连接下的引用（ADR-0015）：逐引用按 `(domain, implementationKey)` create-or-verify，只追加、不改绑、不替换交付来源。 */
   bindRepository(request: BindRepositoryRequest): Promise<SetupOutcome<RepositoryBinding>>
+  /** 显式停用一个 Development / Delivery 挂载（#368）：只写 enabled=false（同时清默认），行、账号、配置、身份与仓库锚点保留；唯一逆操作是同目标 revive。 */
+  unbindProviderBinding(request: UnbindProviderBindingRequest): Promise<SetupOutcome<{ readonly bindingId: ProviderBindingId }>>
 }
 
 /** 设置命令的拒绝：只在 `runSetup` 的事务内抛出——异常令事务整笔回滚，`runSetup` 再把它还原成结果值。 */
@@ -115,6 +119,10 @@ const BINDING_FIELDS = ['workspaceId', 'accountId', 'implementationKey', 'config
 const REPOSITORY_FIELDS = ['workspaceId', 'repositoryId', 'references'] as const
 const REFERENCE_FIELDS = ['domain', 'implementationKey', 'accountId', 'configuration'] as const
 const REFERENCE_DOMAINS: readonly unknown[] = [CapabilityDomain.Development, CapabilityDomain.Delivery]
+const UNBIND_FIELDS = ['workspaceId', 'bindingId', 'domain'] as const
+/** 已知外部能力域：planning / execution 是政策拒绝（不是形状错误），storage 与未知值是形状错误。 */
+const KNOWN_EXTERNAL_DOMAINS: readonly unknown[] = [CapabilityDomain.Planning, CapabilityDomain.Development, CapabilityDomain.Delivery, CapabilityDomain.Execution]
+const UNBINDABLE_DOMAINS: readonly unknown[] = [CapabilityDomain.Development, CapabilityDomain.Delivery]
 const STATUS_POLICIES: readonly unknown[] = Object.values(StatusPolicy)
 const nonBlank = (value: unknown): boolean => typeof value === 'string' && value.trim() !== ''
 const plainObject = (value: unknown): boolean => value !== null && typeof value === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(value))
@@ -193,11 +201,17 @@ export function createWorkspaceSetup(storage: Storage): WorkspaceSetup {
       if (registered !== undefined && !current.some((identity) => identity.id === registered.externalIdentityId)) refuse(ProjectErrorCode.Conflict, '仓库已登记，但它的锚点不在本工作区任何挂载下：不猜实体')
       const bindingIds: ProviderBindingId[] = []
       const created: { readonly id: ProviderBindingId; readonly reference: RepositoryReferenceRequest; readonly target: MountTarget }[] = []
+      const revived: ProviderBindingRecord[] = []
       for (const reference of references) {
         const target: MountTarget = { implementationKey: reference.implementationKey, accountId: reference.accountId, configuration: reference.configuration }
         const existing = mounts.find((mount) => mount.domain === reference.domain && mount.implementationKey === reference.implementationKey && current.some((identity) => identity.bindingId === mount.id))
         if (existing !== undefined) {
           if (!sameMountTarget(await readMountTarget(tx, existing), target)) refuse(ProjectErrorCode.Conflict, '仓库在该实现下已有引用而目标不同：本版本不改绑')
+          // 解绑后的唯一逆操作（#368）：同实现同目标命中停用行时 revive 原 id，不新增行或身份；交付恢复默认槽，已占用则不替换。
+          if (!existing.enabled) {
+            if (reference.domain === CapabilityDomain.Delivery && mounts.some((mount) => mount.domain === CapabilityDomain.Delivery && mount.enabled)) refuse(ProjectErrorCode.Conflict, '工作区已有启用的交付来源：不替换')
+            revived.push(existing)
+          }
           bindingIds.push(existing.id)
           continue
         }
@@ -207,6 +221,7 @@ export function createWorkspaceSetup(storage: Storage): WorkspaceSetup {
         bindingIds.push(id)
         created.push({ id, reference, target })
       }
+      for (const mount of revived) await storageWrite(() => tx.putProviderBinding({ ...mount, enabled: true, isDefault: mount.domain === CapabilityDomain.Delivery }))
       for (const { id, reference, target } of created) {
         await writeMount(tx, { id, workspaceId, domain: reference.domain, enabled: true, isDefault: reference.domain === CapabilityDomain.Delivery }, target)
       }
@@ -214,6 +229,21 @@ export function createWorkspaceSetup(storage: Storage): WorkspaceSetup {
       const anchorFirst = [...created.filter(({ reference }) => reference.domain === CapabilityDomain.Development), ...created.filter(({ reference }) => reference.domain !== CapabilityDomain.Development)]
       await registerRepository(tx, defaultIdFactory, workspaceId, repositoryId, anchorFirst.map(({ id }) => id))
       return { repositoryId, bindingIds }
+    }),
+
+    // 解绑只停用（#368）：闭集与域政策先于行查找，全部拒绝零写入；停用同时清默认（CHECK: 默认必然启用）。行、账号关联、配置、
+    // 外部身份与仓库锚点全部保留，只有同仓库同实现同目标的 bindRepository 能 revive 原 id。
+    unbindProviderBinding: (request) => runSetup(storage, async (tx) => {
+      assertClosed(request, UNBIND_FIELDS)
+      const { workspaceId, bindingId, domain } = request
+      if (!nonBlank(workspaceId) || !nonBlank(bindingId) || !nonBlank(domain)) refuse(ProjectErrorCode.InvalidInput, '工作区 id、挂载 id 与能力域必须是非空字符串')
+      if (!KNOWN_EXTERNAL_DOMAINS.includes(domain)) refuse(ProjectErrorCode.InvalidInput, '能力域未知或不是可挂载的外部域')
+      if (!UNBINDABLE_DOMAINS.includes(domain)) refuse(ProjectErrorCode.NotSupported, '规划与执行挂载不能解绑：没有恢复路径')
+      const mount = (await tx.listProviderBindings(workspaceId)).find((row) => row.id === bindingId && row.domain === domain)
+      if (mount === undefined) refuse(ProjectErrorCode.NotFound, '工作区没有这个挂载')
+      if (!mount.enabled) return { bindingId }
+      await storageWrite(() => tx.putProviderBinding({ ...mount, enabled: false, isDefault: false }))
+      return { bindingId }
     }),
   }
 }
