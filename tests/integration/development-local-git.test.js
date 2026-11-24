@@ -154,6 +154,37 @@ test('路径安全：已存在的目标祖先是符号链接时，带新尾部�
   assert.equal(result.error.code, 'invalid_input')
   assert.equal(result.error.retryable, false)
 })
+
+test('路径安全：非 ENOENT/ENOTDIR 的 stat 失败判为不可规范化，预检结构化拒绝而不是当作可创建路径（零次 Git 调用）', async (t) => {
+  // 平台边界：本文件不在 Windows lane（docs/development/ci.md），CI Verify 以非 root 运行，故这里的 chmod 0 拒绝会真实执行；
+  // 若未来 Verify 改为 root/容器身份，本用例走下面的 skip 而不是变红（run-test-layer 只拒绝零执行），需同时补该文件 skipped===0 的门禁。
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    t.skip('root 下 chmod 0 不构成访问屏障')
+    return
+  }
+  const fixture = await fixtureFor(t)
+  // 正控：正常目标的预检必须成功，否则下面的拒绝可能只是"预检本身坏了"造成的假红。
+  const control = await providerFor(fixture).preflightWorktree({ repository: repositoryRef, worktreeKey: 'wt-ok', branch: 'main' })
+  assert.equal(control.ok, true, '正常目标的预检必须成功')
+  const blocked = path.join(fixture.root, 'blocked')
+  await mkdir(blocked)
+  await chmod(blocked, 0o000)
+  try {
+    const resolved = await resolveWorktreePath(path.join(blocked, 'nested', 'wt'), { repositoryPath: fixture.repositoryPath, allowedRoot: fixture.root })
+    assert.equal(resolved.ok, false, '非 ENOENT/ENOTDIR 的 stat 失败不得被当作"路径不存在、可以创建"')
+    assert.equal(resolved.reason, 'unresolvable', '不可访问必须在路径层被分类为 unresolvable，而不是抛裸异常穿过契约')
+    const recorder = recordingRunner()
+    const provider = providerFor(fixture, { runGit: recorder.runGit })
+    const result = await provider.preflightWorktree({ repository: repositoryRef, worktreeKey: 'wt', path: path.join(blocked, 'nested', 'wt'), branch: 'main' })
+    assert.equal(result.ok, false, '预检必须拒绝不可访问的目标，不得报可创建')
+    assert.equal(result.error.code, 'invalid_input')
+    assert.equal(result.error.retryable, false, '路径分类失败是输入拒绝，不是可重试的平台错误')
+    assert.deepEqual(recorder.calls, [], '路径拒绝必须发生在任何 Git 调用之前')
+  } finally {
+    await chmod(blocked, 0o755)
+  }
+})
+
 test('读取默认分支时的非 not_found 错误不得被折成成功', async (t) => {
   const fixture = await fixtureFor(t)
   const provider = providerFor(fixture, {
@@ -290,6 +321,39 @@ test('分支身份：pack-refs 之后大小写变体仍然被拒，且磁盘上�
     refs.filter((ref) => ref.toLowerCase() === 'refs/heads/work/wi-1'), ['refs/heads/work/wi-1'],
     '磁盘上只能有一条该名字的引用，不能出现折叠到同一底层引用的两个名字',
   )
+})
+
+test('分支列表：limit 为 0 或负数时游标严格前进，遍历有界终止且恰好枚举每个分支一次', async (t) => {
+  const fixture = await fixtureFor(t)
+  const provider = providerFor(fixture)
+  for (const name of ['feature/bound-a', 'feature/bound-b', 'feature/bound-c']) await fixture.run(['branch', name, 'main'])
+  const all = await provider.listBranches({ repository: repositoryRef, cursor: undefined, limit: 1000 })
+  assert.equal(all.ok, true)
+  assert.equal(all.value.nextCursor, undefined, '大页必须一页读完')
+  const names = all.value.items.map((item) => item.name).sort()
+  assert.ok(names.length > 1, '夹具必须提供多个分支，否则分页断言看不出差别')
+  // limit < 1 时实现按 1 条夹取；端口级 limit<=0 语义尚未裁决（ExecPlan D7），若裁决改为"遍历结束返回空页"，本用例须同步改写而不是删断言。
+  // 只断言最终集合会在游标原地踏步时挂住，所以先给页数上界防坏游标，
+  // 再逐页断言性质：非空、页大小 ≤ max(1, limit)、游标严格前进、有界终止、恰好枚举一次。
+  for (const limit of [0, -1]) {
+    const seen = []
+    let cursor
+    for (let pages = 1; ; pages += 1) {
+      assert.ok(pages <= names.length + 2, `limit ${limit} 的分页在页数上界内没有终止：已读 ${pages} 页`)
+      // 本地 provider 的游标是数值 offset（能力契约只承诺不透明字符串）；严格前进断言依赖该编码，改游标形态时必须同步改写断言。
+      const start = cursor === undefined ? 0 : Number(cursor)
+      const page = await provider.listBranches({ repository: repositoryRef, cursor, limit })
+      assert.equal(page.ok, true)
+      assert.ok(page.value.items.length >= 1, `limit ${limit} 的第 ${pages} 页为空：空页会让游标原地踏步，调用方永远读不完`)
+      assert.ok(page.value.items.length <= Math.max(1, limit), `limit ${limit} 每页不得超过 max(1, limit) 条`)
+      seen.push(...page.value.items.map((item) => item.name))
+      if (page.value.nextCursor === undefined) break
+      assert.ok(Number(page.value.nextCursor) > start, `limit ${limit} 的 nextCursor 必须严格前进：${cursor} → ${page.value.nextCursor}`)
+      cursor = page.value.nextCursor
+    }
+    assert.deepEqual([...seen].sort(), names, `limit ${limit} 必须恰好枚举每个分支一次`)
+    assert.equal(new Set(seen).size, seen.length, `limit ${limit} 的分页不得重复枚举分支`)
+  }
 })
 
 test('写后回读：worktree add 落到别处时不得把判定时的路径报成事实', async (t) => {
