@@ -60,7 +60,7 @@ test('assignment JSON rejects unknown operation and undeclared identity fields w
 test('two SQLite instances share the durable assignment claim and local query performs no Provider I/O', async t => {
   const { createSqliteStorage } = await import('@harness-projects/storage-sqlite'), { composeCore } = await import('@harness-projects/core')
   const w = await assigned(t), second = createSqliteStorage(w.path); t.after(() => second.close())
-  const core = await composeCore({ workspace: w.workspace, providers: w.providers, storage: second })
+  const core = await composeCore({ workspace: w.workspace, providers: { ...w.providers, storage: second } })
   await Promise.all([w.add(), core.commands.addChangeRequestAssignees({ ...w.assignment, assigneeIds: ['U_1'], actor: { kind: 'user' }, idempotencyKey: 'assignment-1' })]); assert.equal(w.adds, 1)
   assert.deepEqual((await w.storage.listMutationAttempts(w.workspace.id)).filter(r => r.commandName === 'addChangeRequestAssignees').map(r => r.externalIntent.sequence), [1])
   for (const method of ['listAssignableUsers', 'getChangeRequestAssignees', 'addChangeRequestAssignees']) w.f.provider[method] = () => { throw Error('query must stay local') }

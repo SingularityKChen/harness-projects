@@ -187,7 +187,7 @@ export function storageConnectorAccountSuite(adapter, register = test) {
     const storage = makeStorage(); const mount = await seedAccount(storage, ['planning', 'development'])
     await storage.setProviderBindingAccount('conn-0', 'account-1'); await storage.putBindingConfiguration({ ref: mount(0), configuration: { scope: 'workspace' } })
     for (let round = 0; round < 2; round += 1) { // core 固定 bindingId 的两次装配：重登记只更新角色字段，账号关联与配置必须保留
-      await createContext({ workspace: { id: WORKSPACE, name: '工作区' }, providers: { planning: createFakePlanningProvider({ bindingId: 'conn-0' }) }, storage })
+      await createContext({ workspace: { id: WORKSPACE, name: '工作区' }, providers: { planning: createFakePlanningProvider({ bindingId: 'conn-0' }), storage } })
     }
     assert.equal(await attached(storage, 0), 'account-1', 'core 重登记不得清空账号关联')
     assert.deepEqual((await storage.getBindingConfiguration(mount(0))).configuration, { scope: 'workspace' }, 'core 重登记不得清空配置')

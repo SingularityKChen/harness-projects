@@ -57,7 +57,7 @@ export async function recordedChain(t, statusPolicy) {
   const workspace = w.workspace = { id: newWorkspaceId(), name: 'recorded-development-sqlite', ...(statusPolicy === undefined ? {} : { statusPolicy }) }
   const fake = createFakeProviders()
   fake.development.state.branches[0].headCommit = GAMMA_HEAD
-  const initial = await composeCore({ workspace, providers: { ...fake, storage: w.storage }, storage: w.storage })
+  const initial = await composeCore({ workspace, providers: { ...fake, storage: w.storage } })
   const item = (await initial.queries.listPlanningItems()).find((view) => view.kind === 'work_item' && view.content.contentKind === 'work_item')
   w.scope = { workItemId: item.entityId, repositoryId: 'repo-alpha' }
   w.started = await initial.commands.startWork({ task: 'Synthetic explicit task', ...w.scope, branchName: GAMMA_BRANCH, actor: { kind: 'agent' }, idempotencyKey: 'recorded-anchor' })
@@ -95,7 +95,7 @@ export async function recordedChain(t, statusPolicy) {
   const providers = { planning: counted(fake.planning, 'planning'), execution: counted(fake.execution, 'execution'),
     development: counted(development, 'development'), delivery: counted(delivery, 'delivery') }
   let ticks = 0
-  w.compose = () => composeCore({ workspace, providers: { ...providers, storage: w.storage }, storage: w.storage,
+  w.compose = () => composeCore({ workspace, providers: { ...providers, storage: w.storage },
     clock: () => new Date(Date.UTC(2026, 9, 22, 0, 0, ticks++)).toISOString() })
   w.core = await w.compose()
   w.snapshot = () => w.storage.getDeliveryFacts(workspace.id, w.started.executionContextId)

@@ -5,9 +5,15 @@ import { composeCore } from '@harness-projects/core'
 import { createFakeProviders } from '@harness-projects/provider-fake'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
 const task = '  检查 🧪\nKeep exact whitespace.  '
+/** world 形组装（#632）：storage 只经 provider 表进入 core；w.storage 会在 reopen 后替换，组装时必须读实时值；over.storage 覆写本次 Storage。 */
+const depsOf = (w, over = {}) => {
+  const { storage, ...rest } = w
+  const { storage: overrideStorage, providers = w.providers, ...extra } = over
+  return { ...rest, ...extra, providers: { ...providers, storage: overrideStorage ?? storage } }
+}
 async function setup(t) {
   const providers = createFakeProviders(), storage = createSqliteStorage(':memory:'); t.after(() => storage.close())
-  const options = { providers, storage, workspace: { id: 'task-handoff', name: 'Task' } }, core = await composeCore(options)
+  const options = { providers, storage, workspace: { id: 'task-handoff', name: 'Task' } }, core = await composeCore(depsOf(options))
   const workItemId = (await core.queries.listPlanningItems()).find(v => v.content.contentKind === 'work_item').entityId
   const request = { workItemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'original', task }
   const sent = [], startRun = providers.execution.startRun.bind(providers.execution)
@@ -26,7 +32,7 @@ test('task is exact execution command, bound on first claim and cannot be sent t
   conflict(await w.start({ idempotencyKey: 'new' }), 'existing_execution_task_not_sent')
   assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'new'), undefined)
   assert.equal((await w.start()).writeState, 'saved'); assert.equal(w.sent.length, 1)
-  const detached = await composeCore({ ...w, providers: { ...w.providers, development: undefined } })
+  const detached = await composeCore(depsOf(w, { providers: { ...w.providers, development: undefined } }))
   conflict(await w.start({ idempotencyKey: 'detached' }, detached), 'existing_execution_task_not_sent')
   const record = await w.storage.getExecutionContext(row.externalIntent.contextId); await w.storage.putExecutionContext({ ...record, status: 'failed' })
   conflict(await w.start({ idempotencyKey: 'failed-detached', task: 'different' }, detached), 'existing_execution_task_not_sent')
@@ -47,8 +53,8 @@ test('the first claim window observes identical other keys and rejects changed t
   }
   const running = w.start(); await entered.promise
   try {
-    const other = await composeCore(w)
-    const offline = await composeCore({ ...w, providers: { ...w.providers, development: undefined } })
+    const other = await composeCore(depsOf(w))
+    const offline = await composeCore(depsOf(w, { providers: { ...w.providers, development: undefined } }))
     conflict(await w.start({ idempotencyKey: 'offline-changed', task: 'different' }, offline))
     assert.equal((await w.start({ idempotencyKey: 'observer' }, other)).writeState, 'pending')
     conflict(await w.start({ idempotencyKey: 'changed', task: 'different' }, other))

@@ -32,7 +32,7 @@ const heal = (planning) => { planning.state.observations = planning.state.observ
 async function setup(storage, { clock = clockOf(T(1), T(2), T(3)), workspace = {}, diagnostics } = {}) {
   const providers = createFakeProviders()
   const id = newWorkspaceId()
-  const open = () => composeCore({ workspace: { id, name: 'sync-round', ...workspace }, providers, storage, clock, diagnostics })
+  const open = () => composeCore({ workspace: { id, name: 'sync-round', ...workspace }, providers: { ...providers, storage }, clock, diagnostics })
   const cursor = () => storage.getSyncCursor(id, providers.planning.bindingId, PLANNING_SYNC_SCOPE)
   return { id, providers, storage, open, cursor, revision: () => storage.currentRevision(id), reconciled: async () => (await storage.getReconcileCursor(id))?.lastReconciledAt }
 }

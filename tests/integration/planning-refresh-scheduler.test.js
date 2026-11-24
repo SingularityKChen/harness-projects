@@ -54,7 +54,8 @@ async function setup(deps = {}) {
     id: newWorkspaceId(), name: 'Planning refresh', statusPolicy: StatusPolicy.ProviderAuthoritative,
     project: fixtureProjectRef(providers.planning.bindingId),
   }
-  const core = await composeCore({ workspace, providers, ...deps })
+  const { storage, ...extra } = deps
+  const core = await composeCore({ workspace, providers: storage === undefined ? providers : { ...providers, storage }, ...extra })
   return { core, providers, workspace }
 }
 

@@ -64,7 +64,7 @@ function probe(storage, { failAt, hold } = {}) {
   return { seen, storage: wrap(storage, { transaction }) }
 }
 const compose = (storage, providers, { workspace, policy = {} } = {}) =>
-  createContext({ workspace: { id: WS, name: '新名', ...workspace }, providers, storage, policy })
+  createContext({ workspace: { id: WS, name: '新名', ...workspace }, providers: { ...providers, storage }, policy })
 const row = (id, domain, key = KEY, isDefault = true) => `${id}|${domain}|${key}|true|${isDefault}`
 const rows = async (storage, workspaceId = WS) => (await storage.listProviderBindings(workspaceId))
   .map((r) => `${r.id}|${r.domain}|${r.implementationKey}|${r.enabled}|${r.isDefault}`).sort()
@@ -111,7 +111,7 @@ const routed = async (storage) => {
 }
 /** 生产入口：经 composeCore 装配，返回对规划种子里第一个 work_item 开始工作的命令。 */
 async function starter(storage, providers, policy) {
-  const core = await composeCore({ workspace: { id: WS, name: '新名' }, providers, storage, policy })
+  const core = await composeCore({ workspace: { id: WS, name: '新名' }, providers: { ...providers, storage }, policy })
   const workItemId = (await core.queries.listPlanningItems()).find((view) => view.content.contentKind === 'work_item').entityId
   return () => core.commands.startWork({ task: 'Synthetic explicit task', workItemId, repositoryId: 'repo-alpha', idempotencyKey: 'shared', actor: { kind: 'agent' } })
 }

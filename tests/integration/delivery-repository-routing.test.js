@@ -99,7 +99,7 @@ async function world(label, t, order) {
     delivery[name] = async (input) => { ciCalls.push(name); return original(input) }
   }
   let tick = 0
-  const deps = (mounts) => ({ workspace, storage: store.storage, providers: { planning, execution, delivery, development: mounts.map((dev) => dev.port) },
+  const deps = (mounts) => ({ workspace, providers: { planning, execution, delivery, development: mounts.map((dev) => dev.port), storage: store.storage },
     clock: () => new Date(Date.UTC(2026, 9, 22, 0, 0, tick++)).toISOString() })
   let core = await composeCore(deps(order ? [local, remote] : [local]))
   const workItemId = (await core.queries.listPlanningItems()).find((item) => item.kind === 'work_item' && item.content.contentKind === 'work_item').entityId

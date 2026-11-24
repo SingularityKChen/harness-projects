@@ -31,14 +31,14 @@ export async function world(t, label = 'Fake', options = {}) {
       } })))
       return typeof value === 'function' ? value.bind(object) : value
     } })
-    w.core = await composeCore({ workspace, providers, storage: port, policy: w.policy })
+    w.core = await composeCore({ workspace, providers: { ...providers, storage: port }, policy: w.policy })
     w.commands = createControllerCommands(w.core)
     w.storage = storage
   }
   await w.compose()
   const workItemId = (await w.core.queries.listPlanningItems()).find((item) => item.content.identity?.externalId === 'issue-1').entityId
   w.scope = { workItemId, repositoryId: repository.externalId }
-  const ctx = await createContext({ workspace, providers, storage })
+  const ctx = await createContext({ workspace, providers: { ...providers, storage } })
   await storage.transaction((tx) => registerRepository(tx, ctx.ids, workspace.id, repository.externalId, [repository.bindingId]))
   w.record = { id: contextIdFor(workspace.id, workItemId, repository.externalId), workspaceId: workspace.id, ...w.scope,
     status: 'ready', branchExternalId: input.head, worktreeExternalId: 'fixture-worktree', provisioningStartedAt: undefined, provisioningGeneration: 1 }
@@ -60,7 +60,7 @@ export async function ready(w) {
   local.state.branches[0].repository = local.state.repositories[0].ref
   w.providers.development = [local, w.f.provider]; w.providers.execution = w.fake.execution
   await w.compose()
-  const ctx = await createContext({ workspace: w.workspace, providers: w.providers, storage: w.storage })
+  const ctx = await createContext({ workspace: w.workspace, providers: { ...w.providers, storage: w.storage } })
   await w.storage.transaction((tx) => registerRepository(tx, ctx.ids, w.workspace.id, w.scope.repositoryId, [repository.bindingId, local.gate.bindingId]))
   await w.storage.putEntity({ id: w.record.id, kind: 'execution_context' })
   await w.storage.putEntity({ id: worktreeEntityId(w.workspace.id, w.scope.repositoryId, w.scope.workItemId), kind: 'worktree' })

@@ -52,7 +52,7 @@ test('core 端到端：PR 只经 head 分支挂上谱系，标题 / fork / 大�
     const development = createGithubDevelopmentProvider({
       bindingId: bound.value.bindingIds[0], repository: { externalId: REPOSITORY, owner: 'sandbox-owner', name: 'sandbox' }, transport: async (request) => platform(request),
     })
-    const core = await composeCore({ workspace, providers: { ...providers, development }, storage: providers.storage })
+    const core = await composeCore({ workspace, providers: { ...providers, development, storage: providers.storage } })
     const scope = { workItemId: item.entityId, repositoryId: REPOSITORY }
     assert.equal((await core.commands.refreshDeliveryFacts(scope)).error, undefined, `${mode}：刷新本身不得失败`)
     const hops = (await core.queries.getDeliveryProjection(scope)).hops

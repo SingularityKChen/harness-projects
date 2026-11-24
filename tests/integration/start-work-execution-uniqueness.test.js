@@ -22,6 +22,12 @@ const barrier = () => {
     async hold() { this.hits++; entered.resolve(); await released.promise } }
 }
 const start = (w, key = 'original', core = w.core) => core.commands.startWork({ ...w.request, idempotencyKey: key })
+/** world 形组装（#632）：storage 只经 provider 表进入 core；w.storage 会在 reopen 后替换，组装时必须读实时值；over.storage 覆写本次 Storage。 */
+const depsOf = (w, over = {}) => {
+  const { storage, ...rest } = w
+  const { storage: overrideStorage, providers = w.providers, ...extra } = over
+  return { ...rest, ...extra, providers: { ...providers, storage: overrideStorage ?? storage } }
+}
 const receipt = (w, key = 'original') => w.storage.findMutationAttempt(w.workspace.id, key)
 const unknown = (r) => assert.deepEqual([r.writeState, r.confirmed], ['unknown', false])
 function snapshot(storage) {
@@ -54,7 +60,7 @@ async function setup(kind, fallback = false) {
     }
   }
   w.provider = fallback ? spare : providers.execution
-  w.core = await composeCore(w)
+  w.core = await composeCore(depsOf(w))
   const workItemId = (await w.core.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item').entityId
   w.request = { task: 'Synthetic explicit task', workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' } }
   w.contextId = contextIdFor(w.workspace.id, workItemId, 'repo-alpha'); w.runId = runIdFor(w.contextId)
@@ -63,13 +69,13 @@ async function setup(kind, fallback = false) {
 async function anotherCore(w) {
   const storage = w.kind === 'SQLite' ? sqlite(w.storage.location) : w.storage
   if (w.kind === 'SQLite') assert.notEqual(storage, w.storage, '并发 owner 使用独立 SQLite 连接')
-  return composeCore({ ...w, storage })
+  return composeCore(depsOf(w, { storage }))
 }
 async function reopen(w) {
   // 只在原命令已经结束时关闭；活 owner 并发用 anotherCore，不能靠关闭其连接制造 fence。
   if (w.kind === 'SQLite') { const file = w.storage.location; w.storage.close(); w.storage = sqlite(file) }
   else w.storage = createFakeStorage(exportFakeStorageState(w.storage))
-  w.core = await composeCore(w)
+  w.core = await composeCore(depsOf(w))
 }
 function onceAfterCommit(w, predicate) {
   const gate = barrier(), transaction = w.storage.transaction.bind(w.storage)
@@ -217,7 +223,7 @@ for (const kind of ['Fake', 'SQLite']) for (const stage of ['claim', 'git-ack'])
   const intent = { ...w.request, workspaceId: w.workspace.id }
   assert.equal((await client.submit(intent)).writeState, 'unknown'); assert.equal(interrupted, true); assert.equal(w.ledger.length, 0)
   w.storage.transaction = transaction; await reopen(w); w.time.advance(31_000)
-  const moved = await composeCore({ ...w, providers: { ...w.providers, development: createFakeDevelopmentProvider({ bindingId: 'moved' }) } })
+  const moved = await composeCore(depsOf(w, { providers: { ...w.providers, development: createFakeDevelopmentProvider({ bindingId: 'moved' }) } }))
   assert.equal((await start(w, 'original', moved)).error?.message, 'idempotency_target_changed')
   const changed = await w.core.commands.startWork({ ...w.request, idempotencyKey: 'changed', task: 'changed' })
   assert.equal(changed.error.message, 'idempotency_request_mismatch')
@@ -233,7 +239,7 @@ for (const kind of ['Fake', 'SQLite']) for (const stage of ['claim', 'git-ack'])
   const w = await setup(kind), transaction = w.storage.transaction.bind(w.storage); let interrupted = false
   w.storage.transaction = async work => { const result = await transaction(work); const row = await receipt(w); if (!interrupted && row?.state === 'pending' && (stage === 'claim' ? !row.externalIntent : row.externalIntent?.operation === 'createWorktree' && row.externalIntent.state === 'saved')) { interrupted = true; throw Error('crash after safe gap') } return result }
   await start(w); w.storage.transaction = transaction; await reopen(w); w.time.advance(31_000)
-  const denied = await composeCore({ ...w, policy: { [CapabilityKey.DevelopmentWorktreeCreate]: 'read_only' } })
+  const denied = await composeCore(depsOf(w, { policy: { [CapabilityKey.DevelopmentWorktreeCreate]: 'read_only' } }))
   assert.equal((await start(w, key, denied)).writeState, 'failed'); assert.equal(w.ledger.length, 0)
   assert.equal((await receipt(w)).state, 'failed')
   assert.equal((await w.core.commands.startWork({ ...w.request, idempotencyKey: 'new-task', task: 'new task' })).writeState, 'saved')

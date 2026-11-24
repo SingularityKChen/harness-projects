@@ -231,7 +231,7 @@ test('Windows Core/SQLite: lost worktree ack reconciles and reopen with reposito
       if (loseAck && args[2] === 'worktree' && args[3] === 'add' && result.code === 0) { loseAck = false; return { code: 128, stdout: '', stderr: 'unknown write result' } }
       return result
     } })
-    return composeCore({ workspace: { id: 'windows-durable', name: 'Windows durable' }, storage, providers: { development }, clock: () => FROZEN_NOW })
+    return composeCore({ workspace: { id: 'windows-durable', name: 'Windows durable' }, providers: { development, storage }, clock: () => FROZEN_NOW })
   }
   const request = { workItemId: 'wi-windows', repositoryId: REPOSITORY_ID, task: 'Synthetic task', actor: { kind: 'agent' } }
   let core = await compose(f.repositoryPath); await registerWorkItem(storage, 'windows-durable', request.workItemId)

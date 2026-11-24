@@ -54,8 +54,8 @@ async function world(label, t, storage, workspaceId = newWorkspaceId()) {
         return result
       }
     } }))) } })
-    w.core = await composeCore({ workspace: w.workspace, storage: storagePort,
-      providers: { planning, development, execution: providers.execution, delivery: providers.delivery },
+    w.core = await composeCore({ workspace: w.workspace,
+      providers: { planning, development, execution: providers.execution, delivery: providers.delivery, storage: storagePort },
       clock: () => new Date(Date.UTC(2026, 9, 28, 0, 0, tick++)).toISOString() })
   }
   w.reopen = async (recompose = true) => {
@@ -65,8 +65,8 @@ async function world(label, t, storage, workspaceId = newWorkspaceId()) {
   }
   w.entities = () => label === 'Fake' ? exportFakeStorageState(w.storage).entities.filter((row) => row.kind === 'change_request')
     : w.storage.db.prepare("SELECT id, kind FROM entity WHERE kind = 'change_request'").all()
-  await createContext({ workspace: w.workspace, storage: w.storage,
-    providers: { planning, development, execution: providers.execution, delivery: providers.delivery } })
+  await createContext({ workspace: w.workspace,
+    providers: { planning, development, execution: providers.execution, delivery: providers.delivery, storage: w.storage } })
   w.accountId = `account-${workspaceId}`
   await w.storage.putConnectorAccount({ id: w.accountId, platformFamily: 'github', platformOrigin: 'https://github.com', identityKind: 'account',
     externalId: w.accountId, displayName: 'fixture account', secretHandle: undefined, connectionState: 'connected' })
@@ -259,8 +259,8 @@ for (const label of ['Fake', 'SQLite']) for (const kind of ['issue', 'draft', 'p
 
 for (const label of ['Fake', 'SQLite']) test(`AC367 observed PR reader and persisted queries perform zero writes (${label})`, async (t) => {
   const w = await world(label, t)
-  const context = await createContext({ workspace: w.workspace, storage: w.storage,
-    providers: { planning: w.planning, development: w.development, delivery: w.providers.delivery, execution: w.providers.execution } })
+  const context = await createContext({ workspace: w.workspace,
+    providers: { planning: w.planning, development: w.development, delivery: w.providers.delivery, execution: w.providers.execution, storage: w.storage } })
   let writes = 0
   const readonly = new Proxy(w.storage, { get(object, key) {
     const value = Reflect.get(object, key, object)

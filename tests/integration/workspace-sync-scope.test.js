@@ -36,7 +36,7 @@ async function mount(providers, storage, id) {
       return typeof value === 'function' ? value.bind(target) : value
     },
   })
-  const core = await composeCore({ workspace: { id, name: id }, providers: { ...providers, planning }, storage })
+  const core = await composeCore({ workspace: { id, name: id }, providers: { ...providers, planning, storage } })
   return { id, knob, core, controller: createController(core, { workspaceRevision: () => storage.currentRevision(id) }) }
 }
 

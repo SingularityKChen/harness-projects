@@ -123,7 +123,7 @@ async function raceFixture(makeStorage, change, native = (record) => NATIVE(reco
   const storage = makeStorage()
   const probe = instrument(storage)
   const workspace = { id: 'workspace-race', name: 'status-race', statusPolicy: StatusPolicy.HostAuthoritative, planningFieldMapping: FIELD_MAPPING }
-  const core = await composeCore({ workspace, providers, storage: probe.storage, clock: () => '2026-10-15T00:00:00.000Z',
+  const core = await composeCore({ workspace, providers: { ...providers, storage: probe.storage }, clock: () => '2026-10-15T00:00:00.000Z',
     ids: { entityId: next('entity'), externalIdentityId: next('identity'), relationId: next('relation') } })
   const entityId = await workItemIdOf(core)
   const { content: { identity } } = await core.queries.getItemDetail(entityId)

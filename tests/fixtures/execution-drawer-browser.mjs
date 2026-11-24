@@ -43,7 +43,7 @@ export async function createExecutionFixture({ seed } = {}) {
   let itemId, runId
   if (seed !== 'empty') {
     const planningFieldMapping = seed === 'timeline' ? {targetDateFieldId:'target',iterationFieldId:'iteration'} : seed === 'board' ? { status:{ projectFieldId:'status',options:{todo:'todo',in_progress:'in_progress',done:'done'} } } : undefined
-    const core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture', ...(planningFieldMapping ? { planningFieldMapping } : {}) }, providers, storage })
+    const core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture', ...(planningFieldMapping ? { planningFieldMapping } : {}) }, providers: { ...providers, storage } })
     if (planningFieldMapping) await storage.putWorkspacePlanningMapping({ workspaceId,bindingId:providers.planning.bindingId,projectExternalId:providers.planning.state.projects[0].ref.externalId,origin:'user',mapping:planningFieldMapping })
     await storage.putBindingConfiguration({ ref: { workspaceId, bindingId: providers.planning.bindingId, domain: 'planning' }, configuration: { projectNodeId: providers.planning.state.projects[0].ref.externalId } })
     itemId = (await core.queries.listPlanningItems()).find((item) => item.content.title === '规划项 issue-1').entityId

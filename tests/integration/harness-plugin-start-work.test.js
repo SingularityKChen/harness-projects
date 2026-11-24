@@ -34,7 +34,7 @@ test('real controller failed ledger needs a new attempt; SQLite and Git writes o
   const root = await mkdtemp(join(tmpdir(), 'start-work-')), storage = createSqliteStorage(join(root, 'workspace.sqlite'))
   t.after(async () => { storage.close(); await rm(root, { recursive: true, force: true }) })
   const providers = createFakeProviders(), workspaceId = '00000000-0000-4000-8000-000000000142'
-  const core = await composeCore({ workspace: { id: workspaceId, name: 'Start' }, providers, storage }), controller = createController(core)
+  const core = await composeCore({ workspace: { id: workspaceId, name: 'Start' }, providers: { ...providers, storage } }), controller = createController(core)
   const workItemId = (await core.queries.listPlanningItems()).find((item) => item.content.contentKind === 'work_item').entityId
   let writes = 0; const start = core.commands.startWork; core.commands.startWork = (...args) => { writes++; return start(...args) }
   const keys = [], api = client.createStartWork({ getStartWorkOptions: async () => ({}), startWork: (actorRef, idempotencyKey, workItemId, repositoryId, task, branchName) => { keys.push(idempotencyKey); return controller.commands.startWork({ task, actorRef, idempotencyKey, workItemId, repositoryId, branchName }) } }, async () => null, { kind: 'user' })
@@ -63,7 +63,7 @@ test('Host execution mode comes from actual selected assembly: no executor and h
     const providers = createFakeProviders(); delete providers.execution
     if (mode !== 'none') providers.execution = mode === 'human' ? createHumanExecutionProvider({ bindingId: 'execution-mode', issuerKey: 'fixture-issuer-key-at-least-32-bytes-long' }) : createHarnessExecutionProvider({ bindingId: 'execution-mode', sessions: { create: async () => ({ sessionId: 'fixture-session' }), prompt: async () => ({ accepted: true }), inspect: async () => ({ events: [] }), list: async () => ({ items: [] }) } })
     const catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: {}, create: async ({ binding }) => providers[binding.domain] }, ...(providers.execution ? [{ definition: providers.execution.definition, configuration: {}, create: async () => providers.execution }] : [])])
-    const storage = createSqliteStorage(dataPath, hostStoragePolicy(catalog)), core = await composeCore({ workspace: { id: workspaceId, name: 'Mode' }, providers, storage })
+    const storage = createSqliteStorage(dataPath, hostStoragePolicy(catalog)), core = await composeCore({ workspace: { id: workspaceId, name: 'Mode' }, providers: { ...providers, storage } })
     const item = (await core.queries.listPlanningItems()).find((item) => item.content.contentKind === 'work_item')
     const host = await createHostComposition({ dataPath, workspaceId, catalog, resolveCredential: async () => undefined })
     if (mode === 'none') { const answer = await core.commands.startWork({ task: 'Synthetic explicit task', workItemId: item.entityId, repositoryId: 'repo-alpha', actor: { kind: 'user' }, idempotencyKey: 'manual-start' }); assert.equal(answer.fallback, 'manual_fallback'); assert.equal(answer.confirmed, true) }
@@ -79,7 +79,7 @@ async function recoveryWorld(t) {
   const root = await mkdtemp(join(tmpdir(), 'start-recovery-')), storage = createSqliteStorage(join(root, 'workspace.sqlite'))
   t.after(async () => { storage.close(); await rm(root, { recursive: true, force: true }) })
   const providers = createFakeProviders(), workspaceId = '00000000-0000-4000-8000-000000000144'
-  const core = await composeCore({ workspace: { id: workspaceId, name: 'Recovery' }, providers, storage }), controller = createController(core)
+  const core = await composeCore({ workspace: { id: workspaceId, name: 'Recovery' }, providers: { ...providers, storage } }), controller = createController(core)
   const workItemId = (await core.queries.listPlanningItems()).find((item) => item.content.contentKind === 'work_item').entityId
   return { core, controller, providers, providerFail, target: { task: 'Synthetic explicit task', workspaceId, workItemId, repositoryId: 'repo-alpha' } }
 }

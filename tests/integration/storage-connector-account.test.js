@@ -169,7 +169,7 @@ test('secret-canary-never-published', async () => {
   await assert.rejects(fake.putConnectorAccount(account({ id: 'account-canary', secretHandle: CANARY })), RangeError)
   assert.ok(!scan(JSON.stringify(exportFakeStorageState(fake))), 'Fake export 不得出现 canary')
   await seed(fake)
-  const published = await (await createContext({ workspace: { id: WORKSPACE, name: '工作区' }, providers: { planning: createFakePlanningProvider({ bindingId: 'conn-restart' }) }, storage: fake })).storage.listProviderBindings(WORKSPACE)
+  const published = await (await createContext({ workspace: { id: WORKSPACE, name: '工作区' }, providers: { planning: createFakePlanningProvider({ bindingId: 'conn-restart' }), storage: fake } })).storage.listProviderBindings(WORKSPACE)
   assert.deepEqual(published.map((record) => Object.keys(record).sort()), [['domain', 'enabled', 'id', 'implementationKey', 'isDefault', 'workspaceId'].sort()], '发布面只含原挂载字段：不得出现句柄或配置')
   assert.ok(!scan(JSON.stringify(published)), '发布面不得出现 canary')
 })

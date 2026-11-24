@@ -58,7 +58,7 @@ async function setup(t, { refuseWorktree = false } = {}) {
       provider.startRun = async (input, lifecycle) => { target.push(structuredClone(input)); return start(input, lifecycle) }
     }
     const providers = { development, execution, executionFallback }
-    const core = await composeCore({ workspace: WORKSPACE, storage, providers, clock: () => FROZEN_NOW })
+    const core = await composeCore({ workspace: WORKSPACE, providers: { ...providers, storage }, clock: () => FROZEN_NOW })
     return { core, storage, providers, calls, gitCalls: recorder.calls }
   }
 

@@ -13,6 +13,12 @@ import { controllableClock } from './local-git-fixture.js'
 const root = mkdtempSync(join(tmpdir(), 'external-intent-')), handles = []; let seq = 0
 after(() => { for (const storage of handles) try { storage.close() } catch {} rmSync(root, { recursive: true, force: true }) })
 const sqlite = (file = join(root, `${seq++}.sqlite`)) => { const storage = createSqliteStorage(file); handles.push(storage); return storage }
+/** world 形组装（#632）：storage 只经 provider 表进入 core；w.storage 会在 reopen 后替换，组装时必须读实时值；over.storage 覆写本次 Storage。 */
+const depsOf = (w, over = {}) => {
+  const { storage, ...rest } = w
+  const { storage: overrideStorage, providers = w.providers, ...extra } = over
+  return { ...rest, ...extra, providers: { ...providers, storage: overrideStorage ?? storage } }
+}
 async function setup(kind, fallback = false) {
   const providers = createFakeProviders(), storage = kind === 'Fake' ? providers.storage : sqlite(), time = controllableClock()
   {
@@ -20,7 +26,7 @@ async function setup(kind, fallback = false) {
     spare.describeCapabilities = async () => { const s = await describe(); return { ...s, capability: { ...s.capability, [CapabilityKey.ExecutionRunFallback]: 'available' }, permission: { ...s.permission, [CapabilityKey.ExecutionRunFallback]: 'available' } } }
     if (fallback) providers.execution.startRun = async () => providerFail('unavailable', 'definite refusal')
   }
-  const workspace = { id: `intent-${seq++}`, name: 'intent' }, options = { providers, storage, workspace, clock: time.clock }, core = await composeCore(options)
+  const workspace = { id: `intent-${seq++}`, name: 'intent' }, options = { providers, storage, workspace, clock: time.clock }, core = await composeCore(depsOf(options))
   const workItemId = (await core.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item').entityId
   const request = { task: 'Synthetic explicit task', workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' }, idempotencyKey: 'first', worktreePath: '.worktrees/requested' }
   return { ...options, core, request, time, contextId: contextIdFor(workspace.id, workItemId, 'repo-alpha') }
@@ -85,7 +91,7 @@ for (const kind of ['Fake', 'SQLite']) {
     assert.equal(calls, 1); assert.equal(fallbackCalls, operation === 'startFallbackRun' ? 1 : 0); assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'replacement'), undefined)
     assert.deepEqual(await w.storage.getExecutionContext(w.contextId), record)
     if (kind === 'SQLite') {
-      w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(w); assert.deepEqual(await receipt(w), row)
+      w.storage.close(); w.storage = sqlite(w.storage.location); w.core = await composeCore(depsOf(w)); assert.deepEqual(await receipt(w), row)
       const readsBeforeRestart = reads.listBranches + reads.worktrees
       unknown(await start(w, 'first'))
       if (operation.startsWith('create')) assert.ok(reads.listBranches + reads.worktrees > readsBeforeRestart, '关库重开后的同 key 重放也必须先跑只读对账')
@@ -125,7 +131,7 @@ for (const kind of ['Fake', 'SQLite']) {
       assert.equal((await start(w, 'new-key')).error.message, 'existing_execution_task_not_sent')
       if (kind === 'SQLite') { w.storage.close(); w.storage = sqlite(w.storage.location) }
       else w.storage = createFakeStorage(exportFakeStorageState(w.storage))
-      w.core = await composeCore(w); results.push(await start(w)); assert.equal((await start(w, 'restart')).error.message, 'existing_execution_task_not_sent')
+      w.core = await composeCore(depsOf(w)); results.push(await start(w)); assert.equal((await start(w, 'restart')).error.message, 'existing_execution_task_not_sent')
       for (const r of results) assert.deepEqual([r.runExternalId, r.fallback, r.confirmed], [run.providerRef.externalId, fallback ? 'manual_fallback' : undefined, true])
     }
     assert.equal(starts, 1, '直接计 startRun 调用，不靠 Fake 幂等隐藏重复启动')

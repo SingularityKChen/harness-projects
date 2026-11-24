@@ -16,7 +16,7 @@ async function seeded(label, makeStorage, tag) {
   const providers = createFakeProviders()
   const storage = makeStorage()
   const workspace = { id: `membership-reconcile-${tag}-${label}`, name: label, statusPolicy: StatusPolicy.ProviderAuthoritative, project: fixtureProjectRef(providers.planning.bindingId) }
-  const context = await createContext({ workspace, providers, storage })
+  const context = await createContext({ workspace, providers: { ...providers, storage } })
   assert.ok(context)
   assert.equal((await bootstrapWorkspace(context)).ok, true)
   const item = providers.planning.state.items.find((candidate) => candidate.ref.externalId === 'issue-2')

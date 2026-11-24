@@ -12,6 +12,12 @@ import { createSqliteStorage, openDatabase } from '@harness-projects/storage-sql
 const root = mkdtempSync(join(tmpdir(), 'execution-recovery-')), handles = []; let seq = 0
 after(() => { for (const s of handles) try { s.close() } catch {} rmSync(root, { recursive: true, force: true }) })
 const sqlite = (file = join(root, `${seq++}.sqlite`)) => { const s = createSqliteStorage(file); handles.push(s); return s }
+/** world 形组装（#632）：storage 只经 provider 表进入 core；w.storage 会在 reopen 后替换，组装时必须读实时值；over.storage 覆写本次 Storage。 */
+const depsOf = (w, over = {}) => {
+  const { storage, ...rest } = w
+  const { storage: overrideStorage, providers = w.providers, ...extra } = over
+  return { ...rest, ...extra, providers: { ...providers, storage: overrideStorage ?? storage } }
+}
 async function setup(kind, fallback = false, execution) {
   const providers = createFakeProviders(), storage = kind === 'Fake' ? providers.storage : sqlite()
   if (execution) providers.execution = execution
@@ -20,7 +26,7 @@ async function setup(kind, fallback = false, execution) {
   spare.describeCapabilities = async () => { const s = await describe(); return { ...s, capability: { ...s.capability, [CapabilityKey.ExecutionRunFallback]: 'available' }, permission: { ...s.permission, [CapabilityKey.ExecutionRunFallback]: 'available' } } }
   if (fallback) providers.execution.startRun = async () => providerFail('unavailable', 'definite refusal')
   const w = { providers, storage, workspace: { id: `recover-${seq++}`, name: 'recovery' }, fallback }
-  w.core = await composeCore(w)
+  w.core = await composeCore(depsOf(w))
   const workItemId = (await w.core.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item').entityId
   w.request = { task: 'Synthetic explicit task', workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' }, idempotencyKey: 'original' }
   w.contextId = contextIdFor(w.workspace.id, workItemId, 'repo-alpha'); w.runId = runIdFor(w.contextId)
@@ -51,7 +57,7 @@ function receiptFault(w) { return inject(w, 'putMutationAttempt', (r) => r.state
 async function reopen(w) {
   if (w.storage.location) { const file = w.storage.location; w.storage.close(); w.storage = sqlite(file) }
   else w.storage = createFakeStorage(exportFakeStorageState(w.storage))
-  w.core = await composeCore(w)
+  w.core = await composeCore(depsOf(w))
 }
 for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) {
   test(`${kind} ${fallback ? 'fallback' : 'main'}: journal survives receipt rollback and restart converges original key`, async () => {
@@ -100,7 +106,7 @@ for (const kind of ['Fake', 'SQLite']) {
   for (const response of ['denied', 'not-found', 'throw', 'foreign-ref', 'unknown', 'no-read']) test(`${kind}: ${response} cold read retains receipt and exact local facts`, async () => {
     const w = await setup(kind), hit = receiptFault(w); await start(w); hit(); await reopen(w)
     const before = await receipt(w), run = await w.storage.getExecutionRun(w.runId)
-    if (response === 'no-read') w.core = await composeCore({ ...w, policy: { [CapabilityKey.ExecutionRunRead]: AccessLevel.Unavailable } })
+    if (response === 'no-read') w.core = await composeCore(depsOf(w, { policy: { [CapabilityKey.ExecutionRunRead]: AccessLevel.Unavailable } }))
     else w.provider.getRun = async (ref) => {
       w.reads++
       if (response === 'throw') throw Error('read interrupted')
@@ -165,7 +171,7 @@ for (const kind of ['Fake', 'SQLite']) {
     await w.storage.putPlanningProjection(w.workspace.id, { ...projection, content: { contentKind: 'redacted' } })
     assert.equal((await start(w)).error.code, 'not_found')
     await w.storage.putPlanningProjection(w.workspace.id, projection)
-    w.core = await composeCore({ ...w, providers: { ...w.providers, development: createFakeProviders().development } })
+    w.core = await composeCore(depsOf(w, { providers: { ...w.providers, development: createFakeProviders().development } }))
     assert.equal((await start(w)).error.code, 'conflict')
     assert.deepEqual(await receipt(w), before); assert.equal(w.reads, 0); assert.equal(w.starts, 1)
   })
@@ -201,7 +207,7 @@ for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) for
   const original = start(w); await b.entered
   let expected
   if (successor === 'reconciled') {
-    const observer = await composeCore(w)
+    const observer = await composeCore(depsOf(w))
     expected = await observer.commands.startWork({ ...w.request, idempotencyKey: 'observer' })
     assert.equal(expected.writeState, 'saved')
   } else {
@@ -224,7 +230,7 @@ for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) for
     b = barrier(); const get = w.provider.getRun.bind(w.provider)
     w.provider.getRun = async (ref) => { if (hits++ === 0) await b.hold(); return get(ref) }
     pending = start(w); await b.entered
-    const observer = await composeCore(w)
+    const observer = await composeCore(depsOf(w))
     assert.equal((await observer.commands.startWork({ ...w.request, idempotencyKey: 'observer' })).writeState, 'saved')
     before = [await receipt(w), await w.storage.getExecutionRun(w.runId)]
   }
@@ -259,7 +265,7 @@ for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) for
     return r
   }
   const original = start(w); await b.entered
-  const observer = await composeCore(w)
+  const observer = await composeCore(depsOf(w))
   assert.equal((await observer.commands.startWork({ ...w.request, idempotencyKey: 'observer' })).writeState, 'saved')
   const before = [await receipt(w), await w.storage.getExecutionRun(w.runId)]
   const getWorktree = w.providers.development.getWorktree.bind(w.providers.development); let worktreeReads = 0
@@ -281,7 +287,7 @@ for (const kind of ['Fake', 'SQLite']) for (const fallback of [false, true]) for
     b = barrier(); const get = w.provider.getRun.bind(w.provider)
     w.provider.getRun = async (ref) => { if (barrierHits++ === 0) await b.hold(); return get(ref) }
     pending = start(w); await b.entered
-    const observer = await composeCore(w)
+    const observer = await composeCore(depsOf(w))
     assert.equal((await observer.commands.startWork({ ...w.request, idempotencyKey: 'observer' })).writeState, 'saved')
     before = [await receipt(w), await w.storage.getExecutionRun(w.runId)]
   }
@@ -457,7 +463,7 @@ for (const kind of ['Fake', 'SQLite']) test(`${kind}: callback after start resul
 for (const kind of ['Fake', 'SQLite']) {
   for (const recovery of ['refresh', 'replay']) for (const initial of ['failure', 'running']) for (const observed of ['succeeded', 'running']) test(`${kind}: checkpoint late ${initial} preserves newer ${observed} from ${recovery}`, async () => {
     const w = await nativeFixture(kind, 'healthy'), b = barrier(), page = w.raw.page; let first = true, clock = 0
-    w.clock = () => new Date(Date.UTC(2026, 10, 7) + clock++).toISOString(); w.core = await composeCore(w)
+    w.clock = () => new Date(Date.UTC(2026, 10, 7) + clock++).toISOString(); w.core = await composeCore(depsOf(w))
     w.raw.page = async () => {
       const value = await page(), old = first; first = false
       if (old) { await b.hold(); if (initial === 'failure') throw Error('lost initial read') }
@@ -466,7 +472,7 @@ for (const kind of ['Fake', 'SQLite']) {
     const original = start(w); await b.entered
     try {
       if (recovery === 'refresh') assert.equal((await w.core.commands.refreshExecutionRun(w.request)).ok, true)
-      else { const observer = await composeCore(w); assert.equal((await observer.commands.startWork(w.request)).writeState, 'saved') }
+      else { const observer = await composeCore(depsOf(w)); assert.equal((await observer.commands.startWork(w.request)).writeState, 'saved') }
       const before = [await w.storage.getExecutionRun(w.runId), await receipt(w)]
       assert.equal(before[0].status, observed)
       b.release(); const result = await original

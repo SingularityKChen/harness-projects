@@ -94,7 +94,7 @@ test('two SQLite Core continuations claim exactly one stable creation assignment
   const { createSqliteStorage } = await import('@harness-projects/storage-sqlite'), { composeCore } = await import('@harness-projects/core')
   const w = await setup(t, { dropAck: true }); await w.run({ assigneeIds: ['U_1'] })
   const op = await w.core.queries.getChangeRequestOperation(w.scope), storage = createSqliteStorage(w.path); t.after(() => storage.close())
-  const core = await composeCore({ workspace: w.workspace, providers: w.providers, storage })
+  const core = await composeCore({ workspace: w.workspace, providers: { ...w.providers, storage } })
   const request = { ...w.scope, operationId: op.operationId, observer: { kind: 'user' } }
   const results = await Promise.all([w.core.commands.resumeChangeRequest(request), core.commands.resumeChangeRequest(request)])
   assert.ok(results.some(r => r.phase === 'reconciled')); assert.equal(w.adds, 1)

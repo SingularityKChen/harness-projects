@@ -45,7 +45,7 @@ const externalIdOf = (view) => view.content.identity.externalId
 const signatures = (views) => views.map((view) => `${externalIdOf(view)}:${view.entityId}`).sort()
 
 const compose = (providers, storage) =>
-  composeCore(storage === undefined ? { workspace: WORKSPACE, providers } : { workspace: WORKSPACE, providers, storage })
+  composeCore({ workspace: WORKSPACE, providers: storage === undefined ? providers : { ...providers, storage } })
 
 test('引导：一个条目一个成员，change_request 态不产生第二个工作项（issue #76 验收）', async () => {
   const core = await compose(threeItemComposition())

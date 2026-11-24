@@ -15,8 +15,9 @@ async function fixture(t, adapter, statusPolicy = 'provider_authoritative') {
   const providers = createFakeProviders(), file = path.join(root, 'data.sqlite')
   let storage = adapter === 'fake' ? providers.storage : createSqliteStorage(file), now = T0
   t.after(() => storage.close?.())
-  const deps = { workspace: { name: 'Execution', statusPolicy }, providers, storage, clock: () => now }
-  const core = await composeCore(deps), controller = createController(core)
+  // #632：storage 只经 provider 表进入 core；deps 必须是函数——reopen 会把 storage 换成新句柄，创建时的对象快照会一直指向旧实例。
+  const deps = () => ({ workspace: { name: 'Execution', statusPolicy }, providers: { ...providers, storage }, clock: () => now })
+  const core = await composeCore(deps()), controller = createController(core)
   const workItemId = (await core.queries.listPlanningItems()).find((item) => item.content.contentKind === 'work_item').entityId
   const scope = { workItemId, repositoryId: 'repo-alpha' }
   await core.commands.startWork({ task: 'Synthetic explicit task', ...scope, actor: actor.actorRef, idempotencyKey: 'start' })
@@ -25,7 +26,7 @@ async function fixture(t, adapter, statusPolicy = 'provider_authoritative') {
   const transaction = storage.transaction.bind(storage)
   storage.transaction = (body) => transaction((tx) => body(new Proxy(tx, { get(target, key) { const value = target[key]; return typeof value === 'function' ? (...args) => { if (/^(put|replace|record|advance|remove|set)/.test(key)) writes.push(key); return value.apply(target, args) } : value } })))
   return { providers, core, controller, scope, workspaceId, contextId, runId, run, writes, storage, tick: (value = T1) => { now = value },
-    context: () => createContext({ ...deps, workspace: { ...deps.workspace, id: workspaceId } }),
+    context: () => { const live = deps(); return createContext({ ...live, workspace: { ...live.workspace, id: workspaceId } }) },
     reopen: () => { storage.close(); storage = createSqliteStorage(file); return storage },
     read: () => core.queries.getExecutionContext(scope), refresh: () => controller.commands.refreshExecutionRun(scope, actor) }
 }
@@ -92,4 +93,13 @@ for (const policy of ['provider_authoritative', 'manual_only', 'host_authoritati
   const h = await fixture(t, 'fake', policy), before = JSON.stringify([await h.core.queries.listPlanningItems(), exportFakeStorageState(h.storage).memberships, exportFakeStorageState(h.storage).fieldValues, await h.storage.listPlanningProjections(h.workspaceId), await h.storage.currentRevision(h.workspaceId)])
   for (const status of ['succeeded', 'failed', 'canceled', 'timed_out']) { h.providers.execution.getRun = async (ref) => ({ ok: true, value: { ref, status } }); await h.refresh(); assert.equal((await h.read()).runStatus, status) }
   assert.equal(JSON.stringify([await h.core.queries.listPlanningItems(), exportFakeStorageState(h.storage).memberships, exportFakeStorageState(h.storage).fieldValues, await h.storage.listPlanningProjections(h.workspaceId), await h.storage.currentRevision(h.workspaceId)]), before)
+})
+
+// #632 R5 正控：deps 必须是函数；若退回「创建时对象快照」，reopen 后重新组装仍会用旧句柄，本用例红。
+test('sqlite: reopen 后重新组装读到新 storage 句柄，创建时快照会停在旧实例', async (t) => {
+  const h = await fixture(t, 'sqlite'), before = await h.context()
+  const reopened = h.reopen(), after = await h.context()
+  assert.notEqual(after.storage, before.storage)
+  assert.equal(after.storage, reopened)
+  assert.equal((await readExecutionContext(after, h.scope)).runStatus, 'running')
 })

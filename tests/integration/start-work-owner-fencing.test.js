@@ -14,13 +14,19 @@ import { controllableClock } from './local-git-fixture.js'
 const root = mkdtempSync(join(tmpdir(), 'owner-fencing-')); let serial = 0
 const handles = []; after(() => { for (const s of handles) try { s.close() } catch {} rmSync(root, { recursive: true, force: true }) })
 const sql = (file = join(root, `${serial++}.sqlite`)) => { const s = createSqliteStorage(file); handles.push(s); return s }
+/** world 形组装（#632）：storage 只经 provider 表进入 core；w.storage 会在 reopen 后替换，组装时必须读实时值；over.storage 覆写本次 Storage。 */
+const depsOf = (w, over = {}) => {
+  const { storage, ...rest } = w
+  const { storage: overrideStorage, providers = w.providers, ...extra } = over
+  return { ...rest, ...extra, providers: { ...providers, storage: overrideStorage ?? storage } }
+}
 async function setup(kind, fallback = false) {
   const providers = createFakeProviders(), storage = kind === 'Fake' ? providers.storage : sql(), time = controllableClock()
   if (fallback) { providers.executionFallback = createFakeExecutionProvider(); const spare = providers.executionFallback, describe = spare.describeCapabilities.bind(spare); spare.describeCapabilities = async () => {
     const s = await describe(); return { ...s, capability: { ...s.capability, [CapabilityKey.ExecutionRunFallback]: AccessLevel.Available }, permission: { ...s.permission, [CapabilityKey.ExecutionRunFallback]: AccessLevel.Available } }
   } }
   const workspace = { id: `owner-${serial++}`, name: 'owner fencing' }, options = { providers, storage, workspace, clock: time.clock }
-  const core = await composeCore(options), workItemId = (await core.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item').entityId
+  const core = await composeCore(depsOf(options)), workItemId = (await core.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item').entityId
   const request = { task: 'Synthetic explicit task', workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' } }, contextId = contextIdFor(workspace.id, workItemId, 'repo-alpha')
   return { ...options, core, time, request, contextId, runId: runIdFor(contextId) }
 }
@@ -84,7 +90,7 @@ for (const kind of ['Fake', 'SQLite']) {
     const w = await setup(kind), gate = holdAck(w.providers.development, 'createWorktree'), old = start(w, 'old')
     try {
       await gate.entered.promise; w.time.advance(31_000)
-      const denied = await composeCore({ ...w, policy: { [CapabilityKey.DevelopmentWorktreeCreate]: AccessLevel.Unavailable } })
+      const denied = await composeCore(depsOf(w, { policy: { [CapabilityKey.DevelopmentWorktreeCreate]: AccessLevel.Unavailable } }))
       const before = snapshot(w); assert.equal((await start(w, 'denied', denied)).writeState, 'pending'); assert.equal(snapshot(w), before)
       await w.storage.putExecutionContext({ ...await w.storage.getExecutionContext(w.contextId), provisioningGeneration: 2, status: 'failed' })
       const winner = snapshot(w); gate.release.resolve(); lost(await old)
@@ -211,7 +217,7 @@ for (const kind of ['Fake', 'SQLite']) {
     assert.equal((await read()).provisioningGeneration, 1)
     if (kind === 'Fake') { const valid = exportFakeStorageState(w.storage), invalid = structuredClone(valid); invalid.contexts.find((r) => r.id === w.contextId).provisioningGeneration = 0; assert.throws(() => createFakeStorage(invalid), /positive safe integer/); w.storage = createFakeStorage(valid) }
     else { w.storage.close(); w.storage = sql(w.storage.location) }
-    w.core = await composeCore(w); assert.equal((await read()).provisioningGeneration, 1, '实际存储往返保留代际')
+    w.core = await composeCore(depsOf(w)); assert.equal((await read()).provisioningGeneration, 1, '实际存储往返保留代际')
     await w.storage.putExecutionContext({ ...await read(), status: 'failed', provisioningGeneration: Number.MAX_SAFE_INTEGER })
     const before = snapshot(w), external = JSON.stringify(w.providers.execution.state)
     const refused = await start(w, 'exhausted')

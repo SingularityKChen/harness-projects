@@ -71,12 +71,23 @@ export interface CoreDiagnostics {
 
 export interface CoreDeps {
   readonly workspace: CoreWorkspaceInput
+  /** 唯一注入表；Storage 只经它的 `storage` 槽进入组合（#632）。 */
   readonly providers: CoreProviderTable
-  readonly storage?: Storage
   readonly clock?: () => string
   readonly ids?: IdFactory
   readonly policy?: Readonly<Partial<Record<CapabilityKey, AccessLevel>>>
   readonly diagnostics?: CoreDiagnostics
+}
+
+// ── 类型级自检：只被 `tsc --noEmit` 检查，运行时不产生任何代码。 ──
+/**
+ * 编译期哨兵（不是不可绕过机制）：Storage 只能经 `CoreProviderTable.storage` 进入组合。只要本指令与
+ * 检查行保持原样，字段被加回 `CoreDeps` 会让 tsc 以 TS2578 失败；但把 `@ts-expect-error` 改成
+ * `@ts-ignore`、或删掉本接口，tsc 不会报错——指令原样存续由评审把关，不宣称硬保证。
+ */
+export interface CoreStorageEntryCheck {
+  // @ts-expect-error CoreDeps 不得再有第二个 storage 入口（#632）
+  readonly strayStorage: CoreDeps['storage']
 }
 
 export interface CoreContext {
@@ -140,11 +151,11 @@ function workspaceRecord(input: CoreWorkspaceInput): WorkspaceRecord {
 }
 
 /**
- * storage 缺失时返回 undefined，由 composeCore 转成结构化不可用。存在时：先全部校验与收集，再用**一个**事务写工作区与全部挂载，
- * Storage ack 之后才发布 Registry——任何一步失败都整批回滚，不留新工作区、孤儿锚点或半批挂载。
+ * storage 只来自 provider 表（#632）：缺失时返回 undefined，由 composeCore 转成结构化不可用。存在时：先全部校验与收集，
+ * 再用**一个**事务写工作区与全部挂载，Storage ack 之后才发布 Registry——任何一步失败都整批回滚，不留新工作区、孤儿锚点或半批挂载。
  */
 export async function createContext(deps: CoreDeps): Promise<CoreContext | undefined> {
-  const storage = deps.storage ?? deps.providers.storage
+  const storage = deps.providers.storage
   if (storage === undefined) return undefined
   const workspace = workspaceRecord(deps.workspace)
   const planningFieldMapping = deps.workspace.planningFieldMapping === undefined ? undefined : planningFieldMappingSnapshot(deps.workspace.planningFieldMapping)

@@ -73,9 +73,8 @@ export const LEASE_EXPIRED_MS = 31_000
  *  三项缺省时与只传前两参完全相同：新建 storage、新 workspace、冻结时钟。 */
 export async function coreContextFor(fixture, providers = { development: providerFor(fixture) }, { storage, workspaceId, clock } = {}) {
   const context = await createContext({
-    storage: storage ?? createFakeStorage(),
     workspace: { name: '本地 Git provider 集成测试', ...(workspaceId === undefined ? {} : { id: workspaceId }) },
-    providers, policy: {}, clock: clock ?? (() => FROZEN_NOW), ids: defaultIdFactory,
+    providers: { ...providers, storage: storage ?? createFakeStorage() }, policy: {}, clock: clock ?? (() => FROZEN_NOW), ids: defaultIdFactory,
   })
   assert.ok(context !== undefined, 'core 必须能从注入的 storage 组装出上下文')
   return { storage: context.storage, workspaceId: context.workspaceId, context }
