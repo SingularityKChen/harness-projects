@@ -6,7 +6,7 @@ import { syncBuiltinESMExports } from 'node:module'
 import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import { composeCore, createWorkspaceSetup } from '@harness-projects/core'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
 import { windowsPathsArePlain } from '../../packages/providers/development-local-git/src/git-runner.ts'
@@ -319,6 +319,12 @@ test('Windows repository admission rejects before any Git call when the native m
 // lane 语义：本文件已在 native-git SETS 内，新增用例只抬高 summary.tests；判定是单调下限 tests >= minTests，
 // marker 只数文件数与 skip 预算，所以不需要改 SETS/ci.yml/契约（详见 active ExecPlan 与 PR body）。
 const sep = String.fromCharCode(92)
+/** 所有 helper 子进程都被跟踪：任何用例失败或超时后由 after 兜底 kill，挂起的子进程不得拖住测试进程退出。 */
+const helperChildren = []
+const trackHelper = (child) => { helperChildren.push(child); return child }
+after(() => { for (const child of helperChildren) if (child.exitCode === null && child.signalCode === null) child.kill() })
+/** 同步 Git 调用一律带 60s 上限：spawnSync 没有 timeout 时一个挂起会永锁测试进程。 */
+const runSync = (file, args, options = {}) => spawnSync(file, args, { encoding: 'utf8', timeout: 60000, windowsHide: true, ...options })
 const diagnose = (t, prefix, fields) => t.diagnostic(prefix + ' ' + JSON.stringify(fields))
 const timeLimited = (promise, ms, message) => {
   let timer
@@ -335,17 +341,17 @@ const exitOf = (child) => new Promise((resolve) => child.once('exit', (code) => 
 /** 子进程 cwd 持有目录：Windows 上它让父目录 rename 失败（POSIX 不成立，所以只作原生证据）。 */
 const holdCwd = async (directory) => {
   const script = 'process.stdout.write("ready");process.stdin.on("data",()=>process.exit(0));process.stdin.resume()'
-  const child = childProcess.spawn(process.execPath, ['-e', script], { cwd: directory, stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true })
+  const child = trackHelper(childProcess.spawn(process.execPath, ['-e', script], { cwd: directory, stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true }))
   await timeLimited(readyLine(child), 15000, 'cwd holder did not become ready')
-  return { release: async () => { child.stdin.end('release'); await timeLimited(exitOf(child), 15000, 'cwd holder did not exit') } }
+  return { release: async () => { child.stdin.end('release'); await timeLimited(exitOf(child), 30000, 'cwd holder did not exit').catch((error) => { child.kill(); throw error }) } }
 }
 /** PowerShell 独占句柄（FileShare.None）：让删除真实失败；路径只经 stdin 传入，不解析本地化文本。 */
 const holdExclusiveFile = async (file) => {
   const command = '$ErrorActionPreference="Stop";$p=[Console]::In.ReadLine();$s=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read);[Console]::Out.WriteLine("ready");[Console]::Out.Flush();[Console]::In.ReadLine()|Out-Null;$s.Dispose()'
-  const child = childProcess.spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true })
+  const child = trackHelper(childProcess.spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true }))
   child.stdin.write(file + String.fromCharCode(10))
-  await timeLimited(readyLine(child), 20000, 'exclusive handle holder did not become ready')
-  return { release: async () => { child.stdin.end('release' + String.fromCharCode(10)); await timeLimited(exitOf(child), 20000, 'exclusive handle holder did not exit') } }
+  await timeLimited(readyLine(child), 30000, 'exclusive handle holder did not become ready')
+  return { release: async () => { child.stdin.end('release' + String.fromCharCode(10)); await timeLimited(exitOf(child), 30000, 'exclusive handle holder did not exit').catch((error) => { child.kill(); throw error }) } }
 }
 let currentSid
 /** 当前用户 SID：locale 无关地取数值 SID，用于真实的拒绝 ACE（不写进日志）。 */
@@ -377,7 +383,7 @@ test('Windows worktree removal: clean explicit removal round trips through isola
   assert.equal((await port.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
   const rootReal = await realpath(f.allowedRoot), headBefore = (await f.run(['rev-parse', 'refs/heads/' + branch])).trim()
   const anchor = await stat(target, { bigint: true })
-  const backendProbe = spawnSync('git', ['-C', target, 'config', '--local', '--get', 'extensions.refstorage'], { encoding: 'utf8' })
+  const backendProbe = runSync('git', ['-C', target, 'config', '--local', '--get', 'extensions.refstorage'])
   const backend = backendProbe.status === 1 ? 'files' : backendProbe.stdout.trim() || 'exit-' + backendProbe.status
   const lockPath = await headLockPath(target, f.repositoryPath)
   let anchorMatched
@@ -450,10 +456,10 @@ test('Windows worktree removal: HEAD coordination lock rejects a concurrent deta
     if (!injected && args.includes('status')) {
       injected = true
       lockText = await readFile(lockPath + '.lock', 'utf8')
-      const detach = spawnSync('git', ['checkout', '--detach'], { cwd: target, encoding: 'utf8' })
+      const detach = runSync('git', ['checkout', '--detach'], { cwd: target })
       detachCode = detach.status
       detachStderr = detach.stderr ?? ''
-      if (detach.status === 0) commitCode = spawnSync('git', ['-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', '竞态独有提交'], { cwd: target, encoding: 'utf8' }).status
+      if (detach.status === 0) commitCode = runSync('git', ['-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', '竞态独有提交'], { cwd: target }).status
     }
     return recorder.runGit(args)
   } })
@@ -676,14 +682,14 @@ test('Windows worktree removal: records Git version and reference backend, and r
   const major = Number(parsed[1]), minor = Number(parsed[2])
   assert.ok(major > 2 || (major === 2 && minor >= 30), 'worktree repair 需要 Git >= 2.30，实际 ' + versionText)
   const f = await fixtureFor(t)
-  const filesProbe = spawnSync('git', ['-C', f.repositoryPath, 'config', '--local', '--get', 'extensions.refstorage'], { encoding: 'utf8' })
+  const filesProbe = runSync('git', ['-C', f.repositoryPath, 'config', '--local', '--get', 'extensions.refstorage'])
   assert.equal(filesProbe.status, 1, 'files 后端不得声明 extensions.refstorage')
   assert.equal(filesProbe.stdout.trim(), '')
   diagnose(t, 'windows-removal-matrix:', { git: versionText, node: process.version, backend: 'files' })
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'windows-reftable-')))
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }))
   const repositoryPath = path.join(root, 'repo'); await mkdir(repositoryPath)
-  const init = spawnSync('git', ['init', '--ref-format=reftable', '-b', 'main'], { cwd: repositoryPath, encoding: 'utf8' })
+  const init = runSync('git', ['init', '--ref-format=reftable', '-b', 'main'], { cwd: repositoryPath })
   if (init.status !== 0) {
     diagnose(t, 'windows-removal-matrix:', { git: versionText, node: process.version, backend: 'reftable=init-unavailable' })
     return
@@ -696,9 +702,9 @@ test('Windows worktree removal: records Git version and reference backend, and r
   await reftableRun(['-c', 'commit.gpgsign=false', 'commit', '-m', '初始提交'])
   const target = path.join(root, 'wt-reftable')
   await reftableRun(['branch', 'work/reftable'])
-  const added = spawnSync('git', ['worktree', 'add', target, 'work/reftable'], { cwd: repositoryPath, encoding: 'utf8' })
+  const added = runSync('git', ['worktree', 'add', target, 'work/reftable'], { cwd: repositoryPath })
   if (added.status !== 0) {
-    const format = spawnSync('git', ['-C', repositoryPath, 'rev-parse', '--show-ref-format'], { encoding: 'utf8' })
+    const format = runSync('git', ['-C', repositoryPath, 'rev-parse', '--show-ref-format'])
     assert.equal(format.stdout.trim(), 'reftable', 'reftable 仓库必须报告 reftable 引用后端')
     diagnose(t, 'windows-removal-matrix:', { git: versionText, node: process.version, backend: 'reftable=worktree-unavailable' })
     return
