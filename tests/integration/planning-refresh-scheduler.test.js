@@ -2,6 +2,7 @@ import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import vm from 'node:vm'
 
 import { composeCore, createPlanningReconciler } from '@harness-projects/core'
 import { CommandWriteState, createController } from '@harness-projects/controller'
@@ -342,4 +343,62 @@ test('scheduled double fault (round failed, degraded cursor unwritable) reaches 
   await assert.rejects(createController(core).commands.refreshPlanning({ actorRef }), (error) => error === fault)
   assert.equal(reported.length, 1, 'explicit commands hand the same rejection to their caller, not to diagnostics')
   reconciler.dispose()
+})
+
+test('诊断出口：定时 tick 的非 Error 拒绝按原对象上报一次；sink 返回跨 realm 拒绝 promise 或 then 方法体抛错的 thenable 都被吸收，下一 tick 照常读取且无进程级未处理拒绝', async () => {
+  const rows = [
+    ['字符串失败值 / 跨 realm 拒绝 promise', 'round-failed-as-string', () => vm.runInNewContext('Promise.reject(new Error("sink elsewhere"))')],
+    ['普通对象失败值 / then 方法体抛错', { code: 'round-failed-as-object' }, () => ({ then() { throw new Error('sink then body') } })],
+  ]
+  for (const [label, roundValue, sink] of rows) {
+    const { handles, timers } = fakeTimers()
+    const reported = []
+    let calls = 0
+    const reconciler = createPlanningReconciler(() => {
+      calls += 1
+      return calls === 1 ? Promise.reject(roundValue) : Promise.resolve(OK)
+    }, { intervalMs: 1000, timers, diagnostics: { syncRoundFailed: (error) => { reported.push(error); return sink() } } })
+    const unhandled = await collectUnhandled(async () => {
+      reconciler.start()
+      handles[0].fn()
+      await turn()
+      await turn()
+      assert.equal(reported.length, 1, `${label}：首个 tick 的拒绝恰好交给宿主一次`)
+      assert.strictEqual(reported[0], roundValue, `${label}：交给宿主的是同一个失败值`)
+      handles[0].fn()
+      await turn()
+      await turn()
+      assert.equal(calls, 2, `${label}：下一个 tick 照常读取`)
+      assert.equal(reported.length, 1, `${label}：成功的一轮不产生新的上报`)
+    })
+    reconciler.dispose()
+    assert.deepEqual(unhandled, [], `${label}：被吸收的 sink 异常不成为进程级未处理拒绝`)
+  }
+})
+
+test('诊断出口：stop()/dispose() 之后到达的在途拒绝仍各恰好上报一次，不成为进程级未处理拒绝；重复 dispose 不重复上报', async () => {
+  for (const [action, halt] of [['stop', (target) => target.stop()], ['dispose', (target) => target.dispose()]]) {
+    const failure = new Error(`${action} late round failure`)
+    const { handles, timers } = fakeTimers()
+    const reported = []
+    let rejectRound
+    const reconciler = createPlanningReconciler(() => new Promise((_resolve, reject) => { rejectRound = reject }), {
+      intervalMs: 1000, timers, diagnostics: { syncRoundFailed: (error) => { reported.push(error) } },
+    })
+    const unhandled = await collectUnhandled(async () => {
+      reconciler.start()
+      handles[0].fn()
+      await waitFor(() => typeof rejectRound === 'function', `${action}：tick 已进入在途轮次`)
+      halt(reconciler)
+      rejectRound(failure)
+      await turn()
+      await turn()
+      assert.equal(reported.length, 1, `${action}：${action} 之后到达的在途拒绝仍恰好交给宿主一次`)
+      assert.strictEqual(reported[0], failure, `${action}：交给宿主的是同一个拒绝`)
+      reconciler.dispose()
+      await turn()
+      assert.equal(reported.length, 1, `${action}：重复 dispose 不重复上报`)
+    })
+    assert.deepEqual(unhandled, [], `${action}：在途拒绝不成为进程级未处理拒绝`)
+  }
 })
