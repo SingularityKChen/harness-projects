@@ -4,7 +4,8 @@
  * local-git-core-provisioning.test.js。 */
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -141,6 +142,33 @@ export function faultRunner(faults = {}) {
   return async (args) => (args.some((arg) => ['add', 'branch'].includes(arg))
     ? { code: 128, stdout: '', stderr: 'fatal: unable to create the requested object' }
     : defaultGitRunner(args))
+}
+
+/** 允许根下由 provider 创建的隔离目录（`.harness-remove-*`）：成功与回滚都不许留下它们。 */
+export const quarantineEntries = async (root) => (await readdir(root)).filter((name) => name.startsWith('.harness-remove-'))
+
+/** 破坏性 argv：repair / remove / move 任一出现都说明已经越过了写前判定，零副作用断言必须一起看。 */
+export const destructiveCall = (call) => ['repair', 'remove', 'move'].some((verb) => call.includes(verb))
+
+/** 逐字节快照：相对路径、类型、mode、文件内容 sha256 与链接目标，排序后比较。拒绝路径的「零副作用」必须
+ *  是逐字节事实，不能只看目录还在——被拒绝的移除可能改坏文件内容却留下同名目录。 */
+export const snapshotTree = async (root) => {
+  const entries = []
+  const walk = async (dir, prefix) => {
+    const names = (await readdir(dir)).sort()
+    for (const name of names) {
+      const full = path.join(dir, name)
+      const relative = prefix === '' ? name : `${prefix}/${name}`
+      const info = await lstat(full)
+      const mode = info.mode & 0o777
+      if (info.isSymbolicLink()) entries.push({ relative, kind: 'link', mode, target: await readlink(full) })
+      else if (info.isDirectory()) { entries.push({ relative, kind: 'dir', mode }); await walk(full, relative) }
+      else if (info.isFile()) entries.push({ relative, kind: 'file', mode, hash: createHash('sha256').update(await readFile(full)).digest('hex') })
+      else entries.push({ relative, kind: 'other', mode })
+    }
+  }
+  await walk(root, '')
+  return entries
 }
 
 export const worktreePaths = async (fixture) => (await git(['worktree', 'list', '--porcelain'], fixture.repositoryPath))
