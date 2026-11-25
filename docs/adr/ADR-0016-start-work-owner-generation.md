@@ -22,7 +22,7 @@
 
 ### Storage 与数据库边界
 
-Fake 和 SQLite 均校验正 safe integer；Fake 导出导入、SQLite 实际关库重开保留 generation。SQLite 在现有 `003_control_facts.sql` 增加可空整数列及 CHECK，当前不兼容世代从 1 变为 2。仍使用七份 SQL 建完整新库，没有第八份迁移、兼容 ALTER 或自动数据搬迁。
+Fake 和 SQLite 均校验正 safe integer；Fake 导出导入、SQLite 实际关库重开保留 generation。SQLite 在现有 `003_control_facts.sql` 增加可空整数列及 CHECK，当前不兼容世代从 1 变为 2。仍使用七份 SQL 建完整新库，没有第八份迁移、兼容 ALTER 或自动数据搬迁。 **历史指针（2026-11-24，#666）**：#596 单资产折叠（2026-11-17）后，本段引用的 003_control_facts.sql 已并入 packages/storage/sqlite/migrations/001_init.sql（provisioning_generation 列见其中 -- 003_control_facts： 段的 execution_context 表）；「七份 SQL」是折叠前的资产形状，现行 MIGRATIONS 只有 001_init.sql 一项，建库仍是单事务全量执行，本段「没有第八份迁移、兼容 ALTER 或自动数据搬迁」的判断不变。原文保留，决策不变。
 
 旧 generation=1 数据库拒绝；把缺列旧形状伪装成 2 或 0 也按 schema_shape 拒绝。拒绝不得改变原库 schema、行、账本或 user_version。用户需要停止相关进程、备份原库并核对所需数据，再决定在新位置重建；不自动删除旧库。
 

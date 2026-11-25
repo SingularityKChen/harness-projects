@@ -6,7 +6,7 @@
 
 ## Context
 
-`002_identity_membership.sql` 早先把外部身份的键定为 `(binding_id, external_kind, external_id)`（ADR-0001），并让 `binding_id` 引用 `provider_binding`，而 `provider_binding.workspace_id` 是 `NOT NULL`——**一个绑定只能属于一个工作区**。
+`002_identity_membership.sql` 早先把外部身份的键定为 `(binding_id, external_kind, external_id)`（ADR-0001），并让 `binding_id` 引用 `provider_binding`，而 `provider_binding.workspace_id` 是 `NOT NULL`——**一个绑定只能属于一个工作区**。 **历史指针（2026-11-24，#666）**：#596 单资产折叠（2026-11-17）后，本段引用的 002_identity_membership.sql 已并入 packages/storage/sqlite/migrations/001_init.sql，provider_binding、workspace_binding 与 external_identity 的当前定义见其中 -- 002_identity_membership： 段。原文保留，决策不变。
 
 这三件事因此无法同时成立：
 

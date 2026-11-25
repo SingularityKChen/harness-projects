@@ -84,7 +84,7 @@
 
 ## Consequences
 
-- 迁移 `006_delivery_facts.sql` 新增 `delivery_fact` 表。#223 合并 SQLite 基线时必须把它并入；控制计划里的 `005_delivery_facts.sql` 已过期，因为 005 被 #203 的载体世代占用。
+- 迁移 `006_delivery_facts.sql` 新增 `delivery_fact` 表。#223 合并 SQLite 基线时必须把它并入；控制计划里的 `005_delivery_facts.sql` 已过期，因为 005 被 #203 的载体世代占用。 **历史指针（2026-11-24，#666）**：#596 单资产折叠（2026-11-17）后，006_delivery_facts.sql 已并入 packages/storage/sqlite/migrations/001_init.sql 的 -- 006_delivery_facts： 段（delivery_fact 表），本句的并入义务按当前资产形状已成立；本 ADR 中的「迁移 006」按同一段解析，005_delivery_facts.sql 仍是失效名称（005 的载体历史见 001_init.sql 头注释的退役说明）。原文保留，决策不变。
 - Delivery 两类读取的分页完整性由 #295 的 `collectDeliveryPages` 承担：页失败、游标成环、重复投递、超过页数上界与不属于已观察提交的读回都报成该集合的缺口，第 5 条的「分页未读完」对 Delivery 就是这些缺口，core 不另设截断守卫。Development 的变更请求查找先按本分支过滤再分页（端口的 `headBranch`，#287），别的分支的变更请求不占这一页；分支查找仍只读第一页，按「目标不在第一页且有下一页即缺口」处理（TD-040，有界翻页由 #233 承接）。
 - Development 的连接选择只经 `chain-facts.ts` 的一个路由缝。#219 与 #221 都进 main 后，由 #297 把它换成 `routeDevelopment`，并补一条已登记仓库的多挂载正例；在此之前，多 Development 挂载的工作区里谱系读取退化为缺口，不读错连接（#219 让同域多挂载的 key 级解析 fail closed）。
 - #233（谱系同步）必须扩展这个写者的集合，不得另起第二个写者。#234（抽屉谱系条）与 #281（交付视图）必须读 `stale` 与缺口，不得把陈旧值显示成当前值；陈旧集合按记录时的锚点（`hop.to`）归属（TD-042）。

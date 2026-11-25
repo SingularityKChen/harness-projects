@@ -8,7 +8,7 @@
 
 演示里一个仓库同时由三条连接服务：Local Git（分支与工作树）、GitHub Development（PR 与远端分支）、GitHub Actions（CI）。今天工作区的仓库挂载（`RepositoryRecord`）只指向一条外部身份，`packages/core/src/development-route.ts` 因此只能到达一个 Development 连接。
 
-身份角色 `alias` 在 `packages/domain/src/identity.ts` 与 `002_identity_membership.sql` 里存在，却没有生产写者，也没有成文语义。R7 只规定了两种角色：`primary` 可作平台查询参数或同步游标，`historical` 只在本地可读。`003_control_facts.sql` 把 `repository.external_identity_id` 注释为「R7 身份锚点」。
+身份角色 `alias` 在 `packages/domain/src/identity.ts` 与 `002_identity_membership.sql` 里存在，却没有生产写者，也没有成文语义。R7 只规定了两种角色：`primary` 可作平台查询参数或同步游标，`historical` 只在本地可读。`003_control_facts.sql` 把 `repository.external_identity_id` 注释为「R7 身份锚点」。 **历史指针（2026-11-24，#666）**：#596 单资产折叠（2026-11-17）后，本段引用的 002_identity_membership.sql 与 003_control_facts.sql 已并入 packages/storage/sqlite/migrations/001_init.sql；alias 角色见其中 -- 002_identity_membership： 段的 external_identity.role CHECK，-- R7 身份锚点 注释见 -- 003_control_facts： 段的 repository.external_identity_id。原文保留，决策不变。
 
 两个 Development 实现都声明 `development.repository.read`，所以按单个 key 路由时，这个 key 必然歧义。
 
