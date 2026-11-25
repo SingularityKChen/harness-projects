@@ -9,7 +9,7 @@
 1. **内容身份**落在 `external_identity`，键为 `(binding_id, external_kind, external_id)`，**故意不含** `workspace_id`（见 ADR-0001）。
 2. **成员关系**不是内容身份，落在独立表 `project_item_membership(workspace_id, project_external_id, item_external_id, content_external_kind, content_external_id, …)`，唯一约束为 `UNIQUE(workspace_id, project_external_id, item_external_id)` 与 `UNIQUE(workspace_id, project_external_id, content_external_kind, content_external_id)`。
 3. `ProjectV2Item` **不**加入 `ExternalIdentityKind`。
-4. 规划字段值、条目顺序、同步观察三者的外键都指向 `project_item_membership.item_external_id`，不指向 `external_identity`。**Superseded（2026-09-24，第三轮评审；2026-09-26 订正为只划掉同步观察一项）**：同步观察一项不再成立——观察账本已改为以**端口主体** `(binding, objectKind, externalId)` 为键、作用域是连接，因此它不引用成员关系——条目 id 是会被改写的当前挂载点，放进只追加账本的身份键会让定序主体随成员关系漂移。见 `packages/storage/sqlite/migrations/003_control_facts.sql` 的 `sync_observation` 注释。规划字段值与条目顺序两项不变。
+4. 规划字段值、条目顺序、同步观察三者的外键都指向 `project_item_membership.item_external_id`，不指向 `external_identity`。**Superseded（2026-09-24，第三轮评审；2026-09-26 订正为只划掉同步观察一项）**：同步观察一项不再成立——观察账本已改为以**端口主体** `(binding, objectKind, externalId)` 为键、作用域是连接，因此它不引用成员关系——条目 id 是会被改写的当前挂载点，放进只追加账本的身份键会让定序主体随成员关系漂移。见 `packages/storage/sqlite/migrations/003_control_facts.sql` 的 `sync_observation` 注释。规划字段值与条目顺序两项不变。 **历史指针（2026-11-24，#666）**：#596 单资产折叠（2026-11-17）后，本句引用的 003_control_facts.sql 已并入 packages/storage/sqlite/migrations/001_init.sql，该注释现在位于其中 -- sync_observation： 段（CREATE TABLE sync_observation 之前）；2026-09-24 的 Superseded 判断仍然成立。原文保留，决策不变。
 
 ## Why
 

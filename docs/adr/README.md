@@ -29,6 +29,28 @@
 <代价、限制、后续需要遵守的约束>
 ```
 
+## 历史指针与已折叠片段
+
+ADR 是写作当日的记录。它引用的资产后来消失时，不改原句，而在原句末尾就地追加一条带日期的历史指针。
+
+- **与 Superseded by 的区别**：历史指针只订正所引资产的物理坐标，不改决策、状态与采纳；被推翻的决策仍按 `PLANS.md` §4 就地标注 `Superseded by …（日期）`、原文保留。
+- **触发**：正文以文件名引用了已不存在的资产；迁移编号只是序数标签，不是文件名。
+- **写法与位置**：追加在原句末尾、不打断列表；同一篇的多处指针合并为一条；末句固定「原文保留，决策不变。」；不写行号（易失）。
+- **只覆盖历史 ADR**：本目录索引、`docs/architecture/` 与 active 计划中描述当前状态的句子直接订正；`docs/exec-plan/completed/`、`docs/review/` 与 active 计划的历史批次行不追改。
+- **新写 ADR**：引用现行文件并点名段名，例如 `001_init.sql` 的 `-- 003_control_facts：` 段。
+- **不做常驻链接检查**：已知缺口见 `docs/development/content-placement.md` §5，需要时用一次性脚本核对。
+
+已折叠的迁移片段与现行资产 `packages/storage/sqlite/migrations/001_init.sql` 的段名对照：
+
+| 旧片段 | 现在的位置 |
+|---|---|
+| `002_identity_membership.sql` | `-- 002_identity_membership：` 段 |
+| `003_control_facts.sql` | `-- 003_control_facts：` 段（004 的两条 `ALTER TABLE` 在段末） |
+| `005_source_version_carrier.sql` | 无 DDL；退役说明见 `001_init.sql` 头注释与 `LEGACY_COMMITTED_VERSION_MESSAGE` |
+| `006_delivery_facts.sql` | `-- 006_delivery_facts：` 段（007 的内容以 `-- #305：` 标记） |
+
+权威清单是 `packages/storage/sqlite/src/migrations.ts` 的 `MIGRATIONS`；上表只描述历史文件名到段名的映射，不是第二份资产清单。`005_delivery_facts.sql` 是控制计划里从未创建的过期名（见 ADR-0011），不是已折叠资产。
+
 ## 索引
 
 | ADR | 决策 | 状态 |
@@ -43,7 +65,7 @@
 | [ADR-0008](ADR-0008-run-identity-is-the-core-run-record.md) | 执行运行的身份是 core 的运行记录；provider 引用是落在 `providerRef` 上、由签发者证明来源（签发者身份由宿主稳定注入）、由 core 在取消 ack 后原子替换的路由句柄；`command` / `environment` 不落库，降级结论落在运行记录上 | Proposed |
 | [ADR-0009](ADR-0009-harness-plugin-installable-artifact.md) | `apps/harness-plugin` 是唯一有构建步骤的包（esbuild 精确 `0.28.2`，只作它的 devDependency）；安装件 manifest 由构建按白名单生成，宿主 peer（`~0.2.0-rc.2` 范围）与 `dsh` 块不进源 manifest；client 外置表恰好等于宿主基线模块表，宿主半边外置 `@deepseek-ai/*` 与 Node 内置，其余打入，构建闸门 fail closed；占位组件在 `packages/ui`，apps 只注册 | Accepted |
 | [ADR-0010](ADR-0010-stable-ids-are-route-locators.md) | 规划实体的稳定 `WorkspaceId` / `EntityId` 作 `/projects/:projectId/items/:itemId` 的可观察、非秘密、非 capability 的 canonical locator；locator 不得编码或可验证地派生自外部 id、binding 或用户内容，最小披露属性 L1–L5 各自绑定到会失败的检查；对象级授权由引入第二个主体的 issue 承接 | Accepted |
-| [ADR-0011](ADR-0011-delivery-facts-last-confirmed-snapshot.md) | 交付事实按执行上下文存一份「最后确认快照」（迁移 006 的 `delivery_fact`），`refreshDeliveryFacts` 是唯一写者：只写端点实体、`derived_from` / `produced_by` / `runs_on` 候选边与快照；只有完整读到的集合才替换或删除，不完整的集合保留并标陈旧；新鲜度在快照内，不写同步游标，交付写者不推进业务修订号 | Accepted |
+| [ADR-0011](ADR-0011-delivery-facts-last-confirmed-snapshot.md) | 交付事实按执行上下文存一份「最后确认快照」（`001_init.sql` 的 `delivery_fact` 表），`refreshDeliveryFacts` 是唯一写者：只写端点实体、`derived_from` / `produced_by` / `runs_on` 候选边与快照；只有完整读到的集合才替换或删除，不完整的集合保留并标陈旧；新鲜度在快照内，不写同步游标，交付写者不推进业务修订号 | Accepted |
 | [ADR-0012](ADR-0012-business-revision-advances-only-on-content-change.md) | 业务修订号只随已提交的工作区快照内容变化推进（一个事务至多一次，移除也算变化）；刷新轮次、同步游标、对账时刻与查询都不推进它；交付写者不推进，扩大快照覆盖面者负责让新事实参与变化判定；`reconcile_cursor` 只由规划全量同步在成功提交时写 | Accepted |
 | [ADR-0013](ADR-0013-harness-host-composition.md) | Harness 插件 Host 是 Core/Controller/SQLite 的受控组合根，以 strict typed remote 暴露最小 unary 面；Client 不持有业务状态，provider implementation selection 与 watch 由后续 issue 承担 | Proposed |
 | [ADR-0014](ADR-0014-host-composes-providers-by-implementation-key.md) | Host 按每个挂载的实现键从编译期封闭目录构造 provider，事实源是 SQLite 里的挂载、账号与配置；`inject` 只要 `typert`，宿主 `credentials` 每次凭据解析时经 `ctx.get` 取用，缺席时只让该次操作结构化失败、Host 照常加载；挂载级失败只在内存禁用、不写库，宿主级失败整体 fail closed；`HOST_ENTRY` 放行 capabilities 与目录收录的 provider 包（fake 不放行）；采纳后部分取代 ADR-0013 的工厂注入句，是否连同「`credentials` 必需、缺失时 fail closed」半句一并取代待人类伙伴裁定 | Proposed |
