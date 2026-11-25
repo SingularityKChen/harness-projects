@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-24-node-runtime-contract](exec-plan/completed/2026-11-24-node-runtime-contract.md) | Node 支持契约：source workspace / compiled Host 两种执行模式的声明、编译期守卫与最小运行时证据（#313；rev-687 复评 PASS） |
 | [2026-11-24-local-git-provider-boundary-tests](exec-plan/completed/2026-11-24-local-git-provider-boundary-tests.md) | Local Git provider 分页下界与 stat 错误分类的判别性测试（#174；test-only） |
 | [2026-11-24-scheduler-diagnostics-evidence](exec-plan/completed/2026-11-24-scheduler-diagnostics-evidence.md) | 定时刷新诊断吸收与 stop/dispose 后拒绝的 test-only 证据收口（#336） |
 | [2026-11-24-provider-unbind](exec-plan/completed/2026-11-24-provider-unbind.md) | 工作区挂载解绑：Development/Delivery 停用与同目标 revive（#368；2026-11-24 独立对抗验收与处置收敛） |

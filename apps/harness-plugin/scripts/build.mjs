@@ -41,7 +41,7 @@ export const HOST_DSH_PEER_RANGE = '~0.2.0-rc.2'
 /** `@deepseek-ai/cordis` peer 的取值（D20）。 */
 export const CORDIS_PEER_RANGE = '~4.0.4'
 
-/** 宿主半边的构建目标（D26）：不高于 Desktop 的 Node 24.18.1 与仓库 engines.node >=22。 */
+/** 宿主半边的构建目标（D26）：只受验收宿主 Desktop 的 Node 24.18.1 约束；仓库 engines.node 是 source workspace 的另一种模式，见 docs/development/runtime-support.md。 */
 export const HOST_NODE_TARGET = 'node22'
 
 /**

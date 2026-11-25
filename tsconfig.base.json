@@ -20,6 +20,8 @@
     // 运行时就是 Node 的类型剥离：包内相对导入必须写 .ts 后缀，且没有构建步骤（noEmit）；唯一例外是 apps/harness-plugin 的安装件构建（ADR-0009）。
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
+    // Node 的类型剥离只擦除类型：enum / 带运行时代码的 namespace / 构造器参数属性等在 typecheck 期拒绝（AC3）。
+    "erasableSyntaxOnly": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,

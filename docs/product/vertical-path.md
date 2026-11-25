@@ -115,7 +115,7 @@ node --test-reporter=spec --test-name-pattern='不存在的前缀' "$f" | grep -
 
 判据：退出码 0；输出里有一行以 `✔` 开头（嵌套用例前面有缩进）、标题包含该前缀的用例，不是文件路径；没有 `✖` 行；摘要行 `ℹ tests` ≥ 1 且 `ℹ fail 0`。每个前缀都要配同样的负对照，伪造前缀必须读回 `ℹ tests 0` 且没有 `✔` 行，`ℹ tests 0` 即引用失效。不加 `--test` 是刻意的：`node --test <文件>` 默认按文件起子进程，文件本身被计成一条通过的测试，前缀一条用例都没匹配上时摘要行仍是 `ℹ tests 1` / `ℹ fail 0`，失效引用读回也是绿的（Node v26.10.0 实测）；直接运行没有这层包装。
 
-Node 版本：`package.json` 声明 Node ≥ 22，所以这条命令只用 `--test-name-pattern` 与 `--test-reporter` 两个通用选项，不依赖 `--test-isolation`（据 Node 官方 CLI 文档，`--test-isolation` 到 v23.6 才出现，v22 系列只有 v22.8 起的 `--experimental-test-isolation`，v22.0 至 v22.7 两者都没有）。**局限**：本机只有 Node v26.10.0，命令与全部引用的回读都只在它上面实跑，没有下载或安装其他版本；Node 22 上的行为依据官方文档，未实跑：v22.0.0 的文档已有这两个选项，并写明未被执行的用例不出现在报告输出里（负对照因此应读回 0）；Node 22 在非 TTY 下默认用 tap 报告，所以命令显式写 `--test-reporter=spec`。若某个 Node 版本的 spec 报告没有 `ℹ tests` 摘要行，以"退出码 0、有含前缀的 `✔` 标题行、无 `✖`"为准，负对照改为"没有 `✔` 行"。
+Node 版本：这条命令只用 `--test-name-pattern` 与 `--test-reporter` 两个通用选项（写于 engines 为 ≥22 时；当前支持面见 `docs/development/runtime-support.md`），不依赖 `--test-isolation`（据 Node 官方 CLI 文档，`--test-isolation` 到 v23.6 才出现，v22 系列只有 v22.8 起的 `--experimental-test-isolation`，v22.0 至 v22.7 两者都没有）。**局限**：本机只有 Node v26.10.0，命令与全部引用的回读都只在它上面实跑，没有下载或安装其他版本；Node 22 上的行为依据官方文档，未实跑：v22.0.0 的文档已有这两个选项，并写明未被执行的用例不出现在报告输出里（负对照因此应读回 0）；Node 22 在非 TTY 下默认用 tap 报告，所以命令显式写 `--test-reporter=spec`。若某个 Node 版本的 spec 报告没有 `ℹ tests` 摘要行，以"退出码 0、有含前缀的 `✔` 标题行、无 `✖`"为准，负对照改为"没有 `✔` 行"。
 
 | 简称 | 文件 |
 |---|---|

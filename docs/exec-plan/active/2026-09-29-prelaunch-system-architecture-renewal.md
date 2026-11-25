@@ -530,7 +530,7 @@ SQLite 压缩先在临时库验证，再登记实际库文件、备份方式与�
 
 ## Interfaces and Dependencies
 
-开发入口为仓库根目录的 Node ≥ 22（本轮观察 v26.10.0）、pnpm 锁文件（`packageManager: pnpm@10.28.2`）、`node:test`、TypeScript 与 SQLite；标准命令见 `package.json`、`AGENTS.md` §9、`docs/development/ci.md`。`gh` 命令一律带 `-R SingularityKChen/harness-projects`。前六批不要求真实 GitHub token；真实 Provider/UAT 缺凭据时保持未验证。SQL 使用 `packages/storage/sqlite/src/migrate.ts` 的版本与事务契约，Gate E1 模型裁决后才写定基线。运行取消与运行身份以 `docs/adr/ADR-0008-run-identity-is-the-core-run-record.md` 为依据。
+开发入口为仓库根目录的 Node ≥ 22（本轮观察 v26.10.0；2026-11-24 #313 后 engines.node 为 >=26.0.0，见 `docs/development/runtime-support.md`）、pnpm 锁文件（`packageManager: pnpm@10.28.2`）、`node:test`、TypeScript 与 SQLite；标准命令见 `package.json`、`AGENTS.md` §9、`docs/development/ci.md`。`gh` 命令一律带 `-R SingularityKChen/harness-projects`。前六批不要求真实 GitHub token；真实 Provider/UAT 缺凭据时保持未验证。SQL 使用 `packages/storage/sqlite/src/migrate.ts` 的版本与事务契约，Gate E1 模型裁决后才写定基线。运行取消与运行身份以 `docs/adr/ADR-0008-run-identity-is-the-core-run-record.md` 为依据。
 
 下游依赖（#216 的排序规则）：binding 身份（2A/2B）先于连接与组合子 issue（#127 #131 #132）；同步作用域（2C）先于规划对账（#134）；交付事实（Batch 3）先于 #72，#233 依赖 #219 与 #222；命令身份（Batch 4）先于 #71；#235（第 9 步生产入口）被 #231 与 #204 阻塞，#231 依赖 #219。
 
