@@ -137,6 +137,9 @@ jobs:
           $stage = 'account'
           $profile = $null
           $sid = $null
+          $fixtureVolumes = @()
+          $shareDir = $null
+          $shareCreated = $false
           $nativeExit = 1
           $name = 'hp' + [Guid]::NewGuid().ToString('N').Substring(0, 10)
           function Show-NativeOutput($file) {
@@ -148,6 +151,32 @@ jobs:
                 }
                 Write-Output $line
               }
+            }
+          }
+          function New-FixtureVolume([int]$SizeMb, [string]$FileSystem, [string]$Label, [string]$ExpectedFileSystem) {
+            $used = [IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name.Substring(0, 1).ToUpperInvariant() }
+            $letter = $null
+            foreach ($candidate in 'LMNOPQRSTUVWXY'.ToCharArray()) { if ($used -notcontains [string]$candidate) { $letter = [string]$candidate; break } }
+            if (!$letter) { throw 'no free drive letter for the volume fixture' }
+            $vhd = Join-Path $env:RUNNER_TEMP ("harness-vol-" + [Guid]::NewGuid().ToString('N') + '.vhd')
+            $diskpart = Join-Path $env:RUNNER_TEMP ("diskpart-" + [Guid]::NewGuid().ToString('N') + '.txt')
+            $volume = $null
+            try {
+              @("create vdisk file=`"$vhd`" maximum=$SizeMb type=expandable", "select vdisk file=`"$vhd`"", 'attach vdisk', 'create partition primary', "format fs=$FileSystem quick label=$Label", "assign letter=$letter") | Set-Content -LiteralPath $diskpart -Encoding ascii
+              & diskpart.exe /s $diskpart | Out-Host
+              if ($LASTEXITCODE -ne 0) { throw "volume fixture failed fs=$FileSystem exit=$LASTEXITCODE" }
+              for ($attempt = 0; $attempt -lt 20 -and !$volume; $attempt++) {
+                $volume = Get-CimInstance Win32_LogicalDisk -Filter "VolumeName='$Label'" -ErrorAction SilentlyContinue | Select-Object -First 1
+                if (!$volume) { Start-Sleep -Seconds 1 }
+              }
+              if (!$volume -or $volume.DriveType -ne 3 -or $volume.FileSystem -ne $ExpectedFileSystem) { throw "volume fixture facts mismatch fs=$FileSystem label=$Label" }
+              return [pscustomobject]@{ Vhd = $vhd; Diskpart = $diskpart; Label = $Label; Device = $volume.DeviceID }
+            } catch {
+              $detach = Join-Path $env:RUNNER_TEMP ("diskpart-detach-" + [Guid]::NewGuid().ToString('N') + '.txt')
+              @("select vdisk file=`"$vhd`"", 'detach vdisk noerr') | Set-Content -LiteralPath $detach -Encoding ascii
+              & diskpart.exe /s $detach 2>&1 | Out-Null
+              Remove-Item -LiteralPath $detach, $diskpart, $vhd -Force -ErrorAction SilentlyContinue
+              throw
             }
           }
           try {
@@ -172,6 +201,22 @@ jobs:
             $bootstrapExit = $LASTEXITCODE
             Show-NativeOutput $bootstrapLog
             if ($bootstrapExit -ne 0) { throw 'foreign fixture failed' }
+            # #679：管理员预置两类真实设备。exFAT（256MB VHD，现实外接介质场景；真实卷根
+            # 由 identity gate 更早拒绝）与 ReFS（4GB sparse VHD；命中文件系统 gate）用于卷
+            # 准入证据；回环 SMB 共享用于 DriveType gate。标准用户测试进程按固定卷标/共享名
+            # 发现设备并自建映射盘，不经 argv/env 传递坐标。
+            $stage = 'volume-fixture'
+            $fixtureVolumes += New-FixtureVolume -SizeMb 256 -FileSystem 'exfat' -Label 'HARNESSFAT' -ExpectedFileSystem 'exFAT'
+            $fixtureVolumes += New-FixtureVolume -SizeMb 4096 -FileSystem 'refs' -Label 'HARNESSRFS' -ExpectedFileSystem 'ReFS'
+            $stage = 'share-fixture'
+            $shareDir = Join-Path $env:ProgramData ("harness-vol-share-" + [Guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $shareDir -Force | Out-Null
+            & icacls.exe $shareDir /grant "${name}:(OI)(CI)M" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'volume share ACL failed' }
+            New-SmbShare -Name 'harness-vol-fixture' -Path $shareDir -FullAccess "$env:COMPUTERNAME\$name" | Out-Null
+            $shareCreated = $true
+            $broad = @(Get-SmbShareAccess -Name 'harness-vol-fixture' | Where-Object { $_.AccountName -match '^(Everyone|ANONYMOUS LOGON|BUILTIN\\Users)$' })
+            if ($broad.Count -gt 0) { throw 'volume share grants a broad principal' }
             $stdout = Join-Path $profile 'native.stdout'
             $stderr = Join-Path $profile 'native.stderr'
             $arguments = @('scripts/windows-native-checks.mjs', '--set', 'private-data', '--profile', "`"$profile`"", '--foreign', "`"$foreign`"")
@@ -183,7 +228,7 @@ jobs:
             Show-NativeOutput $stdout
             Show-NativeOutput $stderr
             $nativeOut = if (Test-Path -LiteralPath $stdout) { Get-Content -LiteralPath $stdout -Raw } else { '' }
-            if ($nativeExit -eq 0 -and $nativeOut -notmatch 'windows-native-checks: set=private-data files=3 tests=\d+ skipped=0 todo=0') {
+            if ($nativeExit -eq 0 -and $nativeOut -notmatch 'windows-native-checks: set=private-data files=4 tests=\d+ skipped=0 todo=0') {
               Write-Output '::error::windows-native-checks: set=private-data 缺少或不符合通过标记，按 fail closed 处理'
               $nativeExit = 1
             }
@@ -192,6 +237,14 @@ jobs:
             Write-Output "windows-native-harness-failure stage=$stage type=$($_.Exception.GetType().Name) hresult=$($_.Exception.HResult)"
             $nativeExit = 1
           } finally {
+            if ($shareCreated) { Remove-SmbShare -Name 'harness-vol-fixture' -Force -ErrorAction SilentlyContinue }
+            foreach ($fixture in $fixtureVolumes) {
+              $detach = Join-Path $env:RUNNER_TEMP ("diskpart-detach-" + [Guid]::NewGuid().ToString('N') + '.txt')
+              @("select vdisk file=`"$($fixture.Vhd)`"", 'detach vdisk noerr') | Set-Content -LiteralPath $detach -Encoding ascii
+              & diskpart.exe /s $detach | Out-Null
+              Remove-Item -LiteralPath $detach, $fixture.Vhd, $fixture.Diskpart -Force -ErrorAction SilentlyContinue
+            }
+            if ($shareDir) { Remove-Item -LiteralPath $shareDir -Recurse -Force -ErrorAction SilentlyContinue }
             if ($sid) { Get-CimInstance Win32_UserProfile -Filter "SID='$sid'" -ErrorAction SilentlyContinue | Remove-CimInstance -ErrorAction SilentlyContinue }
             Remove-LocalUser -Name $name -ErrorAction SilentlyContinue
           }
