@@ -113,6 +113,7 @@ gh api repos/SingularityKChen/harness-projects/pulls/<n>/comments \
 
 | 记录 | 范围 | 结论 |
 |---|---|---|
+| [PR #689 MMP 评审](pr-689-mmp-review.md) | Windows 原生真实卷/映射盘拒绝证据（exFAT/ReFS VHD + 回环 SMB，test-only，#679） | 旧 P2-1/P2-2 与正文/计划问题已关闭；2026-11-25 当前 head 独立复审无 P0/P1/P2，4 条 P3 已修复且独立复评通过（本记录 §7.5/§8），无新增 P0–P3；独立契约 20/20、M1–M4 整表 4/4 KILLED；#660/#642/#647/R1 保持独立 |
 | [PR #674 MMP 评审](pr-674-mmp-review.md) | Local Git provider 分页下界与 stat 错误分类的判别性测试（test-only，#174） | 独立 agent 对抗验收：无 P0/P1，P2-1 提交信息过度声称已 amend，P3-1–P3-4 补注释或记录不修；V1 96/96、V2 M1–M3 KILLED；Refs #174 保持 OPEN，人类评审/R1 独立 |
 | [PR #675 MMP 评审](pr-675-mmp-review.md) | 定时刷新诊断吸收在 tick 调用点的剩余证据边界（两条 scheduler 用例与变异归因） | 独立对抗验收：无 P0–P2、4 项 P3 已处置/记录；test-only +59 行，Refs #336 保持 OPEN，人类评审/R1 独立 |
 | [PR #676 MMP 验收处置](pr-676-mmp-review.md) | Provider 挂载解绑（disable-not-delete）与同目标 revive 的独立 agent 对抗验收及处置 | 独立验收 PASS，无 P0–P2、7 条 P3；6 修 1 条显式不修，补 AC5-368 ×2 存储（V1 38/38）；非人类评审/R1，V8/V9 待 push 后回读 |

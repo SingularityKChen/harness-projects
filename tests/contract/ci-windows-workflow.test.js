@@ -103,3 +103,24 @@ test('标准用户阶段自建临时账户、管理员预置 foreign fixture、�
   assert.doesNotMatch(yaml, /\.test\.js/, 'YAML 不得内联测试文件名（清单只在 SETS）');
   for (const setId of Object.keys(SETS)) assert.ok(runText(lane()).includes(setId), `两条入口必须覆盖 SETS 的 ${setId}`);
 });
+test('两类真实卷与映射盘 fixture 由管理员在标准用户测试之前预置，并在 finally 定向清理', () => {
+  const text = runText(lane());
+  for (const marker of ['volume-fixture', 'share-fixture', 'diskpart.exe', 'create vdisk',
+    'format fs=$FileSystem quick label=$Label', 'DriveType -ne 3', 'FileSystem -ne $ExpectedFileSystem',
+    "New-SmbShare -Name 'harness-vol-fixture'", 'Get-SmbShareAccess', 'icacls.exe', 'ProgramData',
+    "Remove-SmbShare -Name 'harness-vol-fixture'", 'detach vdisk',
+    "New-FixtureVolume -SizeMb 256 -FileSystem 'exfat' -Label 'HARNESSFAT'",
+    "New-FixtureVolume -SizeMb 4096 -FileSystem 'refs' -Label 'HARNESSRFS'"]) {
+    assert.ok(text.includes(marker), `真实卷 fixture 缺少 ${marker}`);
+  }
+  const standard = stepContaining('New-LocalUser');
+  assert.ok(standard.run.indexOf('volume-fixture') < standard.run.indexOf('windows-native-checks.mjs'),
+    'exFAT/共享 fixture 必须由管理员在标准用户测试启动之前预置');
+  assert.ok(standard.run.indexOf('Remove-SmbShare') > standard.run.indexOf('finally'), '共享清理必须位于 finally');
+  assert.ok(standard.run.lastIndexOf('detach vdisk') > standard.run.indexOf('finally'), 'VHD detach 必须位于 finally');
+  assert.ok(standard.run.indexOf('foreach ($fixture in $fixtureVolumes)') > standard.run.indexOf('finally'), '两块 VHD 的清理循环必须位于 finally');
+  assert.ok(standard.run.indexOf('Remove-SmbShare') < standard.run.indexOf('Remove-LocalUser'), '卷/共享清理必须先于账户清理');
+  assert.doesNotMatch(standard.run, /net use \*/, '不得用 net use * 清理无关映射');
+  assert.doesNotMatch(standard.run, /-FullAccess\s+'?(Everyone|Users)/i, '共享不得授 broad 主体');
+  assert.doesNotMatch(standard.run, /HARNESS-NATIVE-EXFAT/, '卷标必须满足 exFAT/FAT 的 11 字符上限');
+});

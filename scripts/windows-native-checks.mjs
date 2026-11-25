@@ -58,6 +58,7 @@ export const SETS = {
       { file: 'tests/integration/harness-plugin-windows-private-data.test.js', minTests: 39 },
       { file: 'tests/integration/harness-plugin-windows-artifact.test.js', minTests: 1 },
       { file: 'tests/integration/harness-plugin-artifact.test.js', minTests: 29 },
+      { file: 'tests/integration/harness-plugin-windows-volume.test.js', minTests: 5 },
     ],
     allowedSkips: 0,
   },
