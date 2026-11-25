@@ -11,6 +11,7 @@
 | ci.md | 当前 workflow、PR Fast Gate、merge_group / weekly 的演进边界 |
 | publication.md | disclosure / size 命令与人工五类目检查 |
 | content-placement.md | 流程知识的四桶归属（机械 / 技法 / 约定 / 一次性）与判定规则 |
+| runtime-support.md | Node 支持契约：source workspace / compiled Host 两种执行模式的声明与证据边界 |
 
 ## 1. 工具链
 

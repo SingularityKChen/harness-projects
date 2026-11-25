@@ -21,6 +21,7 @@
    `build.mjs` 的两个常量里各写一次，集成测试另持一份字面量作独立预期（D20，取代最初的精确钉版本方案）。
 5. **构建产物形状。** 宿主半边 `target: 'node22'`（不高于验收宿主的 Node 24 与仓库 `engines.node >=22.0.0`，D26）；客户端半边 `es2022`；
    两个半边都不出 source map、不压缩，`absWorkingDir` 固定为仓库根，使产物与 metafile 里只有相对仓库根的路径（D11）。
+   **Superseded（2026-11-24，#313）**：仓库 `engines.node` 现为 `>=26.0.0`；本决策的 node22 构建目标与 Host 24.18.1 类型上限不变，见 `docs/development/runtime-support.md`。
 6. **占位组件在 `packages/ui`，apps 只注册。** `apps/harness-plugin/src` 不 import `react` / `react-dom`、没有 `.tsx`，由
    `tests/contract/package-boundaries.test.js` 的壳断言守住（D9）。
 7. **宿主半边只打一行就绪行**（`[harness-projects] host ready`），作为宿主观测的正面证据，不承载业务（D10）；安装件保留 `private: true`，
