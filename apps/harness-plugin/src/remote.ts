@@ -6,7 +6,7 @@
  * the exact same descriptor objects.
  */
 
-import { inputOfArguments, OPERATIONS, plainRecord, type Operation, type Operations, type StreamName, type UnaryName } from './host-operations.ts'
+import { inputOfArguments, OPERATIONS, plainRecord, WORKSPACE_SWITCHED, type Operation, type Operations, type StreamName, type UnaryName } from './host-operations.ts'
 import { drainUntil } from './host-planning-lifetime.ts'
 
 export const REMOTE_PACKAGE = '@harness-projects/app-harness-plugin' as const
@@ -55,7 +55,10 @@ export interface ClientRemoteContribution {
 }
 
 export type HostCompositionCall = {
-  call(name: UnaryName<typeof OPERATIONS>, input: unknown): Promise<unknown>
+  /** acknowledge 仅由本次调用在串行区内成功确认装配时同步调用，不进入 wire。 */
+  call(name: UnaryName<typeof OPERATIONS>, input: unknown, acknowledge?: (generation: string) => void): Promise<unknown>
+  /** 当前装配的 Core generation：per-peer 栅栏判断已下发的流是否过期。 */
+  currentGeneration(): string | undefined
 } & {
   /** 宿主流的帧序列；remote.ts 只透传并逐帧 JSON 化，不认识帧的类型（不 import controller）。 */
   readonly [K in StreamName<typeof OPERATIONS>]: (signal: AbortSignal) => AsyncIterable<unknown>
@@ -151,6 +154,15 @@ export interface InstalledHostRemote {
   dispose(deadline?: number): Promise<void>
 }
 
+/** 帧的 generation：baseline / delta / metadata 带，gap 不带；只接受非空字符串。 */
+function frameGeneration(value: unknown): string | undefined {
+  const frame = value as Record<string, unknown> | null
+  for (const kind of ['baseline', 'delta', 'metadata']) {
+    const generation = (frame?.[kind] as { generation?: unknown } | undefined)?.generation
+    if (typeof generation === 'string' && generation.trim() !== '') return generation
+  }
+}
+
 /** Install the live Cordis service and its strict Typert contribution. `remote` 缺省为生产的 `OPERATIONS`；测试可注入带夹具操作的声明。 */
 export async function installHostRemote(
   ctx: HostRemoteContext,
@@ -165,6 +177,7 @@ export async function installHostRemote(
   let disposed = false
   let disposal: Promise<void> | undefined
   let activeCalls = 0
+  const delivered = new Map<string, string>()
   const lifetime = new AbortController()
   const streams = new Set<() => Promise<unknown>>()
   let drainResolve: (() => void) | undefined
@@ -183,7 +196,8 @@ export async function installHostRemote(
   for (const operation of Object.values(remote.operations)) {
     service[operation.name] = operation.mode === 'stream'
       // 首次 next 才登记调用；真实 source 先关，避免 pending next 把 outer.return 排在队尾。
-      ? function (signal: AbortSignal) {
+      ? function (this: { readonly ctx?: HostRemoteContext } | undefined, signal: AbortSignal) {
+        const invoker = this
         const combined = AbortSignal.any([signal, lifetime.signal])
         let frames: AsyncIterator<unknown> | undefined, closing = false, exhausted = false
         let sourceClose: Promise<void> | undefined, stopped: Promise<unknown> | undefined
@@ -219,6 +233,8 @@ export async function installHostRemote(
               catch (error) { if (combined.aborted || closing) return; throw error }
               if (combined.aborted || closing) return
               if (frame.done) { exhausted = true; return }
+              const generation = frameGeneration(frame.value), peer = invoker?.ctx?.invocation?.peer?.id
+              if (generation !== undefined && typeof peer === 'string' && peer.trim() !== '') delivered.set(peer, generation)
               yield toJson(frame.value)
             }
           } finally {
@@ -235,7 +251,12 @@ export async function installHostRemote(
         try {
           const input = inputOfArguments(operation, args)
           if (operation.params.some(({ name }) => name === 'actorRef')) input.actorRef = commandActor(this.ctx)
-          return await composition.call(operation.name as UnaryName<typeof OPERATIONS>, input)
+          const peer = this.ctx.invocation?.peer?.id
+          if (operation.scope !== 'host' && operation.scope !== 'transition' && typeof peer === 'string' && peer.trim() !== ''
+            && delivered.has(peer) && typeof composition.currentGeneration === 'function' && delivered.get(peer) !== composition.currentGeneration()) throw new Error(WORKSPACE_SWITCHED)
+          return await composition.call(operation.name as UnaryName<typeof OPERATIONS>, input, (generation) => {
+            if (typeof peer === 'string' && peer.trim() !== '' && delivered.has(peer)) delivered.set(peer, generation)
+          })
         } finally { endCall() }
       }
   }

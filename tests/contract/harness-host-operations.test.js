@@ -163,6 +163,17 @@ test('settings expose only the four exact positional contracts', () => {
 })
 
 
+test('catalogue and open declare host/transition scopes with strict single-ID wire', () => {
+  const list = OPERATIONS.listWorkspaces, open = OPERATIONS.openWorkspace
+  assert.deepEqual([list.mode, list.scope, list.params.length], ['unary', 'host', 0], 'listWorkspaces 是 host 作用域的无参 unary')
+  assert.deepEqual([open.mode, open.scope, open.params.map(({ name, type }) => [name, type])], ['unary', 'transition', [['workspaceId', 'WorkspaceId']]], 'openWorkspace 只接受一个 transition 作用域的工作区 id')
+  assert.equal(open.params[0].parse('workspace-2'), 'workspace-2')
+  for (const value of ['', null, 3, {}]) assert.throws(() => open.params[0].parse(value), TypeError)
+  assert.throws(() => parseInput(open, { workspaceId: 'ws', extra: true }), /未知字段/)
+  assert.equal(OPERATIONS.createWorkspace.scope, 'transition', '创建后同一 transition 激活新工作区')
+  for (const operation of [OPERATIONS.baseline, OPERATIONS.getWorkspaceSetup, OPERATIONS.connectAccount]) assert.equal(operation.scope, undefined, '既有读与设置写默认 assembly 作用域，ABI 不变')
+})
+
 test('setup read is a strict no-argument unary operation', () => {
   const descriptor = HOST_REMOTE.invocations.find(({ method }) => method === 'getWorkspaceSetup')
   assert.deepEqual([descriptor.mode, descriptor.parameters], [undefined, []])

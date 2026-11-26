@@ -298,6 +298,8 @@ export interface Storage {
   putWorkspacePlanningMapping(record: WorkspacePlanningMappingRecord): Promise<void>
   putWorkspace(record: WorkspaceRecord): Promise<void>
   getWorkspace(id: WorkspaceId): Promise<WorkspaceRecord | undefined>
+  /** 全部工作区，顺序 = 创建序（SQLite 按 rowid，替身按插入序）；只含安全字段，不调 Provider。 */
+  listWorkspaces(): Promise<readonly WorkspaceRecord[]>
   putProviderBinding(record: ProviderBindingRecord): Promise<void>
   listProviderBindings(workspaceId: WorkspaceId): Promise<readonly ProviderBindingRecord[]>
   /** 卸载一个挂载（工作区 + 连接锚点 + 域）：只删该挂载及其配置；账号、连接锚点、外部身份与同步历史保留；缺失挂载重复移除是 no-op。 */

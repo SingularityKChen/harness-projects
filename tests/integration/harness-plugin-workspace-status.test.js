@@ -12,7 +12,8 @@ async function open(t, state = 'configured') {
   let Panel, receive, lost, stopped = false, current = setup(state), generation = 0
   const queue = [], cleanups = [], calls = []
   const emit = value => receive ? (receive({ done: false, value }), receive = undefined) : queue.push(value)
-  const remote = { getWorkspaceSetup: async (...args) => { calls.push(['setup', ...args]); return { ok: true, value: current } }, watch: signal => signal }
+  const remote = { getWorkspaceSetup: async (...args) => { calls.push(['setup', ...args]); return { ok: true, value: current } }, watch: signal => signal,
+    listWorkspaces: async () => ({ ok: true, value: { activeWorkspaceId: null, workspaces: [] } }), openWorkspace: async (workspaceId) => ({ ok: true, value: { state: 'failed', requestedWorkspaceId: workspaceId } }) }
   const child = { effect: run => { cleanups.push(run()) }, slots: { inject: (_name, run) => run(), register: (slot, component) => { if (slot.name === 'main') Panel = component } }, remote: {
     harnessProjects: remote, $stream: options => { lost = options.carrierFailed; return { restart() {}, dispose: async () => { stopped = true; receive?.({ done: true }) }, [Symbol.asyncIterator]: () => ({ next: () => stopped ? Promise.resolve({ done: true }) : queue.length ? Promise.resolve({ done: false, value: queue.shift() }) : new Promise(resolve => { receive = resolve }) }) } },
   } }
@@ -20,7 +21,7 @@ async function open(t, state = 'configured') {
   t.after(async () => { for (const stop of cleanups) await stop() })
   const render = () => renderToStaticMarkup(React.createElement(Panel))
   const frame = async (bindingId = 'binding', observation = {}) => {
-    emit({ generation: ++generation, value: { kind: 'baseline', baseline: { generation: `scope-${generation}`, workspace: current.workspace, revision: 0, entities: [], capabilities: observation.access === 'unknown' ? [] : [{ key: 'planning.item.read', access: observation.access ?? 'available' }], planningSource: { bindingId, name: bindingId === 'binding' ? 'Current project' : 'OLD-PROJECT-CANARY' }, source: { revision: 0, freshness: observation.degraded ? 'degraded' : 'fresh', ...(observation.degraded ? { reason: 'RAW-REASON-CANARY' } : {}), reconciledAt: at } } }, accept() {} }); await turn()
+    emit({ generation: ++generation, value: { kind: 'baseline', baseline: { generation: 'scope', workspace: current.workspace, revision: 0, entities: [], capabilities: observation.access === 'unknown' ? [] : [{ key: 'planning.item.read', access: observation.access ?? 'available' }], planningSource: { bindingId, name: bindingId === 'binding' ? 'Current project' : 'OLD-PROJECT-CANARY' }, source: { revision: 0, freshness: observation.degraded ? 'degraded' : 'fresh', ...(observation.degraded ? { reason: 'RAW-REASON-CANARY' } : {}), reconciledAt: at } } }, accept() {} }); await turn()
   }
   return { render, frame, disconnect: () => lost(), calls, set: value => { current = value } }
 }

@@ -61,9 +61,12 @@ const ENVELOPE = [
   param('idempotencyKey', 'IdempotencyKey', (value) => nonEmptyString(value, 'idempotencyKey')),
 ] as const
 
+export const WORKSPACE_SWITCHED = '项目已切换，请重新读取'
+
 /** 流在类型上不允许业务参数：Host 只会把取消 signal 追加为最后一个参数。 */
 type Body =
-  | { readonly mode: 'unary'; readonly params: readonly Param[] }
+  /** scope 缺省 = assembly：Host 在准入装配上执行，跨工作区以固定文案中止。 */
+  | { readonly mode: 'unary'; readonly params: readonly Param[]; readonly scope?: 'host' | 'transition' }
   | { readonly mode: 'stream'; readonly params: readonly [] }
 
 export type Operation<N extends string = string, B extends Body = Body> = B & { readonly name: N }
@@ -139,12 +142,14 @@ export const OPERATIONS = defineOperations({
   getChangeRequestAssigneeOperation: { mode: 'unary', params: [ENVELOPE[0], ...confirmedPr, { ...param('operationId', 'OperationId', v => v === undefined ? undefined : nonEmptyString(v, 'operationId')), acceptsUndefined: true }] },
   addChangeRequestAssignees: { mode: 'unary', params: [...ENVELOPE, ...confirmedPr, param('assigneeIds', 'AssigneeIds', v => { if (!Array.isArray(v) || v.length > 10 || v.some(id => typeof id !== 'string' || id.trim() === '')) throw TypeError('assigneeIds'); return [...v] as string[] })] },
   resumeChangeRequestAssignees: { mode: 'unary', params: [ENVELOPE[0], ...confirmedPr, param('operationId', 'OperationId', v => nonEmptyString(v, 'operationId'))] },
-  createWorkspace: { mode: 'unary', params: [...ENVELOPE, param('name', 'WorkspaceName', (value) => nonEmptyString(value, 'name'))] },
+  createWorkspace: { mode: 'unary', params: [...ENVELOPE, param('name', 'WorkspaceName', (value) => nonEmptyString(value, 'name'))], scope: 'transition' },
   connectAccount: { mode: 'unary', params: ENVELOPE },
   bindPlanningSource: { mode: 'unary', params: [...ENVELOPE, param('accountId', 'AccountId', (value) => nonEmptyString(value, 'accountId')), param('projectNodeId', 'ProjectNodeId', (value) => nonEmptyString(value, 'projectNodeId'))] },
   bindRepository: { mode: 'unary', params: [...ENVELOPE, param('repositoryId', 'RepositoryId', (value) => nonEmptyString(value, 'repositoryId')), param('references', 'RepositoryReferences', repositoryReferences)] },
   installExecutionBindings: { mode: 'unary', params: ENVELOPE },
   getWorkspaceSetup: { mode: 'unary', params: [] },
+  listWorkspaces: { mode: 'unary', params: [], scope: 'host' },
+  openWorkspace: { mode: 'unary', params: [param('workspaceId', 'WorkspaceId', (value) => nonEmptyString(value, 'workspaceId'))], scope: 'transition' },
   getPlanningMapping: { mode: 'unary', params: [] },
   setPlanningMapping: { mode: 'unary', params: [...ENVELOPE, param('expectedBindingId', 'BindingId', (value) => nonEmptyString(value, 'bindingId')), param('expectedProjectExternalId', 'ProjectExternalId', (value) => nonEmptyString(value, 'projectExternalId')), param('mapping', 'PlanningMapping', (value) => plainRecord(value, 'mapping'))] },
   getIssueClosingLinks: { mode: 'unary', params: [param('workItemId', 'WorkItemId', (value) => nonEmptyString(value, 'workItemId'))] },

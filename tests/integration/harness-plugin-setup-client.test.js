@@ -18,6 +18,8 @@ async function mount(methods = {}) {
     connectAccount: async (...args) => { calls.push(['account', ...args]); return { ok: true, value: local({ accountId: 'account-1' }) } },
     bindPlanningSource: async (...args) => { calls.push(['bind', ...args]); return { ok: true, value: local({ bindingId: 'binding-1' }) } },
     refreshPlanning: async (...args) => { calls.push(['refresh', ...args]); return { ok: true, value: local({ ok: true }) } },
+    listWorkspaces: async () => ({ ok: true, value: { activeWorkspaceId: null, workspaces: [] } }),
+    openWorkspace: async (workspaceId) => ({ ok: true, value: { state: 'activated', requestedWorkspaceId: workspaceId, activeWorkspaceId: workspaceId } }),
     getExecutionContext: async (...args) => { calls.push(['execution', ...args]); return { ok: true, value: { context: null } } }, watch: () => {}, ...methods }
   await apply({ effect: (execute) => effects.push(execute()), remote: { $mount: async () => () => {} }, inject: (_names, run) => run({ remote: { harnessProjects: remote,
     $stream: (value) => { options = value; return { restart() {}, dispose: async () => { disposed += 1 }, [Symbol.asyncIterator]: () => ({ next: () => new Promise((resolve) => waiters.push(resolve)) }) } } },
@@ -41,7 +43,7 @@ test('actual client mount unwraps gateway, submits exact args, fences watch scop
     assert.doesNotMatch(f.html(), /Saved|已连接|<table/)
     f.remote.getWorkspaceSetup = async () => ({ ok: true, value: configured() }); await f.source.refresh()
     await f.emit({ kind: 'baseline', baseline: { ...header('other', 1), revision: 1, entities: [] } })
-    assert.match(f.html(), /正在等待工作项/)
+    assert.match(f.html(), /正在打开「Mounted」…/)
     let reads = 0; f.remote.getWorkspaceSetup = async () => { reads += 1; return { ok: true, value: configured() } }
     await f.emit({ kind: 'delta', delta: { ...header('other', 2), previousRevision: 1, revision: 2, upserts: [], removed: [] } })
     assert.equal(reads, 0); f.break()
@@ -52,6 +54,85 @@ test('actual client mount unwraps gateway, submits exact args, fences watch scop
   } finally { await f.close() }
   assert.equal(f.disposed(), 1)
 })
+test('first Home snapshot then a project baseline refreshes setup for that workspace', async () => {
+  const f = await mount()
+  try {
+    let reads = 0
+    await f.emit({ kind: 'baseline', baseline: { generation: 'home', capabilities: [], source: { revision: 0, freshness: 'fresh', authority: 'provider' }, revision: 0, entities: [] } })
+    f.remote.getWorkspaceSetup = async () => { reads += 1; return { ok: true, value: configured() } }
+    await f.emit({ kind: 'baseline', baseline: { ...header('ws-1', 1), revision: 1, entities: [] } }, 2)
+    assert.equal(reads, 1, 'Home(undefined)→项目(defined) 必须重读 setup'); assert.equal(f.source.getSnapshot().setup.workspace.id, 'ws-1')
+  } finally { await f.close() }
+})
+
+for (const targets of [['ws-2'], ['ws-1'], ['ws-2', 'ws-1']]) test(`new activation ${targets.join(' → ')} cancels a held account continuation until explicit reconnect`, async () => {
+  let current = 'ws-1', release, held = true
+  const accounts = new Set(), bindings = [], accountKeys = []
+  const acknowledgement = new Promise((resolve) => { release = resolve })
+  const setup = () => ({ workspace: { id: current, name: current }, planning: { state: 'unbound' } })
+  const f = await mount({ getWorkspaceSetup: async () => ({ ok: true, value: setup() }),
+    connectAccount: async (_actor, key) => { accounts.add('account-1'); accountKeys.push(key); if (held) await acknowledgement; return { ok: true, value: local({ accountId: 'account-1' }) } },
+    bindPlanningSource: async () => { bindings.push(current); return { ok: true, value: local({ bindingId: 'binding-1' }) } } })
+  try {
+    await f.emit({ kind: 'baseline', baseline: { ...header(current, 1), generation: 'activation-1', revision: 1, entities: [] } })
+    const connecting = f.source.connect('PVT_A'), reconciling = f.source.refresh(true); await tick()
+    for (const [index, target] of targets.entries()) {
+      current = target
+      await f.emit({ kind: 'baseline', baseline: { ...header(current, index + 2), generation: `activation-${index + 2}`, revision: index + 2, entities: [], capabilities: [{ key: 'planning.item.read', access: 'available' }] } }, index + 2)
+    }
+    held = false; release(); await Promise.all([connecting, reconciling]); await tick()
+    assert.deepEqual(bindings, [], 'an old account acknowledgement cannot authorize a planning write in a new activation')
+    assert.ok(!f.calls.some(([kind]) => kind === 'refresh'), 'a queued old reconcile cannot continue on the new activation')
+    assert.ok(accounts.has('account-1'), 'the committed Host account remains available')
+    assert.equal(f.source.getSnapshot().setup.workspace.id, current); assert.equal(f.source.getSnapshot().pending, false)
+    await f.source.connect('PVT_A')
+    assert.deepEqual(bindings, [current], 'only explicit resubmission may bind the current workspace')
+    assert.notEqual(accountKeys[1], accountKeys[0], 'a new activation cannot replay the old connect intent')
+  } finally { release(); await f.close() }
+})
+for (const home of [false, true]) test(`initial creation after ${home ? 'Home' : 'no frame'} survives its own first activation before the acknowledgement arrives`, async () => {
+  let release
+  const acknowledgement = new Promise((resolve) => { release = resolve })
+  const f = await mount({ createWorkspace: async () => { await acknowledgement; return { ok: true, value: local({ workspaceId: 'ws-1' }) } } })
+  try {
+    if (home) await f.emit({ kind: 'baseline', baseline: { generation: 'home', capabilities: [], source: { revision: 0, freshness: 'fresh', authority: 'provider' }, revision: 0, entities: [] } })
+    const creating = f.source.create('One'); f.remote.getWorkspaceSetup = async () => ({ ok: true, value: { workspace: { id: 'ws-1', name: 'One' }, planning: { state: 'unbound' } } })
+    await f.emit({ kind: 'baseline', baseline: { ...header('ws-1', 1), revision: 1, entities: [] } }, home ? 2 : 1)
+    release(); await creating; await tick()
+    assert.equal(f.source.getSnapshot().setup.workspace.id, 'ws-1'); assert.equal(f.source.getSnapshot().pending, false)
+  } finally { release(); await f.close() }
+})
+test('a newer activation refresh replaces a held setup read and absorbs its late old workspace', async () => {
+  const f = await mount({ getWorkspaceSetup: async () => ({ ok: true, value: configured() }) })
+  let release
+  try {
+    await f.emit({ kind: 'baseline', baseline: { ...header('ws-1', 1), generation: 'activation-1', revision: 1, entities: [] } })
+    f.remote.getWorkspaceSetup = () => new Promise((resolve) => { release = resolve })
+    const reading = f.source.refresh(); await tick()
+    f.remote.getWorkspaceSetup = async () => ({ ok: true, value: { ...configured(), workspace: { id: 'ws-2', name: 'Two' } } })
+    await f.emit({ kind: 'baseline', baseline: { ...header('ws-2', 2), generation: 'activation-2', revision: 2, entities: [] } }, 2)
+    release({ ok: true, value: configured() }); await reading
+    assert.equal(f.source.getSnapshot().setup.workspace.id, 'ws-2'); assert.equal(f.source.getSnapshot().pending, false)
+  } finally { await f.close() }
+})
+for (const kind of ['open', 'create']) test(`${kind} completes only after the accepted read replacing its fenced readback`, async () => {
+  const reads = [], target = { ...configured(), workspace: { id: 'ws-2', name: 'Two' } }
+  const f = await mount({ getWorkspaceSetup: async () => ({ ok: true, value: configured() }), createWorkspace: async () => ({ ok: true, value: local({ workspaceId: 'ws-2' }) }) })
+  let done = false
+  try {
+    await f.emit({ kind: 'baseline', baseline: { ...header('ws-1', 1), generation: 'activation-1', revision: 1, entities: [] } })
+    f.remote.getWorkspaceSetup = () => new Promise((resolve) => { reads.push(resolve) })
+    const changing = kind === 'open' ? f.source.open('ws-2') : f.source.create('Two'); void changing.then(() => { done = true }); await tick()
+    await f.emit({ kind: 'baseline', baseline: { ...header('ws-2', 2), generation: 'activation-2', revision: 2, entities: [] } }, 2)
+    reads.shift()({ ok: true, value: target }); await tick()
+    assert.equal(done, false, 'the raw mutation cannot resolve its caller before the queued confirmation read')
+    assert.equal(f.source.getSnapshot().setup.workspace.id, 'ws-1', 'the old readback remains fenced')
+    assert.equal(kind === 'open' ? f.source.open('ws-2') : f.source.create('Two'), changing, 'duplicates join the whole confirmation interaction')
+    reads.shift()({ ok: true, value: target }); await changing
+    assert.equal(f.source.getSnapshot().setup.workspace.id, 'ws-2'); assert.equal(f.source.getSnapshot().pending, false)
+  } finally { await f.close() }
+})
+
 test('actual client rejects outer failure and unknown DTO keys, and unmount absorbs a pending setup response', async () => {
   const f = await mount({ getWorkspaceSetup: async () => ({ ok: false, error: new Error('RAW-CANARY') }) })
   assert.equal(f.source.getSnapshot().error.code, 'unavailable'); assert.doesNotMatch(f.html(), /RAW-CANARY/)

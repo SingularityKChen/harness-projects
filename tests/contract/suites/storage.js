@@ -29,6 +29,23 @@ export function storageFoundationSuite(adapter, register = test) {
     assert.equal(await storage.getWorkspace('ws-rolled-back'), undefined)
     adapter.foundationProbe?.({ storage, initialFence, committedFence })
   })
+  // 端口对外承诺创建序：SQLite 按 rowid，替身按插入序；重名不合并、覆盖同 id 不改变位置；只返回安全字段。
+  register(`${label}：listWorkspaces 按创建序枚举全部工作区且只暴露安全字段`, async () => {
+    const storage = makeStorage()
+    assert.deepEqual(await storage.listWorkspaces(), [], '空库枚举为空数组，不是 undefined')
+    const first = { id: 'ws-order-a', name: '同名', statusPolicy: 'provider_authoritative' }
+    const second = { id: 'ws-order-b', name: '同名', statusPolicy: 'manual_only' }
+    await storage.putWorkspace(first)
+    assert.deepEqual(await storage.listWorkspaces(), [first], '一个工作区时原样返回')
+    await storage.putWorkspace(second)
+    await storage.putWorkspace({ ...first, name: '改名' })
+    assert.deepEqual(await storage.listWorkspaces(), [{ ...first, name: '改名' }, second], '重名不合并、同 id 覆盖不改变创建序')
+    const rows = await storage.listWorkspaces()
+    assert.deepEqual(Object.keys(rows[0]).sort(), ['id', 'name', 'statusPolicy'], '只含 WorkspaceRecord 的安全字段')
+    rows[0].name = '外部改名'
+    assert.equal((await storage.listWorkspaces())[0].name, '改名', '调用方不能改到端口内的行')
+    storage.close?.()
+  })
   register(`${label}：规划映射独立保存、深拷贝、回滚并跨重启保留`, async () => {
     let storage = makeStorage(); await seedWorkspace(storage); await storage.putProviderBinding(binding('binding-1'))
     const record = { workspaceId: WORKSPACE, bindingId: 'binding-1', projectExternalId: 'project-1', origin: 'user', mapping: { status: { projectFieldId: 'status', options: { done: 'done' } } } }

@@ -81,7 +81,7 @@ test('real source renders labeled creation, unique workspace and configured reco
   assert.doesNotMatch(html(f.source), /Saved|已连接|<table/)
   f.set({ ...setup('degraded'), activationError: error() }); await f.source.refresh()
   assert.match(html(f.source), /配置已记录，激活失败/); assert.doesNotMatch(html(f.source), /RAW-CANARY/)
-  await f.source.refresh(true); assert.match(html(f.source, { workspace: { id: 'other' } }), /正在等待工作项/)
+  await f.source.refresh(true); assert.match(html(f.source, { workspace: { id: 'other' } }), /正在打开「Fixture」…/)
   const store = client.createEntityStore(); store.applyBaseline({ revision: 0, entities: [], source: { revision: 0, freshness: 'fresh', authority: 'provider' } })
   const read = { workspace: { id: 'ws-1', name: 'Fixture' }, store, connection: { connected: true }, capabilities: [] }
   assert.match(html(f.source, read), /连接设置/)
@@ -123,7 +123,7 @@ test('verified connection causes keep their specific guidance ahead of generic e
   }
 })
 const find = (node, type) => Array.isArray(node) ? node.flatMap((child) => find(child, type)) : node && typeof node === 'object' ? [...(node.type === type ? [node] : []), ...find(node.props?.children, type)] : []
-function mount(props) {
+function mount(props, component = ui.WorkspaceSetupGate) {
   const slots = []; let cursor = 0, effects = []
   const slot = (init) => { const index = cursor++; return slots[index] ??= init() }
   const dispatcher = { useSyncExternalStore: (_subscribe, read) => read(),
@@ -133,7 +133,7 @@ function mount(props) {
   }
   return { render() { const internals = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED, before = internals.ReactCurrentDispatcher.current
     internals.ReactCurrentDispatcher.current = dispatcher; cursor = 0
-    try { return ui.WorkspaceSetupGate(props) } finally { internals.ReactCurrentDispatcher.current = before } },
+    try { return component(props) } finally { internals.ReactCurrentDispatcher.current = before } },
     flush() { const batch = effects; effects = []; batch.forEach((effect) => effect()) } }
 }
 
@@ -456,4 +456,32 @@ test('execution activation readback keeps the actual Retry on the original insta
     assert.deepEqual(keys, ['intent-1:execution', 'intent-1:execution'])
     assert.equal(f.source.getSnapshot().setup.executionInstalled, true); assert.equal(f.source.getSnapshot().error, undefined)
   } finally { f.source.dispose() }
+})
+test('catalogue refresh parses the closed shape and keeps the last known list on read failure', async () => {
+  const valid = { activeWorkspaceId: 'ws-1', workspaces: [{ workspaceId: 'ws-1', name: '同名', planning: 'bound', policy: 'supported' }, { workspaceId: 'ws-2', name: '同名', planning: 'none', policy: 'unsupported' }] }
+  let response = valid
+  const f = fixture({ listWorkspaces: async () => response })
+  await f.source.refresh(); assert.deepEqual(f.source.getSnapshot().catalogue, valid)
+  response = { ...valid, workspaces: [{ ...valid.workspaces[0], planning: 'guessed' }] }
+  await f.source.refresh()
+  assert.equal(f.source.getSnapshot().failure, 'read'); assert.equal(f.source.getSnapshot().error.code, 'unavailable'); assert.deepEqual(f.source.getSnapshot().catalogue, valid, '读取失败保留最后已知列表')
+  for (const bad of [{ ...valid, extra: true }, { ...valid, activeWorkspaceId: 3 }, { ...valid, workspaces: [{ workspaceId: '', name: 'X', planning: 'none', policy: 'supported' }] }, { ...valid, workspaces: [{ workspaceId: 'a', name: 'X', planning: 'none', policy: 'maybe' }] }, { ...valid, workspaces: [null] }]) {
+    const g = fixture({ listWorkspaces: async () => bad }); await g.source.refresh()
+    assert.equal(g.source.getSnapshot().catalogue, undefined, '畸形目录不得进入快照'); assert.equal(g.source.getSnapshot().failure, 'read')
+  }
+})
+test('open rereads setup, verifies the requested target only on success and maps scoped failures', async () => {
+  const calls = [], activated = (workspaceId) => ({ state: 'activated', requestedWorkspaceId: workspaceId, activeWorkspaceId: workspaceId })
+  let current = setup('confirmed')
+  const f = fixture({ getWorkspaceSetup: async () => current, openWorkspace: async (workspaceId) => { calls.push(workspaceId); current = { ...setup('confirmed'), workspace: { id: workspaceId, name: 'Opened' } }; return activated(workspaceId) } })
+  await f.source.refresh(); await f.source.open('ws-2')
+  assert.deepEqual(calls, ['ws-2']); assert.equal(f.source.getSnapshot().setup.workspace.id, 'ws-2'); assert.equal(f.source.getSnapshot().failure, undefined)
+  const stale = fixture({ openWorkspace: async (workspaceId) => activated(workspaceId) }); stale.set(setup('confirmed')); await stale.source.refresh(); await stale.source.open('ws-2')
+  assert.equal(stale.source.getSnapshot().failure, 'activate'); assert.equal(stale.source.getSnapshot().error.code, 'unavailable'); assert.equal(stale.source.getSnapshot().setup.workspace.id, 'ws-1', '读回不是目标时不覆盖最后已知 setup')
+  const refused = fixture({ openWorkspace: async (workspaceId) => ({ state: 'failed', requestedWorkspaceId: workspaceId, activeWorkspaceId: 'ws-1', error: error('not_supported', 'manual_execution') }) }); refused.set(setup('confirmed')); await refused.source.refresh(); await refused.source.open('ws-2')
+  assert.equal(refused.source.getSnapshot().failure, 'activate'); assert.equal(refused.source.getSnapshot().error.code, 'not_supported', '作用域失败保留 Host 错误码')
+  for (const bad of [{ state: 'activated' }, { state: 'activated', requestedWorkspaceId: 'ws-9', activeWorkspaceId: 'ws-9' }, { state: 'activated', requestedWorkspaceId: 'ws-2', activeWorkspaceId: 3 }, { state: 'saved', requestedWorkspaceId: 'ws-2' }]) {
+    const g = fixture({ openWorkspace: async () => bad }); g.set(setup('confirmed')); await g.source.refresh(); await g.source.open('ws-2')
+    assert.equal(g.source.getSnapshot().failure, 'activate'); assert.equal(g.source.getSnapshot().error.code, 'unavailable'); assert.equal(g.source.getSnapshot().setup.workspace.id, 'ws-1')
+  }
 })

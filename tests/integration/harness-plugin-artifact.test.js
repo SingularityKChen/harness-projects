@@ -454,7 +454,8 @@ describe('Harness 插件安装件契约', () => {
             return stream
           },
           harnessProjects: { getChangeRequestOperation: async (...args) => json(JSON.stringify({ ok: true, value: await getChangeRequestOperation(...args) })), resumeChangeRequest: async (...args) => json(JSON.stringify({ ok: true, value: await resumeChangeRequest(...args) })), createChangeRequest: async (...args) => json(JSON.stringify({ ok: true, value: await createChangeRequest(...args) })), watch: (signal) => signal, // 原样返回 signal，供断言 open 转交的是同一个；Gateway JSON解码属于bundle所在realm
-            getWorkspaceSetup: async () => json(JSON.stringify({ ok: true, value: setup ?? (frame ? { workspace: frame.baseline.workspace, planning: { state: 'confirmed', bindingId: 'binding-1', projectNodeId: 'PVT_artifact' } } : { workspace: null, planning: { state: 'unbound' } }) })) },
+            getWorkspaceSetup: async () => json(JSON.stringify({ ok: true, value: setup ?? (frame ? { workspace: frame.baseline.workspace, planning: { state: 'confirmed', bindingId: 'binding-1', projectNodeId: 'PVT_artifact' } } : { workspace: null, planning: { state: 'unbound' } }) })),
+            listWorkspaces: async () => json(JSON.stringify({ ok: true, value: { activeWorkspaceId: null, workspaces: [] } })), openWorkspace: async (workspaceId) => json(JSON.stringify({ ok: true, value: { state: 'activated', requestedWorkspaceId: workspaceId, activeWorkspaceId: workspaceId } })) },
         },
         effect: (execute, label) => fiberCtx.effect(execute, label),
         slots: {

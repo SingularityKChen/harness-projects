@@ -42,6 +42,8 @@ export class SqliteStorage extends SqliteExecutionSurface implements Storage {
     return this.write('INSERT INTO workspace (id, name, status_policy) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET name = excluded.name, status_policy = excluded.status_policy', record.id, record.name, record.statusPolicy)
   }
   getWorkspace(id: WorkspaceId): Promise<WorkspaceRecord | undefined> { return this.read(() => optional(this.db.prepare('SELECT id, name, status_policy FROM workspace WHERE id = ?').get(id), rowToWorkspace)) }
+  /** 端口承诺创建序：rowid 是插入顺序，同名不合并；读侧返回新行对象。 */
+  listWorkspaces(): Promise<readonly WorkspaceRecord[]> { return this.read(() => (this.db.prepare('SELECT id, name, status_policy FROM workspace ORDER BY rowid').all() as Row[]).map(rowToWorkspace)) }
   /** 绑定写入是两条语句——连接锚点（跨工作区共享）与工作区挂载——必须整体生效：挂载被唯一索引或 CHECK 拒绝时留下孤儿锚点，"被拒绝的挂载不得留下任何行"就不成立。拒绝先于写入：`ON CONFLICT (id) DO NOTHING` 会静默吞掉"同一个 id 换实现"，所以先比对实现键；其余拒绝由 002 的约束给出，事务把它们与前面的写入一起回滚。 */
   async putProviderBinding(record: ProviderBindingRecord): Promise<void> {
     const { enabled, isDefault, ...fields } = record

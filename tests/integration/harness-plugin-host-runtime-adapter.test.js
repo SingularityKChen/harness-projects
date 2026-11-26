@@ -80,7 +80,8 @@ test('Host entry closes storage and publishes nothing when composition or remote
   const close = t.mock.method(SqliteStorage.prototype, 'close')
   const cases = [
     // 组合失败：存储已打开、读已存工作区时被拒绝（宿主级失败，整体关闭）。
-    [() => t.mock.method(SqliteStorage.prototype, 'getWorkspace', async () => { throw new Error('composition refused') }), undefined, /composition refused/],
+    // 新启动选择在空 profile 下先枚举工作区（无显式初始目标），因此组合失败注入在枚举上。
+    [() => t.mock.method(SqliteStorage.prototype, 'listWorkspaces', async () => { throw new Error('composition refused') }), undefined, /composition refused/],
     [() => undefined, () => { throw new Error('register refused') }, /register refused/],
   ]
   for (const [fault, register, reason] of cases) {

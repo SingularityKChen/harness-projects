@@ -4,6 +4,7 @@ import type { PlanningMappingSource, PlanningRefreshSource, WorkspaceSetupSource
 import { workspaceSetupView } from '@harness-projects/ui-model'
 import { PlanningMappingForm } from './planning-mapping.ts'
 import { RepositoryBindingForm } from './repository-binding.ts'
+import { ProjectsHome } from './projects-home.ts'
 import { WorkItemApp, type WorkspaceSource } from './work-item-app.ts'
 import { WorkspaceSettings } from './workspace-settings.ts'
 import { WORKSPACE_STYLES } from './workspace-presentation.ts'
@@ -16,7 +17,8 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   const read = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot)
   const [editScope, setEditScope] = useState<string | undefined>(undefined)
   const [draft, setDraft] = useState<{ scope: string; name?: string; project?: string } | undefined>(undefined)
-  const [navigation, setNavigation] = useState<{ source: WorkspaceSetupSource; view: 'workspace' | 'settings' } | undefined>(undefined), [visited, setVisited] = useState<string | undefined>(undefined)
+  type Pane = 'workspace' | 'settings' | 'projects' | 'create'
+  const [navigation, setNavigation] = useState<{ source: WorkspaceSetupSource; view: Pane } | undefined>(undefined), [visited, setVisited] = useState<string | undefined>(undefined)
   const identity = useRef({ setupSource, repositoryBindingSource, mappingSource, generation: 0 })
   if (identity.current.setupSource !== setupSource || identity.current.repositoryBindingSource !== repositoryBindingSource || identity.current.mappingSource !== mappingSource) identity.current = { setupSource, repositoryBindingSource, mappingSource, generation: identity.current.generation + 1 }
   const initiator = useRef<DOMElement | null>(null), returnFocus = useRef(false)
@@ -35,25 +37,30 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   const name = draft?.scope === scope ? draft.name ?? '' : '', project = draft?.scope === scope ? draft.project : undefined
   const hasDraft = draft?.scope === scope && (draft.name !== undefined || draft.project !== undefined)
   const confirmed = setup?.planning.state === 'confirmed' && setup.workspace !== null
-  const settings = navigation?.source === setupSource ? navigation.view === 'settings' : !setup || setup.workspace === null || !['unbound', 'confirmed'].includes(setup.planning.state)
-  const mounted = settings || visited === scope || (setup?.planning.state === 'unbound' && repositoryBindingSource !== undefined)
+  // 视图收敛为单一 pane：settings 布尔 + visited 派生不再各自为政；Home 只在没有 active 且有已存项目时默认出现。
+  const catalogue = snapshot.catalogue
+  const defaultPane: Pane = !setup ? 'settings' : setup.workspace === null ? (catalogue !== undefined && catalogue.workspaces.length > 0 ? 'projects' : 'create') : setup.planning.state === 'configured' || setup.planning.state === 'degraded' ? 'settings' : 'workspace'
+  const pane: Pane = navigation?.source === setupSource ? navigation.view : defaultPane
+  const settings = pane === 'settings' || pane === 'create'
+  const mounted = settings || visited === scope || pane === 'projects' || (setup?.planning.state === 'unbound' && repositoryBindingSource !== undefined)
   const readable = read?.capabilities?.some(entry => entry.key === 'planning.item.read' && ['available', 'read_only', 'degraded'].includes(entry.access)) === true
   // 拒读帧会隐藏来源名；保留同一确认挂载的安全容器，权限仍由 Host 与读模型裁决。
   const recoverable = setup?.planning.bindingId !== undefined && read?.reason === 'permission_denied'
     && (read.planningSource === undefined || read.planningSource.bindingId === setup.planning.bindingId)
     && read.capabilities?.some(entry => entry.key === 'planning.item.read' && entry.access === 'unavailable') === true
-  const list = confirmed && read?.workspace.id === setup.workspace.id && (readable || recoverable) && !settings
-  const stage = settings ? setup === undefined ? 'loading' : setup.workspace === null ? 'create' : 'connect' : list ? 'list' : 'summary'
+  const list = confirmed && read?.workspace.id === setup.workspace.id && (readable || recoverable) && !settings && pane === 'workspace'
+  const stage = pane === 'projects' ? 'projects' : settings ? setup === undefined ? 'loading' : pane === 'create' ? 'create' : 'connect' : list ? 'list' : 'summary'
   useEffect(() => {
     if (mounted && mappingSource && setup?.workspace && setup.planning.bindingId && setup.planning.projectNodeId) void mappingSource.refresh({ workspaceId: setup.workspace.id, bindingId: setup.planning.bindingId, projectExternalId: setup.planning.projectNodeId })
   }, [mounted, mappingSource, setup?.workspace?.id, setup?.planning.bindingId, setup?.planning.projectNodeId])
-  const enter = (): void => {
+  const enter = (target: 'settings' | 'projects' | 'create'): void => {
     initiator.current = (globalThis as { document?: { activeElement?: DOMElement } }).document?.activeElement ?? null
     if (body.current) body.current.scrollTop = 0
     taskEntry.current = true
-    setVisited(scope); setNavigation({ source: setupSource, view: 'settings' })
+    setVisited(scope); setNavigation({ source: setupSource, view: target })
   }
   const leave = (): void => { setVisited(scope); returnFocus.current = true; setNavigation({ source: setupSource, view: 'workspace' }) }
+  const openProject = (workspaceId: string): void => { void setupSource.open(workspaceId).then(() => { const after = setupSource.getSnapshot(); if (after.failure === undefined && after.error === undefined && after.setup?.workspace?.id === workspaceId) setNavigation(undefined) }) }
   useEffect(() => {
     const previous = shown.current; shown.current = stage
     const doc = (globalThis as { document?: { activeElement?: DOMElement | null; body?: DOMElement | null } }).document
@@ -122,16 +129,17 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
     ] }))
   }
   if (snapshot.pending) children.push(h('p', { key: 'pending', role: 'status', 'aria-live': 'polite' }, '正在处理，请稍候。'))
-  const workspace = list ? h(WorkItemApp, { source, refreshSource, announceListStatus, executionReader, deliveryReader, issueClosingLinksReader, issueDependenciesReader, changeRequestCreator, startWork, onBindRepository: enter }) : h('section', { 'aria-label': '工作区摘要' },
-    h('p', { role: 'status' }, setup?.workspace ? confirmed ? read?.workspace.id !== setup.workspace.id ? '正在等待工作项。' : read.capabilities?.some(entry => entry.key === 'planning.item.read' && entry.access === 'unavailable') ? '当前无法读取工作项，请检查连接设置中的读取能力。' : '工作项读取能力尚未确认，请检查连接设置。' : '来源尚未确认，尚无可读工作项。' : '欢迎使用 Harness Projects。尚无可读工作区。'),
-    setup?.workspace && setup.planning.state === 'unbound' ? h('button', { type: 'button', className: 'hp-action', onClick: enter }, '继续连接项目') : null)
+  const workspace = list ? h(WorkItemApp, { source, refreshSource, announceListStatus, executionReader, deliveryReader, issueClosingLinksReader, issueDependenciesReader, changeRequestCreator, startWork, onBindRepository: () => enter('settings'), onShowProjects: () => enter('projects') }) : h('section', { 'aria-label': '工作区摘要' },
+    h('p', { role: 'status' }, setup?.workspace ? confirmed ? read === undefined ? '正在等待工作项。' : read.workspace.id !== setup.workspace.id ? `正在打开「${setup.workspace.name}」…` : read.capabilities?.some(entry => entry.key === 'planning.item.read' && entry.access === 'unavailable') ? '当前无法读取工作项，请检查连接设置中的读取能力。' : '工作项读取能力尚未确认，请检查连接设置。' : '来源尚未确认，尚无可读工作项。' : '欢迎使用 Harness Projects。尚无可读工作区。'),
+    setup?.workspace && setup.planning.state === 'unbound' ? h('button', { type: 'button', className: 'hp-action', onClick: () => enter('settings') }, '继续连接项目') : null)
   return h('section', { className: 'hp-workspace', 'data-workspace-setup': true, 'aria-label': 'Harness Projects', ref: root },
     h('style', null, WORKSPACE_STYLES + FORM_STYLES),
-    list ? null : h('header', { className: 'hp-workspace-header' }, h('h2', { tabIndex: -1 }, settings ? stage === 'create' ? '创建工作区' : '连接设置' : '工作区'),
-      h('button', { className: 'hp-action', type: 'button', disabled: false, onClick: settings ? leave : enter }, settings ? '返回工作区' : '连接设置')),
+    list || pane === 'projects' ? null : h('header', { className: 'hp-workspace-header' }, h('h2', { tabIndex: -1 }, settings ? stage === 'create' ? '创建工作区' : '连接设置' : '工作区'),
+      h('div', { className: 'hp-list-actions' }, pane === 'settings' ? h('button', { className: 'hp-action', type: 'button', onClick: () => enter('projects') }, '项目') : null,
+        h('button', { className: 'hp-action', type: 'button', disabled: false, onClick: settings ? leave : () => enter('settings') }, settings ? '返回工作区' : '连接设置'))),
     h('div', { className: 'hp-workspace-body', ref: body, role: 'region', 'aria-label': settings ? '连接设置内容' : '工作区内容', tabIndex: 0 },
       mounted ? h('div', { key: scope, hidden: !settings }, ...children) : null,
-      !settings ? h('div', null, workspace, errorSummary('workspace-error')) : null))
+      pane === 'projects' ? h(ProjectsHome, { setupSource, providerLabel: 'GitHub', onOpen: openProject, onReturn: leave }) : !settings ? h('div', null, workspace, errorSummary('workspace-error')) : null))
 
 }
 export function bindWorkspaceSetupApp(setupSource: WorkspaceSetupSource, source: WorkspaceSource, executionReader?: ExecutionContextReader, options: { readonly mappingSource?: PlanningMappingSource | undefined; readonly refreshSource?: PlanningRefreshSource | undefined; readonly issueClosingLinksReader?: IssueClosingLinksReader | undefined; readonly issueDependenciesReader?: IssueDependenciesReader | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly changeRequestCreator?: ChangeRequestCreator | undefined; readonly startWork?: StartWork | undefined; readonly repositoryBindingSource?: RepositoryBindingSource | undefined } = {}): () => ReactElement {

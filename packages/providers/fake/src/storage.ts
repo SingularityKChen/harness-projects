@@ -220,6 +220,8 @@ export class MemoryStorage implements cap.Storage {
     return this.#mutate(() => upsert(this.#data.workspaces, record, (w) => w.id === record.id))
   }
   async getWorkspace(id: domain.WorkspaceId): Promise<cap.WorkspaceRecord | undefined> { return this.#read(() => { return this.#data.workspaces.find((w) => w.id === id) }) }
+  /** 端口承诺创建序：插入序即创建序，覆盖同 id 不改变位置；返回独立副本。 */
+  async listWorkspaces(): Promise<readonly cap.WorkspaceRecord[]> { return this.#read(() => this.#data.workspaces.map((workspace) => structuredClone(workspace))) }
   async putProviderBinding(record: cap.ProviderBindingRecord): Promise<void> {
     const { enabled, isDefault, ...fields } = record
     record = structuredClone({ ...fields, enabled, isDefault })

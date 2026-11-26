@@ -13,13 +13,14 @@ import { DETAIL_STYLES, type LayoutRoot } from './detail-presentation.ts'
 import { DeliveryOverview } from './delivery-overview.ts'
 import { WORKSPACE_STYLES } from './workspace-presentation.ts'
 
-export function WorkItemProjectPage({ listView, deriveOverviewTargets, detailView, navigation, onCloseDetail, executionReader, connected, startWork, onBindRepository, deliveryReader, issueClosingLinksReader, issueDependenciesReader, changeRequestCreator, refresh, statusAnnouncement, presentationScopeKey }: {
+export function WorkItemProjectPage({ listView, deriveOverviewTargets, detailView, navigation, onCloseDetail, executionReader, connected, startWork, onBindRepository, onShowProjects, deliveryReader, issueClosingLinksReader, issueDependenciesReader, changeRequestCreator, refresh, statusAnnouncement, presentationScopeKey }: {
   readonly deriveOverviewTargets?: (() => DeliveryOverviewTargets) | undefined
   readonly presentationScopeKey?: string | undefined
   readonly refresh?: { readonly pending: boolean; readonly disabled: boolean; readonly run: () => void } | undefined; readonly issueClosingLinksReader?: IssueClosingLinksReader | undefined; readonly issueDependenciesReader?: IssueDependenciesReader | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly changeRequestCreator?: ChangeRequestCreator | undefined;
   readonly statusAnnouncement?: string | undefined
   readonly startWork?: StartWork | undefined
   readonly onBindRepository?: (() => void) | undefined
+  readonly onShowProjects?: (() => void) | undefined
   readonly executionReader?: ExecutionContextReader | undefined
   readonly connected?: boolean | undefined
   readonly listView: WorkItemListView
@@ -52,6 +53,7 @@ export function WorkItemProjectPage({ listView, deriveOverviewTargets, detailVie
   const modes = createElement('div', { className: 'hp-list-actions hp-view-modes' }, ...(['items', 'board', 'timeline', 'delivery'] as const).map(value => createElement('button', { key: value, type: 'button', 'aria-pressed': mode === value, onClick: () => setMode(value) }, value === 'items' ? '工作项' : value === 'board' ? '看板' : value === 'timeline' ? '时间线' : '工程交付')))
   const actions = createElement('div', { className: 'hp-list-actions' }, modes,
     refresh === undefined ? null : createElement('button', { className: 'hp-action', type: 'button', disabled: refresh.disabled, 'aria-busy': refresh.pending, onClick: refresh.run }, refresh.pending ? '正在刷新规划' : '刷新规划'),
+    onShowProjects === undefined ? null : createElement('button', { className: 'hp-action', type: 'button', onClick: onShowProjects }, '项目'),
     onBindRepository === undefined ? null : createElement('button', { className: 'hp-action', type: 'button', 'data-workspace-settings': true, onClick: onBindRepository }, '连接设置'))
   return createElement('div', { ref: layoutRoot, className: 'hp-workspace hp-project' },
     createElement('div', { ref: list, className: 'hp-project-list' }, createElement(WorkItemListPage, { view: listView, navigation: routed, headingTabIndex: -1, statusAnnouncement, presentationScopeKey, actions, presentation:mode === 'timeline' ? 'timeline' : mode === 'board' ? 'board' : 'table',

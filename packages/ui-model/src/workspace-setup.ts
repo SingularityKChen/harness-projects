@@ -29,3 +29,17 @@ export function workspaceSetupView(snapshot: WorkspaceSetupSnapshot, providerLab
     recovery: error ? readFailed || snapshot.failure === 'install' && error.code === 'result_unknown' ? { label: '重新读取设置', action: 'refresh' as const } : recovery[error.recovery] : undefined,
     notice: readFailed ? undefined : setup?.activationError ? '配置已记录，激活失败' : setup?.planning.state === 'configured' ? '配置已记录，正在读取项目' : setup?.planning.state === 'degraded' ? '项目读取不完整' : undefined }
 }
+export interface WorkspaceProjectRow { readonly workspaceId: string; readonly displayName: string; readonly planningLabel: string; readonly policyLabel: string; readonly isActive: boolean; readonly pending: boolean }
+/** Home 行 = catalogue 的创建序；同名仅在冲突时加「第 N 个项目」，永不展示不透明 id、账号或计数。 */
+export function workspaceProjectsView(snapshot: WorkspaceSetupSnapshot): { readonly rows: readonly WorkspaceProjectRow[] } {
+  const catalogue = snapshot.catalogue, counts = new Map<string, number>()
+  for (const entry of catalogue?.workspaces ?? []) counts.set(entry.name, (counts.get(entry.name) ?? 0) + 1)
+  const ordinal = new Map<string, number>()
+  const rows = (catalogue?.workspaces ?? []).map((entry) => {
+    const index = (ordinal.get(entry.name) ?? 0) + 1; ordinal.set(entry.name, index)
+    return Object.freeze({ workspaceId: entry.workspaceId, displayName: (counts.get(entry.name) ?? 0) > 1 ? `${entry.name}（第 ${index} 个项目）` : entry.name,
+      planningLabel: entry.planning === 'bound' ? '规划已连接' : '未连接规划', policyLabel: entry.policy === 'supported' ? '' : '当前 Host 不支持',
+      isActive: entry.workspaceId === catalogue?.activeWorkspaceId, pending: snapshot.activating === entry.workspaceId })
+  })
+  return { rows: Object.freeze(rows) }
+}
