@@ -27,6 +27,8 @@ export interface WorkspaceSetupPort {
 }
 export interface WorkspaceSetupSnapshot {
   readonly setup?: WorkspaceSetupDTO
+  /** 最近一次本地创建经 ack 与匹配的 Host 读取确认；后续发布保留，供 UI 关联当前创建交互。 */
+  readonly createdWorkspaceId?: string
   /** 一轮 refresh 同时读取的项目目录；缺省表示端口未提供 catalogue。失败时保留最后已知列表。 */
   readonly catalogue?: WorkspaceCatalogueDTO
   readonly activating?: string
@@ -103,7 +105,7 @@ function command(value: unknown, valueKey?: string): { id?: string; error?: Proj
   return { ...detail, ...(id ? { id } : {}), ...(error ? { error } : {}), definitive: commandError !== undefined && activationError === undefined && (dto.writeState === 'failed' || dto.writeState === 'conflict') }
 }
 type Stage = 'create' | 'account' | 'bind'
-type Intent = { payload: string; key: string; attempts: Partial<Record<Stage, number>> }
+type Intent = { payload: string; key: string; attempts: Partial<Record<Stage, number>>; workspaceId?: string }
 type Mutation = { raw: Promise<void> | undefined; done: Promise<void> }
 export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { readonly actorRef: ActorRef; readonly key?: () => string; readonly interactionTimeoutMs?: number }): WorkspaceSetupSource {
   let snapshot: WorkspaceSetupSnapshot = Object.freeze({ pending: false }), disposed = false, revision = 0, scope = 0, mutationScope = 0
@@ -119,7 +121,7 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
     if (executionIntent !== intent) return
     executionIntent = undefined; executionAttempt++
   }
-  const publish = (next: WorkspaceSetupSnapshot): void => { if (!disposed) { snapshot = Object.freeze(next); listeners.forEach((listener) => listener()) } }
+  const publish = (next: WorkspaceSetupSnapshot): void => { if (!disposed) { snapshot = Object.freeze({ ...(snapshot.createdWorkspaceId === undefined ? {} : { createdWorkspaceId: snapshot.createdWorkspaceId }), ...next }); listeners.forEach((listener) => listener()) } }
   const readState = async (): Promise<{ setup: WorkspaceSetupDTO; catalogue?: WorkspaceCatalogueDTO }> => {
     const setup = parseWorkspaceSetup(await port.getWorkspaceSetup())
     const catalogue = port.listWorkspaces === undefined ? undefined : parseWorkspaceCatalogue(await port.listWorkspaces())
@@ -160,11 +162,15 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
           if (expected !== undefined && (kind !== 'activate' || error === undefined) && setup.workspace?.id !== expected) throw new TypeError('设置工作区已变化')
           if (setup.workspace === null && setup.error) publish({ ...previous(), pending: false, error: kind === 'install' ? safeError('result_unknown') : setup.error, failure })
           else {
+            // 所有恢复读取共享结算：只消费已 ack 且精确匹配的创建，未知 ack 不按名称猜测。
+            const createdWorkspaceId = !error && !setup.error && !setup.activationError && createIntent?.workspaceId !== undefined
+              && createIntent.workspaceId === setup.workspace?.id ? createIntent.workspaceId : undefined
+            if (createdWorkspaceId !== undefined) createIntent = undefined
             // 当前 Host 装配读可独立确认配置；普通 refresh 仅结算已 ack 意图。规划读取错误与执行配置正交。
             if (!error && (confirmation || recover) && setup.executionInstalled && !setup.activationError && executionIntent) finishExecutionIntent(executionIntent)
             const connectionFailure = kind === 'connect' && error ? detail?.() : undefined
             const unresolved = error ?? (kind === 'install' ? setup.activationError ?? (!setup.executionInstalled ? safeError('result_unknown') : undefined) : undefined)
-            publish({ setup, ...(state.catalogue === undefined ? {} : { catalogue: state.catalogue }), pending: false, ...(unresolved ? { error: unresolved, failure: kind } : {}), ...(connectionFailure ? { connectionFailure } : {}) })
+            publish({ setup, ...(state.catalogue === undefined ? {} : { catalogue: state.catalogue }), ...(createdWorkspaceId === undefined ? {} : { createdWorkspaceId }), pending: false, ...(unresolved ? { error: unresolved, failure: kind } : {}), ...(connectionFailure ? { connectionFailure } : {}) })
           }
         }
       } catch { if (current()) publish({ ...previous(), pending: false, error: safeError(failure === 'install' ? 'result_unknown' : 'unavailable'), failure }) }
@@ -204,7 +210,11 @@ export function createWorkspaceSetupSource(port: WorkspaceSetupPort, options: { 
     const intentScope = scope
     let connectionFailure: ConnectionFailure | undefined
     const promise = run(kind, async () => {
-      if (kind === 'create') return accept('create', await port.createWorkspace(options.actorRef, stageKey('create'), payload), 'workspaceId').error
+      if (kind === 'create') {
+        const created = accept('create', await port.createWorkspace(options.actorRef, stageKey('create'), payload), 'workspaceId')
+        if (created.id !== undefined) active.workspaceId = created.id
+        return created.error
+      }
       const accountValue = await port.connectAccount(options.actorRef, stageKey('account'))
       if (disposed || intentScope !== scope) return undefined
       const account = accept('account', accountValue, 'accountId')

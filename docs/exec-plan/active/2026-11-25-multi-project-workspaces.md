@@ -62,7 +62,7 @@
 
 1. **单一 composition + 可切换 active assembly**（否：每项目一个 composition——多写者、生命周期乘数、与 #636 明确否定的 eager 每项目后端冲突；否：每请求带 workspaceId——22 个操作与全部 client reader 的横切 ABI 变更，且与 epoch/lease 机制职责重复）。
 2. **Storage 增加只读枚举 `listWorkspaces()`**，直接扫 `workspace` 表并承诺创建序（SQLite `ORDER BY rowid`，Fake 插入序）；不建 catalogue 表/文件（第二事实源），不调 Provider。
-3. **create 的 workspaceId 由 wire `idempotencyKey` 确定性派生**（UUIDv5，固定命名空间，输入为 `workspace-create:v1:<idempotencyKey>`）；同 key 同名重放零写入、同 key 异名 conflict。派生只用客户端随机意图键，不编码 provider externalId/标题/bindingId，符合 ADR-0010 的 locator 内容规则。create 成功后同一 transition 激活新工作区（create-and-switch）。
+3. **create 的 workspaceId 由 wire `idempotencyKey` 确定性派生**（UUID v5 形状——`sha256` 前 16 字节截断后写入版本位 5 与变体位，不是 RFC 9562 的 v5 命名空间 UUID；输入为 `workspace-create:v1:<idempotencyKey>`）；同 key 同名重放零写入、同 key 异名 conflict。派生只用客户端随机意图键，不编码 provider externalId/标题/bindingId，符合 ADR-0010 的 locator 内容规则。create 成功后同一 transition 激活新工作区（create-and-switch），激活失败只作用于本次命令结果（见 Decision Log 11）。**已知边界**：派生 id 没有 profile 命名空间——不同 profile 各自 SQLite、不共享 workspace id，因此同一意图键在两个 profile 里会得到同一 id 但互不可见；ADR-0010 只要求不从 provider 数据或标题派生，不要求跨 profile 唯一。
 4. **请求隔离 = 双机制**：remote 的 per-peer delivered-generation 栅栏（挡"切换后到达的旧请求"）+ composition 准入时捕获 assembly（挡"检查后切换"）。没有 watch 记录的调用方（直接 `host.call` 的测试/嵌入方）放行；supported client 必须跟随 watch。
 5. **偏好持久化 = 私有根固定文件 `workspace-selection.json`**，格式 `{version:1, workspaceId, confirmedAt}`，启动期由 `preparePrivateProjectData` 打开并做 ACL/nofollow/nlink 校验，运行期只重写该 fd；不新增 SQLite 表（会 bump schema 世代并拒开已安装库），不用 localStorage（多 peer 互相改选、非 Host 权威）。损坏/缺失/目标不可读 → 空装配 + 结构化 restore 状态，不回退到其它项目。
 6. **策略准入收窄**：打开另一个 `statusPolicy` 不支持的项目 = 作用域拒绝并保留当前项目，不 stop 整个 Host；只有"当前活动工作区通过自身设置写变成不支持"保留现有 stop 语义。这是对 `host-composition.ts` 现有行为的显式收窄，记入 Decision Log。
@@ -208,9 +208,9 @@ pnpm run boundaries
 
 **步骤**
 
-1. 先写判别测试：同 key 重放零写同 id、同 key 异名 conflict、不同 key 同名允许；A→B→A 不重启；B 装配失败 A 仍可读且 source 不 degraded；在途 A 写只在 A 结算；快速连续切换串行且最后一次获胜。
-2. `newWorkspaceIdForCreateIntent(idempotencyKey)`（UUIDv5）+ 契约测试。
-3. `createWorkspace` 派生 id 并在同一 transition 激活；失败保留 A、写 `activationError` 仅限设置写语义。
+1. 先写判别测试：同 key 重放零写同 id、同 key 异名 conflict、不同 key 同名允许；A→B→A 不重启；B 装配失败 A 仍可读且 source 不 degraded；切换窗口内到达的 A 设置写按作用域 `conflict` 拒绝、不在 B 执行（PR1 已测试，本批沿用同一语义）；两个并发切换走 tail 串行、每个请求报告自己的目标且最后一次获胜（判别序列 [B, A]：FIFO 落在 A，LIFO 会落在 B）。
+2. `newWorkspaceIdForCreateIntent(idempotencyKey)`（UUID v5 形状）+ 契约测试。
+3. `createWorkspace` 派生 id 并在同一 transition 激活；失败保留 A，`activationError` 只写本次命令结果（`allowSwitch` 失败不污染全局状态），同作用域设置写才保留全局降级语义。
 4. 客户端 create 走 catalogue 源；UI 切换器与过渡屏；焦点保持。
 5. 更新既有断言（`host-recomposition` 的固定 workspace 断言改为同 key 判别）。
 6. 提交：`feat(ui): 创建 A/B 项目并在同一 Host 内确认切换`。
@@ -309,7 +309,7 @@ node scripts/rule-checks.mjs size <declared-base>
 ## Progress
 
 - [x] (2026-11-25) Batch 1 · #691 目录枚举 + 安全打开 + Projects Home
-- [ ] (2026-11-25) Batch 2 · #692 创建 A/B + 确认切换
+- [x] (2026-11-25) Batch 2 · #692 创建 A/B + 确认切换
 - [ ] (2026-11-25) Batch 3 · #693 重开恢复 + 作用域导航
 - [ ] (2026-11-25) Batch 4 · #694 组合/打包/安装态验收
 - [ ] (2026-11-25) 四个 PR 独立对抗验收、重构与 ready 评审
@@ -320,16 +320,21 @@ node scripts/rule-checks.mjs size <declared-base>
 - 2026-11-25：真实 gateway 的 stream 调用同样经 `prepareInvocation` 绑定 `this.ctx.invocation.peer`（`openStream` 复用同一 receiver），所以 per-peer 栅栏不需要改 22 个操作的 ABI。
 - 2026-11-25：`apps/harness-plugin/src/client.ts` 的 setup 只在"重连"时 refresh；切换工作区后 setup 会停在 A，必须新增"workspace id 变化即 refresh"，否则列表永不渲染 B（#691 修复并测试）。
 - 2026-11-25：实现中发现 `createWorkspace` 必须与 `openWorkspace` 一样在 wire 上声明 `scope: 'transition'`，否则它经 `readAdmitted` 取得自己的 lease 后再进 `serialize` 的 barrier 排空，会等待自身 lease 而死锁；两者都绕过 per-peer 栅栏（它们是切换的发起方）。Batch 2 的 create-and-switch 可直接复用同一 scope。
-- 2026-11-25（PR1 最小实现，偏离原计划）：`createWorkspace` 在无显式初始目标时用 `newWorkspaceId()` 生成随机 id，写成功后在同一 `serialize` 临界区装配并激活（`allowSwitch`）。确定性 UUIDv5 派生、同 key 重放零写入与 create-and-switch 的契约语义按计划留给 Batch 2（#692）；PR1 只保持既有空 profile setup 流程可用。
+- 2026-11-25（PR1 最小实现，偏离原计划）：`createWorkspace` 在无显式初始目标时用 `newWorkspaceId()` 生成随机 id，写成功后在同一 `serialize` 临界区装配并激活（`allowSwitch`）。确定性 UUID v5 形状派生、同 key 重放零写入与 create-and-switch 的契约语义按计划留给 Batch 2（#692）；PR1 只保持既有空 profile setup 流程可用。
 - 2026-11-25：启动选择实现为「显式初始目标 > 恰好一个已存工作区 > 空装配（Home）」；显式目标（含被「恰好一个」选中的目标）策略不支持时仍以 `HostPolicyAdmissionError` fail-closed，保住了 `harness-plugin-policy-admission` 的启动断言。空装配的 `assembly.workspaceId` 为 undefined，但显式目标缺行时保留该目标 id 供 `createWorkspace` 写回同一 id（既有单工作区测试语义不变）。
 - 2026-11-25：作用域 `openWorkspace` 成功失败都经同一 `serialize`，失败只返回 `failed + error`：不写全局 `activationError`、不 stop、不替换当前装配；同 workspace 且指纹未变的重复打开是 no-op（不换 generation）。这比原 configure 的「失败写 activationError」语义更窄，未影响既有设置写测试。
 - 2026-11-25：per-peer 栅栏与「发起切换的同一 peer 立刻重读」存在窗口：切换响应返回时 watch 的新 baseline 可能尚未到达，若只按 watch 帧更新 delivered，则 create/open 之后的 setup 重读会被自己的栅栏以固定文案拒绝（浏览器空库创建用例实测触发）。实现为：任何已跟随 watch 的 peer 在拿到 unary 响应后把 delivered 更新为当前 generation（未跟随 watch 的 peer 仍不记录、始终放行）；这样旧 peer 仍被拒绝，切换发起方无需等待下一帧。
 - 2026-11-25：栅栏的 stream 侧必须把 `this.ctx` 提到 async generator 之外捕获——嵌套的 `async function*` 不继承外层 `this`；测试里对 `service.watch` 的无接收者包装会传 undefined，因此捕获时保留可选链。
 - 2026-11-25（PR1 CI 修复）：Windows 原生 private-data 用例在重开时库中已有一条遗留 `manual_only` 行，启动选择因此补「唯一受支持工作区」fallback（显式目标 > 唯一已存 > 唯一 provider_authoritative > Home）；它保留既有单工作区 fail-closed 策略准入，同时避免多行遗留数据把唯一可用项目挡在 Home 之外。另：GitHub 不为非默认 base 的 PR 计算 `closingIssuesReferences`，通过临时把 PR base 指向 main 再切回可触发计算且关联保持（用于 stacked PR 的 issue 链接，属 PR 元数据操作）。
 - 2026-11-25：UI 视图收敛后，planning=`unbound`（工作区已建、未连接）的默认 pane 仍是 `workspace` 摘要而不是设置页，否则 `ui-workspace-setup` 的既有「继续连接项目」金样与焦点测试会改变；只有 `configured/degraded` 默认进设置页。过渡屏文案在 `read` 尚未到达时保留「正在等待工作项。」，仅在已有旧读数且 workspace id 不同时显示「正在打开「<B>」…」，避免把「还没有帧」误报成切换。
-- 2026-11-25（PR1 修复轮）：`createWorkspace` 的幂等只在本实例内成立——Host composition 用 `Map<idempotencyKey, WorkspaceId>` 复用首次决定的目标 id，同 key 重放零写入、同 key 异名 conflict；但跨 Host 重启（进程内 Map 丢失）仍可能为同一意图生成第二个 id，客户端换键重试会产生第二个同名空项目行。该残余风险由 Batch 2（#692）的 UUIDv5 确定性派生关闭，本 PR 不实现。
+- 2026-11-25（PR1 修复轮）：`createWorkspace` 的幂等只在本实例内成立——Host composition 用 `Map<idempotencyKey, WorkspaceId>` 复用首次决定的目标 id，同 key 重放零写入、同 key 异名 conflict；但跨 Host 重启（进程内 Map 丢失）仍可能为同一意图生成第二个 id，客户端换键重试会产生第二个同名空项目行。该残余风险由 Batch 2（#692）的 UUID v5 形状确定性派生关闭，本 PR 不实现。
 - 2026-11-25（PR1 修复轮）：本 PR 同时删除了 `createController` 的 `workspaceRevision` 传参（`packages/controller/src/queries.ts` 的 `_workspaceRevision` 已注明 deprecated 且被忽略），属于简化而非行为变更：Core 快照修订号改由实体推导，既有测试未依赖该参数。
 - 2026-11-25（PR1 修复轮）：Home 空态（0 个项目）在组合 UI 中由 `defaultPane` 直接进入现有 create 表单，`ProjectsHome` 不再保留 `empty` 分支与「创建工作区」按钮；0 项目路径由 `defaultPane` 的组件契约覆盖（`tests/contract/ui-workspace-setup.test.js` 的既有 create 表单断言），Home 非空行为由 `tests/browser/projects-home.test.js` 覆盖。
+- 2026-11-25（Batch 2）：删除 `host-composition.ts` 的 `Map<idempotencyKey, WorkspaceId>`（`createTargets`），创建目标改由 `newWorkspaceIdForCreateIntent(idempotencyKey)` 确定性派生（UUID v5 形状 = `sha256('workspace-create:v1:'+key)` 前 16 字节 + 版本位 5/变体位 10xx）。判别证据：同 key 同名重放走 controller 账本（payload 因派生稳定而完全相同）零写入；**跨 Host composition 重放**（账本与进程内 Map 都丢失）仍复算同一 id、只有一行、库逐字不变——旧 `Map` 实现在该用例上必红（实测 3 个判别用例失败），改后 8/8 绿。只有显式初始目标 `options.workspaceId`（测试/嵌入）仍优先，既有 `value.workspaceId === WORKSPACE` 断言不改。
+- 2026-11-25（Batch 2）：`WorkspaceSetupGate` 的 `creating` 原由 `setup.workspace === null` 派生，于是「Home → 创建工作区」在已有 active 项目时退化成连接表单：无法创建第二个项目（A/B 最小闭环断裂），且创建后 header 仍停在「创建工作区」、没有回 Home 的入口。改为由 pane 派生 `creating = pane === 'create' || setup.workspace === null`，并在 create 成功后的 `.then` 里 `enter('settings')` 交接新项目的连接/设置流程（不声称已完全配置，失败留在本页保留草稿）。判别证据：`tests/contract/ui-workspace-setup.test.js` 的 Home 创建入口与 create→connect 交接用例（改前 red）、`tests/browser/project-switch.test.js` 真实组合创建 A/B。
+- 2026-11-25（Batch 2）：浏览器夹具增 `create-switch` seed（`createHostComposition` 不传显式初始目标，空 profile 从 create 面板开始）与 `/control` 的 `policy` 正控（把非当前项目改成 Host 不支持的策略以触发作用域失败）；其它 seed 的既有行为不变。
+- 2026-11-25（Batch 2 修复轮，独立对抗验收 P2）：① UI 创建提交只看 `setup.workspace != null`，已有 A 时本地拒绝/Host 不可用/装配失败会进入 A 的设置页并丢草稿；改为要求读回无 `error`/`failure`/`activationError` 且 workspace id 与提交前不同才交接新项目。② client 的 `createIntent` 在成功读回后不清除，同名再次创建复用同一 key+payload 被 Host 当重放、静默切回旧项目；改为只在 `run('create')` 读回的新 workspace id 等于本次 command 返回值且无错误时清除，丢 ack/未确认期间仍复用同 key。③ `configure` 的激活失败无条件写全局 `activationError`，create-and-switch 失败会把仍是当前的 A 的 baseline/setup 标成 degraded；改为 `allowSwitch === false` 才写全局，`allowSwitch === true` 只把固定作用域文案放进本次命令结果。三条各有判别用例（改前实测 3 个失败：`失败必须留在 create 面板`、`确认完成后必须换键：名称不是自然键`、`全局 activationError 保持 undefined`），改后 switch 集成 9/9、contract 40/40 绿。
+- 2026-11-25（Batch 2 修复轮，P3）：快速 open 判别序列改为两个请求 `[B, A]`（FIFO 最终 A、LIFO 会最终 B），并断言每个结果报告自己的 target 与 `peak=1`；失败切换补注入次数 `calls===3` 与 `controller`/`generation` 前后指针比较；导航用例的 `BUSINESS_TABLES` 补齐 `dump` 中除 `schema_migrations` 外的全部业务表（含 `sync_cursor`/`reconcile_cursor`/`workspace_planning_mapping`/`workspace_revision` 等 23 张），并把「零 fetch」收窄为「空工作区档案下无 provider 写、无规划状态变化，fetch 计数只对该档案有效」。ExecPlan 同时订正 UUID v5 形状表述、写入语义与 `options.workspaceId` 的 create 优先级。
 
 ## Decision Log
 
@@ -340,11 +345,12 @@ node scripts/rule-checks.mjs size <declared-base>
 3. **偏好持久化 = 私有根 `workspace-selection.json`。** Rationale：不动 schema（否则拒开已安装库）；与 SQLite 同根同 ACL/lease；删除即回滚。被否：SQLite 新表（数据重置）、localStorage（多 peer 互相改选、非 Host 权威）。日期/作者：2026-11-25 / lead。
 4. **策略准入收窄为作用域拒绝（公开行为变更）。** Rationale：单个不支持策略的项目不应杀死整个 Host 与其它项目；当前工作区自身设置写变成不支持仍保留 stop 语义。日期/作者：2026-11-25 / lead。
 5. **显式深链验收口径 = composed Host+client + 浏览器 History 证据 + 如实声明安装态无外部入口。** Rationale：安装态插件无 URL/route API，新增 fragment 约定依赖未证实的宿主能力；不新增宿主 API。日期/作者：2026-11-25 / lead。
-6. **create 的 workspaceId 由 `idempotencyKey` 确定性派生（UUIDv5）。** Rationale：丢 ack 重放可复算同一 id、零写入；不引入持久创建回执表；只用随机意图键，符合 ADR-0010。日期/作者：2026-11-25 / lead。
+6. **create 的 workspaceId 由 `idempotencyKey` 确定性派生（UUID v5 形状）。** Rationale：丢 ack 重放可复算同一 id、零写入；不引入持久创建回执表；只用随机意图键，符合 ADR-0010。派生不含 profile 命名空间：不同 profile 各自 SQLite、不共享 workspace id，这是既有边界而非缺陷。日期/作者：2026-11-25 / lead。
 7. **请求隔离 = per-peer generation 栅栏 + 准入 assembly 捕获。** Rationale：只做其一都有缺口（"检查后切换"或"切换后到达"）；两者都不改既有 ABI。日期/作者：2026-11-25 / lead。
 8. **catalogue 扩展现有 `WorkspaceSetupSource`，不新建 source。** Rationale：单一 pending/订阅/failure 语义；open 必须原子替换 setup。日期/作者：2026-11-25 / lead。
 9. **同名区分用"第 N 个项目"（创建序），不展示 projectNodeId/短 id。** Rationale：公开数据面最小；确定性；端口承诺创建序。日期/作者：2026-11-25 / lead。
 10. **Home 无 active 时不清空 active、不新增 closeWorkspace。** Rationale：少一个生命周期概念；恢复失败可解释。日期/作者：2026-11-25 / lead。
+11. **create-and-switch 的装配失败只作用于本次命令结果（公开行为收窄）。** Rationale：候选装配属于一次创建，把失败写进全局 `activationError` 会让仍是当前项目的 A 的 baseline/setup 降级，违反「切换失败保留 A」；同作用域设置写（`allowSwitch=false`）仍保留原有全局降级与 unsupportedPolicy stop 语义。日期/作者：2026-11-25 / lead。
 
 ## Idempotence and Recovery
 
@@ -371,6 +377,9 @@ node scripts/rule-checks.mjs size <declared-base>
 - 2026-11-25：完成 Batch 1（#691）实现与验证。相对计划的偏离：① `createWorkspace` 在无显式初始目标时先发随机 id（确定性派生留 #692）；② `createWorkspace` 也声明 `scope: 'transition'` 以消除 read-lease 与 transition barrier 的自等待；③ 过渡屏文案只在已有旧读数时切换，`read` 未到达时保留「正在等待工作项。」；④ 除计划列出的金样外，还更新了 `tests/integration/harness-plugin-host-runtime-adapter.test.js`（组合失败注入改为 `listWorkspaces`）、`tests/integration/harness-plugin-setup-client.test.js` 与 `tests/contract/ui-workspace-setup.test.js` 的过渡屏断言；`harness-plugin-issue-closing-links.test.js` 的既有停止语义由 `READ_AFTER_STOP` 代码保留、测试无改动；⑤ 代码增删实测 798 行（`node scripts/rule-checks.mjs size main`），在 ≤800 目标内，文档未超 1500 行预算；实现过程中通过移除 client 的 `exposes` 兼容探测、Projects Home 的 `empty` 分支及其组件测试、并压缩冗余注释/样式/测试表达收敛规模。
 - 2026-11-25（PR1 修复轮）：按独立对抗验收修正三处判别缺陷并补判别测试：① 切换窗口内到达的设置写在 `configure` 执行 `run()` 前即按作用域拒绝（`conflict`），不再写库、装配或写全局 `activationError`，B 的 baseline 与 setup 不再显示 A 的失败；② Host composition 内以 `Map<idempotencyKey, WorkspaceId>` 复用首次决定的目标 id，同 key 重放零写入且不触发账本 conflict；③ client 在首个快照后即视为已观察，Home(undefined)→项目(defined) 也重读 setup+catalogue。另订正 `listWorkspaces.activeWorkspaceId` 取 `current.workspaceId`（避免切换中返回旧 active），并补两个新文件的 EOF 换行；规模实测代码 798 行。
 - 2026-11-25（PR1 CI 修复）：启动选择补「唯一受支持工作区」fallback 以兼容含遗留不支持行的 profile（Windows 原生 private-data 重开用例）；新增判别断言并复用既有测试。PR 关联：GitHub 对非默认 base 不计算 closingIssuesReferences，采用临时 retarget 到 main 再切回的方式建立 stacked PR 的双向 issue 关联。
+- 2026-11-25：启动 Batch 2（#692）。本批在 Batch 1 的目录/安全打开之上补：由 wire `idempotencyKey` 确定性派生 `WorkspaceId`（UUID v5 形状，替换本实例内的 `Map` 复用）、创建 A/B 与确认切换的判别测试、失败切换保留 A 与「切换窗口内 A 设置写按作用域 conflict 拒绝」的反例、以及创建后恢复部分配置的 UI 流程；不改变 Batch 1 的请求栅栏与作用域语义。
+- 2026-11-25：完成 Batch 2（#692）实现与验证。相对计划的偏离：① `packages/ui/src/work-item-project.ts`、`work-item-app.ts` 与 `apps/harness-plugin/src/client.ts` 无改动——PR1 已提供「项目」按钮、项目作用域门与 workspace id 变化重读；② 本批确实修改了 `packages/client/src/workspace-setup.ts`：创建读回确认后清空意图键（修复轮 P2-2）；③ 浏览器证据集中在 composed Host+client 的 create→switch→failed-switch 关键路径，窄屏/明暗/安装态走查留给 #694；④ 代码规模实测见 `node scripts/rule-checks.mjs size feature/multiproject-catalogue-open`（记录于汇报）。
+- 2026-11-25（Batch 2 修复轮）：按独立对抗验收修 3 条 P2 并收敛 P3。① 创建失败不再跳到当前项目设置（UI 只在读回确认为新工作区且无错误时交接）；② 同名再次创建换新意图键、真实创建第二个项目（只在读回确认后清键，丢 ack 仍复用 key 重试）；③ create-and-switch 装配失败只进本次命令结果、不写全局 `activationError`，A 的 baseline/source 逐字不变。三条各补判别用例（改前实测 3 红：`失败必须留在 create 面板`、`确认完成后必须换键：名称不是自然键`、`全局 activationError 保持 undefined`），改后 switch 集成 9/9、contract 40/40。P3：快速 open 改 `[B, A]` 判别序列、失败切换补 `calls===3` 与装配指针比较、导航 BUSINESS_TABLES 补齐 23 张业务表并把「零 fetch」收窄到空工作区档案；订正 UUID v5 形状/写入语义/`options.workspaceId` 的 create 优先级表述，并记录派生 id 无 profile 命名空间的边界与 Decision Log 11。规模：代码 546 行、文档 25 行（`node scripts/rule-checks.mjs size feature/multiproject-catalogue-open`）。
 
 2026-11-26：将首轮评审反例、根因设计、disjoint ownership、恢复锚点和 #694 保留接受写入 Batch R，延续同一 ExecPlan。
 

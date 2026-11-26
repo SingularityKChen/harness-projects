@@ -229,7 +229,9 @@ test('form retains editable drafts through failure, disables pending, and refocu
     reject(new Error('RAW-CANARY')); await new Promise((resolve) => setImmediate(resolve))
     assert.equal(find(app.render(), 'input')[0].props.value, 'Keep my draft'); assert.equal(focused, 0)
     assert.match(renderToStaticMarkup(app.render()), /本页输入仍保留，尚未确认保存/)
-    f.set(setup()); await f.source.refresh(); app.render(); app.flush(); assert.equal(focused, 1)
+    f.set(setup()); await f.source.refresh(); app.render(); app.flush(); assert.equal(focused, 0)
+    assert.equal(find(app.render(), 'input')[0].props.value, 'Keep my draft', 'unacknowledged discovery cannot end the create interaction')
+    find(app.render(), 'button').find((button) => button.props.children === '返回工作区').props.onClick(); app.render(); app.flush(); assert.equal(focused, 1)
     f.set({ ...setup(), error: error() }); await f.source.refresh()
     assert.doesNotMatch(renderToStaticMarkup(app.render()), /本页输入仍保留|草稿已保留/)
     f.set(setup()); await f.source.refresh()
@@ -457,6 +459,58 @@ test('execution activation readback keeps the actual Retry on the original insta
     assert.equal(f.source.getSnapshot().setup.executionInstalled, true); assert.equal(f.source.getSnapshot().error, undefined)
   } finally { f.source.dispose() }
 })
+test('Projects Home exposes a create entry that reuses the create form', async () => {
+  const catalogue = { activeWorkspaceId: 'ws-1', workspaces: [{ workspaceId: 'ws-1', name: '项目 A', planning: 'none', policy: 'supported' }] }
+  const f = fixture({ listWorkspaces: async () => catalogue })
+  await f.source.refresh()
+  const gate = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
+  const home = renderToStaticMarkup(gate.render())
+  assert.match(home, /aria-label="项目"/, '有已存项目时默认 Home')
+  assert.match(home, /class="hp-project-actions"><button class="hp-action hp-action-primary"[^>]*>创建工作区<\/button>/, 'Home 必须提供创建入口：否则已存项目后无法创建第二个项目')
+  let creating = 0
+  const isolated = mount({ setupSource: f.source, onOpen: () => {}, onReturn: () => {}, onCreate: () => { creating += 1 } }, ui.ProjectsHome)
+  const button = find(isolated.render(), 'button').find((node) => node.props.children === '创建工作区')
+  assert.ok(button, 'Home 渲染创建工作区动作')
+  button.props.onClick(); assert.equal(creating, 1, '创建动作交回唯一 setup root')
+})
+test('creating a project hands off to its connection flow instead of the create panel', async () => {
+  const f = fixture()
+  await f.source.refresh()
+  const app = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
+  assert.match(renderToStaticMarkup(app.render()), /aria-label="创建工作区"/, '0 项目时由 defaultPane 直接进入 create 表单')
+  find(app.render(), 'input')[0].props.onChange({ target: { value: '新项目' } })
+  find(app.render(), 'form')[0].props.onSubmit({ preventDefault() {} })
+  await new Promise((resolve) => setImmediate(resolve))
+  const out = renderToStaticMarkup(app.render())
+  assert.match(out, /<h2[^>]*>连接设置<\/h2>/, '创建成功后从 create 面板进入新项目的连接/设置流程')
+  assert.match(out, /aria-label="规划连接"/); assert.match(out, />连接项目<\/button>/, '只提供可恢复的部分配置')
+  assert.match(out, />项目<\/button>/, '创建后即可回到 Home，不困在 create 面板')
+  assert.doesNotMatch(out, /配置已记录|激活失败/, '不得声称新项目已完全配置')
+  assert.equal(f.source.getSnapshot().setup.planning.state, 'unbound', '新项目只有可恢复的部分配置：规划尚未连接')
+})
+test('Home keeps A authoritative while B opens and reports a failed switch in place', async () => {
+  let release
+  const catalogue = { activeWorkspaceId: 'ws-a', workspaces: [
+    { workspaceId: 'ws-a', name: '项目 A', planning: 'none', policy: 'supported' },
+    { workspaceId: 'ws-b', name: '项目 B', planning: 'none', policy: 'supported' }] }
+  const f = fixture({ listWorkspaces: async () => catalogue, openWorkspace: async (workspaceId) => {
+    await new Promise((done) => { release = done })
+    return { state: 'failed', requestedWorkspaceId: workspaceId, activeWorkspaceId: 'ws-a', error: error('not_supported', 'manual_execution') }
+  } })
+  await f.source.refresh()
+  const app = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
+  const opening = f.source.open('ws-b')
+  await new Promise((resolve) => setImmediate(resolve))
+  let out = renderToStaticMarkup(app.render())
+  assert.match(out, /aria-current="true"[^]*项目 A/, 'A 权威直到 B 成功激活：pending 期间不乐观选中 B')
+  assert.match(out, /aria-busy="true"/, '目标行给出 pending 反馈')
+  release(); await opening
+  out = renderToStaticMarkup(app.render())
+  assert.match(out, /role="alert"/, '失败的切换在 Home 就地反馈')
+  assert.match(out, /aria-current="true"[^]*项目 A/, '失败后 A 仍是当前项目')
+  assert.doesNotMatch(out, /项目 B[^]*aria-current="true"/, '不得把 B 标成当前项目')
+  assert.equal(f.source.getSnapshot().setup.workspace, null, '失败不强制换项目')
+})
 test('catalogue refresh parses the closed shape and keeps the last known list on read failure', async () => {
   const valid = { activeWorkspaceId: 'ws-1', workspaces: [{ workspaceId: 'ws-1', name: '同名', planning: 'bound', policy: 'supported' }, { workspaceId: 'ws-2', name: '同名', planning: 'none', policy: 'unsupported' }] }
   let response = valid
@@ -484,4 +538,140 @@ test('open rereads setup, verifies the requested target only on success and maps
     const g = fixture({ openWorkspace: async () => bad }); g.set(setup('confirmed')); await g.source.refresh(); await g.source.open('ws-2')
     assert.equal(g.source.getSnapshot().failure, 'activate'); assert.equal(g.source.getSnapshot().error.code, 'unavailable'); assert.equal(g.source.getSnapshot().setup.workspace.id, 'ws-1')
   }
+})
+test('create failures with an existing workspace stay in the create panel and keep the draft', async () => {
+  const catalogue = { activeWorkspaceId: 'ws-a', workspaces: [{ workspaceId: 'ws-a', name: '项目 A', planning: 'none', policy: 'supported' }] }
+  const cases = [
+    ['空白名本地拒绝', '   ', {}],
+    ['Host 不可用', '项目 C', { createWorkspace: async () => { throw new Error('RAW-CANARY') } }],
+  ]
+  for (const [label, draft, port] of cases) {
+    const f = fixture({ listWorkspaces: async () => catalogue, ...port })
+    f.set(setup('confirmed')); await f.source.refresh()
+    const app = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
+    // 已有 A 且已确认：默认是工作区视图，先经设置页回到 Home，再从创建入口进入 create 面板。
+    find(app.render(), 'button').find((node) => node.props.children === '连接设置').props.onClick()
+    find(app.render(), 'button').find((node) => node.props.children === '项目').props.onClick()
+    // ProjectsHome 是门内唯一 owner 的独立组件：这里直接经它的 onCreate 交接，按钮本身由上方 Home 用例覆盖。
+    find(app.render(), ui.ProjectsHome)[0].props.onCreate()
+    assert.ok(find(app.render(), 'form').length > 0, `${label}：Home 的创建入口必须打开 create 表单`)
+    find(app.render(), 'input')[0].props.onChange({ target: { value: draft } })
+    app.render()
+    find(app.render(), 'form')[0].props.onSubmit({ preventDefault() {} })
+    await new Promise((resolve) => setImmediate(resolve))
+    const out = renderToStaticMarkup(app.render())
+    assert.match(out, /aria-label="创建工作区"/, `${label}：失败必须留在 create 面板`)
+    assert.match(out, /role="alert"/, `${label}：失败必须有就地反馈`)
+    assert.equal(find(app.render(), 'input')[0].props.value, draft, `${label}：草稿保留`)
+    assert.doesNotMatch(out, /当前工作区：项目 A|<h2[^>]*>连接设置<\/h2>/, `${label}：不得跳进 A 的连接/设置页`)
+    f.source.dispose()
+  }
+})
+
+test('a confirmed create consumes its intent so a same-name create gets a fresh key and a second project', async () => {
+  const created = new Map()
+  const f = fixture({
+    createWorkspace: async (_actor, key) => {
+      if (!created.has(key)) created.set(key, `ws-${created.size + 1}`)
+      const workspaceId = created.get(key)
+      f.set({ workspace: { id: workspaceId, name: 'Same' }, planning: { state: 'unbound' } })
+      return result({ workspaceId })
+    },
+    listWorkspaces: async () => ({ activeWorkspaceId: [...created.values()].at(-1) ?? null, workspaces: [...created.values()].map((workspaceId) => ({ workspaceId, name: 'Same', planning: 'none', policy: 'supported' })) }),
+  })
+  await f.source.refresh()
+  await f.source.create('Same')
+  assert.deepEqual([...created.keys()], ['intent-1:create'], '首次创建使用新意图键')
+  await f.source.create('Same')
+  assert.deepEqual([...created.keys()], ['intent-1:create', 'intent-2:create'], '确认完成后必须换键：名称不是自然键')
+  assert.equal(f.source.getSnapshot().setup.workspace.id, 'ws-2', '第二次真实创建第二个同名项目，而不是静默切回第一个')
+})
+
+for (const mode of ['matching', 'unrelated', 'unknown-ack', 'stale']) test(`create read recovery ${mode} consumes only an acknowledged matching intent`, async () => {
+  let current = setup('confirmed'), failRead = false, readOverride
+  const created = new Map(), keys = []
+  const f = fixture({ getWorkspaceSetup: async () => { if (readOverride) return readOverride(); if (failRead) { failRead = false; throw Error('lost readback') } return current },
+    createWorkspace: async (_actor, key, name) => {
+      keys.push(key); if (!created.has(key)) created.set(key, `created-${created.size + 1}`)
+      current = { workspace: { id: created.get(key), name }, planning: { state: 'unbound' } }
+      if (keys.length === 1) { failRead = mode !== 'unknown-ack'; if (mode === 'unknown-ack') return result(undefined, { writeState: 'unknown' }) }
+      return result({ workspaceId: current.workspace.id })
+    } })
+  try {
+    await f.source.refresh(); await f.source.create('Same')
+    const acknowledged = current, other = { ...current, workspace: { id: 'other', name: 'Same' } }
+    if (mode === 'unrelated') current = other
+    if (mode === 'stale') {
+      let release; readOverride = () => new Promise((resolve) => { release = resolve })
+      const oldRead = f.source.refresh(); await new Promise((resolve) => setImmediate(resolve))
+      f.source.invalidateScope(); current = other; readOverride = undefined; await f.source.refresh()
+      release(acknowledged); await oldRead
+    } else await f.source.refresh()
+    assert.equal(f.source.getSnapshot().setup.workspace.id, ['unrelated', 'stale'].includes(mode) ? 'other' : 'created-1')
+    await f.source.create('Same')
+    assert.equal(created.size, mode === 'matching' ? 2 : 1, 'only an accepted exact-target read may consume the acknowledged create')
+    assert.equal(keys[1] === keys[0], mode !== 'matching', 'unknown, unrelated or fenced reads must retain the original intent key')
+  } finally { f.source.dispose() }
+})
+
+for (const [mode, fromEmpty] of [['retry', false], ['read-recovery', false], ['unknown-ack', false], ['unknown-ack', true]]) test(`create ${mode}${fromEmpty ? ' from empty profile' : ''} hands off only after exact confirmation and preserves its draft before that`, async () => {
+  let current = fromEmpty ? empty : setup('confirmed'), failRead = false, attempts = 0
+  const keys = [], target = { workspace: { id: 'created-b', name: 'Target' }, planning: { state: 'unbound' } }
+  const f = fixture({ getWorkspaceSetup: async () => { if (failRead) { failRead = false; throw Error('lost readback') } return current },
+    listWorkspaces: async () => ({ activeWorkspaceId: current.workspace?.id ?? null, workspaces: current.workspace === null ? [] : [{ workspaceId: current.workspace.id, name: current.workspace.name, planning: current.planning.state === 'unbound' ? 'none' : 'bound', policy: 'supported' }] }),
+    createWorkspace: async (_actor, key) => {
+      keys.push(key)
+      if (++attempts === 1) {
+        if (mode === 'retry') throw Error('unavailable')
+        if (mode === 'unknown-ack') { current = { ...target, workspace: { id: 'unrelated', name: 'Other' } }; return result(undefined, { writeState: 'unknown' }) }
+        failRead = true
+      }
+      current = target; return result({ workspaceId: 'created-b' })
+    } })
+  try {
+    await f.source.refresh()
+    const app = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
+    if (!fromEmpty) {
+      find(app.render(), 'button').find((node) => node.props.children === '连接设置').props.onClick()
+      find(app.render(), 'button').find((node) => node.props.children === '项目').props.onClick()
+      find(app.render(), ui.ProjectsHome)[0].props.onCreate()
+    }
+    find(app.render(), 'input')[0].props.onChange({ target: { value: 'Target' } })
+    find(app.render(), 'form')[0].props.onSubmit({ preventDefault() {} }); await new Promise((resolve) => setImmediate(resolve))
+    assert.match(renderToStaticMarkup(app.render()), /aria-label="创建工作区"/); assert.equal(find(app.render(), 'input')[0].props.value, 'Target')
+    const label = mode === 'retry' ? '重试' : mode === 'read-recovery' ? '重新读取设置' : '重新读取'
+    find(app.render(), 'button').find((node) => node.props.children === label).props.onClick(); await new Promise((resolve) => setImmediate(resolve))
+    if (mode === 'unknown-ack') {
+      assert.match(renderToStaticMarkup(app.render()), /aria-label="创建工作区"/, 'an unrelated activation cannot confirm an unknown create')
+      assert.equal(find(app.render(), 'input')[0].props.value, 'Target')
+      find(app.render(), 'form')[0].props.onSubmit({ preventDefault() {} }); await new Promise((resolve) => setImmediate(resolve))
+      assert.equal(keys[1], keys[0], 'explicit retry must recover the same unknown create intent')
+    }
+    await f.source.refresh() // 后续读数不丢创建确认；React 可合并这些发布后再 render。
+    assert.match(renderToStaticMarkup(app.render()), /aria-label="规划连接"/, 'submit, retry and refresh share the confirmed creation handoff')
+    app.flush(); current = { ...target, workspace: { id: 'later-active', name: 'Later' } }; await f.source.refresh()
+    assert.match(renderToStaticMarkup(app.render()), /aria-label="规划连接"/, 'later activation cannot revive the completed create pane')
+    find(app.render(), 'button').find((node) => node.props.children === '项目').props.onClick()
+    find(app.render(), ui.ProjectsHome)[0].props.onCreate()
+    assert.match(renderToStaticMarkup(app.render()), /aria-label="创建工作区"/, 'an old confirmation cannot leave a newly opened create form')
+    assert.equal(find(app.render(), 'input')[0].props.value, '')
+  } finally { f.source.dispose() }
+})
+test('Home open handoff follows the matching accepted read after its original readback is fenced', async () => {
+  let current = setup('confirmed'), hold = false
+  const reads = [], f = fixture({ getWorkspaceSetup: () => hold ? new Promise((resolve) => { reads.push(resolve) }) : Promise.resolve(current),
+    openWorkspace: async (workspaceId) => { current = { workspace: { id: workspaceId, name: 'Opened' }, planning: { state: 'unbound' } }; return { state: 'activated', requestedWorkspaceId: workspaceId, activeWorkspaceId: workspaceId } } })
+  try {
+    await f.source.refresh()
+    const app = mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } })
+    find(app.render(), 'button').find((node) => node.props.children === '连接设置').props.onClick()
+    find(app.render(), 'button').find((node) => node.props.children === '项目').props.onClick()
+    hold = true; find(app.render(), ui.ProjectsHome)[0].props.onOpen('ws-2'); const opening = f.source.open('ws-2'); await new Promise((resolve) => setImmediate(resolve))
+    f.source.invalidateScope(); const refreshing = f.source.refresh()
+    reads.shift()(current); await new Promise((resolve) => setImmediate(resolve))
+    reads.shift()(current); await Promise.all([refreshing, opening])
+    assert.equal(f.source.getSnapshot().setup.workspace.id, 'ws-2')
+    assert.equal(find(app.render(), ui.ProjectsHome).length, 0, 'the completed open must leave Home once its matching read is accepted')
+    assert.match(renderToStaticMarkup(app.render()), /继续连接项目/)
+  } finally { f.source.dispose() }
 })

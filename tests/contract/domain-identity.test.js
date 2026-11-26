@@ -5,6 +5,7 @@
 import '../fixtures/resolution-preflight.mjs';
 
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { test } from 'node:test'
@@ -20,6 +21,7 @@ import {
   newExternalIdentityId,
   newProviderBindingId,
   newWorkspaceId,
+  newWorkspaceIdForCreateIntent,
   newWorkItemId,
   parseExternalIdentityKind,
   projectIntoWorkspace,
@@ -29,6 +31,14 @@ import {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const UUID_V5 = /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+/** 独立复算派生公式：sha256('workspace-create:v1:'+key) 前 16 字节，版本位 5、变体位 10xx（只吃意图键，不编码名称/provider/binding）。 */
+const createIntentId = (key) => {
+  const bytes = createHash('sha256').update(`workspace-create:v1:${key}`, 'utf8').digest().subarray(0, 16)
+  bytes[6] = (bytes[6] & 0x0f) | 0x50; bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Buffer.from(bytes).toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
 const bindingId = newProviderBindingId()
 const identity = (overrides) => ({
   id: newExternalIdentityId(),
@@ -52,6 +62,17 @@ test('标识：生成值是不透明且唯一的字符串，品牌只在类型�
     /@ts-expect-error[^\n]*\n\s+readonly mixedBrands: BrandedIdMustSatisfy<'ChangeRequestId', WorkItemId>/,
     'ids.ts 必须保留 WorkItemId → ChangeRequestId 的 @ts-expect-error 自检（由 tsc 强制执行）',
   )
+})
+test('创建意图键：同键复算同 WorkspaceId、异键异 id、UUID v5 形状且只吃意图键（不编码名称/provider/binding）', () => {
+  const key = 'create-intent-1', derived = newWorkspaceIdForCreateIntent(key)
+  assert.equal(derived, newWorkspaceIdForCreateIntent(key), '同 key 必须复算出同一 id：跨 Host 重启与丢 ack 重放都得到同一权威身份')
+  assert.equal(derived, createIntentId(key), '派生公式固定为 sha256("workspace-create:v1:"+key) 前 16 字节的 UUID v5')
+  assert.match(derived, UUID_V5, '形状稳定为 UUID v5')
+  assert.notEqual(derived, newWorkspaceIdForCreateIntent('create-intent-2'), '不同意图键必须得到不同 id')
+  assert.notEqual(derived, newWorkspaceIdForCreateIntent(' workspace-create:v1:create-intent-1'), '命名空间前缀参与派生：不得与裸意图键碰撞')
+  assert.equal(newWorkspaceIdForCreateIntent.length, 1, '派生只接受意图键这一个入参：名称、provider externalId、bindingId 都不参与（ADR-0010 内容规则）')
+  assert.equal(Object.hasOwn(derived, '__brand'), false, '品牌只在类型层')
+  assert.equal(newWorkspaceIdForCreateIntent(''), createIntentId(''), '空意图键同样是纯函数输入')
 })
 test('身份：Draft→Issue 提升保持内部实体 id 不变，旧身份转 historical、新身份为 primary', () => {
   const entityId = newEntityId()

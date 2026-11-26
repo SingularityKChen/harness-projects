@@ -39,15 +39,17 @@ export async function createExecutionFixture({ seed } = {}) {
     if (seed === 'projects' && binding.domain === 'planning' && binding.workspaceId === projectB) provider.addItem(provider.state.projects[0].ref, 'issue', '项目 B 专属条目', 'B 安全正文')
     byDomain[binding.domain] = provider; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
   const workspaceId = '00000000-0000-4000-8000-000000000282'
+  // #692：空 profile 变体不传显式初始目标，Host 从 Home（空装配）启动，由 UI 创建 A/B；其它 seed 行为不变。
+  const emptyProfile = seed === 'create-switch'
   const storage = createSqliteStorage(dataPath, hostStoragePolicy(catalog))
   let host, installed
   const rebuild = async () => {
     await installed?.dispose(); await host?.dispose()
-    host = await createHostComposition({ dataPath, workspaceId, catalog, resolveCredential: async () => undefined, fetch: async () => { throw new Error('Business network forbidden') }, watchIntervalMs: 5 })
+    host = await createHostComposition({ dataPath, ...(emptyProfile ? {} : { workspaceId }), catalog, resolveCredential: async () => undefined, fetch: async () => { throw new Error('Business network forbidden') }, watchIntervalMs: 5 })
     installed = await installHostRemote({ invocation: { peer: { id: 'fixture-peer' } }, provide: () => () => {}, typert: { register: () => () => {} } }, host)
   }
   let itemId, runId
-  if (seed !== 'empty') {
+  if (seed !== 'empty' && !emptyProfile) {
     const planningFieldMapping = seed === 'timeline' ? {targetDateFieldId:'target',iterationFieldId:'iteration'} : seed === 'board' ? { status:{ projectFieldId:'status',options:{todo:'todo',in_progress:'in_progress',done:'done'} } } : undefined
     const core = await composeCore({ workspace: { id: workspaceId, name: 'Execution Fixture', ...(planningFieldMapping ? { planningFieldMapping } : {}) }, providers: { ...providers, storage } })
     if (planningFieldMapping) await storage.putWorkspacePlanningMapping({ workspaceId,bindingId:providers.planning.bindingId,projectExternalId:providers.planning.state.projects[0].ref.externalId,origin:'user',mapping:planningFieldMapping })
@@ -217,6 +219,8 @@ ${roleStyles}
       } else if (route === '/control') {
         // 既有执行状态 seam 只用于 drawer 正控，不用于证明权限事实。
         if (input.action === 'status') await h.storage.putExecutionRun({ ...(await h.storage.getExecutionRun(h.runId)), status: input.value })
+        // #692 失败切换正控：把目标项目的策略改成 Host 不支持，保持 A 仍然可读。
+        if (input.action === 'policy') await h.storage.putWorkspace({ ...(await h.storage.getWorkspace(input.value.workspaceId)), statusPolicy: input.value.statusPolicy })
         if (input.action === 'fault') h.byDomain[input.value.domain].faultsSwitch.set(input.value.kind, input.value.enabled)
         if (input.action === 'permission') {
           if (!Object.values(permissionMethods[input.value.domain] ?? {}).includes(input.value.key)) throw new TypeError('Unknown fixture permission')
