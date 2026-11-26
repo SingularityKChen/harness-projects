@@ -6,7 +6,7 @@ import { createWorkspaceSetup, composeCore, unavailableCore, createPlanningRecon
 import { createConnectionCommands, createSetupCommands, type CommandResult, createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
 import { createSqliteStorage, type SqliteStorage } from '@harness-projects/storage-sqlite'
 import type { ExecutionContextDTO, WorkspaceSetupDTO } from '@harness-projects/client'
-import { StatusPolicy, ProjectErrorCode, newWorkspaceId, projectError, type ProjectError, type ConnectorAccountId, type WorkspaceId, type WorkspacePlanningFieldMapping } from '@harness-projects/domain'
+import { StatusPolicy, ProjectErrorCode, newWorkspaceIdForCreateIntent, projectError, type ProjectError, type ConnectorAccountId, type WorkspaceId, type WorkspacePlanningFieldMapping } from '@harness-projects/domain'
 import { preparePrivateProjectData } from './host-private-data.ts'
 import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
 import { createHostPlanningMapping } from './host-planning-mapping.ts'
@@ -35,7 +35,11 @@ export interface HostCompositionOptions {
   readonly owner?: { readonly signal: AbortSignal; stop(error?: unknown): number }
   readonly dataPath: string
   readonly rawProfile?: string
-  /** 显式初始目标：测试与嵌入方兼容；缺省时按「恰好一个已存工作区」选择，否则空装配。 */
+  /**
+   * 显式初始目标：测试与嵌入方的既有调用点语义；缺省时按「恰好一个已存工作区」选择，否则空装配（Home）。
+   * 它同时是 create 的目标 id 优先级来源——提供时创建写回该 id（不按幂等键派生），未提供时才由
+   * wire `idempotencyKey` 确定性派生。
+   */
   readonly workspaceId?: WorkspaceId
   readonly catalog: ProviderCatalog
   /** 句柄 → 凭据值；每次 provider 操作才调用，Host 不缓存。 */
@@ -225,8 +229,6 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   const SETTINGS_OPERATIONS = new Set(['setPlanningMapping', 'connectAccount', 'bindPlanningSource', 'bindRepository', 'installExecutionBindings'])
   const READ_AFTER_STOP = new Set(['getIssueClosingLinks', 'refreshIssueClosingLinks', 'refreshIssueDependencies', 'getChangeRequestIssueOptions'])
   const assemblies = new Set<Assembly>()
-  /** 本实例内同 idempotencyKey 复用首次决定的目标 id；跨 Host 重启的确定性派生留给 #692。 */
-  const createTargets = new Map<string, WorkspaceId>()
   let developmentCache = new Map<string, object>()
   let current: Assembly
   let barrier: Promise<void> | undefined, epoch = 0, tail: Promise<unknown> = Promise.resolve(), activeFingerprint = ''
@@ -402,8 +404,13 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
           log.write('activationFailed', describeError(error))
           const unsupportedPolicy = error instanceof HostPolicyAdmissionError
           if (unsupportedPolicy) stop()
-          activationError = projectError(ProjectErrorCode.Unavailable, unsupportedPolicy ? '本地配置已提交，当前 Host 已停止' : '本地配置已提交，装配尚未激活')
-          return { ...result, activationError }
+          // create-and-switch（allowSwitch）的候选装配只属于本次创建：失败写全局 activationError 会把
+          // 仍是当前项目的 A 的 baseline/setup 标成 degraded。这里只把错误交给本次命令结果，全局保持
+          // undefined；同作用域设置写（allowSwitch=false）仍保留原有的全局降级语义（#692 验收 P2-3）。
+          const failure = projectError(ProjectErrorCode.Unavailable, unsupportedPolicy ? '本地配置已提交，当前 Host 已停止'
+            : allowSwitch ? '新项目已创建，但装配尚未激活' : '本地配置已提交，装配尚未激活')
+          if (!allowSwitch) activationError = failure
+          return { ...result, activationError: failure }
         }
       }
       if (confirmPlanning && result.writeState === 'local_only' && old === current && !activationError) await current.controller.commands.refreshPlanning({ actorRef: { kind: 'user' } })
@@ -480,9 +487,9 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
           const error = await assembly.mapping!.validate(input.expectedBindingId, input.expectedProjectExternalId, input.mapping)
           return error ? { writeState: error.code === 'conflict' ? 'conflict' : 'failed', saving: false, authoritative: false, value: undefined, error } : setup.setPlanningMapping({ ...input, workspaceId })
         }, acknowledge, true, true),
+        // 目标只由 wire 意图键派生；显式初始目标优先。确认 generation 仍属于本次串行激活。
         createWorkspace: (_controller, input) => {
-          const target = options.workspaceId ?? createTargets.get(input.idempotencyKey) ?? newWorkspaceId()
-          createTargets.set(input.idempotencyKey, target)
+          const target = options.workspaceId ?? newWorkspaceIdForCreateIntent(input.idempotencyKey)
           return configure(target, () => setup.createWorkspace({ ...input, workspaceId: target, statusPolicy: StatusPolicy.ProviderAuthoritative }), acknowledge, true, false, undefined, true)
         },
         connectAccount: (_controller, input) => configure(workspaceId, () => connection.connectAccount(input), acknowledge, false),

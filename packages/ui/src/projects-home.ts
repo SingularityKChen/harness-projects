@@ -9,11 +9,12 @@ const STYLES = `
 .hp-project-list li{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:center;box-sizing:border-box;padding:.75rem;border:1px solid var(--dsw-alias-border-l2,CanvasText)}
 .hp-project-list .hp-project-name{font-weight:600;overflow-wrap:anywhere}.hp-project-meta{color:var(--dsw-alias-label-secondary,CanvasText);font-size:.857143rem}
 .hp-project-list button{min-block-size:44px;min-inline-size:44px;margin-inline-start:auto}
+.hp-project-actions{margin:0 0 1rem}
 `
-/** Projects Home（#691）：只用 catalogue 的本地安全字段；打开/返回都经唯一 setup root。 */
-export function ProjectsHome({ setupSource, providerLabel = 'GitHub', onOpen, onReturn }: {
+/** Projects Home（#691）：只用 catalogue 的本地安全字段；打开/返回/创建都经唯一 setup root。 */
+export function ProjectsHome({ setupSource, providerLabel = 'GitHub', onOpen, onReturn, onCreate }: {
   readonly setupSource: WorkspaceSetupSource; readonly providerLabel?: string
-  readonly onOpen: (workspaceId: string) => void; readonly onReturn: () => void
+  readonly onOpen: (workspaceId: string) => void; readonly onReturn: () => void; readonly onCreate: () => void
 }): ReactElement {
   const snapshot = useSyncExternalStore(setupSource.subscribe, setupSource.getSnapshot, setupSource.getSnapshot)
   const view = workspaceProjectsView(snapshot), failure = workspaceSetupView(snapshot, providerLabel)
@@ -28,6 +29,9 @@ export function ProjectsHome({ setupSource, providerLabel = 'GitHub', onOpen, on
     h('style', null, STYLES),
     h('h2', { tabIndex: -1, ref: heading }, '项目'),
     h('p', { className: 'hp-project-intro' }, '这里列出本机保存的全部项目；打开一个项目会切换当前工作区。'),
+    // 创建入口必须留在 Home：创建第二个项目是 #692 的最小闭环，不能只在 0 项目时出现。
+    h('div', { key: 'actions', className: 'hp-project-actions' },
+      h('button', { className: 'hp-action hp-action-primary', type: 'button', disabled: snapshot.pending, onClick: onCreate }, '创建工作区')),
     h('ul', { className: 'hp-project-list', key: 'list' }, view.rows.map(row)),
     snapshot.pending ? h('p', { key: 'status', role: 'status' }, '正在打开项目，请稍候。') : null,
     failure.error ? h('div', { key: 'error', className: 'hp-form-notice', role: 'alert' },
