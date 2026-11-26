@@ -232,6 +232,8 @@ try {
   $database=[IO.Path]::Combine($root,'workspace.sqlite')
   Ensure $database $false 'database'
   Ensure ([IO.Path]::Combine($root,'diagnostics.log')) $false 'log'
+  # 导航偏好（#693）：与其它固定文件同一 Ensure/ACL 准入；运行期只重写启动期打开的 fd。
+  Ensure ([IO.Path]::Combine($root,'workspace-selection.json')) $false 'selection'
   foreach($suffix in @('-wal','-shm','-journal')){Open ($database+$suffix) $false $true $false $true $false 'sidecar'}
   [Console]::WriteLine('private-windows-v1')
   while($null -ne ($line=[Console]::ReadLine())) {

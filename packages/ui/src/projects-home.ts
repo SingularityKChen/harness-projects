@@ -9,11 +9,11 @@ const STYLES = `
 .hp-project-list li{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:center;box-sizing:border-box;padding:.75rem;border:1px solid var(--dsw-alias-border-l2,CanvasText)}
 .hp-project-list .hp-project-name{font-weight:600;overflow-wrap:anywhere}.hp-project-meta{color:var(--dsw-alias-label-secondary,CanvasText);font-size:.857143rem}
 .hp-project-list button{min-block-size:44px;min-inline-size:44px;margin-inline-start:auto}
-.hp-project-actions{margin:0 0 1rem}
+.hp-project-actions{margin:0 0 1rem}.hp-project-notice{color:var(--dsw-alias-label-secondary,CanvasText);margin:0 0 1rem}
 `
 /** Projects Home（#691）：只用 catalogue 的本地安全字段；打开/返回/创建都经唯一 setup root。 */
-export function ProjectsHome({ setupSource, providerLabel = 'GitHub', onOpen, onReturn, onCreate }: {
-  readonly setupSource: WorkspaceSetupSource; readonly providerLabel?: string
+export function ProjectsHome({ setupSource, providerLabel = 'GitHub', linkFailure = false, onOpen, onReturn, onCreate }: {
+  readonly setupSource: WorkspaceSetupSource; readonly providerLabel?: string; readonly linkFailure?: boolean | undefined
   readonly onOpen: (workspaceId: string) => void; readonly onReturn: () => void; readonly onCreate: () => void
 }): ReactElement {
   const snapshot = useSyncExternalStore(setupSource.subscribe, setupSource.getSnapshot, setupSource.getSnapshot)
@@ -29,6 +29,9 @@ export function ProjectsHome({ setupSource, providerLabel = 'GitHub', onOpen, on
     h('style', null, STYLES),
     h('h2', { tabIndex: -1, ref: heading }, '项目'),
     h('p', { className: 'hp-project-intro' }, '这里列出本机保存的全部项目；打开一个项目会切换当前工作区。'),
+    // 恢复失败时的安全说明：如实分类，不声称已恢复，也不把别的项目伪装成上次的项目。
+    failure.restoreNotice === undefined ? null : h('p', { className: 'hp-project-notice', role: 'status' }, failure.restoreNotice),
+    linkFailure ? h('p', { className: 'hp-project-notice', role: 'alert' }, '无法打开链接中的项目，请回到项目列表。') : null,
     // 创建入口必须留在 Home：创建第二个项目是 #692 的最小闭环，不能只在 0 项目时出现。
     h('div', { key: 'actions', className: 'hp-project-actions' },
       h('button', { className: 'hp-action hp-action-primary', type: 'button', disabled: snapshot.pending, onClick: onCreate }, '创建工作区')),

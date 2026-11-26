@@ -72,7 +72,7 @@ npx --yes --package @deepseek-ai/dsh@0.2.0-rc.2 dsh web --patch "$HP_DEMO_SCRATC
 
 **保留数据**：先按[Desktop与自定义profile停机备份](../development/backup-rollback.md#desktop-与自定义-profile-的停机备份)生成并核验独立快照（Web演练的sandbox变量不能照抄到Desktop），保留原主库、WAL/SHM/journal、匹配旧安装包及用户Git现场。可先恢复匹配该库的已知旧包；若选择迁移，必须明确源/目标结构和持久操作合同，在副本通过数据保全、当前reader、完整性与外键检查后再切换。备份完成本身不表示迁移完成，通用备份流程也不承诺支持任意旧代际。
 
-**明确选择空工作区时**：停机备份并核对后，才把 `workspace.sqlite` 及存在的同名 `-wal`、`-shm`、`-journal` 一起归档到新的不存在目录，保留原件。重新启动会在原数据库位置建立当前空库，需要重新创建/连接工作区；旧历史不会自动带入。只处理数据库文件，**不要移动、删除或重命名整个插件数据目录及其中worktrees**，Git登记可能依赖这些原路径。
+**明确选择空工作区时**：停机备份并核对后，才把 `workspace.sqlite` 及存在的同名 `-wal`、`-shm`、`-journal` 一起归档到新的不存在目录，保留原件。重新启动会在原数据库位置建立当前空库，需要重新创建/连接工作区；旧历史不会自动带入。同时删除或忽略同目录的 `workspace-selection.json`（否则重开会尝试恢复指向旧库的项目，按 corrupt/stale 的安全 Home 说明重新选择项目即可），避免留下指向旧库的导航偏好。只处理数据库与偏好文件，**不要移动、删除或重命名整个插件数据目录及其中worktrees**，Git登记可能依赖这些原路径。
 
 切换失败应保持打开者停止，保留新旧两套文件，按核验过的旧库与匹配包恢复，不能混用新旧sidecar。操作后重新核对实际Host、包摘要与该匹配包的实际安装文件（当前单资产构建 6 件；折叠前旧构建 12 件），再验证已有工作区和执行身份；不通过再次Start Work或创建PR证明迁移成功。
 
@@ -80,7 +80,7 @@ npx --yes --package @deepseek-ai/dsh@0.2.0-rc.2 dsh web --patch "$HP_DEMO_SCRATC
 
 ## 当前数据根与旧库保留
 
-当前插件以官方 launcher 提供的 `profileContext.dir` 为权威目录，realpath 核对后将数据库写入该 profile 的 `harness-projects/workspace.sqlite`，工作树与诊断位于同一插件数据目录。上述固定 Web profile 对应 `$DSH_HOME/profiles/web/harness-projects/`；自定义 profile 各有自己的目录。同一 profile 重启沿同一路径，两个 profile 不共享数据库。home 与 tilde 由官方 launcher 解析，插件不再自行按环境变量或用户 home 重建根；缺失或无效 profile 元数据会在开库前拒绝。
+当前插件以官方 launcher 提供的 `profileContext.dir` 为权威目录，realpath 核对后将数据库写入该 profile 的 `harness-projects/workspace.sqlite`，工作树、诊断与导航偏好（`workspace-selection.json`）位于同一插件数据目录。上述固定 Web profile 对应 `$DSH_HOME/profiles/web/harness-projects/`；自定义 profile 各有自己的目录。同一 profile 重启沿同一路径，两个 profile 不共享数据库。home 与 tilde 由官方 launcher 解析，插件不再自行按环境变量或用户 home 重建根；缺失或无效 profile 元数据会在开库前拒绝。
 
 旧版 `$DSH_HOME/harness-projects/` 原件保持不动，切换后可能先看到空工作区。先停止使用该库的宿主，备份并核对需要保留的数据和工作树，再明确选择新位置重建或匹配旧 artifact 的恢复副本；插件不自动搬动、合并、删除或升级旧库。不把旧数据库复制到新 profile 来接管执行，也不承诺旧插件可安全读取新库。回滚使用停机后明确选定的匹配版本与原库副本，新 profile 库及用户仓库、分支、工作树继续保留。人工备用仍使用原凭据管理器中的稳定密钥。
 

@@ -5,9 +5,10 @@ import path from 'node:path'
 import { createWorkspaceSetup, composeCore, unavailableCore, createPlanningReconciler, type CoreProviderTable, type PlanningReconciler, type PlanningReconcilerTimers, type CoreApi } from '@harness-projects/core'
 import { createConnectionCommands, createSetupCommands, type CommandResult, createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
 import { createSqliteStorage, type SqliteStorage } from '@harness-projects/storage-sqlite'
-import type { ExecutionContextDTO, WorkspaceSetupDTO } from '@harness-projects/client'
+import type { ExecutionContextDTO, WorkspaceRestoreKind, WorkspaceSetupDTO } from '@harness-projects/client'
 import { StatusPolicy, ProjectErrorCode, newWorkspaceIdForCreateIntent, projectError, type ProjectError, type ConnectorAccountId, type WorkspaceId, type WorkspacePlanningFieldMapping } from '@harness-projects/domain'
 import { preparePrivateProjectData } from './host-private-data.ts'
+import { closeWorkspaceSelection, readWorkspaceSelection, writeWorkspaceSelection } from './host-selection.ts'
 import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
 import { createHostPlanningMapping } from './host-planning-mapping.ts'
 import { createPlanningLifetime, drainUntil } from './host-planning-lifetime.ts'
@@ -233,6 +234,8 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
   let current: Assembly
   let barrier: Promise<void> | undefined, epoch = 0, tail: Promise<unknown> = Promise.resolve(), activeFingerprint = ''
   let activationError: ProjectError | undefined, repositoryValidation = 0
+  /** 启动恢复状态（#693）：只在空装配时投影；成功激活后清空。 */
+  let restoreKind: WorkspaceRestoreKind = 'none'
   const watches = new AbortController()
   const streams = new Set<() => Promise<unknown>>()
   let disposal: Promise<void> | undefined
@@ -280,7 +283,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     finally {
       options.owner?.signal.removeEventListener('abort', abortStartup)
       prepared.lease?.signal.removeEventListener('abort', abortLease)
-      try { log.close() } finally { await prepared.lease?.dispose(deadline) }
+      try { log.close() } finally { await prepared.lease?.dispose(deadline); closeWorkspaceSelection(prepared.selectionFd) }
     }
   })()
   const abortStartup = () => { void dispose().catch((error) => diagnoseShutdown('shutdownFailed', error)) }
@@ -359,9 +362,25 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         return assembly
       } catch (error) { retire(assembly); throw error }
     }
-    // 启动选择：显式初始目标 > 唯一已存工作区 > 唯一受支持工作区（存在不支持策略的遗留行时仍打开唯一可用项目）> 空装配（Home）。
+    // 启动选择：显式初始目标 > 偏好（#693）> 唯一已存工作区 > 唯一受支持工作区 > 空装配（Home）。
+    // 偏好失效（stale/corrupt/unreadable/unsupported）只投影 restore 状态，不回退到其它项目；不删除、不覆盖文件。
     const stored = await storage!.listWorkspaces(), supported = stored.filter((row) => row.statusPolicy === StatusPolicy.ProviderAuthoritative)
-    current = await assemble(options.workspaceId ?? (stored.length === 1 ? stored[0]!.id : supported.length === 1 ? supported[0]!.id : undefined))
+    let initial = options.workspaceId, preferred = false
+    if (initial === undefined) {
+      const read = readWorkspaceSelection(prepared.selectionFd)
+      if (read.kind === 'selection') {
+        const selected = stored.find((row) => row.id === read.selection.workspaceId)
+        if (selected === undefined) restoreKind = 'stale'
+        else if (selected.statusPolicy !== StatusPolicy.ProviderAuthoritative) restoreKind = 'unsupported'
+        else { initial = selected.id; preferred = true }
+      } else restoreKind = read.kind
+      if (restoreKind === 'none' && initial === undefined) initial = stored.length === 1 ? stored[0]!.id : supported.length === 1 ? supported[0]!.id : undefined
+    }
+    // 只有偏好驱动的初始目标容错；显式 workspaceId 与唯一已存/受支持 fallback 保持 fail-closed。
+    if (preferred) {
+      try { current = await assemble(initial) }
+      catch (error) { log.write('restoreAssemblyFailed', describeError(error)); restoreKind = 'failed'; current = await assemble(undefined) }
+    } else current = await assemble(initial)
     io!.assertActive(); developmentCache = current.cache; activeFingerprint = await fingerprint(current.workspaceId); io!.assertActive(); current.reconciler?.start()
     const serialize = <T>(work: (old: Assembly) => Promise<T>): Promise<T> => {
       const task = tail.then(async () => {
@@ -379,7 +398,14 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       })
       tail = task.catch(() => undefined); return track(task)
     }
-    const activate = async (target: WorkspaceId, old: Assembly, desired: string, ci?: { observation: CiReadObservation; current(): Promise<boolean>; isCurrent(): boolean; bindingId: import('@harness-projects/domain').ProviderBindingId | undefined }): Promise<void> => {
+    /** 成功激活后的导航偏好：写失败只记诊断，不失败切换、不声称可恢复（#693）。 */
+    const persistSelection = (workspaceId: WorkspaceId, persist: boolean): void => {
+      restoreKind = 'none'
+      if (!persist) return
+      try { writeWorkspaceSelection(prepared.selectionFd, { workspaceId, confirmedAt: new Date().toISOString() }) }
+      catch (error) { log.write('selectionWriteFailed', describeError(error)) }
+    }
+    const activate = async (target: WorkspaceId, old: Assembly, desired: string, persist: boolean, ci?: { observation: CiReadObservation; current(): Promise<boolean>; isCurrent(): boolean; bindingId: import('@harness-projects/domain').ProviderBindingId | undefined }): Promise<void> => {
       if (ci === undefined && desired === activeFingerprint && current.workspaceId === target) return
       old.reconciler?.stop()
       if (ci && !await ci.current()) throw new Error('仓库验证已失效')
@@ -389,7 +415,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         const activatedFingerprint = await fingerprint(target)
         if (ci && !ci.isCurrent()) throw new Error('仓库验证已失效')
         candidate.reconciler?.start()
-        current = candidate; developmentCache = candidate.cache; activeFingerprint = activatedFingerprint; repositoryValidation++; retire(old)
+        current = candidate; developmentCache = candidate.cache; activeFingerprint = activatedFingerprint; repositoryValidation++; retire(old); persistSelection(target, persist)
       } catch (error) { retire(candidate); throw error }
     }
     const configure = <T>(workspaceId: WorkspaceId, run: () => Promise<CommandResult<T>>, acknowledge?: (generation: string) => void, activateAssembly = true, confirmPlanning = false, ci?: { observation: CiReadObservation; current(): Promise<boolean>; isCurrent(): boolean; bindingId: import('@harness-projects/domain').ProviderBindingId | undefined }, allowSwitch = false): Promise<CommandResult<T> & { activationError?: ProjectError }> => serialize(async (old) => {
@@ -398,7 +424,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       const result = await run()
       if (result.writeState === 'local_only' && activateAssembly) {
         try {
-          await activate(workspaceId, old, await fingerprint(workspaceId), ci)
+          await activate(workspaceId, old, await fingerprint(workspaceId), allowSwitch, ci)
           activationError = undefined
         } catch (error) {
           log.write('activationFailed', describeError(error))
@@ -420,7 +446,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     const openWorkspace = (target: WorkspaceId, acknowledge?: (generation: string) => void) => serialize(async (old) => {
       if (await storage!.getWorkspace(target) === undefined) return { state: 'failed' as const, error: projectError(ProjectErrorCode.NotFound, '项目不存在，请重新读取') }
       try {
-        await activate(target, old, await fingerprint(target))
+        await activate(target, old, await fingerprint(target), true)
         activationError = undefined
         acknowledge?.(current.generation)
         return { state: 'activated' as const }
@@ -431,12 +457,14 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     })
     const getWorkspaceSetup = async (assembly: Assembly): Promise<WorkspaceSetupDTO> => {
       let workspace: WorkspaceSetupDTO['workspace'] = null, bindingId: string | undefined, projectNodeId: string | undefined
+      let restore: Pick<WorkspaceSetupDTO, 'restore'> = {}
       let activation: Pick<WorkspaceSetupDTO, 'activationError' | 'executionInstalled'> = activationError === undefined ? {} : { activationError: projectError(activationError.code, '本地配置已提交，装配尚未激活') }
       const failure = (reason?: string) => projectError(Object.values(ProjectErrorCode).some((code) => code === reason) ? reason as ProjectErrorCode : ProjectErrorCode.Unavailable, '规划项目尚未确认，请按恢复动作重试')
       try {
         const stored = assembly.workspaceId === undefined ? undefined : await storage!.getWorkspace(assembly.workspaceId)
         workspace = stored === undefined ? null : { id: stored.id, name: stored.name }
-        if (stored === undefined) return { workspace, planning: { state: 'unbound' }, ...activation }
+        restore = workspace === null && restoreKind !== 'none' ? { restore: Object.freeze({ kind: restoreKind }) } : {}
+        if (stored === undefined) return { workspace, planning: { state: 'unbound' }, ...activation, ...restore }
         const bindings = await storage!.listProviderBindings(stored.id)
         const executions = bindings.filter((mount) => mount.domain === 'execution')
         const active = await fingerprint(stored.id) === activeFingerprint
@@ -444,7 +472,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
           && executions.length === 2 && executions.some((mount) => mount.isDefault) && executions.some((mount) => !mount.isDefault)
           && executions.every((mount) => mount.enabled && mount.implementationKey === (mount.isDefault ? 'execution.harness' : 'execution.human'))) activation = { ...activation, executionInstalled: true }
         const mount = bindings.find((mount) => mount.enabled && mount.domain === 'planning')
-        if (mount === undefined) return { workspace, planning: { state: 'unbound' }, ...activation }
+        if (mount === undefined) return { workspace, planning: { state: 'unbound' }, ...activation, ...restore }
         bindingId = mount.id
         const configuration = await storage!.getBindingConfiguration({ workspaceId: stored.id, bindingId: mount.id, domain: 'planning' })
         const target = configuration?.configuration.projectNodeId
@@ -453,11 +481,11 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         const mappingOrigin = mapping?.bindingId === bindingId && mapping.projectExternalId === projectNodeId ? mapping.origin : undefined
         const snapshot = active ? await assembly.controller.baseline() : undefined
         const state = !active ? 'configured' : projectNodeId !== undefined && snapshot?.source.freshness === 'fresh' ? 'confirmed' : 'degraded'
-        return { workspace, planning: { state, bindingId, ...(projectNodeId === undefined ? {} : { projectNodeId }) }, ...activation,
+        return { workspace, planning: { state, bindingId, ...(projectNodeId === undefined ? {} : { projectNodeId }) }, ...activation, ...restore,
           ...(mappingOrigin === undefined ? {} : { mappingOrigin }), ...(state === 'degraded' ? { error: failure(snapshot?.source.reason) } : {}) }
       } catch (error) {
         log.write('setupReadFailed', describeError(error))
-        return { workspace, planning: workspace === null ? { state: 'unbound' } : { state: 'degraded', ...(bindingId === undefined ? {} : { bindingId }), ...(projectNodeId === undefined ? {} : { projectNodeId }) }, ...activation, error: failure() }
+        return { workspace, planning: workspace === null ? { state: 'unbound' } : { state: 'degraded', ...(bindingId === undefined ? {} : { bindingId }), ...(projectNodeId === undefined ? {} : { projectNodeId }) }, ...activation, ...restore, error: failure() }
       }
     }
     const planningMappingOf = async (assembly: Assembly) => {

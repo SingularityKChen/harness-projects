@@ -18,6 +18,7 @@ export { browserHistoryPort, createItemNavigation, itemPath, parseItemRoute } fr
 export type { HistoryPort, ItemRoute } from './item-route.ts'
 export { ExecutionContextSection } from './execution-context-section.ts'
 export { WorkspaceSetupGate, bindWorkspaceSetupApp } from './workspace-setup.ts'
+export { resolveWorkspaceLink, type WorkspaceLinkPorts, type WorkspaceLinkState } from './workspace-link.ts'
 export { ProjectsHome } from './projects-home.ts'
 
 export * from './repository-binding.ts'

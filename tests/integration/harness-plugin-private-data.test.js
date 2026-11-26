@@ -9,9 +9,52 @@ import { DatabaseSync } from 'node:sqlite'
 import test, { describe } from 'node:test'
 import { CURRENT_SCHEMA_GENERATION } from '@harness-projects/storage-sqlite'
 import { createHostComposition } from '../../apps/harness-plugin/src/host-composition.ts'
-import { preparePrivateWorktreeDirectories } from '../../apps/harness-plugin/src/host-private-data.ts'
+import { preparePrivateProjectData, preparePrivateWorktreeDirectories } from '../../apps/harness-plugin/src/host-private-data.ts'
 import { apply as applyHost } from '../../apps/harness-plugin/src/host.ts'
 import { WORKSPACE, seed } from './fixtures/host-seed.js'
+
+// The real Node fd and helper lifecycle remain real; only the native PowerShell protocol is substituted.
+test('Windows selection acquisition failure closes the acquired diagnostic fd and helper lease once', async (t) => {
+  for (const cleanupFailure of ['none', 'fd', 'lease', 'both']) await t.test(cleanupFailure, async (t) => {
+  const profile = await realpath(await mkdtemp(path.join(os.tmpdir(), 'private-selection-acquisition-'))), root = path.join(profile, 'harness-projects')
+  await mkdir(root); await writeFile(path.join(root, 'diagnostics.log'), '')
+  const native = childProcess.spawn, open = fs.openSync, close = fs.closeSync, system = process.env.SystemRoot
+  let logFd, child, helperClosed, closes = 0, releases = 0
+  t.after(async () => {
+    if (system === undefined) delete process.env.SystemRoot; else process.env.SystemRoot = system
+    if (logFd !== undefined) try { fs.fstatSync(logFd); close(logFd) } catch {}
+    child?.kill(); await rm(profile, { recursive: true, force: true })
+  })
+  t.mock.property(process, 'platform', 'win32'); process.env.SystemRoot = 'C:\\Windows'
+  t.mock.method(childProcess, 'spawn', function () {
+    child = native.call(this, process.execPath, ['-e', "let ready=false;require('node:readline').createInterface({input:process.stdin}).on('line',line=>{if(line==='close')process.exit();if(!ready){ready=true;process.stdout.write('private-windows-v1\\r\\n')}}).on('close',()=>process.exit())"], { stdio: ['pipe', 'pipe', 'pipe'] })
+    helperClosed = new Promise(resolve => child.once('close', resolve))
+    const end = child.stdin.end
+    t.mock.method(child.stdin, 'end', function (chunk, ...args) {
+      const result = end.call(this, chunk, ...args)
+      if (chunk === 'close\n') { releases++; if (['lease', 'both'].includes(cleanupFailure)) throw Error('lease cleanup canary') }
+      return result
+    })
+    return child
+  })
+  t.mock.method(fs, 'openSync', function (file, ...args) {
+    if (file === path.join(root, 'workspace-selection.json')) throw Object.assign(Error('selection acquisition failure'), { code: 'EACCES' })
+    const fd = open.call(this, file, ...args); if (file === path.join(root, 'diagnostics.log')) logFd = fd; return fd
+  })
+  t.mock.method(fs, 'closeSync', function (fd) {
+    const result = close.call(this, fd)
+    if (fd === logFd) { closes++; if (['fd', 'both'].includes(cleanupFailure)) throw Error('fd cleanup canary') }
+    return result
+  })
+  let error
+  try { await preparePrivateProjectData(path.join(root, 'workspace.sqlite'), undefined, profile) } catch (failure) { error = failure }
+  await helperClosed
+  assert.equal(typeof logFd, 'number'); assert.ok(child.exitCode !== null || child.signalCode !== null, '失败后 helper 已退出并释放 lease')
+  assert.throws(() => fs.fstatSync(logFd), { code: 'EBADF' }); assert.equal(closes, 1, '本次获取的日志 fd 只关闭一次')
+  assert.equal(releases, 1, 'helper lease 只释放一次')
+  assert.deepEqual({ name: error?.name, message: error?.message }, { name: 'HostAuthorityError', message: 'Host project data is unavailable' }, 'cleanup 错误不得覆盖安全的获取失败')
+  })
+})
 
 describe('POSIX private data (native Windows admission has its own secured-root fixture)', { skip: !['darwin', 'linux'].includes(process.platform) }, () => {
 const actorRef = { kind: 'user' }
@@ -19,8 +62,8 @@ const denied = { name: 'HostAuthorityError', message: 'Host project data is unav
 async function fixture(t, parent = os.tmpdir()) {
   const profile = await realpath(await mkdtemp(path.join(parent, 'private-host-')))
   t.after(() => rm(profile, { recursive: true, force: true }))
-  const root = path.join(profile, 'harness-projects'), dataPath = path.join(root, 'workspace.sqlite'), log = path.join(root, 'diagnostics.log')
-  return { profile, root, dataPath, log, options: { dataPath, workspaceId: WORKSPACE, catalog: new Map(), resolveCredential: async () => undefined } }
+  const root = path.join(profile, 'harness-projects'), dataPath = path.join(root, 'workspace.sqlite'), log = path.join(root, 'diagnostics.log'), selection = path.join(root, 'workspace-selection.json')
+  return { profile, root, dataPath, log, selection, options: { dataPath, workspaceId: WORKSPACE, catalog: new Map(), resolveCredential: async () => undefined } }
 }
 async function refusedHost(f) {
   const services = new Map(), effects = []
@@ -44,15 +87,15 @@ test('new and reopened Host data stays private under umask 022 and preserves row
   try {
     host = await createHostComposition(f.options)
     host.diagnoseShutdown('shutdownFailed')
-    assert.deepEqual(await Promise.all([mode(f.root), mode(f.dataPath), mode(f.log)]), [0o700, 0o600, 0o600])
+    assert.deepEqual(await Promise.all([mode(f.root), mode(f.dataPath), mode(f.log), mode(f.selection)]), [0o700, 0o600, 0o600, 0o600])
     assert.equal((await create(host)).writeState, 'local_only')
     const db = new DatabaseSync(f.dataPath)
     try { assert.equal(db.prepare('PRAGMA journal_mode').get().journal_mode, 'delete') } finally { db.close() }
     await host.dispose()
     await writeFile(f.log, 'existing diagnostic bytes\n')
-    await Promise.all([chmod(f.root, 0o755), chmod(f.dataPath, 0o644), chmod(f.log, 0o644)])
+    await Promise.all([chmod(f.root, 0o755), chmod(f.dataPath, 0o644), chmod(f.log, 0o644), chmod(f.selection, 0o644)])
     host = await createHostComposition(f.options)
-    assert.deepEqual(await Promise.all([mode(f.root), mode(f.dataPath), mode(f.log)]), [0o700, 0o600, 0o600])
+    assert.deepEqual(await Promise.all([mode(f.root), mode(f.dataPath), mode(f.log), mode(f.selection)]), [0o700, 0o600, 0o600, 0o600])
     assert.equal((await host.call('getWorkspaceSetup', {})).workspace.name, 'Private workspace')
     assert.ok((await readFile(f.log, 'utf8')).startsWith('existing diagnostic bytes\n'))
   } finally { process.umask(oldMask); await host?.dispose() }
@@ -100,6 +143,7 @@ test('unsafe root, DB, log and SQLite sidecars refuse without modifying an outsi
     ['workspace.sqlite-wal', 'symlink'], ['workspace.sqlite-shm', 'symlink'], ['workspace.sqlite-journal', 'symlink'],
     ['workspace.sqlite', 'hardlink'], ['diagnostics.log', 'hardlink'], ['workspace.sqlite-journal', 'hardlink'],
     ['workspace.sqlite', 'fifo'], ['diagnostics.log', 'directory'],
+    ['workspace-selection.json', 'symlink'], ['workspace-selection.json', 'hardlink'], ['workspace-selection.json', 'fifo'], ['workspace-selection.json', 'directory'],
   ]
   for (const [name, kind] of cases) await t.test(`${name} ${kind}`, async (t) => {
     const f = await fixture(t), sentinel = path.join(f.profile, 'outside')
@@ -175,13 +219,33 @@ test('diagnostics stay on the verified descriptor and close after shutdown failu
   assert.throws(() => fs.fstatSync(logFd), { code: 'EBADF' })
 })
 
+// Catches reopening the preference path on every activation: the fd opened at startup must own the bytes.
+test('the navigation preference is rewritten on its verified descriptor, not through the pathname', async (t) => {
+  const f = await fixture(t), other = '00000000-0000-4000-8000-0000000007d7', moved = path.join(f.root, 'original-selection.json'), sentinel = path.join(f.profile, 'selection-sentinel')
+  await writeFile(sentinel, 'do not overwrite')
+  await seed(f.dataPath, new Map(), async (storage) => {
+    await storage.putWorkspace({ id: WORKSPACE, name: 'Seed workspace', statusPolicy: 'provider_authoritative' })
+    await storage.putWorkspace({ id: other, name: 'Other workspace', statusPolicy: 'provider_authoritative' })
+  })
+  const host = await createHostComposition(f.options)
+  try {
+    assert.equal((await host.call('openWorkspace', { workspaceId: other })).state, 'activated')
+    const before = JSON.parse(await readFile(f.selection, 'utf8'))
+    assert.equal(before.workspaceId, other)
+    await rename(f.selection, moved); await symlink(sentinel, f.selection)
+    assert.equal((await host.call('openWorkspace', { workspaceId: WORKSPACE })).state, 'activated')
+    assert.equal(await readFile(sentinel, 'utf8'), 'do not overwrite', '不得按路径重开/写穿 symlink')
+    assert.equal(JSON.parse(await readFile(moved, 'utf8')).workspaceId, WORKSPACE, '写入落在启动期打开的同一 inode')
+  } finally { await host.dispose() }
+})
+
 // Catches leaking a descriptor acquired immediately before owner cancellation.
 test('owner cancellation at diagnostic acquisition releases every acquired descriptor', async (t) => {
   const f = await fixture(t), controller = new AbortController(), acquired = []
   const open = fs.openSync
   t.mock.method(fs, 'openSync', function (file, ...args) {
     const fd = open.call(this, file, ...args)
-    if (file === f.root || file === f.dataPath || file === f.log) acquired.push(fd)
+    if (file === f.root || file === f.dataPath || file === f.log || file === f.selection) acquired.push(fd)
     if (file === f.log) controller.abort()
     return fd
   })
@@ -192,12 +256,12 @@ test('owner cancellation at diagnostic acquisition releases every acquired descr
 
 // Synthetic uid observation only: no privileged chown or real foreign-user file is used.
 test('descriptor ownership, POSIX support and chmod failure refuse before publishing a Host', async (t) => {
-  for (const entry of ['profile', 'root', 'db', 'log', 'chmod', 'platform']) await t.test(entry, async (t) => {
+  for (const entry of ['profile', 'root', 'db', 'log', 'selection', 'chmod', 'platform']) await t.test(entry, async (t) => {
     const f = await fixture(t)
     await mkdir(f.root, { mode: 0o755 })
     await writeFile(f.dataPath, '', { mode: 0o644 })
     await writeFile(f.log, 'original bytes', { mode: 0o644 })
-    const target = { profile: f.profile, root: f.root, db: f.dataPath, log: f.log }[entry]
+    const target = { profile: f.profile, root: f.root, db: f.dataPath, log: f.log, selection: f.selection }[entry]
     if (target) {
       const open = fs.openSync, inspect = fs.fstatSync
       let selected
@@ -236,7 +300,7 @@ test('canonical profile ancestry refuses nonsticky shared parents and admits pro
 
 // Real Darwin extended grants survive fchmod; each entry must refuse without ACL mutation.
 test('Darwin ACL allow grants on every admitted object refuse and deny-only ACL remains usable', { skip: process.platform !== 'darwin' }, async (t) => {
-  for (const name of ['profile', 'ancestor', 'root', 'workspace.sqlite', 'diagnostics.log', 'workspace.sqlite-wal', 'workspace.sqlite-shm', 'workspace.sqlite-journal', 'inherit', 'inherited']) await t.test(name, async (t) => {
+  for (const name of ['profile', 'ancestor', 'root', 'workspace.sqlite', 'diagnostics.log', 'workspace-selection.json', 'workspace.sqlite-wal', 'workspace.sqlite-shm', 'workspace.sqlite-journal', 'inherit', 'inherited']) await t.test(name, async (t) => {
     const top = await fixture(t, await realpath('/tmp')), f = name === 'ancestor' ? await fixture(t, top.profile) : top
     await mkdir(f.root)
     const file = ['profile', 'ancestor', 'inherit', 'inherited'].includes(name) ? (name === 'ancestor' ? top.profile : f.profile)

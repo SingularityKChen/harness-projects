@@ -23,7 +23,7 @@ export const REFUSAL_TOKENS = {
   refsVolumeFilesystem: 'private-windows-error-volume-filesystem',
   bindingDrive: 'private-windows-error-binding-drive',
 }
-const PRIVATE_NAME = /^(?:harness-projects|workspace\.sqlite(?:-wal|-shm|-journal)?|diagnostics\.log)$/
+const PRIVATE_NAME = /^(?:harness-projects|workspace\.sqlite(?:-wal|-shm|-journal)?|diagnostics\.log|workspace-selection\.json)$/
 const TOKEN = /private-windows-error-[a-z]+-[a-z]+/g
 
 export function volumeLabelError(label) {
@@ -118,7 +118,7 @@ export function assertSentinelUnchanged(record, label) {
 }
 
 /** 卷根只做定点检查：非递归列出可见条目，不进入 System Volume Information 等系统目录。 */
-export const PRIVATE_OBJECT_NAMES = ['harness-projects', 'workspace.sqlite', 'workspace.sqlite-wal', 'workspace.sqlite-shm', 'workspace.sqlite-journal', 'diagnostics.log']
+export const PRIVATE_OBJECT_NAMES = ['harness-projects', 'workspace.sqlite', 'workspace.sqlite-wal', 'workspace.sqlite-shm', 'workspace.sqlite-journal', 'diagnostics.log', 'workspace-selection.json']
 
 export function rootListing(root) {
   return fs.readdirSync(root, { withFileTypes: true }).map((entry) => `${entry.name}${entry.isDirectory() ? '/' : ''}`).sort()

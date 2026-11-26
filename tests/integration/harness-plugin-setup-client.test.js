@@ -64,6 +64,20 @@ test('first Home snapshot then a project baseline refreshes setup for that works
     assert.equal(reads, 1, 'Home(undefined)→项目(defined) 必须重读 setup'); assert.equal(f.source.getSnapshot().setup.workspace.id, 'ws-1')
   } finally { await f.close() }
 })
+test('project → Home cancels a held connection and reads the empty restore state', async () => {
+  let release, committed = false
+  const ack = new Promise((resolve) => { release = resolve })
+  const f = await mount({ getWorkspaceSetup: async () => ({ ok: true, value: configured() }), connectAccount: async () => { committed = true; await ack; return { ok: true, value: local({ accountId: 'account-1' }) } } })
+  try {
+    await f.emit({ kind: 'baseline', baseline: { ...header('ws-1', 1), revision: 1, entities: [] } })
+    const connecting = f.source.connect('PVT_A'); await tick()
+    f.remote.getWorkspaceSetup = async () => ({ ok: true, value: { ...empty, restore: { kind: 'corrupt' } } })
+    await f.emit({ kind: 'baseline', baseline: { generation: 'home', capabilities: [], source: { revision: 0, freshness: 'fresh', authority: 'provider' }, revision: 0, entities: [] } }, 2)
+    release(); await connecting; await tick()
+    assert.equal(f.source.getSnapshot().setup.workspace, null); assert.equal(f.source.getSnapshot().setup.restore.kind, 'corrupt')
+    assert.ok(committed); assert.ok(!f.calls.some(([kind]) => kind === 'bind'), 'the late project acknowledgement cannot continue binding or overwrite Home')
+  } finally { release(); await f.close() }
+})
 
 for (const targets of [['ws-2'], ['ws-1'], ['ws-2', 'ws-1']]) test(`new activation ${targets.join(' → ')} cancels a held account continuation until explicit reconnect`, async () => {
   let current = 'ws-1', release, held = true

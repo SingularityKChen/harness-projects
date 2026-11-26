@@ -22,7 +22,7 @@ export async function createExecutionFixture({ seed } = {}) {
   // #691：第二个已存项目与独立规划条目；A 的条目不得出现在 B 下。
   const projectB = '00000000-0000-4000-8000-000000000283', projectBBinding = '00000000-0000-4000-8000-0000000002b1'
   const make = (options, project) => { const p = createFakeProviders(options)
-  if (seed === 'projects' && project !== projectB) p.planning.addItem(p.planning.state.projects[0].ref, 'issue', '项目 A 条目', 'A 安全正文')
+  if ((seed === 'projects' || seed === 'restore') && project !== projectB) p.planning.addItem(p.planning.state.projects[0].ref, 'issue', '项目 A 条目', 'A 安全正文')
   if (seed === 'board') {
     const item = p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Board native unknown', 'Board safe body')
     item.fields = { ...item.fields, nativeValues: { status: { kind:'single_select', optionId:'native-review', name:'Native review' } } }
@@ -36,11 +36,13 @@ export async function createExecutionFixture({ seed } = {}) {
   }
   if (seed === 'query') for (let i=0;i<120;i++) p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Query '+String(i).padStart(3,'0'), 'Safe query body'); if (seed === 'overview') p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Overview gap', 'Gap fixture'); if (seed === 'read') p.planning.addItem(p.planning.state.projects[0].ref, 'draft', '规划项 draft-1', 'draft-1 正文占位'); return p }
   const mounted = [], byDomain = {}, providers = make(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: { projectNodeId: { kind: 'string', required: false, pattern: '.+', maxLength: 100 } }, create: async ({ binding }) => { const provider = seed === 'overview' ? providers[binding.domain] : make({ [binding.domain]: { bindingId: binding.id } }, binding.workspaceId)[binding.domain]
-    if (seed === 'projects' && binding.domain === 'planning' && binding.workspaceId === projectB) provider.addItem(provider.state.projects[0].ref, 'issue', '项目 B 专属条目', 'B 安全正文')
+    if ((seed === 'projects' || seed === 'restore') && binding.domain === 'planning' && binding.workspaceId === projectB) provider.addItem(provider.state.projects[0].ref, 'issue', '项目 B 专属条目', 'B 安全正文')
     byDomain[binding.domain] = provider; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
   const workspaceId = '00000000-0000-4000-8000-000000000282'
   // #692：空 profile 变体不传显式初始目标，Host 从 Home（空装配）启动，由 UI 创建 A/B；其它 seed 行为不变。
-  const emptyProfile = seed === 'create-switch'
+  // #693：restore 变体也不传显式初始目标，让 Host 从偏好/Home 启动（重开恢复与显式深链的证据）。
+  const restoreProfile = seed === 'restore'
+  const emptyProfile = seed === 'create-switch' || restoreProfile
   const storage = createSqliteStorage(dataPath, hostStoragePolicy(catalog))
   let host, installed
   const rebuild = async () => {
@@ -74,6 +76,15 @@ export async function createExecutionFixture({ seed } = {}) {
     const id = contextIdFor(workspaceId, itemId, 'repo-alpha'); runId = runIdFor(id)
     await storage.putExecutionRun({ ...(await storage.getExecutionRun(runId)), fallback: true }) }
   }
+  if (restoreProfile) {
+    // 两个已存项目各自有规划挂载：启动时无偏好 → Home；打开一个后写偏好，重开恢复它。
+    for (const [id, name] of [[workspaceId, '项目 A'], [projectB, '项目 B']]) {
+      const bindingId = 'planning-' + id.slice(-3)
+      await storage.putWorkspace({ id, name, statusPolicy: 'provider_authoritative' })
+      await storage.putProviderBinding({ id: bindingId, workspaceId: id, domain: 'planning', implementationKey: FAKE_PROVIDER_DEFINITION.implementationKey, enabled: true, isDefault: true })
+      await storage.putBindingConfiguration({ ref: { workspaceId: id, bindingId, domain: 'planning' }, configuration: { projectNodeId: providers.planning.state.projects[0].ref.externalId } })
+    }
+  }
   if (seed === 'projects') {
     // 第二个项目只有本地行 + 规划挂载；打开时由 Host 用同一 catalog 重新装配，不共享 A 的 Provider 实例。
     await storage.putWorkspace({ id: projectB, name: '项目 B', statusPolicy: 'provider_authoritative' })
@@ -81,7 +92,7 @@ export async function createExecutionFixture({ seed } = {}) {
     await storage.putBindingConfiguration({ ref: { workspaceId: projectB, bindingId: projectBBinding, domain: 'planning' }, configuration: { projectNodeId: providers.planning.state.projects[0].ref.externalId } })
   }
   await rebuild()
-  return { dataPath, workspaceId, itemId, runId, storage, get host() { return host }, get installed() { return installed }, rebuild, mounted, byDomain, close: async () => { await installed.dispose(); await host.dispose(); storage.close(); await rm(root, { recursive: true, force: true }) } }
+  return { dataPath, workspaceId, projectB, itemId, runId, storage, get host() { return host }, get installed() { return installed }, rebuild, mounted, byDomain, close: async () => { await installed.dispose(); await host.dispose(); storage.close(); await rm(root, { recursive: true, force: true }) } }
 }
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url)), uiRequire = createRequire(path.join(repoRoot, 'packages/ui/package.json'))
@@ -93,6 +104,7 @@ import { OPERATIONS } from './apps/harness-plugin/src/host-operations.ts'
 ${WEB_ENTRY}
 export async function mount(root) {
   let disconnect
+  const gate = new URLSearchParams(location.search).has('gate')
   const disposers = [], streams = new Set(), observations = [], unaryObservations = []
   const load = (url, options) => fetch(url + location.search, options)
   const command = async (action, value) => (await load('/control', { method: 'POST', body: JSON.stringify({ action, value }) })).json()
@@ -108,7 +120,7 @@ export async function mount(root) {
       for (let end; (end = buffer.indexOf('\\n')) >= 0;) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); yield JSON.parse(line) }
     } } finally { await reader.cancel().catch(() => {}) }
   }
-  const child = { effect: (run) => disposers.push(run()), slots: { inject: (_, run) => run(), register: (slot, Panel) => { if (slot.name === 'main') root.render(createElement(Panel)) } }, remote: {
+  const child = { effect: (run) => disposers.push(run()), slots: { inject: (_, run) => run(), register: (slot, Panel) => { if (slot.name === 'main') root.render(createElement(gate ? () => { const element = Panel(); return createElement(element.type, { ...element.props, initialPath: location.pathname }) } : Panel)) } }, remote: {
     harnessProjects: remote,
     $stream: (options) => { let abort, stopped = false, restart = false, generation = 0
       const stream = { restart() { restart = true; abort?.abort() }, dispose: async () => { stopped = true; abort?.abort(); streams.delete(stream) }, async *[Symbol.asyncIterator]() {
@@ -121,7 +133,7 @@ export async function mount(root) {
       streams.add(stream); disconnect = () => { options.carrierFailed?.(new Error('fixture disconnect')); abort?.abort() }; return stream
     },
   } }
-  if (location.pathname.startsWith('/projects/')) mountWeb(root, child, disposers)
+  if (location.pathname.startsWith('/projects/') && !gate) mountWeb(root, child, disposers)
   else await apply({ effect: child.effect, remote: { $mount: async () => async () => {} }, inject: (_, run) => run(child) })
   return { command, remote, unaryObservations: () => unaryObservations.slice(), observations: () => observations.slice(), disconnect: () => disconnect?.(), unmount: async () => { root.unmount(); await Promise.all(disposers.reverse().map((run) => run())); await Promise.all([...streams].map(stream => stream.dispose())) } }
 }`

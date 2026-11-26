@@ -17,6 +17,17 @@ const guidance: Record<ProjectErrorCode, string> = {
   ambiguous_result: '结果未知，请重新读取设置确认。',
   result_unknown: '结果未知，请重新读取设置确认。',
 }
+const restoreMessages = {
+  stale: '上次打开的项目已不在本机，请选择项目。',
+  corrupt: '上次打开的项目记录已损坏，请选择项目。',
+  unreadable: '上次打开的项目记录无法读取，请选择项目。',
+  unsupported: '上次打开的项目当前 Host 不支持，请选择项目。',
+  failed: '上次打开的项目暂时无法装配，请选择项目。',
+} as const
+export function workspaceRestoreNotice(snapshot: WorkspaceSetupSnapshot): string | undefined {
+  const kind = snapshot.setup?.restore?.kind
+  return kind === undefined || kind === 'none' ? undefined : restoreMessages[kind]
+}
 export function workspaceSetupView(snapshot: WorkspaceSetupSnapshot, providerLabel = '来源平台') {
   const { setup } = snapshot, original = snapshot.error ?? setup?.activationError ?? setup?.error
   const messages = { credential_rejected: `${providerLabel} 拒绝了当前凭据，请在宿主检查或更新凭据。`, permission_missing: `${providerLabel} 明确报告所需权限不足，请在宿主补充授权。`, target_unavailable: `项目不存在或当前授权不可见，请在 ${providerLabel} 核对项目标识与访问范围。` }
@@ -27,7 +38,8 @@ export function workspaceSetupView(snapshot: WorkspaceSetupSnapshot, providerLab
   const error = original ? { ...original, message: cause ? messages[cause] : readFailed ? readGuidance : guidance[original.code] } : undefined
   return { error, errorTitle: readFailed ? '无法读取工作区设置' : '工作区设置未完成',
     recovery: error ? readFailed || snapshot.failure === 'install' && error.code === 'result_unknown' ? { label: '重新读取设置', action: 'refresh' as const } : recovery[error.recovery] : undefined,
-    notice: readFailed ? undefined : setup?.activationError ? '配置已记录，激活失败' : setup?.planning.state === 'configured' ? '配置已记录，正在读取项目' : setup?.planning.state === 'degraded' ? '项目读取不完整' : undefined }
+    notice: readFailed ? undefined : setup?.activationError ? '配置已记录，激活失败' : setup?.planning.state === 'configured' ? '配置已记录，正在读取项目' : setup?.planning.state === 'degraded' ? '项目读取不完整' : undefined,
+    restoreNotice: workspaceRestoreNotice(snapshot) }
 }
 export interface WorkspaceProjectRow { readonly workspaceId: string; readonly displayName: string; readonly planningLabel: string; readonly policyLabel: string; readonly isActive: boolean; readonly pending: boolean }
 /** Home 行 = catalogue 的创建序；同名仅在冲突时加「第 N 个项目」，永不展示不透明 id、账号或计数。 */

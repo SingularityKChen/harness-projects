@@ -106,6 +106,8 @@ export async function hostFixture(apply, f) {
   catch (error) { await dispose(); assert.equal(services.size, 0); assert.equal(live.size, 0); throw error }
 }
 export async function corrupt(f, kind) {
+  // 偏好文件由 prepare 建立；为负向用例先放一个空文件，让 ACL/链接/类型破坏可施加。
+  if (kind.includes('selection')) { try { await readFile(path.join(f.root, 'workspace-selection.json')) } catch { await writeFile(path.join(f.root, 'workspace-selection.json'), '') } }
   if (kind === 'ancestor') return setAcl(f.ancestor, { broad: true, flags: '', rights: '0x40' })
   if (kind === 'direct-only') return setAcl(f.root, { direct: true })
   if (kind === 'null' || kind === 'callback') return setAcl(f.root, { [kind]: true })
@@ -116,11 +118,11 @@ export async function corrupt(f, kind) {
     return setAcl(location, { broad: true, flags: '', rights: 'FR' })
   }
   if (kind.startsWith('junction-')) {
-    const location = kind === 'junction-profile' ? f.profile : f.root
+    const location = kind === 'junction-profile' ? f.profile : kind === 'junction-root' ? f.root : path.join(f.root, 'workspace-selection.json')
     await rename(location, location + '-outside'); return symlink(location + '-outside', location, 'junction')
   }
   if (kind === 'wrong-type') { await rm(f.dataPath); return mkdir(f.dataPath) }
-  const target = kind === 'hardlink-log' ? f.log : kind === 'hardlink-sidecar' ? f.dataPath + '-journal' : f.dataPath
+  const target = kind === 'hardlink-log' ? f.log : kind === 'hardlink-sidecar' ? f.dataPath + '-journal' : kind === 'hardlink-selection' ? path.join(f.root, 'workspace-selection.json') : f.dataPath
   if (kind === 'hardlink-sidecar') await writeFile(target, 'sidecar sentinel')
   await link(target, path.join(f.profile, 'outside-sentinel'))
 }
@@ -162,6 +164,7 @@ export async function positiveHost(apply, t) {
   fs.openSync = (...args) => { const fd = open(...args); if (args[0] === f.log && acquisition) acquisition.fd = fd; return fd }
   try {
     host = await hostFixture(apply, f)
+    assert.equal((await readFile(path.join(f.root, 'workspace-selection.json'))).length, 0, '启动期建立空偏好文件 = 无偏好')
     assert.equal((await host.services.get('harnessProjects').getWorkspaceSetup()).workspace.name, 'Seeded Workspace')
     assert.equal((await host.services.get('harnessProjects').installExecutionBindings({ kind: 'user' }, 'native-install')).writeState, 'local_only')
     fs.writeSync(acquisition.fd, 'admission resumed log\n')

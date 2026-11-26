@@ -29,7 +29,7 @@
 - 每个 Core 装配自动获得新 generation；`watch.ts` 见 generation 变化发 gap，客户端 `stream.restart()` 后以新 baseline 整体替换 store；`sync.ts` 只允许 baseline 重置 generation。
 - 客户端 `WorkspaceSetupSource` 已有 create/connect/install 的 intent key 与失败语义；`WorkspaceSetupGate` 是唯一工作区设置门；`WorkItemApp` 的路由 scope 门要求 `route.projectId === read.workspace.id`。
 - 真实 gateway 的 unary 与 stream 调用都经 `prepareInvocation` 绑定 `this.ctx.invocation.peer`（`@deepseek-ai/dsh-api-gateway` 的 `prepareInvocation`/`openStream`），因此 stream 侧也能读到 peer。
-- 私有数据根只准入固定文件（`workspace.sqlite` 及 sidecar、`diagnostics.log`），POSIX 与 Windows 原生 lease 各有一份允许清单。
+- 私有数据根只准入固定文件（`workspace.sqlite` 及 sidecar、`diagnostics.log`、`workspace-selection.json`），POSIX 与 Windows 原生 lease 各有一份允许清单。
 - 安装态插件没有 URL/route 入口；`apps/web` 只转导出路由 codec。全仓无 `localStorage` 使用。
 
 **相关文件**
@@ -165,7 +165,7 @@ openWorkspace:  { mode: 'unary', params: [param('workspaceId', 'WorkspaceId', no
   - `tests/integration/harness-plugin-host-catalogue.test.js`（新）、`host-switch.test.js`（新）、`host-reopen.test.js`（新）、`multiproject-matrix.test.js`（新）、`harness-plugin-multiproject-execution.test.js`（新）、`harness-plugin-setup-client.test.js`、`harness-plugin-policy-admission.test.js`、`harness-plugin-private-data.test.js`、`harness-plugin-artifact.test.js`、`harness-plugin-migrations.test.js`、`workspace-setup-commands.test.js`
   - `docs/review/pr-695-mmp-review.md`、`pr-696-mmp-review.md`、`pr-697-mmp-review.md`、`pr-698-mmp-review.md`、`docs/review/README.md`、`docs/README.md`、`docs/project-management/merge-queue.md`
   - `tests/browser/projects-home.test.js`（新）、`project-switch.test.js`（新）、`workspace-restore.test.js`（新）、`multiproject-qualification.test.js`（新）
-  - `tests/fixtures/execution-drawer-browser.mjs`
+  - `tests/fixtures/execution-drawer-browser.mjs`、`tests/fixtures/composed-workspace-browser.mjs`（#693 Web History 深链入口）
   - `docs/product/ui-workspace-frame.md`、`docs/product/installed-core-acceptance.md`、本 ExecPlan
 
 ## Plan of Work
@@ -310,7 +310,7 @@ node scripts/rule-checks.mjs size <declared-base>
 
 - [x] (2026-11-25) Batch 1 · #691 目录枚举 + 安全打开 + Projects Home
 - [x] (2026-11-25) Batch 2 · #692 创建 A/B + 确认切换
-- [ ] (2026-11-25) Batch 3 · #693 重开恢复 + 作用域导航
+- [x] (2026-11-25) Batch 3 · #693 重开恢复 + 作用域导航
 - [ ] (2026-11-25) Batch 4 · #694 组合/打包/安装态验收
 - [ ] (2026-11-25) 四个 PR 独立对抗验收、重构与 ready 评审
 
@@ -336,6 +336,13 @@ node scripts/rule-checks.mjs size <declared-base>
 - 2026-11-25（Batch 2 修复轮，独立对抗验收 P2）：① UI 创建提交只看 `setup.workspace != null`，已有 A 时本地拒绝/Host 不可用/装配失败会进入 A 的设置页并丢草稿；改为要求读回无 `error`/`failure`/`activationError` 且 workspace id 与提交前不同才交接新项目。② client 的 `createIntent` 在成功读回后不清除，同名再次创建复用同一 key+payload 被 Host 当重放、静默切回旧项目；改为只在 `run('create')` 读回的新 workspace id 等于本次 command 返回值且无错误时清除，丢 ack/未确认期间仍复用同 key。③ `configure` 的激活失败无条件写全局 `activationError`，create-and-switch 失败会把仍是当前的 A 的 baseline/setup 标成 degraded；改为 `allowSwitch === false` 才写全局，`allowSwitch === true` 只把固定作用域文案放进本次命令结果。三条各有判别用例（改前实测 3 个失败：`失败必须留在 create 面板`、`确认完成后必须换键：名称不是自然键`、`全局 activationError 保持 undefined`），改后 switch 集成 9/9、contract 40/40 绿。
 - 2026-11-25（Batch 2 修复轮，P3）：快速 open 判别序列改为两个请求 `[B, A]`（FIFO 最终 A、LIFO 会最终 B），并断言每个结果报告自己的 target 与 `peak=1`；失败切换补注入次数 `calls===3` 与 `controller`/`generation` 前后指针比较；导航用例的 `BUSINESS_TABLES` 补齐 `dump` 中除 `schema_migrations` 外的全部业务表（含 `sync_cursor`/`reconcile_cursor`/`workspace_planning_mapping`/`workspace_revision` 等 23 张），并把「零 fetch」收窄为「空工作区档案下无 provider 写、无规划状态变化，fetch 计数只对该档案有效」。ExecPlan 同时订正 UUID v5 形状表述、写入语义与 `options.workspaceId` 的 create 优先级。
 
+- 2026-11-25（Batch 3）：偏好文件的安全边界分两层——`preparePrivateProjectData` 仍对私有根固定文件做既有 ACL/nofollow/nlink/0600 准入，**形状不安全即拒绝启动**（与 db/log 同一安全不变量）；只有「已安全打开后的运行期读取失败」降级为 `restore.kind='unreadable'`。因此 `unreadable` 用读取系统调用失败注入判别，而不是把 symlink/hardlink 变成可恢复状态。
+- 2026-11-25（Batch 3）：启动选择本身不写偏好——只有经 `openWorkspace`/`createWorkspace` 的成功激活才写（`activate(target, old, desired, persist)` 的 `persist` 标志）；设置写即使改了 fingerprint 触发重新装配也不重写 `confirmedAt`，「唯一已存」fallback 与同项目 no-op 同样不写。这样「重开恢复」只承诺用户显式确认过的项目，同时保住单工作区既有启动兼容。
+- 2026-11-25（Batch 3）：偏好写入改为「覆盖写满 → fsync → 旧文件更长才 ftruncate 到精确长度 → fsync」，任何崩溃窗口只可能留下可解析旧值或 `corrupt`，不会变成 0 字节 = `none` 而静默打开唯一已存项目。判别注入点因此是第一次 `fs.writeSync`（旧实现「先 ftruncate」会留下 0 字节）：写失败时本次切换仍 `activated`、旧偏好逐字保留、诊断日志出现 `selectionWriteFailed`，重开按旧偏好恢复；写一半后崩溃重开为 `restore.kind='corrupt'`。
+- 2026-11-25（Batch 3）：显式深链只有「已存项目」才触发 `openWorkspace`；catalogue 里没有的 projectId 仍走既有 unresolved。决策与编排收敛到产品模块 `packages/ui/src/workspace-link.ts` 的 `resolveWorkspaceLink`（`active|open|invalid|failed`，每个 await 后用 `isCurrent()` 丢弃目标已变化的旧结果），`WorkspaceSetupGate` 接受可选 `initialPath` 并经它解析（`bindWorkspaceSetupApp` 透传，插件 `client.ts` 不传），浏览器夹具删除内联 resolve 改为调用同一模块。这让 `tests/browser/workspace-read.test.js` 的「跨 scope 深链拒绝」语义保持不变，同时把「链接优先于偏好/失败不回退」落在 composed Host+client 的浏览器 History 入口。该入口的链接解析必须先读 `getWorkspaceSetup` + catalogue 再决定是否 `openWorkspace`：空装配（Home）没有已确认 descriptor，supervisor 的 `read()` 按契约返回 undefined，若先等 `read()` 会把「无 active」误报成连接中并让深链永远卡住（浏览器实测捕获）。
+- 2026-11-25（Batch 3）：Windows 原生允许清单加 `workspace-selection.json` 后，`prepareWindowsProjectData` 的 Node 侧用 `O_CREAT` 兜底打开持久 fd（synthetic helper 用例不执行原生 Ensure）；该 fd 由 `createHostComposition.dispose` 统一关闭，`lease.dispose()` 不再关闭它（消除双关闭/复用风险），`openSync` 失败时先关已打开的 `logFd` 再走统一失败路径。
+- 2026-11-25（Batch 3 修复轮，独立对抗验收）：① P1 偏好命中行+策略但装配失败会拒绝整个 Host 启动；改为只有**偏好驱动**的初始目标容错——`assemble(preferredId)` 失败记 `restoreAssemblyFailed`、`restore.kind='failed'` 并回落到空装配 Home，显式 `options.workspaceId` 与「唯一已存/唯一受支持」fallback 保持 fail-closed。restore kind 闭集增 `failed` 并收敛到 `packages/client/src/workspace-setup.ts`（host 与 ui-model 只 import type），ui-model 文案「上次打开的项目暂时无法装配，请选择项目。」。② P2-1 偏好写入改崩溃安全顺序（见上）。③ P2-2 深链决策提取为产品模块并接入 Gate/夹具。④ P3 收敛：Windows fd 归属、`persist` 标志、闭集边界判别、文档固定文件清单。改前负向验证：P1 用例在旧实现上以 `PlanningReadTimeout` 拒绝启动、P2-1 用例旧实现留下 0 字节偏好、`persist` 用例旧实现重写 `confirmedAt`。
+
 ## Decision Log
 
 2026-11-26 / 本会话人类直接授权本评审会话负责 #695–#698 后续：“你负责后续：三思后修复，但禁止 adhoc 式修复 → re-review → 归档 ExecPlan → 按 Conventional Commits 与可独立理解、回滚、审阅的交付边界整合为适量的 commit → 核对并处理对应 issue → merge_method=rebase 合并。”本授权覆盖四个 PR 的修复、复评、条件 rebase 合并和相关清理；未授权 Planning Status/native blocking 或替代人类安装接受。
@@ -351,6 +358,9 @@ node scripts/rule-checks.mjs size <declared-base>
 9. **同名区分用"第 N 个项目"（创建序），不展示 projectNodeId/短 id。** Rationale：公开数据面最小；确定性；端口承诺创建序。日期/作者：2026-11-25 / lead。
 10. **Home 无 active 时不清空 active、不新增 closeWorkspace。** Rationale：少一个生命周期概念；恢复失败可解释。日期/作者：2026-11-25 / lead。
 11. **create-and-switch 的装配失败只作用于本次命令结果（公开行为收窄）。** Rationale：候选装配属于一次创建，把失败写进全局 `activationError` 会让仍是当前项目的 A 的 baseline/setup 降级，违反「切换失败保留 A」；同作用域设置写（`allowSwitch=false`）仍保留原有全局降级与 unsupportedPolicy stop 语义。日期/作者：2026-11-25 / lead。
+
+12. **偏好读取失败分两层：不安全形状 fail-closed，运行期读取失败 = `restore.unreadable`。** Rationale：私有根固定文件的 symlink/hardlink/ACL 破坏属于安全边界，必须与 db/log 一样拒绝启动；只有打开后 I/O 失败才是可解释的降级，且不得抛到 wire。日期/作者：2026-11-25 / PR3。
+13. **只有已存项目才从深链尝试打开。** Rationale：未知 projectId 是无效链接，保持既有 unresolved（不回显路由、不碰 store），避免为垃圾 URL 触发 Host 切换；已存但不可打开（缺失/策略不支持/装配失败）只给 Home/说明，绝不回退到偏好或当前项目。日期/作者：2026-11-25 / PR3。
 
 ## Idempotence and Recovery
 
@@ -379,8 +389,12 @@ node scripts/rule-checks.mjs size <declared-base>
 - 2026-11-25（PR1 CI 修复）：启动选择补「唯一受支持工作区」fallback 以兼容含遗留不支持行的 profile（Windows 原生 private-data 重开用例）；新增判别断言并复用既有测试。PR 关联：GitHub 对非默认 base 不计算 closingIssuesReferences，采用临时 retarget 到 main 再切回的方式建立 stacked PR 的双向 issue 关联。
 - 2026-11-25：启动 Batch 2（#692）。本批在 Batch 1 的目录/安全打开之上补：由 wire `idempotencyKey` 确定性派生 `WorkspaceId`（UUID v5 形状，替换本实例内的 `Map` 复用）、创建 A/B 与确认切换的判别测试、失败切换保留 A 与「切换窗口内 A 设置写按作用域 conflict 拒绝」的反例、以及创建后恢复部分配置的 UI 流程；不改变 Batch 1 的请求栅栏与作用域语义。
 - 2026-11-25：完成 Batch 2（#692）实现与验证。相对计划的偏离：① `packages/ui/src/work-item-project.ts`、`work-item-app.ts` 与 `apps/harness-plugin/src/client.ts` 无改动——PR1 已提供「项目」按钮、项目作用域门与 workspace id 变化重读；② 本批确实修改了 `packages/client/src/workspace-setup.ts`：创建读回确认后清空意图键（修复轮 P2-2）；③ 浏览器证据集中在 composed Host+client 的 create→switch→failed-switch 关键路径，窄屏/明暗/安装态走查留给 #694；④ 代码规模实测见 `node scripts/rule-checks.mjs size feature/multiproject-catalogue-open`（记录于汇报）。
-- 2026-11-25（Batch 2 修复轮）：按独立对抗验收修 3 条 P2 并收敛 P3。① 创建失败不再跳到当前项目设置（UI 只在读回确认为新工作区且无错误时交接）；② 同名再次创建换新意图键、真实创建第二个项目（只在读回确认后清键，丢 ack 仍复用 key 重试）；③ create-and-switch 装配失败只进本次命令结果、不写全局 `activationError`，A 的 baseline/source 逐字不变。三条各补判别用例（改前实测 3 红：`失败必须留在 create 面板`、`确认完成后必须换键：名称不是自然键`、`全局 activationError 保持 undefined`），改后 switch 集成 9/9、contract 40/40。P3：快速 open 改 `[B, A]` 判别序列、失败切换补 `calls===3` 与装配指针比较、导航 BUSINESS_TABLES 补齐 23 张业务表并把「零 fetch」收窄到空工作区档案；订正 UUID v5 形状/写入语义/`options.workspaceId` 的 create 优先级表述，并记录派生 id 无 profile 命名空间的边界与 Decision Log 11。规模：代码 546 行、文档 25 行（`node scripts/rule-checks.mjs size feature/multiproject-catalogue-open`）。
+- 2026-11-25：完成 Batch 3（#693）实现与验证。相对计划的偏离：① 偏好文件的不安全形状（symlink/hardlink/fifo/目录/ACL）仍按私有根安全不变量 fail-closed，`unreadable` 只表示已安全打开后的运行期读取失败（用 `fs.readSync` 注入判别）；② 偏好写入挂在 `activate()` 成功路径：同项目 no-op 与「唯一已存」启动 fallback 都不写，只有显式 open/create 的激活才写；③ 显式深链实现在 `tests/fixtures/composed-workspace-browser.mjs` 的 Web History 入口（该文件不在原全局集合，属测试夹具；安装态插件仍如实「无外部深链入口」），未知 projectId 保持既有 unresolved；④ Home 恢复说明放在 `ui-model` 的 `workspaceRestoreNotice` + `ProjectsHome`，`WorkspaceSetupGate` 的 `defaultPane` 在 restore 非 none 时进入 projects；⑤ Windows 原生新增 `workspace-selection.json` 的 Ensure/持久 fd 与负向用例（symlink/junction/hardlink/broad ACL/类型）本地无法验证，交 push 后 windows-native lane 复核，POSIX 判别用例全绿；⑥ `packages/ui/src/workspace-setup.ts` 只改 `defaultPane`，`apps/harness-plugin/src/client.ts` 无改动（restore 走既有 setup 重读路径）。规模与命令结果见汇报。
 
 2026-11-26：将首轮评审反例、根因设计、disjoint ownership、恢复锚点和 #694 保留接受写入 Batch R，延续同一 ExecPlan。
 
 2026-11-26 后续发现：#695 当前 CI 与本地 `projects-home.test.js` 一致出现 B 已激活而仍留 Home；scope 栅栏正确丢弃旧 readback，却让 open 的 raw mutation Promise 早于排队的已接受读取结束。根因修复放在 Source 完成契约：原 mutation 槽先释放，返回给调用方的 transition 完成再等待/加入现有新读取，二者不能形成互等；目标不再属于当前意图时不得发布旧结果。被否：在 Gate 额外加 open-target 状态弥补早完成，会让其它 Source 消费者仍读到未结算结果。保留已有栅栏和有限读取，不增加无界重试。原窄组通过不等于浏览器闭环，当前 PR 继续阻塞，须独立复评及新 head CI。
+
+2026-11-26 F3复评收紧：在后续文件打开失败边界分别尝试fd/helper清理，任何cleanup异常不得覆盖原安全获取失败；不扩展其它清理路径。实物fd与child结束及四种cleanup组合已独立验证。
+
+2026-11-26 恢复闭环取证：无active的Home baseline使sync.read返回undefined；必须把已观察项目→undefined作为作用域变化，撤销旧阶段并重读setup，保留初始已结算快照不重复读。扩展本层apps/client与mounted-client回归，原始browser超时不放宽；这是Host权威空装配的消费修复。
