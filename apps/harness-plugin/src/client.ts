@@ -43,13 +43,18 @@ export async function apply(ctx: ClientContext): Promise<void> {
       bindPlanningSource: (...args) => unwrap(remote.bindPlanningSource(...args)),
       installExecutionBindings: (...args) => unwrap(remote.installExecutionBindings(...args)),
       refreshPlanning: () => planningRefresh.refresh(),
+      listWorkspaces: () => unwrap(remote.listWorkspaces()),
+      openWorkspace: (workspaceId: string) => unwrap(remote.openWorkspace(workspaceId)),
     }, { actorRef: { kind: 'user' } })
     child.effect(() => {
-      let connected = false, seen = false
+      let connected = false, seen = false, observed = false, workspaceId: string | undefined, generation: string | undefined
       const stop = workspace.subscribe(() => {
-        const next = workspace.getSnapshot()?.connection.connected === true
-        if (seen && !connected && next) void setup.refresh()
-        seen ||= next; connected = next
+        const snapshot = workspace.getSnapshot(), next = snapshot?.connection.connected === true, id = snapshot?.workspace?.id
+        const changed = snapshot !== undefined && (!observed || id !== workspaceId || snapshot.generation !== generation)
+        // 先撤销旧多阶段意图；A→B→A 及同项目重新装配都不能复活旧连接。
+        if (changed) setup.invalidateScope()
+        if (changed && (observed || id !== setup.getSnapshot().setup?.workspace?.id || setup.getSnapshot().pending) || seen && !connected && next) void setup.refresh()
+        seen ||= next; connected = next; workspaceId = id; generation = snapshot?.generation; observed ||= snapshot !== undefined
       })
       void setup.refresh()
       return () => { stop(); setup.dispose() }

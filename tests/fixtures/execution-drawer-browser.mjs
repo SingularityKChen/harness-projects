@@ -19,7 +19,11 @@ import { AccessLevel, providerErr, providerError } from '@harness-projects/capab
 export async function createExecutionFixture({ seed } = {}) {
   if (seed === 'execution') return createComposedExecutionPlatform()
   const root = await mkdtemp(path.join(tmpdir(), 'execution-drawer-')), dataPath = path.join(root, 'workspace.sqlite')
-  const make = (options) => { const p = createFakeProviders(options); if (seed === 'board') {
+  // #691：第二个已存项目与独立规划条目；A 的条目不得出现在 B 下。
+  const projectB = '00000000-0000-4000-8000-000000000283', projectBBinding = '00000000-0000-4000-8000-0000000002b1'
+  const make = (options, project) => { const p = createFakeProviders(options)
+  if (seed === 'projects' && project !== projectB) p.planning.addItem(p.planning.state.projects[0].ref, 'issue', '项目 A 条目', 'A 安全正文')
+  if (seed === 'board') {
     const item = p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Board native unknown', 'Board safe body')
     item.fields = { ...item.fields, nativeValues: { status: { kind:'single_select', optionId:'native-review', name:'Native review' } } }
     item.content.workItem.sourceNumber = { sourceName:'GitHub', scopeIdentity:{namespace:'repository',id:'board'}, scopeName:'example/board',number:605 }
@@ -31,7 +35,9 @@ export async function createExecutionFixture({ seed } = {}) {
     item.fields={...item.fields,nativeValues:{...(target?{target:{kind:'date',date:target}}:{}),...(i===0||i===2?{iteration:{kind:'iteration',iterationId:'timeline-'+i,title:'Timeline sprint',startDate:'2026-11-09',durationDays:i===0?7:0}}:{})}}
   }
   if (seed === 'query') for (let i=0;i<120;i++) p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Query '+String(i).padStart(3,'0'), 'Safe query body'); if (seed === 'overview') p.planning.addItem(p.planning.state.projects[0].ref, 'issue', 'Overview gap', 'Gap fixture'); if (seed === 'read') p.planning.addItem(p.planning.state.projects[0].ref, 'draft', '规划项 draft-1', 'draft-1 正文占位'); return p }
-  const mounted = [], byDomain = {}, providers = make(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: { projectNodeId: { kind: 'string', required: false, pattern: '.+', maxLength: 100 } }, create: async ({ binding }) => { const provider = seed === 'overview' ? providers[binding.domain] : make({ [binding.domain]: { bindingId: binding.id } })[binding.domain]; byDomain[binding.domain] = provider; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
+  const mounted = [], byDomain = {}, providers = make(), catalog = catalogOf([{ definition: FAKE_PROVIDER_DEFINITION, configuration: { projectNodeId: { kind: 'string', required: false, pattern: '.+', maxLength: 100 } }, create: async ({ binding }) => { const provider = seed === 'overview' ? providers[binding.domain] : make({ [binding.domain]: { bindingId: binding.id } }, binding.workspaceId)[binding.domain]
+    if (seed === 'projects' && binding.domain === 'planning' && binding.workspaceId === projectB) provider.addItem(provider.state.projects[0].ref, 'issue', '项目 B 专属条目', 'B 安全正文')
+    byDomain[binding.domain] = provider; if (binding.domain === 'execution') mounted.push(provider); return provider } }])
   const workspaceId = '00000000-0000-4000-8000-000000000282'
   const storage = createSqliteStorage(dataPath, hostStoragePolicy(catalog))
   let host, installed
@@ -65,6 +71,12 @@ export async function createExecutionFixture({ seed } = {}) {
     } else if (seed !== 'query' && seed !== 'board' && seed !== 'timeline') { await core.commands.startWork({ task: 'Synthetic explicit task', workItemId: itemId, repositoryId: 'repo-alpha', actor: { kind: 'human' }, idempotencyKey: 'fixture-start' })
     const id = contextIdFor(workspaceId, itemId, 'repo-alpha'); runId = runIdFor(id)
     await storage.putExecutionRun({ ...(await storage.getExecutionRun(runId)), fallback: true }) }
+  }
+  if (seed === 'projects') {
+    // 第二个项目只有本地行 + 规划挂载；打开时由 Host 用同一 catalog 重新装配，不共享 A 的 Provider 实例。
+    await storage.putWorkspace({ id: projectB, name: '项目 B', statusPolicy: 'provider_authoritative' })
+    await storage.putProviderBinding({ id: projectBBinding, workspaceId: projectB, domain: 'planning', implementationKey: FAKE_PROVIDER_DEFINITION.implementationKey, enabled: true, isDefault: true })
+    await storage.putBindingConfiguration({ ref: { workspaceId: projectB, bindingId: projectBBinding, domain: 'planning' }, configuration: { projectNodeId: providers.planning.state.projects[0].ref.externalId } })
   }
   await rebuild()
   return { dataPath, workspaceId, itemId, runId, storage, get host() { return host }, get installed() { return installed }, rebuild, mounted, byDomain, close: async () => { await installed.dispose(); await host.dispose(); storage.close(); await rm(root, { recursive: true, force: true }) } }

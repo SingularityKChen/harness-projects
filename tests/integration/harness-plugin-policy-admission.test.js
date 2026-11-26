@@ -12,7 +12,7 @@ import { createHostComposition } from '../../apps/harness-plugin/src/host-compos
 import { installHostRemote } from '../../apps/harness-plugin/src/remote.ts'
 import { apply as applyHost } from '../../apps/harness-plugin/src/host.ts'
 import { PROVIDER_CATALOG, hostStoragePolicy } from '../../apps/harness-plugin/src/host-providers.ts'
-import { WORKSPACE, HANDLE, seed, seedWorkspace, seedPlanning, replayFetch } from './fixtures/host-seed.js'
+import { WORKSPACE, HANDLE, dump, seed, seedWorkspace, seedPlanning, replayFetch } from './fixtures/host-seed.js'
 
 const actor = { kind: 'user' }, message = '当前 Core Host 不支持此已存规划策略；原数据库保留，请停止使用并等待支持该策略的版本。'
 const turn = () => new Promise(resolve => setImmediate(resolve))
@@ -179,6 +179,22 @@ for (const policy of ['host_authoritative', 'manual_only']) test(`policy replace
   }
   assert.equal(after.files['profile-config.json'], before.files['profile-config.json']); assert.deepEqual(after.schema, before.schema); assert.equal(after.generation, before.generation)
   await installed.dispose(); await bounded(host.dispose()); assert.equal(h.clock.live.size, 0); assert.deepEqual(h.replay.misses, [])
+})
+
+test('opening an unsupported workspace is a scoped not_supported rejection that keeps the current Host and rows', async t => {
+  const h = await fixture(t), target = 'unsupported-open-target'
+  const writing = createSqliteStorage(h.dataPath, hostStoragePolicy(PROVIDER_CATALOG))
+  try { await writing.putWorkspace({ id: target, name: 'Unsupported target', statusPolicy: 'manual_only' }) } finally { writing.close() }
+  const host = await createHostComposition(h.options)
+  t.after(() => host.dispose())
+  const controller = host.controller, timers = h.clock.live.size, before = dump(h.dataPath)
+  const opened = await host.call('openWorkspace', { workspaceId: target })
+  assert.deepEqual(JSON.parse(JSON.stringify(opened)), { state: 'failed', requestedWorkspaceId: target, activeWorkspaceId: WORKSPACE,
+    error: { code: 'not_supported', message: '当前 Host 不支持此项目已存的规划策略；原数据库保留，当前项目保持不变。', recovery: 'manual_execution', retryable: false } })
+  assert.equal(host.controller, controller, '失败的作用域打开不得替换当前装配')
+  assert.equal(h.clock.live.size, timers, '失败的作用域打开不得停止或重启当前调度器')
+  assert.ok((await host.call('baseline', {})).entities.length > 0, 'A 仍可读且未降级')
+  assert.deepEqual(dump(h.dataPath), before, '拒绝发生在任何写入之前')
 })
 
 test('ordinary candidate failure with a lookalike error keeps the old graph and same-key recovery', async t => {

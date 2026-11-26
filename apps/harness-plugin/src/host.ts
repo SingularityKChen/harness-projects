@@ -10,8 +10,6 @@ export const inject = ['typert']
 
 export interface HostCredentialService { resolve(reference: string): Promise<{ value: string; source: string } | undefined> }
 
-const WORKSPACE_ID = '00000000-0000-4000-8000-000000000228' as never
-
 /** 凭据适配器：每次解析都经 `ctx.get` 取当前活跃的服务，服务与值都不缓存；服务缺席时该次解析以 `CredentialServiceUnavailable` 拒绝。 */
 function credentialResolverOf(ctx: { get?: (name: string) => unknown }): (reference: string) => Promise<string | undefined> {
   return async (reference) => {
@@ -58,7 +56,7 @@ export async function apply(ctx: HostRemoteContext & RootDisposalContext & { eff
     acquisitions.push(resolving)
     const location = await lifetime.wait(() => resolving, Infinity)
     const opening = createHostComposition({
-      owner, ...location, workspaceId: WORKSPACE_ID, catalog: PROVIDER_CATALOG,
+      owner, ...location, catalog: PROVIDER_CATALOG,
       sessionController: () => ctx.get?.('sessionController'),
       forceSessionStartFailure: process.env.HARNESS_PROJECTS_FORCE_SESSION_START_FAILURE === '1',
       resolveCredential: credentialResolverOf(ctx),

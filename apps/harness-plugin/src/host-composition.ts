@@ -2,22 +2,25 @@ export type { BindRepositoryInput, CommandResult } from '@harness-projects/contr
 import type { ExternalObjectRef, PlanningProvider, ProviderPlanningFieldDefinition, Storage, WorkspacePlanningMappingRecord } from '@harness-projects/capabilities'
 import { CapabilityKey } from '@harness-projects/capabilities'
 import path from 'node:path'
-import { createWorkspaceSetup, composeCore, unavailableCore, createPlanningReconciler, type PlanningReconciler, type PlanningReconcilerTimers, type CoreApi } from '@harness-projects/core'
+import { createWorkspaceSetup, composeCore, unavailableCore, createPlanningReconciler, type CoreProviderTable, type PlanningReconciler, type PlanningReconcilerTimers, type CoreApi } from '@harness-projects/core'
 import { createConnectionCommands, createSetupCommands, type CommandResult, createController, streamWorkspace, type Controller, type WireStreamFrame } from '@harness-projects/controller'
 import { createSqliteStorage, type SqliteStorage } from '@harness-projects/storage-sqlite'
 import type { ExecutionContextDTO, WorkspaceSetupDTO } from '@harness-projects/client'
-import { StatusPolicy, ProjectErrorCode, projectError, type ProjectError, type ConnectorAccountId, type WorkspaceId, type WorkspacePlanningFieldMapping } from '@harness-projects/domain'
+import { StatusPolicy, ProjectErrorCode, newWorkspaceId, projectError, type ProjectError, type ConnectorAccountId, type WorkspaceId, type WorkspacePlanningFieldMapping } from '@harness-projects/domain'
 import { preparePrivateProjectData } from './host-private-data.ts'
 import { createDiagnosticLog, describeError } from './host-diagnostics.ts'
 import { createHostPlanningMapping } from './host-planning-mapping.ts'
 import { createPlanningLifetime, drainUntil } from './host-planning-lifetime.ts'
-import { dispatchOf, OPERATIONS, type UnaryHandlers, type UnaryName } from './host-operations.ts'
+import { dispatchOf, OPERATIONS, WORKSPACE_SWITCHED, type UnaryHandlers, type UnaryName } from './host-operations.ts'
 import { preflightRepositoryBinding, repositoryHead } from './host-repository-binding.ts'
 import { preflightPlanningConnection, ciAccountStamp, type CiReadObservation, githubViewer, HOST_SECRET_HANDLES, hostStoragePolicy, restoreProviders, type DisabledBinding, type ProviderCatalog } from './host-providers.ts'
 
 /** Controller 失败上 wire 的唯一文案：原因只写进宿主诊断日志。 */
 const OPERATION_FAILED = 'harness-projects：操作失败，原因已写入宿主诊断日志'
 
+const MISSING_WORKSPACE = '00000000-0000-4000-8000-000000000000' as WorkspaceId
+const OPEN_NOT_SUPPORTED = '当前 Host 不支持此项目已存的规划策略；原数据库保留，当前项目保持不变。'
+const OPEN_UNAVAILABLE = '项目暂时无法打开，请重新读取当前项目。'
 /** Host 支持集拒绝与可恢复的普通装配失败分开；不将持久策略原文带出边界。 */
 class HostPolicyAdmissionError extends Error {
   readonly code = ProjectErrorCode.NotSupported
@@ -32,7 +35,8 @@ export interface HostCompositionOptions {
   readonly owner?: { readonly signal: AbortSignal; stop(error?: unknown): number }
   readonly dataPath: string
   readonly rawProfile?: string
-  readonly workspaceId: WorkspaceId
+  /** 显式初始目标：测试与嵌入方兼容；缺省时按「恰好一个已存工作区」选择，否则空装配。 */
+  readonly workspaceId?: WorkspaceId
   readonly catalog: ProviderCatalog
   /** 句柄 → 凭据值；每次 provider 操作才调用，Host 不缓存。 */
   readonly resolveCredential: (handle: string) => Promise<string | undefined>
@@ -55,7 +59,10 @@ export interface HostComposition {
   readonly activationError: ProjectError | undefined
   /** 运行期无法构造而被禁用的挂载；只在内存，不写库。 */
   readonly disabled: readonly DisabledBinding[]
-  call(name: UnaryName<typeof OPERATIONS>, input: unknown): Promise<unknown>
+  /** 本次调用成功确认装配后，在串行区内同步确认 generation；Host 内部契约，不进入 wire。 */
+  call(name: UnaryName<typeof OPERATIONS>, input: unknown, acknowledge?: (generation: string) => void): Promise<unknown>
+  /** 当前装配的 Core generation；per-peer 请求栅栏用它判断已下发的流是否过期。 */
+  currentGeneration(): string | undefined
   /** 一代宿主流（#276）：每次 `next()` 都经 `guarded`；`signal` 中止即正常结束。 */
   watch(signal: AbortSignal): AsyncIterable<WireStreamFrame>
   /** 同步撤销读准入；Host 在 remote drain 前调用。 */
@@ -87,7 +94,8 @@ async function finishChangeRequest(controller: Controller, scope: { workItemId: 
 }
 
 /** 工作区身份来自 Host；执行记录只在读取前后均可见的工作项上投影允许字段。 */
-const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness', targetError: CoreApi['queries']['getStartWorkTargetError']): UnaryHandlers<Pick<typeof OPERATIONS, 'listChangeRequestAssigneeOptions' | 'getChangeRequestAssigneeOperation' | 'addChangeRequestAssignees' | 'resumeChangeRequestAssignees' | 'getIssueClosingLinks' | 'refreshIssueDependencies' | 'refreshIssueClosingLinks' | 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts' | 'createChangeRequest' | 'getChangeRequestIssueOptions' | 'getChangeRequestOperation' | 'resumeChangeRequest'>, Controller> => ({
+type HandlerAssembly = { readonly workspaceId: WorkspaceId; readonly executionMode: 'manual' | 'harness'; readonly targetError: CoreApi['queries']['getStartWorkTargetError'] }
+const handlersFor = ({ workspaceId, executionMode, targetError }: HandlerAssembly): UnaryHandlers<Pick<typeof OPERATIONS, 'listChangeRequestAssigneeOptions' | 'getChangeRequestAssigneeOperation' | 'addChangeRequestAssignees' | 'resumeChangeRequestAssignees' | 'getIssueClosingLinks' | 'refreshIssueDependencies' | 'refreshIssueClosingLinks' | 'baseline' | 'refreshPlanning' | 'bootstrapWorkspace' | 'getExecutionContext' | 'refreshExecutionRun' | 'getStartWorkOptions' | 'startWork' | 'getDeliveryProjection' | 'refreshDeliveryFacts' | 'createChangeRequest' | 'getChangeRequestIssueOptions' | 'getChangeRequestOperation' | 'resumeChangeRequest'>, Controller> => ({
   listChangeRequestAssigneeOptions: async (controller, input) => {
     try { return { workspaceId, ...await controller.commands.listChangeRequestAssigneeOptions(input) } }
     catch (error) {
@@ -104,7 +112,7 @@ const handlersFor = (workspaceId: WorkspaceId, mode: () => 'manual' | 'harness',
   refreshIssueClosingLinks: (controller, { actorRef, ...input }) => controller.commands.refreshIssueClosingLinks(input, { actorRef }),
   getStartWorkOptions: async (controller, input) => {
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item') throw new Error('工作项不可见')
-    return { workspaceId, workItemId: input.workItemId, executionMode: mode(), repositories: await controller.commands.validateStartWork(input.workItemId) }
+    return { workspaceId, workItemId: input.workItemId, executionMode, repositories: await controller.commands.validateStartWork(input.workItemId) }
   },
   startWork: async (controller, input) => {
     if ((await controller.queries.getEntity(input.workItemId))?.content.contentKind !== 'work_item'
@@ -212,8 +220,13 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     } })
   }, Infinity)
   let closed = false
-  type Assembly = { mapping?: ReturnType<typeof createHostPlanningMapping>; controller: Controller; targetError: CoreApi['queries']['getStartWorkTargetError']; disabled: readonly DisabledBinding[]; lifetime: ReturnType<typeof createPlanningLifetime>; reconciler?: PlanningReconciler; leases: Set<Promise<unknown>>; retired?: boolean; cache: Map<string, object>; executionMode: 'manual' | 'harness' }
+  type Assembly = { mapping?: ReturnType<typeof createHostPlanningMapping>; controller: Controller; targetError: CoreApi['queries']['getStartWorkTargetError']; disabled: readonly DisabledBinding[]; lifetime: ReturnType<typeof createPlanningLifetime>; reconciler?: PlanningReconciler; leases: Set<Promise<unknown>>; retired?: boolean; cache: Map<string, object>; executionMode: 'manual' | 'harness'; workspaceId: WorkspaceId | undefined; generation: string; dispatch?: Dispatch }
+  type Dispatch = (controller: Controller, name: UnaryName<typeof OPERATIONS>, input: unknown) => Promise<unknown>
+  const SETTINGS_OPERATIONS = new Set(['setPlanningMapping', 'connectAccount', 'bindPlanningSource', 'bindRepository', 'installExecutionBindings'])
+  const READ_AFTER_STOP = new Set(['getIssueClosingLinks', 'refreshIssueClosingLinks', 'refreshIssueDependencies', 'getChangeRequestIssueOptions'])
   const assemblies = new Set<Assembly>()
+  /** 本实例内同 idempotencyKey 复用首次决定的目标 id；跨 Host 重启的确定性派生留给 #692。 */
+  const createTargets = new Map<string, WorkspaceId>()
   let developmentCache = new Map<string, object>()
   let current: Assembly
   let barrier: Promise<void> | undefined, epoch = 0, tail: Promise<unknown> = Promise.resolve(), activeFingerprint = ''
@@ -235,21 +248,26 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
     void task.finally(() => assembly.leases.delete(task)).catch(() => undefined)
     return track(task)
   }
-  const read = async <T>(load: (assembly: Assembly) => Promise<T>): Promise<T> => {
+  const readFor = async <T>(load: (assembly: Assembly) => Promise<T>, check?: (assembly: Assembly) => void): Promise<T> => {
     for (;;) {
       while (barrier) await barrier
       if (closed) throw new Error('host 已关闭')
       const assembly = current, version = epoch
+      check?.(assembly)
       const result = await lease(assembly, () => load(assembly))
       if (version === epoch && assembly === current) return result
     }
   }
-  const source = { baseline: () => read(async (assembly) => {
+  /** unary 用：同 workspace 的 epoch 变化重试，跨 workspace 以固定文案中止。 */
+  const readAdmitted = <T>(admitted: WorkspaceId | undefined, load: (assembly: Assembly) => Promise<T>): Promise<T> =>
+    readFor(load, (assembly) => { if (assembly.workspaceId !== admitted) throw new Error(WORKSPACE_SWITCHED) })
+  const baselineOf = async (assembly: Assembly) => {
     const snapshot = await assembly.controller.baseline()
     if (!activationError) return snapshot
     const stale = { freshness: 'degraded' as const, reason: activationError.code }
     return { ...snapshot, source: { ...snapshot.source, ...stale }, entities: snapshot.entities.map((entity) => ({ ...entity, source: { ...entity.source, ...stale } })) }
-  }) }
+  }
+  const source = { baseline: () => readFor(baselineOf) }
 
   const dispose = (deadline = stopDeadline ?? options.owner?.stop() ?? Date.now() + 1000): Promise<void> => disposal ??= (async () => {
     stop()
@@ -283,21 +301,21 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       },
       verifyProject: (input) => preflightPlanningConnection(storage!, input.accountId, input.configuration.projectNodeId, fetch, resolveCredential),
     })
-    const fingerprint = async () => JSON.stringify([await storage!.getWorkspacePlanningMapping(options.workspaceId), await storage!.getWorkspace(options.workspaceId), await Promise.all((await storage!.listProviderBindings(options.workspaceId)).map(async (mount) => {
+    const fingerprint = async (workspaceId?: WorkspaceId) => workspaceId === undefined ? JSON.stringify([undefined, undefined, []]) : JSON.stringify([await storage!.getWorkspacePlanningMapping(workspaceId), await storage!.getWorkspace(workspaceId), await Promise.all((await storage!.listProviderBindings(workspaceId)).map(async (mount) => {
       const accountId = await storage!.getProviderBindingAccount(mount.id)
-      const configuration = options.catalog.has(mount.implementationKey) ? await storage!.getBindingConfiguration({ workspaceId: options.workspaceId, bindingId: mount.id, domain: mount.domain }) : undefined
+      const configuration = options.catalog.has(mount.implementationKey) ? await storage!.getBindingConfiguration({ workspaceId, bindingId: mount.id, domain: mount.domain }) : undefined
       return [[mount.id, mount.domain, mount.implementationKey, mount.enabled], configuration, accountId === undefined ? undefined : await storage!.getConnectorAccount(accountId)]
     }))])
-    const assemble = async (ci?: { observation: CiReadObservation; bindingId: import('@harness-projects/domain').ProviderBindingId }): Promise<Assembly> => {
-      const workspace = await storage!.getWorkspace(options.workspaceId)
+    const assemble = async (workspaceId: WorkspaceId | undefined, ci?: { observation: CiReadObservation; bindingId: import('@harness-projects/domain').ProviderBindingId }): Promise<Assembly> => {
+      const workspace = workspaceId === undefined ? undefined : await storage!.getWorkspace(workspaceId)
       if (workspace !== undefined && workspace.statusPolicy !== StatusPolicy.ProviderAuthoritative) throw new HostPolicyAdmissionError()
       if (closed) throw new Error('host 已关闭')
       io ??= createPlanningLifetime(options.planningReadTimeoutMs)
       const lifetime = createPlanningLifetime(options.planningReadTimeoutMs)
-      const assembly: Assembly = { controller: undefined!, targetError: undefined!, disabled: [], lifetime, leases: new Set(), cache: new Map(developmentCache), executionMode: 'manual' }
+      const assembly: Assembly = { controller: undefined!, targetError: undefined!, disabled: [], lifetime, leases: new Set(), cache: new Map(developmentCache), executionMode: 'manual', workspaceId, generation: '' }
       assemblies.add(assembly)
       try {
-        const { table, disabled } = workspace === undefined ? { table: {}, disabled: [] } : await restoreProviders(storage!, workspace.id, options.catalog, {
+        const { table, disabled } = workspace === undefined ? { table: {} as CoreProviderTable, disabled: [] as readonly DisabledBinding[] } : await restoreProviders(storage!, workspace.id, options.catalog, {
           // 解析失败（例如宿主凭据服务缺席）只留允许名单字段；provider 随后把它归类为结构化 unavailable，不带原文。
           ...(ci ? { ci } : {}),
           sessionController: () => { lifetime.assertActive(); return options.sessionController?.() },
@@ -318,15 +336,15 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
           ...(table.delivery === undefined ? {} : { delivery: lifetime.wrap(table.delivery, track) }),
           ...(table.execution === undefined ? {} : { execution: lifetime.wrap(table.execution, track) }),
           ...(table.executionFallback === undefined ? {} : { executionFallback: lifetime.wrap(table.executionFallback, track) }), storage: storage! }
-        assembly.mapping = createHostPlanningMapping(storage!, options.workspaceId, providers.planning)
         const mapping = workspace === undefined ? {} : await loadPlanningMapping(storage!, workspace.id, providers.planning, (event) => log.write(event, {}))
+        if (workspace !== undefined) assembly.mapping = createHostPlanningMapping(storage!, workspace.id, providers.planning)
         lifetime.assertActive()
         // 空数据根：不向 Core 传 storage，不写任何行；工作区的创建属于挂载写者（#127、#131）。
         const core: CoreApi = workspace === undefined ? unavailableCore('工作区尚未创建') : await composeCore({
           workspace: { id: workspace.id, name: workspace.name, statusPolicy: workspace.statusPolicy, ...mapping },
           providers, diagnostics,
         })
-        const controller = createController(core, { workspaceRevision: () => storage!.currentRevision(options.workspaceId) })
+        const controller = createController(core)
         assembly.controller = controller; assembly.targetError = core.queries.getStartWorkTargetError; assembly.disabled = disabled
         const start = (await controller.baseline()).capabilities.find((entry) => entry.key === 'execution.run.start')
         assembly.executionMode = table.execution?.definition.implementationKey === 'execution.harness' && ['available', 'degraded'].includes(start?.access ?? '') ? 'harness' : 'manual'
@@ -335,11 +353,15 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
             intervalMs, diagnostics, ...(options.planningTimers === undefined ? {} : { timers: options.planningTimers }),
           })
         }
+        assembly.generation = (await controller.baseline()).generation
         return assembly
       } catch (error) { retire(assembly); throw error }
     }
-    current = await assemble(); io!.assertActive(); developmentCache = current.cache; activeFingerprint = await fingerprint(); io!.assertActive(); current.reconciler?.start()
-    const configure = <T>(run: () => Promise<CommandResult<T>>, activate = true, confirmPlanning = false, ci?: { observation: CiReadObservation; current(): Promise<boolean>; isCurrent(): boolean; bindingId: import('@harness-projects/domain').ProviderBindingId | undefined }): Promise<CommandResult<T> & { activationError?: ProjectError }> => {
+    // 启动选择：显式初始目标 > 唯一已存工作区 > 唯一受支持工作区（存在不支持策略的遗留行时仍打开唯一可用项目）> 空装配（Home）。
+    const stored = await storage!.listWorkspaces(), supported = stored.filter((row) => row.statusPolicy === StatusPolicy.ProviderAuthoritative)
+    current = await assemble(options.workspaceId ?? (stored.length === 1 ? stored[0]!.id : supported.length === 1 ? supported[0]!.id : undefined))
+    io!.assertActive(); developmentCache = current.cache; activeFingerprint = await fingerprint(current.workspaceId); io!.assertActive(); current.reconciler?.start()
+    const serialize = <T>(work: (old: Assembly) => Promise<T>): Promise<T> => {
       const task = tail.then(async () => {
         if (closed) throw new Error('host 已关闭')
         let release!: () => void; barrier = new Promise<void>((resolve) => { release = resolve }); epoch++
@@ -347,30 +369,7 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         try {
           await Promise.allSettled([...old.leases])
           if (closed) throw new Error('host 已关闭')
-          const result = await run()
-          if (result.writeState === 'local_only' && activate) {
-            try {
-              const desired = await fingerprint()
-              if (desired !== activeFingerprint || ci) {
-                old.reconciler?.stop()
-                if (ci && !await ci.current()) throw new Error('仓库验证已失效')
-                const candidate = await assemble(ci?.bindingId ? { observation: ci.observation, bindingId: ci.bindingId } : undefined)
-                if (closed || (ci && (!await ci.current() || await fingerprint() !== desired))) { retire(candidate); throw new Error('仓库验证已失效') }
-                let activatedFingerprint: string
-                try { activatedFingerprint = await fingerprint(); if (ci && !ci.isCurrent()) throw new Error('仓库验证已失效'); candidate.reconciler?.start() } catch (error) { retire(candidate); throw error }
-                current = candidate; developmentCache = candidate.cache; activeFingerprint = activatedFingerprint; retire(old)
-              }
-              activationError = undefined
-            } catch (error) {
-              log.write('activationFailed', describeError(error))
-              const unsupportedPolicy = error instanceof HostPolicyAdmissionError
-              if (unsupportedPolicy) stop()
-              activationError = projectError(ProjectErrorCode.Unavailable, unsupportedPolicy ? '本地配置已提交，当前 Host 已停止' : '本地配置已提交，装配尚未激活')
-              return { ...result, activationError }
-            }
-          }
-          if (confirmPlanning && result.writeState === 'local_only' && old === current && !activationError) await current.controller.commands.refreshPlanning({ actorRef: { kind: 'user' } })
-          return result
+          return await work(old)
         } finally {
           if (!closed) try { current.reconciler?.start() } catch (error) { log.write('schedulerResumeFailed', describeError(error)) }
           barrier = undefined; release()
@@ -378,26 +377,72 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
       })
       tail = task.catch(() => undefined); return track(task)
     }
-    const getWorkspaceSetup = () => read(async (assembly): Promise<WorkspaceSetupDTO> => {
+    const activate = async (target: WorkspaceId, old: Assembly, desired: string, ci?: { observation: CiReadObservation; current(): Promise<boolean>; isCurrent(): boolean; bindingId: import('@harness-projects/domain').ProviderBindingId | undefined }): Promise<void> => {
+      if (ci === undefined && desired === activeFingerprint && current.workspaceId === target) return
+      old.reconciler?.stop()
+      if (ci && !await ci.current()) throw new Error('仓库验证已失效')
+      const candidate = await assemble(target, ci?.bindingId ? { observation: ci.observation, bindingId: ci.bindingId } : undefined)
+      try {
+        if (ci && (!await ci.current() || await fingerprint(target) !== desired)) throw new Error('仓库验证已失效')
+        const activatedFingerprint = await fingerprint(target)
+        if (ci && !ci.isCurrent()) throw new Error('仓库验证已失效')
+        candidate.reconciler?.start()
+        current = candidate; developmentCache = candidate.cache; activeFingerprint = activatedFingerprint; repositoryValidation++; retire(old)
+      } catch (error) { retire(candidate); throw error }
+    }
+    const configure = <T>(workspaceId: WorkspaceId, run: () => Promise<CommandResult<T>>, acknowledge?: (generation: string) => void, activateAssembly = true, confirmPlanning = false, ci?: { observation: CiReadObservation; current(): Promise<boolean>; isCurrent(): boolean; bindingId: import('@harness-projects/domain').ProviderBindingId | undefined }, allowSwitch = false): Promise<CommandResult<T> & { activationError?: ProjectError }> => serialize(async (old) => {
+      // 切换窗口内到达的设置写属于已退出的旧作用域：直接作用域拒绝，不写库、不装配、不写全局 activationError（#691）。
+      if (!allowSwitch && workspaceId !== MISSING_WORKSPACE && current.workspaceId !== workspaceId) return { writeState: 'conflict' as const, saving: false, authoritative: false, value: undefined, error: projectError(ProjectErrorCode.Conflict, WORKSPACE_SWITCHED) }
+      const result = await run()
+      if (result.writeState === 'local_only' && activateAssembly) {
+        try {
+          await activate(workspaceId, old, await fingerprint(workspaceId), ci)
+          activationError = undefined
+        } catch (error) {
+          log.write('activationFailed', describeError(error))
+          const unsupportedPolicy = error instanceof HostPolicyAdmissionError
+          if (unsupportedPolicy) stop()
+          activationError = projectError(ProjectErrorCode.Unavailable, unsupportedPolicy ? '本地配置已提交，当前 Host 已停止' : '本地配置已提交，装配尚未激活')
+          return { ...result, activationError }
+        }
+      }
+      if (confirmPlanning && result.writeState === 'local_only' && old === current && !activationError) await current.controller.commands.refreshPlanning({ actorRef: { kind: 'user' } })
+      if (result.writeState === 'local_only' && activateAssembly && !activationError) acknowledge?.(current.generation)
+      return result
+    })
+    const openWorkspace = (target: WorkspaceId, acknowledge?: (generation: string) => void) => serialize(async (old) => {
+      if (await storage!.getWorkspace(target) === undefined) return { state: 'failed' as const, error: projectError(ProjectErrorCode.NotFound, '项目不存在，请重新读取') }
+      try {
+        await activate(target, old, await fingerprint(target))
+        activationError = undefined
+        acknowledge?.(current.generation)
+        return { state: 'activated' as const }
+      } catch (error) {
+        log.write('transitionFailed', describeError(error))
+        return { state: 'failed' as const, error: error instanceof HostPolicyAdmissionError ? projectError(ProjectErrorCode.NotSupported, OPEN_NOT_SUPPORTED) : projectError(ProjectErrorCode.Unavailable, OPEN_UNAVAILABLE) }
+      }
+    })
+    const getWorkspaceSetup = async (assembly: Assembly): Promise<WorkspaceSetupDTO> => {
       let workspace: WorkspaceSetupDTO['workspace'] = null, bindingId: string | undefined, projectNodeId: string | undefined
       let activation: Pick<WorkspaceSetupDTO, 'activationError' | 'executionInstalled'> = activationError === undefined ? {} : { activationError: projectError(activationError.code, '本地配置已提交，装配尚未激活') }
       const failure = (reason?: string) => projectError(Object.values(ProjectErrorCode).some((code) => code === reason) ? reason as ProjectErrorCode : ProjectErrorCode.Unavailable, '规划项目尚未确认，请按恢复动作重试')
       try {
-        const stored = await storage!.getWorkspace(options.workspaceId)
+        const stored = assembly.workspaceId === undefined ? undefined : await storage!.getWorkspace(assembly.workspaceId)
         workspace = stored === undefined ? null : { id: stored.id, name: stored.name }
-        const executions = (await storage!.listProviderBindings(options.workspaceId)).filter((mount) => mount.domain === 'execution')
-        const active = await fingerprint() === activeFingerprint
+        if (stored === undefined) return { workspace, planning: { state: 'unbound' }, ...activation }
+        const bindings = await storage!.listProviderBindings(stored.id)
+        const executions = bindings.filter((mount) => mount.domain === 'execution')
+        const active = await fingerprint(stored.id) === activeFingerprint
         if (!activationError && active && assembly.executionMode === 'harness' && !assembly.disabled.some((mount) => mount.domain === 'execution')
           && executions.length === 2 && executions.some((mount) => mount.isDefault) && executions.some((mount) => !mount.isDefault)
           && executions.every((mount) => mount.enabled && mount.implementationKey === (mount.isDefault ? 'execution.harness' : 'execution.human'))) activation = { ...activation, executionInstalled: true }
-        if (workspace === null) return { workspace, planning: { state: 'unbound' }, ...activation }
-        const mount = (await storage!.listProviderBindings(options.workspaceId)).find((mount) => mount.enabled && mount.domain === 'planning')
+        const mount = bindings.find((mount) => mount.enabled && mount.domain === 'planning')
         if (mount === undefined) return { workspace, planning: { state: 'unbound' }, ...activation }
         bindingId = mount.id
-        const configuration = await storage!.getBindingConfiguration({ workspaceId: options.workspaceId, bindingId: mount.id, domain: 'planning' })
+        const configuration = await storage!.getBindingConfiguration({ workspaceId: stored.id, bindingId: mount.id, domain: 'planning' })
         const target = configuration?.configuration.projectNodeId
         if (typeof target === 'string' && target !== '') projectNodeId = target
-        const mapping = await storage!.getWorkspacePlanningMapping(options.workspaceId)
+        const mapping = await storage!.getWorkspacePlanningMapping(stored.id)
         const mappingOrigin = mapping?.bindingId === bindingId && mapping.projectExternalId === projectNodeId ? mapping.origin : undefined
         const snapshot = active ? await assembly.controller.baseline() : undefined
         const state = !active ? 'configured' : projectNodeId !== undefined && snapshot?.source.freshness === 'fresh' ? 'confirmed' : 'degraded'
@@ -407,45 +452,73 @@ export async function createHostComposition(options: HostCompositionOptions): Pr
         log.write('setupReadFailed', describeError(error))
         return { workspace, planning: workspace === null ? { state: 'unbound' } : { state: 'degraded', ...(bindingId === undefined ? {} : { bindingId }), ...(projectNodeId === undefined ? {} : { projectNodeId }) }, ...activation, error: failure() }
       }
-    })
-    const dispatch = dispatchOf<typeof OPERATIONS, Controller>(OPERATIONS, { ...handlersFor(options.workspaceId, () => current.executionMode, (id) => current.targetError(id)), baseline: () => source.baseline(), getWorkspaceSetup,
-      getPlanningMapping: () => read(async (assembly) => ({ ...await assembly.mapping!.load(), confirmed: await fingerprint() === activeFingerprint && (await assembly.controller.baseline()).source.freshness === 'fresh' })),
-      setPlanningMapping: (_controller, input) => configure(async () => {
-        const error = await current.mapping!.validate(input.expectedBindingId, input.expectedProjectExternalId, input.mapping)
-        return error ? { writeState: error.code === 'conflict' ? 'conflict' : 'failed', saving: false, authoritative: false, value: undefined, error } : setup.setPlanningMapping({ ...input, workspaceId: options.workspaceId })
-      }, true, true),
-      createWorkspace: (_controller, input) => configure(() => setup.createWorkspace({ ...input, workspaceId: options.workspaceId, statusPolicy: StatusPolicy.ProviderAuthoritative })),
-      connectAccount: (_controller, input) => configure(() => connection.connectAccount(input), false),
-      bindPlanningSource: (_controller, { projectNodeId, accountId, ...input }) => configure(() => connection.bindPlanningSource({ ...input, accountId: accountId as ConnectorAccountId, workspaceId: options.workspaceId, implementationKey: 'planning.github-projects', configuration: { projectNodeId } })),
-      installExecutionBindings: (_controller, input) => configure(() => setup.installExecutionBindings({ ...input, workspaceId: options.workspaceId })),
-      bindRepository: async (_controller, input) => {
-        const sequence = ++repositoryValidation, before = await fingerprint()
-        const checked = await io!.wait(() => preflightRepositoryBinding({ ...input, references: input.references.map((ref) => ({ ...ref, accountId: ref.accountId as ConnectorAccountId | undefined })), workspaceId: options.workspaceId }, storage!, options.catalog, { sequence, worktreesDir, fetch, resolveCredential }), Infinity)
-        if ('writeState' in checked) return checked
-        const accountId = checked.input.references.find(ref => ref.implementationKey === 'github-actions')!.accountId!
-        const ci = { observation: checked.ci, bindingId: undefined as import('@harness-projects/domain').ProviderBindingId | undefined,
-          isCurrent: () => !closed && checked.ci.sequence === repositoryValidation,
-          current: async () => ci.isCurrent() && ciAccountStamp(await storage!.getConnectorAccount(accountId)) === checked.ci.accountStamp
-            && await repositoryHead(checked.input.references.find(ref => ref.implementationKey === 'development.local-git')!.configuration!.repositoryPath as string) === checked.ci.commit && ci.isCurrent() }
-        return configure(async () => {
-          if (!await ci.current() || await fingerprint() !== before) return { writeState: 'failed' as const, saving: false, authoritative: false, value: undefined, error: projectError(ProjectErrorCode.Conflict, '仓库验证已失效，请重新验证') }
-          const result = await setup.bindRepository(checked.input)
-          ci.bindingId = result.value?.bindingIds[checked.input.references.findIndex(ref => ref.implementationKey === 'github-actions')]
-          return result
-        }, true, false, ci)
-      },
-    }, guarded)
+    }
+    const planningMappingOf = async (assembly: Assembly) => {
+      if (assembly.mapping === undefined || assembly.workspaceId === undefined) throw new Error('规划来源尚未配置')
+      return { ...await assembly.mapping.load(), confirmed: await fingerprint(assembly.workspaceId) === activeFingerprint && (await assembly.controller.baseline()).source.freshness === 'fresh' }
+    }
+    const dispatchFor = (assembly: Assembly, acknowledge?: (generation: string) => void): Dispatch => {
+      const workspaceId = assembly.workspaceId ?? MISSING_WORKSPACE
+      return dispatchOf<typeof OPERATIONS, Controller>(OPERATIONS, {
+        ...handlersFor({ workspaceId, executionMode: assembly.executionMode, targetError: assembly.targetError }),
+        baseline: () => baselineOf(assembly),
+        getWorkspaceSetup: () => getWorkspaceSetup(assembly),
+        getPlanningMapping: () => planningMappingOf(assembly),
+        listWorkspaces: async () => {
+          const workspaces = await storage!.listWorkspaces()
+          return { activeWorkspaceId: current.workspaceId ?? null, workspaces: await Promise.all(workspaces.map(async (row) => ({
+            workspaceId: row.id, name: row.name,
+            planning: (await storage!.listProviderBindings(row.id)).some((mount) => mount.enabled && mount.domain === 'planning') ? 'bound' : 'none',
+            policy: row.statusPolicy === StatusPolicy.ProviderAuthoritative ? 'supported' : 'unsupported',
+          }))) }
+        },
+        openWorkspace: async (_controller, input) => {
+          const target = input.workspaceId as WorkspaceId, result = await openWorkspace(target, acknowledge)
+          return { ...result, requestedWorkspaceId: target, ...(result.state === 'activated' ? { activeWorkspaceId: target } : current.workspaceId === undefined ? {} : { activeWorkspaceId: current.workspaceId }) }
+        },
+        setPlanningMapping: (_controller, input) => configure(workspaceId, async () => {
+          const error = await assembly.mapping!.validate(input.expectedBindingId, input.expectedProjectExternalId, input.mapping)
+          return error ? { writeState: error.code === 'conflict' ? 'conflict' : 'failed', saving: false, authoritative: false, value: undefined, error } : setup.setPlanningMapping({ ...input, workspaceId })
+        }, acknowledge, true, true),
+        createWorkspace: (_controller, input) => {
+          const target = options.workspaceId ?? createTargets.get(input.idempotencyKey) ?? newWorkspaceId()
+          createTargets.set(input.idempotencyKey, target)
+          return configure(target, () => setup.createWorkspace({ ...input, workspaceId: target, statusPolicy: StatusPolicy.ProviderAuthoritative }), acknowledge, true, false, undefined, true)
+        },
+        connectAccount: (_controller, input) => configure(workspaceId, () => connection.connectAccount(input), acknowledge, false),
+        bindPlanningSource: (_controller, { projectNodeId, accountId, ...input }) => configure(workspaceId, () => connection.bindPlanningSource({ ...input, accountId: accountId as ConnectorAccountId, workspaceId, implementationKey: 'planning.github-projects', configuration: { projectNodeId } }), acknowledge),
+        installExecutionBindings: (_controller, input) => configure(workspaceId, () => setup.installExecutionBindings({ ...input, workspaceId }), acknowledge),
+        bindRepository: async (_controller, input) => {
+          const sequence = ++repositoryValidation, before = await fingerprint(workspaceId)
+          const checked = await io!.wait(() => preflightRepositoryBinding({ ...input, references: input.references.map((ref) => ({ ...ref, accountId: ref.accountId as ConnectorAccountId | undefined })), workspaceId }, storage!, options.catalog, { sequence, worktreesDir, fetch, resolveCredential }), Infinity)
+          if ('writeState' in checked) return checked
+          const accountId = checked.input.references.find(ref => ref.implementationKey === 'github-actions')!.accountId!
+          const ci = { observation: checked.ci, bindingId: undefined as import('@harness-projects/domain').ProviderBindingId | undefined,
+            isCurrent: () => !closed && checked.ci.sequence === repositoryValidation,
+            current: async () => ci.isCurrent() && ciAccountStamp(await storage!.getConnectorAccount(accountId)) === checked.ci.accountStamp
+              && await repositoryHead(checked.input.references.find(ref => ref.implementationKey === 'development.local-git')!.configuration!.repositoryPath as string) === checked.ci.commit && ci.isCurrent() }
+          return configure(workspaceId, async () => {
+            if (!await ci.current() || await fingerprint(workspaceId) !== before) return { writeState: 'failed' as const, saving: false, authoritative: false, value: undefined, error: projectError(ProjectErrorCode.Conflict, '仓库验证已失效，请重新验证') }
+            const result = await setup.bindRepository(checked.input)
+            ci.bindingId = result.value?.bindingIds[checked.input.references.findIndex(ref => ref.implementationKey === 'github-actions')]
+            return result
+          }, acknowledge, true, false, ci)
+        },
+      }, guarded)
+    }
     // 启动期中止自行回收；交付后由 Host 先撤 remote、写 shutdown 诊断，再 dispose 关闭日志。
     options.owner?.signal.removeEventListener('abort', abortStartup)
     return {
       get controller() { return current.controller }, get disabled() { return current.disabled }, get activationError() { return activationError },
-      call: async (name, input) => {
+      currentGeneration: () => current.generation,
+      call: async (name, input, acknowledge) => {
         if (closed) throw new Error('host 已关闭')
-        if (['baseline', 'getWorkspaceSetup', 'getPlanningMapping', 'setPlanningMapping', 'createWorkspace', 'connectAccount', 'bindPlanningSource', 'bindRepository', 'installExecutionBindings'].includes(name)) return track(dispatch(current.controller, name, input))
-        while (barrier) await barrier
-        if (closed) throw new Error('host 已关闭')
-        const assembly = current; const result = await lease(assembly, () => dispatch(assembly.controller, name, input))
-        if (['getIssueClosingLinks', 'refreshIssueClosingLinks', 'refreshIssueDependencies', 'getChangeRequestIssueOptions'].includes(name) && (closed || assembly !== current || assembly.retired)) throw new Error('host 读取已失效')
+        const admitted = current, scope = (OPERATIONS[name] as { readonly scope?: 'host' | 'transition' }).scope
+        const dispatch = (assembly: Assembly) => (acknowledge ? dispatchFor(assembly, acknowledge) : assembly.dispatch ??= dispatchFor(assembly))(assembly.controller, name, input)
+        // host / transition 作用域同步捕获准入装配（切换在 handler 内串行）；其余 unary 读走准入重试。
+        if (scope !== undefined || SETTINGS_OPERATIONS.has(name)) return track(dispatch(admitted))
+        const result = await readAdmitted(admitted.workspaceId, (assembly) => dispatch(assembly))
+        if (READ_AFTER_STOP.has(name) && (closed || admitted !== current)) throw new Error('host 读取已失效')
         return result
       },
       watch: (signal) => {
