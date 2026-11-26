@@ -46,3 +46,30 @@ test('生产构建与 Host 不持有第二份 SQL 文件名清单：build.mjs �
     assert.doesNotMatch(source, /(['"\x60])[0-9A-Za-z_]+\.sql\1/, `${file} 仍持有 SQL 文件名清单；唯一 inventory 只能来自 @harness-projects/storage-sqlite`)
   }
 })
+
+/** #694：多项目能力不新增第二个迁移资产；两个工作区与重开都只复用同一个 001 基线。 */
+test('two project workspaces and a reopen keep the packed migration inventory at exactly one baseline asset', async () => {
+  const scratch = await mkdtemp(path.join(tmpdir(), 'harness-host-multiproject-'))
+  try {
+    const { packageDir, manifest } = await build({ outDir: scratch })
+    assert.deepEqual([...MIGRATIONS], ['001_init.sql'], '物理基线必须只有一个资产')
+    assert.deepEqual(manifest.files.filter((file) => file.startsWith('migrations/')).sort(), ['migrations/001_init.sql'], '安装件只携带一个迁移资产')
+    assert.deepEqual((await readdir(path.join(packageDir, 'migrations'))).sort(), ['001_init.sql'])
+    const dbPath = path.join(scratch, 'two-projects.sqlite')
+    const migrationsDir = path.join(packageDir, 'migrations')
+    const first = createSqliteStorage(dbPath, undefined, { migrationsDir })
+    // 直接写两行工作区：能力层没有新增 schema/迁移，多项目只是同一 workspace 表里的多行。
+    await first.putWorkspace({ id: '00000000-0000-4000-8000-0000000006a1', name: '项目 A', statusPolicy: 'provider_authoritative' })
+    await first.putWorkspace({ id: '00000000-0000-4000-8000-0000000006b2', name: '项目 B', statusPolicy: 'provider_authoritative' })
+    first.close()
+    const reopened = createSqliteStorage(dbPath, undefined, { migrationsDir })
+    try { assert.deepEqual((await reopened.listWorkspaces()).map((row) => row.name), ['项目 A', '项目 B'], '重开读回两个项目') } finally { reopened.close() }
+    const db = new DatabaseSync(dbPath)
+    try {
+      assert.deepEqual(db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map(({ version }) => version), [BASELINE_VERSION], '重开只记一次基线：不新增迁移资产')
+      assert.equal(db.prepare('SELECT count(*) AS n FROM workspace').get().n, 2, '两个项目只是 workspace 表的两行')
+    } finally { db.close() }
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
+})

@@ -200,3 +200,112 @@ PY
 按既有“有独立跟进的已接受项可关闭/Done”和本次具体推进请求，#545关闭/Done，只改变该测试单本身；#554继续承接原缺失身份、实际Host失败边界及安装恢复接受。#235也已逐条验收关闭/Done，#553随 #560工程交付关闭；指南开放owner不再列这两项。#561编号搜索、#564来源普通引用观察及 #565来源Issue关系选择已交付到当前源码，均不改变已接受安装候选 `64b58137` / `04af317e` 的证据身份；#556父项及安装接受仍开放，#544快照持久化与 #557负责人选择分别跟进。
 
 本段没有新真实模型请求、数据库修复或新安装。`64b58137` / Desktop `0.2.2-rc.1`的完整走查、`04af317e`的Markdown补验、Web历史复用分别保留身份。#236仍等待 #552文档评审/合并；#554/#304/#459/#73保持独立，#555保持Draft/unmerged。2026-10-29 UI框架计划保持原内容；2026-11-04本有界文档交付计划已归档completed。历史推进回执保存在运行态证据中。
+
+## 2026-11-26 多项目（#636 / #691–#694）工程与自动化验收证据
+
+本节记录 [多项目 ExecPlan](../exec-plan/completed/2026-11-25-multi-project-workspaces.md) 的 Batch 4 与 Batch R：真实 composed Host、SQLite、client、浏览器和 packed lib 的多项目隔离与生命周期。工程与自动化范围已收口归档；#698 使用 `Refs #694`，#694 原始的安装态人类走查、父项 #636 完整接受保持 **OPEN**。本节不改变上文历史人工接受的候选身份，也不表示 R1、#647 或看板 `Status` 获得接受。
+
+本批没有把插件装入人类 profile。packed 用例在隔离的测试 profile 中由 Node 加载真实安装件；它证明打包输入、安装件加载与持久化行为，不能代替可用受支持已安装 Host 的人类操作。
+
+### 候选与产物身份
+
+2026-11-26 SGT 的生产输入采用已公开的 PR #697 final head `4c666811787f24a00450389e8f0a9ff80222cb1b`；rebase merge 后的 main `8424ec76397a71b5685fac7db9c98e235e245661` 与其 tree 一致。打包与全量验证的实际检出是 #698 分支 `test/multiproject-isolation-qualification` 的 `6d02ac3c8fce936ff703878900b3346a310158bb`。以下命令已确认公开候选与实测树的生产输入 236 个 blobs 无差异，测试与文档差异不进入插件构建：
+
+```bash
+git diff --exit-code 4c666811787f24a00450389e8f0a9ff80222cb1b 6d02ac3c8fce936ff703878900b3346a310158bb -- apps packages package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json LICENSE
+```
+
+| 项目 | 2026-11-26 SGT 记录 |
+|---|---|
+| 插件版本 | `0.1.0-demo.1` |
+| 宿主线 | peer `@deepseek-ai/dsh-*` `~0.2.0-rc.2`、`@deepseek-ai/cordis` `~4.0.4` |
+| 工具链 | Node `26.13.1`、pnpm `10.28.2`、esbuild `0.28.2` |
+| packed tarball | 369610 bytes；SHA-256 `7895d024321816283f362403cbcad94bf0c70e06bb2e07dab34554b92bf39d99` |
+| `package/lib/index.js` | 773521 bytes；SHA-256 `f4af403101713d25fa7d1ffa3d4e5feba6f9a7f7d8a57e3dca2127744edd62f4` |
+| `package/lib/client.js` | 820506 bytes；SHA-256 `49e36de61441e6a35c325cbbd99b388595ed7a9158279f88d3e3e33f5ab763ae` |
+| 迁移清单 | 单资产 `migrations/001_init.sql`；`schema_migrations` 恰好一行，两项目重开不重复记账 |
+
+原 2026-11-25 记录的源 `7e8026ff`、tarball 368710 bytes / `d739bd2f…`、Host 773365 bytes 与 client 816964 bytes 是修复前历史产物。该候选身份与数值 **Superseded by 本节候选与产物身份（2026-11-26）**，不得移作当前接受证据。
+
+### 相对实施前基线的产物与依赖差量
+
+比较基线 `e7a84328a657612006cc1be328487413e14e0cb6` 与上面的公开生产候选；两次采用相同工具链、安装锁文件与 `build.mjs` 配置。单位均为 bytes，gzip 使用 level 9。
+
+| 产物 | 基线 raw / gzip9 | 当前 raw / gzip9 | 增量 raw / gzip9 |
+|---|---:|---:|---:|
+| Host `index.js` | 762250 / 174601 | 773521 / 177592 | +11271（1.48%）/ +2991（1.71%）|
+| client `client.js` | 801664 / 169105 | 820506 / 173494 | +18842（2.35%）/ +4389（2.60%）|
+| packed tarball | 361969 / — | 369610 / — | +7641（2.11%）/ — |
+
+esbuild 输入图：Host 从 112 到 113，只增加 `apps/harness-plugin/src/host-selection.ts`；client 从 338 到 340，只增加 `packages/ui/src/projects-home.ts` 与 `packages/ui/src/workspace-link.ts`，没有移除输入。计数包含被打入的第三方模块，不代表工作区包的数量。新增输入均为仓库内模块；没有新增运行时依赖或第三方包，所有 `package.json`、锁文件与 workspace 声明相对基线无变更，安装件 `manifest.dependencies` 两次均为 `{}`。
+
+外置集合保持不变：Host 为 `@deepseek-ai/cordis` 和 `node:async_hooks`、`node:child_process`、`node:crypto`、`node:fs`、`node:fs/promises`、`node:path`、`node:sqlite`、`node:url`、`node:util`；client 为 `react`、`react/jsx-runtime`。这些差量是构建体积与依赖图证据，不是安装性能测量。
+
+### 可重放的构建计量
+
+分别在检出上述基线与公开生产候选、且已运行 `pnpm install --frozen-lockfile` 的独立工作树根目录执行以下同一段命令。输出位于各检出的运行态 `.superpowers/multiproject-bundle/`；无需复制运行态文件到 `docs/`。
+
+```bash
+node --input-type=module <<'JS'
+import { build } from './apps/harness-plugin/scripts/build.mjs'
+import { readFile, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { gzipSync } from 'node:zlib'
+import { createHash } from 'node:crypto'
+import path from 'node:path'
+const outDir = path.resolve('.superpowers/multiproject-bundle')
+const built = await build({ outDir })
+execFileSync('pnpm', ['--dir', built.packageDir, 'pack', '--pack-destination', outDir])
+const metrics = { manifestDependencies: built.manifest.dependencies ?? {}, components: {} }
+for (const [name, file] of [['host', 'index.js'], ['client', 'client.js']]) {
+  const bytes = await readFile(path.join(built.packageDir, 'lib', file)), meta = built.metafiles[name]
+  metrics.components[name] = {
+    raw: bytes.length, gzip9: gzipSync(bytes, { level: 9 }).length,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    inputs: Object.keys(meta.inputs).sort(),
+    external: [...new Set(Object.values(meta.outputs).flatMap(o => o.imports.filter(i => i.external).map(i => i.path)))].sort(),
+  }
+}
+const packed = await readFile(path.join(outDir, 'harness-projects-app-harness-plugin-0.1.0-demo.1.tgz'))
+metrics.packed = { raw: packed.length, sha256: createHash('sha256').update(packed).digest('hex') }
+await writeFile(path.join(outDir, 'metrics.json'), JSON.stringify(metrics, null, 2) + '\n')
+console.log(JSON.stringify(metrics, null, 2))
+JS
+```
+
+期望：候选的 raw/gzip9/SHA-256 与上表一致；比较两次 `metrics.json` 的输入集合与 external 得到上述差量。归档时还回读实测 tarball 与两个 lib 的字节和摘要，未重新执行全量产品测试。
+
+### 自动化验证与实际结果
+
+2026-11-26 SGT，在检出 `test/multiproject-isolation-qualification`、head `6d02ac3c8fce936ff703878900b3346a310158bb` 的工作树 `.worktrees/mp-694-qualification` 根目录运行：
+
+```bash
+pnpm verify
+pnpm test:browser
+```
+
+两条命令均 exit 0：contract 1677 pass；integration 2465 total / 2431 pass / 34 平台条件 skip / 0 fail；E2E 226 pass；browser 119 pass / 0 skip / 0 fail。平台 skip 如实保留，没有称作全部无 skip。本次归档只改文档，复用这份已冻结生产树的验证，不把修复前的绿结果转移到新代码上。
+
+其中多项目矩阵为 6 例，执行归属为 2 例，组合浏览器为 3 例；packed 用例在干净 profile 上由真实 lib 建出 A/B、A→B→A、同 `dataPath` 重开恢复最后确认项目。安装件与迁移套件也包含在上述全量集成运行中。其单文件重放入口与期望见归档 ExecPlan 的 Batch 4；执行归属入口为 `node --test tests/integration/harness-plugin-multiproject-execution.test.js`，期望 manual/Harness 两例通过。
+
+### #636 八条验收组的自动化映射
+
+| #636 验收组 | composed / packed 证据 |
+|---|---|
+| 1 Create and resume | `harness-plugin-multiproject-matrix.test.js` 的同标识 A/B；`harness-plugin-artifact.test.js` 的 packed 两项目与重开 |
+| 2 Discover and navigate | `multiproject-qualification.test.js` 的 lifecycle、键盘 A↔B、焦点、320/640 与明暗用例 |
+| 3 Confirmed switch | lifecycle 的失败切换保留 A；矩阵的切换窗口排队写；已确认创建的读取恢复与 UI 交接 |
+| 4 Read/write isolation | 同 item/repository/idempotency 标识、held 旧读、排队写、B 激活后才释放的独特旧 provider 回复；后者比较释放前后完整数据库不变 |
+| 5 Execution and authority | `harness-plugin-multiproject-execution.test.js` 的 manual/Harness 两例：第一次切换前确认已有持久运行身份，A→B→A 保留 workspace/provider/issuer；pending Harness ack 在 A 排空、B 不见 A、返回刷新不再启动；Planning reconciler 退休由原矩阵覆盖 |
+| 6 Reopen and deep links | `workspace-restore.test.js` 与组合浏览器的重开/链接/损坏降级；真实 Gateway 双 peer；packed 重开；手动导航与连续链接目标使旧任务失效 |
+| 7 Product states and access | 0/1/多项目 Home、策略不支持拒绝、损坏偏好说明、窄宽/明暗；真实 Home baseline 清空旧项目设置；项目连接草稿清除与创建恢复草稿保留 |
+| 8 Evidence and closure | 本节候选身份、产物差量与验证命令；归档 ExecPlan 的完整证据、恢复路径与遗留人验 |
+
+复用的既有判别证据包括 `harness-plugin-host-catalogue.test.js`、`harness-plugin-host-switch.test.js`、`harness-plugin-host-reopen.test.js`、`harness-plugin-host-authority.test.js`、`harness-plugin-host-recomposition.test.js`、`projects-home.test.js`、`project-switch.test.js`、`workspace-restore.test.js`，以及安装件 a–f 形状契约和单资产迁移断言。没有复制第二份实现或为文档新增源码快照测试。
+
+### 仍开放的接受边界
+
+- **#694 / #636 的安装态人类走查未执行**：须在可用受支持已安装 Host 上完成创建/切换/重开、键盘/焦点、窄屏、明暗、错误与恢复；组合夹具或 packed 截图不能替代。工程归档不关闭这两个 issue。
+- **#647 的 Win11 硬件接受独立**：本机的 native Windows 用例条件跳过；CI 原生平台执行也不能替代该条款所需的真实硬件人类接受。
+- **R1（#459/#73）与看板 `Status` 接受独立**：工程验证不构成发布裁决，不推进规划状态。
+- 本批未使用真实 GitHub 业务网络；provider 场景使用已有 fake 或录制回放，不把这些证据扩大到真实网络服务表现。
