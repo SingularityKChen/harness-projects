@@ -17,7 +17,7 @@
 | P3 | 文档和证据漂移、过度设计、重复追踪、提交粒度与可读性 | 设计 / 工作项；issue、计划、范围、当前 checks | 无第二目录/Store/Router；修复归 #691/#636；提交整理留主会话 |
 
 ## Global Constraints
-遵守七条系统不变量；不写 Planning Status 或依赖关系；评审账号 gh-review（Singularity-AI-Bot），开发/作者回复/合并 gh（SingularityKChen）。仅本 PR 的代码和本评审记录属于本层 ownership。沿用唯一跨层 ExecPlan `docs/exec-plan/active/2026-11-25-multi-project-workspaces.md`；归档在栈顶完成。
+遵守七条系统不变量；不写 Planning Status 或依赖关系；评审账号 gh-review（Singularity-AI-Bot），开发/作者回复/合并 gh（SingularityKChen）。仅本 PR 的代码和本评审记录属于本层 ownership。沿用唯一跨层 ExecPlan `docs/exec-plan/completed/2026-11-25-multi-project-workspaces.md`；归档在栈顶完成。
 
 ## Plan of Work
 1. 锁定远端事实、关联 issue 和风险矩阵；完整分层审查并运行最窄判别验证。

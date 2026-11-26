@@ -683,4 +683,69 @@ describe('Harness 插件安装件契约', () => {
       }
     })
   })
+
+  describe('g. packed Host 在两个项目上的创建/打开/切换/重开（#694）', () => {
+    /** 把打包产物装进独立 node_modules，按宿主 Loader 的说明符解析出真实 packed lib。 */
+    async function installPacked() {
+      const installed = path.join(tmpRoot, 'packed-host', 'node_modules', ...sourceManifest.name.split('/'))
+      await mkdir(path.dirname(installed), { recursive: true })
+      await cp(packageDir, installed, { recursive: true })
+      await symlink(path.dirname(path.dirname(fileURLToPath(import.meta.resolve('@deepseek-ai/cordis/package.json')))), path.join(tmpRoot, 'packed-host', 'node_modules', '@deepseek-ai'), process.platform === 'win32' ? 'junction' : 'dir')
+    }
+    async function loadPacked(profileDir) {
+      const effects = [], services = new Map(), cordis = new Context()
+      const context = {
+        invocation: { peer: { id: 'packed-multiproject' } },
+        effect(callback) { effects.push(cordis.effect(callback)) },
+        provide(name, value) { services.set(name, value); return () => services.delete(name) },
+        typert: { register() { return async () => {} } },
+        // 宿主把已 canonicalize 的 profile 交给插件；packed Host 由它派生 dataPath。
+        get(name) { return name === 'profileContext' ? { dir: profileDir } : undefined },
+      }
+      const require = createRequire(path.join(tmpRoot, 'packed-host', 'entry.cjs'))
+      const hostModule = await import(pathToFileURL(require.resolve(sourceManifest.name)).href)
+      await hostModule.apply(context)
+      return { service: services.get('harnessProjects'), unload: async () => { for (const dispose of effects.splice(0).reverse()) await dispose() } }
+    }
+
+    it('真实 packed lib 建出两个项目、切 A↔B，并在同 dataPath 重开后恢复最后确认的项目，迁移账本仍单资产', async (t) => {
+      t.mock.method(console, 'info', () => {})
+      const profile = path.join(tmpRoot, 'packed-multiproject-profile')
+      await mkdir(profile, { recursive: true })
+      await installPacked()
+      const first = await loadPacked(profile)
+      // 干净 profile：零工作区 → Home；createWorkspace 由 wire 幂等键派生 id 并 create-and-switch。
+      assert.equal((await first.service.baseline()).workspace, undefined, '干净数据根：零工作区')
+      const createdA = await first.service.createWorkspace({ kind: 'user' }, 'packed-intent-a', '项目 A')
+      assert.equal(createdA.writeState, 'local_only')
+      const a = createdA.value.workspaceId
+      const createdB = await first.service.createWorkspace({ kind: 'user' }, 'packed-intent-b', '项目 B')
+      const b = createdB.value.workspaceId
+      assert.notEqual(a, b, '两个不同幂等键派生出两个不同工作区')
+      const catalogue = await first.service.listWorkspaces()
+      assert.deepEqual(catalogue.workspaces.map((row) => [row.workspaceId, row.name]), [[a, '项目 A'], [b, '项目 B']], 'catalogue 按创建序返回两个项目')
+      assert.equal((await first.service.baseline()).workspace.id, b, 'create-and-switch：B 已是当前装配')
+      const switched = await first.service.openWorkspace(a)
+      assert.deepEqual(switched, { state: 'activated', requestedWorkspaceId: a, activeWorkspaceId: a }, 'packed Host 在同一进程内 A→B→A')
+      assert.equal((await first.service.baseline()).workspace.id, a)
+      const dataPath = path.join(profile, 'harness-projects', 'workspace.sqlite')
+      const db = new DatabaseSync(dataPath, { readOnly: true })
+      try {
+        assert.deepEqual(db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [BASELINE_VERSION], '两个项目与多次切换不新增迁移资产')
+        assert.equal(db.prepare('SELECT count(*) AS n FROM workspace').get().n, 2, 'packed Host 只写两行工作区')
+      } finally { db.close() }
+      // 重开：同一 dataPath 重新加载 packed lib，恢复到最后一次成功确认的 A。
+      await first.unload()
+      const reopened = await loadPacked(profile)
+      try {
+        const setup = await reopened.service.getWorkspaceSetup()
+        assert.deepEqual(setup.workspace, { id: a, name: '项目 A' }, 'packed Host 重开后恢复最后确认的项目')
+        assert.equal(setup.restore, undefined, '恢复成功不带 restore')
+        assert.equal((await reopened.service.listWorkspaces()).activeWorkspaceId, a)
+        assert.deepEqual((await reopened.service.listWorkspaces()).workspaces.map((row) => row.workspaceId), [a, b], '重开不改变创建序')
+        const again = new DatabaseSync(dataPath, { readOnly: true })
+        try { assert.deepEqual(again.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version), [BASELINE_VERSION], '重开不重复记账') } finally { again.close() }
+      } finally { await reopened.unload() }
+    })
+  })
 })

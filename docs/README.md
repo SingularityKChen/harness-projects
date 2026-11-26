@@ -31,6 +31,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-25-multi-project-workspaces](exec-plan/completed/2026-11-25-multi-project-workspaces.md) | 多项目目录、创建切换、重开恢复与自动化资格完成；#694/#636 安装态人验仍 OPEN，R1/#647 独立 |
 | [2026-11-24-native-volume-refusal](exec-plan/completed/2026-11-24-native-volume-refusal.md) | Windows 原生真实卷/映射盘拒绝证据（#679；exFAT+ReFS+mapped 三类真实设备，rev-689 复评可 ready） |
 | [2026-11-24-adr-pointer-reconcile](exec-plan/completed/2026-11-24-adr-pointer-reconcile.md) | 单资产基线后历史 ADR 失效指针订正与冻结策略（#666；docs-only，rev-688 独立验收闭环） |
 | [2026-11-24-node-runtime-contract](exec-plan/completed/2026-11-24-node-runtime-contract.md) | Node 支持契约：source workspace / compiled Host 两种执行模式的声明、编译期守卫与最小运行时证据（#313；rev-687 复评 PASS） |

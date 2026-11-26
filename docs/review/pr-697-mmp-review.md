@@ -23,7 +23,7 @@
 3. **P2 — Windows 选择文件获取失败泄漏已打开的日志 fd。** 新增锚点 `apps/harness-plugin/src/host-private-data.ts:101`。`prepareWindowsProjectData` 已返回 `lease.logFd`，新增 selection `openSync` 抛错时 catch 只调用 `lease.dispose()`；后者只关闭 helper，不关闭 Node 日志 fd。获取失败发生在 composition 建立 logger/dispose 之前，之后没有 owner 可关闭它。生产 `preparePrivateProjectData` + synthetic Windows helper 协议反例确认 helper 已退出，而 `fstat(logFd)` 仍成功；原生 NTFS 安全准入不是这个反例的证明范围。保护结果：失败启动释放本次获取的全部资源，重复重试不累积 fd。最小完整修复：失败分支先关闭 `lease.logFd`，通过 finally 释放 lease，并保留固定错误；补 selection open 拒绝后的所有 fd 关闭断言。
 
 ## Global Constraints
-仅修改本报告与本 worktree 的 `.superpowers/review-697/` 运行态证据；没有产品修复、commit、push、GitHub review 或 issue 写入。共同实施事实源仍是 `docs/exec-plan/active/2026-11-25-multi-project-workspaces.md`。不改 Planning Status、关系、用户数据或已安装 profile。
+仅修改本报告与本 worktree 的 `.superpowers/review-697/` 运行态证据；没有产品修复、commit、push、GitHub review 或 issue 写入。共同实施事实源仍是 `docs/exec-plan/completed/2026-11-25-multi-project-workspaces.md`。不改 Planning Status、关系、用户数据或已安装 profile。
 
 ## Plan of Work
 1. 已完成：锁定 head/base 和完整元数据，先建 P0–P3 矩阵，再检查代码、产品、架构、测试和工作项。
@@ -106,3 +106,5 @@ Node、真实 React 18、Playwright Chromium、SQLite、Host composition/remote�
 最终变异命令`node scripts/review-mutate.mjs .superpowers/review-697/final-mutations.json`覆盖：显式选择优先、偏好装配失败回Home、迟到链接读取、手动消费失败链接、最新目标串行、旧create交接失效、项目草稿清除、Home观察、日志fd释放、获取错误保留、production Gate实际调用resolver。均以相应用例名归因；M10定义收窄为try/finally仍释放helper后传播cleanup错误，隔离错误边界且避免把helper挂起当错误文本证据。结果与字节还原以最终整表输出为准。
 
 2026-11-26 最终整表有效结果：上述11项全部KILLED，基线与字节还原通过；无产品/测试残留变异。Source程序与独立批准6334345及组合验证6d02ac3保持相同blob。最终公开号/CI由push后回读完成。
+
+2026-11-26 最终远端回读：批准 head `4c666811787f24a00450389e8f0a9ff80222cb1b` 的 Fast Gate、Verify、Browser、Windows Native、Disclosure、Size 和 Issue policy 均通过；三条原线程已逐一回复并解决，#693 五项工程验收已核对并关闭。Bot 最终 APPROVE 后按 expected-head rebase 合并为 `8424ec76397a71b5685fac7db9c98e235e245661`，两树相同。原 Progress 最后一项由本段及栈顶归档记录替代；#694/#636 安装态人工接受仍开放。
