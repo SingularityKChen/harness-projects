@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { assertPrivateAcl } from './host-private-acl.ts'
+import { WORKSPACE_SELECTION_FILE } from './host-selection.ts'
 import { prepareWindowsProjectData } from './host-private-windows.ts'
 import { HostAuthorityError } from './remote.ts'
 
@@ -9,6 +10,8 @@ const unavailable = () => new HostAuthorityError('Host project data is unavailab
 export interface PreparedPrivateData {
   readonly directory: string
   readonly logFd: number
+  /** 导航偏好文件 fd：启动期打开并校验，运行期只重写它（不按路径重开）。 */
+  readonly selectionFd: number
   readonly lease?: Awaited<ReturnType<typeof prepareWindowsProjectData>>
 }
 
@@ -91,7 +94,16 @@ export async function preparePrivateProjectData(dataPath: string, signal?: Abort
   if (process.platform === 'win32') {
     if (!rawProfile || dataPath !== rawProfile + path.sep + 'harness-projects' + path.sep + 'workspace.sqlite') throw unavailable()
     const lease = await prepareWindowsProjectData(rawProfile, signal)
-    return { directory: lease.directory, logFd: lease.logFd, lease }
+    // 原生 helper 已 Ensure 并校验该固定文件；这里只取一个持久 fd，运行期不按路径重开（与 logFd 同模式）。
+    // 打开失败时回收已取得的 Node fd，再释放 helper lease；两者分别拥有资源。
+    let selectionFd: number
+    try { selectionFd = fs.openSync(path.join(lease.directory, WORKSPACE_SELECTION_FILE), fs.constants.O_RDWR | fs.constants.O_CREAT, 0o600) }
+    catch (error) {
+      try { fs.closeSync(lease.logFd) } catch { /* 获取失败仍是权威错误；继续释放 helper。 */ }
+      try { await lease.dispose() } catch { /* 不把清理原文带出安全边界。 */ }
+      throw error instanceof HostAuthorityError ? error : unavailable()
+    }
+    return { directory: lease.directory, logFd: lease.logFd, selectionFd, lease }
   }
   let rootFd: number | undefined
   const files: number[] = []
@@ -112,13 +124,16 @@ export async function preparePrivateProjectData(dataPath: string, signal?: Abort
     }
     file(dataPath, true)
     for (const suffix of ['-wal', '-shm', '-journal']) file(dataPath + suffix, false)
+    const selectionFd = file(path.join(directory, WORKSPACE_SELECTION_FILE), true)!
     file(path.join(directory, 'diagnostics.log'), true, true)
     await assertPrivateAcl(files, deadline, signal)
     for (const fd of files) {
       fs.fchmodSync(fd, 0o600)
       if ((fs.fstatSync(fd).mode & 0o777) !== 0o600) throw unavailable()
     }
-    return { directory, logFd: files.pop()! }
+    // 两个 fd 交给调用方；其余（含 sidecar）在 finally 关闭。
+    files.splice(files.indexOf(selectionFd), 1)
+    return { directory, logFd: files.pop()!, selectionFd }
   } catch { throw unavailable() }
   finally { for (const fd of files) fs.closeSync(fd); if (rootFd !== undefined) fs.closeSync(rootFd) }
 }

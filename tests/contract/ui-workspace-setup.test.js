@@ -675,3 +675,141 @@ test('Home open handoff follows the matching accepted read after its original re
     assert.match(renderToStaticMarkup(app.render()), /继续连接项目/)
   } finally { f.source.dispose() }
 })
+
+test('restore kind is a closed set that only belongs to the empty workspace', async () => {
+  const f = fixture()
+  for (const kind of ['stale', 'corrupt', 'unreadable', 'unsupported']) {
+    f.set({ ...empty, restore: { kind } }); await f.source.refresh()
+    assert.deepEqual(f.source.getSnapshot().setup.restore, { kind }, `恢复状态 ${kind} 必须穿过严格解析`)
+  }
+  for (const bad of [{ kind: 'missing' }, { kind: 3 }, { kind: 'stale', extra: true }, 'stale']) {
+    const g = fixture({ getWorkspaceSetup: async () => ({ ...empty, restore: bad }) }); await g.source.refresh()
+    assert.equal(g.source.getSnapshot().setup, undefined, '畸形恢复状态不得进入快照'); assert.equal(g.source.getSnapshot().failure, 'read')
+  }
+  const h = fixture({ getWorkspaceSetup: async () => ({ ...setup(), restore: { kind: 'stale' } }) }); await h.source.refresh()
+  assert.equal(h.source.getSnapshot().setup, undefined, '有 active 工作区时恢复状态即畸形响应')
+})
+
+test('Home explains an unrecoverable restore and still offers choosing or creating a project', async () => {
+  for (const [kind, message] of [['stale', /上次打开的项目已不在本机/], ['corrupt', /上次打开的项目记录已损坏/], ['unreadable', /上次打开的项目记录无法读取/], ['unsupported', /上次打开的项目当前 Host 不支持/]]) {
+    const f = fixture(); f.set({ ...empty, restore: { kind } }); await f.source.refresh()
+    const out = renderToStaticMarkup(mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } }).render())
+    assert.match(out, /aria-label="项目"/, `${kind}：恢复失败进入安全 Home`)
+    assert.match(out, /role="status"/); assert.match(out, message, `${kind}：如实说明分类`)
+    assert.match(out, />创建工作区</, `${kind}：Home 仍提供创建入口`)
+    assert.doesNotMatch(out, /aria-current="true"|Saved|已恢复/, `${kind}：不声称已恢复或选中项目`)
+  }
+  const f = fixture(); await f.source.refresh()
+  assert.doesNotMatch(renderToStaticMarkup(mount({ setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => undefined } }).render()), /请选择项目/, '没有恢复失败时不显示恢复说明')
+})
+
+test('workspace scope change resets the detail route and per-workspace presentation scope', async () => {
+  let read = { workspace: { id: 'ws-1', name: 'A' }, store: client.createEntityStore(), connection: { connected: true }, capabilities: [], planningSource: { bindingId: 'binding-1', name: 'Source' } }
+  const source = { subscribe: () => () => {}, getSnapshot: () => read }
+  const app = mount({ source, initialPath: '/projects/ws-1/items/item-1' }, ui.WorkItemApp)
+  let page = find(app.render(), ui.WorkItemProjectPage)[0]
+  assert.ok(page, '同项目深链进入项目页')
+  assert.ok(page.props.detailView !== undefined, '深链的目标条目先进入详情路由')
+  assert.match(page.props.presentationScopeKey, /ws-1/)
+  read = { ...read, workspace: { id: 'ws-2', name: 'B' }, planningSource: { bindingId: 'binding-2', name: 'Source B' } }
+  page = find(app.render(), ui.WorkItemProjectPage)[0]
+  assert.equal(page.props.detailView, undefined, '跨项目切换重置详情路由（不把 A 的条目链接带进 B）')
+  assert.match(page.props.presentationScopeKey, /ws-2/, '筛选/排序/列宽/时间轴锚点的 scope-key 随工作区更换')
+})
+
+test('deep link decision prefers an existing target, opens it once and never falls back', async () => {
+  const catalogue = { activeWorkspaceId: 'ws-1', workspaces: [{ workspaceId: 'ws-1', name: 'A', planning: 'bound', policy: 'supported' }, { workspaceId: 'ws-2', name: 'B', planning: 'none', policy: 'supported' }] }
+  const calls = []
+  const ports = (workspace, open = async () => 'activated') => ({ path: '/projects/ws-2/items', getSetup: async () => ({ workspace, planning: { state: 'unbound' } }), listWorkspaces: async () => catalogue, openWorkspace: async (id) => { calls.push(id); return open() } })
+  assert.equal(await ui.resolveWorkspaceLink(ports({ id: 'ws-2', name: 'B' })), 'active', '已经 active 的目标不重复打开')
+  assert.equal(await ui.resolveWorkspaceLink(ports({ id: 'ws-1', name: 'A' })), 'open')
+  assert.deepEqual(calls, ['ws-2'], '已存目标先 openWorkspace 再进入项目页')
+  assert.equal(await ui.resolveWorkspaceLink(ports({ id: 'ws-1', name: 'A' }, async () => 'failed')), 'failed')
+  let opened = 0
+  const missing = { ...catalogue, workspaces: catalogue.workspaces.slice(0, 1) }
+  assert.equal(await ui.resolveWorkspaceLink({ ...ports(null), listWorkspaces: async () => missing, openWorkspace: async () => { opened++; return 'activated' } }), 'invalid', 'catalogue 里没有的 projectId 仍走既有 unresolved')
+  for (const path of [undefined, '/', '/projects/ws-1', '/projects/ws-1/item/1']) assert.equal(await ui.resolveWorkspaceLink({ ...ports(null), path, getSetup: async () => { throw new Error('invalid path must not read Host') } }), 'invalid', `无效路径 ${path} 不读 Host`)
+})
+
+test('the setup gate accepts an optional initial deep link', async () => {
+  const f = fixture(); f.set(setup('confirmed')); await f.source.refresh()
+  const read = { workspace: { id: 'ws-1', name: 'Fixture' }, store: client.createEntityStore(), connection: { connected: true }, capabilities: [] }
+  assert.match(renderToStaticMarkup(React.createElement(ui.bindWorkspaceSetupApp(f.source, { subscribe: () => () => {}, getSnapshot: () => read }, undefined, { initialPath: '/projects/ws-2/items' }))), /正在打开链接中的项目…/)
+})
+
+test('deep link resolution drops stale results when the target changes during the reads', async () => {
+  let current = true, opened = 0
+  const state = await ui.resolveWorkspaceLink({
+    path: '/projects/ws-2/items',
+    getSetup: async () => { current = false; return { workspace: { id: 'ws-1', name: 'A' }, planning: { state: 'unbound' } } },
+    listWorkspaces: async () => ({ activeWorkspaceId: 'ws-1', workspaces: [{ workspaceId: 'ws-2', name: 'B', planning: 'none', policy: 'supported' }] }),
+    openWorkspace: async () => { opened++; return 'activated' },
+    isCurrent: () => current,
+  })
+  assert.equal(state, undefined, '目标变化后旧解析结果作废')
+  assert.equal(opened, 0, '作废的解析不得打开旧目标')
+})
+
+function linkFixture(open) {
+  let current = 'ws-1'
+  const calls = [], store = client.createEntityStore(), data = () => ({ workspace: { id: current, name: current }, planning: { state: 'confirmed', bindingId: `binding-${current}`, projectNodeId: `PVT_${current}` } })
+  let read = { ...data(), store, connection: { connected: true }, capabilities: [{ key: 'planning.item.read', access: 'available' }] }
+  const f = fixture({ getWorkspaceSetup: async () => data(), listWorkspaces: async () => ({ activeWorkspaceId: current, workspaces: ['ws-1', 'ws-2', 'ws-3', 'ws-4'].map((workspaceId) => ({ workspaceId, name: workspaceId, planning: 'bound', policy: 'supported' })) }),
+    createWorkspace: async () => { calls.push('create'); await open?.('ws-2'); current = 'ws-2'; read = { ...read, ...data() }; return result({ workspaceId: current }) },
+    connectAccount: async () => { calls.push('connect'); await open?.('ws-2'); return result({ accountId: 'account-1' }) },
+    openWorkspace: async (workspaceId) => { calls.push(workspaceId); if (await open?.(workspaceId) === false) return { state: 'failed', requestedWorkspaceId: workspaceId, activeWorkspaceId: current }; current = workspaceId; read = { ...read, ...data() }; return { state: 'activated', requestedWorkspaceId: workspaceId, activeWorkspaceId: current } } })
+  const props = { setupSource: f.source, source: { subscribe: () => () => {}, getSnapshot: () => read }, initialPath: '/projects/ws-2/items' }
+  return { ...f, props, calls, current: () => current, app: mount(props) }
+}
+for (const action of ['return', 'create', 'open']) test(`failed inbound link is consumed by explicit ${action}`, async () => {
+  const f = linkFixture((id) => id !== 'ws-2')
+  try {
+    await f.source.refresh(); f.app.render(); f.app.flush(); await new Promise((resolve) => setImmediate(resolve))
+    const home = find(f.app.render(), ui.ProjectsHome)[0]; assert.equal(home.props.linkFailure, true)
+    if (action === 'return') home.props.onReturn()
+    else if (action === 'create') home.props.onCreate()
+    else { home.props.onOpen('ws-3'); await f.source.open('ws-3') }
+    const tree = f.app.render(); assert.equal(find(tree, ui.ProjectsHome).length, 0)
+    if (action === 'create') assert.match(renderToStaticMarkup(tree), /aria-label="创建工作区"/)
+    else assert.equal(find(tree, ui.WorkItemApp)[0].props.initialPath, undefined, 'consumed inbound paths cannot reappear in work-item navigation')
+  } finally { f.source.dispose() }
+})
+for (const mode of ['latest', 'superseded', 'cancelled', 'replaced-source', 'manual-first', 'create-first', 'connect-first']) test(`pending inbound activation keeps ${mode} navigation ownership`, async () => {
+  let release, releaseTarget
+  const targetHeld = new Promise((resolve) => { releaseTarget = resolve })
+  const held = new Promise((resolve) => { release = resolve }), f = linkFixture(async (id) => { if (id === 'ws-2') await held; if (mode === 'create-first' && id === 'ws-3') await targetHeld; return true })
+  let replacement
+  try {
+    if (mode.endsWith('-first')) f.props.initialPath = undefined
+    await f.source.refresh(); f.app.render(); f.app.flush()
+    if (mode === 'manual-first') { find(f.app.render(), ui.WorkItemApp)[0].props.onShowProjects(); find(f.app.render(), ui.ProjectsHome)[0].props.onOpen('ws-2') }
+    if (mode === 'create-first') { find(f.app.render(), ui.WorkItemApp)[0].props.onShowProjects(); find(f.app.render(), ui.ProjectsHome)[0].props.onCreate(); find(f.app.render(), 'input')[0].props.onChange({ target: { value: 'Two' } }); find(f.app.render(), 'form')[0].props.onSubmit({ preventDefault() {} }) }
+    if (mode === 'connect-first') { find(f.app.render(), ui.WorkItemApp)[0].props.onBindRepository(); find(f.app.render(), 'button').find((node) => node.props.children === '编辑连接').props.onClick(); find(f.app.render(), 'form')[0].props.onSubmit({ preventDefault() {} }) }
+    const first = mode === 'create-first' ? 'create' : mode === 'connect-first' ? 'connect' : 'ws-2'
+    await new Promise((resolve) => setImmediate(resolve)); assert.deepEqual(f.calls, [first])
+    f.props.initialPath = '/projects/ws-3/items'; f.app.render(); f.app.flush(); await new Promise((resolve) => setImmediate(resolve))
+    if (mode === 'superseded') { f.props.initialPath = '/projects/ws-4/items'; f.app.render(); f.app.flush() }
+    if (mode === 'cancelled') { f.props.initialPath = undefined; f.app.render(); f.app.flush() }
+    if (mode === 'replaced-source') {
+      replacement = linkFixture(); await replacement.source.refresh(); f.props.setupSource = replacement.source; f.props.source = replacement.props.source; f.app.render(); f.app.flush()
+      await new Promise((resolve) => setImmediate(resolve)); assert.deepEqual(replacement.calls, ['ws-3'], 'new Source cannot wait on an old Source activation')
+    }
+    release(); await new Promise((resolve) => setImmediate(resolve))
+    if (mode === 'create-first') { f.app.render(); f.app.flush(); releaseTarget() }
+    await new Promise((resolve) => setImmediate(resolve))
+    const target = mode === 'superseded' ? 'ws-4' : 'ws-3'
+    assert.deepEqual(f.calls, ['cancelled', 'replaced-source'].includes(mode) ? [first] : [first, target], 'only the still-current target may dispatch after the wait')
+    if (!['cancelled', 'replaced-source'].includes(mode)) assert.equal(f.current(), target)
+    if (mode === 'create-first') { f.app.render(); f.app.flush(); assert.equal(find(f.app.render(), ui.WorkItemApp)[0]?.props.initialPath, '/projects/ws-3/items', 'old creation handoff cannot replace newer inbound navigation') }
+  } finally { release(); releaseTarget(); f.source.dispose(); replacement?.source.dispose() }
+})
+test('project connection drafts are actually discarded across A → B → A', async () => {
+  const f = linkFixture(); f.props.initialPath = undefined
+  try {
+    await f.source.refresh(); find(f.app.render(), ui.WorkItemApp)[0].props.onBindRepository()
+    find(f.app.render(), 'button').find((node) => node.props.children === '编辑连接').props.onClick()
+    find(f.app.render(), 'input')[0].props.onChange({ target: { value: 'UNSAVED-A' } })
+    await f.source.open('ws-2'); assert.equal(find(f.app.render(), 'input')[0].props.value, 'PVT_ws-2')
+    await f.source.open('ws-1'); assert.equal(find(f.app.render(), 'input')[0].props.value, 'PVT_ws-1', 'returning to A must not revive its discarded draft')
+  } finally { f.source.dispose() }
+})

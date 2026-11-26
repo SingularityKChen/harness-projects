@@ -3,6 +3,8 @@ import { parseConnectionFailure, type ConnectionFailure } from './connection-fai
 export type { ConnectionFailure } from './connection-failure.ts'
 import type { ActorRef } from '@harness-projects/controller'
 import type { ProjectError, ProjectErrorCode, Recovery } from '@harness-projects/domain'
+/** 启动恢复结果（#693）：只在空装配时出现，成功激活后清空；failed = 偏好项目装配失败（安全 Home）。 */
+export type WorkspaceRestoreKind = 'none' | 'stale' | 'corrupt' | 'unreadable' | 'unsupported' | 'failed'
 export interface WorkspaceSetupDTO {
   readonly workspace: null | { readonly id: string; readonly name: string }
   readonly planning: { readonly state: 'unbound' | 'configured' | 'confirmed' | 'degraded'; readonly bindingId?: string; readonly projectNodeId?: string }
@@ -10,6 +12,8 @@ export interface WorkspaceSetupDTO {
   readonly mappingOrigin?: 'derived' | 'user'
   readonly activationError?: ProjectError
   readonly error?: ProjectError
+  /** 上次打开的项目无法恢复时的结构化状态；不删除、不覆盖偏好，也不回退到其它项目。 */
+  readonly restore?: { readonly kind: WorkspaceRestoreKind }
 }
 export interface WorkspaceCatalogueDTO { readonly activeWorkspaceId: string | null; readonly workspaces: readonly WorkspaceCatalogueEntry[] }
 export interface WorkspaceCatalogueEntry { readonly workspaceId: string; readonly name: string; readonly planning: 'none' | 'bound'; readonly policy: 'supported' | 'unsupported' }
@@ -64,8 +68,17 @@ function parseError(value: unknown): ProjectError | undefined {
     || ['confirmedValue', 'attemptedValue'].some((key) => dto[key] !== undefined && typeof dto[key] !== 'string')) throw new TypeError('设置错误不合契约')
   return safeError(dto.code)
 }
+const RESTORE_KINDS = ['none', 'stale', 'corrupt', 'unreadable', 'unsupported', 'failed'] as const
+/** 恢复状态是闭集且只属于空装配：有 active 工作区时出现即视为畸形响应。 */
+function parseRestore(value: unknown, empty: boolean): { readonly kind: WorkspaceRestoreKind } | undefined {
+  if (value === undefined) return undefined
+  const restore = record(value, ['kind'])
+  if (!RESTORE_KINDS.includes(restore.kind as typeof RESTORE_KINDS[number])) throw new TypeError('恢复状态不合契约')
+  if (!empty) throw new TypeError('恢复状态只属于空装配')
+  return Object.freeze({ kind: restore.kind as WorkspaceRestoreKind })
+}
 export function parseWorkspaceSetup(value: unknown): WorkspaceSetupDTO {
-  const dto = record(value, ['workspace', 'planning', 'executionInstalled', 'mappingOrigin', 'activationError', 'error'])
+  const dto = record(value, ['workspace', 'planning', 'executionInstalled', 'mappingOrigin', 'activationError', 'error', 'restore'])
   const workspace = dto.workspace === null ? null : record(dto.workspace, ['id', 'name'])
   const planning = record(dto.planning, ['state', 'bindingId', 'projectNodeId'])
   const state = planning.state
@@ -76,9 +89,9 @@ export function parseWorkspaceSetup(value: unknown): WorkspaceSetupDTO {
   if (state === 'confirmed' && (!binding.bindingId || !project.projectNodeId)) throw new TypeError('设置绑定缺失')
   if (dto.executionInstalled !== undefined && typeof dto.executionInstalled !== 'boolean') throw new TypeError('执行绑定状态不合契约')
   if (dto.mappingOrigin !== undefined && dto.mappingOrigin !== 'derived' && dto.mappingOrigin !== 'user') throw new TypeError('映射来源不合契约')
-  const activationError = parseError(dto.activationError), error = parseError(dto.error)
+  const activationError = parseError(dto.activationError), error = parseError(dto.error), restore = parseRestore(dto.restore, workspace === null)
   return Object.freeze({ workspace: workspace === null ? null : Object.freeze({ id: text(workspace.id), name: text(workspace.name) }), planning: Object.freeze({ state, ...binding, ...project }),
-    ...(dto.executionInstalled === undefined ? {} : { executionInstalled: dto.executionInstalled as boolean }), ...(dto.mappingOrigin === undefined ? {} : { mappingOrigin: dto.mappingOrigin }), ...(activationError ? { activationError } : {}), ...(error ? { error } : {}) })
+    ...(dto.executionInstalled === undefined ? {} : { executionInstalled: dto.executionInstalled as boolean }), ...(dto.mappingOrigin === undefined ? {} : { mappingOrigin: dto.mappingOrigin }), ...(activationError ? { activationError } : {}), ...(error ? { error } : {}), ...(restore ? { restore } : {}) })
 }
 export function parseWorkspaceCatalogue(value: unknown): WorkspaceCatalogueDTO {
   const dto = record(value, ['activeWorkspaceId', 'workspaces'])

@@ -6,13 +6,15 @@ import { PlanningMappingForm } from './planning-mapping.ts'
 import { RepositoryBindingForm } from './repository-binding.ts'
 import { ProjectsHome } from './projects-home.ts'
 import { WorkItemApp, type WorkspaceSource } from './work-item-app.ts'
+import { resolveWorkspaceLink, type WorkspaceLinkState } from './workspace-link.ts'
 import { WorkspaceSettings } from './workspace-settings.ts'
 import { WORKSPACE_STYLES } from './workspace-presentation.ts'
 import { FORM_STYLES, focusFormError } from './form-presentation.ts'
 import type { DOMElement } from './work-item-detail.ts'
 type SettingsScrollElement = DOMElement & { scrollTop: number; getBoundingClientRect?(): { top: number; bottom: number } }
+type InboundLink = { source: WorkspaceSetupSource; path: string | undefined; consumed: boolean }
 /** 唯一工作区设置门：仅持草稿与导航；确认状态和工作区 identity 全部来自 Host。 */
-export function WorkspaceSetupGate({ setupSource, source, executionReader, repositoryBindingSource, startWork, deliveryReader, issueClosingLinksReader, issueDependenciesReader, changeRequestCreator, mappingSource, refreshSource, announceListStatus }: { readonly announceListStatus?: boolean | undefined; readonly mappingSource?: PlanningMappingSource | undefined; readonly refreshSource?: PlanningRefreshSource | undefined; readonly issueClosingLinksReader?: IssueClosingLinksReader | undefined; readonly issueDependenciesReader?: IssueDependenciesReader | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly changeRequestCreator?: ChangeRequestCreator | undefined; readonly startWork?: StartWork | undefined; readonly repositoryBindingSource?: RepositoryBindingSource | undefined; readonly setupSource: WorkspaceSetupSource; readonly source: WorkspaceSource; readonly executionReader?: ExecutionContextReader | undefined }): ReactElement {
+export function WorkspaceSetupGate({ setupSource, source, executionReader, repositoryBindingSource, startWork, deliveryReader, issueClosingLinksReader, issueDependenciesReader, changeRequestCreator, mappingSource, refreshSource, announceListStatus, initialPath }: { readonly announceListStatus?: boolean | undefined; readonly initialPath?: string | undefined; readonly mappingSource?: PlanningMappingSource | undefined; readonly refreshSource?: PlanningRefreshSource | undefined; readonly issueClosingLinksReader?: IssueClosingLinksReader | undefined; readonly issueDependenciesReader?: IssueDependenciesReader | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly changeRequestCreator?: ChangeRequestCreator | undefined; readonly startWork?: StartWork | undefined; readonly repositoryBindingSource?: RepositoryBindingSource | undefined; readonly setupSource: WorkspaceSetupSource; readonly source: WorkspaceSource; readonly executionReader?: ExecutionContextReader | undefined }): ReactElement {
   const snapshot = useSyncExternalStore(setupSource.subscribe, setupSource.getSnapshot, setupSource.getSnapshot)
   const read = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot)
   const [editScope, setEditScope] = useState<string | undefined>(undefined)
@@ -35,10 +37,55 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   useEffect(() => () => { submitted.current = false }, [setupSource])
   const setup = snapshot.setup, view = workspaceSetupView(snapshot, 'GitHub')
   const scope = JSON.stringify([identity.current.generation, setup?.workspace?.id, setup?.planning.bindingId, setup?.planning.projectNodeId])
+  const createScope = JSON.stringify([identity.current.generation, 'create']), draftScope = useRef(scope)
+  if (draftScope.current !== scope) {
+    draftScope.current = scope
+    if (draft !== undefined && draft.scope !== createScope) setDraft(undefined)
+    if (editScope !== undefined) setEditScope(undefined)
+  }
   const confirmed = setup?.planning.state === 'confirmed' && setup.workspace !== null
   // 视图收敛为单一 pane：settings 布尔 + visited 派生不再各自为政；Home 只在没有 active 且有已存项目时默认出现。
   const catalogue = snapshot.catalogue
-  const defaultPane: Pane = !setup ? 'settings' : setup.workspace === null ? (catalogue !== undefined && catalogue.workspaces.length > 0 ? 'projects' : 'create') : setup.planning.state === 'configured' || setup.planning.state === 'degraded' ? 'settings' : 'workspace'
+  const inbound = useRef<InboundLink>({ source: setupSource, path: initialPath, consumed: false })
+  if (inbound.current.source !== setupSource || inbound.current.path !== initialPath) {
+    inbound.current = { source: setupSource, path: initialPath, consumed: false }
+    if (initialPath !== undefined) { creation.current = undefined; if (navigation !== undefined) setNavigation(undefined) }
+  }
+  const incoming = inbound.current, queue = useRef({ source: setupSource, tail: Promise.resolve() })
+  if (queue.current.source !== setupSource) queue.current = { source: setupSource, tail: Promise.resolve() }
+  const [link, setLink] = useState<{ readonly owner: InboundLink; readonly state: WorkspaceLinkState } | undefined>(undefined)
+  useEffect(() => {
+    if (initialPath === undefined) { setLink(undefined); return }
+    let live = true
+    const current = () => live && inbound.current === incoming && !incoming.consumed
+    // 仅串行本 Source 的链接任务；新目标等旧激活结算后再取得自己的激活，作废任务不派发。
+    queue.current.tail = queue.current.tail.then(async () => {
+      if (!current()) return
+      const read = async () => { const snap = setupSource.getSnapshot(); if (snap.setup === undefined || snap.catalogue === undefined) await setupSource.refresh(); return setupSource.getSnapshot() }
+      try {
+        const state = await resolveWorkspaceLink({
+          path: initialPath,
+          getSetup: async () => (await read()).setup!,
+          listWorkspaces: async () => (await read()).catalogue!,
+          openWorkspace: async (workspaceId) => {
+            if (!current()) return 'failed'
+            await setupSource.open(workspaceId)
+            if (!current()) return 'failed'
+            const after = setupSource.getSnapshot()
+            return after.failure === undefined && after.error === undefined && after.setup?.workspace?.id === workspaceId ? 'activated' : 'failed'
+          },
+          isCurrent: current,
+        })
+        if (current() && state !== undefined) setLink({ owner: incoming, state })
+      } catch { if (current()) setLink({ owner: incoming, state: 'failed' }) }
+    })
+    return () => { live = false }
+  }, [initialPath, setupSource])
+  const linked = link?.owner === incoming && !incoming.consumed ? link.state : undefined
+  const linkPending = initialPath !== undefined && !incoming.consumed && linked === undefined, linkFailed = linked === 'failed'
+  // 恢复失败（#693）必须落在安全 Home 说明上，而不是 create 表单或别的项目：restore 非 none 即进入 projects。
+  const restoring = setup?.workspace === null && setup.restore !== undefined && setup.restore.kind !== 'none'
+  const defaultPane: Pane = !setup ? 'settings' : setup.workspace === null ? (restoring || (catalogue !== undefined && catalogue.workspaces.length > 0) ? 'projects' : 'create') : setup.planning.state === 'configured' || setup.planning.state === 'degraded' ? 'settings' : 'workspace'
   const requestedPane = navigation?.source === setupSource ? navigation.view : defaultPane
   const creationAttempt = creation.current
   const created = creationAttempt?.source === setupSource && snapshot.createdWorkspaceId !== undefined
@@ -46,8 +93,8 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   useEffect(() => {
     if (created && creation.current === creationAttempt) { creation.current = undefined; setNavigation({ source: setupSource, view: 'settings' }) }
   }, [created, creationAttempt, setupSource])
-  const pane: Pane = created ? 'settings' : requestedPane
-  const formScope = pane === 'create' ? JSON.stringify([identity.current.generation, 'create']) : scope
+  const pane: Pane = linkFailed ? 'projects' : created ? 'settings' : requestedPane
+  const formScope = pane === 'create' ? createScope : scope
   const name = draft?.scope === formScope ? draft.name ?? '' : '', project = draft?.scope === scope ? draft.project : undefined
   const hasDraft = draft?.scope === formScope && (draft.name !== undefined || draft.project !== undefined)
   const settings = pane === 'settings' || pane === 'create'
@@ -62,7 +109,9 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
   useEffect(() => {
     if (mounted && mappingSource && setup?.workspace && setup.planning.bindingId && setup.planning.projectNodeId) void mappingSource.refresh({ workspaceId: setup.workspace.id, bindingId: setup.planning.bindingId, projectExternalId: setup.planning.projectNodeId })
   }, [mounted, mappingSource, setup?.workspace?.id, setup?.planning.bindingId, setup?.planning.projectNodeId])
+  const consumeLink = (): InboundLink => { const owner = { ...inbound.current, consumed: true }; inbound.current = owner; setLink(undefined); return owner }
   const enter = (target: 'settings' | 'projects' | 'create'): void => {
+    consumeLink()
     creation.current = undefined
     if (target === 'create') setDraft(undefined)
     initiator.current = (globalThis as { document?: { activeElement?: DOMElement } }).document?.activeElement ?? null
@@ -70,8 +119,8 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
     taskEntry.current = true
     setVisited(scope); setNavigation({ source: setupSource, view: target })
   }
-  const leave = (): void => { creation.current = undefined; setVisited(scope); returnFocus.current = true; setNavigation({ source: setupSource, view: 'workspace' }) }
-  const openProject = (workspaceId: string): void => { void setupSource.open(workspaceId).then(() => { const after = setupSource.getSnapshot(); if (after.failure === undefined && after.error === undefined && after.setup?.workspace?.id === workspaceId) setNavigation(undefined) }) }
+  const leave = (): void => { consumeLink(); creation.current = undefined; setVisited(scope); returnFocus.current = true; setNavigation({ source: setupSource, view: 'workspace' }) }
+  const openProject = (workspaceId: string): void => { const owner = consumeLink(); queue.current.tail = setupSource.open(workspaceId).then(() => { const after = setupSource.getSnapshot(); if (inbound.current === owner && after.failure === undefined && after.error === undefined && after.setup?.workspace?.id === workspaceId) setNavigation(undefined) }) }
   useEffect(() => {
     const previous = shown.current; shown.current = stage
     const doc = (globalThis as { document?: { activeElement?: DOMElement | null; body?: DOMElement | null } }).document
@@ -94,18 +143,19 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
     }
   }, [stage])
   const createProject = (): void => {
+    consumeLink()
     setNavigation({ source: setupSource, view: 'create' })
     creation.current = { source: setupSource, previous: snapshot.createdWorkspaceId }
-    void setupSource.create(name)
+    queue.current.tail = setupSource.create(name)
   }
-  const submit = (): void => { if (pane === 'create') createProject(); else void setupSource.connect(project ?? setup?.planning.projectNodeId ?? '') }
+  const submit = (): void => { if (pane === 'create') createProject(); else queue.current.tail = setupSource.connect(project ?? setup?.planning.projectNodeId ?? '') }
   const recovery = (): void => {
     if (snapshot.failure === 'install' && snapshot.error?.code === 'result_unknown') void setupSource.recoverExecution()
     else if (snapshot.failure === 'read') void setupSource.refresh(false)
     else if (view.recovery?.action === 'refresh') void setupSource.refresh(setup?.planning.state === 'degraded')
-    else if (snapshot.failure === 'install') void setupSource.installExecution()
+    else if (snapshot.failure === 'install') queue.current.tail = setupSource.installExecution()
     else if (snapshot.failure === 'create') createProject()
-    else if (snapshot.failure === 'connect') void setupSource.connect(project ?? setup?.planning.projectNodeId ?? '')
+    else if (snapshot.failure === 'connect') queue.current.tail = setupSource.connect(project ?? setup?.planning.projectNodeId ?? '')
     else if (!setup) void setupSource.refresh()
     else if (setup?.planning.state === 'degraded' && !setup.activationError) void setupSource.refresh(true)
     else submit()
@@ -141,12 +191,12 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
       h('div', { key: 'context' }, h('p', null, `当前工作区：${setup.workspace!.name}`), recoveryOutlet),
       h('div', { key: 'planning' }, ...planning),
       setup.planning.bindingId && setup.planning.projectNodeId && mappingSource ? h(PlanningMappingForm, { key: 'mapping', source: mappingSource }) : h('p', { key: 'mapping' }, !setup.planning.bindingId || !setup.planning.projectNodeId ? '先完成规划连接，确认项目后再设置字段映射。' : '当前宿主未提供字段映射。请检查宿主的规划设置能力。'),
-      h('section', { key: 'execution', className: 'hp-form', 'aria-label': '执行' }, setup.executionInstalled && !setup.activationError ? h('p', { role: 'status' }, 'Harness 执行绑定已启用；会话与模型状态由执行时确认。') : h('div', null, h('p', null, '尚无已确认的执行绑定。'), !view.error ? button('启用 Harness 执行', () => { void setupSource.installExecution() }, true) : null)),
+      h('section', { key: 'execution', className: 'hp-form', 'aria-label': '执行' }, setup.executionInstalled && !setup.activationError ? h('p', { role: 'status' }, 'Harness 执行绑定已启用；会话与模型状态由执行时确认。') : h('div', null, h('p', null, '尚无已确认的执行绑定。'), !view.error ? button('启用 Harness 执行', () => { queue.current.tail = setupSource.installExecution() }, true) : null)),
       repositoryBindingSource ? h(RepositoryBindingForm, { key: 'repository', source: repositoryBindingSource }) : h('p', { key: 'repository' }, '当前宿主未提供仓库绑定。请检查宿主的研发设置能力。')
     ] }))
   }
   if (snapshot.pending) children.push(h('p', { key: 'pending', role: 'status', 'aria-live': 'polite' }, '正在处理，请稍候。'))
-  const workspace = list ? h(WorkItemApp, { source, refreshSource, announceListStatus, executionReader, deliveryReader, issueClosingLinksReader, issueDependenciesReader, changeRequestCreator, startWork, onBindRepository: () => enter('settings'), onShowProjects: () => enter('projects') }) : h('section', { 'aria-label': '工作区摘要' },
+  const workspace = linkPending ? h('p', { role: 'status' }, '正在打开链接中的项目…') : list ? h(WorkItemApp, { source, refreshSource, announceListStatus, initialPath: incoming.consumed ? undefined : initialPath, executionReader, deliveryReader, issueClosingLinksReader, issueDependenciesReader, changeRequestCreator, startWork, onBindRepository: () => enter('settings'), onShowProjects: () => enter('projects') }) : h('section', { 'aria-label': '工作区摘要' },
     h('p', { role: 'status' }, setup?.workspace ? confirmed ? read === undefined ? '正在等待工作项。' : read.workspace.id !== setup.workspace.id ? `正在打开「${setup.workspace.name}」…` : read.capabilities?.some(entry => entry.key === 'planning.item.read' && entry.access === 'unavailable') ? '当前无法读取工作项，请检查连接设置中的读取能力。' : '工作项读取能力尚未确认，请检查连接设置。' : '来源尚未确认，尚无可读工作项。' : '欢迎使用 Harness Projects。尚无可读工作区。'),
     setup?.workspace && setup.planning.state === 'unbound' ? h('button', { type: 'button', className: 'hp-action', onClick: () => enter('settings') }, '继续连接项目') : null)
   return h('section', { className: 'hp-workspace', 'data-workspace-setup': true, 'aria-label': 'Harness Projects', ref: root },
@@ -156,9 +206,9 @@ export function WorkspaceSetupGate({ setupSource, source, executionReader, repos
         h('button', { className: 'hp-action', type: 'button', disabled: false, onClick: settings ? leave : () => enter('settings') }, settings ? '返回工作区' : '连接设置'))),
     h('div', { className: 'hp-workspace-body', ref: body, role: 'region', 'aria-label': settings ? '连接设置内容' : '工作区内容', tabIndex: 0 },
       mounted ? h('div', { key: scope, hidden: !settings }, ...children) : null,
-      pane === 'projects' ? h(ProjectsHome, { setupSource, providerLabel: 'GitHub', onOpen: openProject, onReturn: leave, onCreate: () => enter('create') }) : !settings ? h('div', null, workspace, errorSummary('workspace-error')) : null))
+      pane === 'projects' ? h(ProjectsHome, { setupSource, providerLabel: 'GitHub', linkFailure: linkFailed, onOpen: openProject, onReturn: leave, onCreate: () => enter('create') }) : !settings ? h('div', null, workspace, errorSummary('workspace-error')) : null))
 
 }
-export function bindWorkspaceSetupApp(setupSource: WorkspaceSetupSource, source: WorkspaceSource, executionReader?: ExecutionContextReader, options: { readonly mappingSource?: PlanningMappingSource | undefined; readonly refreshSource?: PlanningRefreshSource | undefined; readonly issueClosingLinksReader?: IssueClosingLinksReader | undefined; readonly issueDependenciesReader?: IssueDependenciesReader | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly changeRequestCreator?: ChangeRequestCreator | undefined; readonly startWork?: StartWork | undefined; readonly repositoryBindingSource?: RepositoryBindingSource | undefined } = {}): () => ReactElement {
-  return () => h(WorkspaceSetupGate, { setupSource, source, executionReader, repositoryBindingSource: options.repositoryBindingSource, startWork: options.startWork, deliveryReader: options.deliveryReader, issueClosingLinksReader: options.issueClosingLinksReader, issueDependenciesReader: options.issueDependenciesReader, changeRequestCreator: options.changeRequestCreator, mappingSource: options.mappingSource, refreshSource: options.refreshSource })
+export function bindWorkspaceSetupApp(setupSource: WorkspaceSetupSource, source: WorkspaceSource, executionReader?: ExecutionContextReader, options: { readonly initialPath?: string | undefined; readonly mappingSource?: PlanningMappingSource | undefined; readonly refreshSource?: PlanningRefreshSource | undefined; readonly issueClosingLinksReader?: IssueClosingLinksReader | undefined; readonly issueDependenciesReader?: IssueDependenciesReader | undefined; readonly deliveryReader?: DeliveryLineageReader | undefined; readonly changeRequestCreator?: ChangeRequestCreator | undefined; readonly startWork?: StartWork | undefined; readonly repositoryBindingSource?: RepositoryBindingSource | undefined } = {}): () => ReactElement {
+  return () => h(WorkspaceSetupGate, { setupSource, source, executionReader, initialPath: options.initialPath, repositoryBindingSource: options.repositoryBindingSource, startWork: options.startWork, deliveryReader: options.deliveryReader, issueClosingLinksReader: options.issueClosingLinksReader, issueDependenciesReader: options.issueDependenciesReader, changeRequestCreator: options.changeRequestCreator, mappingSource: options.mappingSource, refreshSource: options.refreshSource })
 }

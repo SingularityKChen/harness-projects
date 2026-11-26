@@ -8,7 +8,8 @@ import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { apply } from '../../apps/harness-plugin/src/host.ts'
 import { prepareWindowsProjectData } from '../../apps/harness-plugin/src/host-private-windows.ts'
-import { preparePrivateWorktreeDirectories } from '../../apps/harness-plugin/src/host-private-data.ts'
+import { preparePrivateProjectData, preparePrivateWorktreeDirectories } from '../../apps/harness-plugin/src/host-private-data.ts'
+import { WORKSPACE_SELECTION_FILE, readWorkspaceSelection, writeWorkspaceSelection } from '../../apps/harness-plugin/src/host-selection.ts'
 import path from 'node:path'
 import { seed, seedWorkspace } from './fixtures/host-seed.js'
 import { corrupt, denied, hostFixture, inspectAcl, ordinaryToken, positiveHost, ps, setAcl, sqliteProbe, trustedAcl, windowsFixture } from './harness-plugin-windows-fixture.js'
@@ -47,8 +48,8 @@ test('native fresh profile creates the private data boundary inside the creating
   const lease = await prepareWindowsProjectData(f.profile)
   try {
     assert.equal(lease.signal.aborted, false)
-    assert.deepEqual([fs.existsSync(f.root), fs.existsSync(f.dataPath), fs.existsSync(f.log)], [true, true, true], 'fresh prepare 必须建立 root/db/log')
-    for (const location of [f.root, f.dataPath, f.log]) {
+    assert.deepEqual([fs.existsSync(f.root), fs.existsSync(f.dataPath), fs.existsSync(f.log), fs.existsSync(path.join(f.root, 'workspace-selection.json'))], [true, true, true, true], 'fresh prepare 必须建立 root/db/log/偏好文件')
+    for (const location of [f.root, f.dataPath, f.log, path.join(f.root, 'workspace-selection.json')]) {
       const entry = trustedAcl(inspectAcl(location), f.token.sid)
       assert.deepEqual([entry.ownerSid, entry.protected, entry.aces.every(({ inherited }) => !inherited)], [f.token.sid, true, true], `${location} 必须在创建调用内即为 owner=self、protected、无继承 ACE`)
     }
@@ -62,14 +63,15 @@ test('native fresh profile creates the private data boundary inside the creating
 // Batch 1：完全 canonical 的既有对象只被 adopt；SDDL 与字节逐字不变，重开仍接纳。
 test('native Windows adoption leaves the canonical data shape untouched across leases', { skip: process.platform !== 'win32' }, async (t) => {
   const f = await windowsFixture(t, { launcherProfile: true, provisioned: false })
-  const record = async () => ({ root: inspectAcl(f.root), db: inspectAcl(f.dataPath), log: inspectAcl(f.log), bytes: [await readFile(f.dataPath), await readFile(f.log)] })
+  const selection = path.join(f.root, 'workspace-selection.json')
+  const record = async () => ({ root: inspectAcl(f.root), db: inspectAcl(f.dataPath), log: inspectAcl(f.log), selection: inspectAcl(selection), bytes: [await readFile(f.dataPath), await readFile(f.log)] })
   let lease = await prepareWindowsProjectData(f.profile)
   const before = await record()
   fs.closeSync(lease.logFd); await lease.dispose()
   lease = await prepareWindowsProjectData(f.profile)
   try {
     const after = await record()
-    for (const key of ['root', 'db', 'log']) assert.equal(after[key].sddl, before[key].sddl, `${key} 的 DACL 不能被 adopt 路径改写`)
+    for (const key of ['root', 'db', 'log', 'selection']) assert.equal(after[key].sddl, before[key].sddl, `${key} 的 DACL 不能被 adopt 路径改写`)
     assert.deepEqual([after.bytes[0].equals(before.bytes[0]), after.bytes[1].equals(before.bytes[1])], [true, true], 'adopt 不能截断/改写既有内容')
   } finally { fs.closeSync(lease.logFd); await lease.dispose() }
   const reopened = await prepareWindowsProjectData(f.profile)
@@ -410,7 +412,7 @@ test('native Windows admission refuses a foreign-owned database even with otherw
 test('native Windows admission refuses unsafe objects without disclosing paths or mutating sentinels', { skip: process.platform !== 'win32' }, async (t) => {
   for (const kind of ['ancestor', 'direct-only', 'null', 'callback', 'inherit-only',
     'broad-profile', 'broad-root', 'broad-workspace.sqlite', 'broad-diagnostics.log', 'broad-workspace.sqlite-wal',
-    'broad-workspace.sqlite-shm', 'broad-workspace.sqlite-journal', 'junction-profile', 'junction-root', 'wrong-type', 'hardlink-db', 'hardlink-log', 'hardlink-sidecar']) {
+    'broad-workspace.sqlite-shm', 'broad-workspace.sqlite-journal', 'broad-workspace-selection.json', 'junction-profile', 'junction-root', 'junction-selection', 'wrong-type', 'hardlink-db', 'hardlink-log', 'hardlink-sidecar', 'hardlink-selection']) {
     await t.test(kind, async (t) => {
       const f = await windowsFixture(t), original = await readFile(f.log)
       await corrupt(f, kind)
@@ -419,7 +421,25 @@ test('native Windows admission refuses unsafe objects without disclosing paths o
         assert.equal(error.name, denied.name); assert.doesNotMatch(error.message, /harness-admission-|[A-Z]:\\/i)
         return true
       })
-      if (!['junction-profile', 'junction-root'].includes(kind)) assert.deepEqual(await readFile(f.log), original)
+      if (!['junction-profile', 'junction-root', 'junction-selection'].includes(kind)) assert.deepEqual(await readFile(f.log), original)
     })
   }
+})
+// #693：导航偏好是私有根固定文件；原生 Ensure 建立受保护形状，运行期只重写启动期 fd，重开保留字节。
+test('native selection preference is created protected, rewritten on its descriptor and preserved on reopen', { skip: process.platform !== 'win32' }, async (t) => {
+  const f = await windowsFixture(t, { launcherProfile: true, provisioned: false }), selection = path.join(f.root, WORKSPACE_SELECTION_FILE)
+  // 生产入口 preparePrivateProjectData 拥有 selection fd 的生命周期（原生 helper 只 Ensure 固定文件）。
+  const closed = async (prepared) => { fs.closeSync(prepared.logFd); fs.closeSync(prepared.selectionFd); await prepared.lease?.dispose() }
+  let prepared = await preparePrivateProjectData(f.dataPath, undefined, f.profile)
+  try {
+    assert.equal(trustedAcl(inspectAcl(selection), f.token.sid).protected, true, '偏好文件必须在创建调用内即为 protected')
+    assert.deepEqual(readWorkspaceSelection(prepared.selectionFd), { kind: 'none' }, '新文件为空 = 无偏好')
+    writeWorkspaceSelection(prepared.selectionFd, { workspaceId: '00000000-0000-4000-8000-000000000693', confirmedAt: '2026-11-25T00:00:00.000Z' })
+    assert.equal(readWorkspaceSelection(prepared.selectionFd).selection.workspaceId, '00000000-0000-4000-8000-000000000693')
+  } finally { await closed(prepared) }
+  prepared = await preparePrivateProjectData(f.dataPath, undefined, f.profile)
+  try {
+    assert.equal(readWorkspaceSelection(prepared.selectionFd).selection.confirmedAt, '2026-11-25T00:00:00.000Z', '重开保留偏好字节')
+    assert.equal(trustedAcl(inspectAcl(selection), f.token.sid).ownerSid, f.token.sid)
+  } finally { await closed(prepared) }
 })
