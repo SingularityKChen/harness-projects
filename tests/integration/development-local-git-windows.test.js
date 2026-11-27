@@ -607,29 +607,25 @@ test('Windows worktree removal: live cwd blocks isolated rename, provably delete
   diagnose(t, 'windows-removal-mechanism:', { mechanism, renameBlocked: true, zeroWrite: true })
 })
 
-test('Windows worktree removal: exclusive handle or ACL keeps partial deletion honest with a recoverable registration', native, async (t) => {
-  const f = await fixture(t), recorder = recordingRunner(), port = provider(f, { runGit: recorder.runGit })
-  const branch = 'work/partial', target = path.join(f.allowedRoot, 'Task 部分删除'), keepFile = path.join(target, 'keep.bin')
-  // keep.bin 必须是 ignored/untracked：icacls 改 DACL 会更新 NTFS change time，已跟踪文件会被 Git 干净门
-  // 看成“未提交路径”（hosted run 45407095005 之后的 45962513620 回读），那样就永远走不到部分删除；
-  // 忽略文件不进入 status，干净门仍成立，而 git worktree remove 仍必须真实删除它并因 deny-DELETE 失败。
+test('Windows worktree removal: live handle inside quarantine keeps partial deletion honest and recoverable', native, async (t) => {
+  const f = await fixture(t), recorder = recordingRunner()
+  const branch = 'work/partial', target = path.join(f.allowedRoot, 'Task 部分删除'), keepFile = path.join(target, 'sub', 'keep.bin')
+  // 故障必须允许“隔离 rename 成功、清理失败”。hosted 校准（run 45964019955）证明 icacls deny-DELETE 对
+  // Git for Windows 的 worktree 清理无效：Node 侧 rm 被 EPERM 拒绝，但 git worktree remove 仍删掉整个隔离
+  // 目录并让 provider 报成功。因此改用真实共享冲突：在 provider 调用 git worktree remove 之前，用独占句柄
+  // 打开隔离目录内的文件，让清理真实失败、保留字节并要求 reconcile。
   await commitIgnore(f, ['keep.bin'])
+  let holder
+  const port = provider(f, { runGit: async (args) => {
+    if (holder === undefined && args[2] === 'worktree' && args[3] === 'remove') {
+      holder = await holdExclusiveFile(path.join(args[args.length - 1], 'sub', 'keep.bin'))
+    }
+    return recorder.runGit(args)
+  } })
   assert.equal((await port.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
   assert.equal((await port.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  await mkdir(path.join(target, 'sub'))
   await writeFile(keepFile, 'locked-bytes')
-  const probeDirectory = path.join(f.allowedRoot, 'probe-partial'); await mkdir(probeDirectory)
-  const handleProbeFile = path.join(probeDirectory, 'handle.bin'); await writeFile(handleProbeFile, 'probe')
-  let handleBlocksDelete = false, handleBlocksRename = false
-  const handle = await holdExclusiveFile(handleProbeFile)
-  try {
-    handleBlocksDelete = await rm(handleProbeFile).then(() => false, () => true)
-    const moved = await rename(probeDirectory, probeDirectory + '-moved').then(() => true, () => false)
-    handleBlocksRename = !moved
-    if (moved) await rename(probeDirectory + '-moved', probeDirectory)
-  } finally { await handle.release() }
-  // 先取走 deny-DELETE 生效前的只读前置事实：hosted 校准（run 45960832073）证明在文件上施加
-  // icacls deny DELETE 后，Node 的 fs.promises.readFile 会在 windows-2025 内核里永不完成；
-  // 挂起的 threadpool 请求还会拖住 node --test 退出，把 --test-timeout 的失败变成 job 级静默取消。
   const keepBytes = await readFile(keepFile, 'utf8')
   const headProbe = runSync('git', ['-C', target, 'rev-parse', 'refs/heads/' + branch])
   assert.equal(headProbe.status, 0, '读取分支头失败：' + (headProbe.stderr ?? '').trim())
@@ -637,36 +633,15 @@ test('Windows worktree removal: exclusive handle or ACL keeps partial deletion h
   const headPathProbe = runSync('git', ['-C', target, 'rev-parse', '--git-path', 'HEAD'])
   assert.equal(headPathProbe.status, 0, '读取 HEAD 协调锁路径失败：' + (headPathProbe.stderr ?? '').trim())
   const lockPath = path.resolve(target, headPathProbe.stdout.trim())
-  let mechanism, release
-  if (handleBlocksDelete && !handleBlocksRename) {
-    mechanism = 'exclusive-handle'
-    release = (await holdExclusiveFile(keepFile)).release
-  } else {
-    mechanism = 'acl-deny-delete'
-    const aclProbeFile = path.join(probeDirectory, 'acl.bin'); await writeFile(aclProbeFile, 'probe')
-    let aclBlocksDelete = false, aclBlocksRename = false
-    denyDelete(aclProbeFile)
-    try {
-      aclBlocksDelete = await rm(aclProbeFile).then(() => false, () => true)
-      const moved = await rename(probeDirectory, probeDirectory + '-moved').then(() => true, () => false)
-      aclBlocksRename = !moved
-      if (moved) await rename(probeDirectory + '-moved', probeDirectory)
-    } finally { allowDelete(aclProbeFile) }
-    assert.equal(aclBlocksDelete && !aclBlocksRename, true, 'windows-removal-mechanism: no real partial-deletion fault (' + JSON.stringify({ handleBlocksDelete, handleBlocksRename, aclBlocksDelete, aclBlocksRename }) + ')')
-    denyDelete(keepFile)
-    release = async () => undefined
-  }
   let result
   try {
     result = await port.removeWorktree({ worktree: ref(target) })
   } finally {
-    // deny-DELETE 必须在读取隔离目录之前撤销；rename 成功后文件已随目录进入隔离路径，因此两处都尝试。
-    const quarantineNames = await quarantineEntries(f.allowedRoot)
-    for (const candidate of [keepFile, ...quarantineNames.map((name) => path.join(f.allowedRoot, name, 'keep.bin'))]) {
-      try { allowDelete(candidate) } catch { /* 路径不存在说明没有需要撤销的拒绝 ACE */ }
-    }
-    await release()
+    if (holder !== undefined) await holder.release()
   }
+  console.error('DIAG t8 result=' + JSON.stringify(result))
+  console.error('DIAG t8 quarantine=' + JSON.stringify(await quarantineEntries(f.allowedRoot)))
+  console.error('DIAG t8 targetExists=' + await stat(target).then(() => true, () => false))
   assert.equal(result.ok, false, '部分删除绝不能报成功')
   assert.equal(result.error.code, 'ambiguous_result', JSON.stringify(result.error))
   assert.equal(result.error.retryable, false, '结果不确定必须先 reconcile，不能原样重发')
@@ -679,7 +654,7 @@ test('Windows worktree removal: exclusive handle or ACL keeps partial deletion h
   assert.ok(result.error.message.includes('隔离目录仍在'), result.error.message)
   assert.ok(result.error.message.includes('reconcile'), 'message 必须要求 reconcile')
   assert.ok(result.error.message.includes('恢复'), 'message 必须给出恢复步骤')
-  assert.equal(await readFile(path.join(quarantine, 'keep.bin'), 'utf8'), keepBytes, '被锁文件字节必须不变')
+  assert.equal(await readFile(path.join(quarantine, 'sub', 'keep.bin'), 'utf8'), keepBytes, '被锁文件字节必须不变')
   const registry = (await worktreePaths(f)).map(slash), atQuarantine = registry.includes(slash(quarantine))
   assert.ok(result.error.message.includes(atQuarantine ? '登记仍指隔离目录或原目标' : '登记已不含隔离目录与原目标'), 'message 的登记读数必须与独立回读一致：' + result.error.message)
   assert.equal((await f.run(['rev-parse', 'refs/heads/' + branch])).trim(), headBefore, '分支头全程不变')
@@ -690,8 +665,8 @@ test('Windows worktree removal: exclusive handle or ACL keeps partial deletion h
   assert.equal((await port.getWorktree({ worktree: ref(target) })).ok, true, '恢复后必须能读回工作树')
   assert.equal((await port.removeWorktree({ worktree: ref(target) })).ok, true, '恢复后必须能正常移除')
   await assert.rejects(stat(target), { code: 'ENOENT' })
-  diagnose(t, 'windows-removal-recovery:', { mechanism, registration: atQuarantine ? 'quarantine' : 'none', restored: true })
-  diagnose(t, 'windows-removal-mechanism:', { mechanism, deleteBlocked: true, renameAllowed: true })
+  diagnose(t, 'windows-removal-recovery:', { mechanism: 'live-handle-in-quarantine', registration: atQuarantine ? 'quarantine' : 'none', restored: true })
+  diagnose(t, 'windows-removal-mechanism:', { mechanism: 'live-handle-in-quarantine', deleteBlocked: true, cleanupFailed: true })
 })
 
 test('Windows worktree removal: records Git version and reference backend, and refuses reftable removal fail closed', native, async (t) => {
