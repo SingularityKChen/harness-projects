@@ -377,6 +377,7 @@ const commitIgnore = async (fixtureValue, patterns) => {
 const headLockPath = async (target, repositoryPath) => path.resolve(target, (await git(['-C', target, 'rev-parse', '--git-path', 'HEAD'], repositoryPath)).trim())
 
 test('Windows worktree removal: clean explicit removal round trips through isolated rename, repair and readback', native, async (t) => {
+  assert.fail('windows-removal-executed')
   const f = await fixture(t), recorder = recordingRunner(), port = provider(f, { runGit: recorder.runGit })
   const branch = 'work/clean-round-trip', target = path.join(f.allowedRoot, 'Task 干净')
   assert.equal((await port.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
