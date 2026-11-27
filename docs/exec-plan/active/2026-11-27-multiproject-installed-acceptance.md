@@ -317,7 +317,7 @@ P7 人类接受句：人类在 #694 给出明确回复，内容至少包含「�
 ## Progress
 
 - [x] (2026-11-27 15:53 SGT) 创建本 ExecPlan：完成身份/可行性核实、交付形态收敛与批次设计；写入 docs/exec-plan/active/ 与 docs/README.md 的 Active 索引。
-- [ ] Batch 1 · 身份链重放与安装件证据（未开始；需网络与 pnpm install）
+- [x] (2026-11-27 16:03 SGT) Batch 1 · 身份链重放与安装件证据：在检出 `test/mp-installed-acceptance` 的工作树 `.worktrees/mp-installed-acceptance` 根目录完成。工作树 HEAD `f25d887b2c4a229bceb09e21d6e1d17eaf26a60d`（`origin/main` 仍为 `f5b731a4b695cb6cf61070cfbd1746fc05f0639d`）；相对 #697 final head `4c666811787f24a00450389e8f0a9ff80222cb1b` 的 `git diff --exit-code` 分别从 `f5b731a4` 与 HEAD 各跑一次，均无输出（I1 通过）。`pnpm install --frozen-lockfile` 后重放 `pack:plugin`：tarball 369610 bytes / `7895d024…`，`lib/index.js` 773521 / `f4af4031…`，`lib/client.js` 820506 / `49e36de6…`，与 2026-11-26 记录逐项一致（I2 通过）。scratch `DSH_HOME` 内 `dsh --version` 为 `0.2.0-rc.2`，六件 SHA-256 全 match 且 `diff -r` 零差异，宿主 stdout 出现 `[harness-projects] host ready`（I3 通过）；停机后 `/usr/bin/sqlite3 -readonly` 回读 `user_version=7`、`ledger=1:1`、`workspaces=0`（I4 通过）。观察值已回填 docs/product/installed-core-acceptance.md 的 2026-11-27 节。
 - [ ] Batch 2 · 验收包文档交付（记录节、demo-install 指针、Active 索引自查）
 - [ ] Batch 3 · 人类走查执行与记录回填（阻塞于人类可用时间）
 - [ ] Batch 4 · 关闭语义与发布门（依赖 Batch 3 的人类答复）
@@ -333,6 +333,12 @@ P7 人类接受句：人类在 #694 给出明确回复，内容至少包含「�
 - 2026-11-27：/usr/bin/sqlite3 为 3.54.0，支持 -readonly 与 pragma_user_version，前后状态回读不需要新增脚本或写库代码。
 - 2026-11-27：docs/exec-plan/active/ 创建前只有 2026-09-29 计划与 README，Active 索引表只有一行；新增计划必须同时补索引行，否则文档地图与实际计划不一致。
 - 2026-11-27：scripts/rule-checks.mjs 的 size 与 disclosure 按提交判定；工作树里未提交的改动会被计成「代码 0 行 / 文档 0 行」（实测）。因此机械门必须在批次提交之后对 HEAD 运行（或把本地提交作为第二个参数传入），不能拿脏工作树当通过证据。
+- 2026-11-27：Batch 1 重放时工作树 HEAD 是 `f25d887b`（本计划自身的文档提交），不是 Context 第 1 条写的 `f5b731a4`；计划里 `git rev-parse HEAD` 的期望值写于该提交之前。因此 I1 以两次 `git diff --exit-code`（`4c666811` 到 `f5b731a4`、到 HEAD）均无输出来判定，生产输入等价成立，`f5b731a4` 仍是 `origin/main`。
+- 2026-11-27：`pnpm install --frozen-lockfile` 打印 `Ignored build scripts: esbuild@0.28.2` 警告，但重放得到的 tarball 与两个 lib 的字节/摘要与 2026-11-26 完全一致；该 postinstall 不是本构建的输入，不需要 `pnpm approve-builds`。
+- 2026-11-27：`dsh plugin --profile web add` 内部使用 dsh 自带的 pnpm 12.21.0 并打印 peer 依赖警告；该 profile 的 `node_modules` 只有插件本身（peer 由宿主提供），安装成功且六件逐字节一致。
+- 2026-11-27：协调者会话环境继承了 `DSH_PROFILE=desktop`，但 `dsh web` 仍只初始化 `$DSH_HOME/profiles/web`（scratch 下仅有 web 一个 profile，插件数据根与库都在其下）；该继承变量没有把宿主重定向到 desktop profile，也没有触碰任何真实 profile。
+- 2026-11-27：首次加载后 scratch profile 内 `workspace-selection.json` 与 `diagnostics.log` 都是 0 字节文件；H9 的「覆盖为非法 JSON」在 Batch 3 可直接作用于该文件，不需要先创建。
+- 2026-11-27：同机正在运行的 DSH Desktop app 会在走查窗口内继续写它自己的真实 profile（该库 mtime 在会话期间前移）。本批所有 dsh 调用都显式 `DSH_HOME=$HP_DEMO_SCRATCH/dsh`，没有命令指向真实 profile；因此该写入不属于本批证据，也不能用来证明隔离或污染。
 
 ## Decision Log
 
@@ -389,3 +395,4 @@ P7 人类接受句：人类在 #694 给出明确回复，内容至少包含「�
 ## Bottom Change Note
 
 - 2026-11-27 15:53 SGT：创建本 ExecPlan。依据：issue #694 判据 5 仍为唯一未勾项，#698 已合并并留下安装态人验缺口；本次完成基线 f5b731a4 的 tree 等价复核、Desktop 旧产物与库拒绝路径核实、受支持 Web profile 路线确认、docs-only 与契约守卫的取舍，以及 nonce/前后回读协议与 H1–H9 步骤设计；同时写入 docs/README.md 的 Active 索引行。
+- 2026-11-27 16:03 SGT：回填 Batch 1 证据到 Progress 与 Surprises（身份值、六件匹配、host ready、前置状态）；Batch 2–4 仍未完成，本计划不含任何人类接受结论。
