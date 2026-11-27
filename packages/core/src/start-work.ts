@@ -21,7 +21,7 @@ import {
 } from './execution-context.ts'
 import { runReadGate, validRunRef } from './execution-run.ts'
 import {
-  gitIntentKey, guardedDevelopmentReads, namesFor, namesProblem, outcomeOf, provisionGit, reconcileGitStep, unknownGitIntent,
+  gitIntentKey, guardedDevelopmentReads, namesFor, namesProblem, outcomeOf, provisionGit, reconcileGitStep, recoverableGitIntent,
   type AdoptedGitStep, type GitOutcome,
 } from './git-provisioning.ts'
 import { EdgeProvenance, asEntityId, recordEdges, type DiscoveredEdge, type RelationStore } from './relations.ts'
@@ -180,17 +180,31 @@ async function replayRequest(context: CoreContext, contextId: ExecutionContextId
   const supplied = attempt.state === 'pending' && !unresolved(attempt) ? undefined : await createWriteLedger(context.storage).replay(context.workspaceId, request.idempotencyKey)
   return existingResult(context, contextId, supplied)
 }
-/** 同 key 重放携带的对账证据：采样行、被采纳的那一步（absent 为 undefined）、absent 重发的精确输入（`resendPath` 不落盘）与报告用自然键。 */
+/** 同 key 重放携带的对账证据：采样行、采样记录、被采纳的那一步（absent 为 undefined）、absent 重发的精确输入（`resendPath` 不落盘）与报告用自然键。 */
 type Resuming = {
-  readonly attempt: MutationAttemptRecord; readonly adopted: AdoptedGitStep | undefined
+  readonly attempt: MutationAttemptRecord; readonly record: ExecutionContextRecord
+  readonly adopted: AdoptedGitStep | undefined
   readonly resendPath: string | undefined; readonly key: string
+}
+/** 可对账的未决 Git 创建步（与 `git-provisioning` 内部 `GitIntent` 同形；不在 core 公开层新增类型）。 */
+type RecoverableGitIntent = NonNullable<ReturnType<typeof recoverableGitIntent>>
+
+/** 崩溃残留的跨步一致性：该步之前已回填的上下文必须与持久 intent 的目标一致，否则没有对账证据。 */
+function stepConsistent(intent: RecoverableGitIntent, record: ExecutionContextRecord): boolean {
+  return intent.operation === 'createBranch'
+    ? record.branchExternalId === undefined
+    : record.branchExternalId === intent.input.branch && record.worktreeExternalId === undefined
 }
 
 /**
- * 同 key 重放的前置只读对账（issue #191）。只有「确实可能重放」的形态才探测：命令是 Start Work、
- * 根状态是 unknown、请求指纹一致、持久 Git intent 指向本上下文与当代 owner、上下文可续跑且没有 run、
- * 路由仍然解析到同一个 binding。任一不满足都返回 undefined，原有重放行为完全不变（在途、Ready、
- * 已结算、换请求指纹、路由已变都不探测）。
+ * 同 key 重放的前置只读对账（issue #191 / #682）。只有「确实可能重放」的形态才探测：命令是 Start Work、
+ * 槽位是可对账的未决 Git 创建步、请求指纹一致、持久 Git intent 指向本上下文与当代 owner、上下文可续跑
+ * 且没有 run、路由仍然解析到同一个 binding。任一不满足都返回 undefined，原有重放行为完全不变（在途、
+ * Ready、已结算、换请求指纹、路由已变都不探测）。
+ *
+ * 崩溃残留的 pending 行额外要求：上下文仍在供应态（终态与 Ready 不受理）且租约过期、记录与持久 intent
+ * 的已回填步骤一致。进程内仍有 owner（`activeOwners`）时一律否决——它是「外部调用可能仍在飞」的唯一
+ * 进程内证据，只用于拒绝发起恢复，不授予任何权限；进程崩溃后的新 CoreContext 里它为空。
  *
  * 对账只改这一次的答复：conflict / inconclusive 用 `existingResult` 保留既有句柄与状态，零写入；
  * adopted / absent 作为续跑证据返回，由认领事务在同一条记录上继续。
@@ -198,10 +212,14 @@ type Resuming = {
 async function reconcileReplay(
   context: CoreContext, contextId: ExecutionContextId, request: StartWorkRequest, attempt: MutationAttemptRecord,
 ): Promise<{ readonly result: StartWorkResult } | Resuming | undefined> {
-  const intent = unknownGitIntent(attempt)
+  const intent = recoverableGitIntent(attempt)
   if (intent === undefined || requestMismatch(context.workspaceId, request, attempt)) return undefined
-  const record = await context.storage.getExecutionContext(contextId)
-  if (record === undefined || !needsSupply(record, context.clock())) return undefined
+  // 进程内 owner 否决：主动否决恢复，而不是把「时间/进程内标志」当作外部已发生的证据。
+  if (activeOwners.get(context)?.has(contextId)) return undefined
+  const now = context.clock(), record = await context.storage.getExecutionContext(contextId)
+  if (record === undefined || !needsSupply(record, now)) return undefined
+  // pending 是 beforeExternal 已提交的崩溃残留：只有供应中的上下文与一致的已验证步骤才可采信。
+  if (attempt.state === 'pending' && (record.status !== ExecutionContextStatus.Provisioning || !stepConsistent(intent, record))) return undefined
   if (await context.storage.getExecutionRun(runIdFor(contextId)) !== undefined) return undefined
   if (intent.contextId !== contextId || intent.ownerGeneration !== record.provisioningGeneration) return undefined
   const route = await selectDevelopment(context, request.repositoryId, START_WORK_ROUTE.anchor[0])
@@ -215,9 +233,9 @@ async function reconcileReplay(
     const report = reportFor(WritePhase.Unknown, beginWrite(gitIntentKey(intent)).values, outcome.error)
     return { result: await existingResult(context, contextId, report, false) }
   }
-  // adopted / absent：把采样行、结论与被证明的精确输入交给认领事务；absent 只对 createWorktree 带回重发路径。
+  // adopted / absent：把采样行、采样记录、结论与被证明的精确输入交给认领事务；absent 只对 createWorktree 带回重发路径。
   return {
-    attempt, adopted: outcome.kind === 'adopted' ? outcome : undefined,
+    attempt, record, adopted: outcome.kind === 'adopted' ? outcome : undefined,
     resendPath: outcome.kind === 'absent' && intent.operation === 'createWorktree' ? intent.input.path : undefined,
     key: gitIntentKey(intent),
   }
@@ -440,18 +458,21 @@ async function claimContext(
     const targetError = await startTargetError({ ...context, storage: tx }, request.workItemId)
     if (targetError !== undefined) return { kind: 'rejected', result: startWorkUnavailable(targetError) }
     const attempt = await tx.findMutationAttempt(context.workspaceId, request.idempotencyKey)
-    // 同 key 的未决证据行：只有当前行与对账采样的那一行**逐字相同**才跳过 replay，交给下面的认领事务覆盖旧槽位；
-    // 行已经变过（别的写者推进了它）就仍按原有重放语义处理。
-    const sampled = resuming !== undefined && attempt !== undefined && isDeepStrictEqual(attempt, resuming.attempt)
+    const existing = await tx.getExecutionContext(contextId)
+    // 同 key 的未决证据行：只有当前行**与对账采样的记录都逐字相同**才跳过 replay，交给下面的认领事务覆盖旧槽位。
+    // 行或记录任一被别的写者推进过（例如记录被改成 Ready / 推高代际），「对账证据」就不成立：完全回落到原有
+    // replay / safeResume / observe 语义——不采纳、不重发、不抛错，也不改写别的写者刚写下的记录（I3）。
+    const sampled = resuming !== undefined && attempt !== undefined && existing !== undefined
+      && isDeepStrictEqual(attempt, resuming.attempt) && isDeepStrictEqual(existing, resuming.record)
+    const evidence = sampled ? resuming : undefined
     if (attempt !== undefined && !sampled && !await safeResume(context, contextId, request, attempt, tx)) return { kind: 'replay', attempt }
     const source = { ...context, storage: tx }
     const current = await selectDevelopment(source, request.repositoryId, START_WORK_ROUTE.anchor[0])
     if (!current.ok || current.binding.ref.bindingId !== selected.binding.ref.bindingId) return { kind: 'conflict', error: bindingConflict('idempotency_target_changed') }
-    const existing = await tx.getExecutionContext(contextId)
     const run = existing === undefined ? undefined : await tx.getExecutionRun(runIdFor(contextId))
     const pending = await pendingClaim(context, tx, contextId, request, existing, run)
-    // 同 key 的证据行已经被对账采样：它由本次认领事务接管，不再走 observe（不同 key 的未决行仍 observe）。
-    if (pending !== undefined && !(resuming !== undefined && isDeepStrictEqual(pending, resuming.attempt))) {
+    // 同 key 的证据行（行与记录都未变）由本次认领事务接管，不再走 observe（不同 key 的未决行仍 observe）。
+    if (pending !== undefined && !(sampled && isDeepStrictEqual(pending, resuming?.attempt))) {
       if (requestMismatch(context.workspaceId, request, pending)) return { kind: 'conflict', error: bindingConflict('idempotency_request_mismatch') }
       if (unresolved(pending) || existing === undefined || !needsSupply(existing, now) || run !== undefined) return { kind: 'observe', attempt: pending }
       // 已知没有未决外部步骤与 run 的过期 owner 可安全续跑；完整 fingerprint 仍锁住原任务。
@@ -461,9 +482,9 @@ async function claimContext(
     const generation = supplying ? nextGeneration(existing) : existing?.provisioningGeneration
     const route = supplying ? await routeDevelopment(source, request.repositoryId, ...START_WORK_ROUTE.anchor) : current
     // 已采样未决行 + 写门拒绝：写能力是临时的，未决行仍可对账。原路径会把根写成 failed、推进代际并清句柄，
-    // 之后 unknownGitIntent 不再认它、pendingClaim 又永久阻挡——一次拒绝就锁死命令（F2）。此处整笔零写入：
+    // 之后 recoverableGitIntent 不再认它、pendingClaim 又永久阻挡——一次拒绝就锁死命令（F2）。此处整笔零写入：
     // 此前的语句全是读，返回即回滚/不提交任何契约事实；根、代际与未决行逐字保留，恢复后同 key 重新对账。
-    if (!route.ok && resuming !== undefined) return { kind: 'unsettled', error: route.error, attemptedValue: resuming.key }
+    if (!route.ok && evidence !== undefined) return { kind: 'unsettled', error: route.error, attemptedValue: evidence.key }
     if (pending !== undefined && pending.idempotencyKey !== request.idempotencyKey && supplying) await tx.putMutationAttempt({ ...pending, state: 'failed', errorCode: ProjectErrorCode.Conflict })
     if (!route.ok) {
       if (existing === undefined) return { kind: 'rejected', result: startWorkUnavailable(route.error) }
@@ -480,8 +501,8 @@ async function claimContext(
       requestFingerprint: requestFingerprint(context.workspaceId, selected.binding.ref.bindingId, request), report: beginWrite(undefined) })
     // 被采纳的身份都是对账证明的事实：终态接管在同一认领事务里把分支身份与工作树句柄一并写回（F1a）；
     // 工作树句柄仍不由步骤回填以外的路径凭空产生，这里写的只是被对账 ack 证明已落地的那个值。
-    const adoptedBranch = resuming?.adopted?.operation === 'createBranch' ? resuming.adopted.value : undefined
-    const adoptedWorktree = resuming?.adopted?.operation === 'createWorktree' ? resuming.adopted.value : undefined
+    const adoptedBranch = evidence?.adopted?.operation === 'createBranch' ? evidence.adopted.value : undefined
+    const adoptedWorktree = evidence?.adopted?.operation === 'createWorktree' ? evidence.adopted.value : undefined
     if (existing === undefined) {
       await register?.(tx)
       await tx.putExecutionContext({ ...contextRecord(context, contextId, request, ExecutionContextStatus.Provisioning, undefined, undefined, now), provisioningGeneration: generation! })
@@ -500,13 +521,18 @@ async function claimContext(
         ...(adoptedWorktree === undefined ? {} : { worktreeExternalId: adoptedWorktree }),
         status: ExecutionContextStatus.Provisioning, provisioningStartedAt: now, provisioningGeneration: generation!,
       })
-      return { kind: 'resume', route, generation: generation!, adopted: resuming?.adopted, resendPath: resuming?.resendPath }
+      return { kind: 'resume', route, generation: generation!, adopted: evidence?.adopted, resendPath: evidence?.resendPath }
     }
     if (existing.status !== ExecutionContextStatus.Provisioning) return { kind: 'existing', route }
     if (!leaseExpired(existing.provisioningStartedAt, now)) return { kind: 'in-flight', route }
-    // 过期 Provisioning 续跑只透传 absent 的精确输入；不写被采纳的工作树句柄（unknown 行归属终态接管分支，写在这里不可判别）。
-    await tx.putExecutionContext({ ...existing, ...(adoptedBranch === undefined ? {} : { branchExternalId: adoptedBranch }), provisioningStartedAt: now, provisioningGeneration: generation! })
-    return { kind: 'resume', route, generation: generation!, adopted: resuming?.adopted, resendPath: resuming?.resendPath }
+    // 过期 Provisioning 续跑：把对账证明的分支身份与工作树句柄一并写回同一事务（#673 D21 的 pending 对应面）。
+    // 采纳的 worktree 在认领提交后、工作树步回填前崩溃时句柄只在内存里；重启后默认目标漂移会产生第二份工作树，
+    // 所以句柄必须与认领同事务耐久。句柄来源仍是对账 ack 的等价证据；`has_worktree` 边仍只由成功结算写（I10）。
+    await tx.putExecutionContext({ ...existing,
+      ...(adoptedBranch === undefined ? {} : { branchExternalId: adoptedBranch }),
+      ...(adoptedWorktree === undefined ? {} : { worktreeExternalId: adoptedWorktree }),
+      provisioningStartedAt: now, provisioningGeneration: generation! })
+    return { kind: 'resume', route, generation: generation!, adopted: evidence?.adopted, resendPath: evidence?.resendPath }
   }
   return context.storage.transaction(async (tx) => {
     const result = await claim(tx)
