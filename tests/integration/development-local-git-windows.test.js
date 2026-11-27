@@ -637,6 +637,7 @@ test('Windows worktree removal: exclusive handle or ACL keeps partial deletion h
   const headPathProbe = runSync('git', ['-C', target, 'rev-parse', '--git-path', 'HEAD'])
   assert.equal(headPathProbe.status, 0, '读取 HEAD 协调锁路径失败：' + (headPathProbe.stderr ?? '').trim())
   const lockPath = path.resolve(target, headPathProbe.stdout.trim())
+  console.error('DIAG mech ' + JSON.stringify({ handleBlocksDelete, handleBlocksRename }))
   let mechanism, release
   if (handleBlocksDelete && !handleBlocksRename) {
     mechanism = 'exclusive-handle'
@@ -654,6 +655,9 @@ test('Windows worktree removal: exclusive handle or ACL keeps partial deletion h
     } finally { allowDelete(aclProbeFile) }
     assert.equal(aclBlocksDelete && !aclBlocksRename, true, 'windows-removal-mechanism: no real partial-deletion fault (' + JSON.stringify({ handleBlocksDelete, handleBlocksRename, aclBlocksDelete, aclBlocksRename }) + ')')
     denyDelete(keepFile)
+    const denyProbe = await rm(keepFile).then(() => 'deleted', (error) => 'blocked:' + error.code)
+    console.error('DIAG denyProbe=' + denyProbe)
+    if (denyProbe === 'deleted') { await writeFile(keepFile, 'locked-bytes'); denyDelete(keepFile); console.error('DIAG re-armed') }
     release = async () => undefined
   }
   let result
@@ -667,6 +671,10 @@ test('Windows worktree removal: exclusive handle or ACL keeps partial deletion h
     }
     await release()
   }
+  console.error('DIAG result=' + JSON.stringify(result))
+  console.error('DIAG quarantine=' + JSON.stringify(await quarantineEntries(f.allowedRoot)))
+  console.error('DIAG targetExists=' + await stat(target).then(() => true, () => false))
+  console.error('DIAG keepAtTarget=' + await stat(keepFile).then(() => true, () => false))
   assert.equal(result.ok, false, '部分删除绝不能报成功')
   assert.equal(result.error.code, 'ambiguous_result', JSON.stringify(result.error))
   assert.equal(result.error.retryable, false, '结果不确定必须先 reconcile，不能原样重发')
