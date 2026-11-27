@@ -449,7 +449,11 @@ test('Windows worktree removal: HEAD coordination lock rejects a concurrent deta
   const branch = 'work/head-lock', target = path.join(f.allowedRoot, 'Task 锁')
   assert.equal((await port.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
   assert.equal((await port.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
-  const headBefore = (await f.run(['rev-parse', 'refs/heads/' + branch])).trim(), lockPath = await headLockPath(target, f.repositoryPath)
+  console.error('MARKX before-head ' + Date.now())
+  const headBefore = (await f.run(['rev-parse', 'refs/heads/' + branch])).trim()
+  console.error('MARKX after-head ' + Date.now())
+  const lockPath = await headLockPath(target, f.repositoryPath)
+  console.error('MARKX after-lock ' + Date.now())
   let lockText, detachCode, detachStderr = '', commitCode, injected = false
   const racing = provider(f, { runGit: async (args) => {
     // 注入点 = 干净门的 status：锁已在手，真实 Git 尝试切 detached 并产生独有提交。
@@ -641,13 +645,19 @@ test('Windows worktree removal: exclusive handle or ACL keeps partial deletion h
       if (moved) await rename(probeDirectory + '-moved', probeDirectory)
     } finally { allowDelete(aclProbeFile) }
     assert.equal(aclBlocksDelete && !aclBlocksRename, true, 'windows-removal-mechanism: no real partial-deletion fault (' + JSON.stringify({ handleBlocksDelete, handleBlocksRename, aclBlocksDelete, aclBlocksRename }) + ')')
+    console.error('MARKX before-denyKeep ' + Date.now())
     denyDelete(keepFile)
+    console.error('MARKX after-denyKeep ' + Date.now())
     release = async () => allowDelete(keepFile)
   }
+  console.error('MARKX before-readKeep ' + Date.now())
   const keepBytes = await readFile(keepFile, 'utf8')
+  console.error('MARKX after-readKeep ' + Date.now())
   const headBefore = (await f.run(['rev-parse', 'refs/heads/' + branch])).trim(), lockPath = await headLockPath(target, f.repositoryPath)
   let result
-  try { result = await port.removeWorktree({ worktree: ref(target) }) } finally { await release() }
+  console.error('MARKX before-remove ' + Date.now())
+  try { result = await port.removeWorktree({ worktree: ref(target) }) } finally { console.error('MARKX before-release ' + Date.now()); await release() }
+  console.error('MARKX after-remove ' + Date.now() + ' code=' + (result.error && result.error.code))
   assert.equal(result.ok, false, '部分删除绝不能报成功')
   assert.equal(result.error.code, 'ambiguous_result', JSON.stringify(result.error))
   assert.equal(result.error.retryable, false, '结果不确定必须先 reconcile，不能原样重发')
@@ -665,7 +675,9 @@ test('Windows worktree removal: exclusive handle or ACL keeps partial deletion h
   assert.ok(result.error.message.includes(atQuarantine ? '登记仍指隔离目录或原目标' : '登记已不含隔离目录与原目标'), 'message 的登记读数必须与独立回读一致：' + result.error.message)
   assert.equal((await f.run(['rev-parse', 'refs/heads/' + branch])).trim(), headBefore, '分支头全程不变')
   await assert.rejects(stat(lockPath + '.lock'), { code: 'ENOENT' }, '协调锁必须释放')
+  console.error('MARKX before-rmQuarantine ' + Date.now())
   await rm(quarantine, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+  console.error('MARKX after-rmQuarantine ' + Date.now())
   await f.run(['worktree', 'prune'])
   await f.run(['worktree', 'add', target, branch])
   assert.equal((await port.getWorktree({ worktree: ref(target) })).ok, true, '恢复后必须能读回工作树')

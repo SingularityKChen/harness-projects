@@ -118,16 +118,13 @@ jobs:
       # 身份；这里承担 Git 路径/身份/恢复类行为，以及悬空 reparse/架构前提的创建拒绝，
       # 不作为普通用户隔离证据。入口必须证明 runner 真的打印了通过 marker：
       # 路径/argv 形态变化跳过 main() 时退出码仍是 0（#660）。
-      - name: 阶段 1：runner 管理员执行 native-git 套件
+      - name: 阶段 1：诊断 T8 挂起点细粒度（scratch only）
+        timeout-minutes: 8
         run: |
-          $ErrorActionPreference = 'Stop'
-          $output = (& node scripts/windows-native-checks.mjs --set native-git 2>&1 | Out-String)
-          Write-Output $output
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if ($output -notmatch 'windows-native-checks: set=native-git files=3 tests=\d+ skipped=0 todo=0') {
-            Write-Output '::error::windows-native-checks: set=native-git 缺少或不符合通过标记，按 fail closed 处理'
-            exit 1
-          }
+          $ErrorActionPreference = 'Continue'
+          Write-Output 'diagnose3: T8 fine markers'
+          & node --test --test-reporter=spec --test-timeout=600000 --test-name-pattern 'partial deletion' tests/integration/development-local-git-windows.test.js 2>&1 | ForEach-Object { Write-Output $_ }
+          Write-Output "diagnose3-exit=$LASTEXITCODE"
 
       # 阶段 2：账户、profile 与 foreign fixture 的生命周期只由这一处拥有；
       # 清理走 finally，不用 step 级 if。输出经 <fixture> 令牌化后回显。
