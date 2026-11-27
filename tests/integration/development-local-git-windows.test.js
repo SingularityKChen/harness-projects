@@ -618,41 +618,58 @@ test('Windows worktree removal: exclusive handle or ACL keeps partial deletion h
   const probeDirectory = path.join(f.allowedRoot, 'probe-partial'); await mkdir(probeDirectory)
   const handleProbeFile = path.join(probeDirectory, 'handle.bin'); await writeFile(handleProbeFile, 'probe')
   let handleBlocksDelete = false, handleBlocksRename = false
+  console.error('MARK-T8 621 ' + Date.now())
   const handle = await holdExclusiveFile(handleProbeFile)
   try {
+  console.error('MARK-T8 623 ' + Date.now())
     handleBlocksDelete = await rm(handleProbeFile).then(() => false, () => true)
+  console.error('MARK-T8 624 ' + Date.now())
     const moved = await rename(probeDirectory, probeDirectory + '-moved').then(() => true, () => false)
+  console.error('MARK-T8 625 ' + Date.now())
     handleBlocksRename = !moved
     if (moved) await rename(probeDirectory + '-moved', probeDirectory)
+  console.error('MARK-T8 627 ' + Date.now())
   } finally { await handle.release() }
   let mechanism, release
+  console.error('MARK-T8 629 ' + Date.now())
   if (handleBlocksDelete && !handleBlocksRename) {
     mechanism = 'exclusive-handle'
+  console.error('MARK-T8 631 ' + Date.now())
     release = (await holdExclusiveFile(keepFile)).release
   } else {
     mechanism = 'acl-deny-delete'
     const aclProbeFile = path.join(probeDirectory, 'acl.bin'); await writeFile(aclProbeFile, 'probe')
     let aclBlocksDelete = false, aclBlocksRename = false
+  console.error('MARK-T8 636 ' + Date.now())
     denyDelete(aclProbeFile)
     try {
+  console.error('MARK-T8 638 ' + Date.now())
       aclBlocksDelete = await rm(aclProbeFile).then(() => false, () => true)
+  console.error('MARK-T8 639 ' + Date.now())
       const moved = await rename(probeDirectory, probeDirectory + '-moved').then(() => true, () => false)
+  console.error('MARK-T8 640 ' + Date.now())
       aclBlocksRename = !moved
       if (moved) await rename(probeDirectory + '-moved', probeDirectory)
+  console.error('MARK-T8 642 ' + Date.now())
     } finally { allowDelete(aclProbeFile) }
     assert.equal(aclBlocksDelete && !aclBlocksRename, true, 'windows-removal-mechanism: no real partial-deletion fault (' + JSON.stringify({ handleBlocksDelete, handleBlocksRename, aclBlocksDelete, aclBlocksRename }) + ')')
+  console.error('MARK-T8 644 ' + Date.now())
     denyDelete(keepFile)
     release = async () => allowDelete(keepFile)
   }
   const keepBytes = await readFile(keepFile, 'utf8')
   const headBefore = (await f.run(['rev-parse', 'refs/heads/' + branch])).trim(), lockPath = await headLockPath(target, f.repositoryPath)
   let result
+  console.error('MARK-T8 650 ' + Date.now())
   try { result = await port.removeWorktree({ worktree: ref(target) }) } finally { await release() }
+  console.error('MARK-T8 651 ' + Date.now())
   assert.equal(result.ok, false, '部分删除绝不能报成功')
   assert.equal(result.error.code, 'ambiguous_result', JSON.stringify(result.error))
   assert.equal(result.error.retryable, false, '结果不确定必须先 reconcile，不能原样重发')
+  console.error('MARK-T8 654 ' + Date.now())
   const [quarantineName] = await quarantineEntries(f.allowedRoot)
   assert.ok(quarantineName !== undefined, '隔离目录必须仍在允许根下')
+  console.error('MARK-T8 656 ' + Date.now())
   const quarantine = path.join(f.allowedRoot, quarantineName)
   assert.ok(result.error.message.includes(quarantine), 'message 必须包含完整隔离路径')
   assert.ok(result.error.message.includes(target), 'message 必须包含原目标路径')
@@ -660,18 +677,26 @@ test('Windows worktree removal: exclusive handle or ACL keeps partial deletion h
   assert.ok(result.error.message.includes('隔离目录仍在'), result.error.message)
   assert.ok(result.error.message.includes('reconcile'), 'message 必须要求 reconcile')
   assert.ok(result.error.message.includes('恢复'), 'message 必须给出恢复步骤')
+  console.error('MARK-T8 663 ' + Date.now())
   assert.equal(await readFile(path.join(quarantine, 'keep.bin'), 'utf8'), keepBytes, '被锁文件字节必须不变')
   const registry = (await worktreePaths(f)).map(slash), atQuarantine = registry.includes(slash(quarantine))
   assert.ok(result.error.message.includes(atQuarantine ? '登记仍指隔离目录或原目标' : '登记已不含隔离目录与原目标'), 'message 的登记读数必须与独立回读一致：' + result.error.message)
   assert.equal((await f.run(['rev-parse', 'refs/heads/' + branch])).trim(), headBefore, '分支头全程不变')
   await assert.rejects(stat(lockPath + '.lock'), { code: 'ENOENT' }, '协调锁必须释放')
+  console.error('MARK-T8 668 ' + Date.now())
   await rm(quarantine, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+  console.error('MARK-T8 669 ' + Date.now())
   await f.run(['worktree', 'prune'])
+  console.error('MARK-T8 670 ' + Date.now())
   await f.run(['worktree', 'add', target, branch])
+  console.error('MARK-T8 671 ' + Date.now())
   assert.equal((await port.getWorktree({ worktree: ref(target) })).ok, true, '恢复后必须能读回工作树')
+  console.error('MARK-T8 672 ' + Date.now())
   assert.equal((await port.removeWorktree({ worktree: ref(target) })).ok, true, '恢复后必须能正常移除')
   await assert.rejects(stat(target), { code: 'ENOENT' })
+  console.error('MARK-T8 674 ' + Date.now())
   diagnose(t, 'windows-removal-recovery:', { mechanism, registration: atQuarantine ? 'quarantine' : 'none', restored: true })
+  console.error('MARK-T8 675 ' + Date.now())
   diagnose(t, 'windows-removal-mechanism:', { mechanism, deleteBlocked: true, renameAllowed: true })
 })
 
