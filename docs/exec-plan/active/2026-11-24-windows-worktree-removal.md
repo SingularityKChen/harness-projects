@@ -208,6 +208,8 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 - 2026-11-27（Batch 3 定位，scratch 证据）：T8 的挂起点不是 helper 子进程，也不是产品：`readFile(<worktree>/keep.bin)` 在 `icacls /deny *<SID>:(D)` 之后于 hosted windows-2025 永不返回（fine marker run `45960832073`：`before-denyKeep`→`after-denyKeep` 16 ms，`before-readKeep` 后 8 分钟无任何输出，停在 `before-remove` 之前）。同一布局下 `denyDelete`/`allowDelete` 与释放后的读取都正常；无产品 Git 调用发生。
 - 2026-11-27：`--test-timeout` 只把 test 标失败，不取消挂起的 libuv fs 请求；本地 `node --test` 语义实验（E16）显示 pending `readFile` 会让测试进程永不退出——这解释了 diagnose1 在 T8 `✖ 122073ms` 之后仍静默 6 分 41 秒直至 step kill。`commit 53214148` 只兜住了 helper 子进程与 `spawnSync`，没有覆盖 fs promises 与 fixture 的无超时 `execFile`。
 - 2026-11-27（run `45962513620`，head `47e0d552`）：挂起修复生效——T8 从 120s 超时降到 2.3s 并按普通断言失败。新失败：`invalid_input 工作树有 1 个未提交路径…keep.bin`。原因：`icacls` 改 DACL 会更新 NTFS change time，已跟踪文件被 provider 的 `git status --porcelain` 干净门判成未提交；因此 ACL 机制只能作用在 ignored/untracked 文件上。修复：T8 先 `commitIgnore(f, ['keep.bin'])` 再建工作树，`keep.bin` 不再 add/commit；干净门仍成立，`git worktree remove` 仍须真实删除它并被 deny-DELETE 挡住。
+- 2026-11-27（run `45964019955`）：ACL 机制对 Git 清理无效。DIAG 证据：`denyProbe=blocked:EPERM`（Node 侧删除被拒），但同一目录下 `git worktree remove` 仍返回成功、隔离目录消失、`result={"ok":true}`。结论：`icacls /deny *<SID>:(D)` 不能作为“Git 清理真实失败”的故障机制；改用**隔离目录内文件被真实独占句柄持有**（在注入的 `runGit` 里对 `worktree remove` 前调用 `holdExclusiveFile(quarantine/sub/keep.bin)`），让 Git 清理真实失败并保留字节。
+- 2026-11-27（scratch run `45964811530`）：新机制在 windows-2025 上判别性成立——`result.ok=false`、`ambiguous_result`、隔离目录仍在、字节保留、`registration` 读数与独立回读一致，随后释放句柄 → `rm`/`prune`/`worktree add`/`getWorktree`/`removeWorktree` 全部成功；T8 用时 7.6s 通过，`windows-removal-mechanism:`/`windows-removal-recovery:` token 正常。
 - 2026-11-27：Lane 放大是第二个独立缺陷：`scripts/windows-native-checks.mjs` 的 `runFile()` 用无 `timeout` 的 `spawnSync` 且在子进程退出后才写输出，`ci.yml` 阶段 1 又用 `Out-String` 缓冲，于是任何挂起都表现为“零输出 15 分钟取消”。该文件属 #679 owner，本 PR 不改；作为 #681 残余诊断能力缺口记录，建议另立 follow-up（给 runFile 加进程级 timeout 并流式输出，保持 fail-closed）。
 
 
@@ -233,6 +235,8 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 - 2026-11-27 / impl-681：T8 的只读前置事实（`keepBytes`、`headBefore`、`lockPath`）全部移到 arm `denyDelete(keepFile)` 之前，并用文件内 `runSync`（60s 上限）替代无超时的 fixture `execFile` 读取这两项 Git 事实。Rationale：hosted 证据表明 deny-DELETE ACE 生效后对同一文件的 Node fs 读取会永不完成；这不改变任何断言、不做 skip，也不会把失败路径变成成功。
 - 2026-11-27 / impl-681：deny ACE 的撤销放在 provider 返回后的 `finally`，同时尝试原目标路径与隔离目录内的路径（rename 成功后文件已随目录移动）。Rationale：只撤销原路径会因路径不存在而失败并把“诚实 ambiguous + 可恢复”变成测试错误；两处都尝试是可幂等的清理。
 - 2026-11-27 / impl-681：不做产品修复。Rationale：hang 发生在 `port.removeWorktree` 之前，产品路径未被进入；23 条其他 Windows 用例在 hosted 通过；ExecPlan 的 ≤120 行产品修复门槛未被触发。Lane 级 `runFile` 超时另开 follow-up，不在本 PR 扩大 #679 owner 的文件。
+
+- 2026-11-27 / impl-681：T8 的故障机制从“icacls deny-DELETE 文件”改为“隔离目录内文件被真实独占句柄持有”，用例名改为 `live handle inside quarantine keeps partial deletion honest and recoverable`。Rationale：hosted run `45964019955` 证明 Git for Windows 的 worktree 删除路径可以移除 deny-ACL 文件并返回成功（Node 侧 rm 同时被 EPERM 拒绝），因此 ACL 无法产生“清理真实失败”；独占句柄是 Git 无法绕过的真实共享冲突，能同时保留字节并要求 reconcile。断言集合不变（诚实 ambiguous、隔离残留、登记读数、分支头、锁释放、可恢复），只替换故障构造。
 
 ## Idempotence and Recovery
 
@@ -262,3 +266,5 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 - 2026-11-27：Batch 2/3 hosted 挂起定位与 T8 修复（证据见 Progress/Surprises/Decision Log）；本机 focused 验证通过，push 后等待当前 head 的 Windows Native 回读。
 
 - 2026-11-27：T8 改为 ignored 文件 + 记录 DACL/ctime 与 Git 干净门交互的 hosted 证据；再次 push 等待当前 head 的 Windows Native 回读。
+
+- 2026-11-27：T8 故障机制改为隔离目录内独占句柄（hosted 校准 run `45964811530`），本地 focused 通过；push 后等待当前 head 的全量 Windows Native 回读。
