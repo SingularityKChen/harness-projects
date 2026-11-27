@@ -25,6 +25,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-24-windows-worktree-removal](exec-plan/completed/2026-11-24-windows-worktree-removal.md) | Windows 原生工作树移除资格：`native-git` lane 内 9 条判别用例、真实 Windows 清理/拒绝/恢复证据与失败诊断修复（#681；Refs #138；test-only） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed

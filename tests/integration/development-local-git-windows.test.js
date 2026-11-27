@@ -1,11 +1,12 @@
 /** #645：原生 NTFS/Git for Windows 判别证据；POSIX skip 不计作 Windows 验收。 */
 import '../fixtures/resolution-preflight.mjs'
 import assert from 'node:assert/strict'
-import childProcess, { execFileSync } from 'node:child_process'
+import childProcess, { execFileSync, spawnSync } from 'node:child_process'
 import { syncBuiltinESMExports } from 'node:module'
-import { chmod, lstat, mkdir, readFile, realpath, rename, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import { composeCore, createWorkspaceSetup } from '@harness-projects/core'
 import { createSqliteStorage } from '@harness-projects/storage-sqlite'
 import { windowsPathsArePlain } from '../../packages/providers/development-local-git/src/git-runner.ts'
@@ -13,7 +14,7 @@ import { localGitPathProblem } from '../../packages/providers/development-local-
 import { PROVIDER_CATALOG, hostStoragePolicy } from '../../apps/harness-plugin/src/host-providers.ts'
 import { preflightRepositoryBinding } from '../../apps/harness-plugin/src/host-repository-binding.ts'
 import { ACCOUNT, WORKSPACE, account, githubFetch, REPOSITORY_MOUNTS, seedWorkspace } from './fixtures/host-seed.js'
-import { BINDING, FROZEN_NOW, REPOSITORY_ID, fixtureFor, git, providerFor, recordingRunner, registerWorkItem, repositoryRef } from './local-git-fixture.js'
+import { BINDING, FROZEN_NOW, REPOSITORY_ID, destructiveCall, fixtureFor, git, providerFor, quarantineEntries, recordingRunner, registerWorkItem, repositoryRef, snapshotTree, worktreePaths } from './local-git-fixture.js'
 
 const native = { skip: process.platform !== 'win32' }
 const slash = (value) => value.replaceAll('\\', '/')
@@ -312,4 +313,405 @@ test('Windows repository admission rejects before any Git call when the native m
     assert.deepEqual(observed.map((result) => result.error?.code), ['invalid_input', 'invalid_input', 'invalid_input', 'invalid_input'])
     assert.equal(recorder.calls.length, 0, '原生探针判定不安全后不得调用任何 Git 命令')
   } finally { mocked.mock.restore(); syncBuiltinESMExports(); Object.defineProperty(process, 'platform', descriptor) }
+})
+
+// --- #681：显式工作树移除的 Windows 原生资格（9 条，全部 native；前缀 `Windows worktree removal: `）------
+// lane 语义：本文件已在 native-git SETS 内，新增用例只抬高 summary.tests；判定是单调下限 tests >= minTests，
+// marker 只数文件数与 skip 预算，所以不需要改 SETS/ci.yml/契约（详见 active ExecPlan 与 PR body）。
+const sep = String.fromCharCode(92)
+/** 所有 helper 子进程都被跟踪：任何用例失败或超时后由 after 兜底 kill，挂起的子进程不得拖住测试进程退出。 */
+const helperChildren = []
+const trackHelper = (child) => { helperChildren.push(child); return child }
+after(() => { for (const child of helperChildren) if (child.exitCode === null && child.signalCode === null) child.kill() })
+/** 同步 Git 调用一律带 60s 上限：spawnSync 没有 timeout 时一个挂起会永锁测试进程。 */
+const runSync = (file, args, options = {}) => spawnSync(file, args, { encoding: 'utf8', timeout: 60000, windowsHide: true, ...options })
+const diagnose = (t, prefix, fields) => t.diagnostic(prefix + ' ' + JSON.stringify(fields))
+const timeLimited = (promise, ms, message) => {
+  let timer
+  const limit = new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(message)), ms) })
+  return Promise.race([promise, limit]).finally(() => clearTimeout(timer))
+}
+const readyLine = (child) => new Promise((resolve, reject) => {
+  let seen = ''
+  child.stdout.on('data', (chunk) => { seen += chunk; if (seen.includes('ready')) resolve() })
+  child.once('error', reject)
+  child.once('exit', (code) => reject(new Error('helper exited ' + code + ' before ready')))
+})
+const exitOf = (child) => new Promise((resolve) => child.once('exit', (code) => resolve(code)))
+/** 子进程 cwd 持有目录：Windows 上它让父目录 rename 失败（POSIX 不成立，所以只作原生证据）。 */
+const holdCwd = async (directory) => {
+  const script = 'process.stdout.write("ready");process.stdin.on("data",()=>process.exit(0));process.stdin.resume()'
+  const child = trackHelper(childProcess.spawn(process.execPath, ['-e', script], { cwd: directory, stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true }))
+  await timeLimited(readyLine(child), 15000, 'cwd holder did not become ready')
+  return { release: async () => { child.stdin.end('release'); await timeLimited(exitOf(child), 30000, 'cwd holder did not exit').catch((error) => { child.kill(); throw error }) } }
+}
+/** PowerShell 独占句柄（FileShare.None）：让删除真实失败；路径只经 stdin 传入，不解析本地化文本。 */
+const holdExclusiveFile = async (file) => {
+  const command = '$ErrorActionPreference="Stop";$p=[Console]::In.ReadLine();$s=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read);[Console]::Out.WriteLine("ready");[Console]::Out.Flush();[Console]::In.ReadLine()|Out-Null;$s.Dispose()'
+  const child = trackHelper(childProcess.spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true }))
+  child.stdin.write(file + String.fromCharCode(10))
+  await timeLimited(readyLine(child), 30000, 'exclusive handle holder did not become ready')
+  return { release: async () => { child.stdin.end('release' + String.fromCharCode(10)); await timeLimited(exitOf(child), 30000, 'exclusive handle holder did not exit').catch((error) => { child.kill(); throw error }) } }
+}
+let currentSid
+/** 当前用户 SID：locale 无关地取数值 SID，用于真实的拒绝 ACE（不写进日志）。 */
+const sid = () => currentSid ??= execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '([Security.Principal.WindowsIdentity]::GetCurrent()).User.Value'], { encoding: 'utf8', timeout: 20000, windowsHide: true }).trim()
+const denyDelete = (target) => execFileSync('icacls.exe', [target, '/deny', '*' + sid() + ':(D)'], { timeout: 20000, windowsHide: true })
+const allowDelete = (target) => execFileSync('icacls.exe', [target, '/remove:d', '*' + sid()], { timeout: 20000, windowsHide: true })
+/** 自探针：拿住目录后 rename 必须失败；失败分类只取确定性 errno。 */
+const probeRename = async (directory, acquire) => {
+  const holder = await acquire(directory)
+  try {
+    await rename(directory, directory + '-moved')
+    await rename(directory + '-moved', directory)
+    return { blocked: false }
+  } catch (error) {
+    return { blocked: ['EPERM', 'EACCES', 'EBUSY'].includes(error.code), code: error.code }
+  } finally { await holder.release() }
+}
+const commitIgnore = async (fixtureValue, patterns) => {
+  await writeFile(path.join(fixtureValue.repositoryPath, '.gitignore'), patterns.join(String.fromCharCode(10)))
+  await fixtureValue.run(['add', '.gitignore'])
+  await fixtureValue.run(['-c', 'commit.gpgsign=false', 'commit', '-m', '忽略测试内容'])
+}
+const headLockPath = async (target, repositoryPath) => path.resolve(target, (await git(['-C', target, 'rev-parse', '--git-path', 'HEAD'], repositoryPath)).trim())
+
+test('Windows worktree removal: clean explicit removal round trips through isolated rename, repair and readback', native, async (t) => {
+  const f = await fixture(t), recorder = recordingRunner(), port = provider(f, { runGit: recorder.runGit })
+  const branch = 'work/clean-round-trip', target = path.join(f.allowedRoot, 'Task 干净')
+  assert.equal((await port.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await port.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  const rootReal = await realpath(f.allowedRoot), headBefore = (await f.run(['rev-parse', 'refs/heads/' + branch])).trim()
+  const anchor = await stat(target, { bigint: true })
+  const backendProbe = runSync('git', ['-C', target, 'config', '--local', '--get', 'extensions.refstorage'])
+  const backend = backendProbe.status === 1 ? 'files' : backendProbe.stdout.trim() || 'exit-' + backendProbe.status
+  const lockPath = await headLockPath(target, f.repositoryPath)
+  let anchorMatched
+  const observed = provider(f, { runGit: async (args) => {
+    if (anchorMatched === undefined && args.includes('repair')) {
+      const moved = await stat(args[args.length - 1], { bigint: true })
+      anchorMatched = moved.dev === anchor.dev && moved.ino === anchor.ino
+    }
+    return recorder.runGit(args)
+  } })
+  const removed = await observed.removeWorktree({ worktree: ref(target) })
+  assert.equal(removed.ok, true, JSON.stringify(removed))
+  const repair = recorder.calls.find((call) => call.includes('repair'))
+  const removal = recorder.calls.find((call) => call.includes('remove'))
+  assert.ok(repair !== undefined && removal !== undefined, '必须先 repair 登记再 remove')
+  const quarantine = repair[repair.length - 1]
+  assert.equal(path.dirname(quarantine), rootReal, '隔离目录的父目录必须是允许根 realpath')
+  assert.deepEqual(repair, ['-C', f.repositoryPath, 'worktree', 'repair', quarantine], 'repair 只改登记，目标必须是隔离目录')
+  assert.deepEqual(removal, ['-C', f.repositoryPath, 'worktree', 'remove', quarantine], 'remove 目标隔离目录，不得带 force')
+  assert.equal(recorder.calls.some((call) => call.includes('--force') || call.includes('-f') || call.includes('move')), false, '不得 force，也不得用 move 作隔离原语')
+  assert.equal(anchorMatched, true, '隔离对象的 (dev, ino) 必须与准入对象一致')
+  assert.equal(anchor.ino !== 0n, true, '真实文件系统必须提供稳定对象身份')
+  assert.deepEqual(await quarantineEntries(f.allowedRoot), [], '成功后不得残留隔离目录')
+  await assert.rejects(stat(target), { code: 'ENOENT' }, '目录必须消失')
+  assert.equal((await worktreePaths(f)).map(slash).includes(slash(target)), false, '登记必须消失')
+  assert.equal((await f.run(['rev-parse', 'refs/heads/' + branch])).trim(), headBefore, '分支头必须保留')
+  await assert.rejects(stat(lockPath + '.lock'), { code: 'ENOENT' }, 'HEAD 协调锁不得残留')
+  const again = await port.removeWorktree({ worktree: ref(target) })
+  assert.equal(again.error?.code, 'not_found', '二次移除只能答 not_found')
+  diagnose(t, 'windows-removal-matrix:', { git: execFileSync('git', ['--version'], { encoding: 'utf8' }).trim(), node: process.version, backend, ino: anchor.ino !== 0n })
+})
+
+test('Windows worktree removal: dirty worktree is refused with byte-identical preservation and recorded user paths', native, async (t) => {
+  const f = await fixture(t), port = provider(f)
+  await commitIgnore(f, ['.env'])
+  const branch = 'work/dirty-bytes', target = path.join(f.allowedRoot, 'Task 脏')
+  assert.equal((await port.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await port.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  await writeFile(path.join(target, 'README.md'), '# 修改后的内容')
+  await writeFile(path.join(target, 'staged.txt'), 'staged')
+  await git(['add', 'staged.txt'], target)
+  await writeFile(path.join(target, 'untracked.txt'), 'untracked')
+  await writeFile(path.join(target, '.env'), 'SECRET=1')
+  // 负控：仓库配置让未跟踪文件从默认 status 消失；脏检查必须显式 --untracked-files=normal 才数得到 3 条。
+  await git(['config', 'status.showUntrackedFiles', 'no'], target)
+  const before = await snapshotTree(target), headBefore = (await git(['rev-parse', 'HEAD'], target)).trim(), registryBefore = await worktreePaths(f)
+  const recorder = recordingRunner()
+  const result = await provider(f, { runGit: recorder.runGit }).removeWorktree({ worktree: ref(target) })
+  assert.equal(result.ok, false, '脏工作树必须被拒')
+  assert.equal(result.error.code, 'invalid_input', '脏树是确定性拒绝，不能是 conflict/ambiguous_result')
+  assert.equal(result.error.retryable, false, '脏树必须由用户处理后重新显式请求')
+  assert.ok(result.error.message.includes('3 个未提交路径'), result.error.message)
+  assert.ok(result.error.message.includes('README.md'), '必须点名一条未提交路径')
+  assert.ok(result.error.message.includes('请先提交、stash 或清理'), '必须给出可行动出路')
+  assert.deepEqual(await snapshotTree(target), before, '被拒的移除不得改动任何字节（含被忽略内容）')
+  assert.deepEqual(await worktreePaths(f), registryBefore, '被拒后登记必须保留')
+  assert.equal((await git(['rev-parse', 'HEAD'], target)).trim(), headBefore, '被拒后 HEAD 不得变化')
+  assert.equal(recorder.calls.some(destructiveCall), false, '脏树拒绝不得发出破坏性 argv')
+})
+
+test('Windows worktree removal: HEAD coordination lock rejects a concurrent detach and leaves no unreachable commit', native, async (t) => {
+  const f = await fixture(t), recorder = recordingRunner(), port = provider(f, { runGit: recorder.runGit })
+  const branch = 'work/head-lock', target = path.join(f.allowedRoot, 'Task 锁')
+  assert.equal((await port.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await port.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  const headBefore = (await f.run(['rev-parse', 'refs/heads/' + branch])).trim(), lockPath = await headLockPath(target, f.repositoryPath)
+  let lockText, detachCode, detachStderr = '', commitCode, injected = false
+  const racing = provider(f, { runGit: async (args) => {
+    // 注入点 = 干净门的 status：锁已在手，真实 Git 尝试切 detached 并产生独有提交。
+    if (!injected && args.includes('status')) {
+      injected = true
+      lockText = await readFile(lockPath + '.lock', 'utf8')
+      const detach = runSync('git', ['checkout', '--detach'], { cwd: target })
+      detachCode = detach.status
+      detachStderr = detach.stderr ?? ''
+      if (detach.status === 0) commitCode = runSync('git', ['-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', '竞态独有提交'], { cwd: target }).status
+    }
+    return recorder.runGit(args)
+  } })
+  const removed = await racing.removeWorktree({ worktree: ref(target) })
+  assert.ok(lockText !== undefined && lockText.includes('harness worktree removal ' + process.pid + ' '), '锁内注入点必须看到本进程持有的 HEAD.lock 内容')
+  assert.notEqual(detachCode, 0, 'HEAD 协调锁必须让注入的 checkout --detach 失败')
+  assert.match(detachStderr, /HEAD/, 'Git 必须报告 HEAD 引用锁冲突：' + detachStderr)
+  assert.match(detachStderr, /lock/i, 'Git 必须报告引用锁冲突：' + detachStderr)
+  assert.equal(commitCode, undefined, 'detach 被拒后不得再产生独有提交')
+  assert.equal(removed.ok, true, JSON.stringify(removed))
+  assert.equal((await f.run(['rev-parse', 'refs/heads/' + branch])).trim(), headBefore, '分支头不得变化')
+  assert.equal((await f.run(['fsck', '--unreachable', '--no-reflogs'])).trim(), '', '不得留下不可达提交')
+  await assert.rejects(stat(lockPath + '.lock'), { code: 'ENOENT' }, '成功 remove 后协调锁不得残留')
+})
+
+test('Windows worktree removal: same-gitfile substitute is refused by real object identity without deleting content', native, async (t) => {
+  const f = await fixture(t), port = provider(f)
+  await commitIgnore(f, ['.env'])
+  const branch = 'work/substitute', target = path.join(f.allowedRoot, 'Task 替身'), movedReal = path.join(f.allowedRoot, 'Task 替身 real')
+  assert.equal((await port.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await port.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  const recorder = recordingRunner()
+  let substituteBefore, realBefore, swapped = false
+  const racing = provider(f, { runGit: async (args) => {
+    // 注入点 = 干净门的 status：锚已取，这是删除前最后一次只读 Git 读；复制 .git gitfile 后 Git 会把替身当同一登记。
+    if (!swapped && args.includes('status')) {
+      swapped = true
+      await rename(target, movedReal)
+      await cp(movedReal, target, { recursive: true })
+      await writeFile(path.join(target, '.env'), 'SECRET=1')
+      substituteBefore = await snapshotTree(target)
+      realBefore = await snapshotTree(movedReal)
+    }
+    return recorder.runGit(args)
+  } })
+  const result = await racing.removeWorktree({ worktree: ref(target) })
+  assert.equal(result.ok, false, '准入后被换成同 gitfile 替身时必须拒绝')
+  assert.equal(result.error.code, 'invalid_input', '对象复核不符是确定性拒绝')
+  assert.equal(result.error.retryable, false)
+  assert.ok(result.error.message.includes('对象被替换') || result.error.message.includes('已回滚'), result.error.message)
+  assert.deepEqual(await snapshotTree(target), substituteBefore, '回滚后的替身必须逐字节不变')
+  assert.deepEqual(await snapshotTree(movedReal), realBefore, '被移走的准入对象必须完整')
+  assert.equal((await worktreePaths(f)).map(slash).includes(slash(target)), true, '登记必须仍指向 target')
+  assert.deepEqual(await quarantineEntries(f.allowedRoot), [], '不得留下隔离目录')
+  assert.equal(recorder.calls.some(destructiveCall), false, '零破坏性 argv')
+})
+
+test('Windows worktree removal: outside-root, namespace, ADS, trailing-space and junction escapes refuse before any Git argv', native, async (t) => {
+  const f = await fixture(t)
+  const outside = path.join(f.root, 'outside'), junction = path.join(f.allowedRoot, 'escape')
+  await mkdir(outside)
+  const sentinel = path.join(outside, 'sentinel'); await writeFile(sentinel, 'unchanged')
+  await symlink(outside, junction, 'junction')
+  const cases = [
+    { what: 'outside allowed root', target: path.join(outside, 'Task') },
+    { what: 'parent segment', target: f.allowedRoot + sep + '..' + sep + 'outside' + sep + 'Task' },
+    { what: 'UNC', target: sep + sep + 'server' + sep + 'share' + sep + 'task' },
+    { what: 'device namespace', target: sep + sep + '?' + sep + f.allowedRoot },
+    { what: 'ADS', target: path.join(f.allowedRoot, 'task:stream') },
+    { what: 'trailing space', target: path.join(f.allowedRoot, 'task ') },
+    { what: 'junction escape', target: path.join(junction, 'Task') },
+    { what: 'junction allowed root', target: path.join(f.allowedRoot, 'Task'), root: junction },
+  ]
+  for (const item of cases) {
+    const recorder = recordingRunner()
+    const result = await provider(f, { runGit: recorder.runGit, ...(item.root === undefined ? {} : { allowedRoot: item.root }) }).removeWorktree({ worktree: ref(item.target) })
+    assert.deepEqual(recorder.calls, [], item.what + ' 必须在任何 Git 命令之前被拒')
+    assert.equal(result.error?.code, 'invalid_input', JSON.stringify({ what: item.what, error: result.error }))
+    assert.equal(result.error.retryable, false, item.what + ' 是输入错误，原样重发没有意义')
+  }
+  assert.equal(await readFile(sentinel, 'utf8'), 'unchanged', '允许根外的哨兵不得被触碰')
+})
+
+test('Windows worktree removal: capability, foreign binding, main checkout, foreign repository and detached all refuse without destructive argv', native, async (t) => {
+  const f = await fixture(t), recorder = recordingRunner(), port = provider(f, { runGit: recorder.runGit })
+  const branch = 'work/not-removable', target = path.join(f.allowedRoot, 'Task 不可移除')
+  assert.equal((await port.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await port.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  const offRecorder = recordingRunner()
+  const off = await provider(f, { runGit: offRecorder.runGit, capabilities: { worktreeRemove: false } }).removeWorktree({ worktree: { ...ref(target), bindingId: BINDING + '-foreign' } })
+  assert.equal(off.error?.code, 'not_supported', '能力先于身份：关闭能力 + 外来 ref 仍是 not_supported')
+  assert.equal(off.error.retryable, false)
+  assert.deepEqual(offRecorder.calls, [], '被拒的能力不得触发任何 Git 命令')
+  const foreign = await port.removeWorktree({ worktree: { ...ref(target), bindingId: BINDING + '-foreign' } })
+  assert.equal(foreign.error?.code, 'not_found', '外来 binding 不可见')
+  const mainCheckout = await provider(f, { runGit: recorder.runGit, allowedRoot: f.root }).removeWorktree({ worktree: ref(f.repositoryPath) })
+  assert.equal(mainCheckout.error?.code, 'invalid_input')
+  assert.ok(mainCheckout.error.message.includes('主检出'), mainCheckout.error.message)
+  await rm(target, { recursive: true, force: true })
+  await mkdir(target)
+  await git(['init', '-b', 'other'], target)
+  await git(['config', 'user.email', 'other@example.invalid'], target)
+  await git(['config', 'user.name', 'Other Repo'], target)
+  await git(['-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', '独立仓库的提交'], target)
+  const replaced = await port.removeWorktree({ worktree: ref(target) })
+  assert.equal(replaced.error?.code, 'invalid_input', '登记路径被换成独立仓库时不得按账本删除')
+  assert.ok(replaced.error.message.includes('不是本仓库的工作树'), replaced.error.message)
+  const detachedBranch = 'work/detached', detachedTarget = path.join(f.allowedRoot, 'Task detached')
+  assert.equal((await provider(f).createBranch({ repository: repositoryRef, name: detachedBranch, fromRef: 'main' })).ok, true)
+  assert.equal((await provider(f).createWorktree({ repository: repositoryRef, path: detachedTarget, branch: detachedBranch })).ok, true)
+  await git(['checkout', '--detach'], detachedTarget)
+  const detached = await port.removeWorktree({ worktree: ref(detachedTarget) })
+  assert.equal(detached.error?.code, 'invalid_input', 'detached 可能承载未引用提交，不得移除')
+  assert.ok(detached.error.message.includes('没有检出分支'), detached.error.message)
+  assert.equal(recorder.calls.some(destructiveCall), false, '所有不可移除形态都不得发出破坏性 argv')
+  assert.equal((await worktreePaths(f)).map(slash).includes(slash(target)), true, '被换目录的原登记不得被静默清理')
+})
+
+test('Windows worktree removal: live cwd blocks isolated rename, provably deletes nothing, and succeeds after release', native, async (t) => {
+  const f = await fixture(t), recorder = recordingRunner(), port = provider(f, { runGit: recorder.runGit })
+  const branch = 'work/live-cwd', target = path.join(f.allowedRoot, 'Task live cwd')
+  assert.equal((await port.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await port.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  const probeDirectory = path.join(f.allowedRoot, 'probe-rename'); await mkdir(probeDirectory)
+  const cwdProbe = await probeRename(probeDirectory, holdCwd)
+  let release, mechanism
+  if (cwdProbe.blocked) {
+    mechanism = 'cwd-holder'
+    release = (await holdCwd(target)).release
+  } else {
+    const aclProbe = await probeRename(probeDirectory, async (directory) => { denyDelete(directory); return { release: async () => allowDelete(directory) } })
+    assert.equal(aclProbe.blocked, true, 'windows-removal-mechanism: no real rename blocker (cwd=' + cwdProbe.code + ' acl=' + aclProbe.code + ')')
+    mechanism = 'acl-deny-delete'
+    denyDelete(target)
+    release = async () => allowDelete(target)
+  }
+  const before = await snapshotTree(target), registryBefore = await worktreePaths(f)
+  const headBefore = (await f.run(['rev-parse', 'refs/heads/' + branch])).trim(), lockPath = await headLockPath(target, f.repositoryPath)
+  try {
+    const blockedResult = await port.removeWorktree({ worktree: ref(target) })
+    assert.equal(blockedResult.ok, false, '被真实目录句柄/拒绝 ACE 挡住时不得报成功')
+    assert.ok(['permission_denied', 'unavailable'].includes(blockedResult.error.code), JSON.stringify(blockedResult.error))
+    assert.ok(blockedResult.error.message.includes('可证未做任何删除'), '原子 rename 失败必须被声明为零副作用：' + blockedResult.error.message)
+    assert.deepEqual(await snapshotTree(target), before, '失败路径不得改动工作树任何字节')
+    assert.deepEqual(await worktreePaths(f), registryBefore, '失败路径不得改动登记')
+    assert.equal((await f.run(['rev-parse', 'refs/heads/' + branch])).trim(), headBefore, '分支头不得变化')
+    assert.deepEqual(await quarantineEntries(f.allowedRoot), [], '不得留下隔离目录')
+    assert.equal(recorder.calls.some(destructiveCall), false, 'rename 之前不得发出破坏性 argv')
+    await assert.rejects(stat(lockPath + '.lock'), { code: 'ENOENT' }, '协调锁必须在 finally 释放')
+  } finally { await release() }
+  const removed = await port.removeWorktree({ worktree: ref(target) })
+  assert.equal(removed.ok, true, JSON.stringify(removed))
+  await assert.rejects(stat(target), { code: 'ENOENT' })
+  assert.deepEqual(await quarantineEntries(f.allowedRoot), [])
+  diagnose(t, 'windows-removal-mechanism:', { mechanism, renameBlocked: true, zeroWrite: true })
+})
+
+test('Windows worktree removal: live handle inside quarantine keeps partial deletion honest and recoverable', native, async (t) => {
+  const f = await fixture(t), recorder = recordingRunner()
+  const branch = 'work/partial', target = path.join(f.allowedRoot, 'Task 部分删除'), keepFile = path.join(target, 'sub', 'keep.bin')
+  // 故障必须允许“隔离 rename 成功、清理失败”。hosted 校准（run 45964019955）证明 icacls deny-DELETE 对
+  // Git for Windows 的 worktree 清理无效：Node 侧 rm 被 EPERM 拒绝，但 git worktree remove 仍删掉整个隔离
+  // 目录并让 provider 报成功。因此改用真实共享冲突：在 provider 调用 git worktree remove 之前，用独占句柄
+  // 打开隔离目录内的文件，让清理真实失败、保留字节并要求 reconcile。
+  await commitIgnore(f, ['keep.bin'])
+  let holder
+  const port = provider(f, { runGit: async (args) => {
+    if (holder === undefined && args[2] === 'worktree' && args[3] === 'remove') {
+      holder = await holdExclusiveFile(path.join(args[args.length - 1], 'sub', 'keep.bin'))
+    }
+    return recorder.runGit(args)
+  } })
+  assert.equal((await port.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  assert.equal((await port.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
+  await mkdir(path.join(target, 'sub'))
+  await writeFile(keepFile, 'locked-bytes')
+  const keepBytes = await readFile(keepFile, 'utf8')
+  const headProbe = runSync('git', ['-C', target, 'rev-parse', 'refs/heads/' + branch])
+  assert.equal(headProbe.status, 0, '读取分支头失败：' + (headProbe.stderr ?? '').trim())
+  const headBefore = headProbe.stdout.trim()
+  const headPathProbe = runSync('git', ['-C', target, 'rev-parse', '--git-path', 'HEAD'])
+  assert.equal(headPathProbe.status, 0, '读取 HEAD 协调锁路径失败：' + (headPathProbe.stderr ?? '').trim())
+  const lockPath = path.resolve(target, headPathProbe.stdout.trim())
+  let result
+  try {
+    result = await port.removeWorktree({ worktree: ref(target) })
+  } finally {
+    if (holder !== undefined) await holder.release()
+  }
+  assert.equal(result.ok, false, '部分删除绝不能报成功')
+  assert.equal(result.error.code, 'ambiguous_result', JSON.stringify(result.error))
+  assert.equal(result.error.retryable, false, '结果不确定必须先 reconcile，不能原样重发')
+  const [quarantineName] = await quarantineEntries(f.allowedRoot)
+  assert.ok(quarantineName !== undefined, '隔离目录必须仍在允许根下')
+  const quarantine = path.join(f.allowedRoot, quarantineName)
+  assert.ok(result.error.message.includes(quarantine), 'message 必须包含完整隔离路径')
+  assert.ok(result.error.message.includes(target), 'message 必须包含原目标路径')
+  assert.ok(result.error.message.includes(branch), 'message 必须包含分支名')
+  assert.ok(result.error.message.includes('隔离目录仍在'), result.error.message)
+  assert.ok(result.error.message.includes('reconcile'), 'message 必须要求 reconcile')
+  assert.ok(result.error.message.includes('恢复'), 'message 必须给出恢复步骤')
+  assert.equal(await readFile(path.join(quarantine, 'sub', 'keep.bin'), 'utf8'), keepBytes, '被锁文件字节必须不变')
+  const registry = (await worktreePaths(f)).map(slash), atQuarantine = registry.includes(slash(quarantine))
+  assert.ok(result.error.message.includes(atQuarantine ? '登记仍指隔离目录或原目标' : '登记已不含隔离目录与原目标'), 'message 的登记读数必须与独立回读一致：' + result.error.message)
+  assert.equal((await f.run(['rev-parse', 'refs/heads/' + branch])).trim(), headBefore, '分支头全程不变')
+  await assert.rejects(stat(lockPath + '.lock'), { code: 'ENOENT' }, '协调锁必须释放')
+  await rm(quarantine, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+  await f.run(['worktree', 'prune'])
+  await f.run(['worktree', 'add', target, branch])
+  assert.equal((await port.getWorktree({ worktree: ref(target) })).ok, true, '恢复后必须能读回工作树')
+  assert.equal((await port.removeWorktree({ worktree: ref(target) })).ok, true, '恢复后必须能正常移除')
+  await assert.rejects(stat(target), { code: 'ENOENT' })
+  diagnose(t, 'windows-removal-recovery:', { mechanism: 'live-handle-in-quarantine', registration: atQuarantine ? 'quarantine' : 'none', restored: true })
+  diagnose(t, 'windows-removal-mechanism:', { mechanism: 'live-handle-in-quarantine', deleteBlocked: true, cleanupFailed: true })
+})
+
+test('Windows worktree removal: records Git version and reference backend, and refuses reftable removal fail closed', native, async (t) => {
+  const versionText = execFileSync('git', ['--version'], { encoding: 'utf8' }).trim()
+  const parsed = versionText.match(/([0-9]+)\.([0-9]+)/)
+  assert.ok(parsed !== null, 'git --version 必须可解析：' + versionText)
+  const major = Number(parsed[1]), minor = Number(parsed[2])
+  assert.ok(major > 2 || (major === 2 && minor >= 30), 'worktree repair 需要 Git >= 2.30，实际 ' + versionText)
+  const f = await fixtureFor(t)
+  const filesProbe = runSync('git', ['-C', f.repositoryPath, 'config', '--local', '--get', 'extensions.refstorage'])
+  assert.equal(filesProbe.status, 1, 'files 后端不得声明 extensions.refstorage')
+  assert.equal(filesProbe.stdout.trim(), '')
+  diagnose(t, 'windows-removal-matrix:', { git: versionText, node: process.version, backend: 'files' })
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'windows-reftable-')))
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }))
+  const repositoryPath = path.join(root, 'repo'); await mkdir(repositoryPath)
+  const init = runSync('git', ['init', '--ref-format=reftable', '-b', 'main'], { cwd: repositoryPath })
+  if (init.status !== 0) {
+    diagnose(t, 'windows-removal-matrix:', { git: versionText, node: process.version, backend: 'reftable=init-unavailable' })
+    return
+  }
+  const reftableRun = (args) => git(args, repositoryPath)
+  await reftableRun(['config', 'user.email', 'local-git@example.invalid'])
+  await reftableRun(['config', 'user.name', 'Local Git Windows Test'])
+  await writeFile(path.join(repositoryPath, 'README.md'), '# reftable fixture')
+  await reftableRun(['add', 'README.md'])
+  await reftableRun(['-c', 'commit.gpgsign=false', 'commit', '-m', '初始提交'])
+  const target = path.join(root, 'wt-reftable')
+  await reftableRun(['branch', 'work/reftable'])
+  const added = runSync('git', ['worktree', 'add', target, 'work/reftable'], { cwd: repositoryPath })
+  if (added.status !== 0) {
+    const format = runSync('git', ['-C', repositoryPath, 'rev-parse', '--show-ref-format'])
+    assert.equal(format.stdout.trim(), 'reftable', 'reftable 仓库必须报告 reftable 引用后端')
+    diagnose(t, 'windows-removal-matrix:', { git: versionText, node: process.version, backend: 'reftable=worktree-unavailable' })
+    return
+  }
+  const reftableFixture = { root, repositoryPath, headCommit: '' }
+  const before = await snapshotTree(target), registeredBefore = await worktreePaths(reftableFixture)
+  const recorder = recordingRunner()
+  const result = await providerFor(reftableFixture, { runGit: recorder.runGit }).removeWorktree({ worktree: ref(target) })
+  assert.equal(result.ok, false, 'reftable 后端上的破坏性移除必须拒绝')
+  assert.equal(result.error.code, 'not_supported', 'HEAD 协调锁只在 files 后端成立，必须 fail closed')
+  assert.equal(result.error.retryable, false)
+  assert.ok(result.error.message.includes('reftable'), '必须说明是引用后端限制')
+  assert.ok(result.error.message.includes('git worktree remove'), '必须给人工移除出路')
+  assert.deepEqual(await snapshotTree(target), before, '被拒的工作树必须逐字节不变')
+  assert.deepEqual(await worktreePaths(reftableFixture), registeredBefore, '被拒后登记必须不变')
+  assert.equal(recorder.calls.some(destructiveCall), false, '拒绝必须发生在任何破坏性 argv 之前')
+  assert.deepEqual(await quarantineEntries(root), [], '不得留下隔离目录')
+  diagnose(t, 'windows-removal-matrix:', { git: versionText, node: process.version, backend: 'reftable' })
 })
