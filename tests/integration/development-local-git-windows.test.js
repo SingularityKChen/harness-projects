@@ -610,11 +610,13 @@ test('Windows worktree removal: live cwd blocks isolated rename, provably delete
 test('Windows worktree removal: exclusive handle or ACL keeps partial deletion honest with a recoverable registration', native, async (t) => {
   const f = await fixture(t), recorder = recordingRunner(), port = provider(f, { runGit: recorder.runGit })
   const branch = 'work/partial', target = path.join(f.allowedRoot, 'Task 部分删除'), keepFile = path.join(target, 'keep.bin')
+  // keep.bin 必须是 ignored/untracked：icacls 改 DACL 会更新 NTFS change time，已跟踪文件会被 Git 干净门
+  // 看成“未提交路径”（hosted run 45407095005 之后的 45962513620 回读），那样就永远走不到部分删除；
+  // 忽略文件不进入 status，干净门仍成立，而 git worktree remove 仍必须真实删除它并因 deny-DELETE 失败。
+  await commitIgnore(f, ['keep.bin'])
   assert.equal((await port.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
   assert.equal((await port.createWorktree({ repository: repositoryRef, path: target, branch })).ok, true)
   await writeFile(keepFile, 'locked-bytes')
-  await git(['add', 'keep.bin'], target)
-  await git(['-c', 'commit.gpgsign=false', 'commit', '-m', '被锁文件'], target)
   const probeDirectory = path.join(f.allowedRoot, 'probe-partial'); await mkdir(probeDirectory)
   const handleProbeFile = path.join(probeDirectory, 'handle.bin'); await writeFile(handleProbeFile, 'probe')
   let handleBlocksDelete = false, handleBlocksRename = false
