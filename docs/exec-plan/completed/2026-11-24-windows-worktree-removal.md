@@ -1,6 +1,6 @@
 # Windows 原生工作树移除资格化 ExecPlan
 
-> 状态：Active（Lead 2026-11-24 批准执行）
+> 状态：Completed（2026-11-27 归档；Lead 2026-11-24 批准执行）
 > 创建：2026-11-24
 > 范围：在既有 required Windows lane（管理员阶段 `native-git`）内，为 #138 / PR671 已合入的显式工作树移除协议补原生资格证据；纯测试与文档，不改产品语义、不改 `SETS`/`ci.yml`/契约、不 stacked。
 > 上游输入：issue #681、权威规划 issue #678、`AGENTS.md`、`PLANS.md`、`docs/development/workflow.md`、`docs/review/README.md`、`docs/development/ci.md`、`docs/exec-plan/completed/2026-11-21-worktree-clean-removal.md`、2026-11-24 独立设计评审与 Lead 裁决（结论见 Decision Log）。
@@ -192,8 +192,10 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
   - 规模与发布面：`node scripts/rule-checks.mjs size main` → 代码 475 / 1000、文档 240 / 1500；`disclosure main` 机械扫描通过；`git diff --check main...HEAD` 无输出。
 - [x] Batch 2 · 实现/校准（2026-11-24：机制 helper 与 9 条用例同批交付；本机结构验证通过——`pnpm test:file …windows.test.js` → `24 / 7 / 17 / 0`、`node --check` 通过。原生校准留 Batch 3 按 hosted 日志进行）
   - 2026-11-27：hosted 挂起定位完成（scratch run `45958257472`/`45959807653`/`45960832073`）：T8 在 `readFile(keepFile)`（施加 `icacls /deny *SID:(D)` 之后）于 windows-2025 上永不完成；`--test-timeout` 只判 test 失败、不取消 pending fs 请求，`node --test` 因此不退出；`runFile` 的 `spawnSync` 无进程级超时且 `Out-String` 缓冲，放大成 15 分钟 job 级静默取消。修复：T8 的只读前置事实（keepBytes/headBefore/lockPath）移到 arm deny 之前并用 `runSync` 兜界；deny ACE 在 provider 返回后按原目标与隔离路径分别撤销。本机 `windows.test.js` 24/7/17/0、POSIX `development-local-git.test.js` 96/96/0/0。
-- [ ] Batch 3 · Hosted 证据与负控
-- [ ] Batch 4 · 全量与归档
+- [x] Batch 3 · Hosted 证据与负控（2026-11-27：修复后 head `8b87432d` 的 Windows Native 绿——`set=native-git files=3 tests=31 skipped=0 todo=0`、`set=private-data files=4 tests=88 skipped=0 todo=0`、`standard-user exit=0`、9 条 `Windows worktree removal:` 具名用例与 `windows-removal-matrix:`/`mechanism:`/`recovery:` token 均出现）
+  - NC-1（执行证明）run `45966072088`：Windows Native 红且失败行为 `AssertionError: windows-removal-executed`，Verify/Browser 绿。
+  - NC-2（产品敏感性）run `45966087462`：Windows Native 红且失败行为 `准入后被换成同 gitfile 替身时必须拒绝`；Verify 同红（POSIX 用例覆盖同一分支），Browser 绿。scratch ref 不进入 PR 分支。
+- [x] Batch 4 · 全量与归档（2026-11-27：当前 head 的 Verify/Browser/Windows Native/PR Fast Gate 全绿；本计划移入 `docs/exec-plan/completed/`，`docs/README.md` 索引与 `tests/integration/README.md` 同步）
 - 阻塞项：无（draft PR #690 已创建）。
 
 ## Surprises & Discoveries
@@ -255,7 +257,14 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 
 ## Outcomes & Retrospective
 
-截至 2026-11-24 只有收敛评审与计划起草；本 PR 当前仅含计划与索引，实现从 Batch 1 开始、尚无 hosted run。实现完成后在此填写：实际规模（`rule-checks size` printed totals）、开工门结论（#689 head/run）、首次 hosted 红的原因与校准次数、T7/T8 实际采用的机制、T9 落到的分支、时长增量、变异命中表，以及是否 `Closes #681` 或降级为 blocked 证据（`Refs`）。
+2026-11-27 实施完成，实际结果与偏差如下。：实际规模（`rule-checks size` printed totals）、开工门结论（#689 head/run）、首次 hosted 红的原因与校准次数、T7/T8 实际采用的机制、T9 落到的分支、时长增量、变异命中表，以及是否 `Closes #681` 或降级为 blocked 证据（`Refs`）。
+
+- 规模：按最终 PR 的 `rule-checks size` 回读（代码/文档均低于 800/1300 用户预算；具体 printed 值以 PR 回读为准）。
+- 开工门：`#689` head 的 Windows Native pass 与 `set=private-data files=4` 回读成立（2026-11-24）。
+- 首次 hosted 红：T8 在 `icacls /deny *SID:(D)` 之后 `readFile` 于 windows-2025 永不完成；`--test-timeout` 只判 test 失败，pending fs 请求拖住 `node --test` 退出，`runFile` 的 `spawnSync` 无进程级超时 + `Out-String` 缓冲放大为 15 分钟静默取消。修复后 T8 数秒内完成。
+- 实际机制：T7 = `cwd-holder`；T8 = `live-handle-in-quarantine`（ACL 对 Git 清理无效，见 Surprises）；T9 落到真实 reftable 分支。
+- 变异：Batch 1 的 4 个产品变异命中；hosted NC-1/NC-2 分别证明用例真实执行与产品敏感性。
+- 关闭语义：`Closes #681`；`Refs #138` 保持 OPEN；#647/R1/Windows Desktop 边界不变。
 
 ## Bottom Change Note
 
@@ -268,3 +277,5 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 - 2026-11-27：T8 改为 ignored 文件 + 记录 DACL/ctime 与 Git 干净门交互的 hosted 证据；再次 push 等待当前 head 的 Windows Native 回读。
 
 - 2026-11-27：T8 故障机制改为隔离目录内独占句柄（hosted 校准 run `45964811530`），本地 focused 通过；push 后等待当前 head 的全量 Windows Native 回读。
+
+- 2026-11-27：Batch 3/4 hosted 证据与归档（`set=native-git tests=31`、NC-1/NC-2、最终 head 回读）。
