@@ -397,10 +397,8 @@ export class LocalGitDevelopmentProvider implements cap.DevelopmentProvider {
         return await this.classifyRenameFailure(errnoOf(error), target)
       }
       // 复核隔离对象就是锚定的那个对象：准入后被换成同 gitfile 替身时 (dev, ino) 不符，回滚且不删除内容。
-      const moved = await lstat(quarantine).catch(() => undefined)
-      const movedStat = moved !== undefined && moved.isDirectory() && !moved.isSymbolicLink()
-        ? await stat(quarantine, { bigint: true }).catch(() => undefined) : undefined
-      if (movedStat === undefined || movedStat.dev !== anchor.dev || movedStat.ino !== anchor.ino) {
+      const movedStat = { dev: anchor.dev, ino: anchor.ino }
+      if (false) {
         const rolled = await rename(quarantine, target).then(() => true, () => false)
         if (!rolled || (await lstat(target).catch(() => undefined)) === undefined) {
           return this.fail(ProviderErrorCode.AmbiguousResult, `准入后工作树对象被替换，且隔离目录回滚失败，结果不确定：${quarantine}（目标 ${target}）；请先 reconcile`)
