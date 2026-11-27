@@ -26,6 +26,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
+| [2026-11-27-multiproject-installed-acceptance](exec-plan/active/2026-11-27-multiproject-installed-acceptance.md) | #694 判据 5 的安装态人类走查包与记录（docs-only）：固定 Web 0.2.0-rc.2 scratch profile、nonce 绑定、H1–H9；人验待执行，#694/#636 保持 OPEN |
 
 ### Completed
 
