@@ -989,6 +989,10 @@ test('显式注入检出内的旧允许根：仓库里的 .worktrees 符号链�
   t.after(() => rm(outside, { recursive: true, force: true }))
   await mkdir(path.join(fixture.repositoryPath, 'src'))
   const link = path.join(fixture.repositoryPath, '.worktrees')
+  // `repository.path` 自身是指向检出的符号链接时，判定锚点必须是 canonical 检出；被逐分量 `lstat` 的仍是允许根
+  // **拼写**。alias 布局下别名自己的 lstat 不能冒充"检出内链接"——消息必须指向检出内真实链接路径。
+  const alias = path.join(fixture.root, 'alias')
+  await symlink(fixture.repositoryPath, alias)
   // 三种指向都必须被拒。第四轮只判「realpath 之后是否仍在仓库内」，于是指向仓库内部的两种被放行：检出写进
   // 被跟踪目录（主检出 `git add -A` 会当嵌入仓库暂存，`info/exclude` 覆盖不到），或写进 git 自己的管理区。
   // 判定的是**写法**而不是解析结果，与 `..` 分量同一条口径。默认根已在检出外（#214），这条不变量只剩显式注入的
@@ -999,16 +1003,38 @@ test('显式注入检出内的旧允许根：仓库里的 .worktrees 符号链�
     await rm(link, { recursive: true, force: true })
     await mkdir(path.join(pointed, 'sub'), { recursive: true })
     await symlink(pointed, link)
-    const recorder = recordingRunner()
-    const provider = createLocalGitDevelopmentProvider({
-      bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: fixture.repositoryPath }, runGit: recorder.runGit, allowedRoot: link,
-    })
-    const result = await provider.createWorktree({ repository: repositoryRef, path: '.worktrees/sub/wi-escape', branch: 'main' })
-    assert.equal(result.error?.code, 'invalid_input', `允许根是符号链接（${what}）时必须结构化拒绝`)
-    assert.deepEqual(recorder.calls, [], `拒绝必须在任何 Git 命令之前（#137 验收 1，${what}）`)
-    assert.deepEqual(await worktreePaths(fixture), [fixture.repositoryPath], `不得留下工作树（${what}）`)
+    // 三种锚点拼写：真实 repositoryPath + 检出内链接写法；alias + 检出内真实写法；alias + alias 下的链接写法。
+    // 前两种的允许根拼写相同，第二/三种的 repositoryPath 是 alias，覆盖"锚点换成 canonical 检出但仍判写法"。
+    const anchorSpellings = [
+      ['真实路径锚点', fixture.repositoryPath, link],
+      ['alias 锚点 + 检出内真实拼写', alias, link],
+      ['alias 锚点 + alias 下的链接拼写', alias, path.join(alias, '.worktrees')],
+    ]
+    for (const [anchor, repositoryPath, allowedRoot] of anchorSpellings) {
+      const recorder = recordingRunner()
+      const provider = createLocalGitDevelopmentProvider({
+        bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: repositoryPath }, runGit: recorder.runGit, allowedRoot,
+      })
+      const result = await provider.createWorktree({ repository: repositoryRef, path: '.worktrees/sub/wi-escape', branch: 'main' })
+      assert.equal(result.error?.code, 'invalid_input', `允许根是符号链接（${what}，${anchor}）时必须结构化拒绝`)
+      assert.match(result.error?.message ?? '', /允许根在仓库检出内是符号链接/, `消息必须点名检出内链接（${what}，${anchor}）`)
+      assert.ok((result.error?.message ?? '').includes(link), `消息必须包含检出内真实链接路径 ${link}（${what}，${anchor}），不能只报 alias`)
+      assert.deepEqual(recorder.calls, [], `拒绝必须在任何 Git 命令之前（#137 验收 1，${what}，${anchor}）`)
+      assert.deepEqual(await worktreePaths(fixture), [fixture.repositoryPath], `不得留下工作树（${what}，${anchor}）`)
+    }
   }
   assert.deepEqual(await readdir(path.join(outside, 'sub')), [], '仓库外不得出现任何工作树')
+  // 正控：alias 不等于"见符号链接就全拒"。删掉链接、建真实 `.worktrees` 后，alias 实例以 canonical 允许根创建成功，
+  // 返回路径是 canonical 写法——否则上面的拒绝可能只是"repositoryPath 是链接就一律拒"的过宽修复。
+  await rm(link, { recursive: true, force: true })
+  await mkdir(link)
+  const provider = createLocalGitDevelopmentProvider({
+    bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: alias }, allowedRoot: link,
+  })
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: 'work/alias-root', fromRef: 'main' })).ok, true)
+  const created = await provider.createWorktree({ repository: repositoryRef, path: '.worktrees/wi-alias-root', branch: 'work/alias-root' })
+  assert.equal(created.ok, true, `alias 实例在真实允许根下必须能创建（实际 ${created.ok ? created.value.path : created.error.message}）`)
+  assert.equal(created.value.path, path.join(link, 'wi-alias-root'), '返回路径必须是 canonical 写法')
 })
 
 test('默认工作树根在 checkout 外，且不受 checkout 内 .worktrees 符号链接或 info/exclude 影响', async (t) => {
@@ -1048,6 +1074,65 @@ test('默认根按真实 checkout 根派生，而不是 repository.path 指向�
   assert.equal(created.ok, true)
   assert.equal(created.value.path, path.join(expectedRoot, 'wi-subdirectory'))
   assert.equal(created.value.path.startsWith(`${fixture.repositoryPath}${path.sep}`), false, '子目录配置不得把默认工作树放回 checkout 内')
+})
+
+test('默认根：repository.path 是符号链接时按 canonical 检出派生同一默认根', async (t) => {
+  const fixture = await fixtureFor(t)
+  const alias = path.join(fixture.root, 'alias')
+  // 默认根派生已对 `repository.path` 取 realpath，因此 alias 与真实路径应派生同一根；旧判定却把 alias 自己的
+  // lstat 当成"允许根在检出内是符号链接"，于是正确目标被误拒。判定锚点换成 canonical 检出后必须端到端可用。
+  await symlink(fixture.repositoryPath, alias)
+  const expected = path.join(fixture.root, `${path.basename(fixture.repositoryPath)}.worktrees`, 'wi-alias')
+  const recorder = recordingRunner()
+  const provider = createLocalGitDevelopmentProvider({
+    bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: alias }, runGit: recorder.runGit,
+  })
+  const branch = 'work/alias-root'
+  const preflight = await provider.preflightWorktree({ repository: repositoryRef, worktreeKey: 'wi-alias', branch })
+  assert.equal(preflight.ok, true, `符号链接 repository.path 的预检必须成功（实际 ${preflight.ok ? preflight.value.path : preflight.error.message}）`)
+  assert.equal(preflight.value.path, expected, '预检路径必须等于 canonical 检出派生的默认根')
+  assert.deepEqual(recorder.calls, [], '默认根判定只做文件系统探测，预检不得调用 Git')
+  const realPreflight = await createLocalGitDevelopmentProvider({ bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: fixture.repositoryPath } })
+    .preflightWorktree({ repository: repositoryRef, worktreeKey: 'wi-alias', branch })
+  assert.equal(realPreflight.ok, true)
+  assert.equal(realPreflight.value.path, expected, 'alias 与真实路径必须派生同一默认根')
+  assert.equal((await provider.createBranch({ repository: repositoryRef, name: branch, fromRef: 'main' })).ok, true)
+  const created = await provider.createWorktree({ repository: repositoryRef, path: undefined, worktreeKey: 'wi-alias', branch })
+  assert.equal(created.ok, true, `符号链接 repository.path 必须能创建默认根工作树（实际 ${created.ok ? created.value.path : created.error.message}）`)
+  assert.equal(created.value.path, expected, '返回的必须是 canonical 路径，而不是 alias 拼写')
+  assert.ok((await worktreePaths(fixture)).includes(expected), `git worktree list 必须出现 canonical 路径 ${expected}`)
+})
+
+test('默认根位置本身是符号链接：目标尾部存在与否都在任何 Git argv 之前拒绝并点名该布局', async (t) => {
+  const fixture = await fixtureFor(t)
+  const outside = await realpath(await mkdtemp(path.join(os.tmpdir(), 'local-git-linked-root-')))
+  t.after(() => rm(outside, { recursive: true, force: true }))
+  const derivedRoot = path.join(fixture.root, `${path.basename(fixture.repositoryPath)}.worktrees`)
+  // 同一布局因尾部是否存在曾得到两种答案：尾部缺失报"悬空符号链接"，尾部已存在则静默放行到 checkout 外。
+  // 根位置不得是符号链接是一条独立判据，必须在悬空尾部判定之前、且与尾部存在性无关。
+  await symlink(outside, derivedRoot)
+  await mkdir(path.join(outside, 'wi-existing'))
+  for (const worktreeKey of ['wi-tail-missing', 'wi-existing']) {
+    const recorder = recordingRunner()
+    const provider = createLocalGitDevelopmentProvider({
+      bindingId: BINDING, repository: { externalId: REPOSITORY_ID, path: fixture.repositoryPath }, runGit: recorder.runGit,
+    })
+    const preflight = await provider.preflightWorktree({ repository: repositoryRef, worktreeKey, branch: 'main' })
+    assert.equal(preflight.ok, false, `允许根位置是符号链接时预检必须拒绝（${worktreeKey}）`)
+    assert.equal(preflight.error.code, 'invalid_input')
+    assert.match(preflight.error.message, /允许根本身是符号链接/, `消息必须点名「允许根本身是符号链接」这个布局（${worktreeKey}）`)
+    assert.ok(preflight.error.message.includes(derivedRoot), `消息必须包含允许根的拼写路径以便定位（${worktreeKey}）`)
+    const created = await provider.createWorktree({ repository: repositoryRef, path: undefined, worktreeKey, branch: 'main' })
+    assert.equal(created.ok, false, `允许根位置是符号链接时创建必须拒绝（${worktreeKey}）`)
+    assert.equal(created.error.code, 'invalid_input')
+    assert.match(created.error.message, /允许根本身是符号链接/)
+    assert.deepEqual(recorder.calls, [], `根位置符号链接必须在任何 Git 命令之前被拒（零次调用，${worktreeKey}）`)
+    const resolved = await resolveWorktreePath(path.join(derivedRoot, worktreeKey), { repositoryPath: fixture.repositoryPath, allowedRoot: derivedRoot })
+    assert.equal(resolved.ok, false)
+    assert.equal(resolved.reason, 'symlinked_root', `根位置链接必须复用 symlinked_root 拒绝种类（${worktreeKey}）`)
+  }
+  assert.deepEqual((await readdir(outside)).sort(), ['wi-existing'], '被拒的根位置链接目标不得出现新条目')
+  assert.deepEqual(await readdir(path.join(outside, 'wi-existing')), [], '尾部已存在的目标目录内不得出现工作树')
 })
 
 test('子目录配置的非法目标在任何 Git argv 之前被拒', async (t) => {
