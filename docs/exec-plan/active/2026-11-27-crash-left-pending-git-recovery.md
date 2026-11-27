@@ -1,6 +1,6 @@
 # 崩溃残留 Pending Git 意图的重启对账 ExecPlan
 
-> 状态：Active（设计已收敛，待实现与验证）
+> 状态：Active（实现与变异验证完成，待评审；不归档）
 > 创建：2026-11-27
 > 范围：issue #682 —— 把 #673 的「同 key 重放前只读对账」从 `unknown` 行扩展到崩溃残留的 `pending` Git 意图（`createBranch` / `createWorktree`），在持久租约过期后由同 key 重放在认领事务内采纳或重发，保留现有 owner/generation 围栏；不新增列、表、端口、迁移或第二权威。
 > 上游输入：issue #682 正文与验收；issue #191（保持 OPEN）；issue #683（跨 key/后继所有权，保持 OPEN）；`docs/exec-plan/completed/2026-11-21-restart-reconciliation.md`（D6/D20/D21/D23）；`docs/adr/ADR-0016-start-work-owner-generation.md`；`AGENTS.md` §1.1、§2、§7–§9；`PLANS.md`。
@@ -282,9 +282,16 @@ Start Work 在**每个真实外部写之前**用 `beforeExternal`（`packages/co
 
 - [x] (2026-11-27 15:38–15:52 Asia/Singapore) 事实核对与基线取证：读 `start-work.ts`、`git-provisioning.ts`、`write-machine.ts`、`capabilities/storage.ts`、`001_init.sql`、ADR-0016、`2026-11-21-restart-reconciliation.md` D6/D20/D21/D23 与相关测试；在 `f5b731a4` 主检出实测 V3 `142/142`、`local-git-core-provisioning 20/20`、`execution-uniqueness + retry-identity 54/54`；一次性只读探针确认崩溃残留 pending 行同 key 重放仍 `pending`、探针 0、代际不变（S1）。
 - [x] (2026-11-27 Asia/Singapore) 独立验证（只读，未改文件）：Q1「退休代际 pending intent 不可达」证明成立（代际推进事务总在同事务清空 intent 行）；Q2「无 veto 时 31s 后同 key 会探测并改代际」与「加 veto 后 pending、零探针、零写」均确认；Q3 被采纳分支最终阶段为 `confirmed`（末步是工作树）；Q4 事务内只采样两条契约行、`AdmissionInvalid` 整笔回滚不构成误杀；Q5 `unsettled` 写门路径对 pending 恢复同样成立（零写入保留可恢复 unknown）。据此补充 S7/D13 与零写入判据。
-- [ ] Batch 1 · 判别性用例先行（红，只改测试）：V2 期望按用例表失败、C8/C9 绿；记录条数与失败形态。
-- [ ] Batch 2 · 生产修复（绿）：V1–V5 全绿，记录 `unknown` 路径零回归证据。
-- [ ] Batch 3 · 变异 M1–M10、文档与 `docs/README.md` 索引、V6/V7/V8 收尾。
+- [x] (2026-11-27 Asia/Singapore，检出 `fix/crash-left-pending-recovery` 工作树) Batch 1 · 判别性用例先行，提交 `66d045c`：新增 `tests/integration/start-work-pending-recovery.test.js`（C1–C12 + G1–G3）、改写两条既有契约断言，产品代码零改动。
+  - RED 实测（基线 `f5b731a4` 的两个生产文件 + 本测试 @ `66d045c`）：新文件 `29 tests / 8 pass / 21 fail`——C1–C7、C10、C11、G1–G3 全部按行为断言红（`pending ≠ saved / conflict / unknown`，或「对账探针一次都没跑」）；C8/C9/C12 与终态负控本来就绿（负控定义）。
+  - V3 `142 / 140 / 2`：只有改写后的 `committed pending intent recovers on the same key after the lease expires`（Fake/SQLite 各一）按新契约红；`start-work-request-binding` 的 in-flight 用例数值期望不变，语义改由进程内 owner 否决承担。
+  - V1 exit 0；V4 `74 / 74`。
+- [x] (2026-11-27 Asia/Singapore) Batch 2 · 生产修复，提交 `726c432`：`recoverableGitIntent` 谓词扩展、pending 专属资格（Provisioning + 租约 + 跨步一致 + 进程内 owner 否决）、认领事务内 attempt 行与 execution_context 记录双重逐字复核、过期 Provisioning 续跑同事务写回 adopted worktree 句柄。
+  - GREEN：V1 exit 0；V2 `29 / 29`；V3 `142 / 142`（#673 的 `unknown` 路径逐字保持）；V4 `74 / 74`；V5 `10 / 10`。
+- [x] (2026-11-27 Asia/Singapore) Batch 3 · 变异与终态负控，提交 `4394b2c`：`node scripts/review-mutate.mjs .superpowers/impl-682/mutations.json` 退出 0，M1–M10 + 补充 M4b 全部 KILLED，基线与还原后基线绿、逐字节还原（日志 `.superpowers/impl-682/mutations.log`）。
+  - 归因：M1 → C1–C7/C10/C11/G1–G3；M2 → C10；M3 → C9；M4 → C8+C13；M4b → C13；M5 → C3；M6 → C6；M7 → C5；M8 → C11；M9 → C2；M10 → C12。
+  - M4b 在补 C13 前跑不出红（见 S9），按变异纪律补负控而不是删除 D8 守卫。
+- [x] (2026-11-27 Asia/Singapore) Batch 3 · 文档与门禁收尾：`docs/README.md` Active 描述更新；V6/V7/V8 与 `pnpm verify`、`boundaries`、`workflow-check` 回读见 `Outcomes & Retrospective`。
 
 ## Surprises & Discoveries
 
@@ -296,6 +303,9 @@ Start Work 在**每个真实外部写之前**用 `beforeExternal`（`packages/co
 - **S6 被采纳分支的报告阶段是 `confirmed` 不是 `reconciled`**：`provisionGit` 用 `recorded.branchExternalId` 跳过分支步并合成 `confirmWrite` 报告，最终结果面取末步（工作树）报告；只有末步被采纳时才是 `reconciled`。验收因此不断言阶段名（D10），避免把实现细节钉成产品契约。
 
 - **S7 只读对账不是「对整库零副作用」**：探针经 `guardedDevelopmentReads` 的读门会写 `sync_cursor` 与运行权限记账（`runtime-access.ts` 的版本/交付票），因此「零写入」的判别对象必须是 **`mutation_attempt` 行 + `execution_context` 记录 + 外部对象计数**，不是整库快照；同理，认领事务内做逐字复核时只采样这两条契约行（全库快照会把自己与读门记账一起卷进来）。独立验证（2026-11-27）另确认：记录-only 写者（Ready 读回校验）不可能与 pending Git intent 共存，因此「记录变了」只可能来自外部写者，判为失效不是误杀。
+- **S8 C12 在基线本来就绿（计划把它的基线期望写反了）**：计划 Batch 1 把 C12 列为「基线必红的正控」，但它断言的是「跨步错位记录不合资格、不探测、不采纳」。旧实现对**任何** pending 行都不探测，因此 C12 的每条断言在基线都成立。它的判别力只来自 M10（实现后删除跨步一致性守卫时必红）。未放宽断言：按负控口径记录，M10 实测只让 C12 变红。
+- **S9 租约资格实际由既有 `needsSupply` 承担，新增守卫只排除终态**：计划 M4 写的是「pending 资格去掉 `leaseExpired` / `record.status === Provisioning`」，但 `Provisioning + 租约过期` 已由共享的 `needsSupply` 判定；本条新增守卫的净作用是「不让终态/Ready 的 pending 意图进入对账」（D8）。因此 M4 按「同时去掉 `needsSupply` 与终态守卫」施加（KILLED：C8 + C13），另补 M4b「只去掉终态守卫」；M4b 在补 C13 前 SURVIVED，补一条手工构造 `failed + pending intent` 的负控后 KILLED。守卫保留。
+- **S10 两处测试夹具口径（不改产品行为）**：离线 Execution 替身自带 2 条种子 run，运行计数必须以「新增量」为准；`providerFor` 注入 `allowedRoot=fixture.root` 时真实工作树的默认根是**允许根本身**（`<root>/<workItemId>`），不是 `<repo>.worktrees`（后者只在不注入 allowedRoot、走 `deriveDefaultRoot` 时成立）。Batch 1 首次跑绿时据此校正了新文件的计数与 G1 的期望路径。
 
 ## Decision Log
 
@@ -312,6 +322,9 @@ Start Work 在**每个真实外部写之前**用 `beforeExternal`（`packages/co
 - **D11（2026-11-27）测试改写范围：`start-work-external-intent.test.js` 改契约（同 key 现在必须恢复），`start-work-request-binding.test.js` 改语义并补 veto 计数断言；不在 request-binding 里重复 SQLite 重开恢复矩阵。** Rationale：行为矩阵只应在最小地点出现一次（`docs/development/workflow.md` §2）；新文件持有完整矩阵，两个既有文件各自只改「编码了旧契约」的那一处。
 - **D12（2026-11-27）预算与越界处理。** 目标技术改动约 463 行（用户预算 800）；若实测超过 800，先取得人类确认再继续，不静默越过；若需压缩，优先压缩新文件的重复矩阵（保留 C1/C3/C5/C6/C8/C11 与 G1/G2），不得删判别断言或把断言改成空断言。
 - **D13（2026-11-27，独立验证补充）零写入与采样范围固定在两条契约行。** Rationale：只读对账经过读门会写 `sync_cursor`/运行权限记账，整库快照既不适合作为「零写入」判据，也会让认领事务内的时序复核被无关记账干扰；只采样 `mutation_attempt` 行与 `execution_context` 记录，正是「决策是否需要动作」所需的全部事实。
+
+- **D14（2026-11-27，实施期）补 C13 终态负控，不删除 D8 守卫。** Rationale：`failed + pending intent` 只可能由手工写库构造（产品终态结算会把 intent 一并推进），但它正是 D8「pending 恢复只受理 Provisioning」的判别面；M4b 在补负控前跑不出红。按变异纪律「先补一条针对该守卫的负控（只加断言）」补 C13（提交 `4394b2c`），守卫保留。
+- **D15（2026-11-27，实施期）M4 拆分为 M4（`needsSupply` + 终态守卫合并去掉）与 M4b（只去掉终态守卫）。** Rationale：租约判别由既有 `needsSupply` 承担（S9），计划里「pending 资格去掉 leaseExpired」的措辞与实现位置不同；合并变异回答「整条资格是否承重」（C8 + C13 红），M4b 回答「新增的终态守卫是否承重」（C13 红）。两个变异都 KILLED，M1–M10 表按实测归因记录。
 
 **仍需人类/Lead 的决定**：
 
@@ -338,7 +351,15 @@ Start Work 在**每个真实外部写之前**用 `beforeExternal`（`packages/co
 
 ## Outcomes & Retrospective
 
-（执行完成后回填：实际改动行数、V0–V8 实测、M1–M10 结果、与计划的偏差、残余风险的实际状态。当前记录设计阶段的结论与已知残余。）
+**实施结果（2026-11-27，检出 `fix/crash-left-pending-recovery`；head 以 `git rev-parse HEAD` 回读）**
+
+- 提交：`66d045c`（Batch 1 判别性测试与两条既有契约改写）、`726c432`（Batch 2 生产修复）、`4394b2c`（终态负控 C13）、本文档提交。
+- 体量实测（V6，base `f5b731a4`）：代码 592 / 1000 行（用户预算 800，未越过）、文档 381 / 1500 行（用户 1300）；技术改动比计划估值（≈463）高约 28%，主要来自新文件 G1–G3 真实 Git 矩阵与 12 条 Fake/SQLite 双跑用例（新文件 459 行），未删判别断言、未放宽既有断言。
+- 门禁（最终 head 重跑，数字以回读为准）：V0 exit 0；V1 exit 0；V2 `29 / 29`；V3 `142 / 142`；V4 `74 / 74`；V5 `10 / 10`；V6 见上；V7「机械扫描通过」；V8 无输出、exit 0；`pnpm verify` exit 0（contract 1677/1677、integration 2494 tests / 2460 pass / 34 skipped / 0 fail、e2e 226/226）；`node scripts/workflow-check.mjs` exit 0（7 个文件无发现）。
+- 变异（M1–M10 + M4b）：全部 KILLED，无 SURVIVED / KILLED_OTHER / NOT_APPLIED；基线与还原后基线绿、源文件逐字节还原（`scripts/review-mutate.mjs` 语义）。逐条归因见 `Progress`。
+- 与设计/计划的偏差：(1) C12 在基线本来绿（S8），按变异守卫记录；(2) M4 的租约判别由既有 `needsSupply` 承担，新增守卫只排除终态，因此补 C13 与 M4b（S9/D14/D15）；(3) 测试夹具的种子 run 与真实默认根口径（S10）。设计裁决与范围未变。
+- 残余风险：R1–R6 按设计阶段清单保持（跨进程双活 owner 归 #683；分支 absent 重发不重放 `fromRef`；conflict 需要外部修复；缺持久 `intent.input.path` 的 pending 工作树只能 inconclusive；provider 不遵守 conflict 复用契约不在支持面；证据面 = Fake + 真实 local-git 临时仓库 + 真实 SQLite 关库重开 + barrier，无真实平台 Host/端到端、无双进程并发、无 Windows 原生证据）。
+- 关闭口径：#191 保持 OPEN，#683 保持 OPEN；PR 用 `Closes #682`、`Refs #191`、`Refs #683`。
 
 **已知残余（设计阶段）**：
 
@@ -350,10 +371,10 @@ Start Work 在**每个真实外部写之前**用 `beforeExternal`（`packages/co
 6. **R6 证据边界**：无真实平台 Host/Provider 端到端、无双进程并发、无 Windows 原生证据；本 PR 只声明 Fake + 真实 local-git + 真实 SQLite 重开 + barrier。
 7. **#191/#683 边界**：跨 key 与后继所有权仍 OPEN；#191 的关闭条件未全部覆盖。
 
-**待执行时确认**：V6 实测行数、新文件实际条数、两个既有测试改写后的条数；如与估计偏差超过 30%，在 `Progress` 与本节记录原因（不静默调整预算）。
+**待执行时确认（已确认）**：V6 实测代码 592 / 文档 381；新文件 459 行（含 C13）；两个既有测试文件增删合计 39 行（external-intent 23、request-binding 16）。与计划估值偏差 >30% 的原因已记入本节（G1–G3 真实 Git 矩阵），未静默调整预算。
 
 ## Bottom Change Note
 
 - 2026-11-27（Asia/Singapore）修订 1：并入独立验证结论（Q1–Q5），补 S7（零写入判据固定在两条契约行）、D13（采样范围）与 Progress 的独立验证条目；用途是让测试断言不误把读门记账当写入。
 - 2026-11-27（Asia/Singapore）创建本计划：收敛三份独立设计，裁定 D1–D12；确定谓词扩展 + pending 专属资格 + 认领事务时序复核 + adopted 句柄耐久的实现面；给出 Batch 1–3、M1–M10、V0–V8 与残余风险。无代码改动。
-
+- 2026-11-27（Asia/Singapore）修订 2：回填 Batch 1–3 的 RED/GREEN、M1–M10 + M4b 实测与 V0–V8 证据；补 S8–S10、D14–D15 与 `Outcomes & Retrospective`；修正计划文件 EOF 空行、更新 `docs/README.md` Active 描述。设计裁决、范围与预算不变。
