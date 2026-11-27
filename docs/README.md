@@ -26,6 +26,7 @@
 | 计划 | 用途 |
 |---|---|
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
+| [2026-11-27-crash-left-pending-git-recovery](exec-plan/active/2026-11-27-crash-left-pending-git-recovery.md) | 崩溃残留 pending Git 意图在重启后的只读对账、同 key 采纳/重发与 owner 围栏（#682；实现前 Active） |
 
 ### Completed
 
