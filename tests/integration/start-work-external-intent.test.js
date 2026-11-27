@@ -29,11 +29,12 @@ async function setup(kind, fallback = false) {
   const workspace = { id: `intent-${seq++}`, name: 'intent' }, options = { providers, storage, workspace, clock: time.clock }, core = await composeCore(depsOf(options))
   const workItemId = (await core.queries.listPlanningItems()).find((v) => v.content.contentKind === 'work_item').entityId
   const request = { task: 'Synthetic explicit task', workItemId, repositoryId: 'repo-alpha', actor: { kind: 'agent' }, idempotencyKey: 'first', worktreePath: '.worktrees/requested' }
-  return { ...options, core, request, time, contextId: contextIdFor(workspace.id, workItemId, 'repo-alpha') }
+  return { ...options, core, request, time, seedRuns: providers.execution.state.runs.length, contextId: contextIdFor(workspace.id, workItemId, 'repo-alpha') }
 }
 const start = (w, key = 'first') => w.core.commands.startWork({ ...w.request, idempotencyKey: key })
 const receipt = (w) => w.storage.findMutationAttempt(w.workspace.id, 'first')
 const unknown = (r) => assert.deepEqual([r.writeState, r.confirmed], ['unknown', false])
+const countsOf = (w) => [w.providers.development.state.branches.filter((branch) => branch.name.startsWith('work/')).length, w.providers.development.state.worktrees.length, w.providers.execution.state.runs.length - w.seedRuns]
 function inject(w, predicate) {
   const transaction = w.storage.transaction.bind(w.storage); let hits = 0
   w.storage.transaction = (work) => transaction((tx) => work(new Proxy(tx, { get(target, key) {
@@ -136,12 +137,22 @@ for (const kind of ['Fake', 'SQLite']) {
     }
     assert.equal(starts, 1, '直接计 startRun 调用，不靠 Fake 幂等隐藏重复启动')
   })
-  test(`${kind}: committed intent before call interruption remains conservative`, async () => {
+  test(`${kind}: committed pending intent recovers on the same key after the lease expires`, async () => {
     const w = await setup(kind), transaction = w.storage.transaction.bind(w.storage); let hit = false
     w.storage.transaction = async (work) => { const result = await transaction(work); if (!hit && (await receipt(w))?.externalIntent?.state === 'pending') { hit = true; throw Error('interrupted after commit') } return result }
-    unknown(await start(w)); assert.equal(hit, true); const generation = (await w.storage.getExecutionContext(w.contextId)).provisioningGeneration
-    w.time.advance(31_000); assert.equal((await start(w, 'replacement')).writeState, 'pending')
-    assert.equal((await w.storage.getExecutionContext(w.contextId)).provisioningGeneration, generation)
-    assert.equal(w.providers.development.state.worktrees.length, 0)
+    unknown(await start(w)); assert.equal(hit, true)
+    w.storage.transaction = transaction
+    // 跨 key 保护来自 pendingClaim，不是本改动：新 key 仍被保守阻挡成 pending，也不占键（#683 边界）。
+    w.time.advance(31_000)
+    assert.equal((await start(w, 'replacement')).writeState, 'pending')
+    assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'replacement'), undefined)
+    // 同 key 现在必须在租约过期后先只读对账、恰好重发一次并收敛（崩溃残留 pending 的恢复契约）。
+    const d = w.providers.development, create = d.createBranch.bind(d), writes = []
+    d.createBranch = async (input) => { writes.push(input); return create(input) }
+    const resumed = await start(w)
+    assert.deepEqual([resumed.writeState, resumed.confirmed, resumed.status], ['saved', true, 'ready'])
+    assert.equal(writes.length, 1, '核心 createBranch 恰好 1 次')
+    assert.equal((await receipt(w)).state, 'saved', '最终行必须结算为 saved')
+    assert.deepEqual(countsOf(w), [1, 1, 1])
   })
 }

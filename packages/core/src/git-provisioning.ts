@@ -382,12 +382,20 @@ export type GitReconcileOutcome =
 /** 被对账采纳的那一步：值就是已落地的身份，头提交只在分支步可得。 */
 export type AdoptedGitStep = Extract<GitReconcileOutcome, { kind: 'adopted' }>
 
-/** 只认「未决的 Git 创建步」：Start Work 的 unknown 行，intent 是两种 Git 创建之一。 */
-export function unknownGitIntent(attempt: MutationAttemptRecord): GitIntent | undefined {
+/**
+ * 只认「可对账的未决 Git 创建步」：intent 是两种 Git 创建之一，且槽位停在可恢复的未决形态——
+ * - 根 state `unknown`：settle 已提交的未决结论（#673 原路径）；
+ * - 根 state `pending` 且 intent.state `pending`：beforeExternal 已提交、外部写结果未知的崩溃残留（#682）。
+ *
+ * 两者共用同一只读对账与同一结论类型；崩溃残留的额外资格（租约过期、上下文仍在供应、跨步一致、
+ * 进程内无 owner）由 `start-work.ts` 的 `reconcileReplay` 判定，本函数只回答「这行的意图形状是否可对账」。
+ */
+export function recoverableGitIntent(attempt: MutationAttemptRecord): GitIntent | undefined {
   const intent = attempt.externalIntent
-  if (attempt.commandName !== 'startWork' || attempt.state !== 'unknown' || intent === undefined) return undefined
+  if (attempt.commandName !== 'startWork' || intent === undefined) return undefined
   if (intent.operation !== 'createBranch' && intent.operation !== 'createWorktree') return undefined
-  return intent
+  if (attempt.state === 'unknown') return intent
+  return attempt.state === 'pending' && intent.state === 'pending' ? intent : undefined
 }
 
 /** 报告面用的自然键：分支名 / 持久工作树句柄（没有句柄时退回稳定 key）。 */

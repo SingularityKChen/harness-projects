@@ -52,15 +52,25 @@ for (const kind of ['Fake', 'SQLite']) {
     assert.equal(calls, 0); assert.equal(local(w.storage), before); assert.deepEqual(counts(w), external)
     assert.equal((await start(w, { actor: { id: 'one', kind: 'agent', toJSON() { throw Error('must not serialize caller') } }, branchName: undefined, worktreePath: undefined })).writeState, 'saved')
   })
-  test(`${kind}: Pending exact replay observes without lease takeover and new observation keys bind`, async () => {
+  test(`${kind}: 进程内 owner 在租约内外都否决接管，且不探测（D1/D11）`, async () => {
     const w = await setup(kind); const d = w.providers.development; const create = d.createWorktree.bind(d)
-    const entered = gate(), release = gate(); d.createWorktree = async (...args) => { entered.release(); await release.wait; return create(...args) }
+    const entered = gate(), release = gate(); let calls = 0
+    d.createWorktree = async (...args) => { calls += 1; if (calls === 1) { entered.release(); await release.wait } return create(...args) }
+    // 探针计数：保护的来源是进程内 owner 否决，不是「pending 永远不可恢复」——两档租约都不得探测。
+    let probes = 0; const list = d.listBranches.bind(d), get = d.getWorktree.bind(d)
+    d.listBranches = async (...args) => { probes += 1; return list(...args) }
+    d.getWorktree = async (...args) => { probes += 1; return get(...args) }
     const running = start(w); await entered.wait
     try {
       const pending = await w.storage.findMutationAttempt(w.workspace.id, 'first'); assert.equal(pending.state, 'pending')
       const before = local(w.storage), external = counts(w)
       conflict(await start(w, { workItemId: w.items[1] })); assert.equal(local(w.storage), before)
-      for (const advance of [0, 60_000]) { w.time.advance(advance); assert.equal((await start(w)).writeState, 'pending'); assert.equal(local(w.storage), before) }
+      for (const advance of [0, 60_000]) {
+        w.time.advance(advance)
+        assert.equal((await start(w)).writeState, 'pending')
+        assert.equal(local(w.storage), before, '进程内 owner 否决：库快照逐字不变')
+        assert.equal(probes, 0, '进程内 owner 否决：不得探测')
+      }
       assert.deepEqual(counts(w), external)
       assert.equal((await start(w, { idempotencyKey: 'observer' })).writeState, 'pending')
       assert.equal(await w.storage.findMutationAttempt(w.workspace.id, 'observer'), undefined, '未决外部步骤不消费观察新键')
