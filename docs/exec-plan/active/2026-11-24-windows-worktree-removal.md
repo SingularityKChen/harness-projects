@@ -207,6 +207,7 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 - 2026-11-24：规模算术不一致——设计 A §7.1 合计约 527，但按其用例清单（490 + 45 helper + 抽取净增约 6）应为约 541；本计划按 470–560 重估并给裁剪阶梯（超 560 时依次把 T3 锁观察并入 T1、压缩 T5 反例清单、压缩 T8 探针文案，不删 AC 覆盖）。本机 windows 文件基线 `tests 15 / pass 7 / skipped 8 / fail 0`，追加 9 条后预期 `24 / 7 / 17 / 0`（`native` 门本机全跳不是造假绿，lane 判定只在 win32 生效）。
 - 2026-11-27（Batch 3 定位，scratch 证据）：T8 的挂起点不是 helper 子进程，也不是产品：`readFile(<worktree>/keep.bin)` 在 `icacls /deny *<SID>:(D)` 之后于 hosted windows-2025 永不返回（fine marker run `45960832073`：`before-denyKeep`→`after-denyKeep` 16 ms，`before-readKeep` 后 8 分钟无任何输出，停在 `before-remove` 之前）。同一布局下 `denyDelete`/`allowDelete` 与释放后的读取都正常；无产品 Git 调用发生。
 - 2026-11-27：`--test-timeout` 只把 test 标失败，不取消挂起的 libuv fs 请求；本地 `node --test` 语义实验（E16）显示 pending `readFile` 会让测试进程永不退出——这解释了 diagnose1 在 T8 `✖ 122073ms` 之后仍静默 6 分 41 秒直至 step kill。`commit 53214148` 只兜住了 helper 子进程与 `spawnSync`，没有覆盖 fs promises 与 fixture 的无超时 `execFile`。
+- 2026-11-27（run `45962513620`，head `47e0d552`）：挂起修复生效——T8 从 120s 超时降到 2.3s 并按普通断言失败。新失败：`invalid_input 工作树有 1 个未提交路径…keep.bin`。原因：`icacls` 改 DACL 会更新 NTFS change time，已跟踪文件被 provider 的 `git status --porcelain` 干净门判成未提交；因此 ACL 机制只能作用在 ignored/untracked 文件上。修复：T8 先 `commitIgnore(f, ['keep.bin'])` 再建工作树，`keep.bin` 不再 add/commit；干净门仍成立，`git worktree remove` 仍须真实删除它并被 deny-DELETE 挡住。
 - 2026-11-27：Lane 放大是第二个独立缺陷：`scripts/windows-native-checks.mjs` 的 `runFile()` 用无 `timeout` 的 `spawnSync` 且在子进程退出后才写输出，`ci.yml` 阶段 1 又用 `Out-String` 缓冲，于是任何挂起都表现为“零输出 15 分钟取消”。该文件属 #679 owner，本 PR 不改；作为 #681 残余诊断能力缺口记录，建议另立 follow-up（给 runFile 加进程级 timeout 并流式输出，保持 fail-closed）。
 
 
@@ -259,3 +260,5 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 - 2026-11-24 / Batch 1：记录基线与抽取后计数、9 条用例结构、ungated 判别分类、四个产品变异 KILLED 与 475/240 规模；补 T6 允许根与 T8 句柄共享模式两条 Discovery。
 
 - 2026-11-27：Batch 2/3 hosted 挂起定位与 T8 修复（证据见 Progress/Surprises/Decision Log）；本机 focused 验证通过，push 后等待当前 head 的 Windows Native 回读。
+
+- 2026-11-27：T8 改为 ignored 文件 + 记录 DACL/ctime 与 Git 干净门交互的 hosted 证据；再次 push 等待当前 head 的 Windows Native 回读。
