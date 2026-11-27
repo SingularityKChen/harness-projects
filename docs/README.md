@@ -25,6 +25,7 @@
 
 | 计划 | 用途 |
 |---|---|
+| [2026-11-27-canonical-checkout-symlink-root](exec-plan/active/2026-11-27-canonical-checkout-symlink-root.md) | #340：符号链接的 repository.path 按 canonical 检出派生默认根；允许根位置本身是链接时点名拒绝（Provider 路径判定与消息修复） |
 | [2026-09-29-prelaunch-system-architecture-renewal](exec-plan/active/2026-09-29-prelaunch-system-architecture-renewal.md) | 发布前系统与架构收敛 |
 
 ### Completed

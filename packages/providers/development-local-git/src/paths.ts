@@ -6,7 +6,9 @@
  * 一条 `.worktrees -> src` / `.worktrees -> .git` 就能决定检出写到哪里，而 `realpath` 之后「仍在允许根内」
  * 照样成立（实测 git 自己也不拦：`git worktree add` 会照建）。判的是**写法**而不是解析结果，与 `..` 分量
  * 同一条口径（第四轮 P1 只判解析结果，于是指向仓库内部的链接绕过了它；第五轮 P1）。宿主注入检出之外的
- * 允许根由宿主负责。 */
+ * 允许根由宿主负责。判定锚点是 `repository.path` 的 canonical 形式（它自身可能是符号链接；Windows 保留原拼写，
+ * plain-path 门已逐分量拒绝 reparse），逐分量 `lstat` 的仍是允许根写法；允许根**位置**本身不得是符号链接，
+ * 悬空与否都点名拒绝。 */
 import { lstat, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { windowsPathsArePlain } from './git-runner.ts'
@@ -146,12 +148,32 @@ export async function resolveWorktreePath(rawPath: string, input: WorktreePathIn
   const candidate = joined.slice(0, end) || joined
   if (process.platform === 'win32' && !(await windowsPathsArePlain([input.repositoryPath, input.allowedRoot, candidate]))) return reject('symlinked_root', 'Windows 路径必须位于本机固定 NTFS 且所有现有分量无 reparse 属性')
   const target = await canonicalize(candidate)
-  const root = await canonicalize(path.resolve(input.allowedRoot))
+  const rootSpelling = path.resolve(input.allowedRoot)
+  const root = await canonicalize(rootSpelling)
   if (target === undefined) return reject('unresolvable', `目标不可访问或找不到可规范化的祖先目录：${candidate}`)
-  if (root === undefined) return reject('unresolvable', `允许根不可访问或找不到可规范化的祖先目录：${path.resolve(input.allowedRoot)}`)
-  // 允许根在检出内的分量不得是符号链接：拒绝的是**写法**，所以不等到解析结果跑出仓库才判（第五轮 P1）。
-  const planted = await firstLink(path.resolve(input.repositoryPath), path.resolve(input.allowedRoot))
-  if (planted !== undefined) return reject('symlinked_root', `允许根在仓库检出内是符号链接：${planted}；请删除该链接或注入仓库之外的 allowedRoot`)
+  if (root === undefined) return reject('unresolvable', `允许根不可访问或找不到可规范化的祖先目录：${rootSpelling}`)
+  // (R1) 允许根在检出内的分量不得是符号链接：拒绝的是**写法**，所以不等到解析结果跑出仓库才判（第五轮 P1）。
+  // 锚点换成 canonical 检出：`repository.path` 自身可能是指向检出的符号链接，拿它的拼写当锚点会把链接自己
+  // 当成"检出内的链接"（#340）。写法落在 `repository.path` 之下时把尾部映射到 canonical 锚点后逐分量 lstat，
+  // 因此 alias 世界里的检出内链接仍被拒，而 alias 本身不冒充链接。
+  const repositorySpelling = path.resolve(input.repositoryPath)
+  const repositoryCanonical = process.platform === 'win32'
+    ? repositorySpelling
+    : await realpath(repositorySpelling).then((value) => value, () => repositorySpelling)
+  const inCheckout = insideRoot(repositoryCanonical, rootSpelling)
+    ? rootSpelling
+    : insideRoot(repositorySpelling, rootSpelling)
+      ? path.join(repositoryCanonical, path.relative(repositorySpelling, rootSpelling))
+      : undefined
+  if (inCheckout !== undefined) {
+    const planted = await firstLink(repositoryCanonical, inCheckout)
+    if (planted !== undefined) return reject('symlinked_root', `允许根在仓库检出内是符号链接：${planted}；请删除该链接或注入仓库之外的 allowedRoot`)
+  }
+  // (R2) 允许根**位置**本身不得是符号链接：用 `lstat` 判写法，悬空链接与指向存在目标的链接都算。必须先于
+  // 悬空尾部判定，否则同一布局会按尾部是否存在分别报"悬空符号链接"或静默放行到检出之外（#340）。
+  if ((await lstat(rootSpelling).catch(() => undefined))?.isSymbolicLink() === true) {
+    return reject('symlinked_root', `允许根本身是符号链接：${rootSpelling}；请改用真实目录或注入非链接的 allowedRoot`)
+  }
   if (!target.complete) {
     const link = await firstLink(target.ancestor, candidate)
     if (link !== undefined) return reject('unresolvable', `路径分量是悬空符号链接：${link}`)
