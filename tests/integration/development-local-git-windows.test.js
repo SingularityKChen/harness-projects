@@ -625,6 +625,16 @@ test('Windows worktree removal: exclusive handle or ACL keeps partial deletion h
     handleBlocksRename = !moved
     if (moved) await rename(probeDirectory + '-moved', probeDirectory)
   } finally { await handle.release() }
+  // 先取走 deny-DELETE 生效前的只读前置事实：hosted 校准（run 45960832073）证明在文件上施加
+  // icacls deny DELETE 后，Node 的 fs.promises.readFile 会在 windows-2025 内核里永不完成；
+  // 挂起的 threadpool 请求还会拖住 node --test 退出，把 --test-timeout 的失败变成 job 级静默取消。
+  const keepBytes = await readFile(keepFile, 'utf8')
+  const headProbe = runSync('git', ['-C', target, 'rev-parse', 'refs/heads/' + branch])
+  assert.equal(headProbe.status, 0, '读取分支头失败：' + (headProbe.stderr ?? '').trim())
+  const headBefore = headProbe.stdout.trim()
+  const headPathProbe = runSync('git', ['-C', target, 'rev-parse', '--git-path', 'HEAD'])
+  assert.equal(headPathProbe.status, 0, '读取 HEAD 协调锁路径失败：' + (headPathProbe.stderr ?? '').trim())
+  const lockPath = path.resolve(target, headPathProbe.stdout.trim())
   let mechanism, release
   if (handleBlocksDelete && !handleBlocksRename) {
     mechanism = 'exclusive-handle'
@@ -642,12 +652,19 @@ test('Windows worktree removal: exclusive handle or ACL keeps partial deletion h
     } finally { allowDelete(aclProbeFile) }
     assert.equal(aclBlocksDelete && !aclBlocksRename, true, 'windows-removal-mechanism: no real partial-deletion fault (' + JSON.stringify({ handleBlocksDelete, handleBlocksRename, aclBlocksDelete, aclBlocksRename }) + ')')
     denyDelete(keepFile)
-    release = async () => allowDelete(keepFile)
+    release = async () => undefined
   }
-  const keepBytes = await readFile(keepFile, 'utf8')
-  const headBefore = (await f.run(['rev-parse', 'refs/heads/' + branch])).trim(), lockPath = await headLockPath(target, f.repositoryPath)
   let result
-  try { result = await port.removeWorktree({ worktree: ref(target) }) } finally { await release() }
+  try {
+    result = await port.removeWorktree({ worktree: ref(target) })
+  } finally {
+    // deny-DELETE 必须在读取隔离目录之前撤销；rename 成功后文件已随目录进入隔离路径，因此两处都尝试。
+    const quarantineNames = await quarantineEntries(f.allowedRoot)
+    for (const candidate of [keepFile, ...quarantineNames.map((name) => path.join(f.allowedRoot, name, 'keep.bin'))]) {
+      try { allowDelete(candidate) } catch { /* 路径不存在说明没有需要撤销的拒绝 ACE */ }
+    }
+    await release()
+  }
   assert.equal(result.ok, false, '部分删除绝不能报成功')
   assert.equal(result.error.code, 'ambiguous_result', JSON.stringify(result.error))
   assert.equal(result.error.retryable, false, '结果不确定必须先 reconcile，不能原样重发')

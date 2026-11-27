@@ -191,6 +191,7 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
   - 产品变异负控（改 `packages/providers/development-local-git/src/provider.ts`，每次后 `git checkout -- packages/`）：M13 去掉 HEAD.lock 创建 → T3 红；M17 跳过 `(dev, ino)` 复核 → T4 红；M20 去掉 `--untracked-files=normal` → T2 红（只报 2 个未提交路径）；M14 跳过隔离 rename → T1 红（答 `ambiguous_result`）。四个变异全部 KILLED。
   - 规模与发布面：`node scripts/rule-checks.mjs size main` → 代码 475 / 1000、文档 240 / 1500；`disclosure main` 机械扫描通过；`git diff --check main...HEAD` 无输出。
 - [x] Batch 2 · 实现/校准（2026-11-24：机制 helper 与 9 条用例同批交付；本机结构验证通过——`pnpm test:file …windows.test.js` → `24 / 7 / 17 / 0`、`node --check` 通过。原生校准留 Batch 3 按 hosted 日志进行）
+  - 2026-11-27：hosted 挂起定位完成（scratch run `45958257472`/`45959807653`/`45960832073`）：T8 在 `readFile(keepFile)`（施加 `icacls /deny *SID:(D)` 之后）于 windows-2025 上永不完成；`--test-timeout` 只判 test 失败、不取消 pending fs 请求，`node --test` 因此不退出；`runFile` 的 `spawnSync` 无进程级超时且 `Out-String` 缓冲，放大成 15 分钟 job 级静默取消。修复：T8 的只读前置事实（keepBytes/headBefore/lockPath）移到 arm deny 之前并用 `runSync` 兜界；deny ACE 在 provider 返回后按原目标与隔离路径分别撤销。本机 `windows.test.js` 24/7/17/0、POSIX `development-local-git.test.js` 96/96/0/0。
 - [ ] Batch 3 · Hosted 证据与负控
 - [ ] Batch 4 · 全量与归档
 - 阻塞项：无（draft PR #690 已创建）。
@@ -204,6 +205,10 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 - 2026-11-24 / Batch 1：Windows 夹具的允许根是 `<root>/WorkTrees`，主检出 `<root>/Repo 空 格` 不在其内；主检出的 `invalid_input` 会先被 `outside_root` 拦下，所以 T6 的主检出调用改用 `allowedRoot: f.root`（包含仓库的父根）才走到身份拒绝。证据：未加门副本在 macOS 上原写法得到「规范化后逃出允许根：…/Repo 空 格」。
 - 2026-11-24 / Batch 1：独占句柄必须用 `FileShare.Read` 而不是 `FileShare.None`——后者同时挡住干净门 `git status` 的读取，产品会答 `unavailable` 而不是部分删除的 `ambiguous_result`；`FileShare.Read` 仍拒写/拒删。T8 自探针同时要求「`rm` 必败 + 父目录 rename 成功」，不成立才退到 ACL deny DELETE（同样门槛）。
 - 2026-11-24：规模算术不一致——设计 A §7.1 合计约 527，但按其用例清单（490 + 45 helper + 抽取净增约 6）应为约 541；本计划按 470–560 重估并给裁剪阶梯（超 560 时依次把 T3 锁观察并入 T1、压缩 T5 反例清单、压缩 T8 探针文案，不删 AC 覆盖）。本机 windows 文件基线 `tests 15 / pass 7 / skipped 8 / fail 0`，追加 9 条后预期 `24 / 7 / 17 / 0`（`native` 门本机全跳不是造假绿，lane 判定只在 win32 生效）。
+- 2026-11-27（Batch 3 定位，scratch 证据）：T8 的挂起点不是 helper 子进程，也不是产品：`readFile(<worktree>/keep.bin)` 在 `icacls /deny *<SID>:(D)` 之后于 hosted windows-2025 永不返回（fine marker run `45960832073`：`before-denyKeep`→`after-denyKeep` 16 ms，`before-readKeep` 后 8 分钟无任何输出，停在 `before-remove` 之前）。同一布局下 `denyDelete`/`allowDelete` 与释放后的读取都正常；无产品 Git 调用发生。
+- 2026-11-27：`--test-timeout` 只把 test 标失败，不取消挂起的 libuv fs 请求；本地 `node --test` 语义实验（E16）显示 pending `readFile` 会让测试进程永不退出——这解释了 diagnose1 在 T8 `✖ 122073ms` 之后仍静默 6 分 41 秒直至 step kill。`commit 53214148` 只兜住了 helper 子进程与 `spawnSync`，没有覆盖 fs promises 与 fixture 的无超时 `execFile`。
+- 2026-11-27：Lane 放大是第二个独立缺陷：`scripts/windows-native-checks.mjs` 的 `runFile()` 用无 `timeout` 的 `spawnSync` 且在子进程退出后才写输出，`ci.yml` 阶段 1 又用 `Out-String` 缓冲，于是任何挂起都表现为“零输出 15 分钟取消”。该文件属 #679 owner，本 PR 不改；作为 #681 残余诊断能力缺口记录，建议另立 follow-up（给 runFile 加进程级 timeout 并流式输出，保持 fail-closed）。
+
 
 ## Decision Log
 
@@ -223,6 +228,10 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 - 2026-11-24 / Lead 裁决 Q2（负控预算）：允许在 scratch ref 上做至多一次**产品变异**负控（证明新增用例可被证伪），用完即删该分支，变异不得进入 PR 分支；NC-1（测试侧 `assert.fail` 执行证明）不是产品变异，不受此上限约束。
 - 2026-11-24 / Lead 裁决 Q3（关闭语义）：只有 AC1/AC2 的可判别真实原生证据完整时才用 `Closes #681`；若某一核心用例无法原生覆盖，先报告 Lead，允许 `#681` 保持 OPEN 并写 blocked 残余，不硬关、不把未覆盖说成已覆盖。
 - 2026-11-24 / Lead 裁决 Q4（裁剪触发）：技术增删超过 560 行时按 §Surprises & Discoveries 的阶梯自动裁剪（T3 锁观察并入 T1、压缩 T5 反例清单、压缩 T8 探针文案，不删 AC 覆盖），并在交付报告中说明裁剪项与实际规模。
+
+- 2026-11-27 / impl-681：T8 的只读前置事实（`keepBytes`、`headBefore`、`lockPath`）全部移到 arm `denyDelete(keepFile)` 之前，并用文件内 `runSync`（60s 上限）替代无超时的 fixture `execFile` 读取这两项 Git 事实。Rationale：hosted 证据表明 deny-DELETE ACE 生效后对同一文件的 Node fs 读取会永不完成；这不改变任何断言、不做 skip，也不会把失败路径变成成功。
+- 2026-11-27 / impl-681：deny ACE 的撤销放在 provider 返回后的 `finally`，同时尝试原目标路径与隔离目录内的路径（rename 成功后文件已随目录移动）。Rationale：只撤销原路径会因路径不存在而失败并把“诚实 ambiguous + 可恢复”变成测试错误；两处都尝试是可幂等的清理。
+- 2026-11-27 / impl-681：不做产品修复。Rationale：hang 发生在 `port.removeWorktree` 之前，产品路径未被进入；23 条其他 Windows 用例在 hosted 通过；ExecPlan 的 ≤120 行产品修复门槛未被触发。Lane 级 `runFile` 超时另开 follow-up，不在本 PR 扩大 #679 owner 的文件。
 
 ## Idempotence and Recovery
 
@@ -248,3 +257,5 @@ AC 映射：AC1 → 第 7 条（T1–T8 的拒绝/零副作用）+ 第 9 条负�
 - 2026-11-24 / r681（收敛评审）：初稿。读取 issue #681/#678、`AGENTS.md`、`PLANS.md`、`docs/development/workflow.md`、`docs/review/README.md`、`docs/development/ci.md`、两份独立设计 A/B 与 `main@eadf4901` 代码/本机 probe 后收敛：采用 Lead 裁决的 A1，统一 9 条用例与 AC 映射、机制替代与校准规则、登记读数的回读式断言、T9 三分支、预算裁剪阶梯与 blocked/授权阶梯，并剔除 B 的新文件/新契约测试与 C/D 方案。
 - 2026-11-24 / Lead 批准执行：状态改为 Active；删除仅评审用附录（Reviewer Handoff）并把 Q1–Q4 裁决写入 Decision Log；工作树路径校正为 `.worktrees/iteration12-windows-worktree-removal`；Batch 0 记录开工门回读（PR #689 @ `66da5841` 的 Windows Native pass 与 `files=4`）。
 - 2026-11-24 / Batch 1：记录基线与抽取后计数、9 条用例结构、ungated 判别分类、四个产品变异 KILLED 与 475/240 规模；补 T6 允许根与 T8 句柄共享模式两条 Discovery。
+
+- 2026-11-27：Batch 2/3 hosted 挂起定位与 T8 修复（证据见 Progress/Surprises/Decision Log）；本机 focused 验证通过，push 后等待当前 head 的 Windows Native 回读。
