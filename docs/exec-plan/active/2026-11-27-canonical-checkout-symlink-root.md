@@ -271,11 +271,11 @@ if ((await lstat(rootSpelling).catch(() => undefined))?.isSymbolicLink() === tru
 - [x] （2026-11-27 15:52 SGT）在仓库外临时目录只读复现（不碰仓库、不建工作树）：符号链接 `repository.path` 的 preflight/create 答 `invalid_input` 且消息指向 alias；默认根位置符号链接在尾部缺失时答"悬空符号链接"、尾部存在时 `ok: true`；alias 锚点下检出内链接的消息指向 alias。用临时目录内的 `paths.ts` 原型验证了 R1/R2 的预期输出与默认根端到端创建。
 - [x] （2026-11-27 15:54 SGT）两份设计收敛：采用 Design A 骨架但删去其规则 (2)，拒绝 Design B 的新拒绝种类/助手/返回路径再 canonical 化；判定与测试矩阵落在 Design / Spec（见 Decision Log D1–D8）。
 - [x] （2026-11-27 15:54 SGT）创建本计划并更新 `docs/README.md` Active 索引；写集合见 Global Constraints。
-- [ ] Batch 0：安装依赖、focused 基线绿（未开始）。
-- [ ] Batch 1：T1/T2/T3 先红（未开始）。
-- [ ] Batch 2：`paths.ts` R1/R2 转绿（未开始）。
-- [ ] Batch 3：6 个变异 KILLED + `pnpm verify`/boundaries/workflow/disclosure/size/diff-check 全绿（未开始）。
-- [ ] Batch 4：文档同步、Superseded 标注与 Lead 交接（未开始）。
+- [x] （2026-11-27 实施，检出 `fix/symlink-canonical-checkout` 的工作树 `.worktrees/symlink-canonical-checkout`）Batch 0：`pnpm install --frozen-lockfile` 退出 0；focused 基线 `tests 96 / pass 96 / fail 0 / skipped 0`（基线 head `2b3cdf29`；该次为内联运行，摘要即本条目）。
+- [x] （2026-11-27）Batch 1：T1/T2/T3 按计划先红——focused `tests 98 / pass 95 / fail 3 / skipped 0`，红的三条恰好是新增/扩展用例。失败形态与计划逐字一致：T1 答 `invalid_input`「允许根在仓库检出内是符号链接：<alias>」，T2 尾部缺失变体答「路径分量是悬空符号链接：<派生根>」，T3 的 alias 锚点消息指向 alias 而不是检出内真实链接路径（日志 `.superpowers/r340/batch1-red.log`）。
+- [x] （2026-11-27）Batch 2：R1/R2 落地（`paths.ts` 实际 +28/−6，见 Surprises）；focused `98/98`、`local-git-core-provisioning` `20/20`、`pnpm typecheck` 退出 0（日志 `.superpowers/r340/batch2-*.log`）。
+- [x] （2026-11-27）Batch 3：变异 `M1–M6` 全部 `KILLED`（`SUMMARY` 六项 KILLED，归因到 T3/「默认根位置本身是符号链接」，日志 `.superpowers/r340/batch3-mutants.log`）；`pnpm verify` 退出 0（contract `1677/1677`、integration `pass 2433 / fail 0 / skipped 34`、e2e `226/226`）；`pnpm run boundaries` `10/10`、`workflow-check` no findings、`disclosure`/`size`/`git diff --check` 均退出 0（该轮 size 回读：代码 135、文档 347；用户上限 800/1300，观察时刻快照）。
+- [x] （2026-11-27）Batch 4：`tests/integration/README.md` 的「路径安全」与「默认允许根」两行同步；completed `2026-10-13-worktree-root-outside-checkout.md` 的 Decision Log 2026-10-14「符号链接检出」条就地标 Superseded；本计划 Progress / Surprises / Decision Log / Outcomes 与 Bottom Change Note 回填。提交按批次拆为 test → fix → docs 三个提交，最终 head 的复跑门禁见 Bottom Change Note。
 
 ## Surprises & Discoveries
 
@@ -285,6 +285,10 @@ if ((await lstat(rootSpelling).catch(() => undefined))?.isSymbolicLink() === tru
 - 2026-11-27：不修 Design A 规则 (2) 时，`repositoryPath` 为真实路径、`allowedRoot` 经检出外中间链接落进检出内的布局在基线上是放行的（与"显式旧根仍可注入"同类）；收紧要另立验收，不在 #340。
 - 2026-11-27：残余但已确认 fail closed 的相邻行为：`repositoryPath` 为 alias 且显式注入的允许根写在 alias 下、根目录或尾部尚不存在时，目标尾部悬空判定仍会先看到 alias 并报"悬空符号链接"。默认根是 checkout 的 sibling，不经该分支；本计划不为它扩大改动面（见 Risks）。
 - 2026-11-27：PR #690（draft、Blocked）修改同一测试文件；本分支不得叠在它上面，合并顺序由 Lead 的合并队列处理。
+- 2026-11-27（实施）：修复前 RED 与计划逐字一致——focused 98 条里红的恰好是 T1、T2、T3；T1 的消息指向 alias，T2 尾部缺失报「路径分量是悬空符号链接：<派生根>」，T3 的 alias 锚点消息指向 alias。修复后 98/98。
+- 2026-11-27（实施）：`paths.ts` 实际 +28/−6（计划预计 +25/−2）。差额来自 R1 锚点/尾部映射拆行与 R2 的两行注释；净 +22 对预计净 +23，判定面与写集合未扩。若需要压行数，可只删 R2 的两行说明。
+- 2026-11-27（实施）：M5（把 R2 移到 R1 之前）按计划被 T3 杀死而不是 T2：R2 先判时 T3 的允许根拼写正是检出内链接，消息从「检出内链接」变成「允许根本身是符号链接」，说明两者判据在同一布局上确实可区分。
+- 2026-11-27（实施）：R1 的 win32 分支在本机不可达（`windowsPathsArePlain` 已逐分量拒绝 reparse），本机不伪造 Windows 证据；win32 行为只由代码路径与既有 Windows lane 保证。
 
 ## Decision Log
 
@@ -298,6 +302,7 @@ if ((await lstat(rootSpelling).catch(() => undefined))?.isSymbolicLink() === tru
 - D8（2026-11-27）：**不为相邻的"尾部悬空判定 lstat 自己的祖先"扩大改动**。Rationale：issue 的两种布局不需要它；默认根不经过该分支；扩大会改既有"目标祖先是符号链接"语义的判定面，需要单独验收。残余写入本计划 Idempotence and Recovery / Risks。
 - D9（2026-11-27）：**规模低于 issue 的 500–800 目标**。Rationale：issue 现行 disposition 明确"coherent small fixes stay small"；本修复生产 +≈25/−2、测试 +≈80/−6、文档 +≈360，均低于本任务用户上限 800/1300。若实施时发现需要超界，先回写本计划 Decision Log 再继续。
 - D10（2026-11-27）：**Completion 语义**：本 PR 只修 Provider 路径判定与消息，不关闭 #338，不改 R1/发布状态、不改看板 Status；合并与否由人类伙伴决定。
+- D11（2026-11-27，实施者）：**按 Design / Spec 原文落地 R1/R2，未改 `provider.ts`/`git-runner.ts`/Host**。实际 diff 为 `paths.ts` +28/−6（计划 +25/−2，见 Surprises）；差异只在拆行与注释，拒绝种类、判定顺序与消息逐字不变。写集合与 Global Constraints 一致。
 - 需要人类决定的事项（当前不阻塞实现）：若确认存在依赖"显式注入的符号链接 allowedRoot 在尾部存在时可用"的仓库外消费者，需要人类决定是否保留该旧行为（当前未发现消费者；Host 注入的是 `worktreesDir/<hash>` 真实目录）。以及是否为本计划 D8 的残余另开 follow-up issue——本计划不创建 issue。
 
 ## Idempotence and Recovery
@@ -334,13 +339,15 @@ if ((await lstat(rootSpelling).catch(() => undefined))?.isSymbolicLink() === tru
 
 ## Outcomes & Retrospective
 
-本计划创建时尚未实施。预期结果与判定：
+本计划已按 Batch 0–4 实施完毕（2026-11-27，检出 `fix/symlink-canonical-checkout` 的工作树 `.worktrees/symlink-canonical-checkout`）。结果与判定：
 
-- 实施后，issue #340 的四条验收由 T1/T2/T3、变异 M1–M6 与 `pnpm verify` 覆盖；PR 描述引用本计划 Batch 与证据。
-- 与计划的预期偏差：若实施发现 R2 与某个既有用例冲突（例如某测试把符号链接当作合法 `allowedRoot`），以 issue 验收与"根位置不得是链接"不变量为准，并在本计划 Decision Log 追加处置，不静默放宽。
+- issue #340 的两条布局由 T1、T2 判别，PR #160/#328 的承重符号链接不变量由 T3 与变异 M1/M2/M5/M6 覆盖：6 个变异全部 `KILLED`，`pnpm verify` 与 boundaries/workflow/disclosure/size/diff-check 全绿（Batch 3 证据，观察时刻快照）。
+- 可观察结果：符号链接 `repository.path` 与真实路径派生同一默认根，preflight 零 Git argv、create 成功且返回/落盘都是 canonical 路径；默认根位置本身是符号链接时两种尾部形态都在任何 Git 命令行之前以 `symlinked_root` 拒绝并点名该布局；alias 锚点下检出内链接的消息指向检出内真实链接路径。
+- 与计划的预期偏差：`paths.ts` 实际 +28/−6（计划 +25/−2，见 Surprises）；focused 用例 98 条 = 基线 96 + T1/T2 新增 + T3 扩展；未偏离写集合，也没有既有用例与 R2 冲突（没有测试把符号链接当作合法 `allowedRoot`）。
 - 不声称：关闭 #338（只检查最后一个根分量）、Windows 原生行为变化、已安装产品/R1 接受。产品侧新绑定仍先 canonical 化 `repositoryPath`，本修复主要恢复默认 Provider 与原始 symlink 配置的可用性与消息准确性。
-- 归档条件：全部批次完成、PR 合并后，把本文件移到 `docs/exec-plan/completed/`（文件名不变）并更新 `docs/README.md` 索引状态；本计划创建时不执行。
+- 归档条件：PR 合并后，把本文件移到 `docs/exec-plan/completed/`（文件名不变）并更新 `docs/README.md` 索引状态；本 PR 合并前保持 Active。
 
 ## Bottom Change Note
 
 - 2026-11-27 15:54 SGT：创建本计划。依据 issue #340、PR #328/#160 的历史证据、两份独立的符号链接修复设计，以及在本检出上的只读复现与原型的预期输出；写集合见 Global Constraints。
+- 2026-11-27（实施）：Batch 0–4 完成。focused 基线 96 绿 → T1/T2/T3 先红（98 中 3 红）→ R1/R2 落地后 98/98；变异 M1–M6 全 KILLED；`pnpm verify`、boundaries、workflow-check、disclosure、size 与 `git diff --check` 全绿（观察时刻快照）。提交序列按批次拆为 test(providers) → fix(providers) → docs(exec-plan)；PR #699 保持 draft，ready 与合并由人类伙伴决定。
