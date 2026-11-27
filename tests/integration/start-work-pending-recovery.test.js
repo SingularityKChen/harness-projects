@@ -328,6 +328,24 @@ for (const kind of ['Fake', 'SQLite']) {
     assert.deepEqual(counts(w), [1, 1, 1])
   })
 
+  test(kind + ': 手工构造终态上下文 + pending 意图：不探测不接管（负控，M4b / D8）', async () => {
+    const w = await setup(kind)
+    await branchCrash(w)
+    // failed + pending intent 只可能由手工写库构造：产品路径的终态结算会把 intent 一并推进。
+    // pending 恢复因此只受理 Provisioning（D8）——终态与 Ready 不是待恢复的崩溃残留。
+    const record = await recordOf(w)
+    await w.storage.putExecutionContext({ ...record, status: 'failed', provisioningStartedAt: undefined })
+    const injected = await recordOf(w)
+    await restart(w); w.time.advance(LEASE_EXPIRED_MS)
+    const probes = trackProbes(w), writes = trackCreates(w), before = await snapshot(w)
+    const resumed = await start(w)
+    assert.equal(resumed.writeState, 'pending', '终态上下文不是 pending 恢复的合法形态')
+    assert.equal(probes.total(), 0, '终态上下文不得探测')
+    assert.equal(writes.branch.length + writes.worktree.length, 0)
+    assert.deepEqual(await recordOf(w), injected, '终态记录保持原样')
+    assert.deepEqual(before.attempt, await attemptOf(w), '未决行保持原样')
+  })
+
   test(kind + ': 手工构造跨步错位记录：不合资格且不探测（C12 / M10）', async () => {
     const w = await setup(kind)
     const intent = await worktreeCrash(w, '.worktrees/original-target')
