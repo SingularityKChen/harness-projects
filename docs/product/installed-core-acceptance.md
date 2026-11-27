@@ -309,3 +309,115 @@ pnpm test:browser
 - **#647 的 Win11 硬件接受独立**：本机的 native Windows 用例条件跳过；CI 原生平台执行也不能替代该条款所需的真实硬件人类接受。
 - **R1（#459/#73）与看板 `Status` 接受独立**：工程验证不构成发布裁决，不推进规划状态。
 - 本批未使用真实 GitHub 业务网络；provider 场景使用已有 fake 或录制回放，不把这些证据扩大到真实网络服务表现。
+
+## 2026-11-27 多项目安装态验收包（#694 判据 5）
+
+**状态**：截至本节写入，人类走查尚未执行；#694 判据 5 与 #636 保持 OPEN。本节只交付可重放的安装态走查包，以及 2026-11-27 SGT 实际观察到的身份、安装与前置状态；它不含任何人类接受结论，也不把 2026-11-26 的 composed/packed 工程证据移作人验。控制计划为[多项目安装态验收 ExecPlan](../exec-plan/active/2026-11-27-multiproject-installed-acceptance.md)。
+
+### 为什么只用固定 Web 0.2.0-rc.2 profile
+
+[demo-install.md](demo-install.md) 声明的受支持安装态面只有固定 Harness `0.2.0-rc.2` 的 Web profile；Desktop 与真实模型调用不在该指南的验收范围。安装件 peer 也是 `@deepseek-ai/dsh-*` `~0.2.0-rc.2`，本机 Desktop `0.2.2-rc.5` 在该范围外；其已装插件是 2026-11-12 的旧世代产物（多项目标记零命中），数据根 `workspace.sqlite` 为 `user_version=5`、`schema_migrations` 七行，而当前安装件要求单一基线账本恰好一行且 `CURRENT_SCHEMA_GENERATION=7`，会以 `version_list` 拒绝开库而不是原地升级。因此走查只用专用 scratch profile：`mktemp -d` 创建根目录，`DSH_HOME` 指向其中的 `dsh` 子目录，插件数据根为 `$DSH_HOME/profiles/web/harness-projects/`；不写、不迁移、不修复、不删除任何真实 profile 的数据库，也从不改 `PRAGMA user_version`。
+
+### 候选与产物身份（2026-11-27 SGT）
+
+Batch 1 在检出 `test/mp-installed-acceptance` 的工作树 `.worktrees/mp-installed-acceptance` 根目录重放打包与安装，观察值如下；重放命令见本节末。
+
+| 项目 | 2026-11-27 SGT 观察 |
+|---|---|
+| 插件版本 | `0.1.0-demo.1` |
+| 宿主线 | 固定 Web `0.2.0-rc.2`；peer `@deepseek-ai/dsh-*` `~0.2.0-rc.2`、`@deepseek-ai/cordis` `~4.0.4` |
+| 工具链 | Node `26.13.1`、pnpm `10.28.2`、esbuild `0.28.2`（锁文件固定） |
+| 候选源 | 工作树 HEAD `f25d887b2c4a229bceb09e21d6e1d17eaf26a60d`（本计划自身的文档提交）；基线 main `f5b731a4b695cb6cf61070cfbd1746fc05f0639d` |
+| 生产输入等价 | 相对 #697 final head `4c666811787f24a00450389e8f0a9ff80222cb1b` 的 `git diff --exit-code` 从 `f5b731a4` 与 HEAD 各验证一次，均无输出、exit 0 |
+| packed tarball | 369610 bytes；SHA-256 `7895d024321816283f362403cbcad94bf0c70e06bb2e07dab34554b92bf39d99` |
+| `package/lib/index.js` | 773521 bytes；SHA-256 `f4af403101713d25fa7d1ffa3d4e5feba6f9a7f7d8a57e3dca2127744edd62f4` |
+| `package/lib/client.js` | 820506 bytes；SHA-256 `49e36de61441e6a35c325cbbd99b388595ed7a9158279f88d3e3e33f5ab763ae` |
+| 安装件一致性 | 六件（`package.json`、`LICENSE`、`cordis.patch.yml`、`lib/index.js`、`lib/client.js`、`migrations/001_init.sql`）逐个 SHA-256 相同；tgz 解出树与安装目录 `diff -r` 零差异 |
+| 安装位置 | 临时 scratch profile：`$HP_DEMO_SCRATCH`（`mktemp -d` 生成）、`$DSH_HOME=$HP_DEMO_SCRATCH/dsh`；本记录不写本机路径 |
+| Host/runtime | `dsh --version` 输出 `0.2.0-rc.2`；宿主 stdout 出现 `[harness-projects] host ready` |
+| 前置状态（停机回读） | `user_version=7`；`ledger=1:1`；`workspaces=0`；`workspace-selection.json` 为 0 字节 |
+
+重放命令（在同一检出根目录、同一 shell 会话内按顺序执行；期望值即上表）：
+
+```sh
+git rev-parse HEAD origin/main
+git diff --exit-code 4c666811787f24a00450389e8f0a9ff80222cb1b f5b731a4 -- apps packages package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json LICENSE
+pnpm install --frozen-lockfile
+pnpm --filter @harness-projects/app-harness-plugin pack:plugin
+ART=apps/harness-plugin/dist/harness-projects-app-harness-plugin-0.1.0-demo.1.tgz
+wc -c "$ART"; shasum -a 256 "$ART"
+TMP=$(mktemp -d); tar -xzf "$ART" -C "$TMP"
+wc -c "$TMP/package/lib/index.js" "$TMP/package/lib/client.js"
+shasum -a 256 "$TMP/package/lib/index.js" "$TMP/package/lib/client.js"
+export HP_DEMO_ARTIFACT="$(realpath "$ART")"
+export HP_DEMO_SCRATCH="$(mktemp -d -t hp-mp-accept)"
+export DSH_HOME="$HP_DEMO_SCRATCH/dsh"
+export DSH_TELEMETRY_DISABLED=1
+npx --yes --package @deepseek-ai/dsh@0.2.0-rc.2 dsh --version
+npx --yes --package @deepseek-ai/dsh@0.2.0-rc.2 dsh plugin --profile web add "$HP_DEMO_ARTIFACT"
+INST="$DSH_HOME/profiles/web/node_modules/@harness-projects/app-harness-plugin"
+for f in package.json LICENSE cordis.patch.yml lib/index.js lib/client.js migrations/001_init.sql; do
+  a=$(shasum -a 256 "$TMP/package/$f" | awk '{print $1}')
+  b=$(shasum -a 256 "$INST/$f" | awk '{print $1}')
+  [ "$a" = "$b" ] && echo "match $f" || echo "MISMATCH $f"
+done
+```
+
+前置状态回读在宿主进程完全退出后执行，期望 `user_version=7`、`ledger=1:1`、`workspaces=0`：
+
+```sh
+DB="$DSH_HOME/profiles/web/harness-projects/workspace.sqlite"
+/usr/bin/sqlite3 -readonly "$DB" "select 'user_version=' || (select * from pragma_user_version); select 'ledger=' || count(*) || ':' || group_concat(version, ',') from schema_migrations; select 'workspaces=' || count(*) from workspace;"
+```
+
+启动宿主按 [demo-install.md](demo-install.md) 生成 documents overlay、核对 `workspace-controller.config.documentsDirectory` 等于 scratch 的 documents 目录后运行 `dsh web --patch … --no-open --port 0`；终端给出的会话地址含访问材料，不写进本记录。首次加载在 scratch profile 内建库，并留下 0 字节的 `workspace-selection.json` 与 `diagnostics.log`，属预期观察。
+
+### nonce 与前后状态协议（P1–P7）
+
+P1 生成 nonce：在协调者终端运行 `openssl rand -hex 4`，输出 8 位十六进制；同时写进两个项目名 `验收A-<nonce>`、`验收B-<nonce>`。人类接受前，nonce 与项目名只存在于运行态记录，不写进本节。
+
+P2 安装：在与收到 tgz 相同的终端会话内导出 `HP_DEMO_ARTIFACT`、`HP_DEMO_SCRATCH`、`DSH_HOME`、`DSH_TELEMETRY_DISABLED`，按安装指南的固定 Web 流程 `add` 安装件；不写 HOME、不改全局工具、不使用版本豁免参数。
+
+P3 启动：按指南生成 documents overlay，dump-config 核对 `workspace-controller.config.documentsDirectory` 等于 scratch 的 documents 目录，再以 `dsh web --patch … --no-open --port 0` 启动；只在本机浏览器打开终端给出的会话地址，该地址含访问材料，不写进任何记录。
+
+P4 前置回读（停机）：退出宿主进程后，对 `$DSH_HOME/profiles/web/harness-projects/workspace.sqlite` 以 `sqlite3 -readonly` 回读 user_version、账本与 workspace 行数。2026-11-27 SGT 实际观察与期望一致；此时数据库已由首次加载建立，不是「库不存在」。
+
+P5 人类走查：人类执行 H1–H9（A1 可选），逐步给出结果；协调者不代替人类点击，也不代替人类确认视觉与焦点状态。
+
+P6 事后回读（停机）：再次退出宿主，回读同一数据库与 `workspace-selection.json`，期望 `workspaces=2`、两行名称都含本次 nonce、创建序先 A 后 B、`selection.workspaceId` 等于最后确认项目（H9 结束时为 A）的 id、`confirmedAt` 为合法 ISO-8601。若出现第三行、账本多行或 selection 指向不存在的 id，判不通过，记录失败而不修库。
+
+P7 人类接受句：人类在 #694 回复，至少包含「我已完成多项目安装态走查 H1–H9」「nonce 为 …」「tarball SHA-256 为 …」以及对未主张范围的确认；协调者逐字引用并附评论 URL。总体关闭语义见本节末。
+
+### 人类走查步骤 H1–H9
+
+步骤按文档化 profile 上真实可达的控件写；每步的「未出现或不同时记录」列要求人类在异常时写下实际所见，而不是只写「不正常」。操作者、走查日期、nonce、每步结果、事后状态与接受句都尚未产生，本节不写占位结果；人类明确接受后才按 P6/P7 回填。
+
+| 步骤 | 操作（人类） | 目标观察 | 未出现或不同时记录 |
+|---|---|---|---|
+| H1 | 打开侧栏 Harness Projects，在空 profile 的创建表单输入项目名 `验收A-<nonce>`，提交。 | 进入「连接设置」页并显示「当前工作区：验收A-<nonce>」；页头有「项目」「返回工作区」；没有别的项目名混入。 | 表单结果、实际错误文案、是否留下半成品项目。 |
+| H2 | 点页头「项目」进入 Projects Home。 | Home 标题「项目」；列表恰一行 `验收A-<nonce>`，该行按钮是「返回项目」；「创建工作区」可用。 | 实际行数、按钮文案、空态或错误提示。 |
+| H3 | 点「创建工作区」，输入 `验收B-<nonce>`，提交。 | 进入「连接设置」并显示「当前工作区：验收B-<nonce>」。 | 是否复用旧草稿、实际错误、是否仍需连接规划才能创建。 |
+| H4 | 点页头「项目」回到 Home。 | 两行都在且按创建序为 A 在前、B 在后；B 行按钮「返回项目」，A 行「打开」；无行处于永久 pending。 | 实际顺序、活动行标记、pending 或错误状态。 |
+| H5 | 点 A 行「打开」切回 A。 | 项目页页头「工作区」；进「连接设置」读到「当前工作区：验收A-<nonce>」，页面与设置里不出现 `验收B-<nonce>`；再回 Home 时 A 行「返回项目」、B 行「打开」。 | 是否残留 B 的名称/上下文、切换耗时、失败提示。 |
+| H6 | 只用键盘：在 Home 用 Tab/Shift+Tab 移动焦点到行按钮并按 Enter；在项目页用 Tab 到「连接设置」按 Enter，再用 Tab 到「项目」按 Enter 回 Home；最后用键盘 Enter 打开 B。 | 每一步都有可见焦点环，Enter 激活的是当前聚焦控件，回 Home 后焦点落在合理控件（不是页面外或不可见元素）；最终活动项目为 B（Home 中 B 行「返回项目」）。 | 焦点是否可见、是否丢失、是否跳到无关控件；记录实际按键序列与结果。 |
+| H7 | 把浏览器窗口缩到内容宽约 640 CSS px（可用浏览器响应式模式设定 640）。 | Home 两行与项目页页头都不出现整页横向滚动；按钮仍可点击、行内文字不被截断到不可读。记录实际达到的宽度。 | 是否出现横向滚动、重叠、截断或不可点击；若浏览器不允许更窄，记录实际最窄宽度，不推算未测宽度。 |
+| H8 | 在终端 Ctrl+C 停止宿主，用同一 DSH_HOME、同一 `--patch` 重新启动并打开页面。 | 自动回到最后确认项目 B（显示「当前工作区：验收B-<nonce>」），Home 两行仍在，不出现空 profile 创建表单。 | 实际落地页面、恢复成空态/另一项目/报错的情况。 |
+| H9 | 停止宿主；把 `$DSH_HOME/profiles/web/harness-projects/workspace-selection.json` 覆盖为非法 JSON（单个左花括号即可）；重启。 | 落在 Home 并显示「上次打开的项目记录已损坏，请选择项目。」；两行仍在；没有静默打开任何项目。随后点 A 行「打开」，A 正常打开；再停止并重启，自动恢复 A（最后确认）。 | 实际提示文案、是否静默打开别的项目、恢复后 selection 是否可写回。 |
+| A1（可选，不计入接受句） | 在 A 的「连接设置」里输入任意 Project node ID 并提交，观察来源/凭据不可用时的提示与可重试入口。 | 有明确任务结果与恢复入口；失败不产生部分绑定。 | 实际错误分类与入口；不得输入真实 token，不连接真实来源。 |
+
+### 本轮明确不主张
+
+以下各项即使自动证据丰富，也不得写成人验接受：
+
+- **工作项行、读写隔离、执行归属**：scratch profile 不连接真实规划来源，项目里没有工作项，人验无法观察行隔离；这些由 2026-11-26 节的 composed/packed 证据覆盖，不得冒充人验。
+- **明暗主题**：安装态没有产品内主题切换入口，主题跟随 `nativeTheme.themeSource` 与 `prefers-color-scheme`；自动证据用夹具的 `?theme=` 参数。
+- **深链**：安装态插件没有 URL/route 入口。
+- **真实凭据下的 denied/offline/权限否定**：需要真实账号或撤权操作；沿用 #450/#451/#457 与 2026-11-26 节的生产组合证据。A1 若执行，只能记为「凭据/来源不可用的结构化拒绝」，不能写成权限否定。
+- **Windows11 Desktop（#647）、R1（#459/#73）、看板 `Status`**：全部独立，不因本走查通过而推进。
+
+### 关闭语义
+
+- 人类明确接受 + 本节回填（状态行改为「已执行并获人类明确接受（日期、评论 URL）」）+ 身份/前置/事后回读全部通过 → 才允许勾 #694 判据 5；是否让 PR 的 `closingIssuesReferences` 包含 #694，由人类在该次回复里明确指示，并以回读为准，不手写关闭结论。
+- 未执行、任一步未通过、或人类只给出模糊回复 → 判据 5 保持未勾，#694 与 #636 保持 OPEN，PR 用 Refs；本节写明缺哪一步，不写「已基本完成」这类第三种表述。
+- 父项 #636 的完整接受另需其八条验收组全部证据，不因 #694 关闭自动获准；#694 关闭也不等于 R1、#647 或看板 `Status` 接受。
+- 计划自身归档只在人类走查与回填完成后进行；若人验长期不可用，计划保持 Active 并在 Progress 标注阻塞原因，不静默归档。
