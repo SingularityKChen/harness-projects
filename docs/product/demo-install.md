@@ -153,3 +153,5 @@ npx --yes --package @deepseek-ai/dsh@0.2.0-rc.2 dsh web --patch "$HP_DEMO_SCRATC
 2026-10-27 的执行接线验证使用临时 SQLite、真实 Local Git 工作树、生产 Host/remote 与既有会话录制回放；覆盖安装幂等、主备用冲突、同密钥重启、缺服务和故障开关、模型错误及 unknown 零人工启动。此轮未启动真实模型或用户会话，也未重新执行实际 Web/ Desktop 安装演练；新 tarball 的摘要必须按本指南重新核对，不能沿用上面的历史摘要。
 
 2026-10-29 的 #423 临时 Web 观察使用官方 `0.2.0-rc.2` / Cordis `4.0.4`、两个自定义 profile 与产物 SHA-256 `3b704750efebb01a660f8604a13417ac00ace87d546d67834f28fba2d81ba308`：同一 Connection 在两个合法伪造 actor 下重放本地 createWorkspace，结果相同；另一个 profile 首次为空并创建自己的工作区；同 profile 重启后保留名称，Connection peer 已变化。设置命令没有持久 actor 账本，重启后相同自然键成功读回，不能冒充旧 key 的耐久身份验证。实际 peer 与 profile 根由单独的临时只读观察插件记录，该插件不在交付 tgz；撤下观察层、卸载插件并重启后，两 profile 的认证远程入口均为 404、数据库保留。没有配置模型或发送 prompt，也没有真实 GitHub 写入；Start Work 的耐久 actor/冲突证据来自独立的真实 Gateway/生产 composition/Local Git/SQLite 集成用例。
+
+多项目安装态（#694 判据 5）的人类走查包与协议（nonce 绑定、H1–H9、前后停机回读）见[已安装 Core 验收记录](installed-core-acceptance.md)的 2026-11-27 节；该节当前为「人类走查尚未执行」，#694 与 #636 保持 OPEN，不构成安装态接受或发布结论。

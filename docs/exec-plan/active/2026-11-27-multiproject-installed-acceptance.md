@@ -282,7 +282,7 @@ P7 人类接受句：人类在 #694 给出明确回复，内容至少包含「�
 2. 决定 PR 引用语义：未获接受用 Refs；获接受且人类明确指示时，由人类确认后让 PR 的 closingIssuesReferences 包含 #694，并用回读命令确认，不手写关闭结论。
 3. 跑发布面与体量检查；复核记录节无本机路径、无图片、无会话地址；复核 diff 只含 Global Constraints 声明的文件。
 4. 交人类评审 PR；agent 不自行合并，不写看板 Status，不写原生依赖。
-5. 全部完成后把本计划移入 docs/exec-plan/completed/ 并在 docs/README.md 更新索引；否则保持 Active 并在 Progress 写明阻塞原因。
+5. 全部完成后把本计划移入 docs/exec-plan/completed/ 并在 docs/README.md 更新索引，同时把 docs/product/installed-core-acceptance.md 的 2026-11-27 节指向本计划的相对链接改到 completed/ 路径；否则保持 Active 并在 Progress 写明阻塞原因。
 
 **验证**（在检出 test/mp-installed-acceptance 的工作树根运行；gh 命令带 -R）
 
@@ -318,7 +318,7 @@ P7 人类接受句：人类在 #694 给出明确回复，内容至少包含「�
 
 - [x] (2026-11-27 15:53 SGT) 创建本 ExecPlan：完成身份/可行性核实、交付形态收敛与批次设计；写入 docs/exec-plan/active/ 与 docs/README.md 的 Active 索引。
 - [x] (2026-11-27 16:03 SGT) Batch 1 · 身份链重放与安装件证据：在检出 `test/mp-installed-acceptance` 的工作树 `.worktrees/mp-installed-acceptance` 根目录完成。工作树 HEAD `f25d887b2c4a229bceb09e21d6e1d17eaf26a60d`（`origin/main` 仍为 `f5b731a4b695cb6cf61070cfbd1746fc05f0639d`）；相对 #697 final head `4c666811787f24a00450389e8f0a9ff80222cb1b` 的 `git diff --exit-code` 分别从 `f5b731a4` 与 HEAD 各跑一次，均无输出（I1 通过）。`pnpm install --frozen-lockfile` 后重放 `pack:plugin`：tarball 369610 bytes / `7895d024…`，`lib/index.js` 773521 / `f4af4031…`，`lib/client.js` 820506 / `49e36de6…`，与 2026-11-26 记录逐项一致（I2 通过）。scratch `DSH_HOME` 内 `dsh --version` 为 `0.2.0-rc.2`，六件 SHA-256 全 match 且 `diff -r` 零差异，宿主 stdout 出现 `[harness-projects] host ready`（I3 通过）；停机后 `/usr/bin/sqlite3 -readonly` 回读 `user_version=7`、`ledger=1:1`、`workspaces=0`（I4 通过）。观察值已回填 docs/product/installed-core-acceptance.md 的 2026-11-27 节。
-- [ ] Batch 2 · 验收包文档交付（记录节、demo-install 指针、Active 索引自查）
+- [x] (2026-11-27 16:03 SGT) Batch 2 · 验收包文档交付：docs/product/installed-core-acceptance.md 追加「2026-11-27 多项目安装态验收包（#694 判据 5）」节（+112 行：状态行「人类走查尚未执行」、为什么只用固定 Web profile、身份表与重放命令、前置回读命令、P1–P7、H1–H9、本轮明确不主张、关闭语义）；docs/product/demo-install.md 的「验收记录边界」末尾追加一行指针（+2 行，不复制协议）；docs/README.md 的 Active 索引行自查与计划文件一致，无需改动。本节不含人类接受结论。
 - [ ] Batch 3 · 人类走查执行与记录回填（阻塞于人类可用时间）
 - [ ] Batch 4 · 关闭语义与发布门（依赖 Batch 3 的人类答复）
 
@@ -392,7 +392,10 @@ P7 人类接受句：人类在 #694 给出明确回复，内容至少包含「�
 
 截至本计划创建（2026-11-27 SGT），Batch 1–4 均未执行：本文件只包含已核实的身份/可行性事实、交付形态决策、验证协议与批次设计，不包含任何人类接受结论。实际结果、与计划的偏差、未主张范围的最终边界在 Batch 3/4 回填本节；在此之前，任何读者都不得把本计划的存在或归档状态读成安装态验收已通过。
 
+2026-11-27 16:03 SGT（Batch 1–2 完成后追加）：Batch 1 已完成身份链重放与安装件证据（tarball 369610 bytes / `7895d024…`，两个 lib 与 2026-11-26 记录一致，六件逐字节相同，宿主出现 `[harness-projects] host ready`，停机回读 `user_version=7`、`ledger=1:1`、`workspaces=0`）；Batch 2 已交付上述记录节与安装指南指针。Batch 3 人类走查与 Batch 4 关闭语义仍未执行，因此本节仍不含任何人类接受结论，也不改变 #694 判据 5 与 #636 的 OPEN 状态；实际接受值、偏差与未主张范围的最终边界在 Batch 3/4 回填。
+
 ## Bottom Change Note
 
 - 2026-11-27 15:53 SGT：创建本 ExecPlan。依据：issue #694 判据 5 仍为唯一未勾项，#698 已合并并留下安装态人验缺口；本次完成基线 f5b731a4 的 tree 等价复核、Desktop 旧产物与库拒绝路径核实、受支持 Web profile 路线确认、docs-only 与契约守卫的取舍，以及 nonce/前后回读协议与 H1–H9 步骤设计；同时写入 docs/README.md 的 Active 索引行。
 - 2026-11-27 16:03 SGT：回填 Batch 1 证据到 Progress 与 Surprises（身份值、六件匹配、host ready、前置状态）；Batch 2–4 仍未完成，本计划不含任何人类接受结论。
+- 2026-11-27 16:03 SGT：交付 Batch 2 记录节与安装指南指针，勾选 Progress 并追加 Outcomes 中间记录（Batch 1–2 实际值、Batch 3/4 仍阻塞）；不含人类接受结论。
